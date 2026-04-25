@@ -1,24 +1,44 @@
 import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 
-export const workflows = pgTable("workflows", {
+export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull(),
+  email: text("email"),
+  name: text("name"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const workflows = pgTable("workflows", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().default("default"),
+  name: text("name").notNull(),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const workflowVersions = pgTable("workflow_versions", {
   id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().default("default"),
   workflowId: text("workflow_id").notNull(),
   version: integer("version").notNull(),
   dagJson: jsonb("dag_json").notNull(),
+  createdBy: text("created_by"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const runs = pgTable("runs", {
   id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().default("default"),
   workflowVersionId: text("workflow_version_id").notNull(),
   status: text("status").notNull(),
   inputJson: jsonb("input_json"),
+  createdBy: text("created_by"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
