@@ -1,5 +1,6 @@
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
+import { planAgentTool } from "./agent-planner";
 
 export type NodeContext = {
   runId: string;
@@ -50,6 +51,20 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       status: "completed",
       output: {
         tool,
+        result
+      }
+    };
+  },
+
+  agent: async (ctx) => {
+    const plan = planAgentTool(ctx.config, ctx.context);
+
+    const result = await executeTool(plan.tool, plan.input, ctx.context);
+
+    return {
+      status: "completed",
+      output: {
+        plan,
         result
       }
     };
