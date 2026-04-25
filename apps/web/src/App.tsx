@@ -2,17 +2,18 @@ import React, { useState } from 'react'
 import ReactFlow, { addEdge, Background, Controls, useNodesState, useEdgesState } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-const initialNodes = [
-  { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP' } },
-  { id: '2', position: { x: 200, y: 100 }, data: { label: 'Noop' } },
-]
-
-const initialEdges = [{ id: 'e1-2', source: '1', target: '2' }]
-
 export default function App() {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
+  const [nodes, setNodes, onNodesChange] = useNodesState([
+    { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP' } },
+    { id: '2', position: { x: 200, y: 100 }, data: { label: 'Noop' } }
+  ])
+
+  const [edges, setEdges, onEdgesChange] = useEdgesState([
+    { id: 'e1-2', source: '1', target: '2' }
+  ])
+
   const [runId, setRunId] = useState<string | null>(null)
+  const [status, setStatus] = useState<any>(null)
 
   const workflow = {
     id: 'ui-test',
@@ -30,10 +31,20 @@ export default function App() {
     setRunId(json.runId)
   }
 
+  const loadStatus = async () => {
+    if (!runId) return
+    const res = await fetch(`http://localhost:3001/status?runId=${runId}`)
+    const json = await res.json()
+    setStatus(json)
+  }
+
   return (
     <div style={{ height: '100vh' }}>
       <button onClick={start}>Start Workflow</button>
+      <button onClick={loadStatus}>Load Status</button>
       <div>RunId: {runId}</div>
+      <pre>{JSON.stringify(status, null, 2)}</pre>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
