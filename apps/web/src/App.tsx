@@ -5,12 +5,14 @@ import '@xyflow/react/dist/style.css'
 type RunNode = { nodeId: string; status: string }
 type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: unknown; createdAt?: string }
 type WorkflowNodeData = { label: string; type: string; config: Record<string, unknown> }
+type WorkflowEdgeData = { condition?: string }
 
 const statusStyles: Record<string, React.CSSProperties> = {
   pending: { border: '2px solid #94a3b8', background: '#f8fafc' },
   queued: { border: '2px solid #f59e0b', background: '#fffbeb' },
   running: { border: '2px solid #3b82f6', background: '#eff6ff' },
   waiting: { border: '2px solid #a855f7', background: '#faf5ff' },
+  skipped: { border: '2px solid #64748b', background: '#f1f5f9' },
   succeeded: { border: '2px solid #22c55e', background: '#f0fdf4' },
   failed: { border: '2px solid #ef4444', background: '#fef2f2' },
 }
@@ -21,6 +23,7 @@ const nodePresets: Record<string, Record<string, unknown>> = {
   condition: { expression: 'true' },
   webhook: {},
   approval: { message: 'Please approve this workflow step.' },
+  ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' },
 }
 
 export default function App() {
@@ -30,10 +33,11 @@ export default function App() {
     { id: '3', position: { x: 440, y: 180 }, data: { label: 'Noop', type: 'noop', config: {} } },
   ])
   const [edges, setEdges, onEdgesChange] = useEdgesState([
-    { id: 'e1-2', source: '1', target: '2' },
-    { id: 'e2-3', source: '2', target: '3' },
+    { id: 'e1-2', source: '1', target: '2', data: {} },
+    { id: 'e2-3', source: '2', target: '3', data: {} },
   ])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [status, setStatus] = useState<{ nodes: RunNode[]; events: RunEvent[] } | null>(null)
   const [saveInfo, setSaveInfo] = useState<string>('')
@@ -42,11 +46,13 @@ export default function App() {
     id: 'ui-test',
     name: 'UI Test Workflow',
     nodes: nodes.map(n => ({ id: n.id, type: (n.data as WorkflowNodeData).type, config: (n.data as WorkflowNodeData).config ?? {} })),
-    edges: edges.map(e => ({ from: e.source, to: e.target }))
+    edges: edges.map(e => ({ from: e.source, to: e.target, condition: (e.data as WorkflowEdgeData | undefined)?.condition || undefined }))
   }
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId)
   const selectedData = selectedNode?.data as WorkflowNodeData | undefined
+  const selectedEdge = edges.find(e => e.id === selectedEdgeId)
+  const selectedEdgeData = selectedEdge?.data as WorkflowEdgeData | undefined
 
   const addNode = (type: string) => {
     const id = crypto.randomUUID().slice(0, 8)
@@ -64,6 +70,11 @@ export default function App() {
   const updateSelectedType = (type: string) => {
     if (!selectedNodeId) return
     setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } } : node))
+  }
+
+  const updateSelectedEdgeCondition = (condition: string) => {
+    if (!selectedEdgeId) return
+    setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: condition ? 'condition' : undefined, animated: Boolean(condition), data: { ...(edge.data ?? {}), condition: condition || undefined } } : edge))
   }
 
   const nodeStatusMap = useMemo(() => {
@@ -90,7 +101,7 @@ export default function App() {
     if (!json?.dagJson) return
     const wf = json.dagJson
     setNodes(wf.nodes.map((n: any, i: number) => ({ id: n.id, position: { x: 80 + i * 220, y: 80 + i * 90 }, data: { label: n.type.toUpperCase(), type: n.type, config: n.config ?? {} } })))
-    setEdges(wf.edges.map((e: any, i: number) => ({ id: `e${i}`, source: e.from, target: e.to })))
+    setEdges(wf.edges.map((e: any, i: number) => ({ id: `e${i}`, source: e.from, target: e.to, label: e.condition ? 'condition' : undefined, animated: Boolean(e.condition), data: { condition: e.condition } })))
     setSaveInfo(`Loaded v${json.version}`)
   }
 
@@ -123,7 +134,7 @@ export default function App() {
     <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '220px 1fr 380px', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <aside style={{ borderRight: '1px solid #e5e7eb', padding: 16, background: '#f8fafc' }}>
         <h2 style={{ marginTop: 0 }}>Palette</h2>
-        {['http', 'noop', 'condition', 'webhook', 'approval'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 8 }}>{type.toUpperCase()}</button>)}
+        {['http', 'noop', 'condition', 'webhook', 'approval', 'ai'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 8 }}>{type.toUpperCase()}</button>)}
         <hr />
         <button onClick={save} style={{ width: '100%', marginBottom: 8 }}>Save Workflow</button>
         <button onClick={load} style={{ width: '100%', marginBottom: 8 }}>Load Workflow</button>
@@ -134,7 +145,7 @@ export default function App() {
       </aside>
 
       <main style={{ height: '100vh' }}>
-        <ReactFlow nodes={visibleNodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => setSelectedNodeId(node.id)} onConnect={(params) => setEdges((eds) => addEdge(params, eds))}>
+        <ReactFlow nodes={visibleNodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => { setSelectedNodeId(node.id); setSelectedEdgeId(null) }} onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null) }} onConnect={(params) => setEdges((eds) => addEdge({ ...params, data: {} }, eds))}>
           <Background />
           <Controls />
         </ReactFlow>
@@ -142,8 +153,10 @@ export default function App() {
 
       <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
         <h2 style={{ marginTop: 0 }}>Inspector</h2>
-        {!selectedNode && <p style={{ color: '#64748b' }}>Select a node to edit its type and config.</p>}
+        {!selectedNode && !selectedEdge && <p style={{ color: '#64748b' }}>Select a node or edge to edit it.</p>}
+
         {selectedNode && selectedData && <section style={{ marginBottom: 24 }}>
+          <h3>Node</h3>
           <label>Node Type</label>
           <select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ display: 'block', width: '100%', margin: '8px 0 12px' }}>
             <option value="http">HTTP</option>
@@ -151,9 +164,18 @@ export default function App() {
             <option value="condition">CONDITION</option>
             <option value="webhook">WEBHOOK</option>
             <option value="approval">APPROVAL</option>
+            <option value="ai">AI</option>
           </select>
           <label>Config JSON</label>
           <textarea defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
+        </section>}
+
+        {selectedEdge && <section style={{ marginBottom: 24 }}>
+          <h3>Edge</h3>
+          <p style={{ fontSize: 12, color: '#475569' }}>{selectedEdge.source} → {selectedEdge.target}</p>
+          <label>Condition Expression</label>
+          <textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => updateSelectedEdgeCondition(e.target.value)} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90, fontFamily: 'monospace' }} />
+          <p style={{ fontSize: 12, color: '#64748b' }}>Leave empty for unconditional routing.</p>
         </section>}
 
         <h2>Execution Timeline</h2>
