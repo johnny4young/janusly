@@ -12,6 +12,15 @@ type Template = { id: string; name: string; description: string; category: strin
 type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: any }
 type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 
+type CrewAgentView = {
+  name: string
+  role?: string
+  persona?: string
+  status: 'pending' | 'running' | 'completed'
+  events: RunEvent[]
+  result?: any
+}
+
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 const authHeaders = { 'x-org-id': 'org_1', 'x-user-id': 'user_1' }
 
@@ -31,6 +40,19 @@ const nodePresets: Record<string, Record<string, unknown>> = {
   ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' },
   tool: { tool: 'text.uppercase', input: { value: 'hello' } },
   agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 },
+  loop: { items: 'a,b,c', mapping: { value: '{{item}}', index: '{{index}}' } },
+  agent_reflection: { input: '{{context.agent.output}}' },
+  multi_agent: {
+    mode: 'sequential',
+    goal: 'Analyze and validate the workflow result',
+    planner: 'rules',
+    maxSteps: 2,
+    reflection: true,
+    agents: [
+      { name: 'analyzer', role: 'Data analyst', persona: 'Careful and concise analyst', goal: 'Analyze the current context and produce a useful summary' },
+      { name: 'validator', role: 'QA reviewer', persona: 'Skeptical reviewer', goal: 'Validate the previous agent output and identify issues' }
+    ]
+  },
 }
 
 const statusStyles: Record<string, React.CSSProperties> = {
@@ -71,20 +93,50 @@ function uniqueEvents(events: RunEvent[]) {
 
 function toReasoningMessage(event: RunEvent): ReasoningMessage | null {
   const payload = event.payload ?? {}
+  if (event.type === 'multi_agent.started') return { id: event.id, title: 'Crew started', body: `Goal: ${payload.goal ?? 'not provided'}`, meta: `Mode: ${payload.mode ?? 'sequential'} · Agents: ${payload.count ?? '?'}`, tone: 'info' }
+  if (event.type === 'multi_agent.agent.started') return { id: event.id, title: `Agent ${payload.name} started`, body: payload.goal ?? 'Running agent task', meta: `Role: ${payload.role ?? 'agent'} · Persona: ${payload.persona ?? '-'}`, tone: 'info' }
+  if (event.type === 'multi_agent.agent.completed') return { id: event.id, title: `Agent ${payload.name} completed`, body: payload.role ?? 'Agent completed', meta: JSON.stringify(payload.result ?? {}, null, 2), tone: 'success' }
+  if (event.type === 'multi_agent.completed') return { id: event.id, title: 'Crew completed', body: payload.finalAnswer ? String(payload.finalAnswer) : `Completed ${payload.count ?? 0} agents`, meta: JSON.stringify(payload.agents ?? {}, null, 2), tone: 'success' }
+  if (event.type.includes('reflection')) return { id: event.id, title: 'Agent reflection', body: `${payload.decision ?? 'decision'}: ${payload.reason ?? ''}`, meta: JSON.stringify(payload, null, 2), tone: payload.decision === 'retry' ? 'warning' : 'success' }
+  if (event.type.endsWith('.step.started') || event.type === 'agent.step.started') return { id: event.id, title: `Thinking step ${Number(payload.iteration ?? 0) + 1}`, body: 'Planning the next action...', tone: 'info' }
+  if (event.type.endsWith('.step.planned') || event.type === 'agent.step.planned') return { id: event.id, title: `Plan: ${payload.plan?.tool ?? 'unknown tool'}`, body: payload.plan?.reason ?? 'The agent selected a tool.', meta: JSON.stringify(payload.plan?.input ?? {}, null, 2), tone: 'warning' }
+  if (event.type.endsWith('.tool.started') || event.type === 'agent.tool.started' || event.type === 'tool.started') return { id: event.id, title: `Running tool: ${payload.tool ?? 'unknown'}`, body: 'Executing backend tool...', meta: JSON.stringify(payload.input ?? {}, null, 2), tone: 'info' }
+  if (event.type.endsWith('.tool.completed') || event.type === 'agent.tool.completed' || event.type === 'tool.completed') return { id: event.id, title: `Tool completed: ${payload.tool ?? 'unknown'}`, body: 'The tool returned a result.', meta: JSON.stringify(payload.result ?? {}, null, 2), tone: 'success' }
   if (event.type === 'agent.started') return { id: event.id, title: 'Agent started', body: `Goal: ${payload.goal ?? 'not provided'}`, meta: `Planner: ${payload.planner ?? 'rules'} · max steps: ${payload.maxSteps ?? '?'}`, tone: 'info' }
-  if (event.type === 'agent.step.started') return { id: event.id, title: `Thinking step ${Number(payload.iteration ?? 0) + 1}`, body: 'Planning the next action...', tone: 'info' }
-  if (event.type === 'agent.step.planned') return { id: event.id, title: `Plan: ${payload.plan?.tool ?? 'unknown tool'}`, body: payload.plan?.reason ?? 'The agent selected a tool.', meta: JSON.stringify(payload.plan?.input ?? {}, null, 2), tone: 'warning' }
-  if (event.type === 'agent.tool.started' || event.type === 'tool.started') return { id: event.id, title: `Running tool: ${payload.tool ?? 'unknown'}`, body: 'Executing backend tool...', meta: JSON.stringify(payload.input ?? {}, null, 2), tone: 'info' }
-  if (event.type === 'agent.tool.completed' || event.type === 'tool.completed') return { id: event.id, title: `Tool completed: ${payload.tool ?? 'unknown'}`, body: 'The tool returned a result.', meta: JSON.stringify(payload.result ?? {}, null, 2), tone: 'success' }
   if (event.type === 'agent.completed') return { id: event.id, title: 'Agent completed', body: payload.finalAnswer ?? payload.reason ?? 'The agent finished execution.', meta: JSON.stringify(payload.finalResult ?? payload.steps ?? {}, null, 2), tone: 'success' }
+  if (event.type === 'loop.completed') return { id: event.id, title: 'Loop completed', body: `Processed ${payload.count ?? 0} items`, meta: JSON.stringify(payload.items ?? [], null, 2), tone: 'success' }
   if (event.type === 'node.failed') return { id: event.id, title: 'Node failed', body: payload.message ?? 'A node failed during execution.', tone: 'error' }
   return null
+}
+
+function buildCrewView(events: RunEvent[]): CrewAgentView[] {
+  const agents = new Map<string, CrewAgentView>()
+  for (const event of events) {
+    const payload = event.payload ?? {}
+    if (event.type === 'multi_agent.agent.started') {
+      agents.set(payload.name, { name: payload.name, role: payload.role, persona: payload.persona, status: 'running', events: [event] })
+    }
+    if (event.type.includes('multi_agent.agent.') && payload.agent) {
+      const current = agents.get(payload.agent) ?? { name: payload.agent, status: 'running', events: [] }
+      current.events.push(event)
+      agents.set(payload.agent, current)
+    }
+    if (event.type === 'multi_agent.agent.completed') {
+      const current = agents.get(payload.name) ?? { name: payload.name, status: 'completed', events: [] }
+      current.status = 'completed'
+      current.role = payload.role ?? current.role
+      current.result = payload.result
+      current.events.push(event)
+      agents.set(payload.name, current)
+    }
+  }
+  return Array.from(agents.values())
 }
 
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([
     { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } },
-    { id: '2', position: { x: 260, y: 90 }, data: { label: 'AGENT', type: 'agent', config: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 2 } } },
+    { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: nodePresets.multi_agent } },
   ])
   const [edges, setEdges, onEdgesChange] = useEdgesState([{ id: 'e1-2', source: '1', target: '2', data: {} }])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -98,8 +150,8 @@ export default function App() {
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [runs, setRuns] = useState<any[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
-  const [copilotPrompt, setCopilotPrompt] = useState('Create a workflow that calls an API, transforms the response and explains it with an agent')
-  const [activeTab, setActiveTab] = useState<'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning'>('copilot')
+  const [copilotPrompt, setCopilotPrompt] = useState('Create a workflow that calls an API, transforms the response and validates it with a multi-agent crew')
+  const [activeTab, setActiveTab] = useState<'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'crew'>('crew')
   const [streamStatus, setStreamStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed' | 'error'>('idle')
   const [saveInfo, setSaveInfo] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -118,6 +170,7 @@ export default function App() {
   const selectedToolSchema = selectedData?.type === 'tool' ? tools.find(tool => tool.name === (selectedData.config as any)?.tool) : undefined
   const selectedRunNode = selectedNodeId ? status.nodes.find(n => n.nodeId === selectedNodeId) : undefined
   const reasoningMessages = useMemo(() => status.events.map(toReasoningMessage).filter(Boolean) as ReasoningMessage[], [status.events])
+  const crewView = useMemo(() => buildCrewView(status.events), [status.events])
 
   const replayState = useMemo(() => {
     if (!status.events.length || replayIndex == null) return null
@@ -147,21 +200,11 @@ export default function App() {
 
   const refreshPlatform = async () => {
     const [toolData, templateData, credentialData, runData, usageData] = await Promise.all([
-      api('/tools').catch(() => []),
-      api('/templates').catch(() => []),
-      api('/credentials').catch(() => []),
-      api('/runs').catch(() => []),
-      api('/billing/usage').catch(() => ({})),
+      api('/tools').catch(() => []), api('/templates').catch(() => []), api('/credentials').catch(() => []), api('/runs').catch(() => []), api('/billing/usage').catch(() => ({})),
     ])
-    setTools(toolData)
-    setTemplates(templateData)
-    setCredentials(credentialData)
-    setRuns(runData)
-    setUsage(usageData)
+    setTools(toolData); setTemplates(templateData); setCredentials(credentialData); setRuns(runData); setUsage(usageData)
   }
-
   useEffect(() => { refreshPlatform() }, [])
-
   useEffect(() => {
     if (!runId) return
     setStreamStatus('connecting')
@@ -179,239 +222,47 @@ export default function App() {
     return () => { source.close(); setStreamStatus('closed') }
   }, [runId])
 
-  const hydrateWorkflow = (wf: any) => {
-    setNodes(wf.nodes.map((n: any, i: number) => ({ id: n.id, position: { x: 80 + i * 230, y: 80 + (i % 3) * 120 }, data: { label: n.type.toUpperCase(), type: n.type, config: n.config ?? {} } })))
-    setEdges(wf.edges.map((e: any, i: number) => ({ id: `e${i}`, source: e.from, target: e.to, label: e.condition ? 'condition' : undefined, animated: Boolean(e.condition), data: { condition: e.condition } })))
-    setValidationIssues([])
-  }
-
-  const addNode = (type: string) => {
-    const id = crypto.randomUUID().slice(0, 8)
-    setNodes(current => current.concat({ id, position: { x: 120 + current.length * 80, y: 120 + current.length * 40 }, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } }))
-  }
-
-  const updateSelectedConfigObject = (config: Record<string, unknown>) => {
-    if (!selectedNodeId) return
-    setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node))
-  }
-
-  const updateSelectedType = (type: string) => {
-    if (!selectedNodeId) return
-    setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } } : node))
-  }
-
-  const validate = async () => {
-    const json = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) })
-    setValidationIssues(json.issues ?? [])
-    return json.valid
-  }
-
-  const start = async () => {
-    const isValid = await validate()
-    if (!isValid) return setSaveInfo('Fix validation errors before starting')
-    const json = await api('/start', { method: 'POST', body: JSON.stringify(workflow) })
-    if (json.error) return setSaveInfo(json.error)
-    setRunId(json.runId)
-    setStatus({ nodes: [], events: [] })
-    setReplayIndex(null)
-    setSaveInfo(`Started ${json.runId}`)
-  }
-
-  const save = async () => {
-    const isValid = await validate()
-    if (!isValid) return setSaveInfo('Validation failed')
-    const json = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) })
-    setSaveInfo(json.error ? json.error : `Saved v${json.version}`)
-  }
-
-  const load = async () => {
-    const json = await api('/workflows/latest?workflowId=ui-test')
-    if (json?.dagJson) hydrateWorkflow(json.dagJson)
-  }
-
-  const loadStatus = async (id = runId) => {
-    if (!id) return
-    const json = await api(`/status?runId=${id}`)
-    if (!json.error) {
-      setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] })
-      if (replayIndex == null && json.events?.length) setReplayIndex(json.events.length - 1)
-    }
-  }
-
-  const openRun = async (id: string) => {
-    setRunId(id)
-    const json = await api(`/run?runId=${id}`)
-    if (!json.error) {
-      setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] })
-      setReplayIndex(json.events?.length ? json.events.length - 1 : null)
-      setActiveTab('reasoning')
-    }
-  }
-
-  const approveNode = async (nodeId: string) => {
-    if (!runId) return
-    await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) })
-    await loadStatus()
-  }
-
-  const runCopilot = async () => {
-    const wf = await api('/ai/generate-workflow', { method: 'POST', body: JSON.stringify({ prompt: copilotPrompt }) })
-    if (wf?.nodes && wf?.edges) hydrateWorkflow(wf)
-  }
-
-  const explainWorkflow = async () => {
-    const res = await api('/ai/explain-workflow', { method: 'POST', body: JSON.stringify({ workflow }) })
-    alert(res.explanation ?? 'No explanation available')
-  }
-
-  const installPlugin = async (pluginId: string) => {
-    await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) })
-    await refreshPlatform()
-  }
-
-  const createCredential = async () => {
-    const name = prompt('Credential name?') || 'API Key'
-    const kind = prompt('Kind? e.g. slack, stripe, generic') || 'generic'
-    const secretRef = prompt('Secret env ref? e.g. SLACK_BOT_TOKEN') || 'MY_SECRET'
-    await api('/credentials', { method: 'POST', body: JSON.stringify({ name, kind, secretRef }) })
-    await refreshPlatform()
-  }
-
-  const exportWorkflow = () => {
-    const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${workflow.id}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const importWorkflow = async (file: File) => {
-    const text = await file.text()
-    hydrateWorkflow(JSON.parse(text))
-  }
-
+  const hydrateWorkflow = (wf: any) => { setNodes(wf.nodes.map((n: any, i: number) => ({ id: n.id, position: { x: 80 + i * 230, y: 80 + (i % 3) * 120 }, data: { label: n.type.toUpperCase(), type: n.type, config: n.config ?? {} } }))); setEdges(wf.edges.map((e: any, i: number) => ({ id: `e${i}`, source: e.from, target: e.to, label: e.condition ? 'condition' : undefined, animated: Boolean(e.condition), data: { condition: e.condition } }))); setValidationIssues([]) }
+  const addNode = (type: string) => { const id = crypto.randomUUID().slice(0, 8); setNodes(current => current.concat({ id, position: { x: 120 + current.length * 80, y: 120 + current.length * 40 }, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } })) }
+  const updateSelectedConfigObject = (config: Record<string, unknown>) => { if (!selectedNodeId) return; setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node)) }
+  const updateSelectedType = (type: string) => { if (!selectedNodeId) return; setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } } : node)) }
+  const validate = async () => { const json = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }); setValidationIssues(json.issues ?? []); return json.valid }
+  const start = async () => { const isValid = await validate(); if (!isValid) return setSaveInfo('Fix validation errors before starting'); const json = await api('/start', { method: 'POST', body: JSON.stringify(workflow) }); if (json.error) return setSaveInfo(json.error); setRunId(json.runId); setStatus({ nodes: [], events: [] }); setReplayIndex(null); setSaveInfo(`Started ${json.runId}`); setActiveTab('crew') }
+  const save = async () => { const isValid = await validate(); if (!isValid) return setSaveInfo('Validation failed'); const json = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }); setSaveInfo(json.error ? json.error : `Saved v${json.version}`) }
+  const load = async () => { const json = await api('/workflows/latest?workflowId=ui-test'); if (json?.dagJson) hydrateWorkflow(json.dagJson) }
+  const loadStatus = async (id = runId) => { if (!id) return; const json = await api(`/status?runId=${id}`); if (!json.error) { setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] }); if (replayIndex == null && json.events?.length) setReplayIndex(json.events.length - 1) } }
+  const openRun = async (id: string) => { setRunId(id); const json = await api(`/run?runId=${id}`); if (!json.error) { setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] }); setReplayIndex(json.events?.length ? json.events.length - 1 : null); setActiveTab('crew') } }
+  const approveNode = async (nodeId: string) => { if (!runId) return; await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }); await loadStatus() }
+  const runCopilot = async () => { const wf = await api('/ai/generate-workflow', { method: 'POST', body: JSON.stringify({ prompt: copilotPrompt }) }); if (wf?.nodes && wf?.edges) hydrateWorkflow(wf) }
+  const explainWorkflow = async () => { const res = await api('/ai/explain-workflow', { method: 'POST', body: JSON.stringify({ workflow }) }); alert(res.explanation ?? 'No explanation available') }
+  const installPlugin = async (pluginId: string) => { await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) }); await refreshPlatform() }
+  const createCredential = async () => { const name = prompt('Credential name?') || 'API Key'; const kind = prompt('Kind? e.g. slack, stripe, generic') || 'generic'; const secretRef = prompt('Secret env ref? e.g. SLACK_BOT_TOKEN') || 'MY_SECRET'; await api('/credentials', { method: 'POST', body: JSON.stringify({ name, kind, secretRef }) }); await refreshPlatform() }
+  const exportWorkflow = () => { const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${workflow.id}.json`; link.click(); URL.revokeObjectURL(url) }
+  const importWorkflow = async (file: File) => { hydrateWorkflow(JSON.parse(await file.text())) }
   const tabButton = (id: typeof activeTab, label: string) => <button onClick={() => setActiveTab(id)} style={{ width: '100%', marginBottom: 6, background: activeTab === id ? '#dbeafe' : 'white' }}>{label}</button>
 
-  return (
-    <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr 460px', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <aside style={{ borderRight: '1px solid #e5e7eb', padding: 14, background: '#f8fafc', overflow: 'auto' }}>
-        <h2 style={{ marginTop: 0 }}>Builder</h2>
-        {['http', 'noop', 'transform', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 6 }}>{type.toUpperCase()}</button>)}
-        <hr />
-        <button onClick={validate} style={{ width: '100%', marginBottom: 6 }}>Validate</button>
-        <button onClick={save} style={{ width: '100%', marginBottom: 6 }}>Save</button>
-        <button onClick={load} style={{ width: '100%', marginBottom: 6 }}>Load</button>
-        <button onClick={start} style={{ width: '100%', marginBottom: 6 }}>Start</button>
-        <button onClick={exportWorkflow} style={{ width: '100%', marginBottom: 6 }}>Export JSON</button>
-        <button onClick={() => fileInputRef.current?.click()} style={{ width: '100%', marginBottom: 6 }}>Import JSON</button>
-        <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && importWorkflow(e.target.files[0])} />
-        <p style={{ fontSize: 12, color: '#475569' }}>{saveInfo}</p>
-        <p style={{ fontSize: 12, color: streamStatus === 'connected' ? '#16a34a' : '#64748b' }}>Stream: {streamStatus}</p>
-        <hr />
-        <h3>Experience</h3>
-        {tabButton('copilot', '✨ AI Copilot')}
-        {tabButton('marketplace', '🧩 Marketplace')}
-        {tabButton('templates', '📦 Templates')}
-        {tabButton('credentials', '🔐 Credentials')}
-        {tabButton('inspector', '🔎 Data Inspector')}
-        {tabButton('runs', '📊 Runs + Usage')}
-        {tabButton('reasoning', '🧠 Reasoning')}
-      </aside>
+  return <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr 460px', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <aside style={{ borderRight: '1px solid #e5e7eb', padding: 14, background: '#f8fafc', overflow: 'auto' }}>
+      <h2 style={{ marginTop: 0 }}>Builder</h2>
+      {['http', 'noop', 'transform', 'loop', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent', 'agent_reflection', 'multi_agent'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 6 }}>{type.toUpperCase()}</button>)}
+      <hr /><button onClick={validate} style={{ width: '100%', marginBottom: 6 }}>Validate</button><button onClick={save} style={{ width: '100%', marginBottom: 6 }}>Save</button><button onClick={load} style={{ width: '100%', marginBottom: 6 }}>Load</button><button onClick={start} style={{ width: '100%', marginBottom: 6 }}>Start</button><button onClick={exportWorkflow} style={{ width: '100%', marginBottom: 6 }}>Export JSON</button><button onClick={() => fileInputRef.current?.click()} style={{ width: '100%', marginBottom: 6 }}>Import JSON</button>
+      <input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && importWorkflow(e.target.files[0])} />
+      <p style={{ fontSize: 12, color: '#475569' }}>{saveInfo}</p><p style={{ fontSize: 12, color: streamStatus === 'connected' ? '#16a34a' : '#64748b' }}>Stream: {streamStatus}</p>
+      <hr /><h3>Experience</h3>{tabButton('crew', '👥 Crew View')}{tabButton('reasoning', '🧠 Reasoning')}{tabButton('copilot', '✨ AI Copilot')}{tabButton('marketplace', '🧩 Marketplace')}{tabButton('templates', '📦 Templates')}{tabButton('credentials', '🔐 Credentials')}{tabButton('inspector', '🔎 Data Inspector')}{tabButton('runs', '📊 Runs + Usage')}
+    </aside>
 
-      <main style={{ height: '100vh' }}>
-        <ReactFlow nodes={visibleNodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => { setSelectedNodeId(node.id); setSelectedEdgeId(null) }} onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null) }} onConnect={(params) => setEdges(eds => addEdge({ ...params, data: {} }, eds))}>
-          <Background />
-          <Controls />
-        </ReactFlow>
-      </main>
+    <main style={{ height: '100vh' }}><ReactFlow nodes={visibleNodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => { setSelectedNodeId(node.id); setSelectedEdgeId(null) }} onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null) }} onConnect={(params) => setEdges(eds => addEdge({ ...params, data: {} }, eds))}><Background /><Controls /></ReactFlow></main>
 
-      <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
-        {activeTab === 'copilot' && <section>
-          <h2>AI Copilot</h2>
-          <textarea value={copilotPrompt} onChange={e => setCopilotPrompt(e.target.value)} style={{ width: '100%', minHeight: 100 }} />
-          <button onClick={runCopilot} style={{ width: '100%', marginTop: 8 }}>Generate workflow</button>
-          <button onClick={explainWorkflow} style={{ width: '100%', marginTop: 8 }}>Explain current workflow</button>
-        </section>}
-
-        {activeTab === 'marketplace' && <section>
-          <h2>Tool Marketplace</h2>
-          {tools.map(tool => <div key={tool.name} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}>
-            <strong>{tool.name}</strong>
-            <p style={{ fontSize: 12 }}>{tool.description}</p>
-            <div style={{ fontSize: 11, color: '#64748b' }}>Required: {(tool.required ?? []).join(', ') || 'none'}</div>
-            <button onClick={() => installPlugin(tool.name)} style={{ marginTop: 8 }}>Install</button>
-          </div>)}
-        </section>}
-
-        {activeTab === 'templates' && <section>
-          <h2>Templates</h2>
-          {templates.map(t => <div key={t.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}>
-            <strong>{t.name}</strong>
-            <p style={{ fontSize: 12 }}>{t.description}</p>
-            <small>{t.category}</small><br />
-            <button onClick={() => hydrateWorkflow(t.workflow)} style={{ marginTop: 8 }}>Use template</button>
-          </div>)}
-        </section>}
-
-        {activeTab === 'credentials' && <section>
-          <h2>Credentials</h2>
-          <button onClick={createCredential}>New credential</button>
-          {credentials.map(c => <div key={c.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}>
-            <strong>{c.name}</strong>
-            <div style={{ fontSize: 12 }}>{c.kind} · {'{{secret.' + c.secretRef + '}}'}</div>
-          </div>)}
-        </section>}
-
-        {activeTab === 'inspector' && <section>
-          <h2>Data Inspector</h2>
-          {selectedNode && selectedData ? <>
-            <h3>Selected node</h3>
-            <pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify({ id: selectedNode.id, type: selectedData.type, config: selectedData.config }, null, 2)}</pre>
-            <h3>Runtime data</h3>
-            <pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(selectedRunNode ?? {}, null, 2)}</pre>
-            <h3>Inspector</h3>
-            <select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ width: '100%', marginBottom: 8 }}>{Object.keys(nodePresets).map(type => <option key={type} value={type}>{type.toUpperCase()}</option>)}</select>
-            {selectedData.type === 'tool' && <select value={String((selectedData.config as any).tool ?? '')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, tool: e.target.value, input: tools.find(t => t.name === e.target.value)?.inputExample ?? {} })} style={{ width: '100%', marginBottom: 8 }}><option value="">Select tool</option>{tools.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}</select>}
-            {selectedToolSchema && <p style={{ fontSize: 12 }}>{selectedToolSchema.description}</p>}
-            <textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => { try { updateSelectedConfigObject(JSON.parse(e.target.value)) } catch {} }} style={{ width: '100%', minHeight: 160, fontFamily: 'monospace' }} />
-          </> : selectedEdge ? <>
-            <h3>Selected edge</h3>
-            <p>{selectedEdge.source} → {selectedEdge.target}</p>
-            <textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: e.target.value ? 'condition' : undefined, animated: Boolean(e.target.value), data: { ...(edge.data ?? {}), condition: e.target.value || undefined } } : edge))} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90 }} />
-          </> : <p>Select a node or edge.</p>}
-        </section>}
-
-        {activeTab === 'runs' && <section>
-          <h2>Runs + Usage</h2>
-          <pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(usage, null, 2)}</pre>
-          <button onClick={refreshPlatform}>Refresh</button>
-          {runs.map(run => <div key={run.id} onClick={() => openRun(run.id)} style={{ cursor: 'pointer', padding: 10, background: runId === run.id ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}>
-            <strong>{run.id.slice(0, 8)}</strong><div>{run.status}</div>
-          </div>)}
-        </section>}
-
-        {activeTab === 'reasoning' && <section>
-          <h2>Agent Reasoning</h2>
-          {!reasoningMessages.length && <p>Agent/tool trace will appear here during execution.</p>}
-          {reasoningMessages.map(message => <div key={message.id} style={{ ...messageStyles[message.tone], borderRadius: 14, padding: 12, marginBottom: 10 }}>
-            <strong>{message.title}</strong><p style={{ margin: '6px 0', color: '#334155' }}>{message.body}</p>{message.meta && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 8, borderRadius: 8 }}>{message.meta}</pre>}
-          </div>)}
-          <h3>Replay</h3>
-          <button disabled={!status.events.length || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button>{' '}
-          <button disabled={!status.events.length || replayIndex === status.events.length - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, status.events.length - 1))}>Next</button>{' '}
-          <button disabled={!status.events.length} onClick={() => setReplayIndex(status.events.length - 1)}>Live</button>
-          {replayState?.currentEvent && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(replayState.currentEvent, null, 2)}</pre>}
-          <h3>Waiting nodes</h3>
-          {status.nodes.filter(n => n.status === 'waiting').map(n => <button key={n.nodeId} onClick={() => approveNode(n.nodeId)}>Approve {n.nodeId}</button>)}
-        </section>}
-
-        <hr />
-        <h3>Validation</h3>
-        {!validationIssues.length && <p style={{ color: '#16a34a' }}>No validation issues.</p>}
-        {validationIssues.map((issue, i) => <div key={i} style={{ padding: 8, marginBottom: 8, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8 }}><strong>{issue.code}</strong><div>{issue.message}</div></div>)}
-      </aside>
-    </div>
-  )
+    <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
+      {activeTab === 'crew' && <section><h2>Crew View</h2>{!crewView.length && <p>No crew events yet. Run a MULTI_AGENT node.</p>}<div style={{ display: 'grid', gap: 10 }}>{crewView.map((agent, index) => <div key={agent.name} style={{ padding: 12, borderRadius: 14, background: agent.status === 'completed' ? '#f0fdf4' : '#eff6ff', border: '1px solid #bfdbfe' }}><strong>{index + 1}. {agent.name}</strong><div style={{ fontSize: 12 }}>{agent.role ?? 'agent'} · {agent.status}</div>{agent.persona && <p style={{ fontSize: 12 }}>{agent.persona}</p>}<details><summary>Events ({agent.events.length})</summary><pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(agent.events, null, 2)}</pre></details>{agent.result && <details open><summary>Result</summary><pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(agent.result, null, 2)}</pre></details>}</div>)}</div></section>}
+      {activeTab === 'copilot' && <section><h2>AI Copilot</h2><textarea value={copilotPrompt} onChange={e => setCopilotPrompt(e.target.value)} style={{ width: '100%', minHeight: 100 }} /><button onClick={runCopilot} style={{ width: '100%', marginTop: 8 }}>Generate workflow</button><button onClick={explainWorkflow} style={{ width: '100%', marginTop: 8 }}>Explain current workflow</button></section>}
+      {activeTab === 'marketplace' && <section><h2>Tool Marketplace</h2>{tools.map(tool => <div key={tool.name} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}><strong>{tool.name}</strong><p style={{ fontSize: 12 }}>{tool.description}</p><div style={{ fontSize: 11, color: '#64748b' }}>Required: {(tool.required ?? []).join(', ') || 'none'}</div><button onClick={() => installPlugin(tool.name)} style={{ marginTop: 8 }}>Install</button></div>)}</section>}
+      {activeTab === 'templates' && <section><h2>Templates</h2>{templates.map(t => <div key={t.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}><strong>{t.name}</strong><p style={{ fontSize: 12 }}>{t.description}</p><small>{t.category}</small><br /><button onClick={() => hydrateWorkflow(t.workflow)} style={{ marginTop: 8 }}>Use template</button></div>)}</section>}
+      {activeTab === 'credentials' && <section><h2>Credentials</h2><button onClick={createCredential}>New credential</button>{credentials.map(c => <div key={c.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}><strong>{c.name}</strong><div style={{ fontSize: 12 }}>{c.kind} · {'{{secret.' + c.secretRef + '}}'}</div></div>)}</section>}
+      {activeTab === 'inspector' && <section><h2>Data Inspector</h2>{selectedNode && selectedData ? <><h3>Selected node</h3><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify({ id: selectedNode.id, type: selectedData.type, config: selectedData.config }, null, 2)}</pre><h3>Runtime data</h3><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(selectedRunNode ?? {}, null, 2)}</pre><h3>Inspector</h3><select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ width: '100%', marginBottom: 8 }}>{Object.keys(nodePresets).map(type => <option key={type} value={type}>{type.toUpperCase()}</option>)}</select>{selectedData.type === 'tool' && <select value={String((selectedData.config as any).tool ?? '')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, tool: e.target.value, input: tools.find(t => t.name === e.target.value)?.inputExample ?? {} })} style={{ width: '100%', marginBottom: 8 }}><option value="">Select tool</option>{tools.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}</select>}<textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => { try { updateSelectedConfigObject(JSON.parse(e.target.value)) } catch {} }} style={{ width: '100%', minHeight: 160, fontFamily: 'monospace' }} /></> : selectedEdge ? <><h3>Selected edge</h3><p>{selectedEdge.source} → {selectedEdge.target}</p><textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: e.target.value ? 'condition' : undefined, animated: Boolean(e.target.value), data: { ...(edge.data ?? {}), condition: e.target.value || undefined } } : edge))} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90 }} /></> : <p>Select a node or edge.</p>}</section>}
+      {activeTab === 'runs' && <section><h2>Runs + Usage</h2><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(usage, null, 2)}</pre><button onClick={refreshPlatform}>Refresh</button>{runs.map(run => <div key={run.id} onClick={() => openRun(run.id)} style={{ cursor: 'pointer', padding: 10, background: runId === run.id ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}><strong>{run.id.slice(0, 8)}</strong><div>{run.status}</div></div>)}</section>}
+      {activeTab === 'reasoning' && <section><h2>Agent Reasoning</h2>{reasoningMessages.map(message => <div key={message.id} style={{ ...messageStyles[message.tone], borderRadius: 14, padding: 12, marginBottom: 10 }}><strong>{message.title}</strong><p style={{ margin: '6px 0', color: '#334155' }}>{message.body}</p>{message.meta && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 8, borderRadius: 8 }}>{message.meta}</pre>}</div>)}<h3>Replay</h3><button disabled={!status.events.length || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button>{' '}<button disabled={!status.events.length || replayIndex === status.events.length - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, status.events.length - 1))}>Next</button>{' '}<button disabled={!status.events.length} onClick={() => setReplayIndex(status.events.length - 1)}>Live</button>{replayState?.currentEvent && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(replayState.currentEvent, null, 2)}</pre>}<h3>Waiting nodes</h3>{status.nodes.filter(n => n.status === 'waiting').map(n => <button key={n.nodeId} onClick={() => approveNode(n.nodeId)}>Approve {n.nodeId}</button>)}</section>}
+      <hr /><h3>Validation</h3>{!validationIssues.length && <p style={{ color: '#16a34a' }}>No validation issues.</p>}{validationIssues.map((issue, i) => <div key={i} style={{ padding: 8, marginBottom: 8, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8 }}><strong>{issue.code}</strong><div>{issue.message}</div></div>)}
+    </aside>
+  </div>
 }
