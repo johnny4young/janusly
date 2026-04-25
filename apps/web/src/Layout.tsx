@@ -1,4 +1,5 @@
 import React from 'react'
+import { ToastRenderer } from './components/ToastRenderer'
 
 export function Layout({ sidebar, main, panel, header }: {
   sidebar: React.ReactNode
@@ -27,6 +28,8 @@ export function Layout({ sidebar, main, panel, header }: {
           {panel}
         </div>
       </div>
+
+      <ToastRenderer />
     </div>
   )
 }
