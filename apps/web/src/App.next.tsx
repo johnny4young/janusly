@@ -7,6 +7,7 @@ import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { AuthProvider, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
+import { api } from './api'
 
 export default function AppNext() {
   const {
@@ -23,6 +24,11 @@ export default function AppNext() {
     setAuth,
     clearAuth,
     setAuthReady,
+    setActiveTab,
+    hydrateWorkflow,
+    getWorkflowJson,
+    newWorkflow,
+    currentWorkflowName,
   } = useWorkflowStore()
 
   useEffect(() => {
@@ -41,15 +47,42 @@ export default function AppNext() {
     }
   }, [])
 
+  const openWorkflow = async (id: string) => {
+    const data = await api(`/workflows/latest?workflowId=${id}`)
+    if (data?.dagJson) {
+      hydrateWorkflow(data.dagJson)
+      setActiveTab('crew')
+    }
+  }
+
+  const saveWorkflow = async () => {
+    const workflow = getWorkflowJson()
+    await api('/workflows/save', {
+      method: 'POST',
+      body: JSON.stringify(workflow)
+    })
+    setActiveTab('workflows')
+  }
+
   if (!authReady) return <div>Loading...</div>
   if (!session) return <Login onAuthenticated={() => {}} />
 
   return (
     <Layout
       header={<UserMenu />}
-      sidebar={<BuilderSidebar onAdd={addNode} onValidate={() => {}} onSave={() => {}} onLoad={() => {}} onStart={() => {}} />}
+      sidebar={
+        <BuilderSidebar
+          workflowName={currentWorkflowName}
+          onAdd={addNode}
+          onValidate={() => {}}
+          onSave={saveWorkflow}
+          onOpenDashboard={() => setActiveTab('workflows')}
+          onNew={newWorkflow}
+          onStart={() => {}}
+        />
+      }
       main={<WorkflowCanvas nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} />}
-      panel={<RightPanel tab={activeTab} events={events} />}
+      panel={<RightPanel tab={activeTab} events={events} onOpenWorkflow={openWorkflow} />}
     />
   )
 }
