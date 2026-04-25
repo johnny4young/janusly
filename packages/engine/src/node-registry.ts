@@ -2,6 +2,7 @@ export type NodeContext = {
   runId: string;
   nodeId: string;
   config: any;
+  context: Record<string, any>;
 };
 
 export type NodeExecutionResult =
@@ -32,20 +33,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   },
 
   ai: async (ctx) => {
-    const prompt = ctx.config.prompt ?? "Summarize the current workflow context.";
-    const provider = ctx.config.provider ?? "mock";
-
-    if (provider !== "mock") {
-      throw new Error(`AI provider not configured: ${provider}`);
-    }
+    const prompt = ctx.config.prompt ?? "Summarize workflow";
 
     return {
       status: "completed",
       output: {
-        provider,
         prompt,
-        response: `Mock AI response for prompt: ${prompt}`,
-      },
+        contextUsed: ctx.context,
+        response: `AI saw context: ${JSON.stringify(ctx.context)}`,
+      }
     };
   },
 
