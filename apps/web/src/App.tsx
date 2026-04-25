@@ -7,6 +7,12 @@ type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: un
 type WorkflowNodeData = { label: string; type: string; config: Record<string, unknown> }
 type WorkflowEdgeData = { condition?: string }
 
+type ReplayState = {
+  index: number
+  nodes: Record<string, string>
+  currentEvent?: RunEvent
+}
+
 const statusStyles: Record<string, React.CSSProperties> = {
   pending: { border: '2px solid #94a3b8', background: '#f8fafc' },
   queued: { border: '2px solid #f59e0b', background: '#fffbeb' },
@@ -26,6 +32,15 @@ const nodePresets: Record<string, Record<string, unknown>> = {
   ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' },
 }
 
+function statusFromEvent(event: RunEvent) {
+  if (event.type === 'node.queued') return 'queued'
+  if (event.type === 'node.waiting') return 'waiting'
+  if (event.type === 'node.succeeded') return 'succeeded'
+  if (event.type === 'node.failed') return 'failed'
+  if (event.type === 'node.resumed') return 'succeeded'
+  return undefined
+}
+
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([
     { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://google.com' } } },
@@ -41,6 +56,7 @@ export default function App() {
   const [runId, setRunId] = useState<string | null>(null)
   const [status, setStatus] = useState<{ nodes: RunNode[]; events: RunEvent[] } | null>(null)
   const [saveInfo, setSaveInfo] = useState<string>('')
+  const [replayIndex, setReplayIndex] = useState<number | null>(null)
 
   const workflow = {
     id: 'ui-test',
@@ -53,6 +69,44 @@ export default function App() {
   const selectedData = selectedNode?.data as WorkflowNodeData | undefined
   const selectedEdge = edges.find(e => e.id === selectedEdgeId)
   const selectedEdgeData = selectedEdge?.data as WorkflowEdgeData | undefined
+
+  const replayState = useMemo<ReplayState | null>(() => {
+    const events = status?.events ?? []
+    if (!events.length || replayIndex == null) return null
+
+    const effectiveIndex = Math.min(Math.max(replayIndex, 0), events.length - 1)
+    const nodeStates: Record<string, string> = {}
+
+    for (const event of events.slice(0, effectiveIndex + 1)) {
+      if (!event.nodeId) continue
+      const nextStatus = statusFromEvent(event)
+      if (nextStatus) nodeStates[event.nodeId] = nextStatus
+    }
+
+    return {
+      index: effectiveIndex,
+      nodes: nodeStates,
+      currentEvent: events[effectiveIndex],
+    }
+  }, [status, replayIndex])
+
+  const nodeStatusMap = useMemo(() => {
+    const map = new Map<string, string>()
+
+    if (replayState) {
+      Object.entries(replayState.nodes).forEach(([nodeId, nodeStatus]) => map.set(nodeId, nodeStatus))
+      return map
+    }
+
+    status?.nodes?.forEach(n => map.set(n.nodeId, n.status))
+    return map
+  }, [status, replayState])
+
+  const visibleNodes = useMemo(() => nodes.map(node => {
+    const nodeStatus = nodeStatusMap.get(node.id) ?? 'pending'
+    const data = node.data as WorkflowNodeData
+    return { ...node, data: { ...node.data, label: `${data.label} · ${nodeStatus}` }, style: { borderRadius: 12, padding: 8, ...statusStyles[nodeStatus] } }
+  }), [nodes, nodeStatusMap])
 
   const addNode = (type: string) => {
     const id = crypto.randomUUID().slice(0, 8)
@@ -77,18 +131,6 @@ export default function App() {
     setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: condition ? 'condition' : undefined, animated: Boolean(condition), data: { ...(edge.data ?? {}), condition: condition || undefined } } : edge))
   }
 
-  const nodeStatusMap = useMemo(() => {
-    const map = new Map<string, string>()
-    status?.nodes?.forEach(n => map.set(n.nodeId, n.status))
-    return map
-  }, [status])
-
-  const visibleNodes = useMemo(() => nodes.map(node => {
-    const nodeStatus = nodeStatusMap.get(node.id) ?? 'pending'
-    const data = node.data as WorkflowNodeData
-    return { ...node, data: { ...node.data, label: `${data.label} · ${nodeStatus}` }, style: { borderRadius: 12, padding: 8, ...statusStyles[nodeStatus] } }
-  }), [nodes, nodeStatusMap])
-
   const save = async () => {
     const res = await fetch('http://localhost:3001/workflows/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflow) })
     const json = await res.json()
@@ -110,12 +152,15 @@ export default function App() {
     const json = await res.json()
     setRunId(json.runId)
     setStatus(null)
+    setReplayIndex(null)
   }
 
   const loadStatus = async () => {
     if (!runId) return
     const res = await fetch(`http://localhost:3001/status?runId=${runId}`)
-    setStatus(await res.json())
+    const json = await res.json()
+    setStatus(json)
+    if (replayIndex == null && json.events?.length) setReplayIndex(json.events.length - 1)
   }
 
   const approveNode = async (nodeId: string) => {
@@ -128,10 +173,12 @@ export default function App() {
     if (!runId) return
     const interval = window.setInterval(loadStatus, 1000)
     return () => window.clearInterval(interval)
-  }, [runId])
+  }, [runId, replayIndex])
+
+  const eventCount = status?.events?.length ?? 0
 
   return (
-    <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '220px 1fr 380px', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '220px 1fr 420px', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <aside style={{ borderRight: '1px solid #e5e7eb', padding: 16, background: '#f8fafc' }}>
         <h2 style={{ marginTop: 0 }}>Palette</h2>
         {['http', 'noop', 'condition', 'webhook', 'approval', 'ai'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 8 }}>{type.toUpperCase()}</button>)}
@@ -159,12 +206,7 @@ export default function App() {
           <h3>Node</h3>
           <label>Node Type</label>
           <select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ display: 'block', width: '100%', margin: '8px 0 12px' }}>
-            <option value="http">HTTP</option>
-            <option value="noop">NOOP</option>
-            <option value="condition">CONDITION</option>
-            <option value="webhook">WEBHOOK</option>
-            <option value="approval">APPROVAL</option>
-            <option value="ai">AI</option>
+            <option value="http">HTTP</option><option value="noop">NOOP</option><option value="condition">CONDITION</option><option value="webhook">WEBHOOK</option><option value="approval">APPROVAL</option><option value="ai">AI</option>
           </select>
           <label>Config JSON</label>
           <textarea defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
@@ -178,21 +220,28 @@ export default function App() {
           <p style={{ fontSize: 12, color: '#64748b' }}>Leave empty for unconditional routing.</p>
         </section>}
 
+        <h2>Debugger / Replay</h2>
+        <section style={{ padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb', marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <button disabled={!eventCount || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button>
+            <button disabled={!eventCount || replayIndex === eventCount - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, eventCount - 1))}>Next</button>
+            <button disabled={!eventCount} onClick={() => setReplayIndex(eventCount - 1)}>Live</button>
+          </div>
+          <div style={{ fontSize: 12, color: '#475569' }}>Step: {eventCount ? (replayIndex ?? 0) + 1 : 0} / {eventCount}</div>
+          {replayState?.currentEvent && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(replayState.currentEvent, null, 2)}</pre>}
+        </section>
+
         <h2>Execution Timeline</h2>
         <section>
           <h3>Nodes</h3>
           {(status?.nodes ?? []).map(node => <div key={node.nodeId} style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb' }}>
-            <strong>Node {node.nodeId}</strong>
-            <div>Status: {node.status}</div>
-            {node.status === 'waiting' && <button onClick={() => approveNode(node.nodeId)} style={{ marginTop: 8 }}>Approve / Resume</button>}
+            <strong>Node {node.nodeId}</strong><div>Status: {node.status}</div>{node.status === 'waiting' && <button onClick={() => approveNode(node.nodeId)} style={{ marginTop: 8 }}>Approve / Resume</button>}
           </div>)}
         </section>
         <section>
           <h3>Events</h3>
-          {(status?.events ?? []).map(event => <div key={event.id} style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb' }}>
-            <strong>{event.type}</strong>
-            <div style={{ fontSize: 12, color: '#475569' }}>Node: {event.nodeId ?? 'run'}</div>
-            {event.createdAt && <div style={{ fontSize: 12, color: '#64748b' }}>{event.createdAt}</div>}
+          {(status?.events ?? []).map((event, index) => <div key={event.id} onClick={() => setReplayIndex(index)} style={{ cursor: 'pointer', marginBottom: 8, padding: 10, borderRadius: 10, background: replayIndex === index ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb' }}>
+            <strong>{index + 1}. {event.type}</strong><div style={{ fontSize: 12, color: '#475569' }}>Node: {event.nodeId ?? 'run'}</div>{event.createdAt && <div style={{ fontSize: 12, color: '#64748b' }}>{event.createdAt}</div>}
           </div>)}
         </section>
       </aside>
