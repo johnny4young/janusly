@@ -1,7 +1,9 @@
 import { nodeRegistry } from "./node-registry";
+import { getRunContext } from "./persistence";
+import { renderTemplate } from "./template";
 
 export async function executeNode(input: any) {
-  const { node } = input;
+  const { node, runId } = input;
 
   const executor = nodeRegistry[node.type];
 
@@ -9,9 +11,19 @@ export async function executeNode(input: any) {
     throw new Error(`No executor for node type: ${node.type}`);
   }
 
+  const context = await getRunContext(runId);
+
+  const scope = {
+    context,
+    inputs: node.config
+  };
+
+  const resolvedConfig = renderTemplate(node.config, scope);
+
   return executor({
-    runId: input.runId,
+    runId,
     nodeId: node.id,
-    config: node.config,
+    config: resolvedConfig,
+    context
   });
 }
