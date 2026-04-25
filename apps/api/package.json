@@ -8,7 +8,14 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@workflow-engine/db": "workspace:*",
+    "@workflow-engine/engine": "workspace:*",
     "@trpc/server": "^10.45.0",
+    "drizzle-orm": "^0.30.0",
     "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
   }
 }
