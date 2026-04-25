@@ -5,7 +5,7 @@ export type NodeContext = {
 };
 
 export type NodeExecutionResult =
-  | { status: "completed" }
+  | { status: "completed"; output?: Record<string, unknown> }
   | { status: "waiting"; reason?: string; metadata?: Record<string, unknown> };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
@@ -19,7 +19,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       throw new Error(`HTTP failed: ${res.status}`);
     }
 
-    return { status: "completed" };
+    return { status: "completed", output: { statusCode: res.status } };
   },
 
   condition: async (ctx) => {
@@ -29,6 +29,24 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     return { status: "completed" };
+  },
+
+  ai: async (ctx) => {
+    const prompt = ctx.config.prompt ?? "Summarize the current workflow context.";
+    const provider = ctx.config.provider ?? "mock";
+
+    if (provider !== "mock") {
+      throw new Error(`AI provider not configured: ${provider}`);
+    }
+
+    return {
+      status: "completed",
+      output: {
+        provider,
+        prompt,
+        response: `Mock AI response for prompt: ${prompt}`,
+      },
+    };
   },
 
   webhook: async (ctx) => {
