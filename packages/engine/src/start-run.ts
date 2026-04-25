@@ -11,7 +11,7 @@ export async function startRun(workflow: any) {
     id: runId,
     workflowVersionId,
     status: "running",
-    inputJson: workflow.input ?? {},
+    inputJson: { workflow, input: workflow.input ?? {} },
   });
 
   for (const node of workflow.nodes) {
