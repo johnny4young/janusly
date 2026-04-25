@@ -3,6 +3,9 @@ import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  plan: text("plan").notNull().default("free"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -60,5 +63,16 @@ export const runEvents = pgTable("run_events", {
   nodeId: text("node_id"),
   type: text("type").notNull(),
   payload: jsonb("payload"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const usageEvents = pgTable("usage_events", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull(),
+  userId: text("user_id"),
+  runId: text("run_id"),
+  metric: text("metric").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow(),
 });
