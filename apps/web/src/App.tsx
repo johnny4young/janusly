@@ -8,7 +8,6 @@ type WorkflowNodeData = { label: string; type: string; config: Record<string, un
 type WorkflowEdgeData = { condition?: string }
 type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
-
 type ReplayState = { index: number; nodes: Record<string, string>; currentEvent?: RunEvent }
 
 const statusStyles: Record<string, React.CSSProperties> = {
@@ -41,6 +40,16 @@ function statusFromEvent(event: RunEvent) {
   return undefined
 }
 
+function uniqueEvents(events: RunEvent[]) {
+  const seen = new Set<string>()
+  return events.filter(event => {
+    const key = event.id ?? `${event.type}:${event.nodeId}:${event.createdAt}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([
     { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://google.com' } } },
@@ -59,6 +68,7 @@ export default function App() {
   const [replayIndex, setReplayIndex] = useState<number | null>(null)
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [tools, setTools] = useState<ToolSchema[]>([])
+  const [streamStatus, setStreamStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed' | 'error'>('idle')
 
   const workflow = {
     id: 'ui-test',
@@ -71,9 +81,7 @@ export default function App() {
   const selectedData = selectedNode?.data as WorkflowNodeData | undefined
   const selectedEdge = edges.find(e => e.id === selectedEdgeId)
   const selectedEdgeData = selectedEdge?.data as WorkflowEdgeData | undefined
-  const selectedToolSchema = selectedData?.type === 'tool'
-    ? tools.find(tool => tool.name === (selectedData.config as any)?.tool)
-    : undefined
+  const selectedToolSchema = selectedData?.type === 'tool' ? tools.find(tool => tool.name === (selectedData.config as any)?.tool) : undefined
 
   const replayState = useMemo<ReplayState | null>(() => {
     const events = status?.events ?? []
@@ -102,11 +110,7 @@ export default function App() {
     const nodeStatus = nodeStatusMap.get(node.id) ?? 'pending'
     const data = node.data as WorkflowNodeData
     const hasValidationError = validationIssues.some(issue => issue.nodeId === node.id)
-    return {
-      ...node,
-      data: { ...node.data, label: `${data.label} · ${nodeStatus}${hasValidationError ? ' ⚠' : ''}` },
-      style: { borderRadius: 12, padding: 8, ...(hasValidationError ? { border: '3px solid #ef4444', background: '#fff1f2' } : statusStyles[nodeStatus]) }
-    }
+    return { ...node, data: { ...node.data, label: `${data.label} · ${nodeStatus}${hasValidationError ? ' ⚠' : ''}` }, style: { borderRadius: 12, padding: 8, ...(hasValidationError ? { border: '3px solid #ef4444', background: '#fff1f2' } : statusStyles[nodeStatus]) } }
   }), [nodes, nodeStatusMap, validationIssues])
 
   const addNode = (type: string) => {
@@ -165,7 +169,7 @@ export default function App() {
     const json = await res.json()
     if (json.error) { setSaveInfo(json.error); return }
     setRunId(json.runId)
-    setStatus(null)
+    setStatus({ nodes: [], events: [] })
     setReplayIndex(null)
   }
 
@@ -189,9 +193,31 @@ export default function App() {
 
   useEffect(() => {
     if (!runId) return
-    const interval = window.setInterval(loadStatus, 1000)
-    return () => window.clearInterval(interval)
-  }, [runId, replayIndex])
+    setStreamStatus('connecting')
+    const source = new EventSource(`http://localhost:3001/events?runId=${runId}`)
+
+    source.onopen = () => setStreamStatus('connected')
+    source.onmessage = (event) => {
+      try {
+        const events = JSON.parse(event.data) as RunEvent[]
+        setStatus(current => {
+          const existingNodes = current?.nodes ?? []
+          const mergedEvents = uniqueEvents([...(current?.events ?? []), ...events])
+          return { nodes: existingNodes, events: mergedEvents }
+        })
+        setReplayIndex(events.length ? events.length - 1 : null)
+        loadStatus()
+      } catch {
+        setStreamStatus('error')
+      }
+    }
+    source.onerror = () => setStreamStatus('error')
+
+    return () => {
+      source.close()
+      setStreamStatus('closed')
+    }
+  }, [runId])
 
   const eventCount = status?.events?.length ?? 0
 
@@ -208,6 +234,7 @@ export default function App() {
         <button onClick={loadStatus} disabled={!runId} style={{ width: '100%' }}>Refresh Status</button>
         <p style={{ fontSize: 12, color: '#475569' }}>{saveInfo}</p>
         <p style={{ fontSize: 12, color: '#475569', overflowWrap: 'anywhere' }}>RunId: {runId ?? 'not started'}</p>
+        <p style={{ fontSize: 12, color: streamStatus === 'connected' ? '#16a34a' : '#64748b' }}>Stream: {streamStatus}</p>
       </aside>
 
       <main style={{ height: '100vh' }}>
@@ -224,14 +251,12 @@ export default function App() {
 
         <h2>Inspector</h2>
         {!selectedNode && !selectedEdge && <p style={{ color: '#64748b' }}>Select a node or edge to edit it.</p>}
-
         {selectedNode && selectedData && <section style={{ marginBottom: 24 }}>
           <h3>Node</h3>
           <label>Node Type</label>
           <select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ display: 'block', width: '100%', margin: '8px 0 12px' }}>
             {['http', 'noop', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent'].map(type => <option key={type} value={type}>{type.toUpperCase()}</option>)}
           </select>
-
           {selectedData.type === 'tool' && <div style={{ marginBottom: 12, padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 8 }}>
             <label>Tool</label>
             <select value={String((selectedData.config as any).tool ?? '')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, tool: e.target.value, input: tools.find(t => t.name === e.target.value)?.inputExample ?? {} })} style={{ display: 'block', width: '100%', margin: '8px 0' }}>
@@ -240,7 +265,6 @@ export default function App() {
             </select>
             {selectedToolSchema && <p style={{ fontSize: 12, color: '#475569' }}>{selectedToolSchema.description}. Required: {(selectedToolSchema.required ?? []).join(', ') || 'none'}</p>}
           </div>}
-
           <label>Config JSON</label>
           <textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
         </section>}
