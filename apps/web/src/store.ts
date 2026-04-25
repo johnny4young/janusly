@@ -8,33 +8,33 @@ import { nodePresets } from './constants'
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 
 type WorkflowStore = {
-  // Auth
   session: Session | null
   user: User | null
   userId: string | null
   orgId: string | null
   authReady: boolean
 
-  // Workflow editor
+  currentWorkflowId: string
+  currentWorkflowName: string
   nodes: Node[]
   edges: Edge[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
 
-  // Runtime
   runId: string | null
   runNodes: RunNode[]
   events: RunEvent[]
   activeTab: ActiveTab
   streamStatus: StreamStatus
 
-  // Auth actions
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
 
-  // Editor actions
   addNode: (type: string) => void
+  hydrateWorkflow: (workflow: any) => void
+  getWorkflowJson: () => any
+  newWorkflow: () => void
   setNodes: (nodes: Node[]) => void
   setEdges: (edges: Edge[]) => void
   onNodesChange: OnNodesChange
@@ -45,7 +45,6 @@ type WorkflowStore = {
   updateSelectedNodeConfig: (config: Record<string, any>) => void
   updateSelectedNodeType: (type: string) => void
 
-  // Runtime actions
   setRunId: (id: string | null) => void
   setRunNodes: (nodes: RunNode[]) => void
   addEvents: (events: RunEvent[]) => void
@@ -62,6 +61,23 @@ const initialNodes: Node[] = [
 
 const initialEdges: Edge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
 
+function graphToWorkflow(id: string, name: string, nodes: Node[], edges: Edge[]) {
+  return {
+    id,
+    name,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      type: (node.data as any).type,
+      config: (node.data as any).config ?? {},
+    })),
+    edges: edges.map((edge) => ({
+      from: edge.source,
+      to: edge.target,
+      condition: (edge.data as any)?.condition || undefined,
+    })),
+  }
+}
+
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   session: null,
   user: null,
@@ -69,6 +85,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   orgId: null,
   authReady: false,
 
+  currentWorkflowId: 'ui-test',
+  currentWorkflowName: 'UI Test Workflow',
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
@@ -92,6 +110,52 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} },
       })
     }))
+  },
+
+  hydrateWorkflow: (workflow) => {
+    set({
+      currentWorkflowId: workflow.id ?? 'ui-test',
+      currentWorkflowName: workflow.name ?? workflow.id ?? 'Untitled Workflow',
+      nodes: (workflow.nodes ?? []).map((node: any, index: number) => ({
+        id: node.id,
+        position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
+        data: { label: String(node.type).toUpperCase(), type: node.type, config: node.config ?? {} },
+      })),
+      edges: (workflow.edges ?? []).map((edge: any, index: number) => ({
+        id: `e${index}`,
+        source: edge.from,
+        target: edge.to,
+        label: edge.condition ? 'condition' : undefined,
+        animated: Boolean(edge.condition),
+        data: { condition: edge.condition },
+      })),
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      events: [],
+      runNodes: [],
+      runId: null,
+    })
+  },
+
+  getWorkflowJson: () => {
+    const state = get()
+    return graphToWorkflow(state.currentWorkflowId, state.currentWorkflowName, state.nodes, state.edges)
+  },
+
+  newWorkflow: () => {
+    const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
+    set({
+      currentWorkflowId: id,
+      currentWorkflowName: 'Untitled Workflow',
+      nodes: [],
+      edges: [],
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      events: [],
+      runNodes: [],
+      runId: null,
+      activeTab: 'workflows',
+    })
   },
 
   setNodes: (nodes) => set({ nodes }),
