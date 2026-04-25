@@ -1,6 +1,6 @@
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
-import { planAgentTool } from "./agent-planner";
+import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 
 export type NodeContext = {
   runId: string;
@@ -57,15 +57,43 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   },
 
   agent: async (ctx) => {
-    const plan = planAgentTool(ctx.config, ctx.context);
+    const planner = ctx.config.planner ?? "rules";
+    const maxSteps = ctx.config.maxSteps ?? 3;
 
-    const result = await executeTool(plan.tool, plan.input, ctx.context);
+    const steps = [];
+    let lastResult: any = null;
+
+    for (let i = 0; i < maxSteps; i++) {
+      const plan = planner === "openai"
+        ? await planAgentToolWithLLM(ctx.config, ctx.context, steps)
+        : planAgentTool(ctx.config, ctx.context);
+
+      if ((plan as any).done) {
+        return {
+          status: "completed",
+          output: {
+            steps,
+            finalAnswer: (plan as any).finalAnswer
+          }
+        };
+      }
+
+      const result = await executeTool(plan.tool, plan.input, ctx.context);
+
+      steps.push({
+        iteration: i,
+        plan,
+        result
+      });
+
+      lastResult = result;
+    }
 
     return {
       status: "completed",
       output: {
-        plan,
-        result
+        steps,
+        finalResult: lastResult
       }
     };
   },
