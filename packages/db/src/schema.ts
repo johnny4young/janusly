@@ -17,6 +17,16 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const orgMembers = pgTable("org_members", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull(),
+  userId: text("user_id").notNull(),
+  email: text("email"),
+  role: text("role").notNull().default("viewer"),
+  invitedBy: text("invited_by"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const workflows = pgTable("workflows", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().default("default"),
