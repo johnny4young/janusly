@@ -7,16 +7,18 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
-    "dev": "tsc --noEmit --watch"
+    "dev": "tsx watch src/worker.ts"
   },
   "dependencies": {
     "@workflow-engine/db": "workspace:*",
     "@workflow-engine/shared": "workspace:*",
     "bullmq": "^5.7.0",
     "drizzle-orm": "^0.30.0",
-    "ioredis": "^5.3.2"
+    "ioredis": "^5.3.2",
+    "openai": "^4.87.3"
   },
   "devDependencies": {
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
 }
