@@ -6,12 +6,10 @@ type RunNode = { nodeId: string; status: string }
 type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: unknown; createdAt?: string }
 type WorkflowNodeData = { label: string; type: string; config: Record<string, unknown> }
 type WorkflowEdgeData = { condition?: string }
+type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
+type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
 
-type ReplayState = {
-  index: number
-  nodes: Record<string, string>
-  currentEvent?: RunEvent
-}
+type ReplayState = { index: number; nodes: Record<string, string>; currentEvent?: RunEvent }
 
 const statusStyles: Record<string, React.CSSProperties> = {
   pending: { border: '2px solid #94a3b8', background: '#f8fafc' },
@@ -30,6 +28,8 @@ const nodePresets: Record<string, Record<string, unknown>> = {
   webhook: {},
   approval: { message: 'Please approve this workflow step.' },
   ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' },
+  tool: { tool: 'text.uppercase', input: { value: 'hello' } },
+  agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 },
 }
 
 function statusFromEvent(event: RunEvent) {
@@ -57,6 +57,8 @@ export default function App() {
   const [status, setStatus] = useState<{ nodes: RunNode[]; events: RunEvent[] } | null>(null)
   const [saveInfo, setSaveInfo] = useState<string>('')
   const [replayIndex, setReplayIndex] = useState<number | null>(null)
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const [tools, setTools] = useState<ToolSchema[]>([])
 
   const workflow = {
     id: 'ui-test',
@@ -69,35 +71,29 @@ export default function App() {
   const selectedData = selectedNode?.data as WorkflowNodeData | undefined
   const selectedEdge = edges.find(e => e.id === selectedEdgeId)
   const selectedEdgeData = selectedEdge?.data as WorkflowEdgeData | undefined
+  const selectedToolSchema = selectedData?.type === 'tool'
+    ? tools.find(tool => tool.name === (selectedData.config as any)?.tool)
+    : undefined
 
   const replayState = useMemo<ReplayState | null>(() => {
     const events = status?.events ?? []
     if (!events.length || replayIndex == null) return null
-
     const effectiveIndex = Math.min(Math.max(replayIndex, 0), events.length - 1)
     const nodeStates: Record<string, string> = {}
-
     for (const event of events.slice(0, effectiveIndex + 1)) {
       if (!event.nodeId) continue
       const nextStatus = statusFromEvent(event)
       if (nextStatus) nodeStates[event.nodeId] = nextStatus
     }
-
-    return {
-      index: effectiveIndex,
-      nodes: nodeStates,
-      currentEvent: events[effectiveIndex],
-    }
+    return { index: effectiveIndex, nodes: nodeStates, currentEvent: events[effectiveIndex] }
   }, [status, replayIndex])
 
   const nodeStatusMap = useMemo(() => {
     const map = new Map<string, string>()
-
     if (replayState) {
       Object.entries(replayState.nodes).forEach(([nodeId, nodeStatus]) => map.set(nodeId, nodeStatus))
       return map
     }
-
     status?.nodes?.forEach(n => map.set(n.nodeId, n.status))
     return map
   }, [status, replayState])
@@ -105,20 +101,26 @@ export default function App() {
   const visibleNodes = useMemo(() => nodes.map(node => {
     const nodeStatus = nodeStatusMap.get(node.id) ?? 'pending'
     const data = node.data as WorkflowNodeData
-    return { ...node, data: { ...node.data, label: `${data.label} · ${nodeStatus}` }, style: { borderRadius: 12, padding: 8, ...statusStyles[nodeStatus] } }
-  }), [nodes, nodeStatusMap])
+    const hasValidationError = validationIssues.some(issue => issue.nodeId === node.id)
+    return {
+      ...node,
+      data: { ...node.data, label: `${data.label} · ${nodeStatus}${hasValidationError ? ' ⚠' : ''}` },
+      style: { borderRadius: 12, padding: 8, ...(hasValidationError ? { border: '3px solid #ef4444', background: '#fff1f2' } : statusStyles[nodeStatus]) }
+    }
+  }), [nodes, nodeStatusMap, validationIssues])
 
   const addNode = (type: string) => {
     const id = crypto.randomUUID().slice(0, 8)
     setNodes(current => current.concat({ id, position: { x: 120 + current.length * 80, y: 120 + current.length * 40 }, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } }))
   }
 
-  const updateSelectedConfig = (raw: string) => {
+  const updateSelectedConfigObject = (config: Record<string, unknown>) => {
     if (!selectedNodeId) return
-    try {
-      const config = JSON.parse(raw)
-      setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node))
-    } catch {}
+    setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node))
+  }
+
+  const updateSelectedConfig = (raw: string) => {
+    try { updateSelectedConfigObject(JSON.parse(raw)) } catch {}
   }
 
   const updateSelectedType = (type: string) => {
@@ -131,10 +133,19 @@ export default function App() {
     setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: condition ? 'condition' : undefined, animated: Boolean(condition), data: { ...(edge.data ?? {}), condition: condition || undefined } } : edge))
   }
 
+  const validate = async () => {
+    const res = await fetch('http://localhost:3001/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflow) })
+    const json = await res.json()
+    setValidationIssues(json.issues ?? [])
+    return json.valid
+  }
+
   const save = async () => {
+    const isValid = await validate()
+    if (!isValid) { setSaveInfo('Validation failed'); return }
     const res = await fetch('http://localhost:3001/workflows/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflow) })
     const json = await res.json()
-    setSaveInfo(`Saved v${json.version}`)
+    setSaveInfo(json.error ? json.error : `Saved v${json.version}`)
   }
 
   const load = async () => {
@@ -148,8 +159,11 @@ export default function App() {
   }
 
   const start = async () => {
+    const isValid = await validate()
+    if (!isValid) { setSaveInfo('Fix validation errors before starting'); return }
     const res = await fetch('http://localhost:3001/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(workflow) })
     const json = await res.json()
+    if (json.error) { setSaveInfo(json.error); return }
     setRunId(json.runId)
     setStatus(null)
     setReplayIndex(null)
@@ -170,6 +184,10 @@ export default function App() {
   }
 
   useEffect(() => {
+    fetch('http://localhost:3001/tools').then(r => r.json()).then(setTools).catch(() => setTools([]))
+  }, [])
+
+  useEffect(() => {
     if (!runId) return
     const interval = window.setInterval(loadStatus, 1000)
     return () => window.clearInterval(interval)
@@ -178,11 +196,12 @@ export default function App() {
   const eventCount = status?.events?.length ?? 0
 
   return (
-    <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '220px 1fr 420px', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '220px 1fr 440px', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <aside style={{ borderRight: '1px solid #e5e7eb', padding: 16, background: '#f8fafc' }}>
         <h2 style={{ marginTop: 0 }}>Palette</h2>
-        {['http', 'noop', 'condition', 'webhook', 'approval', 'ai'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 8 }}>{type.toUpperCase()}</button>)}
+        {['http', 'noop', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 8 }}>{type.toUpperCase()}</button>)}
         <hr />
+        <button onClick={validate} style={{ width: '100%', marginBottom: 8 }}>Validate</button>
         <button onClick={save} style={{ width: '100%', marginBottom: 8 }}>Save Workflow</button>
         <button onClick={load} style={{ width: '100%', marginBottom: 8 }}>Load Workflow</button>
         <button onClick={start} style={{ width: '100%', marginBottom: 8 }}>Start Workflow</button>
@@ -199,17 +218,31 @@ export default function App() {
       </main>
 
       <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
-        <h2 style={{ marginTop: 0 }}>Inspector</h2>
+        <h2 style={{ marginTop: 0 }}>Validation</h2>
+        {!validationIssues.length && <p style={{ color: '#16a34a' }}>No validation issues.</p>}
+        {validationIssues.map((issue, i) => <div key={i} style={{ padding: 8, marginBottom: 8, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8 }}><strong>{issue.code}</strong><div>{issue.message}</div></div>)}
+
+        <h2>Inspector</h2>
         {!selectedNode && !selectedEdge && <p style={{ color: '#64748b' }}>Select a node or edge to edit it.</p>}
 
         {selectedNode && selectedData && <section style={{ marginBottom: 24 }}>
           <h3>Node</h3>
           <label>Node Type</label>
           <select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ display: 'block', width: '100%', margin: '8px 0 12px' }}>
-            <option value="http">HTTP</option><option value="noop">NOOP</option><option value="condition">CONDITION</option><option value="webhook">WEBHOOK</option><option value="approval">APPROVAL</option><option value="ai">AI</option>
+            {['http', 'noop', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent'].map(type => <option key={type} value={type}>{type.toUpperCase()}</option>)}
           </select>
+
+          {selectedData.type === 'tool' && <div style={{ marginBottom: 12, padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 8 }}>
+            <label>Tool</label>
+            <select value={String((selectedData.config as any).tool ?? '')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, tool: e.target.value, input: tools.find(t => t.name === e.target.value)?.inputExample ?? {} })} style={{ display: 'block', width: '100%', margin: '8px 0' }}>
+              <option value="">Select tool</option>
+              {tools.map(tool => <option key={tool.name} value={tool.name}>{tool.name}</option>)}
+            </select>
+            {selectedToolSchema && <p style={{ fontSize: 12, color: '#475569' }}>{selectedToolSchema.description}. Required: {(selectedToolSchema.required ?? []).join(', ') || 'none'}</p>}
+          </div>}
+
           <label>Config JSON</label>
-          <textarea defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
+          <textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
         </section>}
 
         {selectedEdge && <section style={{ marginBottom: 24 }}>
@@ -217,7 +250,6 @@ export default function App() {
           <p style={{ fontSize: 12, color: '#475569' }}>{selectedEdge.source} → {selectedEdge.target}</p>
           <label>Condition Expression</label>
           <textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => updateSelectedEdgeCondition(e.target.value)} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90, fontFamily: 'monospace' }} />
-          <p style={{ fontSize: 12, color: '#64748b' }}>Leave empty for unconditional routing.</p>
         </section>}
 
         <h2>Debugger / Replay</h2>
@@ -233,7 +265,6 @@ export default function App() {
 
         <h2>Execution Timeline</h2>
         <section>
-          <h3>Nodes</h3>
           {(status?.nodes ?? []).map(node => <div key={node.nodeId} style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb' }}>
             <strong>Node {node.nodeId}</strong><div>Status: {node.status}</div>{node.status === 'waiting' && <button onClick={() => approveNode(node.nodeId)} style={{ marginTop: 8 }}>Approve / Resume</button>}
           </div>)}
