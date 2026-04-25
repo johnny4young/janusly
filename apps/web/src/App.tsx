@@ -3,12 +3,13 @@ import ReactFlow, { addEdge, Background, Controls, useNodesState, useEdgesState 
 import '@xyflow/react/dist/style.css'
 
 type RunNode = { nodeId: string; status: string }
-type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: unknown; createdAt?: string }
+type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: any; createdAt?: string }
 type WorkflowNodeData = { label: string; type: string; config: Record<string, unknown> }
 type WorkflowEdgeData = { condition?: string }
 type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
 type ReplayState = { index: number; nodes: Record<string, string>; currentEvent?: RunEvent }
+type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 
 const statusStyles: Record<string, React.CSSProperties> = {
   pending: { border: '2px solid #94a3b8', background: '#f8fafc' },
@@ -18,6 +19,13 @@ const statusStyles: Record<string, React.CSSProperties> = {
   skipped: { border: '2px solid #64748b', background: '#f1f5f9' },
   succeeded: { border: '2px solid #22c55e', background: '#f0fdf4' },
   failed: { border: '2px solid #ef4444', background: '#fef2f2' },
+}
+
+const messageStyles: Record<ReasoningMessage['tone'], React.CSSProperties> = {
+  info: { background: 'white', border: '1px solid #bfdbfe' },
+  success: { background: '#f0fdf4', border: '1px solid #bbf7d0' },
+  warning: { background: '#fffbeb', border: '1px solid #fde68a' },
+  error: { background: '#fff1f2', border: '1px solid #fecdd3' },
 }
 
 const nodePresets: Record<string, Record<string, unknown>> = {
@@ -50,6 +58,41 @@ function uniqueEvents(events: RunEvent[]) {
   })
 }
 
+function toReasoningMessage(event: RunEvent): ReasoningMessage | null {
+  const payload = event.payload ?? {}
+
+  if (event.type === 'agent.started') {
+    return { id: event.id, title: 'Agent started', body: `Goal: ${payload.goal ?? 'not provided'}`, meta: `Planner: ${payload.planner ?? 'rules'} · max steps: ${payload.maxSteps ?? '?'}`, tone: 'info' }
+  }
+
+  if (event.type === 'agent.step.started') {
+    return { id: event.id, title: `Thinking step ${Number(payload.iteration ?? 0) + 1}`, body: 'Planning the next action...', tone: 'info' }
+  }
+
+  if (event.type === 'agent.step.planned') {
+    const plan = payload.plan ?? {}
+    return { id: event.id, title: `Plan: ${plan.tool ?? 'unknown tool'}`, body: plan.reason ?? 'The agent selected a tool.', meta: JSON.stringify(plan.input ?? {}, null, 2), tone: 'warning' }
+  }
+
+  if (event.type === 'agent.tool.started' || event.type === 'tool.started') {
+    return { id: event.id, title: `Running tool: ${payload.tool ?? 'unknown'}`, body: 'Executing backend tool...', meta: JSON.stringify(payload.input ?? {}, null, 2), tone: 'info' }
+  }
+
+  if (event.type === 'agent.tool.completed' || event.type === 'tool.completed') {
+    return { id: event.id, title: `Tool completed: ${payload.tool ?? 'unknown'}`, body: 'The tool returned a result.', meta: JSON.stringify(payload.result ?? {}, null, 2), tone: 'success' }
+  }
+
+  if (event.type === 'agent.completed') {
+    return { id: event.id, title: 'Agent completed', body: payload.finalAnswer ?? payload.reason ?? 'The agent finished execution.', meta: JSON.stringify(payload.finalResult ?? payload.steps ?? {}, null, 2), tone: 'success' }
+  }
+
+  if (event.type === 'node.failed') {
+    return { id: event.id, title: 'Node failed', body: payload.message ?? 'A node failed during execution.', tone: 'error' }
+  }
+
+  return null
+}
+
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState([
     { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://google.com' } } },
@@ -77,6 +120,7 @@ export default function App() {
     edges: edges.map(e => ({ from: e.source, to: e.target, condition: (e.data as WorkflowEdgeData | undefined)?.condition || undefined }))
   }
 
+  const reasoningMessages = useMemo(() => (status?.events ?? []).map(toReasoningMessage).filter(Boolean) as ReasoningMessage[], [status])
   const selectedNode = nodes.find(n => n.id === selectedNodeId)
   const selectedData = selectedNode?.data as WorkflowNodeData | undefined
   const selectedEdge = edges.find(e => e.id === selectedEdgeId)
@@ -195,7 +239,6 @@ export default function App() {
     if (!runId) return
     setStreamStatus('connecting')
     const source = new EventSource(`http://localhost:3001/events?runId=${runId}`)
-
     source.onopen = () => setStreamStatus('connected')
     source.onmessage = (event) => {
       try {
@@ -207,16 +250,10 @@ export default function App() {
         })
         setReplayIndex(events.length ? events.length - 1 : null)
         loadStatus()
-      } catch {
-        setStreamStatus('error')
-      }
+      } catch { setStreamStatus('error') }
     }
     source.onerror = () => setStreamStatus('error')
-
-    return () => {
-      source.close()
-      setStreamStatus('closed')
-    }
+    return () => { source.close(); setStreamStatus('closed') }
   }, [runId])
 
   const eventCount = status?.events?.length ?? 0
@@ -245,7 +282,15 @@ export default function App() {
       </main>
 
       <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
-        <h2 style={{ marginTop: 0 }}>Validation</h2>
+        <h2 style={{ marginTop: 0 }}>Agent Reasoning</h2>
+        {!reasoningMessages.length && <p style={{ color: '#64748b' }}>Agent/tool trace will appear here during execution.</p>}
+        {reasoningMessages.map(message => <div key={message.id} style={{ ...messageStyles[message.tone], borderRadius: 14, padding: 12, marginBottom: 10 }}>
+          <strong>{message.title}</strong>
+          <p style={{ margin: '6px 0', color: '#334155' }}>{message.body}</p>
+          {message.meta && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: '#f8fafc', padding: 8, borderRadius: 8 }}>{message.meta}</pre>}
+        </div>)}
+
+        <h2>Validation</h2>
         {!validationIssues.length && <p style={{ color: '#16a34a' }}>No validation issues.</p>}
         {validationIssues.map((issue, i) => <div key={i} style={{ padding: 8, marginBottom: 8, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8 }}><strong>{issue.code}</strong><div>{issue.message}</div></div>)}
 
@@ -269,36 +314,18 @@ export default function App() {
           <textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => updateSelectedConfig(e.target.value)} style={{ width: '100%', minHeight: 120, fontFamily: 'monospace' }} />
         </section>}
 
-        {selectedEdge && <section style={{ marginBottom: 24 }}>
-          <h3>Edge</h3>
-          <p style={{ fontSize: 12, color: '#475569' }}>{selectedEdge.source} → {selectedEdge.target}</p>
-          <label>Condition Expression</label>
-          <textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => updateSelectedEdgeCondition(e.target.value)} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90, fontFamily: 'monospace' }} />
-        </section>}
+        {selectedEdge && <section style={{ marginBottom: 24 }}><h3>Edge</h3><p style={{ fontSize: 12, color: '#475569' }}>{selectedEdge.source} → {selectedEdge.target}</p><label>Condition Expression</label><textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => updateSelectedEdgeCondition(e.target.value)} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90, fontFamily: 'monospace' }} /></section>}
 
         <h2>Debugger / Replay</h2>
         <section style={{ padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb', marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <button disabled={!eventCount || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button>
-            <button disabled={!eventCount || replayIndex === eventCount - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, eventCount - 1))}>Next</button>
-            <button disabled={!eventCount} onClick={() => setReplayIndex(eventCount - 1)}>Live</button>
-          </div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}><button disabled={!eventCount || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button><button disabled={!eventCount || replayIndex === eventCount - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, eventCount - 1))}>Next</button><button disabled={!eventCount} onClick={() => setReplayIndex(eventCount - 1)}>Live</button></div>
           <div style={{ fontSize: 12, color: '#475569' }}>Step: {eventCount ? (replayIndex ?? 0) + 1 : 0} / {eventCount}</div>
           {replayState?.currentEvent && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(replayState.currentEvent, null, 2)}</pre>}
         </section>
 
         <h2>Execution Timeline</h2>
-        <section>
-          {(status?.nodes ?? []).map(node => <div key={node.nodeId} style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb' }}>
-            <strong>Node {node.nodeId}</strong><div>Status: {node.status}</div>{node.status === 'waiting' && <button onClick={() => approveNode(node.nodeId)} style={{ marginTop: 8 }}>Approve / Resume</button>}
-          </div>)}
-        </section>
-        <section>
-          <h3>Events</h3>
-          {(status?.events ?? []).map((event, index) => <div key={event.id} onClick={() => setReplayIndex(index)} style={{ cursor: 'pointer', marginBottom: 8, padding: 10, borderRadius: 10, background: replayIndex === index ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb' }}>
-            <strong>{index + 1}. {event.type}</strong><div style={{ fontSize: 12, color: '#475569' }}>Node: {event.nodeId ?? 'run'}</div>{event.createdAt && <div style={{ fontSize: 12, color: '#64748b' }}>{event.createdAt}</div>}
-          </div>)}
-        </section>
+        <section>{(status?.nodes ?? []).map(node => <div key={node.nodeId} style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: 'white', border: '1px solid #e5e7eb' }}><strong>Node {node.nodeId}</strong><div>Status: {node.status}</div>{node.status === 'waiting' && <button onClick={() => approveNode(node.nodeId)} style={{ marginTop: 8 }}>Approve / Resume</button>}</div>)}</section>
+        <section><h3>Events</h3>{(status?.events ?? []).map((event, index) => <div key={event.id} onClick={() => setReplayIndex(index)} style={{ cursor: 'pointer', marginBottom: 8, padding: 10, borderRadius: 10, background: replayIndex === index ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb' }}><strong>{index + 1}. {event.type}</strong><div style={{ fontSize: 12, color: '#475569' }}>Node: {event.nodeId ?? 'run'}</div>{event.createdAt && <div style={{ fontSize: 12, color: '#64748b' }}>{event.createdAt}</div>}</div>)}</section>
       </aside>
     </div>
   )
