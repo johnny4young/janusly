@@ -18,6 +18,93 @@ export type NodeExecutionResult =
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
 
+async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "agent") {
+  const planner = agentConfig.planner ?? "rules";
+  const maxSteps = agentConfig.maxSteps ?? 3;
+  const reflectionEnabled = Boolean(agentConfig.reflection);
+
+  const memory = await getRunMemory(ctx.runId);
+  const summarizedMemory = summarizeMemory(memory);
+
+  await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.started`, {
+    name: agentConfig.name,
+    role: agentConfig.role,
+    persona: agentConfig.persona,
+    planner,
+    maxSteps,
+    reflection: reflectionEnabled,
+    goal: agentConfig.goal,
+    memory: summarizedMemory,
+  });
+
+  const steps: any[] = [];
+  let lastResult: any = null;
+  let lastReflection: any = null;
+
+  for (let i = 0; i < maxSteps; i++) {
+    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.started`, { agent: agentConfig.name, iteration: i });
+
+    const planningContext = { context: ctx.context, memory: summarizedMemory, steps, lastReflection };
+    const plan = planner === "openai"
+      ? await planAgentToolWithLLM(agentConfig, planningContext, steps)
+      : planAgentTool(agentConfig, planningContext);
+
+    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
+
+    if ((plan as any).done) {
+      await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.completed`, {
+        agent: agentConfig.name,
+        iteration: i,
+        finalAnswer: (plan as any).finalAnswer,
+        steps,
+        reflection: lastReflection,
+      });
+
+      return { memory: summarizedMemory, steps, finalAnswer: (plan as any).finalAnswer, reflection: lastReflection };
+    }
+
+    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.started`, {
+      agent: agentConfig.name,
+      iteration: i,
+      tool: plan.tool,
+      input: plan.input,
+    });
+
+    const result = await executeTool(plan.tool, plan.input, ctx.context);
+
+    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.completed`, {
+      agent: agentConfig.name,
+      iteration: i,
+      tool: plan.tool,
+      result,
+    });
+
+    if (reflectionEnabled) {
+      const decision = JSON.stringify(result).toLowerCase().includes("error") ? "retry" : "accept";
+      lastReflection = {
+        agent: agentConfig.name,
+        iteration: i,
+        decision,
+        reason: decision === "retry" ? "The result contains an error-like signal." : "The result looks acceptable.",
+      };
+      await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.reflection`, lastReflection);
+    }
+
+    steps.push({ iteration: i, plan, result, reflection: lastReflection });
+    lastResult = result;
+  }
+
+  await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.completed`, {
+    agent: agentConfig.name,
+    reason: "maxSteps reached",
+    steps,
+    finalResult: lastResult,
+    reflection: lastReflection,
+  });
+
+  return { memory: summarizedMemory, steps, finalResult: lastResult, reflection: lastReflection };
+}
+
 export const nodeRegistry: Record<string, NodeExecutor> = {
   http: async (ctx) => {
     const { url, method, headers, body } = ctx.config;
@@ -69,11 +156,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       });
     });
 
-    await appendEvent(ctx.runId, ctx.nodeId, "loop.completed", {
-      count: results.length,
-      items: results,
-    });
-
+    await appendEvent(ctx.runId, ctx.nodeId, "loop.completed", { count: results.length, items: results });
     return { status: "completed", output: { count: results.length, items: results } };
   },
 
@@ -89,85 +172,66 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   },
 
   agent: async (ctx) => {
-    const planner = ctx.config.planner ?? "rules";
-    const maxSteps = ctx.config.maxSteps ?? 3;
-    const reflectionEnabled = Boolean(ctx.config.reflection);
+    const output = await runAgentLoop(ctx, ctx.config, "agent");
+    return { status: "completed", output };
+  },
 
-    const memory = await getRunMemory(ctx.runId);
-    const summarizedMemory = summarizeMemory(memory);
+  multi_agent: async (ctx) => {
+    const agents = Array.isArray(ctx.config.agents) ? ctx.config.agents : [];
+    const mode = ctx.config.mode ?? "sequential";
+    const sharedContext: Record<string, any> = { ...ctx.context };
+    const results: any[] = [];
 
-    await appendEvent(ctx.runId, ctx.nodeId, "agent.started", {
-      planner,
-      maxSteps,
-      reflection: reflectionEnabled,
+    await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.started", {
+      mode,
+      count: agents.length,
       goal: ctx.config.goal,
-      memory: summarizedMemory,
     });
 
-    const steps: any[] = [];
-    let lastResult: any = null;
-    let lastReflection: any = null;
+    for (const [index, agent] of agents.entries()) {
+      const agentConfig = {
+        ...agent,
+        name: agent.name ?? `agent_${index + 1}`,
+        planner: agent.planner ?? ctx.config.planner ?? "rules",
+        maxSteps: agent.maxSteps ?? ctx.config.maxSteps ?? 2,
+        reflection: agent.reflection ?? ctx.config.reflection ?? true,
+        goal: mapInput(agent.goal ?? ctx.config.goal ?? "Complete the task", {
+          context: sharedContext,
+          previousAgents: results,
+        }),
+      };
 
-    for (let i = 0; i < maxSteps; i++) {
-      await appendEvent(ctx.runId, ctx.nodeId, "agent.step.started", { iteration: i });
-
-      const planningContext = { context: ctx.context, memory: summarizedMemory, steps, lastReflection };
-      const plan = planner === "openai"
-        ? await planAgentToolWithLLM(ctx.config, planningContext, steps)
-        : planAgentTool(ctx.config, planningContext);
-
-      await appendEvent(ctx.runId, ctx.nodeId, "agent.step.planned", { iteration: i, plan });
-
-      if ((plan as any).done) {
-        await appendEvent(ctx.runId, ctx.nodeId, "agent.completed", {
-          iteration: i,
-          finalAnswer: (plan as any).finalAnswer,
-          steps,
-          reflection: lastReflection,
-        });
-
-        return {
-          status: "completed",
-          output: { memory: summarizedMemory, steps, finalAnswer: (plan as any).finalAnswer, reflection: lastReflection },
-        };
-      }
-
-      await appendEvent(ctx.runId, ctx.nodeId, "agent.tool.started", {
-        iteration: i,
-        tool: plan.tool,
-        input: plan.input,
+      await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
+        index,
+        name: agentConfig.name,
+        role: agentConfig.role,
+        persona: agentConfig.persona,
+        goal: agentConfig.goal,
       });
 
-      const result = await executeTool(plan.tool, plan.input, ctx.context);
+      const result = await runAgentLoop(
+        { ...ctx, context: sharedContext },
+        agentConfig,
+        `multi_agent.agent.${index}`
+      );
 
-      await appendEvent(ctx.runId, ctx.nodeId, "agent.tool.completed", {
-        iteration: i,
-        tool: plan.tool,
-        result,
-      });
+      const agentResult = { index, name: agentConfig.name, role: agentConfig.role, result };
+      results.push(agentResult);
+      sharedContext[`agent_${index + 1}`] = { output: result };
+      sharedContext[agentConfig.name] = { output: result };
 
-      if (reflectionEnabled) {
-        const decision = JSON.stringify(result).toLowerCase().includes("error") ? "retry" : "accept";
-        lastReflection = {
-          iteration: i,
-          decision,
-          reason: decision === "retry" ? "The result contains an error-like signal." : "The result looks acceptable.",
-        };
-        await appendEvent(ctx.runId, ctx.nodeId, "agent.reflection", lastReflection);
-      }
-
-      steps.push({ iteration: i, plan, result, reflection: lastReflection });
-      lastResult = result;
+      await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.completed", agentResult);
     }
 
-    await appendEvent(ctx.runId, ctx.nodeId, "agent.completed", {
-      reason: "maxSteps reached",
-      steps,
-      finalResult: lastResult,
-      reflection: lastReflection,
+    const finalAnswer = results.at(-1)?.result?.finalAnswer ?? results.at(-1)?.result?.finalResult ?? null;
+
+    await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.completed", {
+      count: results.length,
+      finalAnswer,
+      agents: results,
     });
 
-    return { status: "completed", output: { memory: summarizedMemory, steps, finalResult: lastResult, reflection: lastReflection } };
+    return { status: "completed", output: { mode, count: results.length, finalAnswer, agents: results } };
   },
 
   agent_reflection: async (ctx) => {
@@ -177,7 +241,6 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     const reason = decision === "retry" ? "The inspected input contains failure signals." : "The inspected input looks valid.";
 
     await appendEvent(ctx.runId, ctx.nodeId, "agent.reflection", { decision, reason, input });
-
     return { status: "completed", output: { decision, reason, input } };
   },
 
