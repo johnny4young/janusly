@@ -1,0 +1,17 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-workspace.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY packages ./packages
+
+RUN pnpm install
+
+COPY . .
+
+EXPOSE 3001
+
+CMD ["pnpm", "--filter", "@workflow-engine/api", "dev"]
