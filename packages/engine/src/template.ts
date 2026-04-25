@@ -17,6 +17,11 @@ export function renderTemplate(value: any, scope: Record<string, any>): any {
         return getSecret(secretName);
       }
 
+      if (expr.startsWith('env.')) {
+        const envName = expr.replace('env.', '').toUpperCase();
+        return process.env[envName] ?? '';
+      }
+
       const resolved = getByPath(scope, expr);
 
       if (resolved == null) return '';
@@ -30,10 +35,12 @@ export function renderTemplate(value: any, scope: Record<string, any>): any {
   }
 
   if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, renderTemplate(item, scope)])
-    );
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplate(item, scope)]));
   }
 
   return value;
+}
+
+export function mapInput(mapping: any, scope: Record<string, any>) {
+  return renderTemplate(mapping ?? {}, scope);
 }
