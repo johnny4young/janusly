@@ -1,12 +1,13 @@
 import http from "http";
 import { startRun } from "@workflow-engine/engine/src/start-run";
-import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
 import { listTools } from "@workflow-engine/engine/src/tool-registry";
 import { requireAuth } from "./auth";
 import { db } from "@workflow-engine/db";
-import { workflows, workflowVersions, runs, runNodes, runEvents } from "@workflow-engine/db";
+import { runs } from "@workflow-engine/db";
 import { eq, desc } from "drizzle-orm";
+
+const PORT = Number(process.env.PORT || 3001);
 
 function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
   res.writeHead(status, {
@@ -31,34 +32,16 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    const auth = requireAuth(req);
+    const auth = await requireAuth(req);
 
     if (req.method === "GET" && req.url === "/tools") {
       sendJson(res, listTools());
       return;
     }
 
-    if (req.method === "GET" && req.url?.startsWith("/runs")) {
+    if (req.method === "GET" && req.url === "/runs") {
       const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt));
       sendJson(res, rows);
-      return;
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/run")) {
-      const url = new URL(req.url, "http://localhost");
-      const runId = url.searchParams.get("runId");
-
-      const run = await db.select().from(runs).where(eq(runs.id, runId!));
-
-      if (run[0]?.orgId !== auth.orgId) {
-        sendJson(res, { error: "Forbidden" }, 403);
-        return;
-      }
-
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId!));
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId!));
-
-      sendJson(res, { run: run[0], nodes, events });
       return;
     }
 
@@ -82,4 +65,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(3001);
+server.listen(PORT, () => {
+  console.log(`API running on port ${PORT}`);
+});
