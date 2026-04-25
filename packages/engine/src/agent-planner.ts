@@ -8,6 +8,12 @@ export type AgentPlan = {
   reason: string;
 };
 
+export type AgentLoopStep = {
+  iteration: number;
+  plan: AgentPlan;
+  result: Record<string, unknown>;
+};
+
 const availableTools = [
   {
     name: "http.request",
@@ -40,9 +46,7 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
   if (goal.includes("uppercase") || goal.includes("upper case")) {
     return {
       tool: "text.uppercase",
-      input: {
-        value: config.value ?? config.text ?? "",
-      },
+      input: { value: config.value ?? config.text ?? "" },
       reason: "Goal matched text uppercase transformation",
     };
   }
@@ -50,9 +54,7 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
   if (goal.includes("pick") || goal.includes("extract")) {
     return {
       tool: "json.pick",
-      input: {
-        path: config.path ?? "",
-      },
+      input: { path: config.path ?? "" },
       reason: "Goal matched JSON extraction",
     };
   }
@@ -72,14 +74,16 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
 
   return {
     tool: "text.uppercase",
-    input: {
-      value: JSON.stringify({ goal: config.goal, context }),
-    },
+    input: { value: JSON.stringify({ goal: config.goal, context }) },
     reason: "Fallback planner selected text.uppercase",
   };
 }
 
-export async function planAgentToolWithLLM(config: any, context: Record<string, any>): Promise<AgentPlan> {
+export async function planAgentToolWithLLM(
+  config: any,
+  context: Record<string, any>,
+  history: AgentLoopStep[] = []
+): Promise<AgentPlan & { done?: boolean; finalAnswer?: string }> {
   if (!process.env.OPENAI_API_KEY) {
     return planAgentTool(config, context);
   }
@@ -91,7 +95,7 @@ export async function planAgentToolWithLLM(config: any, context: Record<string, 
     input: [
       {
         role: "system",
-        content: "You are a workflow agent planner. Select exactly one tool from the available tools and return only valid JSON."
+        content: "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON."
       },
       {
         role: "user",
@@ -99,23 +103,32 @@ export async function planAgentToolWithLLM(config: any, context: Record<string, 
           goal,
           config,
           context,
+          history,
           availableTools,
           requiredJsonShape: {
-            tool: "one available tool name",
-            input: "object with tool input",
+            done: "boolean optional",
+            finalAnswer: "string optional",
+            tool: "one available tool name when not done",
+            input: "object with tool input when not done",
             reason: "short reason"
           }
         })
       }
     ],
-    text: {
-      format: {
-        type: "json_object"
-      }
-    }
+    text: { format: { type: "json_object" } }
   });
 
   const parsed = JSON.parse(response.output_text || "{}");
+
+  if (parsed.done) {
+    return {
+      tool: "done",
+      input: {},
+      reason: parsed.reason ?? "Goal completed",
+      done: true,
+      finalAnswer: parsed.finalAnswer ?? "Done",
+    };
+  }
 
   if (!parsed.tool || typeof parsed.tool !== "string") {
     throw new Error("LLM planner did not return a valid tool");
