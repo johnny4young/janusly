@@ -52,6 +52,33 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/templates") return sendJson(res, workflowTemplates);
     if (req.method === "GET" && req.url === "/billing/usage") return sendJson(res, await getUsageSummary(auth.orgId));
 
+    if (req.method === "GET" && req.url === "/workflows") {
+      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt));
+      return sendJson(res, rows);
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
+      const url = new URL(req.url, "http://localhost");
+      const workflowId = url.searchParams.get("workflowId") ?? "ui-test";
+      const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
+      return sendJson(res, versions[0] ?? null);
+    }
+
+    if (req.method === "POST" && req.url === "/workflows/save") {
+      const workflow = await readJson(req);
+      const validation = validateWorkflow(workflow);
+      if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
+      const workflowId = workflow.id ?? crypto.randomUUID();
+      const existingVersions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
+      const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
+      const existingWorkflow = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+      if (!existingWorkflow[0]) await db.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflow.name ?? workflowId, createdBy: auth.userId });
+      const versionId = crypto.randomUUID();
+      await db.insert(workflowVersions).values({ id: versionId, orgId: auth.orgId, workflowId, version: nextVersion, dagJson: { ...workflow, id: workflowId }, createdBy: auth.userId });
+      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
+      return sendJson(res, { workflowId, versionId, version: nextVersion });
+    }
+
     if (req.method === "GET" && req.url === "/plugins") {
       const installed = await db.select().from(installedPlugins).where(eq(installedPlugins.orgId, auth.orgId));
       return sendJson(res, { available: listTools(), installed });
@@ -88,15 +115,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
       const { prompt } = await readJson(req);
       if (!process.env.OPENAI_API_KEY) return sendJson(res, workflowTemplates[0].workflow);
-
-      const response = await openai.responses.create({
-        model: "gpt-4o-mini",
-        input: [
-          { role: "system", content: "Generate only valid JSON for a workflow DAG. Shape: {id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, ai, approval, webhook, noop." },
-          { role: "user", content: prompt }
-        ],
-        text: { format: { type: "json_object" } }
-      });
+      const response = await openai.responses.create({ model: "gpt-4o-mini", input: [{ role: "system", content: "Generate only valid JSON for a workflow DAG. Shape: {id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, ai, approval, webhook, noop." }, { role: "user", content: prompt }], text: { format: { type: "json_object" } } });
       return sendJson(res, JSON.parse(response.output_text || "{}"));
     }
 
@@ -158,28 +177,6 @@ const server = http.createServer(async (req, res) => {
       const result = await resumeRun(runId, nodeId);
       await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
       return sendJson(res, result);
-    }
-
-    if (req.method === "POST" && req.url === "/workflows/save") {
-      const workflow = await readJson(req);
-      const validation = validateWorkflow(workflow);
-      if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
-      const workflowId = workflow.id ?? crypto.randomUUID();
-      const existingVersions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
-      const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
-      const existingWorkflow = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-      if (!existingWorkflow[0]) await db.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflow.name ?? workflowId, createdBy: auth.userId });
-      const versionId = crypto.randomUUID();
-      await db.insert(workflowVersions).values({ id: versionId, orgId: auth.orgId, workflowId, version: nextVersion, dagJson: { ...workflow, id: workflowId }, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
-      return sendJson(res, { workflowId, versionId, version: nextVersion });
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
-      const url = new URL(req.url, "http://localhost");
-      const workflowId = url.searchParams.get("workflowId") ?? "ui-test";
-      const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
-      return sendJson(res, versions[0] ?? null);
     }
 
     return sendJson(res, { error: "Not found" }, 404);
