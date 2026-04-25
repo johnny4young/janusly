@@ -12,6 +12,7 @@
     "@workflow-engine/engine": "workspace:*",
     "@trpc/server": "^10.45.0",
     "drizzle-orm": "^0.30.0",
+    "stripe": "^16.12.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
