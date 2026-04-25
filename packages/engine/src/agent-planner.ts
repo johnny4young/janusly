@@ -1,8 +1,30 @@
+import OpenAI from "openai";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 export type AgentPlan = {
   tool: string;
   input: Record<string, unknown>;
   reason: string;
 };
+
+const availableTools = [
+  {
+    name: "http.request",
+    description: "Make an HTTP request to an external API.",
+    inputShape: { url: "string", method: "GET|POST", headers: "object optional", body: "object optional" }
+  },
+  {
+    name: "text.uppercase",
+    description: "Convert text to uppercase.",
+    inputShape: { value: "string" }
+  },
+  {
+    name: "json.pick",
+    description: "Pick a value from workflow context using a dot path.",
+    inputShape: { path: "string" }
+  }
+];
 
 export function planAgentTool(config: any, context: Record<string, any>): AgentPlan {
   if (config.tool) {
@@ -54,5 +76,54 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
       value: JSON.stringify({ goal: config.goal, context }),
     },
     reason: "Fallback planner selected text.uppercase",
+  };
+}
+
+export async function planAgentToolWithLLM(config: any, context: Record<string, any>): Promise<AgentPlan> {
+  if (!process.env.OPENAI_API_KEY) {
+    return planAgentTool(config, context);
+  }
+
+  const goal = config.goal ?? "Choose the best tool for this workflow step.";
+
+  const response = await openai.responses.create({
+    model: config.model ?? "gpt-4o-mini",
+    input: [
+      {
+        role: "system",
+        content: "You are a workflow agent planner. Select exactly one tool from the available tools and return only valid JSON."
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          goal,
+          config,
+          context,
+          availableTools,
+          requiredJsonShape: {
+            tool: "one available tool name",
+            input: "object with tool input",
+            reason: "short reason"
+          }
+        })
+      }
+    ],
+    text: {
+      format: {
+        type: "json_object"
+      }
+    }
+  });
+
+  const parsed = JSON.parse(response.output_text || "{}");
+
+  if (!parsed.tool || typeof parsed.tool !== "string") {
+    throw new Error("LLM planner did not return a valid tool");
+  }
+
+  return {
+    tool: parsed.tool,
+    input: parsed.input ?? {},
+    reason: parsed.reason ?? "LLM selected tool",
   };
 }
