@@ -1,3 +1,5 @@
+import { getSecret } from "./secrets";
+
 export function getByPath(source: any, path: string) {
   return path.split('.').reduce((acc, key) => {
     if (acc == null) return undefined;
@@ -8,7 +10,14 @@ export function getByPath(source: any, path: string) {
 export function renderTemplate(value: any, scope: Record<string, any>): any {
   if (typeof value === 'string') {
     return value.replace(/{{\s*([^}]+)\s*}}/g, (_, rawPath) => {
-      const resolved = getByPath(scope, String(rawPath).trim());
+      const expr = String(rawPath).trim();
+
+      if (expr.startsWith('secret.')) {
+        const secretName = expr.replace('secret.', '').toUpperCase();
+        return getSecret(secretName);
+      }
+
+      const resolved = getByPath(scope, expr);
 
       if (resolved == null) return '';
       if (typeof resolved === 'object') return JSON.stringify(resolved);
