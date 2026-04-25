@@ -6,6 +6,8 @@ import { RunEvent, RunNode, ActiveTab } from './types'
 import { nodePresets } from './constants'
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+type ToastTone = 'success' | 'error' | 'info'
+type Toast = { id: string; message: string; tone: ToastTone }
 
 type WorkflowStore = {
   session: Session | null
@@ -26,6 +28,7 @@ type WorkflowStore = {
   events: RunEvent[]
   activeTab: ActiveTab
   streamStatus: StreamStatus
+  toasts: Toast[]
 
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
@@ -35,6 +38,7 @@ type WorkflowStore = {
   hydrateWorkflow: (workflow: any) => void
   getWorkflowJson: () => any
   newWorkflow: () => void
+  setWorkflowName: (name: string) => void
   setNodes: (nodes: Node[]) => void
   setEdges: (edges: Edge[]) => void
   onNodesChange: OnNodesChange
@@ -52,6 +56,8 @@ type WorkflowStore = {
   setActiveTab: (tab: ActiveTab) => void
   setStreamStatus: (status: StreamStatus) => void
   resetRun: () => void
+  addToast: (message: string, tone?: ToastTone) => void
+  removeToast: (id: string) => void
 }
 
 const initialNodes: Node[] = [
@@ -96,6 +102,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   events: [],
   activeTab: 'crew',
   streamStatus: 'idle',
+  toasts: [],
 
   setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
   clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
@@ -158,6 +165,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     })
   },
 
+  setWorkflowName: (currentWorkflowName) => set({ currentWorkflowName }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
@@ -205,4 +213,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   resetRun: () => set({ runId: null, runNodes: [], events: [], streamStatus: 'idle' }),
+  addToast: (message, tone = 'info') => {
+    const id = crypto.randomUUID()
+    set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
+    setTimeout(() => get().removeToast(id), 3500)
+  },
+  removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
 }))
