@@ -1,0 +1,57 @@
+export type WorkflowTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  workflow: any;
+};
+
+export const workflowTemplates: WorkflowTemplate[] = [
+  {
+    id: "http-ai-summary",
+    name: "HTTP → AI Summary",
+    description: "Call an API and summarize the response with an AI/agent step.",
+    category: "AI",
+    workflow: {
+      id: "http-ai-summary",
+      name: "HTTP → AI Summary",
+      nodes: [
+        { id: "api", type: "http", config: { url: "https://api.github.com" } },
+        { id: "agent", type: "agent", config: { planner: "rules", goal: "uppercase this text", value: "API call completed", maxSteps: 2 } }
+      ],
+      edges: [{ from: "api", to: "agent" }]
+    }
+  },
+  {
+    id: "api-transform-tool",
+    name: "API → Transform → Tool",
+    description: "Fetch data, map outputs, and run a backend tool.",
+    category: "Data",
+    workflow: {
+      id: "api-transform-tool",
+      name: "API → Transform → Tool",
+      nodes: [
+        { id: "api", type: "http", config: { url: "https://api.github.com" } },
+        { id: "transform", type: "transform", config: { mapping: { statusCode: "{{context.api.output.statusCode}}", ok: "{{context.api.output.ok}}" } } },
+        { id: "tool", type: "tool", config: { tool: "text.uppercase", input: { value: "status {{context.transform.output.statusCode}}" } } }
+      ],
+      edges: [{ from: "api", to: "transform" }, { from: "transform", to: "tool" }]
+    }
+  },
+  {
+    id: "approval-gate",
+    name: "Human Approval Gate",
+    description: "Pause execution until a human approves the run.",
+    category: "Human-in-the-loop",
+    workflow: {
+      id: "approval-gate",
+      name: "Human Approval Gate",
+      nodes: [
+        { id: "start", type: "noop", config: {} },
+        { id: "approval", type: "approval", config: { message: "Approve to continue." } },
+        { id: "done", type: "noop", config: {} }
+      ],
+      edges: [{ from: "start", to: "approval" }, { from: "approval", to: "done" }]
+    }
+  }
+];
