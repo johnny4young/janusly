@@ -1,4 +1,5 @@
 import { evaluateExpression } from "./expression";
+import { executeTool } from "./tool-registry";
 
 export type NodeContext = {
   runId: string;
@@ -38,6 +39,20 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     return { status: "completed", output: { result } };
+  },
+
+  tool: async (ctx) => {
+    const { tool, input } = ctx.config;
+
+    const result = await executeTool(tool, input, ctx.context);
+
+    return {
+      status: "completed",
+      output: {
+        tool,
+        result
+      }
+    };
   },
 
   ai: async (ctx) => {
