@@ -1,7 +1,7 @@
 import React from 'react'
 import { nodeTypes } from '../constants'
 
-export function BuilderSidebar({ onAdd, onValidate, onSave, onOpenDashboard, onNew, onStart, workflowName }: any) {
+export function BuilderSidebar({ onAdd, onValidate, onSave, onOpenDashboard, onNew, onStart, onOpenMembers, workflowName }: any) {
   return (
     <div style={{ padding: 12 }}>
       <h3>Builder</h3>
@@ -14,6 +14,7 @@ export function BuilderSidebar({ onAdd, onValidate, onSave, onOpenDashboard, onN
       <hr />
       <button onClick={onNew} style={{ width: '100%', marginBottom: 6 }}>New workflow</button>
       <button onClick={onOpenDashboard} style={{ width: '100%', marginBottom: 6 }}>Workflows</button>
+      <button onClick={onOpenMembers} style={{ width: '100%', marginBottom: 6 }}>Members</button>
       <button onClick={onValidate} style={{ width: '100%', marginBottom: 6 }}>Validate</button>
       <button onClick={onSave} style={{ width: '100%', marginBottom: 6 }}>Save</button>
       <button onClick={onStart} style={{ width: '100%', marginBottom: 6 }}>Start</button>
