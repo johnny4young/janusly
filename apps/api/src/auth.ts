@@ -1,39 +1,31 @@
 import http from "http";
-import { createClerkClient } from "@clerk/backend";
+import { createClient } from "@supabase/supabase-js";
 
-const clerk = createClerkClient({
-  secretKey: process.env.CLERK_SECRET_KEY,
-  publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
-});
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export type AuthContext = {
   orgId: string;
   userId: string;
-  mode: "clerk" | "dev-headers" | "service-token";
+  mode: "supabase" | "dev-headers" | "service-token";
 };
 
 export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | null> {
   const authHeader = req.headers.authorization;
 
-  if (authHeader?.startsWith("Bearer ") && process.env.CLERK_SECRET_KEY) {
-    try {
-      const request = new Request("http://localhost", {
-        headers: { Authorization: authHeader },
-      });
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.replace("Bearer ", "");
 
-      const requestState = await clerk.authenticateRequest(request);
+    const { data, error } = await supabase.auth.getUser(token);
 
-      if (requestState.isAuthenticated) {
-        const auth = requestState.toAuth();
-
-        return {
-          orgId: auth.orgId || "default",
-          userId: auth.userId || "unknown",
-          mode: "clerk",
-        };
-      }
-    } catch (err) {
-      console.error("Clerk auth failed", err);
+    if (!error && data?.user) {
+      return {
+        orgId: data.user.user_metadata?.orgId || "default",
+        userId: data.user.id,
+        mode: "supabase",
+      };
     }
   }
 
@@ -61,7 +53,7 @@ export async function requireAuth(req: http.IncomingMessage) {
   const auth = await getAuth(req);
 
   if (!auth) {
-    const err = new Error("Unauthorized: missing Clerk JWT, service token, or x-org-id/x-user-id");
+    const err = new Error("Unauthorized: missing Supabase JWT or dev headers");
     (err as any).statusCode = 401;
     throw err;
   }
