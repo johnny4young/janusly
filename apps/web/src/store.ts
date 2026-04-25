@@ -1,20 +1,39 @@
 import { create } from 'zustand'
 import type { Edge, Node, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'
+import type { Session, User } from '@supabase/supabase-js'
 import { RunEvent, RunNode, ActiveTab } from './types'
 import { nodePresets } from './constants'
 
+type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+
 type WorkflowStore = {
+  // Auth
+  session: Session | null
+  user: User | null
+  userId: string | null
+  orgId: string | null
+  authReady: boolean
+
+  // Workflow editor
   nodes: Node[]
   edges: Edge[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
+
+  // Runtime
   runId: string | null
   runNodes: RunNode[]
   events: RunEvent[]
   activeTab: ActiveTab
-  streamStatus: 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+  streamStatus: StreamStatus
 
+  // Auth actions
+  setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
+  clearAuth: () => void
+  setAuthReady: (ready: boolean) => void
+
+  // Editor actions
   addNode: (type: string) => void
   setNodes: (nodes: Node[]) => void
   setEdges: (edges: Edge[]) => void
@@ -26,12 +45,13 @@ type WorkflowStore = {
   updateSelectedNodeConfig: (config: Record<string, any>) => void
   updateSelectedNodeType: (type: string) => void
 
+  // Runtime actions
   setRunId: (id: string | null) => void
   setRunNodes: (nodes: RunNode[]) => void
   addEvents: (events: RunEvent[]) => void
   setEvents: (events: RunEvent[]) => void
   setActiveTab: (tab: ActiveTab) => void
-  setStreamStatus: (status: WorkflowStore['streamStatus']) => void
+  setStreamStatus: (status: StreamStatus) => void
   resetRun: () => void
 }
 
@@ -43,6 +63,12 @@ const initialNodes: Node[] = [
 const initialEdges: Edge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
 
 export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
+  session: null,
+  user: null,
+  userId: null,
+  orgId: null,
+  authReady: false,
+
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
@@ -52,6 +78,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   events: [],
   activeTab: 'crew',
   streamStatus: 'idle',
+
+  setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
+  clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
+  setAuthReady: (authReady) => set({ authReady }),
 
   addNode: (type) => {
     const id = crypto.randomUUID().slice(0, 8)
