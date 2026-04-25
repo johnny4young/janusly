@@ -1,0 +1,20 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN corepack enable
+
+COPY package.json pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+
+RUN pnpm install
+
+COPY . .
+
+RUN pnpm --filter @workflow-engine/web build
+
+RUN npm install -g serve
+
+EXPOSE 3000
+
+CMD ["serve", "-s", "apps/web/dist", "-l", "3000"]
