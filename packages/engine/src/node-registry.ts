@@ -1,6 +1,8 @@
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
+import { appendEvent } from "./persistence";
+import { getRunMemory, summarizeMemory } from "./memory";
 
 export type NodeContext = {
   runId: string;
@@ -45,14 +47,13 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
 
+    await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input });
     const result = await executeTool(tool, input, ctx.context);
+    await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
 
     return {
       status: "completed",
-      output: {
-        tool,
-        result
-      }
+      output: { tool, result }
     };
   },
 
@@ -60,38 +61,82 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     const planner = ctx.config.planner ?? "rules";
     const maxSteps = ctx.config.maxSteps ?? 3;
 
+    const memory = await getRunMemory(ctx.runId);
+    const summarizedMemory = summarizeMemory(memory);
+
+    await appendEvent(ctx.runId, ctx.nodeId, "agent.started", {
+      planner,
+      maxSteps,
+      goal: ctx.config.goal,
+      memory: summarizedMemory
+    });
+
     const steps = [];
     let lastResult: any = null;
 
     for (let i = 0; i < maxSteps; i++) {
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.step.started", { iteration: i });
+
+      const planningContext = {
+        context: ctx.context,
+        memory: summarizedMemory,
+        steps
+      };
+
       const plan = planner === "openai"
-        ? await planAgentToolWithLLM(ctx.config, ctx.context, steps)
-        : planAgentTool(ctx.config, ctx.context);
+        ? await planAgentToolWithLLM(ctx.config, planningContext, steps)
+        : planAgentTool(ctx.config, planningContext);
+
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.step.planned", {
+        iteration: i,
+        plan
+      });
 
       if ((plan as any).done) {
+        await appendEvent(ctx.runId, ctx.nodeId, "agent.completed", {
+          iteration: i,
+          finalAnswer: (plan as any).finalAnswer,
+          steps
+        });
+
         return {
           status: "completed",
           output: {
+            memory: summarizedMemory,
             steps,
             finalAnswer: (plan as any).finalAnswer
           }
         };
       }
 
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.tool.started", {
+        iteration: i,
+        tool: plan.tool,
+        input: plan.input
+      });
+
       const result = await executeTool(plan.tool, plan.input, ctx.context);
 
-      steps.push({
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.tool.completed", {
         iteration: i,
-        plan,
+        tool: plan.tool,
         result
       });
 
+      steps.push({ iteration: i, plan, result });
       lastResult = result;
     }
+
+    await appendEvent(ctx.runId, ctx.nodeId, "agent.completed", {
+      reason: "maxSteps reached",
+      steps,
+      finalResult: lastResult
+    });
 
     return {
       status: "completed",
       output: {
+        memory: summarizedMemory,
         steps,
         finalResult: lastResult
       }
@@ -100,6 +145,8 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
   ai: async (ctx) => {
     const prompt = ctx.config.prompt ?? "Summarize workflow";
+
+    await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt });
 
     return {
       status: "completed",
