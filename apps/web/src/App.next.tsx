@@ -1,27 +1,58 @@
-import React, { useState } from 'react'
-import { useNodesState, useEdgesState, addEdge } from '@xyflow/react'
+import React, { useEffect } from 'react'
 import { Layout } from './Layout'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
-import { nodePresets } from './constants'
+import { Login } from './components/Login'
+import { AuthProvider, normalizeAuth } from './auth'
+import { useWorkflowStore } from './store'
 
 export default function AppNext() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [events, setEvents] = useState([])
-  const [tab, setTab] = useState('crew')
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    connect,
+    addNode,
+    events,
+    activeTab,
+    session,
+    authReady,
+    setAuth,
+    clearAuth,
+    setAuthReady,
+  } = useWorkflowStore()
 
-  const addNode = (type: string) => {
-    const id = crypto.randomUUID().slice(0, 8)
-    setNodes((n: any) => n.concat({ id, position: { x: 100, y: 100 }, data: { label: type, type, config: nodePresets[type] } }))
+  useEffect(() => {
+    AuthProvider.getSession().then(({ data }) => {
+      const auth = normalizeAuth(data.session)
+      setAuth(auth)
+    }).finally(() => setAuthReady(true))
+
+    const { data: listener } = AuthProvider.onAuthStateChange((auth) => {
+      if (!auth.session) clearAuth()
+      else setAuth(auth)
+    })
+
+    return () => {
+      listener?.subscription.unsubscribe()
+    }
+  }, [])
+
+  if (!authReady) {
+    return <div style={{ padding: 20 }}>Loading...</div>
+  }
+
+  if (!session) {
+    return <Login onAuthenticated={() => {}} />
   }
 
   return (
     <Layout
       sidebar={<BuilderSidebar onAdd={addNode} onValidate={() => {}} onSave={() => {}} onLoad={() => {}} onStart={() => {}} />}
-      main={<WorkflowCanvas nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={(p: any) => setEdges((e: any) => addEdge(p, e))} />}
-      panel={<RightPanel tab={tab} events={events} />}
+      main={<WorkflowCanvas nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} />}
+      panel={<RightPanel tab={activeTab} events={events} />}
     />
   )
 }
