@@ -9,7 +9,7 @@ export async function executeNode(input: any) {
     throw new Error(`No executor for node type: ${node.type}`);
   }
 
-  await executor({
+  return executor({
     runId: input.runId,
     nodeId: node.id,
     config: node.config,
