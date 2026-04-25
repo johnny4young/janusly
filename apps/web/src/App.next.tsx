@@ -4,6 +4,7 @@ import { BuilderSidebar } from './components/BuilderSidebar'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { Login } from './components/Login'
+import { UserMenu } from './components/UserMenu'
 import { AuthProvider, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 
@@ -40,16 +41,12 @@ export default function AppNext() {
     }
   }, [])
 
-  if (!authReady) {
-    return <div style={{ padding: 20 }}>Loading...</div>
-  }
-
-  if (!session) {
-    return <Login onAuthenticated={() => {}} />
-  }
+  if (!authReady) return <div>Loading...</div>
+  if (!session) return <Login onAuthenticated={() => {}} />
 
   return (
     <Layout
+      header={<UserMenu />}
       sidebar={<BuilderSidebar onAdd={addNode} onValidate={() => {}} onSave={() => {}} onLoad={() => {}} onStart={() => {}} />}
       main={<WorkflowCanvas nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={connect} />}
       panel={<RightPanel tab={activeTab} events={events} />}
