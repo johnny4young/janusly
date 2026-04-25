@@ -14,6 +14,12 @@ export async function markNodeQueued(runId: string, nodeId: string) {
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
+export async function markNodeWaiting(runId: string, nodeId: string, metadata?: any) {
+  await db.update(runNodes)
+    .set({ status: "waiting", stateJson: metadata })
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+}
+
 export async function markNodeSucceeded(runId: string, nodeId: string) {
   await db.update(runNodes)
     .set({ status: "succeeded", finishedAt: new Date() })
