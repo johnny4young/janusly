@@ -1,0 +1,10 @@
+export type RunNode = { nodeId: string; status: string; stateJson?: any; errorJson?: any }
+export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: any; createdAt?: string }
+export type WorkflowNodeData = { label: string; type: string; config: Record<string, any> }
+export type WorkflowEdgeData = { condition?: string }
+export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
+export type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
+export type Template = { id: string; name: string; description: string; category: string; workflow: any }
+export type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: any }
+export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
+export type ActiveTab = 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'crew'
