@@ -27,6 +27,11 @@ export const AuthProvider = {
   signUp: (email: string, password: string) => supabase.auth.signUp({ email, password }),
   signOut: () => supabase.auth.signOut(),
   getSession: () => supabase.auth.getSession(),
+  updateOrg: async (orgId: string) => {
+    const result = await supabase.auth.updateUser({ data: { orgId } })
+    const session = await supabase.auth.getSession()
+    return { result, auth: normalizeAuth(session.data.session) }
+  },
   onAuthStateChange: (callback: (auth: NormalizedAuth) => void) => {
     return supabase.auth.onAuthStateChange((_event, session) => callback(normalizeAuth(session)))
   },
