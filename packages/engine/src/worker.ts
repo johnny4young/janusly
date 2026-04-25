@@ -10,6 +10,7 @@ export const worker = new Worker(
     const { runId, node, workflow } = job.data;
 
     await markNodeRunning(runId, node.id);
+    await appendEvent(runId, node.id, "node.running", {});
 
     try {
       const result = await executeNode({ runId, node });
@@ -20,8 +21,8 @@ export const worker = new Worker(
         return;
       }
 
-      await markNodeSucceeded(runId, node.id);
-      await appendEvent(runId, node.id, "node.succeeded", {});
+      await markNodeSucceeded(runId, node.id, result?.output ?? {});
+      await appendEvent(runId, node.id, "node.succeeded", { output: result?.output ?? {} });
 
       await enqueueNextNodes({ runId, workflow });
 
