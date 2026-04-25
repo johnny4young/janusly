@@ -57,6 +57,14 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, rows);
     }
 
+    if (req.method === "GET" && req.url?.startsWith("/workflows/versions")) {
+      const url = new URL(req.url, "http://localhost");
+      const workflowId = url.searchParams.get("workflowId");
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
+      return sendJson(res, versions);
+    }
+
     if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
       const url = new URL(req.url, "http://localhost");
       const workflowId = url.searchParams.get("workflowId") ?? "ui-test";
