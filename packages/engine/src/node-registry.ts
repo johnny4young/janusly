@@ -1,3 +1,5 @@
+import { evaluateExpression } from "./expression";
+
 export type NodeContext = {
   runId: string;
   nodeId: string;
@@ -25,11 +27,17 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
   condition: async (ctx) => {
     const { expression } = ctx.config;
-    if (expression !== "true") {
-      throw new Error("Condition failed");
+
+    const result = evaluateExpression(expression, {
+      context: ctx.context,
+      inputs: ctx.config
+    });
+
+    if (!result) {
+      throw new Error("Condition evaluated to false");
     }
 
-    return { status: "completed" };
+    return { status: "completed", output: { result } };
   },
 
   ai: async (ctx) => {
