@@ -9,7 +9,7 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/backend": "^1.31.4",
+    "@supabase/supabase-js": "^2.49.1",
     "@workflow-engine/db": "workspace:*",
     "@workflow-engine/engine": "workspace:*",
     "@trpc/server": "^10.45.0",
