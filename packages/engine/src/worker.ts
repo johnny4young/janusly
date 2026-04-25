@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import { connection } from "./queue";
 import { executeNode } from "./execute-node";
-import { markNodeRunning, markNodeSucceeded, markNodeFailed, appendEvent } from "./persistence";
+import { markNodeRunning, markNodeSucceeded, markNodeFailed, markNodeWaiting, appendEvent } from "./persistence";
 import { enqueueNextNodes } from "./scheduler";
 
 export const worker = new Worker(
@@ -12,7 +12,13 @@ export const worker = new Worker(
     await markNodeRunning(runId, node.id);
 
     try {
-      await executeNode({ runId, node });
+      const result = await executeNode({ runId, node });
+
+      if (result?.status === "waiting") {
+        await markNodeWaiting(runId, node.id, result.metadata);
+        await appendEvent(runId, node.id, "node.waiting", result);
+        return;
+      }
 
       await markNodeSucceeded(runId, node.id);
       await appendEvent(runId, node.id, "node.succeeded", {});
