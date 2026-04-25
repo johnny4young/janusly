@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
+    "@clerk/backend": "^1.31.4",
     "@workflow-engine/db": "workspace:*",
     "@workflow-engine/engine": "workspace:*",
     "@trpc/server": "^10.45.0",
