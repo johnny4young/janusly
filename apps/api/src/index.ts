@@ -4,7 +4,7 @@ import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
 import { listTools } from "@workflow-engine/engine/src/tool-registry";
 import { db } from "@workflow-engine/db";
-import { workflows, workflowVersions, runNodes, runEvents } from "@workflow-engine/db";
+import { workflows, workflowVersions, runs, runNodes, runEvents } from "@workflow-engine/db";
 import { eq, desc } from "drizzle-orm";
 
 function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
@@ -44,6 +44,24 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/tools") {
       sendJson(res, listTools());
+      return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/runs")) {
+      const url = new URL(req.url, "http://localhost");
+      const limit = Number(url.searchParams.get("limit") ?? 25);
+      const rows = await db.select().from(runs).orderBy(desc(runs.createdAt));
+      sendJson(res, rows.slice(0, limit));
+      return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/run")) {
+      const url = new URL(req.url, "http://localhost");
+      const runId = url.searchParams.get("runId");
+      const run = await db.select().from(runs).where(eq(runs.id, runId!));
+      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId!));
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId!));
+      sendJson(res, { run: run[0] ?? null, nodes, events });
       return;
     }
 
@@ -136,6 +154,20 @@ const server = http.createServer(async (req, res) => {
       });
 
       sendJson(res, { workflowId, versionId, version: nextVersion });
+      return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
+      const url = new URL(req.url, "http://localhost");
+      const workflowId = url.searchParams.get("workflowId") ?? "ui-test";
+
+      const versions = await db
+        .select()
+        .from(workflowVersions)
+        .where(eq(workflowVersions.workflowId, workflowId))
+        .orderBy(desc(workflowVersions.version));
+
+      sendJson(res, versions[0] ?? null);
       return;
     }
 
