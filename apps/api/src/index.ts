@@ -1,5 +1,6 @@
 import http from "http";
 import { startRun } from "@workflow-engine/engine/src/start-run";
+import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { db } from "@workflow-engine/db";
 import { workflows, workflowVersions, runNodes, runEvents } from "@workflow-engine/db";
 import { eq, desc } from "drizzle-orm";
@@ -38,6 +39,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/start") {
       const workflow = await readJson(req);
       const result = await startRun(workflow);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/resume") {
+      const { runId, nodeId } = await readJson(req);
+      const result = await resumeRun(runId, nodeId);
       sendJson(res, result);
       return;
     }
