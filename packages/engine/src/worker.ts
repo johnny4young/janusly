@@ -1,13 +1,30 @@
 import { Worker } from "bullmq";
 import { connection } from "./queue";
+import { executeNode } from "./execute-node";
+import { markNodeRunning, markNodeSucceeded, markNodeFailed, appendEvent } from "./persistence";
 
 export const worker = new Worker(
   "workflow-nodes",
   async (job) => {
-    console.log("Executing node", job.data);
+    const { runId, node } = job.data;
+
+    await markNodeRunning(runId, node.id);
+
+    try {
+      await executeNode({ runId, node });
+
+      await markNodeSucceeded(runId, node.id);
+      await appendEvent(runId, node.id, "node.succeeded", {});
+
+    } catch (err: any) {
+      await markNodeFailed(runId, node.id, { message: err.message });
+      await appendEvent(runId, node.id, "node.failed", { message: err.message });
+
+      throw err;
+    }
   },
   {
     connection,
-    concurrency: 10,
+    concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10),
   }
 );
