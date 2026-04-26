@@ -1,9 +1,10 @@
 {
   "name": "workflow-engine",
   "private": true,
-  "packageManager": "pnpm@8",
+  "packageManager": "pnpm@10.23.0",
   "scripts": {
     "dev": "pnpm -r dev",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "test": "pnpm -r test"
   }
 }
