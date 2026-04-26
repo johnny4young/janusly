@@ -1,6 +1,7 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { loadRootEnv } from "@workflow-engine/db";
+import type { EnqueueNodeInput } from "./core/types";
 
 loadRootEnv();
 
@@ -18,10 +19,10 @@ export const workflowQueue = new Queue("workflow-nodes", {
   connection,
 });
 
-export async function enqueueNode(payload: unknown) {
+export async function enqueueNode(payload: EnqueueNodeInput) {
   return workflowQueue.add("execute-node", payload, {
-    attempts: 5,
-    backoff: { type: "exponential", delay: 1000 },
+    attempts: 1,
+    delay: payload.delayMs ?? 0,
     removeOnComplete: 1000,
   });
 }
