@@ -1,71 +1,135 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 
 const roles: OrgRole[] = ['viewer', 'editor', 'admin']
 
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function MembersPanel() {
-  const { addToast } = useWorkflowStore()
+  const addToast = useWorkflowStore(state => state.addToast)
   const [members, setMembers] = useState<OrgMember[]>([])
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<OrgRole>('viewer')
+  const [pending, setPending] = useState(false)
 
-  const load = async () => {
-    const data = await api('/members')
-    setMembers(data ?? [])
-  }
+  const load = useCallback(async () => {
+    try {
+      const data = await api('/members')
+      setMembers(Array.isArray(data) ? data : [])
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Members failed to load', 'error')
+    }
+  }, [addToast])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [load])
 
   const invite = async () => {
+    const trimmed = email.trim()
+    if (!emailPattern.test(trimmed)) {
+      addToast('Enter a valid email address', 'error')
+      return
+    }
+
+    setPending(true)
     try {
       await api('/members/invite', {
         method: 'POST',
-        body: JSON.stringify({ email, role, userId: email })
+        body: JSON.stringify({ email: trimmed, role, userId: trimmed }),
       })
-      addToast('User invited', 'success')
+      addToast(`Invited ${trimmed}`, 'success')
       setEmail('')
-      load()
-    } catch {
-      addToast('Invite failed', 'error')
+      await load()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Invite failed', 'error')
+    } finally {
+      setPending(false)
     }
   }
 
-  const updateRole = async (userId: string, role: OrgRole) => {
+  const updateRole = async (userId: string, nextRole: OrgRole) => {
     try {
       await api('/members/role', {
         method: 'POST',
-        body: JSON.stringify({ userId, role })
+        body: JSON.stringify({ userId, role: nextRole }),
       })
       addToast('Role updated', 'success')
-      load()
-    } catch {
-      addToast('Update failed', 'error')
+      await load()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Update failed', 'error')
+    }
+  }
+
+  const remove = async (userId: string) => {
+    try {
+      await api(`/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' })
+      addToast('Member removed', 'success')
+      await load()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Remove failed', 'error')
     }
   }
 
   return (
-    <div className="p-4 space-y-4">
-      <h2 className="font-semibold">Members</h2>
-
-      <div className="flex gap-2">
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" className="border px-2 py-1 rounded w-full" />
-        <select value={role} onChange={(e) => setRole(e.target.value as OrgRole)} className="border rounded px-2">
-          {roles.map(r => <option key={r}>{r}</option>)}
+    <div className="panel-list">
+      <section className="panel-card">
+        <div className="section-kicker">Invite member</div>
+        <label className="field-label" htmlFor="member-email">Email</label>
+        <input
+          id="member-email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          placeholder="user@example.com"
+          className="text-field"
+          type="email"
+          autoComplete="off"
+        />
+        <label className="field-label" htmlFor="member-role">Role</label>
+        <select
+          id="member-role"
+          value={role}
+          onChange={(event) => setRole(event.target.value as OrgRole)}
+          className="text-field"
+        >
+          {roles.map(option => <option key={option} value={option}>{option}</option>)}
         </select>
-        <button onClick={invite} className="bg-black text-white px-3 rounded">Invite</button>
-      </div>
+        <button onClick={invite} className="command-button command-button-primary" disabled={pending}>
+          <UserPlus size={15} aria-hidden="true" />
+          <span>{pending ? 'Inviting…' : 'Invite'}</span>
+        </button>
+      </section>
 
-      {members.map(m => (
-        <div key={m.id} className="flex justify-between items-center border p-2 rounded">
+      {members.length === 0 && (
+        <p className="empty-state">No members yet. Invite teammates by email above.</p>
+      )}
+
+      {members.map(member => (
+        <div key={member.id} className="list-card member-row">
           <div>
-            <div>{m.email}</div>
-            <div className="text-xs text-slate-400">{m.userId}</div>
+            <strong>{member.email ?? member.userId}</strong>
+            <span>{member.userId}</span>
           </div>
-          <select value={m.role} onChange={(e) => updateRole(m.userId, e.target.value as OrgRole)}>
-            {roles.map(r => <option key={r}>{r}</option>)}
-          </select>
+          <div className="member-actions">
+            <select
+              className="text-field"
+              value={member.role}
+              onChange={(event) => updateRole(member.userId, event.target.value as OrgRole)}
+              aria-label={`Role for ${member.email ?? member.userId}`}
+            >
+              {roles.map(option => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <button
+              type="button"
+              className="small-command danger"
+              onClick={() => remove(member.userId)}
+              aria-label={`Remove ${member.email ?? member.userId}`}
+              title="Remove member"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </div>
         </div>
       ))}
     </div>

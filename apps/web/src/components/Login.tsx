@@ -1,32 +1,89 @@
 import React, { useState } from 'react'
+import { LogIn, UserPlus } from 'lucide-react'
 import { AuthProvider } from '../auth'
+
+type LoginMode = 'login' | 'signup'
 
 export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [mode, setMode] = useState<LoginMode>('login')
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
 
-  const submit = async () => {
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
     setError(null)
-    const fn = mode === 'login' ? AuthProvider.signIn : AuthProvider.signUp
-    const { error } = await fn(email, password)
-    if (error) return setError(error.message)
-    onAuthenticated()
+    setPending(true)
+    try {
+      const fn = mode === 'login' ? AuthProvider.signIn : AuthProvider.signUp
+      const { error: authError } = await fn(email, password)
+      if (authError) {
+        setError(authError.message)
+        return
+      }
+      onAuthenticated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Authentication failed')
+    } finally {
+      setPending(false)
+    }
   }
 
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9' }}>
-      <div style={{ background: 'white', padding: 20, borderRadius: 12, width: 320 }}>
-        <h2>{mode === 'login' ? 'Login' : 'Sign Up'}</h2>
-        <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email" style={{ width: '100%', marginBottom: 8 }} />
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="password" style={{ width: '100%', marginBottom: 8 }} />
-        {error && <div style={{ color: 'red', fontSize: 12 }}>{error}</div>}
-        <button onClick={submit} style={{ width: '100%' }}>{mode}</button>
-        <button onClick={() => setMode(mode === 'login' ? 'signup' : 'login')} style={{ marginTop: 6 }}>
-          switch to {mode === 'login' ? 'signup' : 'login'}
+    <div className="auth-screen">
+      <form className="auth-card" onSubmit={submit}>
+        <div className="brand-lockup">
+          <span className="brand-mark">WE</span>
+          <div>
+            <strong>Workflow Engine</strong>
+            <span>Secure your control plane</span>
+          </div>
+        </div>
+
+        <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
+
+        <label className="field-label" htmlFor="auth-email">Email</label>
+        <input
+          id="auth-email"
+          className="text-field"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+
+        <label className="field-label" htmlFor="auth-password">Password</label>
+        <input
+          id="auth-password"
+          className="text-field"
+          type="password"
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          required
+          minLength={6}
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+
+        {error && <div className="issue issue-error" role="alert">{error}</div>}
+
+        <button type="submit" className="command-button command-button-primary auth-submit" disabled={pending}>
+          {mode === 'login' ? <LogIn size={16} aria-hidden="true" /> : <UserPlus size={16} aria-hidden="true" />}
+          <span>{pending ? 'Working…' : mode === 'login' ? 'Login' : 'Sign up'}</span>
         </button>
-      </div>
+
+        <button
+          type="button"
+          className="auth-toggle"
+          onClick={() => {
+            setMode(mode === 'login' ? 'signup' : 'login')
+            setError(null)
+          }}
+        >
+          {mode === 'login' ? 'Need an account? Sign up' : 'Already a member? Log in'}
+        </button>
+      </form>
     </div>
   )
 }

@@ -11,15 +11,16 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "test": "echo \"No tests yet\""
+    "test": "tsc --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "^0.30.0",
-    "postgres": "^3.4.4"
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.20.14",
-    "typescript": "^5.4.0",
-    "@types/node": "^22.10.2"
+    "@types/node": "^24.12.2",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.3"
   }
 }

@@ -8,6 +8,8 @@ const supabase = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
+const allowDevHeaders = !supabase || process.env.ALLOW_DEV_AUTH_HEADERS === "true";
+
 export type AuthContext = {
   orgId: string;
   userId: string;
@@ -23,7 +25,7 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
 
     if (!error && data?.user) {
       return {
-        orgId: data.user.user_metadata?.orgId || "default",
+        orgId: (data.user.user_metadata?.orgId as string | undefined) ?? "default",
         userId: data.user.id,
         mode: "supabase",
       };
@@ -40,12 +42,12 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
     };
   }
 
+  if (!allowDevHeaders) return null;
+
   const orgId = req.headers["x-org-id"] as string | undefined;
   const userId = req.headers["x-user-id"] as string | undefined;
 
-  if (!orgId || !userId) {
-    return null;
-  }
+  if (!orgId || !userId) return null;
 
   return { orgId, userId, mode: "dev-headers" };
 }
@@ -54,8 +56,8 @@ export async function requireAuth(req: http.IncomingMessage) {
   const auth = await getAuth(req);
 
   if (!auth) {
-    const err = new Error("Unauthorized: missing Supabase JWT or dev headers");
-    (err as any).statusCode = 401;
+    const err = new Error("Unauthorized: missing Supabase JWT or dev headers") as Error & { statusCode?: number };
+    err.statusCode = 401;
     throw err;
   }
 

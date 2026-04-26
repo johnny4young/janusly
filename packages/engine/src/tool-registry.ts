@@ -1,4 +1,5 @@
 import { getByPath } from "./template";
+import { fetchHttpTarget } from "./http-policy";
 
 export type ToolContext = {
   input: any;
@@ -40,7 +41,7 @@ export const toolSchemas: Record<string, ToolSchema> = {
 
 export const toolRegistry: Record<string, ToolHandler> = {
   "http.request": async ({ input }) => {
-    const res = await fetch(input.url, {
+    const res = await fetchHttpTarget(input.url, {
       method: input.method ?? "GET",
       headers: input.headers,
       body: input.body ? JSON.stringify(input.body) : undefined,

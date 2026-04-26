@@ -1,5 +1,5 @@
 import { db } from "@workflow-engine/db";
-import { runNodes, runEvents } from "@workflow-engine/db";
+import { runNodes, runEvents, runs } from "@workflow-engine/db";
 import { eq, and } from "drizzle-orm";
 
 export async function markNodeRunning(runId: string, nodeId: string) {
@@ -36,6 +36,23 @@ export async function markNodeFailed(runId: string, nodeId: string, error: any) 
   await db.update(runNodes)
     .set({ status: "failed", errorJson: error, finishedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+}
+
+export async function updateRunStatusFromNodes(runId: string) {
+  const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId));
+
+  if (nodes.some(node => node.status === "failed")) {
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+    return "failed";
+  }
+
+  const openStatuses = new Set(["pending", "queued", "running", "waiting"]);
+  if (nodes.length > 0 && nodes.every(node => !openStatuses.has(node.status))) {
+    await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, runId));
+    return "succeeded";
+  }
+
+  return "running";
 }
 
 export async function appendEvent(runId: string, nodeId: string | null, type: string, payload: any) {

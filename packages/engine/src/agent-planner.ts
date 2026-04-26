@@ -1,6 +1,15 @@
 import OpenAI from "openai";
+import { loadRootEnv } from "@workflow-engine/db";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+loadRootEnv();
+
+let openai: OpenAI | null = null;
+
+function getOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) return null;
+  openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openai;
+}
 
 export type AgentPlan = {
   tool: string;
@@ -84,13 +93,15 @@ export async function planAgentToolWithLLM(
   context: Record<string, any>,
   history: AgentLoopStep[] = []
 ): Promise<AgentPlan & { done?: boolean; finalAnswer?: string }> {
-  if (!process.env.OPENAI_API_KEY) {
+  const client = getOpenAIClient();
+
+  if (!client) {
     return planAgentTool(config, context);
   }
 
   const goal = config.goal ?? "Choose the best tool for this workflow step.";
 
-  const response = await openai.responses.create({
+  const response = await client.responses.create({
     model: config.model ?? "gpt-4o-mini",
     input: [
       {

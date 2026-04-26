@@ -1,15 +1,17 @@
 import { enqueueNode } from "./queue";
 import { getNodeStatus } from "./get-node-status";
-import { markNodeQueued, markNodeSkipped, getRunContext } from "./persistence";
+import { appendEvent, markNodeQueued, markNodeSkipped, getRunContext, updateRunStatusFromNodes } from "./persistence";
 import { evaluateExpression } from "./expression";
+import type { Workflow } from "@workflow-engine/shared";
 
-export async function enqueueNextNodes({ runId, workflow }: any) {
+export async function enqueueNextNodes({ runId, workflow }: { runId: string; workflow: Workflow }) {
   const context = await getRunContext(runId);
+  let queued = 0;
 
   for (const node of workflow.nodes) {
-    const incomingEdges = workflow.edges.filter((e: any) => e.to === node.id);
+    const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
 
-    const deps = incomingEdges.map((e: any) => e.from);
+    const deps = incomingEdges.map((edge) => edge.from);
 
     const depStatuses = await Promise.all(
       deps.map((depId: string) => getNodeStatus(runId, depId))
@@ -21,7 +23,7 @@ export async function enqueueNextNodes({ runId, workflow }: any) {
 
     if (!ready || currentStatus !== "pending") continue;
 
-    // 🔥 evaluate edge conditions
+    // Evaluate edge conditions
     let shouldRun = false;
 
     for (const edge of incomingEdges) {
@@ -48,5 +50,11 @@ export async function enqueueNextNodes({ runId, workflow }: any) {
 
     await markNodeQueued(runId, node.id);
     await enqueueNode({ runId, workflow, node });
+    await appendEvent(runId, node.id, "node.queued", {});
+    queued++;
+  }
+
+  if (queued === 0) {
+    await updateRunStatusFromNodes(runId);
   }
 }

@@ -1,31 +1,51 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { History } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import type { WorkflowDefinition } from '../types'
+
+type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
 export function VersionHistoryPanel() {
-  const { currentWorkflowId, hydrateWorkflow, addToast } = useWorkflowStore()
-  const [versions, setVersions] = useState<any[]>([])
+  const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
+  const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow)
+  const addToast = useWorkflowStore(state => state.addToast)
+  const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const [versions, setVersions] = useState<VersionRow[]>([])
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!currentWorkflowId) return
-    api(`/workflows/versions?workflowId=${currentWorkflowId}`).then(setVersions)
-  }, [currentWorkflowId])
+    try {
+      const data = await api(`/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`)
+      setVersions(Array.isArray(data) ? (data as VersionRow[]) : [])
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Version history failed to load', 'error')
+    }
+  }, [addToast, currentWorkflowId])
+
+  useEffect(() => { void load() }, [load, platformVersion])
 
   return (
-    <div className="space-y-2 p-4">
-      <h3 className="text-sm font-semibold text-slate-700">Version history</h3>
+    <div className="panel-card">
+      <div className="section-kicker">
+        <History size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
+        Version History
+      </div>
 
-      {versions.map((v) => (
+      {versions.length === 0 && <p className="empty-state">Save a workflow to start tracking versions.</p>}
+
+      {versions.map((version) => (
         <button
-          key={v.id}
+          key={version.id}
+          type="button"
           onClick={() => {
-            hydrateWorkflow(v.dagJson)
-            addToast(`Loaded v${v.version}`, 'success')
+            hydrateWorkflow(version.dagJson)
+            addToast(`Loaded v${version.version}`, 'success')
           }}
-          className="flex w-full items-center justify-between rounded-lg border bg-white px-3 py-2 text-left text-sm shadow-sm hover:bg-slate-50"
+          className="version-button"
         >
-          <span>v{v.version}</span>
-          <span className="text-xs text-slate-400">{new Date(v.createdAt).toLocaleString()}</span>
+          <span>v{version.version}</span>
+          <span>{version.createdAt ? new Date(version.createdAt).toLocaleString() : ''}</span>
         </button>
       ))}
     </div>

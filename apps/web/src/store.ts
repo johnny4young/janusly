@@ -1,8 +1,8 @@
 import { create } from 'zustand'
-import type { Edge, Node, OnEdgesChange, OnNodesChange } from '@xyflow/react'
+import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
-import { RunEvent, RunNode, ActiveTab } from './types'
+import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { nodePresets } from './constants'
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
@@ -18,8 +18,8 @@ type WorkflowStore = {
 
   currentWorkflowId: string
   currentWorkflowName: string
-  nodes: Node[]
-  edges: Edge[]
+  nodes: WorkflowGraphNode[]
+  edges: WorkflowGraphEdge[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
 
@@ -29,24 +29,25 @@ type WorkflowStore = {
   activeTab: ActiveTab
   streamStatus: StreamStatus
   toasts: Toast[]
+  platformVersion: number
 
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
 
   addNode: (type: string) => void
-  hydrateWorkflow: (workflow: any) => void
-  getWorkflowJson: () => any
+  hydrateWorkflow: (workflow: WorkflowDefinition) => void
+  getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   setWorkflowName: (name: string) => void
-  setNodes: (nodes: Node[]) => void
-  setEdges: (edges: Edge[]) => void
+  setNodes: (nodes: WorkflowGraphNode[]) => void
+  setEdges: (edges: WorkflowGraphEdge[]) => void
   onNodesChange: OnNodesChange
   onEdgesChange: OnEdgesChange
-  connect: (connection: any) => void
+  connect: (connection: Connection) => void
   selectNode: (id: string | null) => void
   selectEdge: (id: string | null) => void
-  updateSelectedNodeConfig: (config: Record<string, any>) => void
+  updateSelectedNodeConfig: (config: JsonObject) => void
   updateSelectedNodeType: (type: string) => void
 
   setRunId: (id: string | null) => void
@@ -58,28 +59,29 @@ type WorkflowStore = {
   resetRun: () => void
   addToast: (message: string, tone?: ToastTone) => void
   removeToast: (id: string) => void
+  bumpPlatformVersion: () => void
 }
 
-const initialNodes: Node[] = [
+const initialNodes: WorkflowGraphNode[] = [
   { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } },
   { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: nodePresets.multi_agent } },
 ]
 
-const initialEdges: Edge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
+const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
 
-function graphToWorkflow(id: string, name: string, nodes: Node[], edges: Edge[]) {
+function graphToWorkflow(id: string, name: string, nodes: WorkflowGraphNode[], edges: WorkflowGraphEdge[]): WorkflowDefinition {
   return {
     id,
     name,
     nodes: nodes.map((node) => ({
       id: node.id,
-      type: (node.data as any).type,
-      config: (node.data as any).config ?? {},
+      type: node.data.type,
+      config: node.data.config ?? {},
     })),
     edges: edges.map((edge) => ({
       from: edge.source,
       to: edge.target,
-      condition: (edge.data as any)?.condition || undefined,
+      condition: edge.data?.condition || undefined,
     })),
   }
 }
@@ -103,6 +105,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   activeTab: 'crew',
   streamStatus: 'idle',
   toasts: [],
+  platformVersion: 0,
 
   setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
   clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
@@ -123,12 +126,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? 'Untitled Workflow',
-      nodes: (workflow.nodes ?? []).map((node: any, index: number) => ({
+      nodes: (workflow.nodes ?? []).map((node, index) => ({
         id: node.id,
         position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
         data: { label: String(node.type).toUpperCase(), type: node.type, config: node.config ?? {} },
       })),
-      edges: (workflow.edges ?? []).map((edge: any, index: number) => ({
+      edges: (workflow.edges ?? []).map((edge, index) => ({
         id: `e${index}`,
         source: edge.from,
         target: edge.to,
@@ -219,4 +222,5 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     setTimeout(() => get().removeToast(id), 3500)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
+  bumpPlatformVersion: () => set((state) => ({ platformVersion: state.platformVersion + 1 })),
 }))
