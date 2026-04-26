@@ -91,6 +91,13 @@ export type DeadLetterInput = {
   error: SerializedError;
 };
 
+export type DeadLetterReplayInput = {
+  runId: string;
+  workflow: Workflow;
+  node: WorkflowNode;
+  attempt?: number;
+};
+
 export type EnqueueReadyNodesInput = {
   runId: string;
   workflow: Workflow;
@@ -112,6 +119,10 @@ export interface ExecutionStore {
 export interface QueueAdapter {
   enqueueNode(input: EnqueueNodeInput): Promise<void>;
   enqueueDeadLetter?(input: DeadLetterInput): Promise<void>;
+}
+
+export interface DeadLetterReplayAdapter {
+  replayDeadLetter(input: DeadLetterReplayInput): Promise<void>;
 }
 
 export interface NodeExecutorRegistry {
