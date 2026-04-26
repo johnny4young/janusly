@@ -76,6 +76,20 @@ export const runEvents = pgTable("run_events", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const deadLetters = pgTable("dead_letters", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().default("default"),
+  runId: text("run_id").notNull(),
+  nodeId: text("node_id").notNull(),
+  attempt: integer("attempt").notNull().default(1),
+  workflowJson: jsonb("workflow_json").notNull(),
+  nodeJson: jsonb("node_json").notNull(),
+  errorJson: jsonb("error_json").notNull(),
+  status: text("status").notNull().default("open"),
+  replayedAt: timestamp("replayed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const usageEvents = pgTable("usage_events", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull(),
