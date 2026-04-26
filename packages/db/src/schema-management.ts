@@ -109,6 +109,56 @@ async function createSchema() {
       CREATE INDEX IF NOT EXISTS run_events_run_created_idx
         ON run_events (run_id, created_at);
 
+      CREATE TABLE IF NOT EXISTS dead_letters (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL DEFAULT 'default',
+        run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        workflow_json JSONB NOT NULL,
+        node_json JSONB NOT NULL,
+        error_json JSONB NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        replayed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS dead_letters_org_status_idx
+        ON dead_letters (org_id, status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS routing_stats (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        pulls INTEGER NOT NULL DEFAULT 0,
+        value REAL NOT NULL DEFAULT 0,
+        mean_reward REAL NOT NULL DEFAULT 0,
+        success_count INTEGER NOT NULL DEFAULT 0,
+        failure_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS routing_stats_org_node_idx
+        ON routing_stats (org_id, node_id);
+
+      CREATE TABLE IF NOT EXISTS workflow_improvements (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        workflow_id TEXT NOT NULL,
+        base_version INTEGER,
+        new_version INTEGER,
+        action JSONB,
+        reason TEXT,
+        before_metrics JSONB,
+        after_metrics JSONB,
+        confidence REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS workflow_improvements_org_workflow_idx
+        ON workflow_improvements (org_id, workflow_id, created_at DESC);
+
       CREATE TABLE IF NOT EXISTS usage_events (
         id TEXT PRIMARY KEY,
         org_id TEXT NOT NULL,
