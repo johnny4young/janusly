@@ -75,7 +75,8 @@ export class WorkflowRuntime {
           workflow: input.workflow,
           node,
           delayMs,
-        });
+          attempt: nextAttempt,
+        } as any);
 
         return;
       }
@@ -127,7 +128,7 @@ export class WorkflowRuntime {
       }
 
       await this.store.markNodeQueued(runId, node.id);
-      await this.queue.enqueueNode({ runId, workflow, node });
+      await this.queue.enqueueNode({ runId, workflow, node, attempt: 1 } as any);
       await this.store.appendEvent({ runId, nodeId: node.id, type: "node.queued" });
       queued++;
     }
