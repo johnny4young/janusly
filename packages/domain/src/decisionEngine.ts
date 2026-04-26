@@ -1,34 +1,117 @@
-export async function decide({ orgId, candidates, preferences, budget }) {
-  const wc = (preferences?.weightCost ?? 40) / 100;
-  const wl = (preferences?.weightLatency ?? 40) / 100;
-  const wq = (preferences?.weightQuality ?? 20) / 100;
+export type DecisionCandidate = {
+  nodeId: string;
+  avgCost?: number;
+  avgLatencyMs?: number;
+  successRate?: number;
+  metadata?: unknown;
+};
 
-  let scored = candidates.map((n) => {
-    const cost = n.avgCost ?? 0;
-    const latency = n.avgLatencyMs ?? 0;
-    const quality = n.successRate ?? 0;
+export type DecisionPreferences = {
+  weightCost?: number;
+  weightLatency?: number;
+  weightQuality?: number;
+  minSuccessRate?: number;
+  maxLatencyMs?: number;
+};
 
-    const score = wc * cost + wl * latency + wq * (1 - quality);
+export type DecisionBudget = {
+  limitUsd?: number;
+};
 
-    return {
-      nodeId: n.nodeId,
-      score,
-      breakdown: { cost, latency, quality }
-    };
+export type DecisionInput = {
+  orgId?: string;
+  candidates: DecisionCandidate[];
+  preferences?: DecisionPreferences;
+  budget?: DecisionBudget;
+  strategy?: "auto" | "cheapest" | "fastest" | "balanced";
+};
+
+export type RankedDecisionCandidate = {
+  nodeId: string;
+  score: number;
+  breakdown: {
+    cost: number;
+    latency: number;
+    quality: number;
+    penalty: number;
+  };
+};
+
+export type DecisionOutput = {
+  chosenNodeId?: string;
+  reason: string;
+  confidence: number;
+  ranking: RankedDecisionCandidate[];
+};
+
+function normalizedWeights(preferences?: DecisionPreferences) {
+  const cost = preferences?.weightCost ?? 40;
+  const latency = preferences?.weightLatency ?? 40;
+  const quality = preferences?.weightQuality ?? 20;
+  const total = cost + latency + quality || 1;
+
+  return {
+    cost: cost / total,
+    latency: latency / total,
+    quality: quality / total,
+  };
+}
+
+function applyConstraints(candidates: DecisionCandidate[], preferences?: DecisionPreferences) {
+  return candidates.filter((candidate) => {
+    if (preferences?.minSuccessRate !== undefined) {
+      const threshold = preferences.minSuccessRate > 1 ? preferences.minSuccessRate / 100 : preferences.minSuccessRate;
+      if ((candidate.successRate ?? 0) < threshold) return false;
+    }
+
+    if (preferences?.maxLatencyMs !== undefined && (candidate.avgLatencyMs ?? 0) > preferences.maxLatencyMs) {
+      return false;
+    }
+
+    return true;
   });
+}
 
-  if (budget?.limitUsd) {
-    scored = scored.filter((n) => n.breakdown.cost <= budget.limitUsd);
+export function scoreCandidate(candidate: DecisionCandidate, preferences?: DecisionPreferences) {
+  const weights = normalizedWeights(preferences);
+  const cost = candidate.avgCost ?? 0;
+  const latency = candidate.avgLatencyMs ?? 0;
+  const quality = candidate.successRate ?? 0;
+  const penalty = 1 - quality;
+
+  return {
+    nodeId: candidate.nodeId,
+    score: weights.cost * cost + weights.latency * latency + weights.quality * penalty,
+    breakdown: { cost, latency, quality, penalty },
+  } satisfies RankedDecisionCandidate;
+}
+
+export async function decide(input: DecisionInput): Promise<DecisionOutput> {
+  const constrained = applyConstraints(input.candidates, input.preferences);
+  const candidatePool = constrained.length ? constrained : input.candidates;
+  let scored = candidatePool.map((candidate) => scoreCandidate(candidate, input.preferences));
+
+  if (input.strategy === "cheapest") {
+    scored = scored.sort((a, b) => a.breakdown.cost - b.breakdown.cost);
+  } else if (input.strategy === "fastest") {
+    scored = scored.sort((a, b) => a.breakdown.latency - b.breakdown.latency);
+  } else {
+    scored = scored.sort((a, b) => a.score - b.score);
   }
 
-  scored.sort((a, b) => a.score - b.score);
+  if (input.budget?.limitUsd !== undefined) {
+    const budgetSafe = scored.filter((candidate) => candidate.breakdown.cost <= input.budget!.limitUsd!);
+    if (budgetSafe.length) scored = budgetSafe;
+  }
 
   const best = scored[0];
 
   return {
     chosenNodeId: best?.nodeId,
-    reason: `cost=${best?.breakdown.cost}, latency=${best?.breakdown.latency}`,
-    confidence: Math.max(0.5, 1 - (best?.score ?? 0)),
-    ranking: scored
+    reason: best
+      ? `Selected ${best.nodeId} using ${input.strategy ?? "auto"} strategy: cost=${best.breakdown.cost}, latency=${best.breakdown.latency}, quality=${best.breakdown.quality}`
+      : "No eligible candidate found",
+    confidence: best ? Math.max(0.5, Math.min(1, 1 - best.score)) : 0,
+    ranking: scored,
   };
 }
