@@ -4,6 +4,7 @@ import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import { updateRoutingStats } from "@workflow-engine/data/src/routingStatsRepo";
 import { recordWorkflowImprovement } from "@workflow-engine/data/src/improvementsRepo";
+import { rollbackWorkflowVersion } from "@workflow-engine/data/src/workflowRollbackRepo";
 import { computeConfidence, shouldRollback } from "@workflow-engine/domain/src/improvementEngine";
 import type {
   ExecutionStore,
@@ -127,18 +128,20 @@ export class WorkflowRuntime {
       status,
     });
 
-    await this.store.appendEvent(workflowEvent({
-      runId,
-      type: "improvement.evaluated",
-      payload: { workflowId, confidence, status },
-    }));
+    await this.store.appendEvent(workflowEvent({ runId, type: "improvement.evaluated", payload: { workflowId, confidence, status } }));
 
-    if (shouldRollback(confidence)) {
-      await this.store.appendEvent(workflowEvent({
-        runId,
-        type: "rollback.triggered",
-        payload: { workflowId, confidence, status },
-      }));
+    if (shouldRollback(confidence) && typeof context.baseVersion === "number") {
+      await this.store.appendEvent(workflowEvent({ runId, type: "rollback.triggered", payload: { workflowId, confidence, status, targetVersion: context.baseVersion } }));
+
+      const rollback = await rollbackWorkflowVersion({
+        orgId,
+        workflowId,
+        targetVersion: context.baseVersion,
+        createdBy: typeof context.createdBy === "string" ? context.createdBy : "system",
+        reason: "auto-rollback: low confidence",
+      });
+
+      await this.store.appendEvent(workflowEvent({ runId, type: "rollback.completed", payload: rollback }));
     }
   }
 
