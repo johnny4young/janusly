@@ -1,4 +1,6 @@
 import { evaluateExpression } from "../expression";
+import { logNodeEvent } from "../observability/logger";
+import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import type {
   ExecutionStore,
@@ -20,9 +22,10 @@ export class WorkflowRuntime {
   async executeQueuedNode(input: ExecuteQueuedNodeInput): Promise<void> {
     const { runId, node } = input;
     const attempt = input.attempt ?? 1;
+    const start = Date.now();
 
     await this.store.markNodeRunning(runId, node.id, attempt);
-    await this.store.appendEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } });
+    await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } }));
 
     try {
       const context = await this.store.getRunContext(runId);
@@ -34,18 +37,23 @@ export class WorkflowRuntime {
         attempt,
       });
 
+      const durationMs = Date.now() - start;
+
       if (result?.status === "waiting") {
         await this.store.markNodeWaiting(runId, node.id, result.metadata);
-        await this.store.appendEvent({ runId, nodeId: node.id, type: "node.waiting", payload: result });
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: result }));
+        logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
         return;
       }
 
       await this.store.markNodeSucceeded(runId, node.id, result?.output ?? {});
-      await this.store.appendEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } });
+      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } }));
+      logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
       await this.enqueueReadyNodes(input);
 
     } catch (err: any) {
+      const durationMs = Date.now() - start;
       const error: SerializedError = {
         message: err.message,
         name: err.name,
@@ -60,12 +68,13 @@ export class WorkflowRuntime {
         const nextAttempt = attempt + 1;
         const delayMs = computeRetryDelay(nextAttempt, retryPolicy);
 
-        await this.store.appendEvent({
+        await this.store.appendEvent(workflowEvent({
           runId,
           nodeId: node.id,
           type: "node.retry",
           payload: { attempt: nextAttempt, delayMs, error },
-        });
+        }));
+        logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
 
         await this.queue.enqueueNode({
           runId,
@@ -79,7 +88,8 @@ export class WorkflowRuntime {
       }
 
       await this.store.markNodeFailed(runId, node.id, error);
-      await this.store.appendEvent({ runId, nodeId: node.id, type: "node.failed", payload: { error, attempt } });
+      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.failed", payload: { error, attempt } }));
+      logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
       await this.store.updateRunStatusFromNodes(runId);
 
       throw err;
@@ -121,17 +131,21 @@ export class WorkflowRuntime {
 
       if (!shouldRun) {
         await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
+        logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
         continue;
       }
 
       await this.store.markNodeQueued(runId, node.id, 1);
       await this.queue.enqueueNode({ runId, workflow, node, attempt: 1 });
-      await this.store.appendEvent({ runId, nodeId: node.id, type: "node.queued" });
+      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
+      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });
       queued++;
     }
 
     if (queued === 0) {
       await this.store.updateRunStatusFromNodes(runId);
+      await this.store.appendEvent(workflowEvent({ runId, type: "run.status_checked" }));
     }
 
     return queued;
