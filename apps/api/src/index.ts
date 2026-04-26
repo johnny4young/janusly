@@ -4,6 +4,35 @@ import { listDeadLetters, getDeadLetter, markDeadLetterReplayed, markDeadLetterR
 
 // --- ADD BELOW OTHER ROUTES ---
 
+if (req.method === "GET" && req.url?.startsWith("/causal")) {
+  const url = new URL(req.url, "http://localhost");
+  const runId = url.searchParams.get("runId");
+  const nodeId = url.searchParams.get("nodeId");
+
+  if (!runId || !nodeId) return sendJson(res, { error: "runId and nodeId are required" }, 400);
+
+  const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
+  const decisionEvent = events.find((event) => event.type === "decision.made" && event.nodeId === nodeId);
+
+  if (!decisionEvent) return sendJson(res, { error: "No decision event" }, 404);
+
+  const { replayDecision } = await import("@workflow-engine/domain/src/causalReasoning");
+  const payload = decisionEvent.payload as any;
+
+  const result = replayDecision({
+    chosenNodeId: payload?.chosenNodeId,
+    candidates: (payload?.ranking ?? []).map((candidate: any) => ({
+      nodeId: candidate.nodeId,
+      avgCost: candidate.breakdown?.cost,
+      avgLatencyMs: candidate.breakdown?.latency,
+      successRate: candidate.breakdown?.quality,
+    })),
+    strategy: "auto",
+  });
+
+  return sendJson(res, result);
+}
+
 if (req.method === "GET" && req.url?.startsWith("/dlq")) {
   const url = new URL(req.url, "http://localhost");
   const id = url.searchParams.get("id");
