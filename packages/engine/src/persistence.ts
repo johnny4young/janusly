@@ -2,15 +2,15 @@ import { db } from "@workflow-engine/db";
 import { runNodes, runEvents, runs } from "@workflow-engine/db";
 import { eq, and } from "drizzle-orm";
 
-export async function markNodeRunning(runId: string, nodeId: string) {
+export async function markNodeRunning(runId: string, nodeId: string, attempt = 1) {
   await db.update(runNodes)
-    .set({ status: "running", startedAt: new Date() })
+    .set({ status: "running", attempts: attempt, startedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
-export async function markNodeQueued(runId: string, nodeId: string) {
+export async function markNodeQueued(runId: string, nodeId: string, attempt = 1) {
   await db.update(runNodes)
-    .set({ status: "queued" })
+    .set({ status: "queued", attempts: attempt })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
@@ -71,6 +71,7 @@ export async function getRunContext(runId: string) {
   return rows.reduce<Record<string, any>>((acc, row) => {
     acc[row.nodeId] = {
       status: row.status,
+      attempts: row.attempts ?? 0,
       state: row.stateJson ?? {},
       output: (row.stateJson as any)?.output ?? {},
       error: row.errorJson ?? null,
