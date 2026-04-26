@@ -4,6 +4,30 @@ import { listDeadLetters, getDeadLetter, markDeadLetterReplayed, markDeadLetterR
 
 // --- ADD BELOW OTHER ROUTES ---
 
+if (req.method === "POST" && req.url === "/ai/explain-run") {
+  const { runId, question } = asRecord(await readJson(req));
+
+  if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
+
+  const run = await db.select().from(runs).where(eq(runs.id, runId));
+  if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
+
+  const events = await db
+    .select()
+    .from(runEvents)
+    .where(eq(runEvents.runId, runId));
+
+  const { explainRun } = await import("@workflow-engine/ai/src/runExplainer");
+
+  const result = await explainRun({
+    run: run[0],
+    events,
+    question: typeof question === "string" ? question : undefined,
+  });
+
+  return sendJson(res, result);
+}
+
 if (req.method === "GET" && req.url?.startsWith("/causal")) {
   const url = new URL(req.url, "http://localhost");
   const runId = url.searchParams.get("runId");
