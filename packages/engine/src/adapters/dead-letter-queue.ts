@@ -1,13 +1,23 @@
+import { db } from "@workflow-engine/db";
+import { deadLetters } from "@workflow-engine/db";
 import type { DeadLetterInput, QueueAdapter } from "../core/types";
 
 export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
   async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
-    // Minimal DLQ: log + future extension to persist or push to queue/topic
-    console.error("[DLQ] node moved to dead letter", {
+    await db.insert(deadLetters).values({
+      id: crypto.randomUUID(),
       runId: input.runId,
       nodeId: input.node.id,
       attempt: input.attempt,
-      error: input.error,
+      workflowJson: input.workflow,
+      nodeJson: input.node,
+      errorJson: input.error,
+    });
+
+    console.error("[DLQ] node persisted to dead letters", {
+      runId: input.runId,
+      nodeId: input.node.id,
+      attempt: input.attempt,
     });
   }
 }
