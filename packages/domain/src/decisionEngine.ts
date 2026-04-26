@@ -1,3 +1,5 @@
+import { applyRlAdjustments } from "./reinforcement";
+
 export type DecisionCandidate = {
   nodeId: string;
   avgCost?: number;
@@ -57,14 +59,23 @@ function normalizedWeights(preferences?: DecisionPreferences) {
   };
 }
 
-function applyConstraints(candidates: DecisionCandidate[], preferences?: DecisionPreferences) {
+function applyConstraints(
+  candidates: DecisionCandidate[],
+  preferences?: DecisionPreferences,
+) {
   return candidates.filter((candidate) => {
     if (preferences?.minSuccessRate !== undefined) {
-      const threshold = preferences.minSuccessRate > 1 ? preferences.minSuccessRate / 100 : preferences.minSuccessRate;
+      const threshold =
+        preferences.minSuccessRate > 1
+          ? preferences.minSuccessRate / 100
+          : preferences.minSuccessRate;
       if ((candidate.successRate ?? 0) < threshold) return false;
     }
 
-    if (preferences?.maxLatencyMs !== undefined && (candidate.avgLatencyMs ?? 0) > preferences.maxLatencyMs) {
+    if (
+      preferences?.maxLatencyMs !== undefined &&
+      (candidate.avgLatencyMs ?? 0) > preferences.maxLatencyMs
+    ) {
       return false;
     }
 
@@ -72,7 +83,10 @@ function applyConstraints(candidates: DecisionCandidate[], preferences?: Decisio
   });
 }
 
-export function scoreCandidate(candidate: DecisionCandidate, preferences?: DecisionPreferences) {
+export function scoreCandidate(
+  candidate: DecisionCandidate,
+  preferences?: DecisionPreferences,
+) {
   const weights = normalizedWeights(preferences);
   const cost = candidate.avgCost ?? 0;
   const latency = candidate.avgLatencyMs ?? 0;
@@ -81,7 +95,10 @@ export function scoreCandidate(candidate: DecisionCandidate, preferences?: Decis
 
   return {
     nodeId: candidate.nodeId,
-    score: weights.cost * cost + weights.latency * latency + weights.quality * penalty,
+    score:
+      weights.cost * cost +
+      weights.latency * latency +
+      weights.quality * penalty,
     breakdown: { cost, latency, quality, penalty },
   } satisfies RankedDecisionCandidate;
 }
@@ -89,7 +106,14 @@ export function scoreCandidate(candidate: DecisionCandidate, preferences?: Decis
 export async function decide(input: DecisionInput): Promise<DecisionOutput> {
   const constrained = applyConstraints(input.candidates, input.preferences);
   const candidatePool = constrained.length ? constrained : input.candidates;
-  let scored = candidatePool.map((candidate) => scoreCandidate(candidate, input.preferences));
+  let scored = candidatePool.map((candidate) =>
+    scoreCandidate(candidate, input.preferences),
+  );
+  // 🔥 RL ADJUSTMENT
+  scored = applyRlAdjustments(scored, input.rlStats, {
+    enabled: true,
+    influence: 0.1,
+  });
 
   if (input.strategy === "cheapest") {
     scored = scored.sort((a, b) => a.breakdown.cost - b.breakdown.cost);
@@ -100,7 +124,9 @@ export async function decide(input: DecisionInput): Promise<DecisionOutput> {
   }
 
   if (input.budget?.limitUsd !== undefined) {
-    const budgetSafe = scored.filter((candidate) => candidate.breakdown.cost <= input.budget!.limitUsd!);
+    const budgetSafe = scored.filter(
+      (candidate) => candidate.breakdown.cost <= input.budget!.limitUsd!,
+    );
     if (budgetSafe.length) scored = budgetSafe;
   }
 
