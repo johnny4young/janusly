@@ -105,6 +105,7 @@ export type EnqueueReadyNodesInput = {
 
 export interface ExecutionStore {
   getRunContext(runId: string): Promise<RunContext>;
+  getRunStatus(runId: string): Promise<RunStatus | null>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
   markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
   markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<void>;
