@@ -5,7 +5,7 @@ import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
-import { AuthProvider, normalizeAuth } from './auth'
+import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
 
@@ -65,7 +65,7 @@ export default function AppNext() {
   }
 
   if (!authReady) return <div>Loading...</div>
-  if (!session) return <Login onAuthenticated={() => {}} />
+  if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => {}} />
 
   return (
     <Layout
@@ -77,6 +77,7 @@ export default function AppNext() {
           onValidate={() => {}}
           onSave={saveWorkflow}
           onOpenDashboard={() => setActiveTab('workflows')}
+          onOpenMembers={() => setActiveTab('members')}
           onNew={newWorkflow}
           onStart={() => {}}
         />
