@@ -14,5 +14,12 @@ export async function api(path: string, options: RequestInit = {}) {
   }
 
   const res = await fetch(`${API_URL}${path}`, { ...options, headers })
-  return res.json()
+  const payload = await res.json().catch(() => ({}))
+
+  if (!res.ok) {
+    const message = typeof payload?.error === 'string' ? payload.error : `Request failed with ${res.status}`
+    throw new Error(message)
+  }
+
+  return payload
 }

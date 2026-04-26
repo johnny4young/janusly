@@ -1,16 +1,25 @@
-version: "3.8"
-
 services:
   redis:
-    image: redis:7
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     ports:
       - "6379:6379"
 
   postgres:
-    image: postgres:15
+    image: postgres:18-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: workflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     ports:
       - "5432:5432"

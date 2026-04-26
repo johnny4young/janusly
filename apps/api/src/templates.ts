@@ -1,9 +1,11 @@
+import type { Workflow } from "@workflow-engine/shared";
+
 export type WorkflowTemplate = {
   id: string;
   name: string;
   description: string;
   category: string;
-  workflow: any;
+  workflow: Workflow;
 };
 
 export const workflowTemplates: WorkflowTemplate[] = [

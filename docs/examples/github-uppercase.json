@@ -1,0 +1,37 @@
+{
+  "id": "github-uppercase",
+  "name": "Fetch GitHub user and uppercase login",
+  "nodes": [
+    {
+      "id": "fetch_user",
+      "type": "http",
+      "config": {
+        "url": "https://api.github.com/users/octocat",
+        "method": "GET",
+        "headers": { "Accept": "application/vnd.github+json" }
+      }
+    },
+    {
+      "id": "shape",
+      "type": "transform",
+      "config": {
+        "mapping": {
+          "raw": "{{context.fetch_user.output.body}}",
+          "ok": "{{context.fetch_user.output.ok}}"
+        }
+      }
+    },
+    {
+      "id": "shout",
+      "type": "tool",
+      "config": {
+        "tool": "text.uppercase",
+        "input": { "value": "octocat status: {{context.fetch_user.output.statusCode}}" }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "fetch_user", "to": "shape" },
+    { "from": "shape", "to": "shout" }
+  ]
+}

@@ -3,6 +3,7 @@ import { runs } from "@workflow-engine/db";
 import { eq } from "drizzle-orm";
 import { markNodeSucceeded, appendEvent } from "./persistence";
 import { enqueueNextNodes } from "./scheduler";
+import { WorkflowSchema } from "@workflow-engine/shared";
 
 export async function resumeRun(runId: string, nodeId: string) {
   const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -11,7 +12,8 @@ export async function resumeRun(runId: string, nodeId: string) {
     throw new Error("Run not found");
   }
 
-  const workflow = run[0].inputJson.workflow;
+  const inputJson = run[0].inputJson as { workflow?: unknown } | null;
+  const workflow = WorkflowSchema.parse(inputJson?.workflow);
 
   await markNodeSucceeded(runId, nodeId);
   await appendEvent(runId, nodeId, "node.resumed", {});

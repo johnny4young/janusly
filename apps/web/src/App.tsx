@@ -1,89 +1,407 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ReactFlow, addEdge, Background, Controls, useNodesState, useEdgesState } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Layout } from './Layout'
+import { BuilderSidebar } from './components/BuilderSidebar'
+import { WorkflowCanvas } from './components/WorkflowCanvas'
+import { RightPanel } from './components/RightPanel'
+import { Login } from './components/Login'
+import { UserMenu } from './components/UserMenu'
+import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
+import { useWorkflowStore } from './store'
+import { api } from './api'
+import { statusStyles } from './constants'
+import type { Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 
-type RunNode = { nodeId: string; status: string; stateJson?: any; errorJson?: any }
-type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: any; createdAt?: string }
-type WorkflowNodeData = { label: string; type: string; config: Record<string, any> }
-type WorkflowEdgeData = { condition?: string }
-type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
-type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
-type Template = { id: string; name: string; description: string; category: string; workflow: any }
-type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: any }
-type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
-type CrewAgentView = { name: string; role?: string; persona?: string; status: 'pending' | 'running' | 'completed'; events: RunEvent[]; result?: any }
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
-const authHeaders = { 'x-org-id': 'org_1', 'x-user-id': 'user_1' }
-
-async function api(path: string, options: RequestInit = {}) {
-  const headers = { 'Content-Type': 'application/json', ...authHeaders, ...(options.headers ?? {}) }
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers })
-  return res.json()
+type StatusResponse = {
+  run?: RunSummary
+  nodes?: RunNode[]
+  events?: RunEvent[]
 }
 
-const nodePresets: Record<string, Record<string, any>> = {
-  http: { url: 'https://api.github.com' }, noop: {}, transform: { mapping: { value: '{{context.1.output.statusCode}}' } }, condition: { expression: 'true' }, webhook: {}, approval: { message: 'Please approve this workflow step.' }, ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' }, tool: { tool: 'text.uppercase', input: { value: 'hello' } }, agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 }, loop: { items: 'a,b,c', mapping: { value: '{{item}}', index: '{{index}}' } }, agent_reflection: { input: '{{context.agent.output}}' }, multi_agent: { mode: 'sequential', goal: 'Analyze and validate the workflow result', planner: 'rules', maxSteps: 2, reflection: true, agents: [{ name: 'analyzer', role: 'Data analyst', persona: 'Careful and concise analyst', goal: 'Analyze the current context and produce a useful summary' }, { name: 'validator', role: 'QA reviewer', persona: 'Skeptical reviewer', goal: 'Validate the previous agent output and identify issues' }] },
+const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
+
+type RunResponse = {
+  run?: RunSummary
+  nodes?: RunNode[]
+  events?: RunEvent[]
 }
 
-const statusStyles: Record<string, React.CSSProperties> = { pending: { border: '2px solid #94a3b8', background: '#f8fafc' }, queued: { border: '2px solid #f59e0b', background: '#fffbeb' }, running: { border: '2px solid #3b82f6', background: '#eff6ff' }, waiting: { border: '2px solid #a855f7', background: '#faf5ff' }, skipped: { border: '2px solid #64748b', background: '#f1f5f9' }, succeeded: { border: '2px solid #22c55e', background: '#f0fdf4' }, failed: { border: '2px solid #ef4444', background: '#fef2f2' } }
-const messageStyles: Record<ReasoningMessage['tone'], React.CSSProperties> = { info: { background: 'white', border: '1px solid #bfdbfe' }, success: { background: '#f0fdf4', border: '1px solid #bbf7d0' }, warning: { background: '#fffbeb', border: '1px solid #fde68a' }, error: { background: '#fff1f2', border: '1px solid #fecdd3' } }
-
-function statusFromEvent(event: RunEvent) { if (event.type === 'node.queued') return 'queued'; if (event.type === 'node.waiting') return 'waiting'; if (event.type === 'node.succeeded') return 'succeeded'; if (event.type === 'node.failed') return 'failed'; if (event.type === 'node.resumed') return 'succeeded'; return undefined }
-function uniqueEvents(events: RunEvent[]) { const seen = new Set<string>(); return events.filter(event => { const key = event.id ?? `${event.type}:${event.nodeId}:${event.createdAt}`; if (seen.has(key)) return false; seen.add(key); return true }) }
-function toReasoningMessage(event: RunEvent): ReasoningMessage | null { const p = event.payload ?? {}; if (event.type === 'multi_agent.started') return { id: event.id, title: 'Crew started', body: `Goal: ${p.goal ?? 'not provided'}`, meta: `Mode: ${p.mode ?? 'sequential'} · Agents: ${p.count ?? '?'}`, tone: 'info' }; if (event.type === 'multi_agent.agent.started') return { id: event.id, title: `Agent ${p.name} started`, body: p.goal ?? 'Running agent task', meta: `Role: ${p.role ?? 'agent'} · Persona: ${p.persona ?? '-'}`, tone: 'info' }; if (event.type === 'multi_agent.agent.completed') return { id: event.id, title: `Agent ${p.name} completed`, body: p.role ?? 'Agent completed', meta: JSON.stringify(p.result ?? {}, null, 2), tone: 'success' }; if (event.type === 'multi_agent.completed') return { id: event.id, title: 'Crew completed', body: p.finalAnswer ? String(p.finalAnswer) : `Completed ${p.count ?? 0} agents`, meta: JSON.stringify(p.agents ?? {}, null, 2), tone: 'success' }; if (event.type.includes('reflection')) return { id: event.id, title: 'Agent reflection', body: `${p.decision ?? 'decision'}: ${p.reason ?? ''}`, meta: JSON.stringify(p, null, 2), tone: p.decision === 'retry' ? 'warning' : 'success' }; if (event.type.endsWith('.step.started') || event.type === 'agent.step.started') return { id: event.id, title: `Thinking step ${Number(p.iteration ?? 0) + 1}`, body: 'Planning the next action...', tone: 'info' }; if (event.type.endsWith('.step.planned') || event.type === 'agent.step.planned') return { id: event.id, title: `Plan: ${p.plan?.tool ?? 'unknown tool'}`, body: p.plan?.reason ?? 'The agent selected a tool.', meta: JSON.stringify(p.plan?.input ?? {}, null, 2), tone: 'warning' }; if (event.type.endsWith('.tool.started') || event.type === 'agent.tool.started' || event.type === 'tool.started') return { id: event.id, title: `Running tool: ${p.tool ?? 'unknown'}`, body: 'Executing backend tool...', meta: JSON.stringify(p.input ?? {}, null, 2), tone: 'info' }; if (event.type.endsWith('.tool.completed') || event.type === 'agent.tool.completed' || event.type === 'tool.completed') return { id: event.id, title: `Tool completed: ${p.tool ?? 'unknown'}`, body: 'The tool returned a result.', meta: JSON.stringify(p.result ?? {}, null, 2), tone: 'success' }; if (event.type === 'agent.started') return { id: event.id, title: 'Agent started', body: `Goal: ${p.goal ?? 'not provided'}`, meta: `Planner: ${p.planner ?? 'rules'} · max steps: ${p.maxSteps ?? '?'}`, tone: 'info' }; if (event.type === 'agent.completed') return { id: event.id, title: 'Agent completed', body: p.finalAnswer ?? p.reason ?? 'The agent finished execution.', meta: JSON.stringify(p.finalResult ?? p.steps ?? {}, null, 2), tone: 'success' }; if (event.type === 'loop.completed') return { id: event.id, title: 'Loop completed', body: `Processed ${p.count ?? 0} items`, meta: JSON.stringify(p.items ?? [], null, 2), tone: 'success' }; if (event.type === 'node.failed') return { id: event.id, title: 'Node failed', body: p.message ?? 'A node failed during execution.', tone: 'error' }; return null }
-function buildCrewView(events: RunEvent[]): CrewAgentView[] { const agents = new Map<string, CrewAgentView>(); for (const event of events) { const p = event.payload ?? {}; if (event.type === 'multi_agent.agent.started') agents.set(p.name, { name: p.name, role: p.role, persona: p.persona, status: 'running', events: [event] }); if (event.type.includes('multi_agent.agent.') && p.agent) { const c = agents.get(p.agent) ?? { name: p.agent, status: 'running', events: [] }; c.events.push(event); agents.set(p.agent, c) } if (event.type === 'multi_agent.agent.completed') { const c = agents.get(p.name) ?? { name: p.name, status: 'completed', events: [] }; c.status = 'completed'; c.role = p.role ?? c.role; c.result = p.result; c.events.push(event); agents.set(p.name, c) } } return Array.from(agents.values()) }
+type ValidationResponse = {
+  valid: boolean
+  issues?: ValidationIssue[]
+}
 
 export default function App() {
-  const [nodes, setNodes, onNodesChange] = useNodesState([{ id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } }, { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: nodePresets.multi_agent } }])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([{ id: 'e1-2', source: '1', target: '2', data: {} }])
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null); const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null); const [runId, setRunId] = useState<string | null>(null); const [status, setStatus] = useState<{ nodes: RunNode[]; events: RunEvent[] }>({ nodes: [], events: [] }); const [replayIndex, setReplayIndex] = useState<number | null>(null); const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([]); const [tools, setTools] = useState<ToolSchema[]>([]); const [templates, setTemplates] = useState<Template[]>([]); const [credentials, setCredentials] = useState<Credential[]>([]); const [runs, setRuns] = useState<any[]>([]); const [usage, setUsage] = useState<Record<string, number>>({}); const [copilotPrompt, setCopilotPrompt] = useState('Create a workflow that calls an API, transforms the response and validates it with a multi-agent crew'); const [activeTab, setActiveTab] = useState<'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'crew'>('crew'); const [streamStatus, setStreamStatus] = useState<'idle' | 'connecting' | 'connected' | 'closed' | 'error'>('idle'); const [saveInfo, setSaveInfo] = useState(''); const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    connect,
+    addNode,
+    activeTab,
+    session,
+    userId,
+    orgId,
+    authReady,
+    runId,
+    runNodes,
+    events,
+    selectedNodeId,
+    selectedEdgeId,
+    currentWorkflowId,
+    currentWorkflowName,
+    streamStatus,
+    setAuth,
+    clearAuth,
+    setAuthReady,
+    setActiveTab,
+    setWorkflowName,
+    hydrateWorkflow,
+    getWorkflowJson,
+    newWorkflow,
+    selectNode,
+    selectEdge,
+    updateSelectedNodeConfig,
+    updateSelectedNodeType,
+    setRunId,
+    setRunNodes,
+    setEvents,
+    setStreamStatus,
+    resetRun,
+    addToast,
+    setEdges,
+    bumpPlatformVersion,
+  } = useWorkflowStore()
 
-  const workflow = { id: 'ui-test', name: 'UI Test Workflow', nodes: nodes.map(n => ({ id: n.id, type: (n.data as WorkflowNodeData).type, config: (n.data as WorkflowNodeData).config ?? {} })), edges: edges.map(e => ({ from: e.source, to: e.target, condition: (e.data as WorkflowEdgeData | undefined)?.condition || undefined })) }
-  const selectedNode = nodes.find(n => n.id === selectedNodeId); const selectedEdge = edges.find(e => e.id === selectedEdgeId); const selectedData = selectedNode?.data as WorkflowNodeData | undefined; const selectedEdgeData = selectedEdge?.data as WorkflowEdgeData | undefined; const selectedToolSchema = selectedData?.type === 'tool' ? tools.find(tool => tool.name === (selectedData.config as any)?.tool) : undefined; const selectedRunNode = selectedNodeId ? status.nodes.find(n => n.nodeId === selectedNodeId) : undefined; const reasoningMessages = useMemo(() => status.events.map(toReasoningMessage).filter(Boolean) as ReasoningMessage[], [status.events]); const crewView = useMemo(() => buildCrewView(status.events), [status.events])
-  const replayState = useMemo(() => { if (!status.events.length || replayIndex == null) return null; const effectiveIndex = Math.min(Math.max(replayIndex, 0), status.events.length - 1); const nodeStates: Record<string, string> = {}; for (const event of status.events.slice(0, effectiveIndex + 1)) { if (!event.nodeId) continue; const nextStatus = statusFromEvent(event); if (nextStatus) nodeStates[event.nodeId] = nextStatus } return { index: effectiveIndex, nodes: nodeStates, currentEvent: status.events[effectiveIndex] } }, [status.events, replayIndex])
-  const nodeStatusMap = useMemo(() => { const map = new Map<string, string>(); if (replayState) Object.entries(replayState.nodes).forEach(([nodeId, s]) => map.set(nodeId, s)); else status.nodes.forEach(n => map.set(n.nodeId, n.status)); return map }, [status.nodes, replayState])
-  const visibleNodes = useMemo(() => nodes.map(node => { const nodeStatus = nodeStatusMap.get(node.id) ?? 'pending'; const data = node.data as WorkflowNodeData; const hasValidationError = validationIssues.some(issue => issue.nodeId === node.id); return { ...node, data: { ...node.data, label: `${data.label} · ${nodeStatus}${hasValidationError ? ' ⚠' : ''}` }, style: { borderRadius: 12, padding: 8, ...(hasValidationError ? { border: '3px solid #ef4444', background: '#fff1f2' } : statusStyles[nodeStatus]) } } }), [nodes, nodeStatusMap, validationIssues])
+  const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const [tools, setTools] = useState<ToolSchema[]>([])
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [credentials, setCredentials] = useState<Credential[]>([])
+  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [usage, setUsage] = useState<Record<string, number>>({})
 
-  const refreshPlatform = async () => { const [toolData, templateData, credentialData, runData, usageData] = await Promise.all([api('/tools').catch(() => []), api('/templates').catch(() => []), api('/credentials').catch(() => []), api('/runs').catch(() => []), api('/billing/usage').catch(() => ({}))]); setTools(toolData); setTemplates(templateData); setCredentials(credentialData); setRuns(runData); setUsage(usageData) }
-  useEffect(() => { refreshPlatform() }, [])
-  useEffect(() => { if (!runId) return; setStreamStatus('connecting'); const source = new EventSource(`${API_URL}/events?runId=${runId}`); source.onopen = () => setStreamStatus('connected'); source.onmessage = (event) => { try { const events = JSON.parse(event.data) as RunEvent[]; setStatus(current => ({ ...current, events: uniqueEvents([...(current.events ?? []), ...events]) })); setReplayIndex(events.length ? events.length - 1 : null); loadStatus(runId) } catch { setStreamStatus('error') } }; source.onerror = () => setStreamStatus('error'); return () => { source.close(); setStreamStatus('closed') } }, [runId])
+  useEffect(() => {
+    let mounted = true
 
-  const hydrateWorkflow = (wf: any) => { setNodes(wf.nodes.map((n: any, i: number) => ({ id: n.id, position: { x: 80 + i * 230, y: 80 + (i % 3) * 120 }, data: { label: n.type.toUpperCase(), type: n.type, config: n.config ?? {} } }))); setEdges(wf.edges.map((e: any, i: number) => ({ id: `e${i}`, source: e.from, target: e.to, label: e.condition ? 'condition' : undefined, animated: Boolean(e.condition), data: { condition: e.condition } }))); setValidationIssues([]) }
-  const addNode = (type: string) => { const id = crypto.randomUUID().slice(0, 8); setNodes(current => current.concat({ id, position: { x: 120 + current.length * 80, y: 120 + current.length * 40 }, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } })) }
-  const updateSelectedConfigObject = (config: Record<string, any>) => { if (!selectedNodeId) return; setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node)) }
-  const updateSelectedType = (type: string) => { if (!selectedNodeId) return; setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } } : node)) }
-  const updateCrewAgent = (index: number, patch: Record<string, any>) => { if (!selectedData) return; const agents = [...(selectedData.config.agents ?? [])]; agents[index] = { ...agents[index], ...patch }; updateSelectedConfigObject({ ...selectedData.config, agents }) }
-  const addCrewAgent = () => { if (!selectedData) return; const agents = [...(selectedData.config.agents ?? []), { name: `agent_${(selectedData.config.agents?.length ?? 0) + 1}`, role: 'Specialist', persona: 'Helpful specialist', goal: 'Contribute to the crew goal' }]; updateSelectedConfigObject({ ...selectedData.config, agents }) }
-  const removeCrewAgent = (index: number) => { if (!selectedData) return; const agents = [...(selectedData.config.agents ?? [])]; agents.splice(index, 1); updateSelectedConfigObject({ ...selectedData.config, agents }) }
-  const validate = async () => { const json = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }); setValidationIssues(json.issues ?? []); return json.valid }
-  const start = async () => { const isValid = await validate(); if (!isValid) return setSaveInfo('Fix validation errors before starting'); const json = await api('/start', { method: 'POST', body: JSON.stringify(workflow) }); if (json.error) return setSaveInfo(json.error); setRunId(json.runId); setStatus({ nodes: [], events: [] }); setReplayIndex(null); setSaveInfo(`Started ${json.runId}`); setActiveTab('crew') }
-  const save = async () => { const isValid = await validate(); if (!isValid) return setSaveInfo('Validation failed'); const json = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }); setSaveInfo(json.error ? json.error : `Saved v${json.version}`) }
-  const load = async () => { const json = await api('/workflows/latest?workflowId=ui-test'); if (json?.dagJson) hydrateWorkflow(json.dagJson) }
-  const loadStatus = async (id = runId) => { if (!id) return; const json = await api(`/status?runId=${id}`); if (!json.error) { setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] }); if (replayIndex == null && json.events?.length) setReplayIndex(json.events.length - 1) } }
-  const openRun = async (id: string) => { setRunId(id); const json = await api(`/run?runId=${id}`); if (!json.error) { setStatus({ nodes: json.nodes ?? [], events: json.events ?? [] }); setReplayIndex(json.events?.length ? json.events.length - 1 : null); setActiveTab('crew') } }
-  const approveNode = async (nodeId: string) => { if (!runId) return; await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }); await loadStatus() }
-  const runCopilot = async () => { const wf = await api('/ai/generate-workflow', { method: 'POST', body: JSON.stringify({ prompt: copilotPrompt }) }); if (wf?.nodes && wf?.edges) hydrateWorkflow(wf) }
-  const explainWorkflow = async () => { const res = await api('/ai/explain-workflow', { method: 'POST', body: JSON.stringify({ workflow }) }); alert(res.explanation ?? 'No explanation available') }
-  const installPlugin = async (pluginId: string) => { await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) }); await refreshPlatform() }
-  const createCredential = async () => { const name = prompt('Credential name?') || 'API Key'; const kind = prompt('Kind? e.g. slack, stripe, generic') || 'generic'; const secretRef = prompt('Secret env ref? e.g. SLACK_BOT_TOKEN') || 'MY_SECRET'; await api('/credentials', { method: 'POST', body: JSON.stringify({ name, kind, secretRef }) }); await refreshPlatform() }
-  const exportWorkflow = () => { const blob = new Blob([JSON.stringify(workflow, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${workflow.id}.json`; link.click(); URL.revokeObjectURL(url) }
-  const importWorkflow = async (file: File) => { hydrateWorkflow(JSON.parse(await file.text())) }
-  const tabButton = (id: typeof activeTab, label: string) => <button onClick={() => setActiveTab(id)} style={{ width: '100%', marginBottom: 6, background: activeTab === id ? '#dbeafe' : 'white' }}>{label}</button>
+    AuthProvider.getSession().then(({ data }) => {
+      if (!mounted) return
+      setAuth(normalizeAuth(data.session))
+    }).finally(() => {
+      if (mounted) setAuthReady(true)
+    })
 
-  return <div style={{ height: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr 460px', fontFamily: 'Inter, system-ui, sans-serif' }}>
-    <aside style={{ borderRight: '1px solid #e5e7eb', padding: 14, background: '#f8fafc', overflow: 'auto' }}><h2 style={{ marginTop: 0 }}>Builder</h2>{['http', 'noop', 'transform', 'loop', 'condition', 'webhook', 'approval', 'ai', 'tool', 'agent', 'agent_reflection', 'multi_agent'].map(type => <button key={type} onClick={() => addNode(type)} style={{ display: 'block', width: '100%', marginBottom: 6 }}>{type.toUpperCase()}</button>)}<hr /><button onClick={validate} style={{ width: '100%', marginBottom: 6 }}>Validate</button><button onClick={save} style={{ width: '100%', marginBottom: 6 }}>Save</button><button onClick={load} style={{ width: '100%', marginBottom: 6 }}>Load</button><button onClick={start} style={{ width: '100%', marginBottom: 6 }}>Start</button><button onClick={exportWorkflow} style={{ width: '100%', marginBottom: 6 }}>Export JSON</button><button onClick={() => fileInputRef.current?.click()} style={{ width: '100%', marginBottom: 6 }}>Import JSON</button><input ref={fileInputRef} type="file" accept="application/json" style={{ display: 'none' }} onChange={e => e.target.files?.[0] && importWorkflow(e.target.files[0])} /><p style={{ fontSize: 12, color: '#475569' }}>{saveInfo}</p><p style={{ fontSize: 12, color: streamStatus === 'connected' ? '#16a34a' : '#64748b' }}>Stream: {streamStatus}</p><hr /><h3>Experience</h3>{tabButton('crew', '👥 Crew View')}{tabButton('inspector', '🧑‍🤝‍🧑 Agent Editor')}{tabButton('reasoning', '🧠 Reasoning')}{tabButton('copilot', '✨ AI Copilot')}{tabButton('marketplace', '🧩 Marketplace')}{tabButton('templates', '📦 Templates')}{tabButton('credentials', '🔐 Credentials')}{tabButton('runs', '📊 Runs + Usage')}</aside>
-    <main style={{ height: '100vh' }}><ReactFlow nodes={visibleNodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => { setSelectedNodeId(node.id); setSelectedEdgeId(null) }} onEdgeClick={(_, edge) => { setSelectedEdgeId(edge.id); setSelectedNodeId(null) }} onConnect={(params) => setEdges(eds => addEdge({ ...params, data: {} }, eds))}><Background /><Controls /></ReactFlow></main>
-    <aside style={{ borderLeft: '1px solid #e5e7eb', padding: 16, overflow: 'auto', background: '#f8fafc' }}>
-      {activeTab === 'crew' && <section><h2>Crew View</h2>{!crewView.length && <p>No crew events yet. Run a MULTI_AGENT node.</p>}<div style={{ display: 'grid', gap: 10 }}>{crewView.map((agent, index) => <div key={agent.name} style={{ padding: 12, borderRadius: 14, background: agent.status === 'completed' ? '#f0fdf4' : '#eff6ff', border: '1px solid #bfdbfe' }}><strong>{index + 1}. {agent.name}</strong><div style={{ fontSize: 12 }}>{agent.role ?? 'agent'} · {agent.status}</div>{agent.persona && <p style={{ fontSize: 12 }}>{agent.persona}</p>}<details><summary>Events ({agent.events.length})</summary><pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(agent.events, null, 2)}</pre></details>{agent.result && <details open><summary>Result</summary><pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{JSON.stringify(agent.result, null, 2)}</pre></details>}</div>)}</div></section>}
-      {activeTab === 'inspector' && <section><h2>{selectedData?.type === 'multi_agent' ? 'Visual Agent Editor' : 'Data Inspector'}</h2>{selectedNode && selectedData ? <><h3>Selected node</h3><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify({ id: selectedNode.id, type: selectedData.type }, null, 2)}</pre><select value={selectedData.type} onChange={e => updateSelectedType(e.target.value)} style={{ width: '100%', marginBottom: 8 }}>{Object.keys(nodePresets).map(type => <option key={type} value={type}>{type.toUpperCase()}</option>)}</select>{selectedData.type === 'multi_agent' && <div><label>Crew goal</label><textarea value={String(selectedData.config.goal ?? '')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, goal: e.target.value })} style={{ width: '100%', minHeight: 60 }} /><label>Planner</label><select value={String(selectedData.config.planner ?? 'rules')} onChange={e => updateSelectedConfigObject({ ...selectedData.config, planner: e.target.value })} style={{ width: '100%', margin: '6px 0' }}><option value="rules">rules</option><option value="openai">openai</option></select><label><input type="checkbox" checked={Boolean(selectedData.config.reflection)} onChange={e => updateSelectedConfigObject({ ...selectedData.config, reflection: e.target.checked })} /> Reflection enabled</label><h3>Agents</h3>{(selectedData.config.agents ?? []).map((agent: any, index: number) => <div key={index} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, padding: 10, marginBottom: 10 }}><input value={agent.name ?? ''} onChange={e => updateCrewAgent(index, { name: e.target.value })} placeholder="name" style={{ width: '100%', marginBottom: 6 }} /><input value={agent.role ?? ''} onChange={e => updateCrewAgent(index, { role: e.target.value })} placeholder="role" style={{ width: '100%', marginBottom: 6 }} /><input value={agent.persona ?? ''} onChange={e => updateCrewAgent(index, { persona: e.target.value })} placeholder="persona" style={{ width: '100%', marginBottom: 6 }} /><textarea value={agent.goal ?? ''} onChange={e => updateCrewAgent(index, { goal: e.target.value })} placeholder="goal" style={{ width: '100%', minHeight: 60 }} /><button onClick={() => removeCrewAgent(index)} style={{ marginTop: 6 }}>Remove</button></div>)}<button onClick={addCrewAgent}>Add agent</button></div>}{selectedData.type !== 'multi_agent' && <><h3>Runtime data</h3><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(selectedRunNode ?? {}, null, 2)}</pre><textarea key={selectedNodeId + JSON.stringify(selectedData.config)} defaultValue={JSON.stringify(selectedData.config, null, 2)} onBlur={e => { try { updateSelectedConfigObject(JSON.parse(e.target.value)) } catch {} }} style={{ width: '100%', minHeight: 160, fontFamily: 'monospace' }} /></>}</> : selectedEdge ? <><h3>Selected edge</h3><p>{selectedEdge.source} → {selectedEdge.target}</p><textarea defaultValue={selectedEdgeData?.condition ?? ''} onBlur={e => setEdges(current => current.map(edge => edge.id === selectedEdgeId ? { ...edge, label: e.target.value ? 'condition' : undefined, animated: Boolean(e.target.value), data: { ...(edge.data ?? {}), condition: e.target.value || undefined } } : edge))} placeholder="context.1.output.statusCode === 200" style={{ width: '100%', minHeight: 90 }} /></> : <p>Select a node or edge.</p>}</section>}
-      {activeTab === 'copilot' && <section><h2>AI Copilot</h2><textarea value={copilotPrompt} onChange={e => setCopilotPrompt(e.target.value)} style={{ width: '100%', minHeight: 100 }} /><button onClick={runCopilot} style={{ width: '100%', marginTop: 8 }}>Generate workflow</button><button onClick={explainWorkflow} style={{ width: '100%', marginTop: 8 }}>Explain current workflow</button></section>}
-      {activeTab === 'marketplace' && <section><h2>Tool Marketplace</h2>{tools.map(tool => <div key={tool.name} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}><strong>{tool.name}</strong><p style={{ fontSize: 12 }}>{tool.description}</p><button onClick={() => installPlugin(tool.name)}>Install</button></div>)}</section>}
-      {activeTab === 'templates' && <section><h2>Templates</h2>{templates.map(t => <div key={t.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 8 }}><strong>{t.name}</strong><p style={{ fontSize: 12 }}>{t.description}</p><button onClick={() => hydrateWorkflow(t.workflow)}>Use template</button></div>)}</section>}
-      {activeTab === 'credentials' && <section><h2>Credentials</h2><button onClick={createCredential}>New credential</button>{credentials.map(c => <div key={c.id} style={{ padding: 10, background: 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}><strong>{c.name}</strong><div style={{ fontSize: 12 }}>{c.kind} · {'{{secret.' + c.secretRef + '}}'}</div></div>)}</section>}
-      {activeTab === 'runs' && <section><h2>Runs + Usage</h2><pre style={{ fontSize: 11, background: 'white', padding: 10, borderRadius: 10 }}>{JSON.stringify(usage, null, 2)}</pre><button onClick={refreshPlatform}>Refresh</button>{runs.map(run => <div key={run.id} onClick={() => openRun(run.id)} style={{ cursor: 'pointer', padding: 10, background: runId === run.id ? '#e0f2fe' : 'white', border: '1px solid #e5e7eb', borderRadius: 10, marginTop: 8 }}><strong>{run.id.slice(0, 8)}</strong><div>{run.status}</div></div>)}</section>}
-      {activeTab === 'reasoning' && <section><h2>Agent Reasoning</h2>{reasoningMessages.map(message => <div key={message.id} style={{ ...messageStyles[message.tone], borderRadius: 14, padding: 12, marginBottom: 10 }}><strong>{message.title}</strong><p>{message.body}</p>{message.meta && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{message.meta}</pre>}</div>)}<h3>Replay</h3><button disabled={!status.events.length || replayIndex === 0} onClick={() => setReplayIndex(i => Math.max((i ?? 0) - 1, 0))}>Prev</button>{' '}<button disabled={!status.events.length || replayIndex === status.events.length - 1} onClick={() => setReplayIndex(i => Math.min((i ?? -1) + 1, status.events.length - 1))}>Next</button>{' '}<button disabled={!status.events.length} onClick={() => setReplayIndex(status.events.length - 1)}>Live</button>{replayState?.currentEvent && <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', background: 'white', padding: 10 }}>{JSON.stringify(replayState.currentEvent, null, 2)}</pre>}<h3>Waiting nodes</h3>{status.nodes.filter(n => n.status === 'waiting').map(n => <button key={n.nodeId} onClick={() => approveNode(n.nodeId)}>Approve {n.nodeId}</button>)}</section>}
-      <hr /><h3>Validation</h3>{!validationIssues.length && <p style={{ color: '#16a34a' }}>No validation issues.</p>}{validationIssues.map((issue, i) => <div key={i} style={{ padding: 8, marginBottom: 8, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 8 }}><strong>{issue.code}</strong><div>{issue.message}</div></div>)}
-    </aside>
-  </div>
+    const { data: listener } = AuthProvider.onAuthStateChange((auth) => {
+      if (!mounted) return
+      if (!auth.session && isSupabaseConfigured) clearAuth()
+      else setAuth(auth)
+    })
+
+    return () => {
+      mounted = false
+      listener?.subscription.unsubscribe()
+    }
+  }, [clearAuth, setAuth, setAuthReady])
+
+  const refreshPlatform = useCallback(async () => {
+    const [toolData, templateData, credentialData, runData, usageData] = await Promise.allSettled([
+      api('/tools'),
+      api('/templates'),
+      api('/credentials'),
+      api('/runs'),
+      api('/billing/usage'),
+    ])
+
+    if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
+    if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
+    if (credentialData.status === 'fulfilled') setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
+    if (runData.status === 'fulfilled') setRuns(Array.isArray(runData.value) ? runData.value : [])
+    if (usageData.status === 'fulfilled' && usageData.value && typeof usageData.value === 'object') {
+      setUsage(usageData.value as Record<string, number>)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (authReady) void refreshPlatform()
+  }, [authReady, refreshPlatform])
+
+  const loadStatus = useCallback(async (id: string): Promise<StatusResponse> => {
+    const status = await api(`/status?runId=${encodeURIComponent(id)}`) as StatusResponse
+    setRunNodes(status.nodes ?? [])
+    setEvents(status.events ?? [])
+    return status
+  }, [setEvents, setRunNodes])
+
+  useEffect(() => {
+    if (!runId) return
+
+    let closed = false
+    let stopped = false
+    setStreamStatus('connecting')
+
+    const tick = async () => {
+      try {
+        const status = await loadStatus(runId)
+        if (closed) return
+        setStreamStatus('connected')
+
+        if (status.run?.status && TERMINAL_RUN_STATUSES.has(status.run.status)) {
+          stopped = true
+          window.clearInterval(interval)
+          bumpPlatformVersion()
+          await refreshPlatform()
+        }
+      } catch (error) {
+        if (!closed) {
+          setStreamStatus('error')
+          addToast(error instanceof Error ? error.message : 'Run status failed', 'error')
+        }
+      }
+    }
+
+    void tick()
+    const interval = window.setInterval(() => {
+      if (!stopped) void tick()
+    }, 1500)
+
+    return () => {
+      closed = true
+      window.clearInterval(interval)
+      setStreamStatus('closed')
+    }
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, setStreamStatus])
+
+  const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
+  const selectedEdge = useMemo(() => edges.find(edge => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
+
+  const nodeStatusMap = useMemo(() => {
+    return new Map(runNodes.map(node => [node.nodeId, node.status]))
+  }, [runNodes])
+
+  const visibleNodes = useMemo<WorkflowGraphNode[]>(() => {
+    return nodes.map(node => {
+      const status = nodeStatusMap.get(node.id) ?? 'pending'
+      const hasValidationError = validationIssues.some(issue => issue.nodeId === node.id)
+      const isSelected = selectedNodeId === node.id
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          label: `${node.data.label} · ${status}`,
+        },
+        style: {
+          borderRadius: 10,
+          padding: 11,
+          boxShadow: isSelected
+            ? '0 0 0 3px rgba(79, 70, 229, 0.28)'
+            : '0 10px 24px -14px rgba(15, 23, 42, 0.18)',
+          ...(hasValidationError ? { border: '1.5px solid #ef4444', background: '#fef2f2' } : statusStyles[status] ?? statusStyles.pending),
+        },
+      }
+    })
+  }, [nodeStatusMap, nodes, selectedNodeId, validationIssues])
+
+  const visibleEdges = useMemo<WorkflowGraphEdge[]>(() => {
+    return edges.map(edge => ({
+      ...edge,
+      animated: Boolean(edge.data?.condition),
+      label: edge.data?.condition ? 'condition' : edge.label,
+      style: {
+        stroke: selectedEdgeId === edge.id ? '#4f46e5' : '#94a3b8',
+        strokeWidth: selectedEdgeId === edge.id ? 2.5 : 1.5,
+      },
+    }))
+  }, [edges, selectedEdgeId])
+
+  const validateWorkflow = useCallback(async () => {
+    try {
+      const workflow = getWorkflowJson()
+      const result = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }) as ValidationResponse
+      setValidationIssues(result.issues ?? [])
+      addToast(result.valid ? 'Workflow contract is valid' : 'Workflow has validation issues', result.valid ? 'success' : 'error')
+      return result.valid
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Validation failed', 'error')
+      return false
+    }
+  }, [addToast, getWorkflowJson])
+
+  const saveWorkflow = useCallback(async () => {
+    if (!await validateWorkflow()) return
+
+    try {
+      const workflow = getWorkflowJson()
+      const result = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }) as { version?: number }
+      addToast(`Saved version ${result.version ?? '?'}`, 'success')
+      bumpPlatformVersion()
+      await refreshPlatform()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Save failed', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, validateWorkflow])
+
+  const startWorkflow = useCallback(async () => {
+    if (!await validateWorkflow()) return
+
+    try {
+      const workflow = getWorkflowJson()
+      const result = await api('/start', { method: 'POST', body: JSON.stringify(workflow) }) as { runId?: string }
+      if (!result.runId) throw new Error('API did not return runId')
+      resetRun()
+      setRunId(result.runId)
+      setActiveTab('crew')
+      addToast(`Run started: ${result.runId.slice(0, 8)}`, 'success')
+      bumpPlatformVersion()
+      await refreshPlatform()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Run failed to start', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId, validateWorkflow])
+
+  const openWorkflow = useCallback(async (id: string) => {
+    try {
+      const data = await api(`/workflows/latest?workflowId=${encodeURIComponent(id)}`) as { dagJson?: WorkflowDefinition }
+      if (data?.dagJson) {
+        hydrateWorkflow(data.dagJson)
+        setValidationIssues([])
+        setActiveTab('inspector')
+      }
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Workflow failed to open', 'error')
+    }
+  }, [addToast, hydrateWorkflow, setActiveTab])
+
+  const openRun = useCallback(async (id: string) => {
+    try {
+      const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
+      setRunId(id)
+      setRunNodes(data.nodes ?? [])
+      setEvents(data.events ?? [])
+      setActiveTab('crew')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Run failed to open', 'error')
+    }
+  }, [addToast, setActiveTab, setEvents, setRunId, setRunNodes])
+
+  const installPlugin = useCallback(async (pluginId: string) => {
+    try {
+      await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) })
+      addToast(`Installed ${pluginId}`, 'success')
+      await refreshPlatform()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Tool install failed', 'error')
+    }
+  }, [addToast, refreshPlatform])
+
+  const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string }) => {
+    try {
+      await api('/credentials', { method: 'POST', body: JSON.stringify(credential) })
+      addToast(`Credential ${credential.name} added`, 'success')
+      await refreshPlatform()
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Credential failed to save', 'error')
+    }
+  }, [addToast, refreshPlatform])
+
+  const approveNode = useCallback(async (nodeId: string) => {
+    if (!runId) return
+
+    try {
+      await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) })
+      await loadStatus(runId)
+      addToast(`Node ${nodeId} resumed`, 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Resume failed', 'error')
+    }
+  }, [addToast, loadStatus, runId])
+
+  const updateEdgeCondition = useCallback((edgeId: string, condition: string) => {
+    setEdges(edges.map(edge => edge.id === edgeId
+      ? { ...edge, data: { ...(edge.data ?? {}), condition: condition || undefined }, label: condition ? 'condition' : undefined }
+      : edge
+    ))
+  }, [edges, setEdges])
+
+  if (!authReady) return <div className="boot-screen">Loading Workflow Engine…</div>
+  if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
+
+  return (
+    <Layout
+      header={
+        <>
+          <div className="brand-lockup">
+            <span className="brand-mark">WE</span>
+            <div>
+              <strong>Workflow Engine</strong>
+              <span>{currentWorkflowId} / {orgId ?? 'default'}</span>
+            </div>
+          </div>
+          <UserMenu />
+        </>
+      }
+      sidebar={
+        <BuilderSidebar
+          activeTab={activeTab}
+          workflowName={currentWorkflowName}
+          streamStatus={streamStatus}
+          onWorkflowNameChange={setWorkflowName}
+          onAdd={addNode}
+          onValidate={validateWorkflow}
+          onSave={saveWorkflow}
+          onOpenTab={setActiveTab}
+          onNew={() => {
+            newWorkflow()
+            setValidationIssues([])
+          }}
+          onStart={startWorkflow}
+        />
+      }
+      main={
+        <WorkflowCanvas
+          nodes={visibleNodes}
+          edges={visibleEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={connect}
+          onNodeClick={(_, node) => {
+            selectNode(node.id)
+            setActiveTab('inspector')
+          }}
+          onEdgeClick={(_, edge) => {
+            selectEdge(edge.id)
+            setActiveTab('inspector')
+          }}
+        />
+      }
+      panel={
+        <RightPanel
+          tab={activeTab}
+          events={events}
+          runNodes={runNodes}
+          selectedNode={selectedNode}
+          selectedEdge={selectedEdge}
+          validationIssues={validationIssues}
+          tools={tools}
+          templates={templates}
+          credentials={credentials}
+          runs={runs}
+          usage={usage}
+          onOpenWorkflow={openWorkflow}
+          onUseTemplate={(workflow) => {
+            hydrateWorkflow(workflow)
+            setValidationIssues([])
+            setActiveTab('inspector')
+          }}
+          onInstallPlugin={installPlugin}
+          onCreateCredential={createCredential}
+          onOpenRun={openRun}
+          onRefreshPlatform={refreshPlatform}
+          onUpdateNodeConfig={updateSelectedNodeConfig}
+          onUpdateNodeType={updateSelectedNodeType}
+          onUpdateEdgeCondition={updateEdgeCondition}
+          onApproveNode={approveNode}
+        />
+      }
+    />
+  )
 }

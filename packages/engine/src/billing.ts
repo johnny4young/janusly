@@ -1,5 +1,6 @@
 import { db } from "@workflow-engine/db";
 import { usageEvents } from "@workflow-engine/db";
+import { eq } from "drizzle-orm";
 
 export async function trackUsage(orgId: string, userId: string | null, runId: string, metric: string, quantity = 1, metadata: any = {}) {
   await db.insert(usageEvents).values({
@@ -14,12 +15,11 @@ export async function trackUsage(orgId: string, userId: string | null, runId: st
 }
 
 export async function getUsageSummary(orgId: string) {
-  const rows = await db.select().from(usageEvents);
+  const rows = await db.select().from(usageEvents).where(eq(usageEvents.orgId, orgId));
 
   const summary: Record<string, number> = {};
 
   for (const row of rows) {
-    if (row.orgId !== orgId) continue;
     summary[row.metric] = (summary[row.metric] ?? 0) + (row.quantity ?? 0);
   }
 

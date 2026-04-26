@@ -1,52 +1,133 @@
 import http from "http";
 import OpenAI from "openai";
+import { ensureDatabaseSchema } from "@workflow-engine/db/src/schema-management";
 import { startRun } from "@workflow-engine/engine/src/start-run";
 import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
 import { listTools } from "@workflow-engine/engine/src/tool-registry";
 import { getUsageSummary } from "@workflow-engine/engine/src/billing";
 import { requireAuth } from "./auth";
-import { requireRole } from "./permissions";
+import { isRole, requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";
 import { db } from "@workflow-engine/db";
 import { workflows, workflowVersions, runs, runNodes, runEvents, credentials, installedPlugins, auditLogs, orgMembers } from "@workflow-engine/db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, asc, and, gt } from "drizzle-orm";
+import { WorkflowSchema } from "@workflow-engine/shared";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PORT = Number(process.env.PORT || 3001);
+const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
+let openai: OpenAI | null = null;
 
-function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id",
-  });
-  res.end(JSON.stringify(payload));
+type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
+
+function getOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) return null;
+  openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return openai;
 }
 
-function sendEvent(res: http.ServerResponse, data: any) {
+function httpError(message: string, statusCode: number) {
+  const err = new Error(message) as Error & { statusCode?: number };
+  err.statusCode = statusCode;
+  return err;
+}
+
+function getAllowedOrigins() {
+  const configured = process.env.API_ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173";
+  return configured.split(",").map(origin => origin.trim()).filter(Boolean);
+}
+
+function corsHeaders(res: http.ServerResponse) {
+  const origin = (res as CorsAwareResponse).requestOrigin;
+  const allowedOrigins = getAllowedOrigins();
+  const allowAny = allowedOrigins.includes("*");
+  const allowedOrigin = !origin
+    ? "*"
+    : allowAny || allowedOrigins.includes(origin)
+      ? origin
+      : "null";
+
+  return {
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id",
+    "Vary": "Origin",
+  };
+}
+
+function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
+  let body: string;
+  try {
+    body = JSON.stringify(payload);
+  } catch {
+    body = JSON.stringify({ error: "Failed to serialize response" });
+    status = 500;
+  }
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    ...corsHeaders(res),
+  });
+  res.end(body);
+}
+
+function sendEvent(res: http.ServerResponse, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 async function readJson(req: http.IncomingMessage) {
-  return new Promise<any>((resolve) => {
+  return new Promise<unknown>((resolve, reject) => {
     let body = "";
-    req.on("data", chunk => body += chunk);
-    req.on("end", () => resolve(body ? JSON.parse(body) : {}));
+    let receivedBytes = 0;
+    let rejected = false;
+
+    req.on("data", chunk => {
+      receivedBytes += chunk.length;
+
+      if (receivedBytes > MAX_JSON_BODY_BYTES) {
+        rejected = true;
+        reject(httpError(`Request body too large. Limit is ${MAX_JSON_BODY_BYTES} bytes`, 413));
+        req.destroy();
+        return;
+      }
+
+      body += chunk;
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      if (rejected) return;
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(httpError("Invalid JSON body", 400));
+      }
+    });
   });
 }
 
-async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: any = {}) {
+function asRecord(value: unknown) {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: unknown = {}) {
   try {
     await db.insert(auditLogs).values({ id: crypto.randomUUID(), orgId, userId, action, targetType, targetId, metadata });
-  } catch {}
+  } catch (error) {
+    console.warn("audit write failed", error);
+  }
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === "OPTIONS") return sendJson(res, {});
+  (res as CorsAwareResponse).requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders(res));
+    return res.end();
+  }
 
   try {
+    if (req.method === "GET" && req.url === "/health") return sendJson(res, { ok: true });
+
     const auth = await requireAuth(req);
 
     if (req.method === "GET" && req.url === "/tools") return sendJson(res, listTools());
@@ -60,24 +141,33 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/members/invite") {
-      await requireRole(auth.orgId, auth.userId, "admin");
-      const body = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+      const body = asRecord(await readJson(req));
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      const role = isRole(body.role) ? body.role : "viewer";
+      if (!email) return sendJson(res, { error: "email is required" }, 400);
+      const userId = typeof body.userId === "string" && body.userId.trim() ? body.userId.trim() : email;
+      const existing = await db.select().from(orgMembers).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
+      if (existing[0]) return sendJson(res, { error: "Member already exists for this org" }, 409);
       const id = crypto.randomUUID();
-      await db.insert(orgMembers).values({ id, orgId: auth.orgId, userId: body.userId || body.email, email: body.email, role: body.role || "viewer", invitedBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "member.invited", "member", body.userId || body.email, { email: body.email, role: body.role || "viewer" });
+      await db.insert(orgMembers).values({ id, orgId: auth.orgId, userId, email, role, invitedBy: auth.userId });
+      await audit(auth.orgId, auth.userId, "member.invited", "member", userId, { email, role });
       return sendJson(res, { id });
     }
 
     if (req.method === "POST" && req.url === "/members/role") {
-      await requireRole(auth.orgId, auth.userId, "admin");
-      const body = await readJson(req);
-      await db.update(orgMembers).set({ role: body.role }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, body.userId)));
-      await audit(auth.orgId, auth.userId, "member.role.updated", "member", body.userId, { role: body.role });
+      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+      const body = asRecord(await readJson(req));
+      const userId = typeof body.userId === "string" ? body.userId : "";
+      if (!userId) return sendJson(res, { error: "userId is required" }, 400);
+      if (!isRole(body.role)) return sendJson(res, { error: "role must be viewer, editor, or admin" }, 400);
+      await db.update(orgMembers).set({ role: body.role }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
+      await audit(auth.orgId, auth.userId, "member.role.updated", "member", userId, { role: body.role });
       return sendJson(res, { ok: true });
     }
 
     if (req.method === "DELETE" && req.url?.startsWith("/members")) {
-      await requireRole(auth.orgId, auth.userId, "admin");
+      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
       const url = new URL(req.url, "http://localhost");
       const userId = url.searchParams.get("userId");
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
@@ -102,23 +192,32 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
       const url = new URL(req.url, "http://localhost");
-      const workflowId = url.searchParams.get("workflowId") ?? "ui-test";
+      const workflowId = url.searchParams.get("workflowId");
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
     }
 
     if (req.method === "POST" && req.url === "/workflows/save") {
-      await requireRole(auth.orgId, auth.userId, "editor");
-      const workflow = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const workflow = asRecord(await readJson(req));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
-      const workflowId = workflow.id ?? crypto.randomUUID();
+      const parsedWorkflow = WorkflowSchema.parse(workflow);
+      const workflowId = parsedWorkflow.id ?? crypto.randomUUID();
       const existingVersions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
       const existingWorkflow = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-      if (!existingWorkflow[0]) await db.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflow.name ?? workflowId, createdBy: auth.userId });
+      const workflowName = parsedWorkflow.name ?? workflowId;
+      if (existingWorkflow[0]) {
+        if (existingWorkflow[0].name !== workflowName) {
+          await db.update(workflows).set({ name: workflowName }).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+        }
+      } else {
+        await db.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflowName, createdBy: auth.userId });
+      }
       const versionId = crypto.randomUUID();
-      await db.insert(workflowVersions).values({ id: versionId, orgId: auth.orgId, workflowId, version: nextVersion, dagJson: { ...workflow, id: workflowId }, createdBy: auth.userId });
+      await db.insert(workflowVersions).values({ id: versionId, orgId: auth.orgId, workflowId, version: nextVersion, dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName }, createdBy: auth.userId });
       await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
       return sendJson(res, { workflowId, versionId, version: nextVersion });
     }
@@ -130,11 +229,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/plugins/install") {
-      await requireRole(auth.orgId, auth.userId, "admin");
-      const body = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+      const body = asRecord(await readJson(req));
+      const pluginId = typeof body.pluginId === "string" ? body.pluginId : "";
+      if (!pluginId) return sendJson(res, { error: "pluginId is required" }, 400);
       const id = crypto.randomUUID();
-      await db.insert(installedPlugins).values({ id, orgId: auth.orgId, pluginId: body.pluginId, configJson: body.config ?? {}, installedBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "plugin.installed", "plugin", body.pluginId, body.config ?? {});
+      await db.insert(installedPlugins).values({ id, orgId: auth.orgId, pluginId, configJson: body.config ?? {}, installedBy: auth.userId });
+      await audit(auth.orgId, auth.userId, "plugin.installed", "plugin", pluginId, body.config ?? {});
       return sendJson(res, { id });
     }
 
@@ -144,15 +245,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/credentials") {
-      await requireRole(auth.orgId, auth.userId, "admin");
-      const body = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+      const body = asRecord(await readJson(req));
+      if (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.secretRef !== "string") {
+        return sendJson(res, { error: "name, kind, and secretRef are required" }, 400);
+      }
       const id = crypto.randomUUID();
       await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, createdBy: auth.userId });
       await audit(auth.orgId, auth.userId, "credential.created", "credential", id, { kind: body.kind });
       return sendJson(res, { id });
     }
 
-    if (req.method === "GET" && req.url?.startsWith("/audit")) {
+    if (req.method === "GET" && req.url === "/audit") {
       const rows = await db.select().from(auditLogs).where(eq(auditLogs.orgId, auth.orgId)).orderBy(desc(auditLogs.createdAt));
       return sendJson(res, rows.slice(0, 100));
     }
@@ -161,16 +265,22 @@ const server = http.createServer(async (req, res) => {
 
     // AI helpers
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
-      const { prompt } = await readJson(req);
-      if (!process.env.OPENAI_API_KEY) return sendJson(res, workflowTemplates[0].workflow);
-      const response = await openai.responses.create({ model: "gpt-4o-mini", input: [{ role: "system", content: "Generate only valid JSON for a workflow DAG. Shape: {id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, ai, approval, webhook, noop." }, { role: "user", content: prompt }], text: { format: { type: "json_object" } } });
-      return sendJson(res, JSON.parse(response.output_text || "{}"));
+      const { prompt } = asRecord(await readJson(req));
+      const client = getOpenAIClient();
+      if (!client) return sendJson(res, workflowTemplates[0]?.workflow ?? {});
+      const response = await client.responses.create({ model: "gpt-4o-mini", input: [{ role: "system", content: "Generate only valid JSON for a workflow DAG. Shape: {id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, ai, approval, webhook, noop." }, { role: "user", content: String(prompt ?? "") }], text: { format: { type: "json_object" } } });
+      try {
+        return sendJson(res, JSON.parse(response.output_text || "{}"));
+      } catch {
+        return sendJson(res, { error: "AI returned invalid JSON" }, 502);
+      }
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
-      const { workflow } = await readJson(req);
-      if (!process.env.OPENAI_API_KEY) return sendJson(res, { explanation: "This workflow contains nodes connected by edges and can be executed by the engine." });
-      const response = await openai.responses.create({ model: "gpt-4o-mini", input: `Explain this workflow clearly: ${JSON.stringify(workflow)}` });
+      const { workflow } = asRecord(await readJson(req));
+      const client = getOpenAIClient();
+      if (!client) return sendJson(res, { explanation: "This workflow contains nodes connected by edges and can be executed by the engine." });
+      const response = await client.responses.create({ model: "gpt-4o-mini", input: `Explain this workflow clearly: ${JSON.stringify(workflow)}` });
       return sendJson(res, { explanation: response.output_text });
     }
 
@@ -180,60 +290,82 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, rows);
     }
 
-    if (req.method === "GET" && req.url?.startsWith("/run")) {
+    if (req.method === "GET" && req.url?.startsWith("/run?")) {
       const url = new URL(req.url, "http://localhost");
       const runId = url.searchParams.get("runId");
-      const run = await db.select().from(runs).where(eq(runs.id, runId!));
+      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId!));
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId!));
+      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       return sendJson(res, { run: run[0], nodes, events });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/status")) {
       const url = new URL(req.url, "http://localhost");
       const runId = url.searchParams.get("runId");
-      const run = await db.select().from(runs).where(eq(runs.id, runId!));
+      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId!));
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId!));
-      return sendJson(res, { nodes, events });
+      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
+      return sendJson(res, { run: run[0], nodes, events });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/events")) {
       const url = new URL(req.url, "http://localhost");
       const runId = url.searchParams.get("runId");
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
-      const interval = setInterval(async () => {
-        const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId!));
-        sendEvent(res, events);
-      }, 1000);
+      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...corsHeaders(res) });
+      let lastSeen: Date | null = null;
+      const tick = async () => {
+        const filter = lastSeen
+          ? and(eq(runEvents.runId, runId), gt(runEvents.createdAt, lastSeen))
+          : eq(runEvents.runId, runId);
+        const events = await db.select().from(runEvents).where(filter).orderBy(asc(runEvents.createdAt));
+        if (events.length) {
+          lastSeen = events[events.length - 1].createdAt ?? lastSeen;
+          sendEvent(res, events);
+        }
+      };
+      const interval = setInterval(() => { void tick(); }, 1000);
+      void tick();
       req.on("close", () => clearInterval(interval));
       return;
     }
 
     if (req.method === "POST" && req.url === "/start") {
-      await requireRole(auth.orgId, auth.userId, "editor");
-      const workflow = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const workflow = asRecord(await readJson(req));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
-      const result = await startRun({ ...workflow, orgId: auth.orgId, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "run.started", "run", result.runId, { workflowId: workflow.id });
+      const parsedWorkflow = WorkflowSchema.parse(workflow);
+      const result = await startRun({ ...parsedWorkflow, orgId: auth.orgId, createdBy: auth.userId });
+      await audit(auth.orgId, auth.userId, "run.started", "run", result.runId, { workflowId: parsedWorkflow.id });
       return sendJson(res, result);
     }
 
     if (req.method === "POST" && req.url === "/resume") {
-      await requireRole(auth.orgId, auth.userId, "editor");
-      const { runId, nodeId } = await readJson(req);
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const { runId, nodeId } = asRecord(await readJson(req));
+      if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
       const result = await resumeRun(runId, nodeId);
       await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
       return sendJson(res, result);
     }
 
     return sendJson(res, { error: "Not found" }, 404);
-  } catch (err: any) {
-    return sendJson(res, { error: err.message }, err.statusCode || 500);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    const statusCode = err && typeof err === "object" && "statusCode" in err ? Number((err as { statusCode?: number }).statusCode) : 500;
+    return sendJson(res, { error: message }, statusCode || 500);
   }
 });
+
+await ensureDatabaseSchema();
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));

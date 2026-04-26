@@ -4,6 +4,7 @@ import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 import { appendEvent } from "./persistence";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
+import { fetchHttpTarget } from "./http-policy";
 
 export type NodeContext = {
   runId: string;
@@ -150,7 +151,7 @@ function aggregateCrewResults(results: any[], strategy = "last") {
 export const nodeRegistry: Record<string, NodeExecutor> = {
   http: async (ctx) => {
     const { url, method, headers, body } = ctx.config;
-    const res = await fetch(url, {
+    const res = await fetchHttpTarget(url, {
       method: method ?? "GET",
       headers,
       body: body ? JSON.stringify(body) : undefined,
@@ -165,7 +166,6 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   condition: async (ctx) => {
     const { expression } = ctx.config;
     const result = evaluateExpression(expression, { context: ctx.context, inputs: ctx.config });
-    if (!result) throw new Error("Condition evaluated to false");
     return { status: "completed", output: { result } };
   },
 

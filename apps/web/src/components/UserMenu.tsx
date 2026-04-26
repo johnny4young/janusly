@@ -1,39 +1,86 @@
-import React, { useState } from 'react'
-import { AuthProvider } from '../auth'
+import React, { useEffect, useRef, useState } from 'react'
+import { ChevronDown, LogOut } from 'lucide-react'
+import { AuthProvider, isSupabaseConfigured } from '../auth'
 import { useWorkflowStore } from '../store'
 
 export function UserMenu() {
-  const { user, orgId, setAuth } = useWorkflowStore()
+  const user = useWorkflowStore(state => state.user)
+  const userId = useWorkflowStore(state => state.userId)
+  const orgId = useWorkflowStore(state => state.orgId)
+  const setAuth = useWorkflowStore(state => state.setAuth)
+  const addToast = useWorkflowStore(state => state.addToast)
+
   const [open, setOpen] = useState(false)
   const [newOrg, setNewOrg] = useState(orgId ?? '')
+  const popoverRef = useRef<HTMLDivElement | null>(null)
 
-  if (!user) return null
+  useEffect(() => {
+    setNewOrg(orgId ?? '')
+  }, [orgId])
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (event: MouseEvent) => {
+      if (!popoverRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
 
   const logout = async () => {
-    await AuthProvider.signOut()
+    try {
+      await AuthProvider.signOut()
+      addToast('Signed out', 'info')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Sign out failed', 'error')
+    }
   }
 
   const changeOrg = async () => {
-    const { auth } = await AuthProvider.updateOrg(newOrg)
-    setAuth(auth)
-    setOpen(false)
+    const trimmed = newOrg.trim()
+    if (!trimmed) {
+      addToast('Org id cannot be empty', 'error')
+      return
+    }
+    try {
+      const { auth } = await AuthProvider.updateOrg(trimmed)
+      setAuth(auth)
+      setOpen(false)
+      addToast(`Switched to ${trimmed}`, 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Org switch failed', 'error')
+    }
   }
 
   return (
-    <div style={{ position: 'absolute', top: 10, right: 10 }}>
-      <button onClick={() => setOpen(!open)}>
-        {user.email}
+    <div className="user-menu" ref={popoverRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="small-command user-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <span className="user-trigger-label">{user?.email ?? userId ?? 'dev-user'}</span>
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
 
       {open && (
-        <div style={{ background: 'white', padding: 10, border: '1px solid #ccc' }}>
-          <div>
-            <strong>Org:</strong>
-            <input value={newOrg} onChange={(e) => setNewOrg(e.target.value)} />
-            <button onClick={changeOrg}>switch</button>
-          </div>
+        <div className="user-popover" role="menu">
+          <label className="field-label" htmlFor="org-switcher">Org</label>
+          <input
+            id="org-switcher"
+            className="text-field"
+            value={newOrg}
+            onChange={(event) => setNewOrg(event.target.value)}
+          />
+          <button className="small-command" onClick={changeOrg} type="button">Switch org</button>
 
-          <button onClick={logout}>Logout</button>
+          {isSupabaseConfigured && user && (
+            <button className="small-command danger" onClick={logout} type="button">
+              <LogOut size={14} aria-hidden="true" />
+              <span>Logout</span>
+            </button>
+          )}
         </div>
       )}
     </div>

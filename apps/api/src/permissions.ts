@@ -2,6 +2,7 @@ import { db, orgMembers } from '@workflow-engine/db'
 import { and, eq } from 'drizzle-orm'
 
 export type Role = 'viewer' | 'editor' | 'admin'
+export type AuthMode = 'supabase' | 'dev-headers' | 'service-token'
 
 const rank: Record<Role, number> = {
   viewer: 1,
@@ -9,21 +10,28 @@ const rank: Record<Role, number> = {
   admin: 3,
 }
 
-export async function getMemberRole(orgId: string, userId: string): Promise<Role> {
+export function isRole(value: unknown): value is Role {
+  return value === 'viewer' || value === 'editor' || value === 'admin'
+}
+
+export async function getMemberRole(orgId: string, userId: string, mode: AuthMode = 'supabase'): Promise<Role | null> {
   const rows = await db
     .select()
     .from(orgMembers)
     .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)))
 
-  return (rows[0]?.role as Role | undefined) ?? 'admin'
+  const role = rows[0]?.role
+  if (isRole(role)) return role
+
+  return mode === 'dev-headers' || mode === 'service-token' ? 'admin' : null
 }
 
-export async function requireRole(orgId: string, userId: string, required: Role) {
-  const role = await getMemberRole(orgId, userId)
+export async function requireRole(orgId: string, userId: string, required: Role, mode: AuthMode = 'supabase') {
+  const role = await getMemberRole(orgId, userId, mode)
 
-  if (rank[role] < rank[required]) {
-    const err = new Error(`Forbidden: requires ${required} role`)
-    ;(err as any).statusCode = 403
+  if (!role || rank[role] < rank[required]) {
+    const err = new Error(`Forbidden: requires ${required} role`) as Error & { statusCode?: number }
+    err.statusCode = 403
     throw err
   }
 

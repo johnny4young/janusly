@@ -1,8 +1,11 @@
 import { Worker } from "bullmq";
+import { ensureDatabaseSchema } from "@workflow-engine/db/src/schema-management";
 import { connection } from "./queue";
 import { executeNode } from "./execute-node";
-import { markNodeRunning, markNodeSucceeded, markNodeFailed, markNodeWaiting, appendEvent } from "./persistence";
+import { markNodeRunning, markNodeSucceeded, markNodeFailed, markNodeWaiting, appendEvent, updateRunStatusFromNodes } from "./persistence";
 import { enqueueNextNodes } from "./scheduler";
+
+await ensureDatabaseSchema();
 
 export const worker = new Worker(
   "workflow-nodes",
@@ -29,6 +32,7 @@ export const worker = new Worker(
     } catch (err: any) {
       await markNodeFailed(runId, node.id, { message: err.message });
       await appendEvent(runId, node.id, "node.failed", { message: err.message });
+      await updateRunStatusFromNodes(runId);
 
       throw err;
     }

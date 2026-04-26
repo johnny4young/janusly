@@ -7,21 +7,20 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit",
-    "test": "echo \"No tests yet\""
+    "test": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
+    "@supabase/supabase-js": "^2.104.1",
     "@workflow-engine/db": "workspace:*",
     "@workflow-engine/engine": "workspace:*",
-    "@trpc/server": "^10.45.0",
-    "drizzle-orm": "^0.30.0",
-    "openai": "^4.87.3",
-    "stripe": "^16.12.0",
-    "zod": "^3.23.8"
+    "@workflow-engine/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "openai": "^6.34.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "tsx": "^4.7.0",
-    "typescript": "^5.4.0",
-    "@types/node": "^22.10.2"
+    "@types/node": "^24.12.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
   }
 }

@@ -1,6 +1,6 @@
 import { db } from "@workflow-engine/db";
 import { runEvents } from "@workflow-engine/db";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 export type MemoryEntry = {
   type: string;
@@ -20,7 +20,7 @@ export async function appendMemory(runId: string, nodeId: string | null, payload
 }
 
 export async function getRunMemory(runId: string, limit = 50): Promise<MemoryEntry[]> {
-  const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
+  const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
 
   return events
     .filter(event => ["memory.appended", "node.succeeded", "node.failed", "node.waiting", "node.resumed"].includes(event.type))
