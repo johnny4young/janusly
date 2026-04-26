@@ -1,3 +1,4 @@
+import { evaluateExpression } from "../expression";
 import type {
   ExecutionStore,
   QueueAdapter,
@@ -48,8 +49,53 @@ export class WorkflowRuntime {
   }
 
   async enqueueReadyNodes(input: EnqueueReadyNodesInput): Promise<number> {
-    // Minimal placeholder implementation (delegation will be migrated from scheduler)
-    // This method will be expanded in next commits
-    return 0;
+    const { runId, workflow } = input;
+    const context = await this.store.getRunContext(runId);
+    let queued = 0;
+
+    for (const node of workflow.nodes) {
+      const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
+      const deps = incomingEdges.map((edge) => edge.from);
+      const depStatuses = await Promise.all(deps.map((depId) => this.store.getNodeStatus(runId, depId)));
+      const ready = depStatuses.every((status) => ["succeeded", "skipped"].includes(status));
+      const currentStatus = await this.store.getNodeStatus(runId, node.id);
+
+      if (!ready || currentStatus !== "pending") continue;
+
+      let shouldRun = false;
+
+      for (const edge of incomingEdges) {
+        if (!edge.condition) {
+          shouldRun = true;
+          break;
+        }
+
+        const result = evaluateExpression(edge.condition, {
+          context,
+          inputs: {},
+        });
+
+        if (result) {
+          shouldRun = true;
+          break;
+        }
+      }
+
+      if (!shouldRun) {
+        await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
+        continue;
+      }
+
+      await this.store.markNodeQueued(runId, node.id);
+      await this.queue.enqueueNode({ runId, workflow, node });
+      await this.store.appendEvent({ runId, nodeId: node.id, type: "node.queued" });
+      queued++;
+    }
+
+    if (queued === 0) {
+      await this.store.updateRunStatusFromNodes(runId);
+    }
+
+    return queued;
   }
 }
