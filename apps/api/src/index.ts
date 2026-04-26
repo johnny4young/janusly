@@ -6,6 +6,7 @@ import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
 import { listTools } from "@workflow-engine/engine/src/tool-registry";
 import { getUsageSummary } from "@workflow-engine/engine/src/billing";
+import { DLQReplayAdapter } from "@workflow-engine/engine/src/adapters/dlq-replay";
 import { requireAuth } from "./auth";
 import { isRole, requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";
@@ -17,6 +18,7 @@ import { WorkflowSchema } from "@workflow-engine/shared";
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
 let openai: OpenAI | null = null;
+const dlqReplay = new DLQReplayAdapter();
 
 type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
 
@@ -356,6 +358,22 @@ const server = http.createServer(async (req, res) => {
       const result = await resumeRun(runId, nodeId);
       await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
       return sendJson(res, result);
+    }
+
+    if (req.method === "POST" && req.url === "/dlq/replay") {
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const { runId, nodeId } = asRecord(await readJson(req));
+      if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      const version = await db.select().from(workflowVersions).where(eq(workflowVersions.id, run[0].workflowVersionId));
+      if (!version[0] || version[0].orgId !== auth.orgId) return sendJson(res, { error: "Workflow version not found" }, 404);
+      const workflow = WorkflowSchema.parse(version[0].dagJson);
+      const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+      if (!node) return sendJson(res, { error: "Node not found in workflow" }, 404);
+      await dlqReplay.replayDeadLetter({ runId, workflow, node });
+      await audit(auth.orgId, auth.userId, "dlq.replayed", "run", runId, { nodeId });
+      return sendJson(res, { ok: true });
     }
 
     return sendJson(res, { error: "Not found" }, 404);
