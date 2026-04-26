@@ -3,6 +3,8 @@ import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
 import { updateRoutingStats } from "@workflow-engine/data/src/routingStatsRepo";
+import { recordWorkflowImprovement } from "@workflow-engine/data/src/improvementsRepo";
+import { computeConfidence, shouldRollback } from "@workflow-engine/domain/src/improvementEngine";
 import type {
   ExecutionStore,
   QueueAdapter,
@@ -68,6 +70,7 @@ export class WorkflowRuntime {
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
+      await this.evaluateImprovement(runId, context);
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
       const durationMs = Date.now() - start;
@@ -99,6 +102,43 @@ export class WorkflowRuntime {
       logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
       await this.store.updateRunStatusFromNodes(runId);
       throw err;
+    }
+  }
+
+  private async evaluateImprovement(runId: string, context: Record<string, unknown>) {
+    const orgId = context?.orgId;
+    const workflowId = context?.workflowId;
+    if (typeof orgId !== "string" || typeof workflowId !== "string") return;
+
+    const beforeMetrics = (context?.metricsBefore ?? {}) as Record<string, unknown>;
+    const afterMetrics = (context?.metricsAfter ?? {}) as Record<string, unknown>;
+    const { confidence, status } = computeConfidence(beforeMetrics, afterMetrics);
+
+    await recordWorkflowImprovement({
+      orgId,
+      workflowId,
+      baseVersion: typeof context.baseVersion === "number" ? context.baseVersion : undefined,
+      newVersion: typeof context.newVersion === "number" ? context.newVersion : undefined,
+      action: context.improvementAction,
+      reason: "runtime_evaluation",
+      beforeMetrics,
+      afterMetrics,
+      confidence,
+      status,
+    });
+
+    await this.store.appendEvent(workflowEvent({
+      runId,
+      type: "improvement.evaluated",
+      payload: { workflowId, confidence, status },
+    }));
+
+    if (shouldRollback(confidence)) {
+      await this.store.appendEvent(workflowEvent({
+        runId,
+        type: "rollback.triggered",
+        payload: { workflowId, confidence, status },
+      }));
     }
   }
 
