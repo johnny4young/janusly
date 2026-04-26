@@ -630,3 +630,14 @@ Es:
 ```
 
 👉 Un verdadero sistema AI-first
+
+
+
+un test
+
+POST http://localhost:3001/ai/explain-run
+deberia responder con una explicación de lo que pasó en el run
+{
+  "runId": "test",
+  "question": "What happened?"
+}

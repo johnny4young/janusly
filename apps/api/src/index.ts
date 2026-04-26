@@ -1,6 +1,14 @@
+import OpenAI from "openai"
 // (only showing inserted routes section for brevity)
 
 import { listDeadLetters, getDeadLetter, markDeadLetterReplayed, markDeadLetterResolved } from "./dlq";
+
+if (process.env.OPENAI_API_KEY) {
+  globalThis.openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  })
+
+}
 
 // --- ADD BELOW OTHER ROUTES ---
 
