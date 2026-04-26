@@ -1,6 +1,23 @@
 import { db } from "@workflow-engine/db";
 import { runNodes, runEvents, runs } from "@workflow-engine/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
+
+export async function getRunStatus(runId: string) {
+  const rows = await db.select().from(runs).where(eq(runs.id, runId));
+  return rows[0]?.status ?? null;
+}
+
+export async function cancelRun(runId: string, reason?: any) {
+  await db.update(runs)
+    .set({ status: "cancelled" })
+    .where(eq(runs.id, runId));
+
+  await db.update(runNodes)
+    .set({ status: "cancelled", stateJson: { cancelled: reason ?? {} }, finishedAt: new Date() })
+    .where(and(eq(runNodes.runId, runId), inArray(runNodes.status, ["pending", "queued", "waiting"])));
+
+  await appendEvent(runId, null, "run.cancelled", reason ?? {});
+}
 
 export async function markNodeRunning(runId: string, nodeId: string, attempt = 1) {
   await db.update(runNodes)
@@ -39,6 +56,9 @@ export async function markNodeFailed(runId: string, nodeId: string, error: any) 
 }
 
 export async function updateRunStatusFromNodes(runId: string) {
+  const status = await getRunStatus(runId);
+  if (status === "cancelled") return "cancelled";
+
   const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId));
 
   if (nodes.some(node => node.status === "failed")) {
