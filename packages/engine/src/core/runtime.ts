@@ -87,6 +87,17 @@ export class WorkflowRuntime {
         return;
       }
 
+      // DLQ HANDLING
+      if (this.queue.enqueueDeadLetter) {
+        await this.queue.enqueueDeadLetter({
+          runId,
+          workflow: input.workflow,
+          node,
+          attempt,
+          error,
+        });
+      }
+
       await this.store.markNodeFailed(runId, node.id, error);
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.failed", payload: { error, attempt } }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
