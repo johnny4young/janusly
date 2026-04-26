@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, real } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
@@ -88,6 +88,18 @@ export const deadLetters = pgTable("dead_letters", {
   status: text("status").notNull().default("open"),
   replayedAt: timestamp("replayed_at"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const routingStats = pgTable("routing_stats", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull(),
+  nodeId: text("node_id").notNull(),
+  pulls: integer("pulls").notNull().default(0),
+  value: real("value").notNull().default(0),
+  meanReward: real("mean_reward").notNull().default(0),
+  successCount: integer("success_count").notNull().default(0),
+  failureCount: integer("failure_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const usageEvents = pgTable("usage_events", {
