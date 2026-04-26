@@ -8,6 +8,7 @@ export type WorkflowEventType =
   | "node.succeeded"
   | "node.failed"
   | "node.skipped"
+  | "decision.made"
   | "run.status_checked";
 
 export function workflowEvent(input: {
