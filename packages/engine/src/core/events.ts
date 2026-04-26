@@ -9,6 +9,9 @@ export type WorkflowEventType =
   | "node.failed"
   | "node.skipped"
   | "decision.made"
+  | "improvement.evaluated"
+  | "rollback.triggered"
+  | "rollback.completed"
   | "run.status_checked";
 
 export function workflowEvent(input: {
