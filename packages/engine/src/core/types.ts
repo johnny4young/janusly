@@ -23,6 +23,8 @@ export type SerializedError = {
   name?: string;
   stack?: string;
   cause?: unknown;
+  code?: string;
+  statusCode?: number;
 };
 
 export type RetryBackoffStrategy = "fixed" | "exponential";
@@ -30,7 +32,11 @@ export type RetryBackoffStrategy = "fixed" | "exponential";
 export type RetryPolicy = {
   maxAttempts?: number;
   delayMs?: number;
+  maxDelayMs?: number;
   backoff?: RetryBackoffStrategy;
+  jitter?: boolean;
+  retryOn?: string[];
+  ignoreOn?: string[];
 };
 
 export type RunContext = Record<string, unknown>;
@@ -74,6 +80,15 @@ export type EnqueueNodeInput = {
   workflow: Workflow;
   node: WorkflowNode;
   delayMs?: number;
+  attempt?: number;
+};
+
+export type DeadLetterInput = {
+  runId: string;
+  workflow: Workflow;
+  node: WorkflowNode;
+  attempt: number;
+  error: SerializedError;
 };
 
 export type EnqueueReadyNodesInput = {
@@ -84,8 +99,8 @@ export type EnqueueReadyNodesInput = {
 export interface ExecutionStore {
   getRunContext(runId: string): Promise<RunContext>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
-  markNodeQueued(runId: string, nodeId: string): Promise<void>;
-  markNodeRunning(runId: string, nodeId: string): Promise<void>;
+  markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
+  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<void>;
   markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
   markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;
   markNodeWaiting(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
@@ -96,6 +111,7 @@ export interface ExecutionStore {
 
 export interface QueueAdapter {
   enqueueNode(input: EnqueueNodeInput): Promise<void>;
+  enqueueDeadLetter?(input: DeadLetterInput): Promise<void>;
 }
 
 export interface NodeExecutorRegistry {
