@@ -1,10 +1,6 @@
 import http from "http";
 import OpenAI from "openai";
-import { startRun } from "@workflow-engine/engine/src/start-run";
-import { resumeRun } from "@workflow-engine/engine/src/resume-run";
-import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
-import { listTools } from "@workflow-engine/engine/src/tool-registry";
-import { getUsageSummary } from "@workflow-engine/engine/src/billing";
+import { startRun, resumeRun, validateWorkflow, listTools, getUsageSummary } from "@workflow-engine/engine";
 import { requireAuth } from "./auth";
 import { requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";

@@ -6,12 +6,16 @@ import { markNodeQueued, appendEvent } from "./persistence";
 export async function startRun(workflow: any) {
   const runId = crypto.randomUUID();
   const workflowVersionId = workflow.id;
+  const orgId = workflow.orgId ?? "default";
+  const createdBy = workflow.createdBy ?? null;
 
   await db.insert(runs).values({
     id: runId,
     workflowVersionId,
+    orgId,
     status: "running",
     inputJson: { workflow, input: workflow.input ?? {} },
+    createdBy,
   });
 
   for (const node of workflow.nodes) {

@@ -6,11 +6,12 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc --noEmit -p tsconfig.json",
     "dev": "tsc --noEmit --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test": "echo \"No tests configured\""
   },
   "dependencies": {
     "drizzle-orm": "^0.30.0",

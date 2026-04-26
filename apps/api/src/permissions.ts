@@ -15,7 +15,7 @@ export async function getMemberRole(orgId: string, userId: string): Promise<Role
     .from(orgMembers)
     .where(and(eq(orgMembers.orgId, orgId), eq(orgMembers.userId, userId)))
 
-  return (rows[0]?.role as Role | undefined) ?? 'admin'
+  return (rows[0]?.role as Role | undefined) ?? 'viewer'
 }
 
 export async function requireRole(orgId: string, userId: string, required: Role) {

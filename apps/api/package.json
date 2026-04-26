@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"No tests configured\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",

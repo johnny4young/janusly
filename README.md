@@ -1,157 +1,167 @@
 # Workflow Engine
 
-A production-oriented workflow engine designed for asynchronous, distributed execution of DAG-based workflows.
+Motor de workflows orientado a ejecución asíncrona y distribuida de DAGs.
 
 ---
 
-## Architecture Overview
+## Arquitectura del monorepo
 
-This system is built as a modular monorepo using a layered architecture:
-
-```
+```txt
 apps/
-  api        -> tRPC API (control plane)
-  worker     -> BullMQ workers (execution plane)
-  web        -> React Flow editor (UI)
+  api        -> API HTTP para control de workflows, ejecuciones, auth/roles
+  web        -> UI (Vite + React + React Flow)
 
 packages/
-  engine     -> Workflow runtime & execution engine
-  db         -> Drizzle ORM schema & DB client
-  shared     -> Types, contracts, schemas
+  db         -> esquema y cliente Drizzle/Postgres
+  engine     -> runtime de ejecución (scheduler, worker, validación)
+  shared     -> contratos/tipos compartidos
+```
+
+> Nota: anteriormente se referenciaba `apps/worker`, pero el worker vive en `packages/engine/src/worker.ts`.
+
+---
+
+## Requisitos
+
+- Node.js 22+
+- pnpm 8.15+
+- PostgreSQL
+- Redis
+- (Opcional) Supabase para auth real
+
+---
+
+## Variables de entorno
+
+Copia `.env.example` y completa valores:
+
+```bash
+cp .env.example .env
+```
+
+Variables principales:
+
+- `DATABASE_URL`: conexión a Postgres
+- `REDIS_URL`: conexión a Redis
+- `PORT`: puerto de API (default `3001`)
+- `OPENAI_API_KEY`: opcional para helpers de IA
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`: opcional para JWT vía Supabase
+- `API_SERVICE_TOKEN`: opcional para auth máquina-a-máquina
+- `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`: frontend
+
+---
+
+## Instalación
+
+```bash
+pnpm install
+```
+
+Si el entorno no permite descargar paquetes (red corporativa/proxy), usa el lockfile/cache corporativo o ejecuta la instalación dentro de tu red interna.
+
+---
+
+## Desarrollo local
+
+### Backend (API)
+
+```bash
+pnpm --filter @workflow-engine/api dev
+```
+
+### Worker
+
+```bash
+pnpm --filter @workflow-engine/engine dev
+```
+
+### Frontend (UI)
+
+```bash
+pnpm --filter @workflow-engine/web dev
 ```
 
 ---
 
-## Core Concepts
+## Build
 
-### Workflow
-A versioned Directed Acyclic Graph (DAG) describing execution logic.
-
-### Run
-An execution instance of a workflow version.
-
-### Node
-A unit of work (task, condition, webhook, approval).
-
-### Run Node
-Persisted execution state of each node inside a run.
-
-### Event Log
-Append-only log for debugging, auditing, and replay.
+```bash
+pnpm build
+```
 
 ---
 
-## Execution Model
+## Testing
 
-- Nodes are executed asynchronously using BullMQ.
-- Dependencies are resolved dynamically.
-- Execution is distributed across workers.
-- Each node execution is persisted (idempotent design).
-- Retries are handled automatically with exponential backoff.
+### Unit tests (engine/shared)
 
----
+```bash
+pnpm --filter @workflow-engine/shared test
+pnpm --filter @workflow-engine/engine test
+```
 
-## Data Model
+### UI smoke build (Vite)
 
-Main tables:
-
-- workflows
-- workflow_versions
-- runs
-- run_nodes
-- run_events
-
-### Key Decisions
-
-- Event sourcing-lite via `run_events`
-- Node-level persistence (not just run-level)
-- Explicit statuses for orchestration control
+```bash
+pnpm --filter @workflow-engine/web test
+```
 
 ---
 
-## Engine Responsibilities
+## Modelo y contratos principales
 
-The engine layer is responsible for:
+### Entidades
 
-- Scheduling nodes when dependencies are met
-- Executing tasks
-- Managing retries and failures
-- Handling pause/resume flows
-- Emitting execution events
+- `workflows`
+- `workflow_versions`
+- `runs`
+- `run_nodes`
+- `run_events`
+- `org_members`
+- `credentials`
+- `installed_plugins`
+- `audit_logs`
 
----
+### Contratos clave
 
-## Queue System
+- Workflow DAG: `id`, `nodes[]`, `edges[]`
+- Node: `id`, `type`, `config`
+- Edge: `from`, `to`, `condition?`
 
-- Powered by BullMQ
-- Redis-backed
-- Supports retries, backoff, concurrency control
-
----
-
-## Technical Stack
-
-- Node.js + TypeScript
-- BullMQ (queue system)
-- Redis (job orchestration)
-- Postgres (state persistence)
-- Drizzle ORM
-- tRPC
-- React Flow (UI)
+Validación en runtime: tipos soportados, ciclos, nodos duplicados, endpoints de edges, requisitos por tipo de nodo (`http.url`, `tool.tool`, etc.).
 
 ---
 
-## Design Goals
+## Roles y permisos
 
-- Deterministic execution
-- Horizontal scalability
-- Idempotent operations
-- Observability-first design
-- Extensibility (AI, rules, automation)
+Roles soportados:
 
----
+- `viewer`
+- `editor`
+- `admin`
 
-## Current Status
+Regla: `admin > editor > viewer`.
 
-### Implemented
+- `viewer`: lectura
+- `editor`: operar workflows/runs
+- `admin`: miembros, credenciales, plugins
 
-- Monorepo structure
-- Database schema (Drizzle)
-- Queue system (BullMQ)
-- Worker bootstrap
-
-### In Progress
-
-- Execution engine (scheduler + executor)
-- API layer (tRPC)
-- UI editor
+Principio aplicado: mínimo privilegio por defecto.
 
 ---
 
-## Next Steps
+## Estado actual
 
-- Implement execution engine (scheduler + DAG traversal)
-- Add run lifecycle management
-- Build API endpoints (start, resume, status)
-- Add observability (logs + timeline UI)
+Implementado:
 
----
+- API HTTP para workflows, runs, miembros, auditoría, plugins, credenciales
+- Motor base de ejecución y scheduler
+- UI editor con React Flow
+- Validación de workflows
+- Pruebas unitarias iniciales de contratos/validación
 
-## Future Enhancements
+Pendiente sugerido:
 
-- State machines (XState integration)
-- AI-driven nodes
-- Plugin system for tasks
-- Multi-tenant support
-- Distributed workers (Kubernetes-ready)
-
----
-
-## Philosophy
-
-This project aims to sit between:
-
-- n8n (ease of use)
-- Temporal (power and scalability)
-
-Delivering a flexible, developer-first workflow engine with strong execution guarantees.
+- integración e2e API + Worker + DB + Redis
+- pruebas de UI interactivas (Vitest + RTL)
+- versionado robusto de `workflowVersionId` al iniciar runs

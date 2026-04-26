@@ -6,8 +6,9 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsc --noEmit",
-    "dev": "tsx watch src/worker.ts"
+    "build": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx watch src/worker.ts",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts"
   },
   "dependencies": {
     "@workflow-engine/db": "workspace:*",
