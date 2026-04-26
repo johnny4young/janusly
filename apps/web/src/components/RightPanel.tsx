@@ -28,10 +28,16 @@ type RightPanelProps = {
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
   onApproveNode: (nodeId: string) => void
+  onReplayNode?: (nodeId: string) => void
 }
 
 export function RightPanel(props: RightPanelProps) {
-  if (props.tab === 'crew') return <PanelChrome title="Crew Timeline"><CrewTimeline events={props.events} /></PanelChrome>
+  if (props.tab === 'crew') return (
+    <PanelChrome title="Observability Timeline">
+      <CrewTimeline events={props.events} />
+      <ObservabilityPanel events={props.events} runNodes={props.runNodes} onReplayNode={props.onReplayNode} />
+    </PanelChrome>
+  )
   if (props.tab === 'workflows') return <PanelChrome title="Saved Workflows"><WorkflowsDashboard onOpen={props.onOpenWorkflow} /></PanelChrome>
   if (props.tab === 'members') return <PanelChrome title="Members"><MembersPanel /></PanelChrome>
   if (props.tab === 'inspector') return (
@@ -59,6 +65,7 @@ export function RightPanel(props: RightPanelProps) {
       onOpenRun={props.onOpenRun}
       onRefreshPlatform={props.onRefreshPlatform}
       onApproveNode={props.onApproveNode}
+      onReplayNode={props.onReplayNode}
     />
   )
   return <PanelChrome title="Reasoning"><ReasoningPanel events={props.events} /></PanelChrome>
@@ -73,6 +80,53 @@ function PanelChrome({ title, children }: { title: string; children: React.React
       </div>
       {children}
     </div>
+  )
+}
+
+function ObservabilityPanel({ events, runNodes, onReplayNode }: { events: RunEvent[]; runNodes: RunNode[]; onReplayNode?: (nodeId: string) => void }) {
+  const failedNodes = runNodes.filter(node => node.status === 'failed')
+  const retryCount = events.filter(event => event.type === 'node.retry').length
+  const failureCount = events.filter(event => event.type === 'node.failed').length
+  const visibleEvents = events.slice(-25).reverse()
+
+  return (
+    <section className="panel-card">
+      <div className="split-row">
+        <strong>Run observability</strong>
+        <span className="section-kicker">{events.length} events</span>
+      </div>
+      <div className="mini-grid">
+        <span>Retries: {retryCount}</span>
+        <span>Failures: {failureCount}</span>
+        <span>Failed nodes: {failedNodes.length}</span>
+      </div>
+
+      {failedNodes.length > 0 && (
+        <div className="panel-list">
+          {failedNodes.map(node => (
+            <div key={node.nodeId} className="list-card">
+              <div className="split-row" style={{ width: '100%' }}>
+                <strong>{node.nodeId}</strong>
+                <span className="status-pill" data-status="failed">failed</span>
+              </div>
+              <button className="small-command" onClick={() => onReplayNode?.(node.nodeId)}>Replay from DLQ</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="panel-list">
+        {visibleEvents.map(event => (
+          <div key={event.id} className="list-card">
+            <div className="split-row" style={{ width: '100%' }}>
+              <strong>{event.type}</strong>
+              <span>{event.nodeId ?? 'run'}</span>
+            </div>
+            <pre className="mini-pre">{JSON.stringify(event.payload ?? {}, null, 2)}</pre>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -228,8 +282,10 @@ function RunsPanel({
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
-}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode'>) {
+  onReplayNode,
+}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode'>) {
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
+  const failedNodes = runNodes.filter(node => node.status === 'failed')
 
   return (
     <PanelChrome title="Runs">
@@ -247,6 +303,17 @@ function RunsPanel({
           {waitingNodes.map(node => (
             <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
               Approve {node.nodeId}
+            </button>
+          ))}
+        </section>
+      )}
+
+      {failedNodes.length > 0 && (
+        <section className="panel-card">
+          <strong>Failed nodes</strong>
+          {failedNodes.map(node => (
+            <button key={node.nodeId} className="small-command" onClick={() => onReplayNode?.(node.nodeId)}>
+              Replay {node.nodeId}
             </button>
           ))}
         </section>
