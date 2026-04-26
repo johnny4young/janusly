@@ -25,6 +25,14 @@ export type SerializedError = {
   cause?: unknown;
 };
 
+export type RetryBackoffStrategy = "fixed" | "exponential";
+
+export type RetryPolicy = {
+  maxAttempts?: number;
+  delayMs?: number;
+  backoff?: RetryBackoffStrategy;
+};
+
 export type RunContext = Record<string, unknown>;
 
 export type WorkflowEvent = {
@@ -51,18 +59,21 @@ export type ExecuteNodeInput = {
   runId: string;
   node: WorkflowNode;
   context: RunContext;
+  attempt: number;
 };
 
 export type ExecuteQueuedNodeInput = {
   runId: string;
   workflow: Workflow;
   node: WorkflowNode;
+  attempt?: number;
 };
 
 export type EnqueueNodeInput = {
   runId: string;
   workflow: Workflow;
   node: WorkflowNode;
+  delayMs?: number;
 };
 
 export type EnqueueReadyNodesInput = {
