@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
     "@workflow-engine/db": "workspace:*",
     "@workflow-engine/shared": "workspace:*",
     "bullmq": "^5.76.2",
