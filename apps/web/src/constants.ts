@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+
 export const nodePresets: Record<string, Record<string, any>> = {
   http: { url: 'https://api.github.com' },
   noop: {},
@@ -25,7 +27,7 @@ export const nodePresets: Record<string, Record<string, any>> = {
 
 export const nodeTypes = Object.keys(nodePresets)
 
-export const statusStyles: Record<string, React.CSSProperties> = {
+export const statusStyles: Record<string, CSSProperties> = {
   pending: { border: '2px solid #94a3b8', background: '#f8fafc' },
   queued: { border: '2px solid #f59e0b', background: '#fffbeb' },
   running: { border: '2px solid #3b82f6', background: '#eff6ff' },

@@ -1,5 +1,5 @@
 import React from 'react'
-import ReactFlow, { Background, Controls } from '@xyflow/react'
+import { ReactFlow, Background, Controls } from '@xyflow/react'
 
 export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick }: any) {
   return (

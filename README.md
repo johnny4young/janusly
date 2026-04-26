@@ -1,157 +1,115 @@
 # Workflow Engine
 
-A production-oriented workflow engine designed for asynchronous, distributed execution of DAG-based workflows.
+Motor de workflows orientado a ejecución asíncrona y distribuida de DAGs, con API, worker y UI en un monorepo de PNPM.
 
 ---
 
-## Architecture Overview
+## Arquitectura
 
-This system is built as a modular monorepo using a layered architecture:
-
-```
+```txt
 apps/
-  api        -> tRPC API (control plane)
-  worker     -> BullMQ workers (execution plane)
-  web        -> React Flow editor (UI)
+  api        -> API HTTP (control plane)
+  web        -> UI React + Vite + React Flow
 
 packages/
-  engine     -> Workflow runtime & execution engine
-  db         -> Drizzle ORM schema & DB client
-  shared     -> Types, contracts, schemas
+  engine     -> runtime, scheduler, ejecutores y worker BullMQ
+  db         -> esquema y cliente Drizzle/Postgres
+  shared     -> contratos y validaciones compartidas
+```
+
+> Nota: el worker vive en `packages/engine/src/worker.ts` y se ejecuta con `pnpm --filter @workflow-engine/engine dev`.
+
+---
+
+## Requisitos
+
+- Node.js 20+
+- PNPM 8 (`corepack enable`)
+- Postgres 15+
+- Redis 7+
+
+---
+
+## Instalación local
+
+```bash
+pnpm install
+cp .env.example .env
+docker compose up -d redis postgres
+```
+
+Variables mínimas (`.env`):
+
+```env
+REDIS_URL=redis://localhost:6379
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/workflow
+WORKER_CONCURRENCY=10
+# opcional para auth real
+# SUPABASE_URL=...
+# SUPABASE_SERVICE_ROLE_KEY=...
 ```
 
 ---
 
-## Core Concepts
+## Ejecutar el proyecto
 
-### Workflow
-A versioned Directed Acyclic Graph (DAG) describing execution logic.
+En terminales separadas:
 
-### Run
-An execution instance of a workflow version.
+```bash
+pnpm --filter @workflow-engine/api dev
+pnpm --filter @workflow-engine/engine dev
+pnpm --filter @workflow-engine/web dev
+```
 
-### Node
-A unit of work (task, condition, webhook, approval).
+- API: `http://localhost:3001`
+- UI: `http://localhost:5173`
 
-### Run Node
-Persisted execution state of each node inside a run.
-
-### Event Log
-Append-only log for debugging, auditing, and replay.
+Si no configuras Supabase en el frontend, la UI entra en modo desarrollo y usa headers dev (`x-org-id`, `x-user-id`).
 
 ---
 
-## Execution Model
+## Validación rápida (backend + UI)
 
-- Nodes are executed asynchronously using BullMQ.
-- Dependencies are resolved dynamically.
-- Execution is distributed across workers.
-- Each node execution is persisted (idempotent design).
-- Retries are handled automatically with exponential backoff.
+```bash
+pnpm build
+pnpm test
+```
 
----
+Checks manuales útiles:
 
-## Data Model
-
-Main tables:
-
-- workflows
-- workflow_versions
-- runs
-- run_nodes
-- run_events
-
-### Key Decisions
-
-- Event sourcing-lite via `run_events`
-- Node-level persistence (not just run-level)
-- Explicit statuses for orchestration control
+- `GET /tools` en API.
+- `POST /validate` con un DAG.
+- Desde la UI: validar workflow, guardar versión y correr un run.
 
 ---
 
-## Engine Responsibilities
+## Roles y permisos
 
-The engine layer is responsible for:
+- `viewer`: lectura.
+- `editor`: puede validar, guardar workflows y ejecutar/resumir runs.
+- `admin`: gestión de miembros, plugins y credenciales.
 
-- Scheduling nodes when dependencies are met
-- Executing tasks
-- Managing retries and failures
-- Handling pause/resume flows
-- Emitting execution events
+La API valida permisos por organización con `org_members`.
 
 ---
 
-## Queue System
+## Estado actual
 
-- Powered by BullMQ
-- Redis-backed
-- Supports retries, backoff, concurrency control
+### Implementado
 
----
+- Persistencia en Postgres (workflows, versiones, runs, eventos, membresías, auditoría).
+- Cola BullMQ + worker.
+- Validación de workflows (nodos, edges, ciclos, nodo de inicio).
+- UI de edición, historial, miembros y timeline de ejecución.
 
-## Technical Stack
+### En progreso
 
-- Node.js + TypeScript
-- BullMQ (queue system)
-- Redis (job orchestration)
-- Postgres (state persistence)
-- Drizzle ORM
-- tRPC
-- React Flow (UI)
+- Endpoints tRPC completos (hoy coexisten rutas HTTP directas).
+- Harden de expresiones condicionales y sandboxing.
 
 ---
 
-## Design Goals
+## Testing
 
-- Deterministic execution
-- Horizontal scalability
-- Idempotent operations
-- Observability-first design
-- Extensibility (AI, rules, automation)
-
----
-
-## Current Status
-
-### Implemented
-
-- Monorepo structure
-- Database schema (Drizzle)
-- Queue system (BullMQ)
-- Worker bootstrap
-
-### In Progress
-
-- Execution engine (scheduler + executor)
-- API layer (tRPC)
-- UI editor
-
----
-
-## Next Steps
-
-- Implement execution engine (scheduler + DAG traversal)
-- Add run lifecycle management
-- Build API endpoints (start, resume, status)
-- Add observability (logs + timeline UI)
-
----
-
-## Future Enhancements
-
-- State machines (XState integration)
-- AI-driven nodes
-- Plugin system for tasks
-- Multi-tenant support
-- Distributed workers (Kubernetes-ready)
-
----
-
-## Philosophy
-
-This project aims to sit between:
-
-- n8n (ease of use)
-- Temporal (power and scalability)
-
-Delivering a flexible, developer-first workflow engine with strong execution guarantees.
+- Se incluye base de pruebas unitarias en frontend con **Vitest** (ecosistema Vite).
+- Recomendación siguiente: agregar pruebas unitarias en `packages/engine` para scheduler/validación/templating.

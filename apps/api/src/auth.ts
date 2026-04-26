@@ -1,10 +1,12 @@
 import http from "http";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
 
 export type AuthContext = {
   orgId: string;
@@ -15,9 +17,8 @@ export type AuthContext = {
 export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | null> {
   const authHeader = req.headers.authorization;
 
-  if (authHeader?.startsWith("Bearer ")) {
+  if (supabase && authHeader?.startsWith("Bearer ")) {
     const token = authHeader.replace("Bearer ", "");
-
     const { data, error } = await supabase.auth.getUser(token);
 
     if (!error && data?.user) {

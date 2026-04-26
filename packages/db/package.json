@@ -10,7 +10,8 @@
     "dev": "tsc --noEmit --watch",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test": "echo \"No tests yet\""
   },
   "dependencies": {
     "drizzle-orm": "^0.30.0",
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "drizzle-kit": "^0.20.14",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@types/node": "^22.10.2"
   }
 }
