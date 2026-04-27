@@ -11,6 +11,8 @@ export const nodePresets: Record<string, JsonObject> = {
   ai: { provider: 'mock', prompt: 'Summarize this workflow using {{context}}' },
   tool: { tool: 'text.uppercase', input: { value: 'hello' } },
   agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 },
+  router: { candidates: [{ nodeId: 'fast_path', avgCost: 0.001, avgLatencyMs: 500, successRate: 0.9 }] },
+  router_llm: { candidates: [{ nodeId: 'accurate_path', avgCost: 0.01, avgLatencyMs: 1500, successRate: 0.98 }] },
   loop: { items: 'a,b,c', mapping: { value: '{{item}}', index: '{{index}}' } },
   agent_reflection: { input: '{{context.agent.output}}' },
   multi_agent: {

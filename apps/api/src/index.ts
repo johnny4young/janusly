@@ -6,24 +6,61 @@ import { resumeRun } from "@workflow-engine/engine/src/resume-run";
 import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
 import { listTools } from "@workflow-engine/engine/src/tool-registry";
 import { getUsageSummary } from "@workflow-engine/engine/src/billing";
+import { DLQReplayAdapter } from "@workflow-engine/engine/src/adapters/dlq-replay";
+import { explainRun } from "@workflow-engine/ai";
+import { replayDecision, type DecisionCandidate } from "@workflow-engine/domain";
 import { requireAuth } from "./auth";
 import { isRole, requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";
 import { db } from "@workflow-engine/db";
-import { workflows, workflowVersions, runs, runNodes, runEvents, credentials, installedPlugins, auditLogs, orgMembers } from "@workflow-engine/db";
+import {
+  workflows,
+  workflowVersions,
+  runs,
+  runNodes,
+  runEvents,
+  credentials,
+  installedPlugins,
+  auditLogs,
+  orgMembers,
+} from "@workflow-engine/db";
 import { eq, desc, asc, and, gt } from "drizzle-orm";
-import { WorkflowSchema } from "@workflow-engine/shared";
+import { NodeSchema, WorkflowSchema } from "@workflow-engine/shared";
+import {
+  getDeadLetter,
+  listDeadLetters,
+  markDeadLetterReplayed,
+  markDeadLetterResolved,
+} from "./dlq";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
+const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 let openai: OpenAI | null = null;
 
 type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
 
+const dlqReplay = new DLQReplayAdapter();
+
 function getOpenAIClient() {
   if (!process.env.OPENAI_API_KEY) return null;
-  openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  openai ??= new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: OPENAI_TIMEOUT_MS,
+    maxRetries: OPENAI_MAX_RETRIES,
+  });
   return openai;
+}
+
+function aiStatus() {
+  return {
+    enabled: Boolean(process.env.OPENAI_API_KEY),
+    model: OPENAI_MODEL,
+    timeoutMs: OPENAI_TIMEOUT_MS,
+    maxRetries: OPENAI_MAX_RETRIES,
+  };
 }
 
 function httpError(message: string, statusCode: number) {
@@ -107,6 +144,29 @@ async function readJson(req: http.IncomingMessage) {
 
 function asRecord(value: unknown) {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function asNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function decisionCandidatesFromPayload(payload: unknown): DecisionCandidate[] {
+  const record = asRecord(payload);
+  const ranking = Array.isArray(record.ranking) ? record.ranking : [];
+
+  return ranking.flatMap(item => {
+    const candidate = asRecord(item);
+    const breakdown = asRecord(candidate.breakdown);
+    const nodeId = typeof candidate.nodeId === "string" ? candidate.nodeId : "";
+    if (!nodeId) return [];
+
+    return [{
+      nodeId,
+      avgCost: asNumber(breakdown.cost),
+      avgLatencyMs: asNumber(breakdown.latency),
+      successRate: asNumber(breakdown.quality),
+    }];
+  });
 }
 
 async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: unknown = {}) {
@@ -264,24 +324,81 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/validate") return sendJson(res, validateWorkflow(await readJson(req)));
 
     // AI helpers
+    if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
+
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
       const { prompt } = asRecord(await readJson(req));
       const client = getOpenAIClient();
-      if (!client) return sendJson(res, workflowTemplates[0]?.workflow ?? {});
-      const response = await client.responses.create({ model: "gpt-4o-mini", input: [{ role: "system", content: "Generate only valid JSON for a workflow DAG. Shape: {id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, ai, approval, webhook, noop." }, { role: "user", content: String(prompt ?? "") }], text: { format: { type: "json_object" } } });
+      if (!client) {
+        return sendJson(res, {
+          mode: "fallback",
+          ...(workflowTemplates[0]?.workflow ?? {}),
+        });
+      }
       try {
-        return sendJson(res, JSON.parse(response.output_text || "{}"));
-      } catch {
-        return sendJson(res, { error: "AI returned invalid JSON" }, 502);
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: [
+            {
+              role: "system",
+              content: "Generate only valid JSON for a workflow DAG. Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, router, router_llm, ai, approval, webhook, noop.",
+            },
+            { role: "user", content: String(prompt ?? "") },
+          ],
+          text: { format: { type: "json_object" } },
+        });
+        const parsed = JSON.parse(response.output_text || "{}");
+        return sendJson(res, { mode: "ai", ...parsed });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
       }
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
       const { workflow } = asRecord(await readJson(req));
       const client = getOpenAIClient();
-      if (!client) return sendJson(res, { explanation: "This workflow contains nodes connected by edges and can be executed by the engine." });
-      const response = await client.responses.create({ model: "gpt-4o-mini", input: `Explain this workflow clearly: ${JSON.stringify(workflow)}` });
-      return sendJson(res, { explanation: response.output_text });
+      if (!client) {
+        return sendJson(res, {
+          mode: "fallback",
+          explanation: "This workflow contains nodes connected by edges and can be executed by the engine. Configure OPENAI_API_KEY in .env to enable AI-generated explanations.",
+        });
+      }
+      try {
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+        });
+        return sendJson(res, { mode: "ai", explanation: response.output_text });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
+      }
+    }
+
+    if (req.method === "POST" && req.url === "/ai/explain-run") {
+      const { runId, question } = asRecord(await readJson(req));
+      if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
+
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
+
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
+      try {
+        const result = await explainRun({
+          openai: getOpenAIClient() ?? undefined,
+          run: run[0],
+          events,
+          question: typeof question === "string" ? question : undefined,
+        });
+        return sendJson(res, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
+      }
     }
 
     // Runs
@@ -356,6 +473,93 @@ const server = http.createServer(async (req, res) => {
       const result = await resumeRun(runId, nodeId);
       await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
       return sendJson(res, result);
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/causal")) {
+      const url = new URL(req.url, "http://localhost");
+      const runId = url.searchParams.get("runId");
+      const nodeId = url.searchParams.get("nodeId");
+      if (!runId || !nodeId) return sendJson(res, { error: "runId and nodeId are required" }, 400);
+
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
+      const decisionEvent = events.find(event => event.type === "decision.made" && event.nodeId === nodeId);
+      if (!decisionEvent) return sendJson(res, { error: "No decision event" }, 404);
+
+      const payload = asRecord(decisionEvent.payload);
+      const result = replayDecision({
+        chosenNodeId: typeof payload.chosenNodeId === "string" ? payload.chosenNodeId : undefined,
+        candidates: decisionCandidatesFromPayload(payload),
+        strategy: "auto",
+      });
+
+      return sendJson(res, result);
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/dlq")) {
+      const url = new URL(req.url, "http://localhost");
+      const id = url.searchParams.get("id");
+      const status = url.searchParams.get("status");
+
+      if (id) {
+        const item = await getDeadLetter(auth.orgId, id);
+        if (!item) return sendJson(res, { error: "Not found" }, 404);
+        return sendJson(res, item);
+      }
+
+      return sendJson(res, await listDeadLetters(auth.orgId, status));
+    }
+
+    if (req.method === "POST" && req.url === "/dlq/resolve") {
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const { id } = asRecord(await readJson(req));
+      if (typeof id !== "string") return sendJson(res, { error: "id is required" }, 400);
+
+      await markDeadLetterResolved(auth.orgId, id);
+      await audit(auth.orgId, auth.userId, "dlq.resolved", "dlq", id);
+
+      return sendJson(res, { ok: true });
+    }
+
+    if (req.method === "POST" && req.url === "/dlq/replay") {
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      const body = asRecord(await readJson(req));
+
+      if (typeof body.deadLetterId === "string") {
+        const item = await getDeadLetter(auth.orgId, body.deadLetterId);
+        if (!item) return sendJson(res, { error: "Not found" }, 404);
+
+        await dlqReplay.replayDeadLetter({
+          runId: item.runId,
+          workflow: WorkflowSchema.parse(item.workflowJson),
+          node: NodeSchema.parse(item.nodeJson),
+        });
+
+        await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
+        await audit(auth.orgId, auth.userId, "dlq.replayed", "dlq", body.deadLetterId);
+
+        return sendJson(res, { ok: true });
+      }
+
+      const { runId, nodeId } = body;
+      if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
+
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+
+      const version = await db.select().from(workflowVersions).where(eq(workflowVersions.id, run[0].workflowVersionId));
+      if (!version[0] || version[0].orgId !== auth.orgId) return sendJson(res, { error: "Workflow version not found" }, 404);
+
+      const workflow = WorkflowSchema.parse(version[0].dagJson);
+      const node = workflow.nodes.find(candidate => candidate.id === nodeId);
+      if (!node) return sendJson(res, { error: "Node not found in workflow" }, 404);
+
+      await dlqReplay.replayDeadLetter({ runId, workflow, node });
+      await audit(auth.orgId, auth.userId, "dlq.replayed", "run", runId, { nodeId });
+
+      return sendJson(res, { ok: true });
     }
 
     return sendJson(res, { error: "Not found" }, 404);

@@ -9,6 +9,7 @@ import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
 import { statusStyles } from './constants'
+import type { DeadLetter } from './components/DeadLettersPanel'
 import type { Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 
 type StatusResponse = {
@@ -78,6 +79,7 @@ export default function App() {
   const [templates, setTemplates] = useState<Template[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [runs, setRuns] = useState<RunSummary[]>([])
+  const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
 
   useEffect(() => {
@@ -103,11 +105,12 @@ export default function App() {
   }, [clearAuth, setAuth, setAuthReady])
 
   const refreshPlatform = useCallback(async () => {
-    const [toolData, templateData, credentialData, runData, usageData] = await Promise.allSettled([
+    const [toolData, templateData, credentialData, runData, deadLetterData, usageData] = await Promise.allSettled([
       api('/tools'),
       api('/templates'),
       api('/credentials'),
       api('/runs'),
+      api('/dlq'),
       api('/billing/usage'),
     ])
 
@@ -115,6 +118,7 @@ export default function App() {
     if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
     if (credentialData.status === 'fulfilled') setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
     if (runData.status === 'fulfilled') setRuns(Array.isArray(runData.value) ? runData.value : [])
+    if (deadLetterData.status === 'fulfilled') setDeadLetters(Array.isArray(deadLetterData.value) ? deadLetterData.value : [])
     if (usageData.status === 'fulfilled' && usageData.value && typeof usageData.value === 'object') {
       setUsage(usageData.value as Record<string, number>)
     }
@@ -193,9 +197,9 @@ export default function App() {
           borderRadius: 10,
           padding: 11,
           boxShadow: isSelected
-            ? '0 0 0 3px rgba(79, 70, 229, 0.28)'
+            ? '0 0 0 3px var(--we-primary-ring)'
             : '0 10px 24px -14px rgba(15, 23, 42, 0.18)',
-          ...(hasValidationError ? { border: '1.5px solid #ef4444', background: '#fef2f2' } : statusStyles[status] ?? statusStyles.pending),
+          ...(hasValidationError ? { border: '1.5px solid var(--we-danger)', background: 'var(--we-danger-soft)' } : statusStyles[status] ?? statusStyles.pending),
         },
       }
     })
@@ -207,7 +211,7 @@ export default function App() {
       animated: Boolean(edge.data?.condition),
       label: edge.data?.condition ? 'condition' : edge.label,
       style: {
-        stroke: selectedEdgeId === edge.id ? '#4f46e5' : '#94a3b8',
+        stroke: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
         strokeWidth: selectedEdgeId === edge.id ? 2.5 : 1.5,
       },
     }))
@@ -315,6 +319,52 @@ export default function App() {
     }
   }, [addToast, loadStatus, runId])
 
+  const replayNode = useCallback(async (nodeId: string) => {
+    if (!runId) return
+
+    try {
+      await api('/dlq/replay', {
+        method: 'POST',
+        body: JSON.stringify({ runId, nodeId }),
+      })
+      await loadStatus(runId)
+      bumpPlatformVersion()
+      await refreshPlatform()
+      addToast(`Node ${nodeId} replayed`, 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Replay failed', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
+
+  const replayDeadLetter = useCallback(async (deadLetterId: string) => {
+    try {
+      await api('/dlq/replay', {
+        method: 'POST',
+        body: JSON.stringify({ deadLetterId }),
+      })
+      if (runId) await loadStatus(runId)
+      bumpPlatformVersion()
+      await refreshPlatform()
+      addToast('Dead letter replayed', 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Dead letter replay failed', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
+
+  const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
+    try {
+      await api('/dlq/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ id: deadLetterId }),
+      })
+      bumpPlatformVersion()
+      await refreshPlatform()
+      addToast('Dead letter resolved', 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Dead letter resolve failed', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, refreshPlatform])
+
   const updateEdgeCondition = useCallback((edgeId: string, condition: string) => {
     setEdges(edges.map(edge => edge.id === edgeId
       ? { ...edge, data: { ...(edge.data ?? {}), condition: condition || undefined }, label: condition ? 'condition' : undefined }
@@ -322,7 +372,7 @@ export default function App() {
     ))
   }, [edges, setEdges])
 
-  if (!authReady) return <div className="boot-screen">Loading Workflow Engine…</div>
+  if (!authReady) return <div className="boot-screen">Loading Cortex…</div>
   if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
 
   return (
@@ -330,9 +380,9 @@ export default function App() {
       header={
         <>
           <div className="brand-lockup">
-            <span className="brand-mark">WE</span>
+            <span className="brand-mark">CX</span>
             <div>
-              <strong>Workflow Engine</strong>
+              <strong>Cortex</strong>
               <span>{currentWorkflowId} / {orgId ?? 'default'}</span>
             </div>
           </div>
@@ -385,6 +435,8 @@ export default function App() {
           templates={templates}
           credentials={credentials}
           runs={runs}
+          activeRunId={runId}
+          deadLetters={deadLetters}
           usage={usage}
           onOpenWorkflow={openWorkflow}
           onUseTemplate={(workflow) => {
@@ -400,6 +452,9 @@ export default function App() {
           onUpdateNodeType={updateSelectedNodeType}
           onUpdateEdgeCondition={updateEdgeCondition}
           onApproveNode={approveNode}
+          onReplayNode={replayNode}
+          onReplayDeadLetter={replayDeadLetter}
+          onResolveDeadLetter={resolveDeadLetter}
         />
       }
     />

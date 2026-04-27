@@ -1,16 +1,20 @@
-# Agent Notes
+# Agent Notes — Cortex
 
-- Stack baselines: Node.js **24** (`engines.node` enforced), TypeScript 6, React 19, Vite 8 (Rolldown), Tailwind 4 (CSS-first via `@theme` + `@tailwindcss/vite`), Vitest 4, Zod 4, Drizzle 0.45, Postgres 18, Redis 8.
-- Before UI/React changes activate `frontend-design` and `typescript-react-reviewer`; keep the app usable from the first viewport and validate the flow in a browser.
-- Before Node.js backend, worker, queue, or runtime changes activate `node`; for auth, CORS, request handling, secrets, or SSRF changes also activate `security-best-practices`.
-- Design system: Workflow Engine palette (Indigo `#4F46E5` + Cyan `#06B6D4` + green/amber/red status tones). Tokens declared in `apps/web/src/index.css` (`@theme { --color-we-*: ... }` + `:root` aliases for component CSS). Don't introduce inline hex values; use the tokens.
-- Tailwind 4 is CSS-first: there is **no** `tailwind.config.ts` or `postcss.config.js`. Theme lives inside `@theme {}`, plugin runs through `@tailwindcss/vite` in `apps/web/vite.config.ts`.
-- Vite 8 uses Rolldown — `build.rollupOptions.output.manualChunks` must be a function, not an object literal.
-- Zod 4: `z.record(...)` requires both key and value schemas (`z.record(z.string(), z.unknown())`).
-- Auth: dev mode without Supabase uses `x-org-id` and `x-user-id` headers. When Supabase is configured, the API requires a Bearer JWT unless `ALLOW_DEV_AUTH_HEADERS=true`.
-- HTTP/SSRF: `ALLOW_PRIVATE_HTTP_TARGETS=false` by default blocks localhost, private ranges, and link-local for `http` nodes and the `http.request` tool.
-- `pnpm test` runs Vitest 4 in shared, engine, and web (jsdom + Testing Library). `pnpm test:e2e` boots Postgres/Redis via Docker Compose, starts API and worker, lets Playwright bring up the UI, and shuts Compose down on exit.
-- If Docker Compose was started during a task, run `docker compose down` before finishing unless the user explicitly asks to keep services up.
-- Cross-panel reactivity: when an action invalidates server data (save, run start, run finished, member invite/remove), call `bumpPlatformVersion()` on the Zustand store. Independent panels (WorkflowsDashboard, VersionHistoryPanel, MembersPanel) listen to it as an effect dep.
-- Don't reintroduce Stripe or the deleted tRPC stub; the API is plain HTTP. Migration to tRPC must be a complete iteration.
-- `CLAUDE.md` is a symlink to this file. Edit here; don't break the symlink.
+Cortex = the AI operator for business workflows. The repo is named `workflow-engine` for legacy/package reasons; the **product** is Cortex. Everywhere user-facing (UI brand-mark, page titles, marketing copy, `/ai/*` responses) say **Cortex**. The `@workflow-engine/*` package names stay unchanged — refactoring those is a separate, intentional task.
+
+- **Stack baselines:** Node.js **24**, TypeScript 6, React 19, Vite 8 (Rolldown), Tailwind 4 (CSS-first via `@theme` + `@tailwindcss/vite`), Vitest 4, Zod 4, Drizzle 0.45, Postgres 18, Redis 8, OpenAI SDK 6.
+- **Design system:** Workflow palette (Indigo `#4F46E5` + Cyan `#06B6D4` + green/amber/red status). Tokens in `apps/web/src/index.css` (`@theme { --color-we-* }` + `:root` aliases). No inline hex.
+- **Tailwind 4 is CSS-first.** No `tailwind.config.ts` or `postcss.config.js`. The plugin runs through `@tailwindcss/vite()` in `apps/web/vite.config.ts`.
+- **Vite 8 / Rolldown:** `build.rollupOptions.output.manualChunks` must be a function, not an object literal.
+- **Zod 4:** `z.record(z.string(), z.unknown())` — two-arg form.
+- **Auth:** dev-mode uses `x-org-id` and `x-user-id` headers. With Supabase configured, the API requires a Bearer JWT unless `ALLOW_DEV_AUTH_HEADERS=true`.
+- **HTTP/SSRF:** `ALLOW_PRIVATE_HTTP_TARGETS=false` blocks localhost/private/link-local for `http` nodes and the `http.request` tool.
+- **AI integration:** `OPENAI_API_KEY` enables `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run`, and the `agent` planner `"openai"`. Every AI path has a deterministic fallback — calls return `{ mode: "ai" | "fallback" | "error" }`. Never break the fallback. `GET /ai/health` is the source of truth for "is AI live?".
+- **Decision engine / RL:** `packages/domain` is pure logic, no I/O. `packages/data` owns the drizzle repos. Don't put DB queries in `domain`; don't put scoring logic in `data`.
+- **Causal reasoning:** runs without an LLM. Always available.
+- **Cross-panel reactivity:** when an action invalidates server data (save, run start, terminal run, member invite/remove, DLQ replay), call `bumpPlatformVersion()` on the Zustand store. Independent panels listen to it as an effect dep.
+- **DLQ:** every failed node beyond `retryPolicy.maxAttempts` lands in `dead_letters`. Replay via `POST /dlq/replay`. The Operations card in Runs surfaces counts and filters.
+- **Tests:** `pnpm test` runs Vitest 4 in shared, engine, ai, domain, and web (jsdom + Testing Library). `pnpm test:e2e` boots Postgres/Redis via Compose, starts API + worker, lets Playwright bring up the UI, shuts Compose down on exit.
+- **Compose lifecycle:** if a task started Compose, run `docker compose down` before finishing unless told otherwise.
+- **Don't reintroduce** the deleted tRPC stub or Stripe SDK; the API is plain HTTP, billing schema columns are placeholders.
+- **`CLAUDE.md`** is a symlink to this file. Edit here; don't break the symlink.

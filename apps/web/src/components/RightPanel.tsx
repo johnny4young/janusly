@@ -4,6 +4,8 @@ import { CrewTimeline } from '../CrewTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
+import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
+import { RunExplainChat } from './RunExplainChat'
 import { nodeTypes } from '../constants'
 
 type RightPanelProps = {
@@ -17,6 +19,8 @@ type RightPanelProps = {
   templates: Template[]
   credentials: Credential[]
   runs: RunSummary[]
+  activeRunId?: string | null
+  deadLetters: DeadLetter[]
   usage: Record<string, number>
   onOpenWorkflow: (id: string) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
@@ -28,6 +32,9 @@ type RightPanelProps = {
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
   onApproveNode: (nodeId: string) => void
+  onReplayNode: (nodeId: string) => void
+  onReplayDeadLetter: (id: string) => void
+  onResolveDeadLetter: (id: string) => void
 }
 
 export function RightPanel(props: RightPanelProps) {
@@ -56,9 +63,14 @@ export function RightPanel(props: RightPanelProps) {
       runs={props.runs}
       usage={props.usage}
       runNodes={props.runNodes}
+      activeRunId={props.activeRunId}
+      deadLetters={props.deadLetters}
       onOpenRun={props.onOpenRun}
       onRefreshPlatform={props.onRefreshPlatform}
       onApproveNode={props.onApproveNode}
+      onReplayNode={props.onReplayNode}
+      onReplayDeadLetter={props.onReplayDeadLetter}
+      onResolveDeadLetter={props.onResolveDeadLetter}
     />
   )
   return <PanelChrome title="Reasoning"><ReasoningPanel events={props.events} /></PanelChrome>
@@ -225,11 +237,17 @@ function RunsPanel({
   runs,
   usage,
   runNodes,
+  activeRunId,
+  deadLetters,
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
-}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode'>) {
+  onReplayNode,
+  onReplayDeadLetter,
+  onResolveDeadLetter,
+}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
+  const failedNodes = runNodes.filter(node => node.status === 'failed')
 
   return (
     <PanelChrome title="Runs">
@@ -251,6 +269,26 @@ function RunsPanel({
           ))}
         </section>
       )}
+
+      {failedNodes.length > 0 && (
+        <section className="panel-card">
+          <strong>Failed nodes</strong>
+          {failedNodes.map(node => (
+            <button key={node.nodeId} className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+              Replay {node.nodeId}
+            </button>
+          ))}
+        </section>
+      )}
+
+      <RunExplainChat runId={activeRunId} />
+
+      <DeadLettersPanel
+        deadLetters={deadLetters}
+        onRefresh={onRefreshPlatform}
+        onReplay={onReplayDeadLetter}
+        onResolve={onResolveDeadLetter}
+      />
 
       <div className="panel-list">
         {runs.length === 0 && <p className="empty-state">No runs yet. Press Run to execute the current workflow.</p>}
