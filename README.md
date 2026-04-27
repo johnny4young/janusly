@@ -1,14 +1,14 @@
-# Cortex
+# Janusly
 
 > The AI operator for your business workflows.
 
-Cortex turns business processes into observable, learning DAGs. It runs them on a BullMQ worker, decides routes with a built-in decision engine + RL adjustments, rolls back when confidence drops, and explains every run in natural language. With an OpenAI key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → rollback → conversational explainability. Without one, every deterministic path still works.
+Janusly turns business processes into observable, learning DAGs. It runs them on a BullMQ worker, decides routes with a built-in decision engine + RL adjustments, rolls back when confidence drops, and explains every run in natural language. With an OpenAI key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → rollback → conversational explainability. Without one, every deterministic path still works.
 
 > Design system: **Electric Indigo** (`#4F46E5`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
 
 ---
 
-## What Cortex does
+## What Janusly does
 
 - **Plan**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`).
 - **Run**: execute it on a Postgres-backed runtime + BullMQ workers, with retries, dead-letter queue, timeouts.
@@ -36,7 +36,7 @@ packages/
   shared     -> Zod 4 contracts for the workflow DSL
 ```
 
-The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter @workflow-engine/engine dev`.
+The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter @janusly/engine dev`.
 
 ---
 
@@ -79,16 +79,16 @@ pnpm install
 docker compose up -d redis postgres
 
 # 3. Start the API in one terminal
-pnpm --filter @workflow-engine/api dev      # http://localhost:3001
+pnpm --filter @janusly/api dev      # http://localhost:3001
 
 # 4. Start the worker in another terminal
-pnpm --filter @workflow-engine/engine dev
+pnpm --filter @janusly/engine dev
 
 # 5. Start the UI in a third terminal
-pnpm --filter @workflow-engine/web dev      # http://localhost:5173
+pnpm --filter @janusly/web dev      # http://localhost:5173
 ```
 
-Open <http://localhost:5173> — Cortex signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an OpenAI key — see [§ AI](#ai-cortex-as-an-ai-operator).
+Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an OpenAI key — see [§ AI](#ai-janusly-as-an-ai-operator).
 
 When you're done:
 
@@ -124,7 +124,7 @@ curl -s "http://localhost:3001/run?runId=$RUNID" \
 
 ---
 
-## AI: Cortex as an AI operator
+## AI: Janusly as an AI operator
 
 The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summary:
 
@@ -142,7 +142,7 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 ```bash
 cp .env.example .env
 echo "OPENAI_API_KEY=sk-xxxxxxxxxxxx" >> .env
-pnpm --filter @workflow-engine/api dev    # restart
+pnpm --filter @janusly/api dev    # restart
 curl -s http://localhost:3001/ai/health -H "x-org-id: default" -H "x-user-id: dev-user"
 ```
 
@@ -263,5 +263,5 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 pnpm test               # full unit test suite (96 tests)
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
-pnpm --filter @workflow-engine/web test:watch   # Vitest watch
+pnpm --filter @janusly/web test:watch   # Vitest watch
 ```

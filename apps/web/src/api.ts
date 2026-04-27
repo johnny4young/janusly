@@ -13,7 +13,12 @@ export async function api(path: string, options: RequestInit = {}) {
     ...(options.headers ?? {})
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers })
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...options, headers })
+  } catch {
+    throw new Error('Janusly API is offline. Start the API and refresh this view.')
+  }
   const payload = await res.json().catch(() => ({}))
 
   if (!res.ok) {

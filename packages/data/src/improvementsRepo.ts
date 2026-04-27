@@ -1,4 +1,4 @@
-import { db, workflowImprovements } from "@workflow-engine/db";
+import { db, workflowImprovements } from "@janusly/db";
 import { desc, eq, and } from "drizzle-orm";
 
 export type WorkflowMetrics = {

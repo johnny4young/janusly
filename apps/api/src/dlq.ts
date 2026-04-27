@@ -1,5 +1,5 @@
-import { db } from "@workflow-engine/db";
-import { deadLetters } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { deadLetters } from "@janusly/db";
 import { eq, desc, and } from "drizzle-orm";
 
 export async function listDeadLetters(orgId: string, status?: string | null) {

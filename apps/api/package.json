@@ -1,5 +1,5 @@
 {
-  "name": "@workflow-engine/api",
+  "name": "@janusly/api",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -10,12 +10,12 @@
     "test": "tsc --noEmit"
   },
   "dependencies": {
-    "@workflow-engine/ai": "workspace:*",
+    "@janusly/ai": "workspace:*",
     "@supabase/supabase-js": "^2.104.1",
-    "@workflow-engine/db": "workspace:*",
-    "@workflow-engine/domain": "workspace:*",
-    "@workflow-engine/engine": "workspace:*",
-    "@workflow-engine/shared": "workspace:*",
+    "@janusly/db": "workspace:*",
+    "@janusly/domain": "workspace:*",
+    "@janusly/engine": "workspace:*",
+    "@janusly/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "openai": "^6.34.0",
     "zod": "^4.3.6"

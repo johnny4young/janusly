@@ -1,6 +1,6 @@
 import { trace, context } from "@opentelemetry/api";
 
-export const tracer = trace.getTracer("workflow-engine");
+export const tracer = trace.getTracer("janusly");
 
 export function withSpan<T>(name: string, fn: () => Promise<T>, attrs?: Record<string, any>): Promise<T> {
   const span = tracer.startSpan(name);

@@ -1,5 +1,5 @@
-import { db } from "@workflow-engine/db";
-import { usageEvents } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { usageEvents } from "@janusly/db";
 import { eq } from "drizzle-orm";
 
 export async function trackUsage(orgId: string, userId: string | null, runId: string, metric: string, quantity = 1, metadata: any = {}) {

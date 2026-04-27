@@ -1,18 +1,19 @@
 # AI configuration (local)
 
-Cortex runs as an **AI operator**: it plans workflows from prompts, decides which route to take when a `router` node fires, learns from past runs (RL), and explains every run in natural language. All of this works without a key (using deterministic fallbacks). Configuring an OpenAI key lights up the AI-native paths.
+Janusly runs as an **AI operator**: it plans workflows from prompts, decides which route to take when a `router` node fires, learns from past runs (RL), and explains every run in natural language. All of this works without a key (using deterministic fallbacks). Configuring an OpenAI key lights up the AI-native paths.
 
 This guide covers local setup. For production secret management, point the same env var at your vault (Doppler, AWS Secrets Manager, Supabase Vault, etc.).
 
 ---
 
-## 1. What AI powers in Cortex
+## 1. What AI powers in Janusly
 
 | Feature | Endpoint / surface | Without key | With key |
 | --- | --- | --- | --- |
 | Generate a workflow from a natural-language prompt | `POST /ai/generate-workflow` | Returns the seeded `http-ai-summary` template | LLM emits a real DAG that conforms to the contract |
-| Explain a saved workflow | `POST /ai/explain-workflow` | Generic placeholder text | Bullet-pointed walkthrough |
+| Explain a saved workflow | `POST /ai/explain-workflow` | Plain-language local summary | Bullet-pointed walkthrough |
 | Conversational chat about a finished run | `POST /ai/explain-run` + **AI Run Explainer** in the Runs tab | Deterministic summary (failures / retries / decisions / rollbacks counts) | LLM answers free-form questions ("why did this fail?", "what should I change?") |
+| AI prompt step inside a workflow | `ai` node | Captures the prompt and returns a local fallback summary | LLM answers with run context |
 | Agent planner inside `agent` / `multi_agent` nodes | `config.planner: "openai"` | Falls back to the rules planner | LLM picks the next tool per step |
 | Causal reasoning over past decisions | `GET /causal?runId=...&nodeId=...` | Always available — pure logic, no LLM | Same |
 | Health / introspection | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, model, timeoutMs, maxRetries }` |
@@ -51,7 +52,7 @@ OPENAI_MAX_RETRIES=2           # default
 **Restart the API** after editing `.env` (the API reads env at boot):
 
 ```bash
-pnpm --filter @workflow-engine/api dev
+pnpm --filter @janusly/api dev
 ```
 
 The worker also picks up `OPENAI_API_KEY` for `agent` nodes with `planner: "openai"`.
@@ -119,10 +120,10 @@ curl -s -X POST http://localhost:3001/ai/generate-workflow \
 ## 5. Use it from the UI
 
 1. **Open** <http://localhost:5173>.
-2. Click **Run** on the seeded workflow (or save your own first).
-3. Switch to the **Runs** tab.
-4. The **AI Run Explainer** card lets you chat about the active run. Type a question and click **Ask AI**.
-5. Each reply tags `mode: "ai"` (LLM) or `mode: "fallback"` (deterministic) so you always know which path served the answer.
+2. Start in **AI Copilot** and describe the outcome you want. With no key, Janusly loads a deterministic starter workflow; with a key, it drafts a workflow from the prompt.
+3. Click **Explain current flow** to get a plain-language explanation of the canvas.
+4. Click **Run** on the workflow.
+5. Switch to **Run history** and ask Janusly what happened. Each reply tags `mode: "ai"` (LLM) or `mode: "fallback"` (deterministic) so you always know which path served the answer.
 
 ---
 
@@ -136,6 +137,7 @@ Default model is `gpt-4o-mini`. Typical costs per call (OpenAI list price, April
 | `/ai/explain-workflow` | 400 in / 250 out | ~$0.0002 |
 | `/ai/explain-run` (10 events) | 800 in / 350 out | ~$0.0004 |
 | `/ai/explain-run` (200 events) | 6000 in / 600 out | ~$0.0020 |
+| `ai` node | 800 in / 250 out | ~$0.0003 |
 | `agent` step with `planner: "openai"` | 300 in / 150 out | ~$0.0001 |
 
 To switch model (e.g. for higher accuracy on workflow generation):
@@ -168,7 +170,7 @@ The node you queried isn't a `router` / `router_llm`, or the run didn't reach th
 
 ---
 
-## 8. AI-first flow inside Cortex
+## 8. AI-first flow inside Janusly
 
 ```
 Prompt
@@ -177,6 +179,7 @@ Prompt
   → POST /start           → execution
        ├ router/router_llm → decide() picks the route
        │   └ scoreCandidate + RL adjustments
+       ├ ai → summarize or decide from run context
        ├ agent (rules|openai) → loop with reflection
        ├ tool / http / transform / loop / condition
        └ approval / webhook → human resume
@@ -188,17 +191,18 @@ Prompt
   → /causal                 → counterfactual replay of the decision
 ```
 
-This is why we treat Cortex as an **AI operator**, not just a workflow engine: it plans, runs, decides, learns, rolls back, and explains.
+This is why we treat Janusly as an **AI operator**, not just a workflow engine: it plans, runs, decides, learns, rolls back, and explains.
 
 ---
 
 ## 9. Privacy notes
 
-Cortex sends to OpenAI, by call:
+Janusly sends to OpenAI, by call:
 
 - `/ai/generate-workflow` — only the user prompt.
 - `/ai/explain-workflow` — the workflow DAG JSON (no run data).
 - `/ai/explain-run` — the run row + event list. Event payloads can include node outputs, so review what your `transform` and `http` nodes emit before pointing at production.
+- `ai` node — the prompt plus current run context.
 - `agent (planner: openai)` — the goal, the available tools list, and the loop history.
 
 Never put live PII or secrets in node outputs. Use `{{secret.NAME}}` so values are resolved at run time and never persisted in events.

@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { loadRootEnv } from "@workflow-engine/db";
+import { loadRootEnv } from "@janusly/db";
 
 loadRootEnv();
 

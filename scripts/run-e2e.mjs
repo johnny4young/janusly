@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const children = new Set();
 let shuttingDown = false;
+const webTestArgs = process.argv.slice(2).filter((arg, index) => !(index === 0 && arg === "--"));
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -112,16 +113,21 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 try {
   await run("docker", ["compose", "up", "-d", "redis", "postgres"]);
 
-  startService("api", "pnpm", ["--filter", "@workflow-engine/api", "exec", "tsx", "src/index.ts"], {
+  startService("api", "pnpm", ["--filter", "@janusly/api", "exec", "tsx", "src/index.ts"], {
     env: { PORT: "3001" },
   });
-  startService("worker", "pnpm", ["--filter", "@workflow-engine/engine", "exec", "tsx", "src/worker.ts"]);
+  startService("worker", "pnpm", ["--filter", "@janusly/engine", "exec", "tsx", "src/worker.ts"]);
 
   await waitForHttp("http://127.0.0.1:3001/tools", {
     headers: { "x-org-id": "default", "x-user-id": "dev-user" },
   });
 
-  await run("pnpm", ["--filter", "@workflow-engine/web", "test:e2e"], {
+  await run("pnpm", [
+    "--filter",
+    "@janusly/web",
+    "test:e2e",
+    ...(webTestArgs.length ? ["--", ...webTestArgs] : []),
+  ], {
     env: {
       PLAYWRIGHT_BASE_URL: "http://127.0.0.1:5173",
       VITE_API_URL: "http://127.0.0.1:3001",

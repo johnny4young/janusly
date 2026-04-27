@@ -1,4 +1,4 @@
-import { db, routingStats } from "@workflow-engine/db";
+import { db, routingStats } from "@janusly/db";
 import { and, eq } from "drizzle-orm";
 
 export async function getRoutingStats(orgId: string) {

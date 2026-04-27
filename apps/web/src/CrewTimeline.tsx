@@ -32,7 +32,7 @@ function getAgentName(event: RunEvent): string {
 function getLabel(event: RunEvent): string {
   const payload = event.payload ?? {}
 
-  if (event.type === 'multi_agent.started') return `Crew started (${payload.count ?? 0})`
+  if (event.type === 'multi_agent.started') return `Team started (${payload.count ?? 0})`
   if (event.type === 'multi_agent.agent.started') return `${typeof payload.name === 'string' ? payload.name : 'agent'} started`
   if (event.type.match(/^multi_agent\.agent\.\d+\.started$/)) return `${typeof payload.name === 'string' ? payload.name : 'agent'} started`
   if (event.type.match(/^multi_agent\.agent\.\d+\.completed$/)) return `${typeof payload.name === 'string' ? payload.name : 'agent'} completed`
@@ -42,7 +42,7 @@ function getLabel(event: RunEvent): string {
   if (event.type.endsWith('.tool.completed')) return 'Tool completed'
   if (event.type.includes('reflection')) return `Reflection: ${typeof payload.decision === 'string' ? payload.decision : 'decision'}`
   if (event.type === 'multi_agent.agent.completed') return `${typeof payload.name === 'string' ? payload.name : 'agent'} completed`
-  if (event.type === 'multi_agent.completed') return 'Crew completed'
+  if (event.type === 'multi_agent.completed') return 'Team completed'
 
   return event.type
 }
@@ -100,7 +100,10 @@ export function CrewTimeline({ events }: { events: RunEvent[] }) {
   if (!items.length) {
     return (
       <div className="panel-card">
-        <div className="empty-state">No crew events yet. Run a multi-agent workflow to see the timeline.</div>
+        <div className="empty-panel">
+          <strong>No team activity yet</strong>
+          <p>Run an agent or agent team step to see planning, tool calls, reflection, and completion events.</p>
+        </div>
       </div>
     )
   }
@@ -108,8 +111,11 @@ export function CrewTimeline({ events }: { events: RunEvent[] }) {
   return (
     <div className="timeline-shell">
       <div className="timeline-header">
-        <h3>Crew timeline</h3>
-        <span className="empty-state">{items.length} events</span>
+        <div>
+          <h3>Agent team timeline</h3>
+          <p className="helper-text">Grouped by agent so multi-step reasoning is easier to scan.</p>
+        </div>
+        <span className="mode-pill mode-pill-neutral">{items.length} events</span>
       </div>
 
       {lanes.map(([agent, laneItems]) => (

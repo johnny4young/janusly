@@ -8,19 +8,19 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'New', exact: true }).click()
   await page.getByLabel('Name').fill(workflowName)
-  await page.getByRole('button', { name: /^noop$/i }).click()
+  await page.getByRole('button', { name: /Do nothing/i }).click()
 
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
-  await expect(page.getByText('Workflow contract is valid')).toBeVisible()
+  await expect(page.getByText('Flow is ready to run')).toBeVisible()
 
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByText(/Saved version \d+/)).toBeVisible()
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await expect(page.getByText(/NOOP\s*[·/]\s*succeeded/)).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('button', { name: 'Workflows' }).click()
+  await page.getByRole('button', { name: 'Flows' }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
-  await expect(page.getByText(workflowName)).toBeVisible()
+  await expect(page.getByText(workflowName, { exact: true })).toBeVisible()
 })

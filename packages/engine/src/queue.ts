@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import IORedis from "ioredis";
-import { loadRootEnv } from "@workflow-engine/db";
+import { loadRootEnv } from "@janusly/db";
 import type { EnqueueNodeInput } from "./core/types";
 
 loadRootEnv();

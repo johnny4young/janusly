@@ -3,7 +3,14 @@ import type { Edge, Node } from '@xyflow/react'
 export type JsonObject = Record<string, unknown>
 export type RunNode = { nodeId: string; status: string; stateJson?: JsonObject | null; errorJson?: JsonObject | null }
 export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
-export type WorkflowNodeData = { label: string; type: string; config: JsonObject }
+export type WorkflowNodeData = {
+  label: string
+  type: string
+  config: JsonObject
+  status?: string
+  helper?: string
+  hasValidationError?: boolean
+}
 export type WorkflowEdgeData = { condition?: string }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 export type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
@@ -14,6 +21,8 @@ export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy
 export type RunSummary = { id: string; orgId?: string; workflowVersionId?: string; status: string; createdBy?: string; createdAt?: string }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
+export type AiMode = 'ai' | 'fallback' | 'error'
+export type AiHealth = { enabled: boolean; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'crew'
 export type WorkflowDefinition = {
   id?: string

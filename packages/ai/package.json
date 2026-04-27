@@ -1,5 +1,5 @@
 {
-  "name": "@workflow-engine/ai",
+  "name": "@janusly/ai",
   "version": "0.0.1",
   "private": true,
   "type": "module",

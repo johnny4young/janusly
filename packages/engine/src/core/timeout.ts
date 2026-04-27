@@ -1,4 +1,4 @@
-import type { WorkflowNode } from "@workflow-engine/shared";
+import type { WorkflowNode } from "@janusly/shared";
 
 export class NodeTimeoutError extends Error {
   code = "NODE_TIMEOUT";

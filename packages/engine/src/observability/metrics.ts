@@ -1,6 +1,6 @@
 import { metrics } from "@opentelemetry/api";
 
-const meter = metrics.getMeter("workflow-engine");
+const meter = metrics.getMeter("janusly");
 
 export const nodeDuration = meter.createHistogram("workflow_node_duration_ms", {
   description: "Execution time per node",

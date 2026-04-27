@@ -1,12 +1,13 @@
 import React from 'react'
-import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
-import { nodeTypes } from '../constants'
-import type { ActiveTab } from '../types'
+import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, Database, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { nodeTypes, nodeUi } from '../constants'
+import type { ActiveTab, AiHealth } from '../types'
 
 type BuilderSidebarProps = {
   workflowName: string
   activeTab: ActiveTab
   streamStatus: string
+  aiHealth: AiHealth | null
   onWorkflowNameChange: (name: string) => void
   onAdd: (type: string) => void
   onValidate: () => void
@@ -31,19 +32,21 @@ const nodeIcons: Record<string, React.ReactNode> = {
   multi_agent: <Layers3 size={15} />,
 }
 
-const navItems: Array<{ tab: ActiveTab; label: string; icon: React.ReactNode }> = [
-  { tab: 'workflows', label: 'Workflows', icon: <Database size={15} /> },
-  { tab: 'crew', label: 'Crew', icon: <Layers3 size={15} /> },
-  { tab: 'inspector', label: 'Inspector', icon: <GitBranch size={15} /> },
-  { tab: 'runs', label: 'Runs', icon: <Activity size={15} /> },
-  { tab: 'members', label: 'Members', icon: <Users size={15} /> },
-  { tab: 'templates', label: 'Templates', icon: <Workflow size={15} /> },
-  { tab: 'marketplace', label: 'Tools', icon: <Boxes size={15} /> },
-  { tab: 'credentials', label: 'Secrets', icon: <KeyRound size={15} /> },
+const navItems: Array<{ tab: ActiveTab; label: string; helper: string; icon: React.ReactNode }> = [
+  { tab: 'copilot', label: 'AI Studio', helper: 'Draft and explain', icon: <Sparkles size={15} /> },
+  { tab: 'workflows', label: 'Flows', helper: 'Saved versions', icon: <Database size={15} /> },
+  { tab: 'crew', label: 'Run timeline', helper: 'Agent events', icon: <Layers3 size={15} /> },
+  { tab: 'inspector', label: 'Step setup', helper: 'Edit selected step', icon: <GitBranch size={15} /> },
+  { tab: 'runs', label: 'Runs', helper: 'Execution history', icon: <Activity size={15} /> },
+  { tab: 'members', label: 'Team', helper: 'Access control', icon: <Users size={15} /> },
+  { tab: 'templates', label: 'Recipes', helper: 'Starting patterns', icon: <Workflow size={15} /> },
+  { tab: 'marketplace', label: 'Tools', helper: 'Backend actions', icon: <Boxes size={15} /> },
+  { tab: 'credentials', label: 'Connections', helper: 'Secrets by reference', icon: <KeyRound size={15} /> },
 ]
 
 export function BuilderSidebar({
   activeTab,
+  aiHealth,
   workflowName,
   streamStatus,
   onAdd,
@@ -54,10 +57,15 @@ export function BuilderSidebar({
   onOpenTab,
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
+  const aiModeLabel = aiHealth?.enabled ? 'AI connected' : 'Local mode'
+  const aiModeCopy = aiHealth?.enabled
+    ? `${aiHealth.model} is ready for flow drafting and explanations.`
+    : 'Janusly can still draft, explain, and run with local rules.'
+
   return (
     <aside className="builder-sidebar">
       <div className="sidebar-section">
-        <div className="section-kicker">Workflow</div>
+        <div className="section-kicker">Flow</div>
         <label className="field-label" htmlFor="workflow-name">Name</label>
         <input
           id="workflow-name"
@@ -69,6 +77,23 @@ export function BuilderSidebar({
           <span className={`status-dot status-dot-${streamStatus}`} />
           <span>{streamStatus}</span>
         </div>
+      </div>
+
+      <div className="sidebar-section ai-mode-card">
+        <div className="split-row">
+          <div>
+            <div className="section-kicker">AI mode</div>
+            <strong>{aiModeLabel}</strong>
+          </div>
+          <span className={aiHealth?.enabled ? 'mode-pill mode-pill-ai' : 'mode-pill mode-pill-fallback'}>
+            {aiHealth?.enabled ? 'Live' : 'Local'}
+          </span>
+        </div>
+        <p>{aiModeCopy}</p>
+        <button onClick={() => onOpenTab('copilot')} className="command-button command-button-primary">
+          <Bot size={16} aria-hidden="true" />
+          <span>Describe flow</span>
+        </button>
       </div>
 
       <div className="sidebar-section sidebar-actions">
@@ -90,18 +115,6 @@ export function BuilderSidebar({
         </button>
       </div>
 
-      <div className="sidebar-section">
-        <div className="section-kicker">Add Node</div>
-        <div className="node-palette">
-          {nodeTypes.map(type => (
-            <button key={type} onClick={() => onAdd(type)} className="node-chip" title={`Add ${type} node`}>
-              {nodeIcons[type] ?? <SquarePlus size={15} aria-hidden="true" />}
-              <span>{type.replace('_', ' ')}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       <nav className="sidebar-section" aria-label="Workspace views">
         <div className="section-kicker">Views</div>
         <div className="view-list">
@@ -109,14 +122,38 @@ export function BuilderSidebar({
             <button
               key={item.tab}
               onClick={() => onOpenTab(item.tab)}
+              aria-label={item.label}
+              aria-current={activeTab === item.tab ? 'page' : undefined}
               className={activeTab === item.tab ? 'view-button view-button-active' : 'view-button'}
             >
-              {item.icon}
-              <span>{item.label}</span>
+              <span className="view-icon">{item.icon}</span>
+              <span className="view-copy">
+                <strong>{item.label}</strong>
+                <small>{item.helper}</small>
+              </span>
+              <ChevronRight className="view-arrow" size={14} aria-hidden="true" />
             </button>
           ))}
         </div>
       </nav>
+
+      <div className="sidebar-section">
+        <div className="section-kicker">Add step</div>
+        <div className="node-palette">
+          {nodeTypes.map(type => {
+            const copy = nodeUi[type] ?? { label: type.replace('_', ' '), helper: 'Workflow step' }
+            return (
+              <button key={type} onClick={() => onAdd(type)} className="node-chip" title={`${copy.label}: ${copy.helper}`}>
+                <span className="node-chip-main">
+                  {nodeIcons[type] ?? <SquarePlus size={15} aria-hidden="true" />}
+                  <span>{copy.label}</span>
+                </span>
+                <small>{copy.helper}</small>
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </aside>
   )
 }

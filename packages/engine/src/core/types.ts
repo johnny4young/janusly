@@ -1,4 +1,4 @@
-import type { Workflow, WorkflowNode } from "@workflow-engine/shared";
+import type { Workflow, WorkflowNode } from "@janusly/shared";
 
 export type NodeTerminalStatus = "succeeded" | "failed" | "skipped" | "cancelled";
 

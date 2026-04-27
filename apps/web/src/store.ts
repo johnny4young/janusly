@@ -102,7 +102,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   runId: null,
   runNodes: [],
   events: [],
-  activeTab: 'crew',
+  activeTab: 'copilot',
   streamStatus: 'idle',
   toasts: [],
   platformVersion: 0,
@@ -164,7 +164,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       events: [],
       runNodes: [],
       runId: null,
-      activeTab: 'workflows',
+      activeTab: 'copilot',
     })
   },
 

@@ -2,10 +2,10 @@ import { evaluateExpression } from "../expression";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
-import { updateRoutingStats } from "@workflow-engine/data/src/routingStatsRepo";
-import { recordWorkflowImprovement } from "@workflow-engine/data/src/improvementsRepo";
-import { rollbackWorkflowVersion } from "@workflow-engine/data/src/workflowRollbackRepo";
-import { computeConfidence, shouldRollback } from "@workflow-engine/domain/src/improvementEngine";
+import { updateRoutingStats } from "@janusly/data/src/routingStatsRepo";
+import { recordWorkflowImprovement } from "@janusly/data/src/improvementsRepo";
+import { rollbackWorkflowVersion } from "@janusly/data/src/workflowRollbackRepo";
+import { computeConfidence, shouldRollback } from "@janusly/domain/src/improvementEngine";
 import type {
   ExecutionStore,
   QueueAdapter,
@@ -39,7 +39,7 @@ export class WorkflowRuntime {
         const rlStats = (context as any)?.rlStats;
 
         if (candidates.length > 0) {
-          const { decide } = await import("@workflow-engine/domain/src/decisionEngine");
+          const { decide } = await import("@janusly/domain/src/decisionEngine");
           const decision = await decide({
             orgId: (context as any)?.orgId,
             candidates,

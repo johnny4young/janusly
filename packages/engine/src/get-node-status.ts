@@ -1,5 +1,5 @@
-import { db } from "@workflow-engine/db";
-import { runNodes } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { runNodes } from "@janusly/db";
 import { eq, and } from "drizzle-orm";
 
 export async function getNodeStatus(runId: string, nodeId: string) {
