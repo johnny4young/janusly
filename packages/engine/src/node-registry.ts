@@ -1,3 +1,5 @@
+import OpenAI from "openai";
+import { loadRootEnv } from "@janusly/db";
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
@@ -5,6 +7,9 @@ import { appendEvent } from "./persistence";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
 import { fetchHttpTarget } from "./http-policy";
+import { hasFailureSignal } from "./failure-signal";
+
+loadRootEnv();
 
 export type NodeContext = {
   runId: string;
@@ -18,6 +23,35 @@ export type NodeExecutionResult =
   | { status: "waiting"; reason?: string; metadata?: Record<string, unknown> };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
+
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
+const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+let aiNodeOpenAI: OpenAI | null = null;
+
+function getAiNodeOpenAIClient() {
+  if (!process.env.OPENAI_API_KEY) return null;
+  aiNodeOpenAI ??= new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: OPENAI_TIMEOUT_MS,
+    maxRetries: OPENAI_MAX_RETRIES,
+  });
+  return aiNodeOpenAI;
+}
+
+function fallbackAiResponse(prompt: string, context: Record<string, any>) {
+  const contextKeys = Object.keys(context).filter(key => !["orgId", "userId", "createdBy"].includes(key));
+  return [
+    "AI fallback response.",
+    `Prompt: ${previewText(prompt)}`,
+    contextKeys.length ? `Available context: ${contextKeys.join(", ")}.` : "No prior node context was available.",
+    "Configure OPENAI_API_KEY to generate a model-written answer.",
+  ].join("\n");
+}
+
+function previewText(value: string, maxLength = 700) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs?: number, label = "operation") {
   if (!timeoutMs) return promise;
@@ -96,7 +130,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
     });
 
     if (reflectionEnabled) {
-      const decision = JSON.stringify(result).toLowerCase().includes("error") ? "retry" : "accept";
+      const decision = hasFailureSignal(result) ? "retry" : "accept";
       lastReflection = {
         agent: agentConfig.name,
         iteration: i,
@@ -277,17 +311,70 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
   agent_reflection: async (ctx) => {
     const input = mapInput(ctx.config.input ?? "", { context: ctx.context, inputs: ctx.config });
-    const text = typeof input === "string" ? input : JSON.stringify(input);
-    const decision = text.toLowerCase().includes("error") || text.toLowerCase().includes("failed") ? "retry" : "accept";
+    const decision = hasFailureSignal(input) ? "retry" : "accept";
     const reason = decision === "retry" ? "The inspected input contains failure signals." : "The inspected input looks valid.";
     await appendEvent(ctx.runId, ctx.nodeId, "agent.reflection", { decision, reason, input });
     return { status: "completed", output: { decision, reason, input } };
   },
 
   ai: async (ctx) => {
-    const prompt = ctx.config.prompt ?? "Summarize workflow";
-    await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt });
-    return { status: "completed", output: { prompt, contextUsed: ctx.context, response: `AI saw context: ${JSON.stringify(ctx.context)}` } };
+    const prompt = String(ctx.config.prompt ?? "Summarize workflow");
+    await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt: previewText(prompt), contextKeys: Object.keys(ctx.context) });
+    const client = getAiNodeOpenAIClient();
+    const model = ctx.config.model ?? OPENAI_MODEL;
+
+    if (!client) {
+      return {
+        status: "completed",
+        output: {
+          mode: "fallback",
+          prompt: previewText(prompt),
+          response: fallbackAiResponse(String(prompt), ctx.context),
+          contextKeys: Object.keys(ctx.context),
+        },
+      };
+    }
+
+    try {
+      const response = await client.responses.create({
+        model,
+        input: [
+          {
+            role: "system",
+            content: "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              prompt,
+              context: ctx.context,
+            }),
+          },
+        ],
+      });
+
+      return {
+        status: "completed",
+        output: {
+          mode: "ai",
+          model,
+          prompt: previewText(prompt),
+          response: response.output_text,
+        },
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI request failed";
+      return {
+        status: "completed",
+        output: {
+          mode: "error",
+          model,
+          prompt: previewText(prompt),
+          error: message,
+          response: fallbackAiResponse(String(prompt), ctx.context),
+        },
+      };
+    }
   },
 
   webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),

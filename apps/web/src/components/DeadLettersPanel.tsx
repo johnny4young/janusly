@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { formatStatusLabel } from '../constants'
 
 export type DeadLetter = {
   id: string
@@ -22,6 +23,12 @@ type DeadLettersPanelProps = {
 
 const statuses = ['all', 'open', 'replayed', 'resolved'] as const
 type DeadLetterStatusFilter = typeof statuses[number]
+const statusLabels: Record<DeadLetterStatusFilter, string> = {
+  all: 'All',
+  open: 'Open',
+  replayed: 'Retried',
+  resolved: 'Resolved',
+}
 
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
@@ -39,59 +46,64 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
       <div className="split-row">
         <div>
           <div className="section-kicker">Operations</div>
-          <strong>Dead Letters</strong>
+          <strong>Recovery queue</strong>
         </div>
         <button className="small-command" onClick={onRefresh}>Refresh</button>
       </div>
 
       <div className="mini-grid">
-        <span>Total: {deadLetters.length}</span>
-        <span>Open: {deadLetters.filter(item => item.status === 'open').length}</span>
-        <span>Replayed: {deadLetters.filter(item => item.status === 'replayed').length}</span>
-        <span>Resolved: {deadLetters.filter(item => item.status === 'resolved').length}</span>
+        <span><strong>{deadLetters.length}</strong>Total</span>
+        <span><strong>{deadLetters.filter(item => item.status === 'open').length}</strong>Open</span>
+        <span><strong>{deadLetters.filter(item => item.status === 'replayed').length}</strong>Retried</span>
+        <span><strong>{deadLetters.filter(item => item.status === 'resolved').length}</strong>Resolved</span>
       </div>
 
-      <label className="field-label" htmlFor="dlq-filter">Status filter</label>
+      <label className="field-label" htmlFor="dlq-filter">Show</label>
       <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
-        {statuses.map(item => <option key={item} value={item}>{item}</option>)}
+        {statuses.map(item => <option key={item} value={item}>{statusLabels[item]}</option>)}
       </select>
 
       <div className="panel-list">
-        {filtered.length === 0 && <p className="empty-state">No dead letters for this filter.</p>}
+        {filtered.length === 0 && (
+          <div className="empty-panel empty-panel-compact">
+            <strong>No failed handoffs</strong>
+            <p>This view is clear for the selected filter.</p>
+          </div>
+        )}
         {filtered.map(item => (
           <button key={item.id} className="list-card list-card-button" onClick={() => setSelectedId(item.id)}>
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{item.nodeId}</strong>
-              <span className="status-pill" data-status={item.status}>{item.status}</span>
+              <span className="status-pill" data-status={item.status}>{formatStatusLabel(item.status)}</span>
             </div>
             <span>run {item.runId.slice(0, 8)}… / attempt {item.attempt}</span>
-            <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : 'dead letter'}</span>
+            <span>{item.createdAt ? new Date(item.createdAt).toLocaleString() : 'failed handoff'}</span>
           </button>
         ))}
       </div>
 
       {selected && (
-        <section className="panel-card">
+        <section className="detail-box">
           <div className="split-row">
             <div>
               <div className="section-kicker">Selected</div>
               <strong>{selected.nodeId}</strong>
             </div>
-            <span className="status-pill" data-status={selected.status}>{selected.status}</span>
+            <span className="status-pill" data-status={selected.status}>{formatStatusLabel(selected.status)}</span>
           </div>
 
           <div className="split-row">
             <button className="small-command" disabled={selected.status === 'replayed'} onClick={() => onReplay(selected.id)}>
-              Replay
+              Retry
             </button>
             <button className="small-command" disabled={selected.status === 'resolved'} onClick={() => onResolve(selected.id)}>
               Resolve
             </button>
           </div>
 
-          <DetailBlock title="Error JSON" value={selected.errorJson} />
-          <DetailBlock title="Node JSON" value={selected.nodeJson} />
-          <DetailBlock title="Workflow JSON" value={selected.workflowJson} />
+          <DetailBlock title="Error details" value={selected.errorJson} />
+          <DetailBlock title="Step payload" value={selected.nodeJson} />
+          <DetailBlock title="Flow payload" value={selected.workflowJson} />
         </section>
       )}
     </section>
@@ -99,10 +111,10 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
 }
 
 function DetailBlock({ title, value }: { title: string; value: unknown }) {
-  const [open, setOpen] = useState(title === 'Error JSON')
+  const [open, setOpen] = useState(title === 'Error details')
 
   return (
-    <div className="list-card">
+    <div className="detail-block">
       <button className="small-command" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Show'} {title}</button>
       {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
     </div>

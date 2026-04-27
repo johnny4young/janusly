@@ -1,18 +1,18 @@
 import http from "http";
 import OpenAI from "openai";
-import { ensureDatabaseSchema } from "@workflow-engine/db/src/schema-management";
-import { startRun } from "@workflow-engine/engine/src/start-run";
-import { resumeRun } from "@workflow-engine/engine/src/resume-run";
-import { validateWorkflow } from "@workflow-engine/engine/src/workflow-validation";
-import { listTools } from "@workflow-engine/engine/src/tool-registry";
-import { getUsageSummary } from "@workflow-engine/engine/src/billing";
-import { DLQReplayAdapter } from "@workflow-engine/engine/src/adapters/dlq-replay";
-import { explainRun } from "@workflow-engine/ai";
-import { replayDecision, type DecisionCandidate } from "@workflow-engine/domain";
+import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
+import { startRun } from "@janusly/engine/src/start-run";
+import { resumeRun } from "@janusly/engine/src/resume-run";
+import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
+import { listTools } from "@janusly/engine/src/tool-registry";
+import { getUsageSummary } from "@janusly/engine/src/billing";
+import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
+import { explainRun } from "@janusly/ai";
+import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { requireAuth } from "./auth";
 import { isRole, requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";
-import { db } from "@workflow-engine/db";
+import { db } from "@janusly/db";
 import {
   workflows,
   workflowVersions,
@@ -23,9 +23,9 @@ import {
   installedPlugins,
   auditLogs,
   orgMembers,
-} from "@workflow-engine/db";
+} from "@janusly/db";
 import { eq, desc, asc, and, gt } from "drizzle-orm";
-import { NodeSchema, WorkflowSchema } from "@workflow-engine/shared";
+import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import {
   getDeadLetter,
   listDeadLetters,
@@ -67,6 +67,75 @@ function httpError(message: string, statusCode: number) {
   const err = new Error(message) as Error & { statusCode?: number };
   err.statusCode = statusCode;
   return err;
+}
+
+function parseAiWorkflow(payload: unknown) {
+  const parsed = WorkflowSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw httpError(`AI returned an invalid workflow: ${parsed.error.issues.map(issue => issue.message).join(", ")}`, 502);
+  }
+
+  const validation = validateWorkflow(parsed.data);
+  if (!validation.valid) {
+    throw httpError(`AI returned a workflow with validation issues: ${validation.issues.map(issue => issue.message).join(", ")}`, 502);
+  }
+
+  return parsed.data;
+}
+
+const stepLabels: Record<string, string> = {
+  http: "Call an API",
+  noop: "Do nothing",
+  transform: "Shape data",
+  condition: "Branch rule",
+  webhook: "Wait for webhook",
+  approval: "Ask approval",
+  ai: "AI prompt",
+  tool: "Run a tool",
+  agent: "Agent",
+  router: "Smart router",
+  router_llm: "AI router",
+  loop: "Repeat list",
+  agent_reflection: "Review result",
+  multi_agent: "Agent team",
+};
+
+function fallbackExplainWorkflow(workflow: unknown) {
+  const parsed = WorkflowSchema.safeParse(workflow);
+  if (!parsed.success) {
+    return "Janusly could not read this flow yet. Check that it has valid steps and paths.";
+  }
+
+  const data = parsed.data;
+  const labelFor = (nodeId: string) => {
+    const node = data.nodes.find(candidate => candidate.id === nodeId);
+    return node ? stepLabels[node.type] ?? node.type.replaceAll("_", " ") : nodeId;
+  };
+  const incoming = new Set(data.edges.map(edge => edge.to));
+  const startNodes = data.nodes.filter(node => !incoming.has(node.id)).map(node => labelFor(node.id));
+  const nodeNames = data.nodes.map(node => `- ${stepLabels[node.type] ?? node.type.replaceAll("_", " ")} (${node.id})`).join("\n");
+  const flow = data.edges.length
+    ? data.edges.map(edge => `${labelFor(edge.from)} -> ${labelFor(edge.to)}${edge.condition ? " when the rule passes" : ""}`).join("\n")
+    : "No paths yet; this flow has one or more standalone steps.";
+
+  return [
+    `${data.name ?? data.id ?? "This flow"} has ${data.nodes.length} step${data.nodes.length === 1 ? "" : "s"}.`,
+    `It starts with: ${startNodes.length ? startNodes.join(", ") : "no clear start step"}.`,
+    `Steps:\n${nodeNames || "none"}`,
+    `Path:\n${flow}`,
+    "Next check: validate the flow, run it, then ask Janusly what happened.",
+  ].join("\n");
+}
+
+function fallbackWorkflowForPrompt(prompt: unknown) {
+  const text = typeof prompt === "string" ? prompt.toLowerCase() : "";
+  const templateId = text.includes("approval") || text.includes("approve") || text.includes("aprob") || text.includes("human") || text.includes("risk")
+    ? "approval-gate"
+    : text.includes("transform") || text.includes("map") || text.includes("tool") || text.includes("herramient") || text.includes("backend")
+      ? "api-transform-tool"
+      : "http-ai-summary";
+
+  return workflowTemplates.find(template => template.id === templateId)?.workflow ?? workflowTemplates[0]?.workflow;
 }
 
 function getAllowedOrigins() {
@@ -330,9 +399,10 @@ const server = http.createServer(async (req, res) => {
       const { prompt } = asRecord(await readJson(req));
       const client = getOpenAIClient();
       if (!client) {
+        const fallbackWorkflow = fallbackWorkflowForPrompt(prompt);
         return sendJson(res, {
           mode: "fallback",
-          ...(workflowTemplates[0]?.workflow ?? {}),
+          ...(fallbackWorkflow ?? {}),
         });
       }
       try {
@@ -348,10 +418,11 @@ const server = http.createServer(async (req, res) => {
           text: { format: { type: "json_object" } },
         });
         const parsed = JSON.parse(response.output_text || "{}");
-        return sendJson(res, { mode: "ai", ...parsed });
+        const workflow = parseAiWorkflow(parsed);
+        return sendJson(res, { mode: "ai", ...workflow });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        const status = (err as { status?: number })?.status ?? 502;
+        const status = (err as { status?: number; statusCode?: number })?.status ?? (err as { statusCode?: number })?.statusCode ?? 502;
         return sendJson(res, { mode: "error", error: message }, status);
       }
     }
@@ -362,7 +433,7 @@ const server = http.createServer(async (req, res) => {
       if (!client) {
         return sendJson(res, {
           mode: "fallback",
-          explanation: "This workflow contains nodes connected by edges and can be executed by the engine. Configure OPENAI_API_KEY in .env to enable AI-generated explanations.",
+          explanation: fallbackExplainWorkflow(workflow),
         });
       }
       try {
@@ -392,6 +463,7 @@ const server = http.createServer(async (req, res) => {
           run: run[0],
           events,
           question: typeof question === "string" ? question : undefined,
+          model: OPENAI_MODEL,
         });
         return sendJson(res, result);
       } catch (err) {

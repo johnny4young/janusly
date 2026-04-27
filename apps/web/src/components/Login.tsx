@@ -34,9 +34,9 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <div className="brand-lockup">
-          <span className="brand-mark">WE</span>
+          <span className="brand-mark">JN</span>
           <div>
-            <strong>Workflow Engine</strong>
+            <strong>Janusly</strong>
             <span>Secure your control plane</span>
           </div>
         </div>

@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from 'react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { CrewTimeline } from '../CrewTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
-import { nodeTypes } from '../constants'
+import { AiCopilotPanel } from './AiCopilotPanel'
+import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 
 type RightPanelProps = {
   tab: ActiveTab
@@ -22,6 +24,8 @@ type RightPanelProps = {
   activeRunId?: string | null
   deadLetters: DeadLetter[]
   usage: Record<string, number>
+  aiHealth: AiHealth | null
+  currentWorkflowName: string
   onOpenWorkflow: (id: string) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
@@ -35,14 +39,39 @@ type RightPanelProps = {
   onReplayNode: (nodeId: string) => void
   onReplayDeadLetter: (id: string) => void
   onResolveDeadLetter: (id: string) => void
+  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition }>
+  onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
+  onOpenTab: (tab: ActiveTab) => void
 }
 
 export function RightPanel(props: RightPanelProps) {
-  if (props.tab === 'crew') return <PanelChrome title="Crew Timeline"><CrewTimeline events={props.events} /></PanelChrome>
-  if (props.tab === 'workflows') return <PanelChrome title="Saved Workflows"><WorkflowsDashboard onOpen={props.onOpenWorkflow} /></PanelChrome>
-  if (props.tab === 'members') return <PanelChrome title="Members"><MembersPanel /></PanelChrome>
+  if (props.tab === 'copilot') return (
+    <AiCopilotPanel
+      health={props.aiHealth}
+      workflowName={props.currentWorkflowName}
+      onGenerateWorkflow={props.onGenerateWorkflow}
+      onExplainWorkflow={props.onExplainWorkflow}
+      onOpenRuns={() => props.onOpenTab('runs')}
+      onOpenTemplates={() => props.onOpenTab('templates')}
+    />
+  )
+  if (props.tab === 'crew') return (
+    <PanelChrome title="Run timeline" description="Follow agent and team events as a run moves through the flow." icon={<Layers3 size={18} />}>
+      <CrewTimeline events={props.events} />
+    </PanelChrome>
+  )
+  if (props.tab === 'workflows') return (
+    <PanelChrome title="Flows" description="Open saved flows and continue from the latest version." icon={<Database size={18} />}>
+      <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
+    </PanelChrome>
+  )
+  if (props.tab === 'members') return (
+    <PanelChrome title="Team" description="Invite teammates and choose what they can operate." icon={<Users size={18} />}>
+      <MembersPanel />
+    </PanelChrome>
+  )
   if (props.tab === 'inspector') return (
-    <PanelChrome title="Inspector">
+    <PanelChrome title="Step setup" description="Select a step or path on the canvas to edit how it behaves." icon={<GitBranch size={18} />}>
       <InspectorPanel
         selectedNode={props.selectedNode}
         selectedEdge={props.selectedEdge}
@@ -73,15 +102,35 @@ export function RightPanel(props: RightPanelProps) {
       onResolveDeadLetter={props.onResolveDeadLetter}
     />
   )
-  return <PanelChrome title="Reasoning"><ReasoningPanel events={props.events} /></PanelChrome>
+  return (
+    <PanelChrome title="Run events" description="Low-level execution signals for debugging." icon={<Activity size={18} />}>
+      <ReasoningPanel events={props.events} />
+    </PanelChrome>
+  )
 }
 
-function PanelChrome({ title, children }: { title: string; children: React.ReactNode }) {
+function PanelChrome({
+  title,
+  children,
+  kicker = 'Workspace',
+  description,
+  icon,
+}: {
+  title: string
+  children: React.ReactNode
+  kicker?: string
+  description?: string
+  icon?: React.ReactNode
+}) {
   return (
     <div className="panel-stack">
       <div className="panel-heading">
-        <div className="section-kicker">Control Surface</div>
-        <h2>{title}</h2>
+        <div className="panel-heading-copy">
+          <div className="section-kicker">{kicker}</div>
+          <h2>{title}</h2>
+          {description && <p>{description}</p>}
+        </div>
+        {icon && <span className="panel-heading-icon">{icon}</span>}
       </div>
       {children}
     </div>
@@ -102,37 +151,57 @@ function InspectorPanel({
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
 
   if (selectedNode) {
+    const status = nodeStatus?.status ?? 'draft'
+
     return (
       <section className="panel-card">
         <div className="split-row">
           <div>
-            <div className="section-kicker">Node</div>
-            <h3>{selectedNode.id}</h3>
+            <div className="section-kicker">Step</div>
+            <h3>{getNodeLabel(selectedNode.data.type)}</h3>
+            <p className="helper-text">{getNodeConfigSummary(selectedNode.data.type, selectedNode.data.config ?? {})}</p>
           </div>
-          <span className="status-pill" data-status={nodeStatus?.status ?? 'draft'}>{nodeStatus?.status ?? 'draft'}</span>
+          <span className="status-pill" data-status={status}>{formatStatusLabel(status)}</span>
         </div>
 
-        <label className="field-label" htmlFor="node-type">Type</label>
-        <select id="node-type" className="text-field" value={selectedNode.data.type} onChange={event => onUpdateNodeType(event.target.value)}>
-          {nodeTypes.map(type => <option key={type} value={type}>{type}</option>)}
-        </select>
+        <div className="inspector-meta">
+          <span>Step ID {selectedNode.id}</span>
+          <span>{nodeIssues.length ? `${nodeIssues.length} issue${nodeIssues.length === 1 ? '' : 's'}` : 'No validation issues'}</span>
+        </div>
 
-        <label className="field-label" htmlFor="node-config">Config JSON</label>
-        <textarea
+        <div className="form-grid">
+          <label className="field-label" htmlFor="node-type">Step kind</label>
+          <select id="node-type" className="text-field" value={selectedNode.data.type} onChange={event => onUpdateNodeType(event.target.value)}>
+            {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
+          </select>
+        </div>
+
+        <QuickConfigEditor
           key={selectedNode.id}
-          id="node-config"
-          className="code-field"
-          defaultValue={JSON.stringify(selectedNode.data.config, null, 2)}
-          onBlur={(event) => {
-            try {
-              const parsed = JSON.parse(event.target.value) as Record<string, unknown>
-              onUpdateNodeConfig(parsed)
-              setJsonError(null)
-            } catch (error) {
-              setJsonError(error instanceof Error ? error.message : 'Invalid JSON')
-            }
-          }}
+          type={selectedNode.data.type}
+          config={selectedNode.data.config ?? {}}
+          onUpdate={onUpdateNodeConfig}
         />
+
+        <details className="advanced-config">
+          <summary>Advanced JSON</summary>
+          <p className="helper-text">Use this when you need to edit the exact payload sent to the engine.</p>
+          <textarea
+            key={`${selectedNode.id}-json`}
+            id="node-config"
+            className="code-field"
+            defaultValue={JSON.stringify(selectedNode.data.config, null, 2)}
+            onBlur={(event) => {
+              try {
+                const parsed = JSON.parse(event.target.value) as Record<string, unknown>
+                onUpdateNodeConfig(parsed)
+                setJsonError(null)
+              } catch (error) {
+                setJsonError(error instanceof Error ? error.message : 'Settings must be valid JSON')
+              }
+            }}
+          />
+        </details>
 
         {jsonError && <div className="issue issue-error">{jsonError}</div>}
         {nodeIssues.map(issue => <div key={`${issue.code}-${issue.message}`} className="issue issue-error">{issue.message}</div>)}
@@ -143,9 +212,9 @@ function InspectorPanel({
   if (selectedEdge) {
     return (
       <section className="panel-card">
-        <div className="section-kicker">Edge</div>
+        <div className="section-kicker">Path</div>
         <h3>{selectedEdge.source} to {selectedEdge.target}</h3>
-        <label className="field-label" htmlFor="edge-condition">Condition</label>
+        <label className="field-label" htmlFor="edge-condition">Run only when</label>
         <textarea
           id="edge-condition"
           className="code-field code-field-short"
@@ -159,20 +228,224 @@ function InspectorPanel({
 
   return (
     <section className="panel-card">
-      <div className="empty-state">No selection.</div>
+      <div className="empty-panel">
+        <GitBranch size={24} aria-hidden="true" />
+        <strong>Select a step to configure it</strong>
+        <p>Click any node on the canvas to edit inputs, prompts, tools, path rules, and advanced JSON.</p>
+      </div>
     </section>
   )
 }
 
+function QuickConfigEditor({
+  type,
+  config,
+  onUpdate,
+}: {
+  type: string
+  config: JsonObject
+  onUpdate: (config: Record<string, unknown>) => void
+}) {
+  const patch = (next: Record<string, unknown>) => onUpdate({ ...config, ...next })
+
+  if (type === 'http') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField label="Request URL" value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'ai') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextareaConfigField label="Prompt" value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'tool') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField label="Tool name" value={readConfigString(config, 'tool')} onChange={value => patch({ tool: value })} />
+        <JsonConfigField label="Tool input" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'agent' || type === 'multi_agent') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextareaConfigField label={type === 'multi_agent' ? 'Team goal' : 'Agent goal'} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
+        <div className="config-field-row">
+          <label className="field-label" htmlFor={`${type}-planner`}>Planner</label>
+          <select id={`${type}-planner`} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
+            <option value="rules">Rules</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </div>
+        {type === 'multi_agent' && (
+          <div className="config-field-row">
+            <label className="field-label" htmlFor="team-mode">Team mode</label>
+            <select id="team-mode" className="text-field" value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
+              <option value="sequential">Sequential</option>
+              <option value="parallel">Parallel</option>
+            </select>
+          </div>
+        )}
+        {type === 'agent' && <TextConfigField label="Input value" value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
+        <NumberConfigField label="Max steps" value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
+        {type === 'multi_agent' && (
+          <label className="checkbox-row">
+            <input type="checkbox" checked={config.reflection !== false} onChange={event => patch({ reflection: event.target.checked })} />
+            <span>Review results before completing</span>
+          </label>
+        )}
+      </section>
+    )
+  }
+
+  if (type === 'approval') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextareaConfigField label="Approval message" value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'condition') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextareaConfigField label="Branch expression" value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'loop') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField label="Items" value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
+        <JsonConfigField label="Item mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'transform') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <JsonConfigField label="Field mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'router' || type === 'router_llm') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <JsonConfigField label="Candidate paths" value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
+      </section>
+    )
+  }
+
+  return (
+    <section className="quick-config">
+      <div className="section-kicker">Quick setup</div>
+      <p className="empty-state">This step has no required setup. Use advanced JSON only for custom behavior.</p>
+    </section>
+  )
+}
+
+function TextConfigField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const id = label.toLowerCase().replaceAll(' ', '-')
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <input id={id} className="text-field" value={value} onChange={event => onChange(event.target.value)} />
+    </div>
+  )
+}
+
+function NumberConfigField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  const id = label.toLowerCase().replaceAll(' ', '-')
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <input id={id} className="text-field" type="number" min={1} value={value} onChange={event => onChange(Number(event.target.value) || 1)} />
+    </div>
+  )
+}
+
+function TextareaConfigField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const id = label.toLowerCase().replaceAll(' ', '-')
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <textarea id={id} className="code-field code-field-short" value={value} onChange={event => onChange(event.target.value)} />
+    </div>
+  )
+}
+
+function JsonConfigField({ label, value, onChange }: { label: string; value: unknown; onChange: (value: unknown) => void }) {
+  const [error, setError] = useState<string | null>(null)
+  const id = label.toLowerCase().replaceAll(' ', '-')
+
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <textarea
+        id={id}
+        className="code-field code-field-short"
+        defaultValue={JSON.stringify(value ?? {}, null, 2)}
+        onBlur={(event) => {
+          try {
+            onChange(JSON.parse(event.target.value))
+            setError(null)
+          } catch (jsonError) {
+            setError(jsonError instanceof Error ? jsonError.message : 'Value must be valid JSON')
+          }
+        }}
+      />
+      {error && <div className="issue issue-error">{error}</div>}
+    </div>
+  )
+}
+
+function readConfigString(config: JsonObject, key: string) {
+  const value = config[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function readConfigNumber(config: JsonObject, key: string) {
+  const value = config[key]
+  return typeof value === 'number' ? value : null
+}
+
+function asJsonObject(value: unknown) {
+  return value && typeof value === 'object' ? value : {}
+}
+
 function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'templates' | 'onUseTemplate'>) {
   return (
-    <PanelChrome title="Templates">
+    <PanelChrome title="Recipes" description="Start from a tested pattern, then adjust the steps on the canvas." icon={<Workflow size={18} />}>
       <div className="panel-list">
+        {templates.length === 0 && <EmptyView icon={<Workflow size={22} />} title="No recipes loaded" body="Refresh the API connection and try again." />}
         {templates.map(template => (
           <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
-            <span className="section-kicker">{template.category}</span>
+            <div className="split-row" style={{ width: '100%' }}>
+              <span className="section-kicker">{template.category}</span>
+              <span className="mode-pill mode-pill-neutral">{template.workflow.nodes.length} steps</span>
+            </div>
             <strong>{template.name}</strong>
             <span>{template.description}</span>
+            <span className="list-card-action">Use recipe</span>
           </button>
         ))}
       </div>
@@ -182,13 +455,23 @@ function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'tem
 
 function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 'onInstallPlugin'>) {
   return (
-    <PanelChrome title="Tool Catalog">
+    <PanelChrome title="Tools" description="Install backend actions that a flow or agent can call." icon={<Boxes size={18} />}>
       <div className="panel-list">
+        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title="No tools available" body="Start the API to load registered tool actions." />}
         {tools.map(tool => (
           <div key={tool.name} className="list-card">
-            <strong>{tool.name}</strong>
+            <div className="split-row" style={{ width: '100%' }}>
+              <strong>{tool.name}</strong>
+              <span className="mode-pill mode-pill-neutral">{tool.required?.length ?? 0} required</span>
+            </div>
             <span>{tool.description}</span>
-            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>Install</button>
+            {(tool.required?.length || tool.optional?.length) && (
+              <div className="mini-grid mini-grid-tight">
+                {(tool.required ?? []).map(field => <span key={`required-${field}`}>Required: {field}</span>)}
+                {(tool.optional ?? []).map(field => <span key={`optional-${field}`}>Optional: {field}</span>)}
+              </div>
+            )}
+            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>Install tool</button>
           </div>
         ))}
       </div>
@@ -202,30 +485,43 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
   const [secretRef, setSecretRef] = useState('')
 
   return (
-    <PanelChrome title="Credentials">
-      <section className="panel-card">
-        <label className="field-label" htmlFor="credential-name">Name</label>
+    <PanelChrome title="Connections" description="Reference secrets by environment variable name without exposing values in the UI." icon={<KeyRound size={18} />}>
+      <section className="panel-card connection-form">
+        <div className="split-row">
+          <div>
+            <div className="section-kicker">New connection</div>
+            <strong>Register a secret reference</strong>
+          </div>
+          <LockKeyhole size={18} aria-hidden="true" />
+        </div>
+        <label className="field-label" htmlFor="credential-name">Connection name</label>
         <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
-        <label className="field-label" htmlFor="credential-kind">Kind</label>
+        <label className="field-label" htmlFor="credential-kind">Connection kind</label>
         <input id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)} />
-        <label className="field-label" htmlFor="credential-secret">Secret ref</label>
+        <label className="field-label" htmlFor="credential-secret">Environment variable</label>
         <input id="credential-secret" className="text-field" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder="SLACK_BOT_TOKEN" />
-        <button
-          className="command-button command-button-primary"
-          onClick={() => {
-            onCreateCredential({ name: name || 'API Key', kind, secretRef: secretRef || 'MY_SECRET' })
-            setName('')
-            setSecretRef('')
-          }}
-        >
-          Add credential
-        </button>
+        <div className="form-actions connection-form-actions">
+          <button
+            className="command-button command-button-primary"
+            onClick={() => {
+              onCreateCredential({ name: name || 'API Key', kind, secretRef: secretRef || 'MY_SECRET' })
+              setName('')
+              setSecretRef('')
+            }}
+          >
+            Add connection
+          </button>
+        </div>
       </section>
       <div className="panel-list">
+        {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title="No connections yet" body="Create a reference once the matching environment variable exists in the runtime." />}
         {credentials.map(credential => (
           <div key={credential.id} className="list-card">
-            <strong>{credential.name}</strong>
-            <span>{credential.kind} / {'{{secret.' + credential.secretRef + '}}'}</span>
+            <div className="split-row" style={{ width: '100%' }}>
+              <strong>{credential.name}</strong>
+              <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
+            </div>
+            <span>{'{{secret.' + credential.secretRef + '}}'}</span>
           </div>
         ))}
       </div>
@@ -248,20 +544,41 @@ function RunsPanel({
 }: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
+  const completedRuns = runs.filter(run => run.status === 'succeeded').length
+  const activeRuns = runs.filter(run => run.status === 'running' || run.status === 'queued').length
+  const failedRuns = runs.filter(run => run.status === 'failed').length
 
   return (
-    <PanelChrome title="Runs">
+    <PanelChrome title="Runs" description="Review execution history, approvals, retries, and AI explanations." icon={<Activity size={18} />}>
+      <section className="metric-strip" aria-label="Run summary">
+        <Metric label="Total" value={runs.length} icon={<ListChecks size={15} />} />
+        <Metric label="Active" value={activeRuns} icon={<Activity size={15} />} />
+        <Metric label="Done" value={completedRuns} icon={<CheckCircle2 size={15} />} />
+        <Metric label="Failed" value={failedRuns} icon={<RefreshCw size={15} />} />
+      </section>
+
       <section className="panel-card">
         <div className="split-row">
-          <strong>Usage</strong>
+          <strong>Usage summary</strong>
           <button className="small-command" onClick={onRefreshPlatform}>Refresh</button>
         </div>
-        <pre className="mini-pre">{JSON.stringify(usage, null, 2)}</pre>
+        {Object.keys(usage).length === 0 ? (
+          <p className="empty-state">No usage recorded yet.</p>
+        ) : (
+          <div className="mini-grid">
+            {Object.entries(usage).map(([key, value]) => (
+              <span key={key}><strong>{value}</strong>{key}</span>
+            ))}
+          </div>
+        )}
       </section>
 
       {waitingNodes.length > 0 && (
-        <section className="panel-card">
-          <strong>Waiting nodes</strong>
+        <section className="panel-card action-card">
+          <div>
+            <strong>Needs approval</strong>
+            <p className="helper-text">Resume paused approval steps from here.</p>
+          </div>
           {waitingNodes.map(node => (
             <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
               Approve {node.nodeId}
@@ -271,11 +588,14 @@ function RunsPanel({
       )}
 
       {failedNodes.length > 0 && (
-        <section className="panel-card">
-          <strong>Failed nodes</strong>
+        <section className="panel-card action-card">
+          <div>
+            <strong>Needs attention</strong>
+            <p className="helper-text">Retry failed steps after reviewing their payloads.</p>
+          </div>
           {failedNodes.map(node => (
             <button key={node.nodeId} className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-              Replay {node.nodeId}
+              Retry {node.nodeId}
             </button>
           ))}
         </section>
@@ -291,18 +611,40 @@ function RunsPanel({
       />
 
       <div className="panel-list">
-        {runs.length === 0 && <p className="empty-state">No runs yet. Press Run to execute the current workflow.</p>}
+        <div className="section-kicker">History</div>
+        {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title="No runs yet" body="Press Run to execute the current flow and inspect the result here." />}
         {runs.map(run => (
           <button key={run.id} className="list-card list-card-button" onClick={() => onOpenRun(run.id)}>
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{run.id.slice(0, 8)}…</strong>
-              <span className="status-pill" data-status={run.status}>{run.status}</span>
+              <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
             </div>
             <span>{run.createdAt ? new Date(run.createdAt).toLocaleString() : 'run'}</span>
+            <span className="list-card-action">Open run timeline</span>
           </button>
         ))}
       </div>
     </PanelChrome>
+  )
+}
+
+function Metric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+  return (
+    <div className="metric-item">
+      <span>{icon}</span>
+      <strong>{value}</strong>
+      <small>{label}</small>
+    </div>
+  )
+}
+
+function EmptyView({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <div className="empty-panel">
+      {icon}
+      <strong>{title}</strong>
+      <p>{body}</p>
+    </div>
   )
 }
 
@@ -311,6 +653,7 @@ function ReasoningPanel({ events }: { events: RunEvent[] }) {
 
   return (
     <div className="panel-list">
+      {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title="No run events yet" body="Run a flow to inspect low-level execution signals." />}
       {visibleEvents.map(event => (
         <div key={event.id} className="list-card">
           <strong>{event.type}</strong>

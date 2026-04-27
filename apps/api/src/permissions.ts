@@ -1,4 +1,4 @@
-import { db, orgMembers } from '@workflow-engine/db'
+import { db, orgMembers } from '@janusly/db'
 import { and, eq } from 'drizzle-orm'
 
 export type Role = 'viewer' | 'editor' | 'admin'

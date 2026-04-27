@@ -1,4 +1,4 @@
-import { db, workflowVersions } from "@workflow-engine/db";
+import { db, workflowVersions } from "@janusly/db";
 import { and, desc, eq } from "drizzle-orm";
 
 export async function rollbackWorkflowVersion(input: {

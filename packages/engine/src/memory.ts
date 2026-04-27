@@ -1,5 +1,5 @@
-import { db } from "@workflow-engine/db";
-import { runEvents } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { runEvents } from "@janusly/db";
 import { asc, eq } from "drizzle-orm";
 
 export type MemoryEntry = {

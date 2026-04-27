@@ -1,11 +1,11 @@
-import { db } from "@workflow-engine/db";
-import { runs } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { runs } from "@janusly/db";
 import { eq } from "drizzle-orm";
 import { markNodeSucceeded, appendEvent } from "./persistence";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { WorkflowRuntime } from "./core/runtime";
-import { WorkflowSchema } from "@workflow-engine/shared";
+import { WorkflowSchema } from "@janusly/shared";
 
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),

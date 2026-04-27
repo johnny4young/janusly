@@ -1,4 +1,4 @@
-import { WorkflowSchema, nodeTypeValues } from "@workflow-engine/shared";
+import { WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { validateToolInput } from "./tool-registry";
 

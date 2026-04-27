@@ -1,5 +1,5 @@
 {
-  "name": "workflow-engine",
+  "name": "janusly",
   "private": true,
   "packageManager": "pnpm@10.23.0",
   "engines": {

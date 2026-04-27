@@ -1,4 +1,4 @@
-import type { Workflow } from "@workflow-engine/shared";
+import type { Workflow } from "@janusly/shared";
 
 export type WorkflowTemplate = {
   id: string;
@@ -20,9 +20,9 @@ export const workflowTemplates: WorkflowTemplate[] = [
       name: "HTTP → AI Summary",
       nodes: [
         { id: "api", type: "http", config: { url: "https://api.github.com" } },
-        { id: "agent", type: "agent", config: { planner: "rules", goal: "uppercase this text", value: "API call completed", maxSteps: 2 } }
+        { id: "summary", type: "ai", config: { prompt: "Summarize the API response for an operator and suggest the next action: {{context.api.output.body}}" } }
       ],
-      edges: [{ from: "api", to: "agent" }]
+      edges: [{ from: "api", to: "summary" }]
     }
   },
   {

@@ -1,9 +1,9 @@
-# Agent Notes — Cortex
+# Agent Notes — Janusly
 
-Cortex = the AI operator for business workflows. The repo is named `workflow-engine` for legacy/package reasons; the **product** is Cortex. Everywhere user-facing (UI brand-mark, page titles, marketing copy, `/ai/*` responses) say **Cortex**. The `@workflow-engine/*` package names stay unchanged — refactoring those is a separate, intentional task.
+Janusly = the AI operator for business workflows. Internal packages live under the `@janusly/*` scope. Everywhere user-facing (UI brand-mark, page titles, marketing copy, `/ai/*` responses) say **Janusly**.
 
 - **Stack baselines:** Node.js **24**, TypeScript 6, React 19, Vite 8 (Rolldown), Tailwind 4 (CSS-first via `@theme` + `@tailwindcss/vite`), Vitest 4, Zod 4, Drizzle 0.45, Postgres 18, Redis 8, OpenAI SDK 6.
-- **Design system:** Workflow palette (Indigo `#4F46E5` + Cyan `#06B6D4` + green/amber/red status). Tokens in `apps/web/src/index.css` (`@theme { --color-we-* }` + `:root` aliases). No inline hex.
+- **Design system:** Workflow palette (Cobalt `#245BFF` + Cyan `#06B6D4` + green/amber/red status). Tokens in `apps/web/src/index.css` (`@theme { --color-we-* }` + `:root` aliases). No inline hex.
 - **Tailwind 4 is CSS-first.** No `tailwind.config.ts` or `postcss.config.js`. The plugin runs through `@tailwindcss/vite()` in `apps/web/vite.config.ts`.
 - **Vite 8 / Rolldown:** `build.rollupOptions.output.manualChunks` must be a function, not an object literal.
 - **Zod 4:** `z.record(z.string(), z.unknown())` — two-arg form.

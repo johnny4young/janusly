@@ -1,9 +1,37 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Janusly CSS map
+   01. Tailwind v4 theme tokens
+   02. Runtime token aliases
+   03. Base elements
+   04. App shell and workspace layout
+   05. Shared layout primitives
+   06. Form elements
+   07. Command buttons
+   08. Sidebar controls and navigation
+   09. Canvas frame
+   10. Panel, list, and empty states
+   11. Status and mode indicators
+   12. AI copilot and chat surfaces
+   13. Account menu
+   14. Boot and auth screens
+   15. React Flow and workflow nodes
+   16. Toast feedback
+   17. Agent team timeline
+   18. Team member list
+   19. Responsive rules
+   ========================================================================== */
+
+/* ==========================================================================
+   01. Tailwind v4 theme tokens
+   Exposes Janusly color and font tokens to Tailwind's CSS-first runtime.
+   Keep raw color values here; component rules below should consume aliases.
+   ========================================================================== */
 @theme {
-  --color-we-primary: #4f46e5;
-  --color-we-primary-strong: #4338ca;
-  --color-we-primary-soft: #eef2ff;
+  --color-we-primary: #245bff;
+  --color-we-primary-strong: #1537cc;
+  --color-we-primary-soft: #eef4ff;
   --color-we-accent: #06b6d4;
   --color-we-accent-soft: #ecfeff;
   --color-we-success: #10b981;
@@ -25,18 +53,22 @@
   --color-we-surface-2: #fbfbfe;
   --color-we-surface-muted: #f3f4fb;
 
-  --font-sans: "Inter", "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: "Avenir Next", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Menlo", monospace;
 }
 
 /* ==========================================================================
-   Workflow Engine — design tokens (alias to @theme above for component CSS)
+   02. Runtime token aliases
+   Short semantic aliases used by hand-written component CSS. These make
+   component rules easier to read and keep color usage centralized.
    ========================================================================== */
 :root {
   --we-primary: var(--color-we-primary);
   --we-primary-strong: var(--color-we-primary-strong);
   --we-primary-soft: var(--color-we-primary-soft);
-  --we-primary-ring: rgba(79, 70, 229, 0.18);
+  --we-primary-ring: color-mix(in srgb, var(--we-primary) 18%, transparent);
+  --we-primary-shadow: color-mix(in srgb, var(--we-primary) 55%, transparent);
+  --we-primary-shadow-strong: color-mix(in srgb, var(--we-primary) 70%, transparent);
   --we-accent: var(--color-we-accent);
   --we-accent-soft: var(--color-we-accent-soft);
   --we-bg: var(--color-we-bg);
@@ -45,7 +77,8 @@
   --we-surface-muted: var(--color-we-surface-muted);
   --we-line: var(--color-we-line);
   --we-line-strong: var(--color-we-line-strong);
-  --we-grid: rgba(79, 70, 229, 0.08);
+  --we-grid: color-mix(in srgb, var(--we-primary) 8%, transparent);
+  --we-grid-strong: color-mix(in srgb, var(--we-primary) 16%, transparent);
   --we-ink: var(--color-we-ink);
   --we-ink-soft: var(--color-we-ink-soft);
   --we-muted: var(--color-we-muted);
@@ -60,8 +93,13 @@
   --we-info-soft: var(--color-we-info-soft);
 }
 
-* { box-sizing: border-box; }
+/* ==========================================================================
+   03. Base elements
+   Browser-level resets and default element behavior. Avoid component-specific
+   styling here so inherited behavior remains predictable.
+   ========================================================================== */
 
+* { box-sizing: border-box; }
 html, body, #root { min-height: 100%; }
 
 body {
@@ -80,8 +118,11 @@ button { cursor: pointer; font-family: inherit; }
 button:disabled { cursor: not-allowed; opacity: 0.5; }
 a { color: var(--we-primary); }
 
-/* ============ Shell ============ */
-
+/* ==========================================================================
+   04. App shell and workspace layout
+   Defines the persistent top bar and the three-column builder workspace.
+   Responsive layout changes live at the bottom of the file.
+   ========================================================================== */
 .app-shell {
   display: grid;
   grid-template-rows: 56px 1fr;
@@ -135,16 +176,16 @@ a { color: var(--we-primary); }
   place-items: center;
   border-radius: 8px;
   background: linear-gradient(135deg, var(--we-primary) 0%, var(--we-accent) 100%);
-  color: #fff;
+  color: var(--we-surface);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  box-shadow: 0 6px 14px -6px rgba(79, 70, 229, 0.55);
+  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
 }
 
 .workspace-grid {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 440px;
+  grid-template-columns: 300px minmax(460px, 1fr) 420px;
   min-height: 0;
 }
 
@@ -164,13 +205,16 @@ a { color: var(--we-primary); }
   position: relative;
 }
 
-/* ============ Sidebar / Panel ============ */
-
+/* ==========================================================================
+   05. Shared layout primitives
+   Reusable structural shells used by sidebar sections, panel stacks, cards,
+   list rows, and common alignment helpers.
+   ========================================================================== */
 .builder-sidebar,
 .panel-stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 16px;
 }
 
@@ -178,19 +222,14 @@ a { color: var(--we-primary); }
 .panel-card,
 .list-card {
   border: 1px solid var(--we-line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--we-surface);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .sidebar-section { padding: 14px; }
 
-.sidebar-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
+/* Shared typographic helper for compact section labels. */
 .section-kicker {
   color: var(--we-primary);
   font-size: 10px;
@@ -201,6 +240,45 @@ a { color: var(--we-primary); }
   text-transform: uppercase;
 }
 
+.helper-text {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+/* Sidebar-specific AI mode card shown near the primary builder actions. */
+.ai-mode-card {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--we-primary-soft) 78%, var(--we-surface) 22%) 0%, var(--we-surface) 62%),
+    var(--we-surface);
+}
+
+.ai-mode-card p,
+.usecase-row p,
+.copilot-hero p {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+.ai-mode-card .command-button {
+  margin-top: 12px;
+  width: 100%;
+}
+
+.sidebar-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   06. Form elements
+   Inputs, labels, JSON editors, and form-specific layout. Keep form spacing
+   here instead of attaching margins directly to button variants.
+   ========================================================================== */
 .field-label {
   display: block;
   color: var(--we-ink-soft);
@@ -237,8 +315,11 @@ a { color: var(--we-primary); }
 
 .code-field-short { min-height: 84px; }
 
-/* ============ Buttons ============ */
-
+/* ==========================================================================
+   07. Command buttons
+   Shared button contract plus action variants. Feature-specific buttons should
+   extend these classes instead of redefining hover/focus behavior.
+   ========================================================================== */
 .command-button,
 .small-command,
 .node-chip,
@@ -277,16 +358,16 @@ a { color: var(--we-primary); }
 .command-button-primary {
   border-color: transparent;
   background: linear-gradient(135deg, var(--we-primary) 0%, var(--we-primary-strong) 100%);
-  color: #fff;
+  color: var(--we-surface);
   font-weight: 600;
-  box-shadow: 0 6px 14px -6px rgba(79, 70, 229, 0.55);
+  box-shadow: 0 6px 14px -6px var(--we-primary-shadow);
 }
 
 .command-button-primary:hover {
   border-color: transparent;
-  color: #fff;
+  color: var(--we-surface);
   filter: brightness(1.05);
-  box-shadow: 0 10px 22px -10px rgba(79, 70, 229, 0.7);
+  box-shadow: 0 10px 22px -10px var(--we-primary-shadow-strong);
 }
 
 .command-button-quiet { background: var(--we-surface); }
@@ -309,6 +390,11 @@ a { color: var(--we-primary); }
   color: var(--we-danger);
 }
 
+/* ==========================================================================
+   08. Sidebar controls and navigation
+   Palette chips for adding workflow steps, view navigation buttons, and the
+   stream status indicator used in the builder sidebar.
+   ========================================================================== */
 .node-palette {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -316,14 +402,33 @@ a { color: var(--we-primary); }
 }
 
 .node-chip {
+  align-items: flex-start;
+  flex-direction: column;
   justify-content: flex-start;
+  min-height: 58px;
   min-width: 0;
   font-size: 12px;
   font-weight: 500;
-  text-transform: capitalize;
+  padding: 8px 10px;
+  text-align: left;
 }
 
-.node-chip span,
+.node-chip-main {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.node-chip small {
+  color: var(--we-muted);
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.25;
+  margin-left: 22px;
+}
+
 .view-button span,
 .command-button span {
   overflow: hidden;
@@ -331,20 +436,76 @@ a { color: var(--we-primary); }
   white-space: nowrap;
 }
 
-/* ============ Views / Lists ============ */
+.node-chip-main span {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .view-list,
 .panel-list { display: grid; gap: 8px; }
 
 .view-button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  gap: 10px;
   justify-content: flex-start;
+  min-height: 54px;
+  padding: 9px 10px;
+  text-align: left;
   width: 100%;
   font-weight: 500;
+}
+
+.view-icon {
+  align-items: center;
+  align-self: center;
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-ink-soft);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.view-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.view-copy strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.view-copy small {
+  color: var(--we-muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.view-arrow {
+  align-self: center;
+  color: var(--we-faint);
 }
 
 .view-button-active {
   border-color: var(--we-primary);
   background: var(--we-primary-soft);
+  color: var(--we-primary);
+  box-shadow: 0 8px 18px -14px var(--we-primary-shadow);
+}
+
+.view-button-active .view-icon {
+  background: var(--we-surface);
+  border-color: color-mix(in srgb, var(--we-primary) 28%, transparent);
+  color: var(--we-primary);
+}
+
+.view-button-active .view-copy small,
+.view-button-active .view-arrow {
   color: var(--we-primary);
 }
 
@@ -377,15 +538,53 @@ a { color: var(--we-primary); }
   50% { opacity: 1; }
 }
 
+/* ==========================================================================
+   09. Canvas frame
+   The React Flow viewport shell and floating summary badge. The detailed
+   React Flow node styles live with workflow-node rules below.
+   ========================================================================== */
 .canvas-frame {
   height: 100%;
+  position: relative;
   background:
-    linear-gradient(90deg, var(--we-grid) 1px, transparent 1px),
-    linear-gradient(0deg, var(--we-grid) 1px, transparent 1px),
-    linear-gradient(135deg, #ffffff 0%, #f4f5fb 100%);
-  background-size: 40px 40px, 40px 40px, auto;
+    linear-gradient(135deg, var(--we-surface) 0%, var(--we-surface-muted) 100%);
 }
 
+.canvas-toolbar {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -18px rgba(15, 23, 42, 0.35);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  left: 16px;
+  min-width: 190px;
+  padding: 10px 12px;
+  position: absolute;
+  top: 16px;
+  z-index: 3;
+  backdrop-filter: blur(10px);
+}
+
+.canvas-toolbar strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.canvas-toolbar span {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   10. Panel, list, and empty states
+   Common right-panel heading, list card, empty state, metrics, and detail
+   primitives reused across Runs, Connections, Team, Tools, and Recipes.
+   ========================================================================== */
 .panel-heading h2 {
   font-size: 18px;
   font-weight: 700;
@@ -394,8 +593,49 @@ a { color: var(--we-primary); }
   margin: 0;
 }
 
+.panel-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.panel-heading-copy {
+  min-width: 0;
+}
+
+.panel-heading p {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+.panel-heading-icon {
+  align-items: center;
+  background: var(--we-primary-soft);
+  border: 1px solid color-mix(in srgb, var(--we-primary) 24%, transparent);
+  border-radius: 8px;
+  color: var(--we-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
 .panel-card,
 .list-card { padding: 14px; }
+
+.panel-card h3,
+.list-card strong {
+  margin: 0;
+}
+
+.panel-card h3 {
+  font-size: 16px;
+  line-height: 1.2;
+}
 
 .list-card {
   align-items: flex-start;
@@ -413,6 +653,36 @@ a { color: var(--we-primary); }
 
 .empty-state { padding: 8px 4px; }
 
+.empty-panel {
+  align-items: center;
+  border: 1px dashed var(--we-line-strong);
+  border-radius: 8px;
+  color: var(--we-muted);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  padding: 18px 14px;
+  text-align: center;
+}
+
+.empty-panel svg { color: var(--we-primary); }
+
+.empty-panel strong {
+  color: var(--we-ink);
+  font-size: 13px;
+}
+
+.empty-panel p {
+  color: var(--we-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.empty-panel-compact {
+  padding: 12px;
+}
+
 .list-card-button {
   width: 100%;
   cursor: pointer;
@@ -425,6 +695,188 @@ a { color: var(--we-primary); }
   gap: 10px;
 }
 
+.panel-toolbar,
+.workflow-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.workflow-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.list-card-action {
+  color: var(--we-primary);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.inspector-meta {
+  border-top: 1px solid var(--we-line);
+  color: var(--we-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.inspector-meta span {
+  background: var(--we-surface-muted);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.form-grid,
+.quick-config {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.connection-form-actions {
+  border-top: 1px solid var(--we-line);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.quick-config {
+  border-top: 1px solid var(--we-line);
+  padding-top: 12px;
+}
+
+.config-field-row {
+  display: grid;
+  gap: 2px;
+}
+
+.checkbox-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  color: var(--we-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.checkbox-row input {
+  accent-color: var(--we-primary);
+}
+
+.advanced-config {
+  border-top: 1px solid var(--we-line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.advanced-config summary {
+  color: var(--we-ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-box {
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.detail-block {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.metric-strip {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric-item {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-width: 0;
+  padding: 10px;
+}
+
+.metric-item span {
+  color: var(--we-primary);
+  display: inline-flex;
+}
+
+.metric-item strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.metric-item small {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.action-card {
+  display: grid;
+  gap: 10px;
+}
+
+.mini-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.mini-grid span {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 2px;
+  padding: 8px;
+}
+
+.mini-grid strong {
+  color: var(--we-ink);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.mini-grid-tight {
+  grid-template-columns: 1fr;
+}
+
+/* ==========================================================================
+   11. Status and mode indicators
+   Pills and badges for run state, AI/fallback mode, and lightweight metadata.
+   ========================================================================== */
 .status-pill {
   border: 1px solid var(--we-line-strong);
   border-radius: 999px;
@@ -442,6 +894,152 @@ a { color: var(--we-primary); }
 .status-pill[data-status="waiting"] { color: var(--we-warning); border-color: rgba(245, 158, 11, 0.3); background: var(--we-warning-soft); }
 .status-pill[data-status="running"] { color: var(--we-info); border-color: rgba(59, 130, 246, 0.3); background: var(--we-info-soft); }
 
+.mode-pill {
+  align-items: center;
+  border: 1px solid var(--we-line-strong);
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  min-height: 24px;
+  padding: 0 9px;
+  text-transform: uppercase;
+}
+
+.mode-pill-ai {
+  background: var(--we-accent-soft);
+  border-color: color-mix(in srgb, var(--we-accent) 34%, transparent);
+  color: var(--we-accent);
+}
+
+.mode-pill-fallback,
+.mode-pill-neutral {
+  background: var(--we-surface-muted);
+  border-color: var(--we-line-strong);
+  color: var(--we-ink-soft);
+}
+
+.mode-pill-error {
+  background: var(--we-danger-soft);
+  border-color: color-mix(in srgb, var(--we-danger) 30%, transparent);
+  color: var(--we-danger);
+}
+
+/* ==========================================================================
+   12. AI copilot and chat surfaces
+   AI Studio hero, prompt controls, supported-use-case rows, and run chat
+   message cards.
+   ========================================================================== */
+.copilot-hero {
+  align-items: flex-start;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, var(--we-surface) 0%, var(--we-primary-soft) 54%, var(--we-accent-soft) 100%);
+  box-shadow: 0 12px 30px -24px rgba(15, 23, 42, 0.35);
+}
+
+.copilot-hero h2 {
+  color: var(--we-ink);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.08;
+  margin: 12px 0 0;
+}
+
+.copilot-hero svg {
+  color: var(--we-primary);
+  flex: 0 0 auto;
+}
+
+.copilot-prompt {
+  margin-top: 12px;
+}
+
+.suggestion-row,
+.chat-starters,
+.copilot-actions,
+.copilot-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.copilot-actions .command-button {
+  flex: 1 1 160px;
+}
+
+.copilot-secondary-actions .command-button {
+  flex: 1 1 0;
+}
+
+.result-panel .result-body,
+.message-body {
+  line-height: 1.5;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+
+.usecase-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.usecase-row {
+  align-items: flex-start;
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  padding-top: 10px;
+}
+
+.usecase-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.usecase-icon {
+  align-items: center;
+  background: var(--we-primary-soft);
+  border-radius: 8px;
+  color: var(--we-primary);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.usecase-icon-ready {
+  background: var(--we-success-soft);
+  color: var(--we-success);
+}
+
+.message-card {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 12px 13px;
+  background: var(--we-surface);
+}
+
+.message-card-user {
+  background: var(--we-surface-muted);
+}
+
+.message-card-assistant {
+  background: linear-gradient(180deg, var(--we-surface) 0%, var(--we-primary-soft) 180%);
+}
+
 .issue {
   border-radius: 8px;
   font-size: 12px;
@@ -453,7 +1051,7 @@ a { color: var(--we-primary); }
 .issue-error {
   border: 1px solid rgba(239, 68, 68, 0.25);
   background: var(--we-danger-soft);
-  color: #991b1b;
+  color: var(--we-danger);
 }
 
 .mini-pre {
@@ -478,8 +1076,10 @@ a { color: var(--we-primary); }
   font-size: 12px;
 }
 
-/* ============ User menu ============ */
-
+/* ==========================================================================
+   13. Account menu
+   User dropdown and trigger sizing. Keep auth-card styles in the auth section.
+   ========================================================================== */
 .user-menu {
   margin-left: auto;
   position: relative;
@@ -501,7 +1101,7 @@ a { color: var(--we-primary); }
   z-index: 50;
   width: 260px;
   border: 1px solid var(--we-line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--we-surface);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
   padding: 14px;
@@ -510,16 +1110,18 @@ a { color: var(--we-primary); }
   gap: 8px;
 }
 
-/* ============ Boot / Auth ============ */
-
+/* ==========================================================================
+   14. Boot and auth screens
+   Full-screen loading/authentication surfaces used outside the main builder.
+   ========================================================================== */
 .boot-screen,
 .auth-screen {
   display: grid;
   height: 100vh;
   place-items: center;
   background:
-    radial-gradient(circle at 20% 10%, rgba(79, 70, 229, 0.12), transparent 55%),
-    radial-gradient(circle at 80% 90%, rgba(6, 182, 212, 0.12), transparent 55%),
+    radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--we-primary) 12%, transparent), transparent 55%),
+    radial-gradient(circle at 80% 90%, color-mix(in srgb, var(--we-accent) 12%, transparent), transparent 55%),
     var(--we-bg);
   color: var(--we-ink);
   font-size: 16px;
@@ -560,18 +1162,117 @@ a { color: var(--we-primary); }
 
 .auth-toggle:hover { text-decoration: underline; }
 
-/* ============ React Flow ============ */
-
+/* ==========================================================================
+   15. React Flow and workflow nodes
+   Styles third-party React Flow chrome and Janusly custom workflow step nodes.
+   Keep React Flow class overrides scoped to .react-flow__* selectors.
+   ========================================================================== */
 .react-flow__node {
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--we-ink);
   font-size: 12px;
   font-weight: 600;
 }
 
+.react-flow__node-workflowStep {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.workflow-node {
+  background: var(--we-surface);
+  border: 1.5px solid var(--we-line-strong);
+  border-radius: 8px;
+  box-shadow: 0 18px 34px -26px rgba(15, 23, 42, 0.45);
+  min-width: 238px;
+  padding: 11px;
+  position: relative;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.workflow-node[data-selected="true"] {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 4px var(--we-primary-ring), 0 22px 42px -28px var(--we-primary-shadow);
+}
+
+.workflow-node[data-status="running"] { border-color: var(--we-info); background: var(--we-info-soft); }
+.workflow-node[data-status="waiting"],
+.workflow-node[data-status="queued"] { border-color: var(--we-warning); background: var(--we-warning-soft); }
+.workflow-node[data-status="succeeded"] { border-color: var(--we-success); background: var(--we-success-soft); }
+.workflow-node[data-status="failed"],
+.workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
+
+.workflow-node-head {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.workflow-node-icon {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-primary);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.workflow-node-title {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-node-status {
+  font-size: 9px;
+  padding: 3px 7px;
+}
+
+.workflow-node p {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 8px 0 0;
+}
+
+.workflow-node-summary {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  color: var(--we-ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 10px;
+  overflow: hidden;
+  padding: 7px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-handle {
+  background: var(--we-ink);
+  border: 2px solid var(--we-surface);
+  height: 10px;
+  width: 10px;
+}
+
+.workflow-handle-target { top: -5px; }
+.workflow-handle-source { bottom: -5px; }
+
 .react-flow__controls {
   border: 1px solid var(--we-line-strong);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 6px 20px -8px rgba(15, 23, 42, 0.2);
   overflow: hidden;
 }
@@ -582,10 +1283,24 @@ a { color: var(--we-primary); }
   border-bottom: 1px solid var(--we-line);
 }
 
+.react-flow__edge-textbg {
+  fill: var(--we-surface);
+  stroke: var(--we-line);
+  stroke-width: 1px;
+}
+
+.react-flow__edge-text {
+  fill: var(--we-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .react-flow__attribution { background: transparent; }
 
-/* ============ Toasts ============ */
-
+/* ==========================================================================
+   16. Toast feedback
+   Fixed notification stack for validation, save, run, and API feedback.
+   ========================================================================== */
 .toast-stack {
   position: fixed;
   bottom: 18px;
@@ -601,7 +1316,7 @@ a { color: var(--we-primary); }
   border: 1px solid var(--we-line-strong);
   background: var(--we-surface);
   color: var(--we-ink);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px 14px;
   font-size: 13px;
   text-align: left;
@@ -612,12 +1327,14 @@ a { color: var(--we-primary); }
 
 .toast:hover { transform: translateY(-1px); }
 
-.toast-success { border-color: rgba(16, 185, 129, 0.4); background: var(--we-success-soft); color: #065f46; }
-.toast-error { border-color: rgba(239, 68, 68, 0.4); background: var(--we-danger-soft); color: #991b1b; }
-.toast-info { border-color: rgba(79, 70, 229, 0.3); background: var(--we-primary-soft); color: var(--we-primary-strong); }
+.toast-success { border-color: rgba(16, 185, 129, 0.4); background: var(--we-success-soft); color: var(--we-success); }
+.toast-error { border-color: rgba(239, 68, 68, 0.4); background: var(--we-danger-soft); color: var(--we-danger); }
+.toast-info { border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); background: var(--we-primary-soft); color: var(--we-primary-strong); }
 
-/* ============ Crew timeline ============ */
-
+/* ==========================================================================
+   17. Agent team timeline
+   Multi-agent run timeline lanes, event cards, tones, and selected detail.
+   ========================================================================== */
 .timeline-shell { display: grid; gap: 14px; }
 
 .timeline-header {
@@ -632,7 +1349,7 @@ a { color: var(--we-primary); }
 .timeline-lane {
   background: var(--we-surface);
   border: 1px solid var(--we-line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
 }
 
@@ -709,12 +1426,14 @@ a { color: var(--we-primary); }
   margin-top: 4px;
   background: var(--we-surface);
   border: 1px solid var(--we-line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
 }
 
-/* ============ Member list ============ */
-
+/* ==========================================================================
+   18. Team member list
+   Team management rows and compact role controls.
+   ========================================================================== */
 .member-row {
   flex-direction: row;
   align-items: center;
@@ -740,8 +1459,11 @@ a { color: var(--we-primary); }
   font-size: 12px;
 }
 
-/* ============ Responsive ============ */
-
+/* ==========================================================================
+   19. Responsive rules
+   Breakpoints are ordered wide to narrow. Add new responsive overrides here
+   instead of scattering @media blocks through feature sections.
+   ========================================================================== */
 @media (max-width: 1100px) {
   .app-shell {
     height: auto;
@@ -750,7 +1472,7 @@ a { color: var(--we-primary); }
   }
 
   .workspace-grid {
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
     grid-template-rows: minmax(430px, 1fr) minmax(320px, auto);
     min-height: calc(100vh - 56px);
   }
@@ -764,11 +1486,26 @@ a { color: var(--we-primary); }
 }
 
 @media (max-width: 760px) {
-  .top-bar { min-height: 56px; }
+  .top-bar {
+    gap: 10px;
+    min-height: 56px;
+    padding: 0 12px;
+  }
+
+  .brand-lockup > div {
+    min-width: 0;
+  }
+
+  .brand-lockup span:not(.brand-mark) {
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .workspace-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(430px, 70vh) auto;
+    grid-template-rows: auto minmax(430px, 64svh) auto;
   }
 
   .workspace-sidebar {
@@ -779,5 +1516,75 @@ a { color: var(--we-primary); }
   .workspace-panel {
     grid-column: 1;
     max-height: none;
+  }
+
+  .builder-sidebar,
+  .panel-stack {
+    padding: 12px;
+  }
+
+  .sidebar-actions,
+  .node-palette,
+  .view-list,
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .view-button {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .view-arrow {
+    display: none;
+  }
+
+  .canvas-toolbar {
+    left: 10px;
+    min-width: 160px;
+    padding: 8px 10px;
+    top: 10px;
+  }
+
+  .workflow-node {
+    min-width: 218px;
+  }
+
+  .panel-heading-icon {
+    display: none;
+  }
+
+  .copilot-hero {
+    display: grid;
+  }
+}
+
+@media (max-width: 480px) {
+  .sidebar-actions,
+  .node-palette,
+  .view-list,
+  .metric-strip,
+  .mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-toolbar,
+  .workflow-row,
+  .member-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .member-actions {
+    width: 100%;
+  }
+
+  .member-actions select {
+    flex: 1;
+    width: auto;
+  }
+
+  .copilot-actions .command-button,
+  .copilot-secondary-actions .command-button {
+    flex-basis: 100%;
   }
 }

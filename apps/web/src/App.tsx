@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from './Layout'
+import { MarkerType } from '@xyflow/react'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
@@ -8,9 +9,9 @@ import { UserMenu } from './components/UserMenu'
 import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
-import { statusStyles } from './constants'
+import { getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
-import type { Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 
 type StatusResponse = {
   run?: RunSummary
@@ -29,6 +30,18 @@ type RunResponse = {
 type ValidationResponse = {
   valid: boolean
   issues?: ValidationIssue[]
+}
+
+type GenerateWorkflowResponse = WorkflowDefinition & {
+  mode?: AiMode
+  error?: string
+}
+
+type ExplainWorkflowResponse = {
+  mode?: AiMode
+  explanation?: string
+  model?: string
+  error?: string
 }
 
 export default function App() {
@@ -81,6 +94,7 @@ export default function App() {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
+  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
 
   useEffect(() => {
     let mounted = true
@@ -105,13 +119,14 @@ export default function App() {
   }, [clearAuth, setAuth, setAuthReady])
 
   const refreshPlatform = useCallback(async () => {
-    const [toolData, templateData, credentialData, runData, deadLetterData, usageData] = await Promise.allSettled([
+    const [toolData, templateData, credentialData, runData, deadLetterData, usageData, aiHealthData] = await Promise.allSettled([
       api('/tools'),
       api('/templates'),
       api('/credentials'),
       api('/runs'),
       api('/dlq'),
       api('/billing/usage'),
+      api('/ai/health'),
     ])
 
     if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
@@ -121,6 +136,9 @@ export default function App() {
     if (deadLetterData.status === 'fulfilled') setDeadLetters(Array.isArray(deadLetterData.value) ? deadLetterData.value : [])
     if (usageData.status === 'fulfilled' && usageData.value && typeof usageData.value === 'object') {
       setUsage(usageData.value as Record<string, number>)
+    }
+    if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
+      setAiHealth(aiHealthData.value as AiHealth)
     }
   }, [])
 
@@ -189,18 +207,15 @@ export default function App() {
 
       return {
         ...node,
+        type: 'workflowStep',
         data: {
           ...node.data,
-          label: `${node.data.label} · ${status}`,
+          label: getNodeLabel(node.data.type),
+          helper: getNodeHelper(node.data.type),
+          status,
+          hasValidationError,
         },
-        style: {
-          borderRadius: 10,
-          padding: 11,
-          boxShadow: isSelected
-            ? '0 0 0 3px var(--we-primary-ring)'
-            : '0 10px 24px -14px rgba(15, 23, 42, 0.18)',
-          ...(hasValidationError ? { border: '1.5px solid var(--we-danger)', background: 'var(--we-danger-soft)' } : statusStyles[status] ?? statusStyles.pending),
-        },
+        selected: isSelected,
       }
     })
   }, [nodeStatusMap, nodes, selectedNodeId, validationIssues])
@@ -212,7 +227,11 @@ export default function App() {
       label: edge.data?.condition ? 'condition' : edge.label,
       style: {
         stroke: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
-        strokeWidth: selectedEdgeId === edge.id ? 2.5 : 1.5,
+        strokeWidth: selectedEdgeId === edge.id ? 2.8 : 1.8,
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
       },
     }))
   }, [edges, selectedEdgeId])
@@ -222,7 +241,7 @@ export default function App() {
       const workflow = getWorkflowJson()
       const result = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }) as ValidationResponse
       setValidationIssues(result.issues ?? [])
-      addToast(result.valid ? 'Workflow contract is valid' : 'Workflow has validation issues', result.valid ? 'success' : 'error')
+      addToast(result.valid ? 'Flow is ready to run' : 'Flow needs a quick fix', result.valid ? 'success' : 'error')
       return result.valid
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Validation failed', 'error')
@@ -313,7 +332,7 @@ export default function App() {
     try {
       await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) })
       await loadStatus(runId)
-      addToast(`Node ${nodeId} resumed`, 'success')
+      addToast(`Step ${nodeId} approved`, 'success')
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Resume failed', 'error')
     }
@@ -330,7 +349,7 @@ export default function App() {
       await loadStatus(runId)
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast(`Node ${nodeId} replayed`, 'success')
+      addToast(`Step ${nodeId} retried`, 'success')
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Replay failed', 'error')
     }
@@ -350,6 +369,39 @@ export default function App() {
       addToast(error instanceof Error ? error.message : 'Dead letter replay failed', 'error')
     }
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
+
+  const generateWorkflow = useCallback(async (prompt: string) => {
+    const result = await api('/ai/generate-workflow', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    }) as GenerateWorkflowResponse
+
+    if (result.error) throw new Error(result.error)
+    if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
+      throw new Error('AI response did not include a runnable workflow.')
+    }
+
+    hydrateWorkflow(result)
+    setValidationIssues([])
+    const mode = result.mode ?? 'fallback'
+    addToast(mode === 'ai' ? 'AI drafted a flow' : 'Starter flow loaded locally', mode === 'error' ? 'error' : 'success')
+    return { mode, workflow: result as WorkflowDefinition }
+  }, [addToast, hydrateWorkflow])
+
+  const explainWorkflow = useCallback(async () => {
+    const workflow = getWorkflowJson()
+    const result = await api('/ai/explain-workflow', {
+      method: 'POST',
+      body: JSON.stringify({ workflow }),
+    }) as ExplainWorkflowResponse
+
+    if (result.error) throw new Error(result.error)
+    return {
+      mode: result.mode ?? 'fallback',
+      explanation: result.explanation ?? 'No workflow explanation available.',
+      model: result.model,
+    }
+  }, [getWorkflowJson])
 
   const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
     try {
@@ -372,7 +424,7 @@ export default function App() {
     ))
   }, [edges, setEdges])
 
-  if (!authReady) return <div className="boot-screen">Loading Cortex…</div>
+  if (!authReady) return <div className="boot-screen">Loading Janusly…</div>
   if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
 
   return (
@@ -380,10 +432,10 @@ export default function App() {
       header={
         <>
           <div className="brand-lockup">
-            <span className="brand-mark">CX</span>
+            <span className="brand-mark">JN</span>
             <div>
-              <strong>Cortex</strong>
-              <span>{currentWorkflowId} / {orgId ?? 'default'}</span>
+              <strong>Janusly</strong>
+              <span>{currentWorkflowName} · {orgId ?? 'default'}</span>
             </div>
           </div>
           <UserMenu />
@@ -392,6 +444,7 @@ export default function App() {
       sidebar={
         <BuilderSidebar
           activeTab={activeTab}
+          aiHealth={aiHealth}
           workflowName={currentWorkflowName}
           streamStatus={streamStatus}
           onWorkflowNameChange={setWorkflowName}
@@ -438,6 +491,8 @@ export default function App() {
           activeRunId={runId}
           deadLetters={deadLetters}
           usage={usage}
+          aiHealth={aiHealth}
+          currentWorkflowName={currentWorkflowName}
           onOpenWorkflow={openWorkflow}
           onUseTemplate={(workflow) => {
             hydrateWorkflow(workflow)
@@ -455,6 +510,9 @@ export default function App() {
           onReplayNode={replayNode}
           onReplayDeadLetter={replayDeadLetter}
           onResolveDeadLetter={resolveDeadLetter}
+          onGenerateWorkflow={generateWorkflow}
+          onExplainWorkflow={explainWorkflow}
+          onOpenTab={setActiveTab}
         />
       }
     />

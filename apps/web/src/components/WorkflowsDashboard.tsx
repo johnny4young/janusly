@@ -28,17 +28,31 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
 
   return (
     <div className="panel-list">
-      <button onClick={load} className="small-command" disabled={loading} aria-label="Refresh saved workflows">
-        <RefreshCw size={14} aria-hidden="true" /> {loading ? 'Loading…' : 'Refresh'}
-      </button>
+      <div className="panel-toolbar">
+        <div>
+          <strong>{workflows.length} saved flows</strong>
+          <p className="helper-text">The list updates after Save or Run refreshes workspace data.</p>
+        </div>
+        <button onClick={load} className="small-command" disabled={loading} aria-label="Refresh">
+          <RefreshCw size={14} aria-hidden="true" /> {loading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
 
-      {workflows.length === 0 && !loading && <p className="empty-state">No workflows saved yet. Build one and click Save.</p>}
+      {workflows.length === 0 && !loading && (
+        <div className="empty-panel">
+          <RefreshCw size={22} aria-hidden="true" />
+          <strong>No flows saved yet</strong>
+          <p>Build a flow on the canvas, validate it, then click Save.</p>
+        </div>
+      )}
 
       {workflows.map(workflow => (
-        <div key={workflow.id} className="list-card">
-          <strong>{workflow.name}</strong>
-          <span>{workflow.id}</span>
-          <button onClick={() => onOpen(workflow.id)} className="small-command">Open</button>
+        <div key={workflow.id} className="list-card workflow-row">
+          <div>
+            <strong>{workflow.name}</strong>
+            <span>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString() : workflow.id}</span>
+          </div>
+          <button onClick={() => onOpen(workflow.id)} className="small-command">Open flow</button>
         </div>
       ))}
     </div>

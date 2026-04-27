@@ -1,5 +1,5 @@
 {
-  "name": "@workflow-engine/data",
+  "name": "@janusly/data",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
-    "@workflow-engine/db": "workspace:*",
+    "@janusly/db": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

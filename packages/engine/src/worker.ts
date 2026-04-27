@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { ensureDatabaseSchema } from "@workflow-engine/db/src/schema-management";
+import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";

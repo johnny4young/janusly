@@ -5,6 +5,11 @@ import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 
 const roles: OrgRole[] = ['viewer', 'editor', 'admin']
+const roleCopy: Record<OrgRole, string> = {
+  viewer: 'View runs and saved flows',
+  editor: 'Build, save, and run flows',
+  admin: 'Manage team, tools, and connections',
+}
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -75,7 +80,13 @@ export function MembersPanel() {
   return (
     <div className="panel-list">
       <section className="panel-card">
-        <div className="section-kicker">Invite member</div>
+        <div className="split-row">
+          <div>
+            <div className="section-kicker">Invite member</div>
+            <strong>Add access by email</strong>
+          </div>
+          <span className="mode-pill mode-pill-neutral">{role}</span>
+        </div>
         <label className="field-label" htmlFor="member-email">Email</label>
         <input
           id="member-email"
@@ -95,6 +106,7 @@ export function MembersPanel() {
         >
           {roles.map(option => <option key={option} value={option}>{option}</option>)}
         </select>
+        <p className="helper-text">{roleCopy[role]}</p>
         <button onClick={invite} className="command-button command-button-primary" disabled={pending}>
           <UserPlus size={15} aria-hidden="true" />
           <span>{pending ? 'Inviting…' : 'Invite'}</span>
@@ -102,14 +114,18 @@ export function MembersPanel() {
       </section>
 
       {members.length === 0 && (
-        <p className="empty-state">No members yet. Invite teammates by email above.</p>
+        <div className="empty-panel">
+          <UserPlus size={22} aria-hidden="true" />
+          <strong>No members yet</strong>
+          <p>Invite teammates by email and choose the smallest role they need.</p>
+        </div>
       )}
 
       {members.map(member => (
         <div key={member.id} className="list-card member-row">
           <div>
             <strong>{member.email ?? member.userId}</strong>
-            <span>{member.userId}</span>
+            <span>{roleCopy[member.role]}</span>
           </div>
           <div className="member-actions">
             <select

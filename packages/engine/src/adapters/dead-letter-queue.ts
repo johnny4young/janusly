@@ -1,5 +1,5 @@
-import { db } from "@workflow-engine/db";
-import { deadLetters } from "@workflow-engine/db";
+import { db } from "@janusly/db";
+import { deadLetters } from "@janusly/db";
 import type { DeadLetterInput, QueueAdapter } from "../core/types";
 
 export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
