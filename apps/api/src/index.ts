@@ -33,15 +33,29 @@ import {
   markDeadLetterReplayed,
   markDeadLetterResolved,
 } from "./dlq";
+import {
+  asNumber,
+  asRecord,
+  corsHeaders,
+  httpError,
+  readJson,
+  sendEvent,
+  sendJson,
+  type CorsAwareResponse,
+} from "./http";
+import { enforceRateLimit } from "./rate-limit";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
 const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
 const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-let openai: OpenAI | null = null;
+const AI_PROMPT_MAX_CHARS = Number(process.env.AI_PROMPT_MAX_CHARS || 4_000);
+const AI_RATE_LIMIT_PER_MIN = Number(process.env.AI_RATE_LIMIT_PER_MIN || 30);
+const AUDIT_PAGE_SIZE = 100;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
+let openai: OpenAI | null = null;
 
 const dlqReplay = new DLQReplayAdapter();
 
@@ -62,12 +76,6 @@ function aiStatus() {
     timeoutMs: OPENAI_TIMEOUT_MS,
     maxRetries: OPENAI_MAX_RETRIES,
   };
-}
-
-function httpError(message: string, statusCode: number) {
-  const err = new Error(message) as Error & { statusCode?: number };
-  err.statusCode = statusCode;
-  return err;
 }
 
 function looseAiWorkflow(payload: unknown): unknown {
@@ -196,87 +204,6 @@ function fallbackWorkflowForPrompt(prompt: unknown) {
   return workflowTemplates.find(template => template.id === templateId)?.workflow ?? workflowTemplates[0]?.workflow;
 }
 
-function getAllowedOrigins() {
-  const configured = process.env.API_ALLOWED_ORIGINS ?? "http://localhost:5173,http://127.0.0.1:5173";
-  return configured.split(",").map(origin => origin.trim()).filter(Boolean);
-}
-
-function corsHeaders(res: http.ServerResponse) {
-  const origin = (res as CorsAwareResponse).requestOrigin;
-  const allowedOrigins = getAllowedOrigins();
-  const allowAny = allowedOrigins.includes("*");
-  const allowedOrigin = !origin
-    ? "*"
-    : allowAny || allowedOrigins.includes(origin)
-      ? origin
-      : "null";
-
-  return {
-    "Access-Control-Allow-Origin": allowedOrigin,
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id",
-    "Vary": "Origin",
-  };
-}
-
-function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
-  let body: string;
-  try {
-    body = JSON.stringify(payload);
-  } catch {
-    body = JSON.stringify({ error: "Failed to serialize response" });
-    status = 500;
-  }
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    ...corsHeaders(res),
-  });
-  res.end(body);
-}
-
-function sendEvent(res: http.ServerResponse, data: unknown) {
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-async function readJson(req: http.IncomingMessage) {
-  return new Promise<unknown>((resolve, reject) => {
-    let body = "";
-    let receivedBytes = 0;
-    let rejected = false;
-
-    req.on("data", chunk => {
-      receivedBytes += chunk.length;
-
-      if (receivedBytes > MAX_JSON_BODY_BYTES) {
-        rejected = true;
-        reject(httpError(`Request body too large. Limit is ${MAX_JSON_BODY_BYTES} bytes`, 413));
-        req.destroy();
-        return;
-      }
-
-      body += chunk;
-    });
-    req.on("error", reject);
-    req.on("end", () => {
-      if (rejected) return;
-      if (!body) return resolve({});
-      try {
-        resolve(JSON.parse(body));
-      } catch {
-        reject(httpError("Invalid JSON body", 400));
-      }
-    });
-  });
-}
-
-function asRecord(value: unknown) {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
-}
-
-function asNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
 function decisionCandidatesFromPayload(payload: unknown): DecisionCandidate[] {
   const record = asRecord(payload);
   const ranking = Array.isArray(record.ranking) ? record.ranking : [];
@@ -296,9 +223,32 @@ function decisionCandidatesFromPayload(payload: unknown): DecisionCandidate[] {
   });
 }
 
+const SENSITIVE_AUDIT_KEYS = /^(secret|password|token|api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key)$/i;
+
+function redactAuditMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactAuditMetadata);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        SENSITIVE_AUDIT_KEYS.test(key) ? "[redacted]" : redactAuditMetadata(item),
+      ]),
+    );
+  }
+  return value;
+}
+
 async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: unknown = {}) {
   try {
-    await db.insert(auditLogs).values({ id: crypto.randomUUID(), orgId, userId, action, targetType, targetId, metadata });
+    await db.insert(auditLogs).values({
+      id: crypto.randomUUID(),
+      orgId,
+      userId,
+      action,
+      targetType,
+      targetId,
+      metadata: redactAuditMetadata(metadata),
+    });
   } catch (error) {
     console.warn("audit write failed", error);
   }
@@ -329,10 +279,13 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/members/invite") {
       await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
-      const body = asRecord(await readJson(req));
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const role = isRole(body.role) ? body.role : "viewer";
       if (!email) return sendJson(res, { error: "email is required" }, 400);
+      if (!EMAIL_PATTERN.test(email) || email.length > 254) {
+        return sendJson(res, { error: "email format is invalid" }, 400);
+      }
       // Until invite-acceptance flow is in place, user_id starts as the email so the
       // member row is queryable by it; replace on first sign-in or accept event.
       const userId = typeof body.userId === "string" && body.userId.trim() ? body.userId.trim() : email;
@@ -346,7 +299,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/members/role") {
       await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
-      const body = asRecord(await readJson(req));
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const userId = typeof body.userId === "string" ? body.userId : "";
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
       if (!isRole(body.role)) return sendJson(res, { error: "role must be viewer, editor, or admin" }, 400);
@@ -392,24 +345,45 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/workflows/save") {
       await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      const workflow = asRecord(await readJson(req));
+      const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
       const workflowId = parsedWorkflow.id ?? crypto.randomUUID();
-      const existingVersions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
-      const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
-      const existingWorkflow = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
       const workflowName = parsedWorkflow.name ?? workflowId;
-      if (existingWorkflow[0]) {
-        if (existingWorkflow[0].name !== workflowName) {
-          await db.update(workflows).set({ name: workflowName }).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-        }
-      } else {
-        await db.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflowName, createdBy: auth.userId });
-      }
       const versionId = crypto.randomUUID();
-      await db.insert(workflowVersions).values({ id: versionId, orgId: auth.orgId, workflowId, version: nextVersion, dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName }, createdBy: auth.userId });
+
+      // Atomic so we never end up with a workflow row missing its first version
+      // or a version row pointing at a non-existent workflow.
+      const { nextVersion } = await db.transaction(async (tx) => {
+        const existingVersions = await tx.select().from(workflowVersions)
+          .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)))
+          .orderBy(desc(workflowVersions.version));
+        const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
+
+        const existingWorkflow = await tx.select().from(workflows)
+          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+        if (existingWorkflow[0]) {
+          if (existingWorkflow[0].name !== workflowName) {
+            await tx.update(workflows).set({ name: workflowName })
+              .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+          }
+        } else {
+          await tx.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflowName, createdBy: auth.userId });
+        }
+
+        await tx.insert(workflowVersions).values({
+          id: versionId,
+          orgId: auth.orgId,
+          workflowId,
+          version: nextVersion,
+          dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName },
+          createdBy: auth.userId,
+        });
+
+        return { nextVersion };
+      });
+
       await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
       return sendJson(res, { workflowId, versionId, version: nextVersion });
     }
@@ -422,7 +396,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/plugins/install") {
       await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
-      const body = asRecord(await readJson(req));
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const pluginId = typeof body.pluginId === "string" ? body.pluginId : "";
       if (!pluginId) return sendJson(res, { error: "pluginId is required" }, 400);
       const id = crypto.randomUUID();
@@ -438,7 +412,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/credentials") {
       await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
-      const body = asRecord(await readJson(req));
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.secretRef !== "string") {
         return sendJson(res, { error: "name, kind, and secretRef are required" }, 400);
       }
@@ -448,20 +422,36 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { id });
     }
 
-    if (req.method === "GET" && req.url === "/audit") {
-      const rows = await db.select().from(auditLogs).where(eq(auditLogs.orgId, auth.orgId)).orderBy(desc(auditLogs.createdAt));
-      return sendJson(res, rows.slice(0, 100));
+    if (req.method === "GET" && req.url?.startsWith("/audit")) {
+      const url = new URL(req.url, "http://localhost");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limitValue = Number.isFinite(limitParam) && limitParam > 0
+        ? Math.min(limitParam, 200)
+        : AUDIT_PAGE_SIZE;
+      const rows = await db.select().from(auditLogs)
+        .where(eq(auditLogs.orgId, auth.orgId))
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limitValue);
+      return sendJson(res, rows);
     }
 
-    if (req.method === "POST" && req.url === "/validate") return sendJson(res, validateWorkflow(await readJson(req)));
+    if (req.method === "POST" && req.url === "/validate") {
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      return sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES)));
+    }
 
     // AI helpers
     if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
 
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
-      const { prompt } = asRecord(await readJson(req));
+      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { prompt: rawPrompt } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const promptText = typeof rawPrompt === "string" ? rawPrompt : "";
+      if (promptText.length > AI_PROMPT_MAX_CHARS) {
+        return sendJson(res, { error: `prompt exceeds ${AI_PROMPT_MAX_CHARS} characters` }, 413);
+      }
       const client = getOpenAIClient();
-      const fallbackWorkflow = fallbackWorkflowForPrompt(prompt);
+      const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!client) {
         return sendJson(res, {
           mode: "fallback",
@@ -504,7 +494,7 @@ const server = http.createServer(async (req, res) => {
                 "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
               ].join("\n"),
             },
-            { role: "user", content: String(prompt ?? "") },
+            { role: "user", content: promptText },
           ],
           text: { format: { type: "json_object" } },
         });
@@ -524,7 +514,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
-      const { workflow } = asRecord(await readJson(req));
+      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { workflow } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const client = getOpenAIClient();
       if (!client) {
         return sendJson(res, {
@@ -551,8 +542,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-run") {
-      const { runId, question } = asRecord(await readJson(req));
+      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
+      const questionText = typeof question === "string" ? question : undefined;
+      if (questionText && questionText.length > AI_PROMPT_MAX_CHARS) {
+        return sendJson(res, { error: `question exceeds ${AI_PROMPT_MAX_CHARS} characters` }, 413);
+      }
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
@@ -562,8 +558,13 @@ const server = http.createServer(async (req, res) => {
         openai: getOpenAIClient() ?? undefined,
         run: run[0],
         events,
-        question: typeof question === "string" ? question : undefined,
+        question: questionText,
         model: OPENAI_MODEL,
+      });
+      await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
+        mode: result.mode,
+        model: result.model,
+        aiError: result.aiError,
       });
       return sendJson(res, result);
     }
@@ -631,18 +632,39 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/start") {
       await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      const workflow = asRecord(await readJson(req));
+      const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
+
+      // Track whether this run is for a workflow we've persisted (saved) or
+      // an ad-hoc one constructed in the request body. Ad-hoc starts are
+      // legitimate (AI Studio "Run" before Save) but operators may want to
+      // forbid them in production via JANUSLY_REQUIRE_SAVED_WORKFLOW=true.
+      const requireSaved = process.env.JANUSLY_REQUIRE_SAVED_WORKFLOW === "true";
+      let isAdhoc = true;
+      if (typeof parsedWorkflow.id === "string" && parsedWorkflow.id) {
+        const owned = await db
+          .select({ id: workflows.id })
+          .from(workflows)
+          .where(and(eq(workflows.id, parsedWorkflow.id), eq(workflows.orgId, auth.orgId)));
+        isAdhoc = owned.length === 0;
+      }
+      if (requireSaved && isAdhoc) {
+        return sendJson(res, { error: "Ad-hoc workflows are disabled. Save the workflow first." }, 403);
+      }
+
       const result = await startRun({ ...parsedWorkflow, orgId: auth.orgId, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "run.started", "run", result.runId, { workflowId: parsedWorkflow.id });
+      await audit(auth.orgId, auth.userId, isAdhoc ? "run.started.adhoc" : "run.started", "run", result.runId, {
+        workflowId: parsedWorkflow.id,
+        adhoc: isAdhoc,
+      });
       return sendJson(res, result);
     }
 
     if (req.method === "POST" && req.url === "/resume") {
       await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      const { runId, nodeId } = asRecord(await readJson(req));
+      const { runId, nodeId } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
@@ -690,7 +712,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/dlq/resolve") {
       await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      const { id } = asRecord(await readJson(req));
+      const { id } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof id !== "string") return sendJson(res, { error: "id is required" }, 400);
 
       await markDeadLetterResolved(auth.orgId, id);
@@ -701,7 +723,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/dlq/replay") {
       await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      const body = asRecord(await readJson(req));
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       if (typeof body.deadLetterId === "string") {
         const item = await getDeadLetter(auth.orgId, body.deadLetterId);
