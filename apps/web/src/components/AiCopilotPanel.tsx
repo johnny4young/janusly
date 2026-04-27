@@ -6,15 +6,15 @@ import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
 type AiCopilotPanelProps = {
   health: AiHealth | null
   workflowName: string
-  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition }>
-  onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
+  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string }>
+  onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onOpenRuns: () => void
   onOpenTemplates: () => void
 }
 
 type ResultState =
-  | { kind: 'workflow'; mode: AiMode; title: string; body: string }
-  | { kind: 'explanation'; mode: AiMode; title: string; body: string }
+  | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string }
+  | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
 
 const starterPrompts = [
   'Watch a GitHub release, summarize what changed, and ask for approval when risk is high.',
@@ -26,6 +26,19 @@ const modeCopy: Record<AiMode, string> = {
   ai: 'Generated with the connected model.',
   fallback: 'Generated locally so the flow still works without external AI.',
   error: 'The AI request needs attention.',
+}
+
+function describeAiError(message: string) {
+  if (/quota|billing|insufficient_quota/i.test(message)) {
+    return 'Your OpenAI account has no quota left. Add a payment method at https://platform.openai.com/account/billing and retry.'
+  }
+  if (/rate limit/i.test(message)) {
+    return 'Rate limit reached. Wait a few seconds and retry, or switch to a higher-tier model.'
+  }
+  if (/invalid api key|incorrect api key|unauthorized/i.test(message)) {
+    return 'OpenAI rejected the API key. Re-check the value in the root .env and restart the API.'
+  }
+  return message
 }
 
 export function AiCopilotPanel({
@@ -105,11 +118,17 @@ export function AiCopilotPanel({
     setLoading('generate')
     try {
       const response = await onGenerateWorkflow(trimmed)
+      const draftedByAi = response.mode === 'ai'
       setResult({
         kind: 'workflow',
         mode: response.mode,
-        title: response.mode === 'ai' ? 'Flow drafted by AI' : 'Starter flow loaded locally',
+        title: draftedByAi
+          ? 'Flow drafted by AI'
+          : response.aiError
+            ? 'Starter flow used because AI failed'
+            : 'Starter flow loaded locally',
         body: `${response.workflow.name ?? response.workflow.id ?? 'Untitled workflow'} is now on the canvas. Review the setup, then run it when ready.`,
+        aiError: response.aiError,
       })
     } catch (error) {
       setResult({
@@ -130,8 +149,11 @@ export function AiCopilotPanel({
       setResult({
         kind: 'explanation',
         mode: response.mode,
-        title: `Explanation for ${workflowName}`,
+        title: response.aiError
+          ? `Local explanation for ${workflowName} (AI failed)`
+          : `Explanation for ${workflowName}`,
         body: response.explanation,
+        aiError: response.aiError,
       })
     } catch (error) {
       setResult({
@@ -205,6 +227,12 @@ export function AiCopilotPanel({
           </div>
           <p className="helper-text">{modeCopy[result.mode]}</p>
           <div className="result-body">{result.body}</div>
+          {result.aiError && (
+            <div className="issue issue-warn" role="status">
+              <strong>AI request failed.</strong>{' '}
+              <span>{describeAiError(result.aiError)}</span>
+            </div>
+          )}
         </section>
       )}
 

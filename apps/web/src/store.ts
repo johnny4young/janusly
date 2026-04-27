@@ -49,6 +49,7 @@ type WorkflowStore = {
   selectEdge: (id: string | null) => void
   updateSelectedNodeConfig: (config: JsonObject) => void
   updateSelectedNodeType: (type: string) => void
+  updateEdgeCondition: (id: string, condition: string | null) => void
 
   setRunId: (id: string | null) => void
   setRunNodes: (nodes: RunNode[]) => void
@@ -195,6 +196,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         : node)
     }))
   },
+
+  updateEdgeCondition: (id, condition) => set((state) => ({
+    edges: state.edges.map((edge) => edge.id === id
+      ? {
+          ...edge,
+          label: condition ? 'condition' : undefined,
+          animated: Boolean(condition),
+          data: { ...edge.data, condition: condition ?? undefined },
+        }
+      : edge),
+  })),
 
   setRunId: (id) => set({ runId: id }),
   setRunNodes: (nodes) => set({ runNodes: nodes }),

@@ -1,5 +1,5 @@
 import { db } from "@janusly/db";
-import { runs, runNodes } from "@janusly/db";
+import { runs, runNodes, runEvents } from "@janusly/db";
 import { enqueueNode } from "./queue";
 import { markNodeQueued, appendEvent } from "./persistence";
 import type { Workflow } from "@janusly/shared";
@@ -15,26 +15,36 @@ export async function startRun(workflow: StartableWorkflow) {
   const runId = crypto.randomUUID();
   const workflowVersionId = workflow.versionId ?? workflow.id ?? runId;
 
-  await db.insert(runs).values({
-    id: runId,
-    orgId: workflow.orgId ?? "default",
-    workflowVersionId,
-    status: "running",
-    createdBy: workflow.createdBy ?? null,
-    inputJson: { workflow, input: workflow.input ?? {} },
-  });
+  // Persist run + all nodes + the run.started event in one transaction so a
+  // crash mid-setup cannot leave a partially-initialized run.
+  await db.transaction(async (tx) => {
+    await tx.insert(runs).values({
+      id: runId,
+      orgId: workflow.orgId ?? "default",
+      workflowVersionId,
+      status: "running",
+      createdBy: workflow.createdBy ?? null,
+      inputJson: { workflow, input: workflow.input ?? {} },
+    });
 
-  for (const node of workflow.nodes) {
-    await db.insert(runNodes).values({
+    if (workflow.nodes.length > 0) {
+      await tx.insert(runNodes).values(workflow.nodes.map((node) => ({
+        id: crypto.randomUUID(),
+        runId,
+        nodeId: node.id,
+        status: "pending",
+        stateJson: {},
+      })));
+    }
+
+    await tx.insert(runEvents).values({
       id: crypto.randomUUID(),
       runId,
-      nodeId: node.id,
-      status: "pending",
-      stateJson: {},
+      nodeId: null,
+      type: "run.started",
+      payload: { workflowVersionId },
     });
-  }
-
-  await appendEvent(runId, null, "run.started", { workflowVersionId });
+  });
 
   const startNodes = workflow.nodes.filter((node) => {
     return !workflow.edges.some((edge) => edge.to === node.id);

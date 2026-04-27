@@ -15,6 +15,20 @@ type ExplainRunResponse = {
   mode?: AiMode
   model?: string
   error?: string
+  aiError?: string
+}
+
+function describeAiError(message: string) {
+  if (/quota|billing|insufficient_quota/i.test(message)) {
+    return 'Your OpenAI account has no quota left. Add a payment method in your OpenAI dashboard and retry.'
+  }
+  if (/rate limit/i.test(message)) {
+    return 'Rate limit reached. Wait a few seconds and ask again, or switch to a higher-tier model.'
+  }
+  if (/invalid api key|incorrect api key|unauthorized/i.test(message)) {
+    return 'OpenAI rejected the API key. Check the value in the root .env and restart the API.'
+  }
+  return message
 }
 
 const starterQuestions = [
@@ -44,11 +58,15 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       if (response.error) throw new Error(response.error)
 
+      const body = response.aiError
+        ? `${response.answer ?? 'No explanation available.'}\n\nNote: AI request failed — ${describeAiError(response.aiError)}`
+        : response.answer ?? 'No explanation available.'
+
       setMessages((current) => [
         ...current,
         {
           role: 'assistant',
-          content: response.answer ?? 'No explanation available.',
+          content: body,
           mode: response.mode ?? 'fallback',
           model: response.model,
         },

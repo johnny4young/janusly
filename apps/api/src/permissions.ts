@@ -23,7 +23,7 @@ export async function getMemberRole(orgId: string, userId: string, mode: AuthMod
   const role = rows[0]?.role
   if (isRole(role)) return role
 
-  return mode === 'dev-headers' || mode === 'service-token' ? 'admin' : null
+  return mode === 'dev-headers' ? 'admin' : null
 }
 
 export async function requireRole(orgId: string, userId: string, required: Role, mode: AuthMode = 'supabase') {

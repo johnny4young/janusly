@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { CrewTimeline } from '../CrewTimeline'
@@ -178,6 +178,7 @@ function InspectorPanel({
 
         <QuickConfigEditor
           key={selectedNode.id}
+          nodeId={selectedNode.id}
           type={selectedNode.data.type}
           config={selectedNode.data.config ?? {}}
           onUpdate={onUpdateNodeConfig}
@@ -237,11 +238,17 @@ function InspectorPanel({
   )
 }
 
+function fieldId(scope: string, label: string) {
+  return `${scope}-${label.toLowerCase().replaceAll(' ', '-')}`
+}
+
 function QuickConfigEditor({
+  nodeId,
   type,
   config,
   onUpdate,
 }: {
+  nodeId: string
   type: string
   config: JsonObject
   onUpdate: (config: Record<string, unknown>) => void
@@ -252,7 +259,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextConfigField label="Request URL" value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+        <TextConfigField scope={nodeId} label="Request URL" value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
       </section>
     )
   }
@@ -261,7 +268,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField label="Prompt" value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
+        <TextareaConfigField scope={nodeId} label="Prompt" value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
       </section>
     )
   }
@@ -270,35 +277,37 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextConfigField label="Tool name" value={readConfigString(config, 'tool')} onChange={value => patch({ tool: value })} />
-        <JsonConfigField label="Tool input" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <TextConfigField scope={nodeId} label="Tool name" value={readConfigString(config, 'tool')} onChange={value => patch({ tool: value })} />
+        <JsonConfigField scope={nodeId} label="Tool input" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
   }
 
   if (type === 'agent' || type === 'multi_agent') {
+    const plannerId = fieldId(nodeId, `${type} planner`)
+    const teamModeId = fieldId(nodeId, 'team mode')
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField label={type === 'multi_agent' ? 'Team goal' : 'Agent goal'} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
+        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? 'Team goal' : 'Agent goal'} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
         <div className="config-field-row">
-          <label className="field-label" htmlFor={`${type}-planner`}>Planner</label>
-          <select id={`${type}-planner`} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
+          <label className="field-label" htmlFor={plannerId}>Planner</label>
+          <select id={plannerId} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
             <option value="rules">Rules</option>
             <option value="openai">OpenAI</option>
           </select>
         </div>
         {type === 'multi_agent' && (
           <div className="config-field-row">
-            <label className="field-label" htmlFor="team-mode">Team mode</label>
-            <select id="team-mode" className="text-field" value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
+            <label className="field-label" htmlFor={teamModeId}>Team mode</label>
+            <select id={teamModeId} className="text-field" value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
               <option value="sequential">Sequential</option>
               <option value="parallel">Parallel</option>
             </select>
           </div>
         )}
-        {type === 'agent' && <TextConfigField label="Input value" value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
-        <NumberConfigField label="Max steps" value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
+        {type === 'agent' && <TextConfigField scope={nodeId} label="Input value" value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
+        <NumberConfigField scope={nodeId} label="Max steps" value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
         {type === 'multi_agent' && (
           <label className="checkbox-row">
             <input type="checkbox" checked={config.reflection !== false} onChange={event => patch({ reflection: event.target.checked })} />
@@ -313,7 +322,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField label="Approval message" value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
+        <TextareaConfigField scope={nodeId} label="Approval message" value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
       </section>
     )
   }
@@ -322,7 +331,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField label="Branch expression" value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
+        <TextareaConfigField scope={nodeId} label="Branch expression" value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
       </section>
     )
   }
@@ -331,8 +340,8 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextConfigField label="Items" value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
-        <JsonConfigField label="Item mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        <TextConfigField scope={nodeId} label="Items" value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
+        <JsonConfigField scope={nodeId} label="Item mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
       </section>
     )
   }
@@ -341,7 +350,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <JsonConfigField label="Field mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        <JsonConfigField scope={nodeId} label="Field mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
       </section>
     )
   }
@@ -350,7 +359,7 @@ function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <JsonConfigField label="Candidate paths" value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
+        <JsonConfigField scope={nodeId} label="Candidate paths" value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
       </section>
     )
   }
@@ -363,8 +372,8 @@ function QuickConfigEditor({
   )
 }
 
-function TextConfigField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const id = label.toLowerCase().replaceAll(' ', '-')
+function TextConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: string; onChange: (value: string) => void }) {
+  const id = fieldId(scope, label)
   return (
     <div className="config-field-row">
       <label className="field-label" htmlFor={id}>{label}</label>
@@ -373,8 +382,8 @@ function TextConfigField({ label, value, onChange }: { label: string; value: str
   )
 }
 
-function NumberConfigField({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
-  const id = label.toLowerCase().replaceAll(' ', '-')
+function NumberConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: number; onChange: (value: number) => void }) {
+  const id = fieldId(scope, label)
   return (
     <div className="config-field-row">
       <label className="field-label" htmlFor={id}>{label}</label>
@@ -383,8 +392,8 @@ function NumberConfigField({ label, value, onChange }: { label: string; value: n
   )
 }
 
-function TextareaConfigField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const id = label.toLowerCase().replaceAll(' ', '-')
+function TextareaConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: string; onChange: (value: string) => void }) {
+  const id = fieldId(scope, label)
   return (
     <div className="config-field-row">
       <label className="field-label" htmlFor={id}>{label}</label>
@@ -393,9 +402,21 @@ function TextareaConfigField({ label, value, onChange }: { label: string; value:
   )
 }
 
-function JsonConfigField({ label, value, onChange }: { label: string; value: unknown; onChange: (value: unknown) => void }) {
+function JsonConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: unknown; onChange: (value: unknown) => void }) {
   const [error, setError] = useState<string | null>(null)
-  const id = label.toLowerCase().replaceAll(' ', '-')
+  const [draft, setDraft] = useState(() => JSON.stringify(value ?? {}, null, 2))
+  const id = fieldId(scope, label)
+
+  useEffect(() => {
+    const next = JSON.stringify(value ?? {}, null, 2)
+    setDraft((current) => {
+      try {
+        return JSON.stringify(JSON.parse(current)) === JSON.stringify(value ?? {}) ? current : next
+      } catch {
+        return next
+      }
+    })
+  }, [value])
 
   return (
     <div className="config-field-row">
@@ -403,7 +424,8 @@ function JsonConfigField({ label, value, onChange }: { label: string; value: unk
       <textarea
         id={id}
         className="code-field code-field-short"
-        defaultValue={JSON.stringify(value ?? {}, null, 2)}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
         onBlur={(event) => {
           try {
             onChange(JSON.parse(event.target.value))
@@ -655,7 +677,7 @@ function ReasoningPanel({ events }: { events: RunEvent[] }) {
     <div className="panel-list">
       {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title="No run events yet" body="Run a flow to inspect low-level execution signals." />}
       {visibleEvents.map(event => (
-        <div key={event.id} className="list-card">
+        <div key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`} className="list-card">
           <strong>{event.type}</strong>
           <span>{event.nodeId ?? 'run'}</span>
           <pre className="mini-pre">{JSON.stringify(event.payload ?? {}, null, 2)}</pre>

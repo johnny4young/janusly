@@ -108,6 +108,7 @@ export interface ExecutionStore {
   getRunStatus(runId: string): Promise<RunStatus | null>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
   markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
+  tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
   markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<void>;
   markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
   markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;

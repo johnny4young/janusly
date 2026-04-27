@@ -173,7 +173,8 @@ export class WorkflowRuntime {
         continue;
       }
 
-      await this.store.markNodeQueued(runId, node.id, 1);
+      const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
+      if (!claimed) continue;
       await this.queue.enqueueNode({ runId, workflow, node, attempt: 1 });
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });

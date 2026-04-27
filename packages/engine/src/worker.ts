@@ -30,3 +30,20 @@ export const worker = new Worker(
     concurrency: Number(process.env.WORKER_CONCURRENCY ?? 10),
   }
 );
+
+let shuttingDown = false;
+async function shutdown(signal: NodeJS.Signals) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[worker] received ${signal}, draining in-flight jobs…`);
+  try {
+    await worker.close();
+    console.log("[worker] drained, exiting");
+    process.exit(0);
+  } catch (error) {
+    console.error("[worker] shutdown error", error);
+    process.exit(1);
+  }
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

@@ -9,16 +9,6 @@ export type MemoryEntry = {
   createdAt?: unknown;
 };
 
-export async function appendMemory(runId: string, nodeId: string | null, payload: any) {
-  await db.insert(runEvents).values({
-    id: crypto.randomUUID(),
-    runId,
-    nodeId,
-    type: "memory.appended",
-    payload,
-  });
-}
-
 export async function getRunMemory(runId: string, limit = 50): Promise<MemoryEntry[]> {
   const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
 

@@ -74,14 +74,16 @@ describe('explainRun', () => {
     expect(create.mock.calls[0][0]).toMatchObject({ model: 'gpt-4o-mini' })
   })
 
-  it('propagates openai errors so the caller can map them to HTTP status', async () => {
+  it('falls back to deterministic answer when openai throws, attaching aiError', async () => {
     const create = vi.fn().mockRejectedValue(Object.assign(new Error('quota exceeded'), { status: 429 }))
-    await expect(
-      explainRun({
-        run: {},
-        events: [],
-        openai: { responses: { create } },
-      }),
-    ).rejects.toThrow('quota exceeded')
+    const result = await explainRun({
+      run: {},
+      events: [{ type: 'node.failed' }],
+      openai: { responses: { create } },
+    })
+
+    expect(result.mode).toBe('fallback')
+    expect(result.aiError).toBe('quota exceeded')
+    expect(result.answer).toContain('events observed')
   })
 })

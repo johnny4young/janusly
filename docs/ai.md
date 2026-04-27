@@ -22,11 +22,12 @@ Note: causal reasoning, decision engine, RL adjustments, and rollback are 100% d
 
 ---
 
-## 2. Get an OpenAI key
+## 2. Get an OpenAI key (with billing!)
 
 1. Go to <https://platform.openai.com/api-keys>.
 2. Click **Create new secret key**.
 3. Copy the `sk-...` value. It is shown only once.
+4. **Enable billing** at <https://platform.openai.com/account/billing>. A valid key with **zero quota** is the most common reason every call returns the new graceful fallback (`mode: "fallback"` with `aiError: "429 You exceeded your current quota..."`). With billing on you'll see `mode: "ai"`.
 
 ---
 
@@ -49,13 +50,26 @@ OPENAI_TIMEOUT_MS=30000        # default
 OPENAI_MAX_RETRIES=2           # default
 ```
 
-**Restart the API** after editing `.env` (the API reads env at boot):
+**Restart both the API and the worker** after editing `.env` — env is captured at process start:
 
 ```bash
-pnpm --filter @janusly/api dev
+pnpm --filter @janusly/api dev      # terminal 1 — powers /ai/* endpoints
+pnpm --filter @janusly/engine dev   # terminal 2 — powers `agent` (planner:"openai") and `ai` step types
 ```
 
-The worker also picks up `OPENAI_API_KEY` for `agent` nodes with `planner: "openai"`.
+`loadRootEnv()` (in `packages/db/src/env.ts`) loads BOTH `.env.example` (defaults) and `.env` (overrides) for every workspace process — never put `OPENAI_API_KEY` in `apps/api/.env` or `packages/engine/.env`, those paths aren't read.
+
+### The three gates
+
+`OPENAI_API_KEY` must be present when each of these helpers runs:
+
+| File | Function | Powers |
+| --- | --- | --- |
+| `apps/api/src/index.ts:getOpenAIClient` | API server | `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run` |
+| `packages/engine/src/agent-planner.ts:getOpenAIClient` | Worker | `agent` and `multi_agent` steps with `planner: "openai"` |
+| `packages/engine/src/node-registry.ts:getAiNodeOpenAIClient` | Worker | `ai` step type |
+
+If `/ai/health` says `enabled: true` but a runtime call still falls back, the worker process is missing the env var — restart it too.
 
 ---
 
@@ -150,20 +164,30 @@ OPENAI_MODEL=gpt-4o
 
 ## 7. Common issues
 
-### `mode: "fallback"` on every call
-Either `OPENAI_API_KEY` is missing or you didn't restart the API after editing `.env`. Confirm with `GET /ai/health`.
+### `mode: "fallback"` on every call (with no `aiError`)
+The API never saw `OPENAI_API_KEY`. Confirm with `GET /ai/health`. If it says `enabled: false`, the key is missing or the API didn't restart after editing `.env`.
 
-### `mode: "error"` with a 401
-The key is invalid or revoked. Generate a fresh one.
+### `mode: "fallback"` with `aiError: "429 ... quota..."`
+The key is valid but the OpenAI account has no billing left. The API now **gracefully falls back** to deterministic content and surfaces `aiError` so the UI can warn you ("Your OpenAI account has no quota left. Add a payment method..."). Add billing at <https://platform.openai.com/account/billing>, retry — no restart needed.
 
-### `mode: "error"` with a 429
-Quota exceeded or rate-limited. Add billing on the OpenAI dashboard or lower `WORKER_CONCURRENCY` so agents don't burst.
+### `mode: "fallback"` with `aiError: "Invalid API key" / "Unauthorized"`
+The key is rejected. Generate a fresh one and update `.env`. Restart the API and worker.
+
+### `mode: "fallback"` with `aiError: "Rate limit ..."`
+You're sending requests faster than your tier allows. Lower `WORKER_CONCURRENCY` and/or pause and retry; the fallback content is still served so the run continues.
 
 ### `/ai/explain-run` says "Run not found"
-The run id is for a different org. The API enforces `org_members` scoping — check `x-org-id` header.
+The run id is for a different org. The API enforces `org_members` scoping — check the `x-org-id` header.
 
-### AI generates invalid workflow JSON
-The endpoint returns HTTP 502 with `{ mode: "error", error: "..." }`. Try a more specific prompt; `gpt-4o` is more reliable than `gpt-4o-mini` for code-shaped output.
+### AI generates an "invalid workflow"
+The API has a **looser/sanitizer** in `parseAiWorkflow` (`apps/api/src/index.ts`) that:
+- coerces wrong-typed `id`/`from`/`to` fields to strings,
+- drops non-string `edge.condition` values,
+- replaces edge or `condition`-node expressions that don't fit the limited grammar with `"true"` (always pass).
+If even after sanitization the schema fails, you'll see `mode: "fallback"` with `aiError: "AI returned an invalid workflow: ..."` and the local starter template loaded instead. Switching `OPENAI_MODEL=gpt-4o` improves structural reliability over `gpt-4o-mini`.
+
+### Worker calls `agent` with `planner: "openai"` but it still uses rules
+The worker process needs its own restart after changing `.env`. The fallback also fires when the LLM call throws — check the worker logs for the `aiError` payload on `agent.step.planned` events.
 
 ### `decisionEvent: "No decision event"` on `/causal`
 The node you queried isn't a `router` / `router_llm`, or the run didn't reach that node. Causal replay needs an emitted `decision.made` event.

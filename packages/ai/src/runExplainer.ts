@@ -8,6 +8,7 @@ export type RunExplanation = {
   answer: string;
   mode: "ai" | "fallback";
   model?: string;
+  aiError?: string;
 };
 
 export type OpenAIResponseClient = {
@@ -56,16 +57,24 @@ export async function explainRun({
   }
 
   const chosenModel = model ?? "gpt-4o-mini";
-  const response = await openai.responses.create({
-    model: chosenModel,
-    input: buildRunExplanationPrompt({ run, events, question }),
-  });
+  try {
+    const response = await openai.responses.create({
+      model: chosenModel,
+      input: buildRunExplanationPrompt({ run, events, question }),
+    });
 
-  return {
-    answer: response.output_text,
-    mode: "ai",
-    model: chosenModel,
-  };
+    return {
+      answer: response.output_text,
+      mode: "ai",
+      model: chosenModel,
+    };
+  } catch (error) {
+    return {
+      answer: fallbackExplainRun({ run, events, question }),
+      mode: "fallback",
+      aiError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export function fallbackExplainRun(input: RunExplanationInput): string {
