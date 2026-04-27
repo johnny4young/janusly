@@ -1,8 +1,22 @@
-# Workflow Engine
+# Cortex
 
-Workflow engine for async, distributed DAG execution. HTTP API + BullMQ worker (Node.js 24, TypeScript 6) and a React 19 + React Flow UI built on Vite 8 + Tailwind 4. Lives in a single PNPM monorepo.
+> The AI operator for your business workflows.
 
-> Design system: **Electric Indigo** (`#4F46E5`) primary with **Cyan** (`#06B6D4`) accent and semantic green/amber/red status tones. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
+Cortex turns business processes into observable, learning DAGs. It runs them on a BullMQ worker, decides routes with a built-in decision engine + RL adjustments, rolls back when confidence drops, and explains every run in natural language. With an OpenAI key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → rollback → conversational explainability. Without one, every deterministic path still works.
+
+> Design system: **Electric Indigo** (`#4F46E5`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
+
+---
+
+## What Cortex does
+
+- **Plan**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`).
+- **Run**: execute it on a Postgres-backed runtime + BullMQ workers, with retries, dead-letter queue, timeouts.
+- **Decide**: `router` / `router_llm` nodes pick a route via a decision engine (cost / latency / quality + RL on past pulls).
+- **Learn**: every node outcome updates `routing_stats`; reinforcement learning shifts future scoring.
+- **Improve & rollback**: a confidence model compares before/after metrics; below 30% it auto-creates a rollback workflow version.
+- **Explain**: natural-language Q&A about any past run (`POST /ai/explain-run`), and counterfactual decision replay (`GET /causal`).
+- **Operate**: visual builder with React Flow, Crew Timeline for multi-agent runs, Dead Letters operations panel.
 
 ---
 
@@ -14,27 +28,32 @@ apps/
   web        -> React 19 + Vite 8 + React Flow UI
 
 packages/
-  engine     -> runtime, scheduler, executors, BullMQ worker
-  db         -> Drizzle ORM 0.45 / postgres-js client + schema bootstrap
-  shared     -> Zod 4 contracts shared across packages
+  engine     -> runtime, scheduler, executors, BullMQ worker, OTEL
+  domain     -> decision engine, RL, causal reasoning, improvement engine
+  data       -> drizzle repos: routing stats, improvements, rollback
+  ai         -> OpenAI-backed run explainer + deterministic fallback
+  db         -> drizzle schema + idempotent bootstrap
+  shared     -> Zod 4 contracts for the workflow DSL
 ```
 
-The worker lives in `packages/engine/src/worker.ts` and runs with `pnpm --filter @workflow-engine/engine dev`.
+The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter @workflow-engine/engine dev`.
 
 ---
 
 ## Stack
 
-| Layer       | Library                                                   |
-| ----------- | --------------------------------------------------------- |
-| Runtime     | Node.js 24 LTS (Krypton), Postgres 18, Redis 8            |
-| TypeScript  | 6.0                                                        |
-| Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, `openai` |
-| Validation  | `zod` 4                                                    |
-| UI          | React 19, Vite 8 (Rolldown), `@xyflow/react`, Tailwind 4  |
-| State       | `zustand` 5                                                |
-| Auth        | `@supabase/supabase-js` 2 (optional)                      |
-| Tests       | Vitest 4 (jsdom + Testing Library), Playwright            |
+| Layer       | Library                                                                |
+| ----------- | ---------------------------------------------------------------------- |
+| Runtime     | Node.js 24 LTS (Krypton), Postgres 18, Redis 8                         |
+| TypeScript  | 6.0                                                                     |
+| Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, `openai`             |
+| AI          | `openai` SDK with `gpt-4o-mini` default; fallback paths everywhere     |
+| Validation  | `zod` 4                                                                 |
+| UI          | React 19, Vite 8 (Rolldown), `@xyflow/react`, Tailwind 4               |
+| State       | `zustand` 5                                                             |
+| Auth        | `@supabase/supabase-js` 2 (optional)                                   |
+| Observability | OpenTelemetry SDK (traces) + Prometheus exporter                     |
+| Tests       | Vitest 4 (jsdom + Testing Library), Playwright                         |
 
 ---
 
@@ -43,6 +62,7 @@ The worker lives in `packages/engine/src/worker.ts` and runs with `pnpm --filter
 - Node.js **24+** (`engines.node` enforced at root)
 - PNPM **10** (`corepack enable`)
 - Docker (for Postgres 18 + Redis 8 services)
+- (Optional) OpenAI API key — see [`docs/ai.md`](docs/ai.md)
 
 ---
 
@@ -68,7 +88,7 @@ pnpm --filter @workflow-engine/engine dev
 pnpm --filter @workflow-engine/web dev      # http://localhost:5173
 ```
 
-Open <http://localhost:5173> — the UI is signed in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run** on the seeded workflow to verify the full path works.
+Open <http://localhost:5173> — Cortex signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an OpenAI key — see [§ AI](#ai-cortex-as-an-ai-operator).
 
 When you're done:
 
@@ -79,140 +99,56 @@ docker compose down
 ### Test commands
 
 ```bash
-pnpm test       # 66 Vitest unit tests (shared + engine + web) + tsc on api/db
-pnpm build      # type-check + Vite production build with manualChunks
-pnpm test:e2e   # Playwright; boots Compose, runs full UI flow, tears Compose down
-
-# Vitest watch (web only)
-pnpm --filter @workflow-engine/web test:watch
+pnpm test       # 96 Vitest tests (shared + engine + ai + domain + web) + tsc on api/db/data
+pnpm build      # type-check + Vite production build (Rolldown, manualChunks)
+pnpm test:e2e   # Playwright; boots Compose, runs UI flow, tears Compose down
 ```
 
 ### End-to-end smoke via curl
 
-`.env.example` is auto-loaded for development; no `.env` is needed for the dev-mode flow.
-
 ```bash
-# 1. Save a workflow from the example payload
 curl -X POST http://localhost:3001/workflows/save \
   -H "Content-Type: application/json" \
   -H "x-org-id: default" -H "x-user-id: dev-user" \
   -d @docs/examples/github-uppercase.json
 
-# 2. Start a run
 RUN=$(curl -s -X POST http://localhost:3001/start \
   -H "Content-Type: application/json" \
   -H "x-org-id: default" -H "x-user-id: dev-user" \
   -d @docs/examples/github-uppercase.json)
 RUNID=$(echo "$RUN" | jq -r .runId)
 
-# 3. Inspect (status will become "succeeded" within ~1 second)
 curl -s "http://localhost:3001/run?runId=$RUNID" \
   -H "x-org-id: default" -H "x-user-id: dev-user" | jq .
 ```
 
 ---
 
-## Credentials & auth
+## AI: Cortex as an AI operator
 
-The project has **three independent layers of credentials** — they don't overlap:
+The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summary:
 
-### 1. App login (how a user signs in to the UI)
+| Feature | Endpoint / surface | Without OpenAI key | With key |
+| --- | --- | --- | --- |
+| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits a real DAG |
+| Explain a workflow | `POST /ai/explain-workflow` | Generic placeholder | Bullet walkthrough |
+| Run-level Q&A chat | `POST /ai/explain-run` + UI Runs tab | Deterministic summary (failures / retries / decisions / rollbacks) | Free-form answers |
+| Agent planner | `agent.config.planner: "openai"` | Rules planner | LLM picks tools per step |
+| Causal reasoning | `GET /causal?runId=...&nodeId=...` | Always available — pure logic | Same |
+| Health check | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, model, ... }` |
 
-**Dev mode (default — no setup):** the UI sends `x-org-id=default` and `x-user-id=dev-user` headers; the API trusts them. No credentials required.
+**Activate AI in 30 seconds:**
 
-**Supabase mode (production):** real email/password auth backed by Supabase.
-
-1. Create a free project at <https://supabase.com>.
-2. *Project Settings → API*. Copy:
-   - `Project URL` → `SUPABASE_URL` and `VITE_SUPABASE_URL`
-   - `anon public key` → `VITE_SUPABASE_ANON_KEY` (frontend, safe to expose)
-   - `service_role key` → `SUPABASE_SERVICE_ROLE_KEY` (backend only, **never** ship to the frontend)
-3. Put them in `.env` at the repo root:
-   ```env
-   SUPABASE_URL=https://xxxxx.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
-   VITE_SUPABASE_URL=https://xxxxx.supabase.co
-   VITE_SUPABASE_ANON_KEY=eyJhbGc...
-   ```
-4. Restart API + UI. The dev headers are now disabled (the API rejects them when Supabase is configured). Override with `ALLOW_DEV_AUTH_HEADERS=true` only for hybrid test/staging.
-
-### 2. Workflow secrets (what nodes use to call external APIs)
-
-`http`, `tool`, `agent`, etc. nodes can resolve the `{{secret.NAME}}` placeholder at run time. The placeholder is read from `process.env.NAME` in the worker.
-
-Two pieces, decoupled on purpose:
-
-- **The reference** lives in Postgres via the **Secrets** tab in the UI (or `POST /credentials`). It only stores the *name* of the env var, never the value:
-  ```bash
-  curl -X POST http://localhost:3001/credentials \
-    -H "Content-Type: application/json" \
-    -H "x-org-id: default" -H "x-user-id: dev-user" \
-    -d '{"name":"GitHub bot","kind":"github","secretRef":"GITHUB_TOKEN"}'
-  ```
-- **The actual value** lives in `.env` (or your secret manager: Doppler, Supabase Vault, AWS Secrets Manager, etc.):
-  ```env
-  GITHUB_TOKEN=ghp_xxxxx
-  SLACK_BOT_TOKEN=xoxb-xxxxx
-  ```
-- **Workflow node usage:**
-  ```jsonc
-  {
-    "id": "call",
-    "type": "http",
-    "config": {
-      "url": "https://api.github.com/user",
-      "headers": { "Authorization": "Bearer {{secret.GITHUB_TOKEN}}" }
-    }
-  }
-  ```
-
-### 3. Optional integrations (LLM provider for `agent` and `/ai/*`)
-
-If you want `agent` nodes with `planner: "openai"` and the `/ai/generate-workflow` / `/ai/explain-workflow` endpoints to call a real model:
-
-- Get a key from <https://platform.openai.com/api-keys>.
-- Add it to `.env`:
-  ```env
-  OPENAI_API_KEY=sk-...
-  ```
-
-Without this key, the AI endpoints return a deterministic fallback (template / placeholder text) instead of failing — agents fall back to the rules planner.
-
-### Full env-var reference
-
-```env
-# Required
-REDIS_URL=redis://localhost:6379
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/workflow
-
-# API tuning
-PORT=3001
-WORKER_CONCURRENCY=10
-API_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
-API_MAX_JSON_BODY_BYTES=1048576
-
-# SSRF policy — keep false unless you intentionally allow internal calls
-ALLOW_PRIVATE_HTTP_TARGETS=false
-
-# Supabase auth (optional)
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
-ALLOW_DEV_AUTH_HEADERS=false
-
-# Service-to-service auth (optional)
-API_SERVICE_TOKEN=
-
-# AI providers (optional)
-OPENAI_API_KEY=
-
-# Workflow secrets (each {{secret.NAME}} resolves to one of these)
-# GITHUB_TOKEN=
-# SLACK_BOT_TOKEN=
+```bash
+cp .env.example .env
+echo "OPENAI_API_KEY=sk-xxxxxxxxxxxx" >> .env
+pnpm --filter @workflow-engine/api dev    # restart
+curl -s http://localhost:3001/ai/health -H "x-org-id: default" -H "x-user-id: dev-user"
 ```
 
-> The API and worker run an idempotent Postgres schema bootstrap at startup, so you don't need to run migrations for the first run.
+```json
+{ "enabled": true, "model": "gpt-4o-mini", "timeoutMs": 30000, "maxRetries": 2 }
+```
 
 ---
 
@@ -220,8 +156,8 @@ OPENAI_API_KEY=
 
 | Role    | Capabilities                                                                  |
 | ------- | ----------------------------------------------------------------------------- |
-| viewer  | Read-only: workflows, runs, members, audit                                    |
-| editor  | Validate, save workflows, start runs, resume `waiting` nodes                  |
+| viewer  | Read-only: workflows, runs, members, audit, dead letters                      |
+| editor  | Validate, save workflows, start runs, resume `waiting` nodes, replay/resolve dead letters |
 | admin   | Invite/remove members, change roles, install plugins, manage credentials      |
 
 Permissions are enforced per organization through `org_members`. In `dev-headers` and `service-token` modes the default role is `admin`.
@@ -232,6 +168,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 
 | Topic | File |
 | --- | --- |
+| Local AI configuration & verification | [`docs/ai.md`](docs/ai.md) |
 | Node types, configs, outputs, templating | [`docs/nodes.md`](docs/nodes.md) |
 | HTTP API request/response examples | [`docs/api.md`](docs/api.md) |
 | Full workflow examples (DAG JSON) | [`docs/workflows.md`](docs/workflows.md) |
@@ -239,20 +176,69 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 
 ---
 
+## Credentials & auth
+
+Three independent layers, see [§ Credentials](#credentials):
+
+1. **App login** — dev headers (`x-org-id` + `x-user-id`) or Supabase JWT for production.
+2. **Workflow secrets** — `{{secret.NAME}}` resolves at run time from `process.env.NAME`. Register the *name* via the **Secrets** tab; keep the value in `.env` / your vault.
+3. **AI provider** — `OPENAI_API_KEY` for the AI-native paths.
+
+### Credentials
+
+#### App login (UI auth)
+
+- **Dev mode (default):** the UI sends `x-org-id=default` and `x-user-id=dev-user`. No setup needed.
+- **Supabase mode (production):** create a free project at <https://supabase.com>, copy the `Project URL`, `anon public key`, and `service_role key`. Set in `.env`:
+
+  ```env
+  SUPABASE_URL=https://xxxxx.supabase.co
+  SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
+  VITE_SUPABASE_URL=https://xxxxx.supabase.co
+  VITE_SUPABASE_ANON_KEY=eyJhbGc...
+  ```
+
+  Once configured, dev headers are rejected by the API. Override for hybrid test/staging with `ALLOW_DEV_AUTH_HEADERS=true`.
+
+#### Workflow secrets
+
+```bash
+# 1. Register the reference (name only)
+curl -X POST http://localhost:3001/credentials \
+  -H "Content-Type: application/json" \
+  -H "x-org-id: default" -H "x-user-id: dev-user" \
+  -d '{"name":"GitHub bot","kind":"github","secretRef":"GITHUB_TOKEN"}'
+
+# 2. Add the value in .env (or your vault)
+# GITHUB_TOKEN=ghp_xxxxxx
+
+# 3. Use it in a node
+# { "type": "http", "config": { "headers": { "Authorization": "Bearer {{secret.GITHUB_TOKEN}}" } } }
+```
+
+#### AI provider
+
+See [`docs/ai.md`](docs/ai.md) for the full guide.
+
+---
+
 ## Status
 
 ### Implemented
 
-- Postgres persistence (workflows, versions, runs, events, memberships, audit, plugins, credentials).
-- BullMQ queue + worker with configurable concurrency and exponential backoff.
+- Postgres persistence (workflows, versions, runs, events, memberships, audit, plugins, credentials, dead letters, routing stats, workflow improvements).
+- BullMQ queue + worker with concurrency, exponential backoff, retry policy, timeouts, dead-letter queue, replay adapter.
 - DAG validation: types, cycles, sandboxed expressions, tool input schemas, start node detection.
-- 12 node types: `noop`, `http`, `condition`, `transform`, `loop`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `ai`, `webhook`, `approval`.
+- 14 node types: `noop`, `http`, `condition`, `transform`, `loop`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `ai`, `webhook`, `approval`, `router`, `router_llm`.
 - 3 builtin tools: `http.request`, `text.uppercase`, `json.pick`.
-- React 19 + Tailwind 4 UI with Workflow Engine design system.
+- **Decision engine**: scores candidates by cost/latency/quality, applies RL, honors strategies (cheapest / fastest / balanced / auto), respects budget caps.
+- **Improvement engine**: computes confidence between metric snapshots, auto-rollback under 30%, auto-promote over 70%.
+- **Causal replay**: counterfactual reasoning over past `decision.made` events.
+- **AI explainability**: OpenAI-backed run Q&A with a deterministic fallback that never crashes.
+- **Observability**: OpenTelemetry traces, Prometheus metrics exporter, structured logging.
+- React 19 + Tailwind 4 UI: builder, Crew Timeline, Inspector, Runs (with AI chat + DLQ ops), Members, Templates, Tools, Secrets.
 - Auto-refresh on terminal run state via shared `platformVersion` signal.
-- Vitest 4 unit suites across `shared`, `engine`, `web`; Playwright e2e.
-- Code splitting (React/Flow/Supabase vendors) with Rolldown.
-- Incremental SSE on `/events` (only events newer than the last cursor).
+- Vitest 4 unit suites across `shared`, `engine`, `ai`, `domain`, `web` (96 tests). Playwright e2e.
 
 ### In progress
 
@@ -269,375 +255,13 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 | `apps/web`               | Vitest 4 + jsdom + Testing Library (utilities, store, components). Playwright e2e. |
 | `packages/shared`        | Vitest 4 over the Zod workflow contracts.                                          |
 | `packages/engine`        | Vitest 4 for expressions, validation, templates, tool registry, secrets, memory, planner. |
-| `apps/api`, `packages/db`| `tsc --noEmit` as a type guard.                                                    |
+| `packages/domain`        | Vitest 4 for decision engine, causal reasoning, improvement engine, RL.            |
+| `packages/ai`            | Vitest 4 for run explainer (mocks the OpenAI client).                              |
+| `apps/api`, `packages/db`, `packages/data` | `tsc --noEmit` as a type guard.                                  |
 
 ```bash
-pnpm test               # full unit test suite (66 tests)
+pnpm test               # full unit test suite (96 tests)
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
 pnpm --filter @workflow-engine/web test:watch   # Vitest watch
 ```
-
-
-Notas Extras
-
-
-# 🚀 AI Workflow Operator
-
-> **Automation that builds, runs, explains, and improves itself.**
-
----
-
-## 🧠 ¿Qué es esto?
-
-AI Workflow Operator es una plataforma **AI-first** que permite:
-
-- Generar workflows automáticamente a partir de lenguaje natural
-- Ejecutarlos de forma confiable y observable
-- Tomar decisiones inteligentes en runtime
-- Aprender de su propio comportamiento
-- Explicar qué hizo y por qué
-- Mejorarse continuamente con feedback real
-
----
-
-# 📊 ¿Tiene sentido?
-
-Sí — y el problema que resuelve es real:
-
-```txt
-Las empresas quieren automatizar procesos con AI, pero:
-- Los workflows son frágiles
-- Los costos son impredecibles
-- Los errores son difíciles de depurar
-- Las decisiones de AI no son transparentes
-```
-
-👉 Esta plataforma resuelve eso combinando:
-
-- ejecución confiable
-- decisiones inteligentes
-- aprendizaje continuo
-- explicabilidad
-
----
-
-# 🌍 ¿Dónde está el mercado?
-
-## 1. AI Workflow Automation
-Automatización de procesos internos:
-
-- soporte al cliente
-- backoffice
-- facturación
-- onboarding
-
----
-
-## 2. AI Observability / Operations
-Equipos que ya usan AI necesitan:
-
-- trazabilidad
-- control de costos
-- debugging
-- auditoría
-
----
-
-## 3. Embedded Automation (SaaS)
-Plataforma integrada dentro de:
-
-- POS
-- clínicas veterinarias
-- ERPs
-- CRMs
-
----
-
-## 4. Developer Platform
-Para equipos técnicos:
-
-- SDK
-- orchestration engine
-- control plane
-
----
-
-# 🧩 Casos concretos de uso
-
-## 🧾 Soporte al cliente
-
-```txt
-Webhook ticket →
-AI clasificación →
-router (modelo barato/caro) →
-respuesta automática →
-escalación si necesario
-```
-
----
-
-## 📄 Procesamiento de documentos
-
-```txt
-Upload →
-OCR →
-AI validation →
-approval →
-ERP update
-```
-
----
-
-## 🏪 POS / retail
-
-```txt
-Stock bajo →
-Proveedor →
-Orden automática →
-Notificación
-```
-
----
-
-## 🐶 Veterinaria
-
-```txt
-Vacunas vencidas →
-Recordatorio →
-Agendar cita →
-Seguimiento automático
-```
-
----
-
-## 🧠 AI Governance
-
-```txt
-¿Qué decidió?
-¿Por qué?
-¿Cuánto costó?
-¿Qué falló?
-```
-
----
-
-# 🤖 ¿Qué significa realmente "AI-first"?
-
-No es solo usar LLMs.
-
-Significa:
-
-```txt
-1. El usuario describe intención
-2. El sistema construye el workflow
-3. El sistema lo ejecuta
-4. El sistema lo explica
-5. El sistema lo mejora
-```
-
----
-
-## 🔑 Definición clave
-
-```txt
-El usuario no diseña workflows.
-Describe objetivos.
-El sistema los construye y optimiza.
-```
-
----
-
-# 🔄 ¿Pivotear o no?
-
-No pivotees — enfoca.
-
-Evita:
-
-```txt
-❌ “otro workflow builder”
-```
-
-Enfócate en:
-
-### Opción A — AI Workflow Operator
-Automatización inteligente
-
-### Opción B — Embedded AI Layer
-Infraestructura dentro de otro SaaS
-
-### Opción C — AI Observability Platform
-Control + trazabilidad
-
----
-
-# ⭐ Features realmente diferenciadoras
-
-```txt
-✔ Prompt → Workflow
-✔ Explainability (chat sobre runs)
-✔ Decision engine (cost + preferences)
-✔ Auto-fix seguro
-✔ Versioning + rollback automático
-✔ Cost guardrails
-```
-
----
-
-## ⚠️ Features NO prioritarias (todavía)
-
-```txt
-- RL complejo (LinUCB, etc)
-- simulaciones avanzadas
-- optimización profunda
-```
-
----
-
-# 🎯 MVP vendible
-
-```txt
-1. Prompt → workflow
-2. Vista simple del flujo
-3. Ejecución real
-4. Timeline de eventos
-5. Chat explainability
-6. Sugerencias de mejora
-7. Aplicar fix → nueva versión
-```
-
-👉 Esto ya es potente.
-
----
-
-# ⚠️ Riesgos reales (y mitigación)
-
-## Riesgo 1: Complejidad
-
-```txt
-Solución:
-UI simple
-Engine complejo
-```
-
----
-
-## Riesgo 2: AI genera malos flujos
-
-```txt
-Solución:
-- templates
-- validación
-- preview
-```
-
----
-
-## Riesgo 3: Competencia (n8n, Zapier)
-
-```txt
-Solución:
-NO competir como builder
-SÍ como AI operator
-```
-
----
-
-## Riesgo 4: Confianza
-
-```txt
-Solución:
-- versioning
-- rollback
-- audit logs
-- safe mode
-```
-
----
-
-# 📦 ¿Cómo empaquetarlo?
-
-## Producto
-
-```txt
-AI Workflow Operator
-```
-
----
-
-## Pitch
-
-```txt
-“Describe un proceso.
-El sistema lo construye, lo ejecuta, lo explica y lo mejora.”
-```
-
----
-
-## Componentes
-
-```txt
-Builder AI
-Execution Engine
-Decision Engine
-Explainability
-Optimization
-Governance
-```
-
----
-
-# 🧠 Recomendación final
-
-No construyas más features ahora.
-
-Haz esto:
-
-```txt
-1. Elige 1 caso de uso (ej: soporte o POS)
-2. Define 3 workflows claros
-3. Diseña UX AI-first
-4. Haz demo end-to-end
-5. Valida con usuarios reales
-```
-
----
-
-## 🎯 Enfoque ideal
-
-```txt
-De:
-“workflow engine con AI”
-
-A:
-“AI operator para procesos de negocio”
-```
-
----
-
-# 🚀 Conclusión
-
-Esto no es un builder.
-
-Es:
-
-```txt
-✔ un sistema que ejecuta
-✔ un sistema que decide
-✔ un sistema que aprende
-✔ un sistema que se corrige
-✔ un sistema que explica
-```
-
-👉 Un verdadero sistema AI-first
-
-
-
-un test
-
-POST http://localhost:3001/ai/explain-run
-deberia responder con una explicación de lo que pasó en el run
-{
-  "runId": "test",
-  "question": "What happened?"
-}

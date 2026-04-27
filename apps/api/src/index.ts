@@ -35,6 +35,9 @@ import {
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
+const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 let openai: OpenAI | null = null;
 
 type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
@@ -43,8 +46,21 @@ const dlqReplay = new DLQReplayAdapter();
 
 function getOpenAIClient() {
   if (!process.env.OPENAI_API_KEY) return null;
-  openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  openai ??= new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: OPENAI_TIMEOUT_MS,
+    maxRetries: OPENAI_MAX_RETRIES,
+  });
   return openai;
+}
+
+function aiStatus() {
+  return {
+    enabled: Boolean(process.env.OPENAI_API_KEY),
+    model: OPENAI_MODEL,
+    timeoutMs: OPENAI_TIMEOUT_MS,
+    maxRetries: OPENAI_MAX_RETRIES,
+  };
 }
 
 function httpError(message: string, statusCode: number) {
@@ -308,34 +324,58 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/validate") return sendJson(res, validateWorkflow(await readJson(req)));
 
     // AI helpers
+    if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
+
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
       const { prompt } = asRecord(await readJson(req));
       const client = getOpenAIClient();
-      if (!client) return sendJson(res, workflowTemplates[0]?.workflow ?? {});
-      const response = await client.responses.create({
-        model: "gpt-4o-mini",
-        input: [
-          {
-            role: "system",
-            content: "Generate only valid JSON for a workflow DAG. Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, ai, approval, webhook, noop.",
-          },
-          { role: "user", content: String(prompt ?? "") },
-        ],
-        text: { format: { type: "json_object" } },
-      });
+      if (!client) {
+        return sendJson(res, {
+          mode: "fallback",
+          ...(workflowTemplates[0]?.workflow ?? {}),
+        });
+      }
       try {
-        return sendJson(res, JSON.parse(response.output_text || "{}"));
-      } catch {
-        return sendJson(res, { error: "AI returned invalid JSON" }, 502);
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: [
+            {
+              role: "system",
+              content: "Generate only valid JSON for a workflow DAG. Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, router, router_llm, ai, approval, webhook, noop.",
+            },
+            { role: "user", content: String(prompt ?? "") },
+          ],
+          text: { format: { type: "json_object" } },
+        });
+        const parsed = JSON.parse(response.output_text || "{}");
+        return sendJson(res, { mode: "ai", ...parsed });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
       }
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
       const { workflow } = asRecord(await readJson(req));
       const client = getOpenAIClient();
-      if (!client) return sendJson(res, { explanation: "This workflow contains nodes connected by edges and can be executed by the engine." });
-      const response = await client.responses.create({ model: "gpt-4o-mini", input: `Explain this workflow clearly: ${JSON.stringify(workflow)}` });
-      return sendJson(res, { explanation: response.output_text });
+      if (!client) {
+        return sendJson(res, {
+          mode: "fallback",
+          explanation: "This workflow contains nodes connected by edges and can be executed by the engine. Configure OPENAI_API_KEY in .env to enable AI-generated explanations.",
+        });
+      }
+      try {
+        const response = await client.responses.create({
+          model: OPENAI_MODEL,
+          input: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+        });
+        return sendJson(res, { mode: "ai", explanation: response.output_text });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
+      }
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-run") {
@@ -346,14 +386,19 @@ const server = http.createServer(async (req, res) => {
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
 
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
-      const result = await explainRun({
-        openai: getOpenAIClient() ?? undefined,
-        run: run[0],
-        events,
-        question: typeof question === "string" ? question : undefined,
-      });
-
-      return sendJson(res, result);
+      try {
+        const result = await explainRun({
+          openai: getOpenAIClient() ?? undefined,
+          run: run[0],
+          events,
+          question: typeof question === "string" ? question : undefined,
+        });
+        return sendJson(res, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        const status = (err as { status?: number })?.status ?? 502;
+        return sendJson(res, { mode: "error", error: message }, status);
+      }
     }
 
     // Runs
