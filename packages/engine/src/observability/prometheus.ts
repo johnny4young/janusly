@@ -10,8 +10,9 @@ const exporter = new PrometheusExporter({
   console.log(`[otel] Prometheus metrics available at http://localhost:${port}/metrics`);
 });
 
-const meterProvider = new MeterProvider();
-meterProvider.addMetricReader(exporter);
+const meterProvider = new MeterProvider({
+  readers: [exporter],
+});
 
 // Set as global provider
 import("@opentelemetry/api").then(({ metrics }) => {

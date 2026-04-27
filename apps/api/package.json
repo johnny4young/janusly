@@ -10,8 +10,10 @@
     "test": "tsc --noEmit"
   },
   "dependencies": {
+    "@workflow-engine/ai": "workspace:*",
     "@supabase/supabase-js": "^2.104.1",
     "@workflow-engine/db": "workspace:*",
+    "@workflow-engine/domain": "workspace:*",
     "@workflow-engine/engine": "workspace:*",
     "@workflow-engine/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",

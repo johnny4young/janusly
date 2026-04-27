@@ -15,6 +15,6 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       workflow,
       node,
       attempt: 1,
-    } as any);
+    });
   }
 }

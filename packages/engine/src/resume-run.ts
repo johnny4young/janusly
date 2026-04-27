@@ -2,8 +2,18 @@ import { db } from "@workflow-engine/db";
 import { runs } from "@workflow-engine/db";
 import { eq } from "drizzle-orm";
 import { markNodeSucceeded, appendEvent } from "./persistence";
-import { enqueueNextNodes } from "./scheduler";
+import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
+import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
+import { WorkflowRuntime } from "./core/runtime";
 import { WorkflowSchema } from "@workflow-engine/shared";
+
+const runtime = new WorkflowRuntime(
+  new PostgresExecutionStore(),
+  new BullMQQueueAdapter(),
+  {
+    execute: async () => ({}),
+  },
+);
 
 export async function resumeRun(runId: string, nodeId: string) {
   const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -18,7 +28,7 @@ export async function resumeRun(runId: string, nodeId: string) {
   await markNodeSucceeded(runId, nodeId);
   await appendEvent(runId, nodeId, "node.resumed", {});
 
-  await enqueueNextNodes({ runId, workflow });
+  await runtime.enqueueReadyNodes({ runId, workflow });
 
   return { resumed: true };
 }

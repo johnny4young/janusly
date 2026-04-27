@@ -1,6 +1,7 @@
 import {
   appendEvent,
   getRunContext,
+  getRunStatus,
   markNodeFailed,
   markNodeQueued,
   markNodeRunning,
@@ -10,23 +11,27 @@ import {
   updateRunStatusFromNodes,
 } from "../persistence";
 import { getNodeStatus } from "../get-node-status";
-import type { ExecutionStore, NodeStatus, SerializedError, WorkflowEvent } from "../core/types";
+import type { ExecutionStore, NodeStatus, RunStatus, SerializedError, WorkflowEvent } from "../core/types";
 
 export class PostgresExecutionStore implements ExecutionStore {
   getRunContext(runId: string) {
     return getRunContext(runId);
   }
 
+  async getRunStatus(runId: string): Promise<RunStatus | null> {
+    return getRunStatus(runId) as Promise<RunStatus | null>;
+  }
+
   async getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus> {
     return getNodeStatus(runId, nodeId) as Promise<NodeStatus>;
   }
 
-  markNodeQueued(runId: string, nodeId: string) {
-    return markNodeQueued(runId, nodeId);
+  markNodeQueued(runId: string, nodeId: string, attempt?: number) {
+    return markNodeQueued(runId, nodeId, attempt);
   }
 
-  markNodeRunning(runId: string, nodeId: string) {
-    return markNodeRunning(runId, nodeId);
+  markNodeRunning(runId: string, nodeId: string, attempt?: number) {
+    return markNodeRunning(runId, nodeId, attempt);
   }
 
   markNodeSucceeded(runId: string, nodeId: string, output: unknown) {
@@ -49,7 +54,7 @@ export class PostgresExecutionStore implements ExecutionStore {
     return appendEvent(event.runId, event.nodeId ?? null, event.type, event.payload ?? {});
   }
 
-  updateRunStatusFromNodes(runId: string) {
-    return updateRunStatusFromNodes(runId);
+  async updateRunStatusFromNodes(runId: string): Promise<void> {
+    await updateRunStatusFromNodes(runId);
   }
 }
