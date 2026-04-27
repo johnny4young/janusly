@@ -20,8 +20,11 @@ type DeadLettersPanelProps = {
   onResolve: (id: string) => void
 }
 
+const statuses = ['all', 'open', 'replayed', 'resolved'] as const
+type DeadLetterStatusFilter = typeof statuses[number]
+
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
-  const [status, setStatus] = useState<'all' | 'open' | 'replayed' | 'resolved'>('open')
+  const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
 
   const filtered = useMemo(() => {
@@ -49,11 +52,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
       </div>
 
       <label className="field-label" htmlFor="dlq-filter">Status filter</label>
-      <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(event.target.value as any)}>
-        <option value="all">all</option>
-        <option value="open">open</option>
-        <option value="replayed">replayed</option>
-        <option value="resolved">resolved</option>
+      <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
+        {statuses.map(item => <option key={item} value={item}>{item}</option>)}
       </select>
 
       <div className="panel-list">
@@ -107,4 +107,11 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
       {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
     </div>
   )
+}
+
+function toStatusFilter(value: string): DeadLetterStatusFilter {
+  for (const status of statuses) {
+    if (status === value) return status
+  }
+  return 'open'
 }

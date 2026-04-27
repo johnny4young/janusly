@@ -10,6 +10,8 @@ export const nodeTypeValues = [
   "multi_agent",
   "agent_reflection",
   "loop",
+  "router",
+  "router_llm",
   "transform",
   "ai",
   "webhook",

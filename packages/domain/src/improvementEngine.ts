@@ -1,4 +1,12 @@
-export function computeConfidence(before, after) {
+export type WorkflowMetrics = {
+  successRate?: number;
+  avgLatencyMs?: number;
+  avgCost?: number;
+};
+
+export type ImprovementStatus = "improving" | "stable" | "regressing";
+
+export function computeConfidence(before: WorkflowMetrics, after: WorkflowMetrics) {
   const deltaSuccess = (after.successRate ?? 0) - (before.successRate ?? 0);
   const deltaLatency = (before.avgLatencyMs ?? 0) - (after.avgLatencyMs ?? 0);
   const deltaCost = (before.avgCost ?? 0) - (after.avgCost ?? 0);
@@ -7,17 +15,17 @@ export function computeConfidence(before, after) {
 
   const confidence = Math.max(0, Math.min(100, score * 100));
 
-  let status = "stable";
+  let status: ImprovementStatus = "stable";
   if (score > 0.1) status = "improving";
   if (score < -0.1) status = "regressing";
 
   return { confidence, status };
 }
 
-export function shouldRollback(confidence) {
+export function shouldRollback(confidence: number) {
   return confidence < 30;
 }
 
-export function shouldPromote(confidence) {
+export function shouldPromote(confidence: number) {
   return confidence > 70;
 }

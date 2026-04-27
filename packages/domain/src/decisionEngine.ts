@@ -1,4 +1,4 @@
-import { applyRlAdjustments } from "./reinforcement";
+import { applyRlAdjustments, type RlStats } from "./reinforcement";
 
 export type DecisionCandidate = {
   nodeId: string;
@@ -25,6 +25,7 @@ export type DecisionInput = {
   candidates: DecisionCandidate[];
   preferences?: DecisionPreferences;
   budget?: DecisionBudget;
+  rlStats?: Record<string, RlStats>;
   strategy?: "auto" | "cheapest" | "fastest" | "balanced";
 };
 
