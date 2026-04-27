@@ -1,6 +1,6 @@
 import { nodeRegistry } from "./node-registry";
 import { getRunContext } from "./persistence";
-import { renderTemplate } from "./template";
+import { redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 
 export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node">): Promise<NodeExecutionResult> {
@@ -19,7 +19,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     inputs: node.config
   };
 
-  const resolvedConfig = renderTemplate(node.config, scope);
+  const { rendered: resolvedConfig, redactedValues } = renderTemplateWithRedactions(node.config, scope);
 
   const result = await executor({
     runId,
@@ -29,16 +29,22 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
   });
 
   if (result.status === "waiting") {
+    const metadata = result.reason
+      ? { reason: result.reason, ...(result.metadata ?? {}) }
+      : result.metadata;
     return {
       status: "waiting",
-      metadata: result.reason
-        ? { reason: result.reason, ...(result.metadata ?? {}) }
-        : result.metadata,
+      metadata: redactValues(metadata, redactedValues),
     };
   }
 
+  // Defense-in-depth: if any output value echoes a resolved secret (e.g. an
+  // HTTP node returning the Authorization header it just sent), strip the
+  // plaintext value before it is persisted to run_nodes.state_json or
+  // run_events.payload. The actual call to the upstream service happened with
+  // the resolved value; we just don't keep it in our DB.
   return {
     status: "succeeded",
-    output: result.output ?? {},
+    output: redactValues(result.output ?? {}, redactedValues),
   };
 }

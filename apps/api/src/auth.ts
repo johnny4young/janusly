@@ -1,4 +1,5 @@
 import http from "http";
+import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -25,6 +26,15 @@ export type AuthContext = {
   mode: "supabase" | "dev-headers" | "service-token";
 };
 
+function constantTimeBearerMatch(authHeader: string | undefined, expected: string) {
+  if (!authHeader || !expected) return false;
+  const expectedHeader = `Bearer ${expected}`;
+  if (authHeader.length !== expectedHeader.length) return false;
+  const a = Buffer.from(authHeader);
+  const b = Buffer.from(expectedHeader);
+  return timingSafeEqual(a, b);
+}
+
 export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | null> {
   const authHeader = req.headers.authorization;
 
@@ -43,7 +53,7 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
 
   const serviceToken = process.env.API_SERVICE_TOKEN;
 
-  if (serviceToken && authHeader === `Bearer ${serviceToken}`) {
+  if (serviceToken && constantTimeBearerMatch(authHeader, serviceToken)) {
     return {
       orgId: (req.headers["x-org-id"] as string) || "default",
       userId: (req.headers["x-user-id"] as string) || "service",

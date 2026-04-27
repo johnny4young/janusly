@@ -2,8 +2,15 @@ import { db } from "@janusly/db";
 import { deadLetters } from "@janusly/db";
 import { eq, desc, and } from "drizzle-orm";
 
+export const deadLetterStatuses = ["open", "replayed", "resolved"] as const;
+export type DeadLetterStatus = typeof deadLetterStatuses[number];
+
+export function isDeadLetterStatus(value: unknown): value is DeadLetterStatus {
+  return typeof value === "string" && (deadLetterStatuses as readonly string[]).includes(value);
+}
+
 export async function listDeadLetters(orgId: string, status?: string | null) {
-  const where = status
+  const where = isDeadLetterStatus(status)
     ? and(eq(deadLetters.orgId, orgId), eq(deadLetters.status, status))
     : eq(deadLetters.orgId, orgId);
 

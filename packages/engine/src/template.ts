@@ -7,14 +7,16 @@ export function getByPath(source: any, path: string) {
   }, source);
 }
 
-export function renderTemplate(value: any, scope: Record<string, any>): any {
+function renderTemplateInternal(value: any, scope: Record<string, any>, redactionList: Set<string>): any {
   if (typeof value === 'string') {
     return value.replace(/{{\s*([^}]+)\s*}}/g, (_, rawPath) => {
       const expr = String(rawPath).trim();
 
       if (expr.startsWith('secret.')) {
         const secretName = expr.replace('secret.', '').toUpperCase();
-        return getSecret(secretName);
+        const resolved = getSecret(secretName);
+        if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        return resolved;
       }
 
       if (expr.startsWith('env.')) {
@@ -31,13 +33,56 @@ export function renderTemplate(value: any, scope: Record<string, any>): any {
   }
 
   if (Array.isArray(value)) {
-    return value.map(item => renderTemplate(item, scope));
+    return value.map((item) => renderTemplateInternal(item, scope, redactionList));
   }
 
   if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplate(item, scope)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplateInternal(item, scope, redactionList)]));
   }
 
+  return value;
+}
+
+export function renderTemplate(value: any, scope: Record<string, any>): any {
+  return renderTemplateInternal(value, scope, new Set());
+}
+
+/**
+ * Render a template AND return the set of secret VALUES that were substituted
+ * during the render. The caller is expected to post-process any persisted
+ * output through `redactValues(output, redactedValues)` so plaintext secrets
+ * never end up in `run_nodes.state_json` or `run_events.payload`.
+ */
+export function renderTemplateWithRedactions(
+  value: any,
+  scope: Record<string, any>,
+): { rendered: any; redactedValues: string[] } {
+  const list = new Set<string>();
+  const rendered = renderTemplateInternal(value, scope, list);
+  return { rendered, redactedValues: Array.from(list) };
+}
+
+/**
+ * Walk a value recursively and replace any string-occurrence of `redactedValues`
+ * with `[redacted]`. Used post-execution to scrub secrets from outputs before
+ * they are persisted to run_nodes / run_events.
+ */
+export function redactValues(value: any, redactedValues: string[]): any {
+  if (redactedValues.length === 0) return value;
+  if (typeof value === 'string') {
+    let next = value;
+    for (const secret of redactedValues) {
+      if (!secret) continue;
+      next = next.split(secret).join('[redacted]');
+    }
+    return next;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValues(item, redactedValues));
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValues(item, redactedValues)]));
+  }
   return value;
 }
 
