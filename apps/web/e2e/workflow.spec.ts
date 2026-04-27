@@ -18,7 +18,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
-  await expect(page.getByText(/NOOP \/ succeeded/)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText(/NOOP\s*[·/]\s*succeeded/)).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: 'Workflows' }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()

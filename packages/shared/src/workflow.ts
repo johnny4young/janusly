@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const workflowDslVersion = "1.0" as const;
+
 export const nodeTypeValues = [
   "http",
   "condition",
@@ -8,6 +10,8 @@ export const nodeTypeValues = [
   "multi_agent",
   "agent_reflection",
   "loop",
+  "router",
+  "router_llm",
   "transform",
   "ai",
   "webhook",
@@ -30,9 +34,16 @@ export const EdgeSchema = z.object({
   condition: z.string().trim().min(1).optional(),
 });
 
+export const WorkflowMetadataSchema = z.object({
+  description: z.string().trim().optional(),
+  tags: z.array(z.string().trim().min(1)).default([]),
+}).default({ tags: [] });
+
 export const WorkflowSchema = z.object({
+  dslVersion: z.literal(workflowDslVersion).default(workflowDslVersion),
   id: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),
+  metadata: WorkflowMetadataSchema.optional(),
   nodes: z.array(NodeSchema),
   edges: z.array(EdgeSchema),
 });
@@ -40,4 +51,5 @@ export const WorkflowSchema = z.object({
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 export type WorkflowNode = z.infer<typeof NodeSchema>;
 export type WorkflowEdge = z.infer<typeof EdgeSchema>;
+export type WorkflowMetadata = z.infer<typeof WorkflowMetadataSchema>;
 export type Workflow = z.infer<typeof WorkflowSchema>;

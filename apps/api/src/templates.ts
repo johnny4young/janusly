@@ -15,6 +15,7 @@ export const workflowTemplates: WorkflowTemplate[] = [
     description: "Call an API and summarize the response with an AI/agent step.",
     category: "AI",
     workflow: {
+      dslVersion: "1.0",
       id: "http-ai-summary",
       name: "HTTP → AI Summary",
       nodes: [
@@ -30,6 +31,7 @@ export const workflowTemplates: WorkflowTemplate[] = [
     description: "Fetch data, map outputs, and run a backend tool.",
     category: "Data",
     workflow: {
+      dslVersion: "1.0",
       id: "api-transform-tool",
       name: "API → Transform → Tool",
       nodes: [
@@ -46,6 +48,7 @@ export const workflowTemplates: WorkflowTemplate[] = [
     description: "Pause execution until a human approves the run.",
     category: "Human-in-the-loop",
     workflow: {
+      dslVersion: "1.0",
       id: "approval-gate",
       name: "Human Approval Gate",
       nodes: [
