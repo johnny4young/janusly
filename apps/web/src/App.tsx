@@ -372,7 +372,7 @@ export default function App() {
     ))
   }, [edges, setEdges])
 
-  if (!authReady) return <div className="boot-screen">Loading Workflow Engine…</div>
+  if (!authReady) return <div className="boot-screen">Loading Cortex…</div>
   if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
 
   return (
@@ -380,9 +380,9 @@ export default function App() {
       header={
         <>
           <div className="brand-lockup">
-            <span className="brand-mark">WE</span>
+            <span className="brand-mark">CX</span>
             <div>
-              <strong>Workflow Engine</strong>
+              <strong>Cortex</strong>
               <span>{currentWorkflowId} / {orgId ?? 'default'}</span>
             </div>
           </div>
