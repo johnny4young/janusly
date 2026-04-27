@@ -13,11 +13,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            if (id.includes('@xyflow/react')) return 'flow-vendor'
-            if (id.includes('@supabase/supabase-js')) return 'supabase-vendor'
-            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor'
-          }
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('@xyflow/react')) return 'flow-vendor'
+          if (id.includes('@supabase/supabase-js')) return 'supabase-vendor'
+          if (id.includes('lucide-react')) return 'icons-vendor'
+          if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor'
           return undefined
         },
       },

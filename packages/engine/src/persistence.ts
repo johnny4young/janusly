@@ -31,6 +31,18 @@ export async function markNodeQueued(runId: string, nodeId: string, attempt = 1)
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
+export async function tryClaimNodeForQueue(runId: string, nodeId: string, attempt = 1): Promise<boolean> {
+  const claimed = await db.update(runNodes)
+    .set({ status: "queued", attempts: attempt })
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "pending"),
+    ))
+    .returning({ id: runNodes.id });
+  return claimed.length > 0;
+}
+
 export async function markNodeWaiting(runId: string, nodeId: string, metadata?: any) {
   await db.update(runNodes)
     .set({ status: "waiting", stateJson: { waiting: metadata ?? {} } })

@@ -364,13 +364,14 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI request failed";
+      await appendEvent(ctx.runId, ctx.nodeId, "ai.fallback", { error: message, model });
       return {
         status: "completed",
         output: {
-          mode: "error",
+          mode: "fallback",
           model,
           prompt: previewText(prompt),
-          error: message,
+          aiError: message,
           response: fallbackAiResponse(String(prompt), ctx.context),
         },
       };

@@ -7,7 +7,11 @@ let openai: OpenAI | null = null;
 
 function getOpenAIClient() {
   if (!process.env.OPENAI_API_KEY) return null;
-  openai ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  openai ??= new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    timeout: Number(process.env.OPENAI_TIMEOUT_MS ?? 30_000),
+    maxRetries: Number(process.env.OPENAI_MAX_RETRIES ?? 2),
+  });
   return openai;
 }
 
@@ -92,7 +96,7 @@ export async function planAgentToolWithLLM(
   config: any,
   context: Record<string, any>,
   history: AgentLoopStep[] = []
-): Promise<AgentPlan & { done?: boolean; finalAnswer?: string }> {
+): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
   const client = getOpenAIClient();
 
   if (!client) {
@@ -101,53 +105,59 @@ export async function planAgentToolWithLLM(
 
   const goal = config.goal ?? "Choose the best tool for this workflow step.";
 
-  const response = await client.responses.create({
-    model: config.model ?? "gpt-4o-mini",
-    input: [
-      {
-        role: "system",
-        content: "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON."
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          goal,
-          config,
-          context,
-          history,
-          availableTools,
-          requiredJsonShape: {
-            done: "boolean optional",
-            finalAnswer: "string optional",
-            tool: "one available tool name when not done",
-            input: "object with tool input when not done",
-            reason: "short reason"
-          }
-        })
-      }
-    ],
-    text: { format: { type: "json_object" } }
-  });
+  try {
+    const response = await client.responses.create({
+      model: config.model ?? "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content: "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON."
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            goal,
+            config,
+            context,
+            history,
+            availableTools,
+            requiredJsonShape: {
+              done: "boolean optional",
+              finalAnswer: "string optional",
+              tool: "one available tool name when not done",
+              input: "object with tool input when not done",
+              reason: "short reason"
+            }
+          })
+        }
+      ],
+      text: { format: { type: "json_object" } }
+    });
 
-  const parsed = JSON.parse(response.output_text || "{}");
+    const parsed = JSON.parse(response.output_text || "{}");
 
-  if (parsed.done) {
+    if (parsed.done) {
+      return {
+        tool: "done",
+        input: {},
+        reason: parsed.reason ?? "Goal completed",
+        done: true,
+        finalAnswer: parsed.finalAnswer ?? "Done",
+      };
+    }
+
+    if (!parsed.tool || typeof parsed.tool !== "string") {
+      const fallback = planAgentTool(config, context);
+      return { ...fallback, aiError: "LLM planner did not return a valid tool" };
+    }
+
     return {
-      tool: "done",
-      input: {},
-      reason: parsed.reason ?? "Goal completed",
-      done: true,
-      finalAnswer: parsed.finalAnswer ?? "Done",
+      tool: parsed.tool,
+      input: parsed.input ?? {},
+      reason: parsed.reason ?? "LLM selected tool",
     };
+  } catch (error) {
+    const fallback = planAgentTool(config, context);
+    return { ...fallback, aiError: error instanceof Error ? error.message : String(error) };
   }
-
-  if (!parsed.tool || typeof parsed.tool !== "string") {
-    throw new Error("LLM planner did not return a valid tool");
-  }
-
-  return {
-    tool: parsed.tool,
-    input: parsed.input ?? {},
-    reason: parsed.reason ?? "LLM selected tool",
-  };
 }

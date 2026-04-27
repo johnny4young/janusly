@@ -8,6 +8,7 @@ import {
   markNodeSkipped,
   markNodeSucceeded,
   markNodeWaiting,
+  tryClaimNodeForQueue,
   updateRunStatusFromNodes,
 } from "../persistence";
 import { getNodeStatus } from "../get-node-status";
@@ -28,6 +29,10 @@ export class PostgresExecutionStore implements ExecutionStore {
 
   markNodeQueued(runId: string, nodeId: string, attempt?: number) {
     return markNodeQueued(runId, nodeId, attempt);
+  }
+
+  tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number) {
+    return tryClaimNodeForQueue(runId, nodeId, attempt);
   }
 
   markNodeRunning(runId: string, nodeId: string, attempt?: number) {

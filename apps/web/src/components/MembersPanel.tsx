@@ -42,7 +42,7 @@ export function MembersPanel() {
     try {
       await api('/members/invite', {
         method: 'POST',
-        body: JSON.stringify({ email: trimmed, role, userId: trimmed }),
+        body: JSON.stringify({ email: trimmed, role }),
       })
       addToast(`Invited ${trimmed}`, 'success')
       setEmail('')

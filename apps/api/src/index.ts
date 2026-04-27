@@ -4,6 +4,7 @@ import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
 import { startRun } from "@janusly/engine/src/start-run";
 import { resumeRun } from "@janusly/engine/src/resume-run";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
+import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -69,18 +70,75 @@ function httpError(message: string, statusCode: number) {
   return err;
 }
 
+function looseAiWorkflow(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const root = payload as Record<string, unknown>;
+
+  const nodes = Array.isArray(root.nodes) ? root.nodes.map((node) => {
+    if (!node || typeof node !== "object") return node;
+    const n = { ...(node as Record<string, unknown>) };
+    if (n.id != null && typeof n.id !== "string") n.id = String(n.id);
+    if (n.config && typeof n.config === "object" && !Array.isArray(n.config)) {
+      const cfg = n.config as Record<string, unknown>;
+      if (n.type === "condition" && cfg.expression != null && typeof cfg.expression !== "string") {
+        cfg.expression = String(cfg.expression);
+      }
+    } else if (n.config == null) {
+      n.config = {};
+    }
+    return n;
+  }) : root.nodes;
+
+  const edges = Array.isArray(root.edges) ? root.edges.map((edge) => {
+    if (!edge || typeof edge !== "object") return edge;
+    const e = { ...(edge as Record<string, unknown>) };
+    if (e.from != null && typeof e.from !== "string") e.from = String(e.from);
+    if (e.to != null && typeof e.to !== "string") e.to = String(e.to);
+    // The LLM sometimes emits booleans/numbers for condition. Drop anything that
+    // isn't a non-empty string — the workflow will still run unconditionally.
+    if (e.condition != null && (typeof e.condition !== "string" || !e.condition.trim())) {
+      delete e.condition;
+    }
+    return e;
+  }) : root.edges;
+
+  return { ...root, nodes, edges };
+}
+
 function parseAiWorkflow(payload: unknown) {
-  const parsed = WorkflowSchema.safeParse(payload);
+  const loosened = looseAiWorkflow(payload);
+  const parsed = WorkflowSchema.safeParse(loosened);
   if (!parsed.success) {
     throw httpError(`AI returned an invalid workflow: ${parsed.error.issues.map(issue => issue.message).join(", ")}`, 502);
   }
 
-  const validation = validateWorkflow(parsed.data);
+  // Sanitize: LLMs often emit edge conditions or `condition` node expressions
+  // that use template syntax (`{{...}}`) or bare identifiers our grammar
+  // doesn't accept. Replace invalid expressions with safe defaults so the
+  // workflow still validates and runs — matching the LLM's intent better than
+  // failing the whole draft.
+  const sanitizedEdges = parsed.data.edges.map((edge) => {
+    if (!edge.condition) return edge;
+    return validateExpression(edge.condition).valid ? edge : { ...edge, condition: undefined };
+  });
+  const sanitizedNodes = parsed.data.nodes.map((node) => {
+    if (node.type !== "condition") return node;
+    const expression = node.config && typeof (node.config as { expression?: unknown }).expression === "string"
+      ? String((node.config as { expression: string }).expression)
+      : "";
+    if (expression && !validateExpression(expression).valid) {
+      return { ...node, config: { ...(node.config ?? {}), expression: "true" } };
+    }
+    return node;
+  });
+  const sanitized = { ...parsed.data, nodes: sanitizedNodes, edges: sanitizedEdges };
+
+  const validation = validateWorkflow(sanitized);
   if (!validation.valid) {
     throw httpError(`AI returned a workflow with validation issues: ${validation.issues.map(issue => issue.message).join(", ")}`, 502);
   }
 
-  return parsed.data;
+  return sanitized;
 }
 
 const stepLabels: Record<string, string> = {
@@ -275,6 +333,8 @@ const server = http.createServer(async (req, res) => {
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const role = isRole(body.role) ? body.role : "viewer";
       if (!email) return sendJson(res, { error: "email is required" }, 400);
+      // Until invite-acceptance flow is in place, user_id starts as the email so the
+      // member row is queryable by it; replace on first sign-in or accept event.
       const userId = typeof body.userId === "string" && body.userId.trim() ? body.userId.trim() : email;
       const existing = await db.select().from(orgMembers).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
       if (existing[0]) return sendJson(res, { error: "Member already exists for this org" }, 409);
@@ -306,8 +366,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Workflows
-    if (req.method === "GET" && req.url === "/workflows") {
-      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt));
+    if (req.method === "GET" && req.url?.startsWith("/workflows") && !req.url.startsWith("/workflows/")) {
+      const url = new URL(req.url, "http://localhost");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
+      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt)).limit(limitValue);
       return sendJson(res, rows);
     }
 
@@ -398,8 +461,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
       const { prompt } = asRecord(await readJson(req));
       const client = getOpenAIClient();
+      const fallbackWorkflow = fallbackWorkflowForPrompt(prompt);
       if (!client) {
-        const fallbackWorkflow = fallbackWorkflowForPrompt(prompt);
         return sendJson(res, {
           mode: "fallback",
           ...(fallbackWorkflow ?? {}),
@@ -411,7 +474,35 @@ const server = http.createServer(async (req, res) => {
           input: [
             {
               role: "system",
-              content: "Generate only valid JSON for a workflow DAG. Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}. Supported node types: http, tool, transform, condition, agent, multi_agent, agent_reflection, loop, router, router_llm, ai, approval, webhook, noop.",
+              content: [
+                "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
+                "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
+                "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
+                "Node types and required config:",
+                "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object }",
+                "- noop: {} (good for explicit start/end markers)",
+                "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
+                "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
+                "- webhook: {} (waits for external resume)",
+                "- approval: { message?: string } (waits for human approval)",
+                "- ai: { prompt: string, model?: string }",
+                "- tool: { tool: 'http.request'|'text.uppercase'|'json.pick', input: object }",
+                "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
+                "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
+                "- agent_reflection: { input?: any }",
+                "- loop: { items: string|array, mapping?: object }",
+                "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
+                "- router_llm: { candidates: Array<{id}> }",
+                "edges[].condition grammar (optional, leave it out unless you really need branching):",
+                "  - boolean literals: true / false",
+                "  - numbers, single/double-quoted strings, null",
+                "  - paths starting with `context.` or `inputs.` (e.g. context.fetch.output.statusCode)",
+                "  - comparisons: ===, !==, ==, !=, >, <, >=, <=",
+                "  - boolean composition: &&, ||, !, parentheses",
+                "  - INVALID: bare identifiers (e.g. risk_is_high), function calls, string concatenation, regex.",
+                "If you can't express a condition with this grammar, omit `condition` and route via a `condition` or `router` node instead.",
+                "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
+              ].join("\n"),
             },
             { role: "user", content: String(prompt ?? "") },
           ],
@@ -419,11 +510,16 @@ const server = http.createServer(async (req, res) => {
         });
         const parsed = JSON.parse(response.output_text || "{}");
         const workflow = parseAiWorkflow(parsed);
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: OPENAI_MODEL });
         return sendJson(res, { mode: "ai", ...workflow });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        const status = (err as { status?: number; statusCode?: number })?.status ?? (err as { statusCode?: number })?.statusCode ?? 502;
-        return sendJson(res, { mode: "error", error: message }, status);
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", fallbackWorkflow?.id, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          ...(fallbackWorkflow ?? {}),
+        });
       }
     }
 
@@ -441,11 +537,16 @@ const server = http.createServer(async (req, res) => {
           model: OPENAI_MODEL,
           input: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
         });
+        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: OPENAI_MODEL });
         return sendJson(res, { mode: "ai", explanation: response.output_text });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        const status = (err as { status?: number })?.status ?? 502;
-        return sendJson(res, { mode: "error", error: message }, status);
+        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          explanation: fallbackExplainWorkflow(workflow),
+        });
       }
     }
 
@@ -457,25 +558,22 @@ const server = http.createServer(async (req, res) => {
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
 
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
-      try {
-        const result = await explainRun({
-          openai: getOpenAIClient() ?? undefined,
-          run: run[0],
-          events,
-          question: typeof question === "string" ? question : undefined,
-          model: OPENAI_MODEL,
-        });
-        return sendJson(res, result);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "AI request failed";
-        const status = (err as { status?: number })?.status ?? 502;
-        return sendJson(res, { mode: "error", error: message }, status);
-      }
+      const result = await explainRun({
+        openai: getOpenAIClient() ?? undefined,
+        run: run[0],
+        events,
+        question: typeof question === "string" ? question : undefined,
+        model: OPENAI_MODEL,
+      });
+      return sendJson(res, result);
     }
 
     // Runs
-    if (req.method === "GET" && req.url === "/runs") {
-      const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt));
+    if (req.method === "GET" && req.url?.startsWith("/runs") && !req.url.startsWith("/run?")) {
+      const url = new URL(req.url, "http://localhost");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
+      const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
       return sendJson(res, rows);
     }
 
@@ -509,11 +607,14 @@ const server = http.createServer(async (req, res) => {
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...corsHeaders(res) });
       let lastSeen: Date | null = null;
+      let closed = false;
       const tick = async () => {
+        if (closed) return;
         const filter = lastSeen
           ? and(eq(runEvents.runId, runId), gt(runEvents.createdAt, lastSeen))
           : eq(runEvents.runId, runId);
         const events = await db.select().from(runEvents).where(filter).orderBy(asc(runEvents.createdAt));
+        if (closed) return;
         if (events.length) {
           lastSeen = events[events.length - 1].createdAt ?? lastSeen;
           sendEvent(res, events);
@@ -521,7 +622,10 @@ const server = http.createServer(async (req, res) => {
       };
       const interval = setInterval(() => { void tick(); }, 1000);
       void tick();
-      req.on("close", () => clearInterval(interval));
+      req.on("close", () => {
+        closed = true;
+        clearInterval(interval);
+      });
       return;
     }
 

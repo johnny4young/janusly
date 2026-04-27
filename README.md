@@ -4,7 +4,7 @@
 
 Janusly turns business processes into observable, learning DAGs. It runs them on a BullMQ worker, decides routes with a built-in decision engine + RL adjustments, rolls back when confidence drops, and explains every run in natural language. With an OpenAI key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → rollback → conversational explainability. Without one, every deterministic path still works.
 
-> Design system: **Electric Indigo** (`#4F46E5`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
+> Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
 
 ---
 
@@ -160,7 +160,7 @@ curl -s http://localhost:3001/ai/health -H "x-org-id: default" -H "x-user-id: de
 | editor  | Validate, save workflows, start runs, resume `waiting` nodes, replay/resolve dead letters |
 | admin   | Invite/remove members, change roles, install plugins, manage credentials      |
 
-Permissions are enforced per organization through `org_members`. In `dev-headers` and `service-token` modes the default role is `admin`.
+Permissions are enforced per organization through `org_members`. In `dev-headers` mode (no Supabase configured outside production) the default role is `admin`. `service-token` mode requires an explicit `org_members` row — there is no implicit admin grant.
 
 ---
 
@@ -198,7 +198,7 @@ Three independent layers, see [§ Credentials](#credentials):
   VITE_SUPABASE_ANON_KEY=eyJhbGc...
   ```
 
-  Once configured, dev headers are rejected by the API. Override for hybrid test/staging with `ALLOW_DEV_AUTH_HEADERS=true`.
+  Once configured, dev headers are rejected by the API. Override for hybrid test/staging with `ALLOW_DEV_AUTH_HEADERS=true`. In `NODE_ENV=production`, the API refuses to start without either Supabase credentials **or** `ALLOW_DEV_AUTH_HEADERS=true`.
 
 #### Workflow secrets
 
@@ -238,7 +238,7 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 - **Observability**: OpenTelemetry traces, Prometheus metrics exporter, structured logging.
 - React 19 + Tailwind 4 UI: builder, Crew Timeline, Inspector, Runs (with AI chat + DLQ ops), Members, Templates, Tools, Secrets.
 - Auto-refresh on terminal run state via shared `platformVersion` signal.
-- Vitest 4 unit suites across `shared`, `engine`, `ai`, `domain`, `web` (96 tests). Playwright e2e.
+- Vitest 4 unit suites across `shared`, `engine`, `ai`, `domain`, `web` (101 tests, includes the atomic-claim race-condition guard for concurrent workers). Playwright e2e.
 
 ### In progress
 
@@ -260,7 +260,7 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 | `apps/api`, `packages/db`, `packages/data` | `tsc --noEmit` as a type guard.                                  |
 
 ```bash
-pnpm test               # full unit test suite (96 tests)
+pnpm test               # full unit test suite (101 tests)
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
 pnpm --filter @janusly/web test:watch   # Vitest watch

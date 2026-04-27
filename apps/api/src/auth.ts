@@ -8,7 +8,16 @@ const supabase = supabaseUrl && supabaseServiceKey
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
-const allowDevHeaders = !supabase || process.env.ALLOW_DEV_AUTH_HEADERS === "true";
+const isProduction = process.env.NODE_ENV === "production";
+const explicitDevHeaders = process.env.ALLOW_DEV_AUTH_HEADERS === "true";
+
+if (!supabase && isProduction && !explicitDevHeaders) {
+  throw new Error(
+    "Production requires Supabase auth (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY) or explicit ALLOW_DEV_AUTH_HEADERS=true.",
+  );
+}
+
+const allowDevHeaders = explicitDevHeaders || (!supabase && !isProduction);
 
 export type AuthContext = {
   orgId: string;

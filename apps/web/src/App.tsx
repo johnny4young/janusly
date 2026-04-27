@@ -13,12 +13,6 @@ import { getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 
-type StatusResponse = {
-  run?: RunSummary
-  nodes?: RunNode[]
-  events?: RunEvent[]
-}
-
 const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
 
 type RunResponse = {
@@ -35,6 +29,7 @@ type ValidationResponse = {
 type GenerateWorkflowResponse = WorkflowDefinition & {
   mode?: AiMode
   error?: string
+  aiError?: string
 }
 
 type ExplainWorkflowResponse = {
@@ -42,6 +37,7 @@ type ExplainWorkflowResponse = {
   explanation?: string
   model?: string
   error?: string
+  aiError?: string
 }
 
 export default function App() {
@@ -83,7 +79,7 @@ export default function App() {
     setStreamStatus,
     resetRun,
     addToast,
-    setEdges,
+    updateEdgeCondition: storeUpdateEdgeCondition,
     bumpPlatformVersion,
   } = useWorkflowStore()
 
@@ -108,7 +104,7 @@ export default function App() {
 
     const { data: listener } = AuthProvider.onAuthStateChange((auth) => {
       if (!mounted) return
-      if (!auth.session && isSupabaseConfigured) clearAuth()
+      if (!auth.session) clearAuth()
       else setAuth(auth)
     })
 
@@ -146,8 +142,8 @@ export default function App() {
     if (authReady) void refreshPlatform()
   }, [authReady, refreshPlatform])
 
-  const loadStatus = useCallback(async (id: string): Promise<StatusResponse> => {
-    const status = await api(`/status?runId=${encodeURIComponent(id)}`) as StatusResponse
+  const loadStatus = useCallback(async (id: string): Promise<RunResponse> => {
+    const status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
     setRunNodes(status.nodes ?? [])
     setEvents(status.events ?? [])
     return status
@@ -384,8 +380,14 @@ export default function App() {
     hydrateWorkflow(result)
     setValidationIssues([])
     const mode = result.mode ?? 'fallback'
-    addToast(mode === 'ai' ? 'AI drafted a flow' : 'Starter flow loaded locally', mode === 'error' ? 'error' : 'success')
-    return { mode, workflow: result as WorkflowDefinition }
+    const tone = mode === 'error' ? 'error' : result.aiError ? 'info' : 'success'
+    const message = mode === 'ai'
+      ? 'AI drafted a flow'
+      : result.aiError
+        ? 'AI failed — starter flow loaded'
+        : 'Starter flow loaded locally'
+    addToast(message, tone)
+    return { mode, workflow: result as WorkflowDefinition, aiError: result.aiError }
   }, [addToast, hydrateWorkflow])
 
   const explainWorkflow = useCallback(async () => {
@@ -400,6 +402,7 @@ export default function App() {
       mode: result.mode ?? 'fallback',
       explanation: result.explanation ?? 'No workflow explanation available.',
       model: result.model,
+      aiError: result.aiError,
     }
   }, [getWorkflowJson])
 
@@ -418,11 +421,8 @@ export default function App() {
   }, [addToast, bumpPlatformVersion, refreshPlatform])
 
   const updateEdgeCondition = useCallback((edgeId: string, condition: string) => {
-    setEdges(edges.map(edge => edge.id === edgeId
-      ? { ...edge, data: { ...(edge.data ?? {}), condition: condition || undefined }, label: condition ? 'condition' : undefined }
-      : edge
-    ))
-  }, [edges, setEdges])
+    storeUpdateEdgeCondition(edgeId, condition || null)
+  }, [storeUpdateEdgeCondition])
 
   if (!authReady) return <div className="boot-screen">Loading Janusly…</div>
   if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
