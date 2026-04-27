@@ -1,4 +1,5 @@
-import { Worker } from "bullmq";
+import { Worker, UnrecoverableError } from "bullmq";
+import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
@@ -18,12 +19,30 @@ const runtime = new WorkflowRuntime(
   }
 );
 
+function validateJobData(data: unknown): { runId: string; node: unknown; workflow: unknown } {
+  if (!data || typeof data !== "object") {
+    throw new UnrecoverableError("Invalid job data: not an object");
+  }
+  const obj = data as Record<string, unknown>;
+  if (typeof obj.runId !== "string" || obj.runId.length === 0) {
+    throw new UnrecoverableError("Invalid job data: missing runId");
+  }
+  const node = NodeSchema.safeParse(obj.node);
+  if (!node.success) {
+    throw new UnrecoverableError(`Invalid job data (node): ${node.error.issues.map((i) => i.message).join(", ")}`);
+  }
+  const workflow = WorkflowSchema.safeParse(obj.workflow);
+  if (!workflow.success) {
+    throw new UnrecoverableError(`Invalid job data (workflow): ${workflow.error.issues.map((i) => i.message).join(", ")}`);
+  }
+  return { runId: obj.runId, node: node.data, workflow: workflow.data };
+}
+
 export const worker = new Worker(
   "workflow-nodes",
   async (job) => {
-    const { runId, node, workflow } = job.data;
-
-    await runtime.executeQueuedNode({ runId, node, workflow });
+    const { runId, node, workflow } = validateJobData(job.data);
+    await runtime.executeQueuedNode({ runId, node: node as any, workflow: workflow as any });
   },
   {
     connection,
