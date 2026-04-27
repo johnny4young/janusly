@@ -223,9 +223,32 @@ function decisionCandidatesFromPayload(payload: unknown): DecisionCandidate[] {
   });
 }
 
+const SENSITIVE_AUDIT_KEYS = /^(secret|password|token|api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key)$/i;
+
+function redactAuditMetadata(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactAuditMetadata);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        SENSITIVE_AUDIT_KEYS.test(key) ? "[redacted]" : redactAuditMetadata(item),
+      ]),
+    );
+  }
+  return value;
+}
+
 async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: unknown = {}) {
   try {
-    await db.insert(auditLogs).values({ id: crypto.randomUUID(), orgId, userId, action, targetType, targetId, metadata });
+    await db.insert(auditLogs).values({
+      id: crypto.randomUUID(),
+      orgId,
+      userId,
+      action,
+      targetType,
+      targetId,
+      metadata: redactAuditMetadata(metadata),
+    });
   } catch (error) {
     console.warn("audit write failed", error);
   }
@@ -412,7 +435,10 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, rows);
     }
 
-    if (req.method === "POST" && req.url === "/validate") return sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES)));
+    if (req.method === "POST" && req.url === "/validate") {
+      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+      return sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES)));
+    }
 
     // AI helpers
     if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
@@ -610,8 +636,29 @@ const server = http.createServer(async (req, res) => {
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
+
+      // Track whether this run is for a workflow we've persisted (saved) or
+      // an ad-hoc one constructed in the request body. Ad-hoc starts are
+      // legitimate (AI Studio "Run" before Save) but operators may want to
+      // forbid them in production via JANUSLY_REQUIRE_SAVED_WORKFLOW=true.
+      const requireSaved = process.env.JANUSLY_REQUIRE_SAVED_WORKFLOW === "true";
+      let isAdhoc = true;
+      if (typeof parsedWorkflow.id === "string" && parsedWorkflow.id) {
+        const owned = await db
+          .select({ id: workflows.id })
+          .from(workflows)
+          .where(and(eq(workflows.id, parsedWorkflow.id), eq(workflows.orgId, auth.orgId)));
+        isAdhoc = owned.length === 0;
+      }
+      if (requireSaved && isAdhoc) {
+        return sendJson(res, { error: "Ad-hoc workflows are disabled. Save the workflow first." }, 403);
+      }
+
       const result = await startRun({ ...parsedWorkflow, orgId: auth.orgId, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "run.started", "run", result.runId, { workflowId: parsedWorkflow.id });
+      await audit(auth.orgId, auth.userId, isAdhoc ? "run.started.adhoc" : "run.started", "run", result.runId, {
+        workflowId: parsedWorkflow.id,
+        adhoc: isAdhoc,
+      });
       return sendJson(res, result);
     }
 
