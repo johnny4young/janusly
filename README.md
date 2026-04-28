@@ -222,29 +222,9 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 
 ---
 
-## Status
+## Roadmap
 
-### Implemented
-
-- Postgres persistence (workflows, versions, runs, events, memberships, audit, plugins, credentials, dead letters, routing stats, workflow improvements).
-- BullMQ queue + worker with concurrency, exponential backoff, retry policy, timeouts, dead-letter queue, replay adapter.
-- DAG validation: types, cycles, sandboxed expressions, tool input schemas, start node detection.
-- 14 node types: `noop`, `http`, `condition`, `transform`, `loop`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `ai`, `webhook`, `approval`, `router`, `router_llm`.
-- 3 builtin tools: `http.request`, `text.uppercase`, `json.pick`.
-- **Decision engine**: scores candidates by cost/latency/quality, applies RL, honors strategies (cheapest / fastest / balanced / auto), respects budget caps.
-- **Improvement engine**: computes confidence between metric snapshots, auto-rollback under 30%, auto-promote over 70%.
-- **Causal replay**: counterfactual reasoning over past `decision.made` events.
-- **AI explainability**: OpenAI-backed run Q&A with a deterministic fallback that never crashes.
-- **Observability**: OpenTelemetry traces, Prometheus metrics exporter, structured logging.
-- React 19 + Tailwind 4 UI: builder, Crew Timeline, Inspector, Runs (with AI chat + DLQ ops), Members, Templates, Tools, Secrets.
-- Auto-refresh on terminal run state via shared `platformVersion` signal.
-- Vitest 4 unit suites across `shared`, `engine`, `ai`, `domain`, `web` (101 tests, includes the atomic-claim race-condition guard for concurrent workers). Playwright e2e.
-
-### In progress
-
-- Formal Drizzle migrations for production deployments.
-- Lazy loading for very large run timelines.
-- Vitest browser mode for canvas-level React Flow tests.
+What is in flight, what shipped, what is intentionally deferred lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Strategic context — why we are picking these bets — lives in [`docs/PLAN.md`](docs/PLAN.md).
 
 ---
 

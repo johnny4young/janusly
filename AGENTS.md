@@ -1,5 +1,7 @@
 # Agent Notes — Janusly
 
+Operational invariants only — how to run the project, what not to break. Roadmap and ticket pool live in [`docs/ROADMAP.md`](docs/ROADMAP.md). Strategic context lives in [`docs/PLAN.md`](docs/PLAN.md). Don't add planning here.
+
 Janusly = the AI operator for business workflows. Internal packages live under the `@janusly/*` scope. Everywhere user-facing (UI brand-mark, page titles, marketing copy, `/ai/*` responses) say **Janusly**.
 
 - **Stack baselines:** Node.js **24**, TypeScript 6, React 19, Vite 8 (Rolldown), Tailwind 4 (CSS-first via `@theme` + `@tailwindcss/vite`), Vitest 4, Zod 4, Drizzle 0.45, Postgres 18, Redis 8, OpenAI SDK 6.
