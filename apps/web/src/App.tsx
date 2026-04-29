@@ -19,6 +19,8 @@ type RunResponse = {
   run?: RunSummary
   nodes?: RunNode[]
   events?: RunEvent[]
+  eventsCursor?: string | null
+  eventsHasMore?: boolean
 }
 
 type ValidationResponse = {
@@ -76,6 +78,10 @@ export default function App() {
     setRunId,
     setRunNodes,
     setEvents,
+    addEvents,
+    eventsCursor,
+    eventsHasMore,
+    setEventsPagination,
     setStreamStatus,
     resetRun,
     addToast,
@@ -145,9 +151,22 @@ export default function App() {
   const loadStatus = useCallback(async (id: string): Promise<RunResponse> => {
     const status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
     setRunNodes(status.nodes ?? [])
-    setEvents(status.events ?? [])
+    const statusEvents = status.events ?? []
+    addEvents(statusEvents)
+    // /status always describes the latest page. Once the user has loaded older
+    // pages, preserving the existing cursor prevents polling from rewinding the
+    // "Load older events" button back to the first page of history.
+    if (typeof status.eventsHasMore === 'boolean') {
+      const state = useWorkflowStore.getState()
+      const hasLoadedBeyondLatestPage = state.events.length > statusEvents.length
+      if (!status.eventsHasMore) {
+        setEventsPagination(null, false)
+      } else if (!state.eventsCursor && !hasLoadedBeyondLatestPage) {
+        setEventsPagination(status.eventsCursor ?? null, true)
+      }
+    }
     return status
-  }, [setEvents, setRunNodes])
+  }, [addEvents, setEventsPagination, setRunNodes])
 
   useEffect(() => {
     if (!runId) return
@@ -268,7 +287,7 @@ export default function App() {
       if (!result.runId) throw new Error('API did not return runId')
       resetRun()
       setRunId(result.runId)
-      setActiveTab('crew')
+      setActiveTab('multiAgent')
       addToast(`Run started: ${result.runId.slice(0, 8)}`, 'success')
       bumpPlatformVersion()
       await refreshPlatform()
@@ -296,11 +315,23 @@ export default function App() {
       setRunId(id)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
-      setActiveTab('crew')
+      setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
+      setActiveTab('multiAgent')
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Run failed to open', 'error')
     }
-  }, [addToast, setActiveTab, setEvents, setRunId, setRunNodes])
+  }, [addToast, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes])
+
+  const loadOlderEvents = useCallback(async () => {
+    if (!runId || !eventsCursor || !eventsHasMore) return
+    try {
+      const data = await api(`/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`) as RunResponse
+      addEvents(data.events ?? [])
+      setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Older events failed to load', 'error')
+    }
+  }, [addEvents, addToast, eventsCursor, eventsHasMore, runId, setEventsPagination])
 
   const installPlugin = useCallback(async (pluginId: string) => {
     try {
@@ -480,6 +511,8 @@ export default function App() {
         <RightPanel
           tab={activeTab}
           events={events}
+          eventsHasMore={eventsHasMore}
+          onLoadOlderEvents={loadOlderEvents}
           runNodes={runNodes}
           selectedNode={selectedNode}
           selectedEdge={selectedEdge}

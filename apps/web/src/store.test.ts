@@ -21,7 +21,9 @@ beforeEach(() => {
       runId: null,
       runNodes: [],
       events: [],
-      activeTab: 'crew',
+      eventsCursor: null,
+      eventsHasMore: false,
+      activeTab: 'multiAgent',
       streamStatus: 'idle',
       toasts: [],
       platformVersion: 0,
@@ -122,6 +124,30 @@ describe('useWorkflowStore', () => {
     expect(ids).toEqual(['evt_1', 'evt_2', 'evt_3'])
   })
 
+  it('addEvents sorts merged events chronologically by createdAt', () => {
+    useWorkflowStore.getState().addEvents([
+      { id: 'evt_b', type: 'node.queued', createdAt: '2026-04-29T10:00:01.000Z' },
+      { id: 'evt_a', type: 'node.queued', createdAt: '2026-04-29T10:00:00.000Z' },
+    ])
+    useWorkflowStore.getState().addEvents([
+      { id: 'evt_old', type: 'run.started', createdAt: '2026-04-29T09:59:50.000Z' },
+      { id: 'evt_c', type: 'node.succeeded', createdAt: '2026-04-29T10:00:02.000Z' },
+    ])
+
+    const ids = useWorkflowStore.getState().events.map(event => event.id)
+    expect(ids).toEqual(['evt_old', 'evt_a', 'evt_b', 'evt_c'])
+  })
+
+  it('setEventsPagination updates cursor and hasMore', () => {
+    useWorkflowStore.getState().setEventsPagination('2026-04-29T09:00:00.000Z', true)
+    expect(useWorkflowStore.getState().eventsCursor).toBe('2026-04-29T09:00:00.000Z')
+    expect(useWorkflowStore.getState().eventsHasMore).toBe(true)
+
+    useWorkflowStore.getState().setEventsPagination(null, false)
+    expect(useWorkflowStore.getState().eventsCursor).toBeNull()
+    expect(useWorkflowStore.getState().eventsHasMore).toBe(false)
+  })
+
   it('addToast adds a toast and removeToast clears it', () => {
     useWorkflowStore.getState().addToast('Hello', 'success')
     expect(useWorkflowStore.getState().toasts).toHaveLength(1)
@@ -137,11 +163,13 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().platformVersion).toBe(2)
   })
 
-  it('resetRun clears runId, run nodes, events, and stream status', () => {
+  it('resetRun clears runId, run nodes, events, pagination, and stream status', () => {
     useWorkflowStore.setState({
       runId: 'run_1',
       runNodes: [{ nodeId: 'a', status: 'running' }],
       events: [{ id: 'e1', type: 'node.queued' }],
+      eventsCursor: '2026-04-29T09:00:00.000Z',
+      eventsHasMore: true,
       streamStatus: 'connected',
     })
     useWorkflowStore.getState().resetRun()
@@ -149,6 +177,8 @@ describe('useWorkflowStore', () => {
     expect(state.runId).toBeNull()
     expect(state.runNodes).toEqual([])
     expect(state.events).toEqual([])
+    expect(state.eventsCursor).toBeNull()
+    expect(state.eventsHasMore).toBe(false)
     expect(state.streamStatus).toBe('idle')
   })
 })

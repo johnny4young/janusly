@@ -17,15 +17,15 @@ type TimelineItem = {
 function getAgentName(event: RunEvent): string {
   const payload = event.payload ?? {}
 
-  if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : 'crew'
-  if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : 'crew'
+  if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : 'agents'
+  if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : 'agents'
   if (typeof payload.name === 'string') return payload.name
   if (typeof payload.agent === 'string') return payload.agent
 
   const match = event.type.match(/^multi_agent\.agent\.(\d+)\./)
   if (match) return `agent_${Number(match[1]) + 1}`
 
-  if (event.type.startsWith('multi_agent')) return 'crew'
+  if (event.type.startsWith('multi_agent')) return 'agents'
   return 'workflow'
 }
 
@@ -69,8 +69,28 @@ function readNumber(value: unknown) {
   return typeof value === 'number' ? value : 0
 }
 
-export function CrewTimeline({ events }: { events: RunEvent[] }) {
+export function MultiAgentTimeline({
+  events,
+  eventsHasMore,
+  onLoadOlderEvents,
+}: {
+  events: RunEvent[]
+  eventsHasMore?: boolean
+  onLoadOlderEvents?: () => void | Promise<void>
+}) {
   const [selected, setSelected] = useState<TimelineItem | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+
+  const handleLoadOlder = onLoadOlderEvents
+    ? async () => {
+        setLoadingOlder(true)
+        try {
+          await onLoadOlderEvents()
+        } finally {
+          setLoadingOlder(false)
+        }
+      }
+    : null
 
   const items = useMemo<TimelineItem[]>(() => {
     return events
@@ -112,11 +132,22 @@ export function CrewTimeline({ events }: { events: RunEvent[] }) {
     <div className="timeline-shell">
       <div className="timeline-header">
         <div>
-          <h3>Agent team timeline</h3>
+          <h3>Multi-agent timeline</h3>
           <p className="helper-text">Grouped by agent so multi-step reasoning is easier to scan.</p>
         </div>
         <span className="mode-pill mode-pill-neutral">{items.length} events</span>
       </div>
+
+      {eventsHasMore && handleLoadOlder && (
+        <button
+          type="button"
+          className="load-older-events"
+          disabled={loadingOlder}
+          onClick={handleLoadOlder}
+        >
+          {loadingOlder ? 'Loading…' : 'Load older events'}
+        </button>
+      )}
 
       {lanes.map(([agent, laneItems]) => (
         <div key={agent} className="timeline-lane">

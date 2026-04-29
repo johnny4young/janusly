@@ -137,9 +137,9 @@ Runs a single-agent loop using either the rule-based planner or an OpenAI planne
 
 **Output:** `{ steps: [...], finalAnswer?: string, finalResult?: any, reflection?: {...} }`
 
-## `multi_agent` (crew)
+## `multi_agent`
 
-Runs a crew of agents. Modes:
+Runs a team of agents. Modes:
 
 - `sequential` — agents run in order, each can read the previous results from `previousAgents`.
 - `parallel` — agents run concurrently with `Promise.allSettled`.
@@ -148,7 +148,7 @@ Aggregation strategies for the final answer: `last` (default), `first`, `all`, `
 
 ```jsonc
 {
-  "id": "crew",
+  "id": "agents",
   "type": "multi_agent",
   "config": {
     "mode": "sequential",
