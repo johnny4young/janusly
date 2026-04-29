@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 const views = [
   { button: 'AI Studio', text: 'Describe the outcome. Janusly builds the flow.' },
   { button: 'Flows', heading: 'Flows' },
-  { button: 'Run timeline', heading: 'Run timeline' },
+  { button: 'Multi-agent timeline', heading: 'Multi-agent timeline' },
   { button: 'Step setup', heading: 'Step setup' },
   { button: 'Runs', heading: 'Runs' },
   { button: 'Team', heading: 'Team' },
