@@ -6,6 +6,8 @@ apps/web/dist/
 .playwright-mcp/
 apps/web/playwright-report/
 apps/web/test-results/
+apps/web/.vitest-attachments/
+apps/web/**/__screenshots__/
 output/
 .env
 .DS_Store

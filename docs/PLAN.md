@@ -575,7 +575,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 - [ ] Coverage report in CI; aim for 80% on `engine` and `domain`.
 - [ ] Property-based tests on `expression.ts` and `parseAiWorkflow` (use `fast-check`).
-- [ ] Vitest browser mode for the React Flow canvas (currently tested via Playwright e2e only).
+- [ ] Vitest browser mode for the React Flow canvas — local `pnpm test:browser` coverage exists for `<WorkflowCanvas>`; CI wiring remains with ENG-015.
 - [ ] LLM eval harness: maintain a goldens file `evals/generate-workflow.jsonl` with `{ prompt, expected_node_types }`. CI fails if the generated workflow regresses.
 
 ### 10.6 Multi-tenancy maturity
