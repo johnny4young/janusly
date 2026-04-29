@@ -1,13 +1,13 @@
 import { Worker, UnrecoverableError } from "bullmq";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
-import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
+import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 
-await ensureDatabaseSchema();
+await assertMigrationsApplied();
 
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),

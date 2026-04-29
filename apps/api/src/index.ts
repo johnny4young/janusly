@@ -1,6 +1,6 @@
 import http from "http";
 import OpenAI from "openai";
-import { ensureDatabaseSchema } from "@janusly/db/src/schema-management";
+import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
 import { resumeRun } from "@janusly/engine/src/resume-run";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
@@ -768,6 +768,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-await ensureDatabaseSchema();
+await assertMigrationsApplied();
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));
