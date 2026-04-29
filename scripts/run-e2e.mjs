@@ -127,6 +127,15 @@ async function shutdown() {
   await run("docker", ["compose", "down"]);
 }
 
+async function dumpComposeLogs() {
+  try {
+    console.error("[e2e] command failed; dumping Compose logs before shutdown");
+    await run("docker", ["compose", "logs", "--no-color"]);
+  } catch (error) {
+    console.error("[e2e] failed to dump Compose logs", error);
+  }
+}
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
     await shutdown();
@@ -160,6 +169,9 @@ try {
       VITE_API_URL: "http://127.0.0.1:3001",
     },
   });
+} catch (error) {
+  await dumpComposeLogs();
+  throw error;
 } finally {
   await shutdown();
 }
