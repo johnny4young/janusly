@@ -552,7 +552,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 ### 10.2 Build / DX
 
 - [ ] CI: GitHub Actions with build + test + e2e + audit. None today (`.github/` is empty).
-- [ ] Drizzle migrations: today schema is bootstrapped via `ensureDatabaseSchema()` with `IF NOT EXISTS`. Real migrations + a `pnpm migrate` command.
+- [x] Drizzle migrations: ENG-008 shipped checked-in SQL migrations, root `pnpm migrate`, and API/worker startup guards via `assertMigrationsApplied()`. The runtime `ensureDatabaseSchema()` bootstrap was removed.
 - [ ] Containerize end-to-end: `docker-compose.full.yml` that runs api + worker + web + postgres + redis. Today only the data tier is composed.
 - [ ] `pnpm dev` should boot everything in one command with `concurrently` or similar.
 - [ ] Storybook for the UI components (especially the DAG node renderer + Right Panel sub-panels).
@@ -598,7 +598,7 @@ Goal: provider freedom, cost visibility, MCP server stub.
 - `usage_events` instrumentation: every LLM call writes one row.
 - `@janusly/mcp-server` with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`).
 - Replace `parseAiWorkflow` looser/sanitizer with `generateObject({ schema: WorkflowSchema })` (§4 phase B).
-- Drizzle migrations, real `pnpm migrate`.
+- Drizzle migrations shipped in ENG-008: checked-in SQL migrations, real `pnpm migrate`, and API/worker fail-fast guards before boot.
 - GitHub Actions: build + test + e2e + dep-audit.
 
 Definition of done: a developer can switch `JANUSLY_LLM_PROVIDER=anthropic` and the AI Studio still works; usage shows up in the Runs view; Claude Desktop can list workflows via MCP.

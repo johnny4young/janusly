@@ -66,6 +66,30 @@ async function waitForHttp(url, options = {}) {
   throw lastError ?? new Error(`${url} did not become ready`);
 }
 
+async function waitForPostgres(timeoutMs = 60_000) {
+  const startedAt = Date.now();
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn("docker", ["compose", "exec", "-T", "postgres", "pg_isready", "-U", "postgres"], {
+          cwd: rootDir,
+          stdio: "ignore",
+        });
+        child.on("exit", code => (code === 0 ? resolve() : reject(new Error(`pg_isready exited ${code}`))));
+        child.on("error", reject);
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(1_000);
+    }
+  }
+
+  throw lastError ?? new Error("postgres did not become ready");
+}
+
 async function stopService(child) {
   if (!child || child.exitCode !== null || child.killed) return;
 
@@ -112,6 +136,9 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 try {
   await run("docker", ["compose", "up", "-d", "redis", "postgres"]);
+
+  await waitForPostgres();
+  await run("pnpm", ["migrate"]);
 
   startService("api", "pnpm", ["--filter", "@janusly/api", "exec", "tsx", "src/index.ts"], {
     env: { PORT: "3001" },
