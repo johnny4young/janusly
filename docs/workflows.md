@@ -111,7 +111,7 @@ When `fetch` succeeds, `rescue` is marked `skipped` and `happy` runs. Inverted o
 
 ---
 
-## 4. Single-agent crew using rules planner
+## 4. Single agent using rules planner
 
 ```json
 {
@@ -136,19 +136,19 @@ When `fetch` succeeds, `rescue` is marked `skipped` and `happy` runs. Inverted o
 }
 ```
 
-The rules planner sees the word "uppercase" in the goal and selects `text.uppercase`. The agent emits step events the UI renders in the **Crew timeline** panel.
+The rules planner sees the word "uppercase" in the goal and selects `text.uppercase`. The agent emits step events the UI renders in the **Multi-agent timeline** panel.
 
 ---
 
-## 5. Sequential multi-agent crew (analyzer → validator)
+## 5. Sequential multi-agent step (analyzer → validator)
 
 ```json
 {
-  "id": "crew-analyze-validate",
-  "name": "Two-agent crew",
+  "id": "agents-analyze-validate",
+  "name": "Two-agent multi-agent step",
   "nodes": [
     {
-      "id": "crew",
+      "id": "agents",
       "type": "multi_agent",
       "config": {
         "mode": "sequential",
@@ -180,7 +180,7 @@ The rules planner sees the word "uppercase" in the goal and selects `text.upperc
 }
 ```
 
-Run this and open **Crew Timeline** in the UI to see analyzer and validator lanes side by side.
+Run this and open the **Multi-agent timeline** in the UI to see analyzer and validator lanes side by side.
 
 ---
 
