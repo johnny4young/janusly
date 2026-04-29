@@ -25,7 +25,7 @@ import {
   auditLogs,
   orgMembers,
 } from "@janusly/db";
-import { eq, desc, asc, and, gt } from "drizzle-orm";
+import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import {
   getDeadLetter,
@@ -44,6 +44,7 @@ import {
   type CorsAwareResponse,
 } from "./http";
 import { enforceRateLimit } from "./rate-limit";
+import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "./run-pagination";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
@@ -53,6 +54,8 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const AI_PROMPT_MAX_CHARS = Number(process.env.AI_PROMPT_MAX_CHARS || 4_000);
 const AI_RATE_LIMIT_PER_MIN = Number(process.env.AI_RATE_LIMIT_PER_MIN || 30);
 const AUDIT_PAGE_SIZE = 100;
+const RUN_EVENTS_DEFAULT_LIMIT = 200;
+const RUN_EVENTS_MAX_LIMIT = 500;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 let openai: OpenAI | null = null;
@@ -585,8 +588,28 @@ const server = http.createServer(async (req, res) => {
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
       const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
-      return sendJson(res, { run: run[0], nodes, events });
+      const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
+      const cursor = parseEventsCursor(url.searchParams.get("eventsCursor"));
+      // Composite (createdAt, id) keyset cursor: events sharing exact createdAt
+      // (e.g. inserts within one transaction) tie-break on id so pagination
+      // always advances and never skips peers.
+      const filter = cursor
+        ? and(
+            eq(runEvents.runId, runId),
+            or(
+              lt(runEvents.createdAt, cursor.createdAt),
+              and(eq(runEvents.createdAt, cursor.createdAt), lt(runEvents.id, cursor.id)),
+            ),
+          )
+        : eq(runEvents.runId, runId);
+      const rows = await db
+        .select()
+        .from(runEvents)
+        .where(filter)
+        .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
+        .limit(limit + 1);
+      const page = paginateRunEvents(rows, limit);
+      return sendJson(res, { run: run[0], nodes, ...page });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/status")) {
@@ -596,8 +619,15 @@ const server = http.createServer(async (req, res) => {
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
       const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
-      return sendJson(res, { run: run[0], nodes, events });
+      const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
+      const rows = await db
+        .select()
+        .from(runEvents)
+        .where(eq(runEvents.runId, runId))
+        .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
+        .limit(limit + 1);
+      const page = paginateRunEvents(rows, limit);
+      return sendJson(res, { run: run[0], nodes, ...page });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/events")) {

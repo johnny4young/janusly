@@ -444,6 +444,31 @@ a { color: var(--we-primary); }
 .view-list,
 .panel-list { display: grid; gap: 8px; }
 
+.load-older-events {
+  align-self: center;
+  justify-self: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--we-faint);
+  background: var(--we-surface);
+  color: var(--we-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.load-older-events:hover:not(:disabled) {
+  background: var(--we-surface-hover, var(--we-surface));
+  border-color: var(--we-primary);
+}
+
+.load-older-events:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 .view-button {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 16px;

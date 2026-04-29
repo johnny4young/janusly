@@ -26,6 +26,8 @@ type WorkflowStore = {
   runId: string | null
   runNodes: RunNode[]
   events: RunEvent[]
+  eventsCursor: string | null
+  eventsHasMore: boolean
   activeTab: ActiveTab
   streamStatus: StreamStatus
   toasts: Toast[]
@@ -55,6 +57,7 @@ type WorkflowStore = {
   setRunNodes: (nodes: RunNode[]) => void
   addEvents: (events: RunEvent[]) => void
   setEvents: (events: RunEvent[]) => void
+  setEventsPagination: (cursor: string | null, hasMore: boolean) => void
   setActiveTab: (tab: ActiveTab) => void
   setStreamStatus: (status: StreamStatus) => void
   resetRun: () => void
@@ -103,6 +106,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   runId: null,
   runNodes: [],
   events: [],
+  eventsCursor: null,
+  eventsHasMore: false,
   activeTab: 'copilot',
   streamStatus: 'idle',
   toasts: [],
@@ -143,6 +148,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       events: [],
+      eventsCursor: null,
+      eventsHasMore: false,
       runNodes: [],
       runId: null,
     })
@@ -163,6 +170,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       selectedNodeId: null,
       selectedEdgeId: null,
       events: [],
+      eventsCursor: null,
+      eventsHasMore: false,
       runNodes: [],
       runId: null,
       activeTab: 'copilot',
@@ -211,23 +220,23 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setRunId: (id) => set({ runId: id }),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
   setEvents: (events) => set({ events }),
+  setEventsPagination: (eventsCursor, eventsHasMore) => set({ eventsCursor, eventsHasMore }),
 
   addEvents: (incoming) => set((state) => {
-    const seen = new Set(state.events.map((e) => e.id ?? `${e.type}:${e.nodeId}:${e.createdAt}`))
-    const merged = [...state.events]
-    for (const event of incoming) {
-      const key = event.id ?? `${event.type}:${event.nodeId}:${event.createdAt}`
-      if (!seen.has(key)) {
-        seen.add(key)
-        merged.push(event)
-      }
-    }
-    return { events: merged }
+    const keyOf = (event: RunEvent) => event.id ?? `${event.type}:${event.nodeId}:${event.createdAt}`
+    const merged = new Map(state.events.map((event) => [keyOf(event), event]))
+    for (const event of incoming) merged.set(keyOf(event), event)
+    const events = [...merged.values()].sort((a, b) => {
+      const at = (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+      if (at !== 0) return at
+      return (a.id ?? '').localeCompare(b.id ?? '')
+    })
+    return { events }
   }),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setStreamStatus: (streamStatus) => set({ streamStatus }),
-  resetRun: () => set({ runId: null, runNodes: [], events: [], streamStatus: 'idle' }),
+  resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle' }),
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
-import { CrewTimeline } from '../CrewTimeline'
+import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
@@ -13,6 +13,8 @@ import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from
 type RightPanelProps = {
   tab: ActiveTab
   events: RunEvent[]
+  eventsHasMore?: boolean
+  onLoadOlderEvents?: () => void | Promise<void>
   runNodes: RunNode[]
   selectedNode: WorkflowGraphNode | null
   selectedEdge: WorkflowGraphEdge | null
@@ -55,9 +57,9 @@ export function RightPanel(props: RightPanelProps) {
       onOpenTemplates={() => props.onOpenTab('templates')}
     />
   )
-  if (props.tab === 'crew') return (
-    <PanelChrome title="Run timeline" description="Follow agent and team events as a run moves through the flow." icon={<Layers3 size={18} />}>
-      <CrewTimeline events={props.events} />
+  if (props.tab === 'multiAgent') return (
+    <PanelChrome title="Multi-agent timeline" description="Follow agent and team events as a run moves through the flow." icon={<Layers3 size={18} />}>
+      <MultiAgentTimeline events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (
@@ -104,7 +106,7 @@ export function RightPanel(props: RightPanelProps) {
   )
   return (
     <PanelChrome title="Run events" description="Low-level execution signals for debugging." icon={<Activity size={18} />}>
-      <ReasoningPanel events={props.events} />
+      <ReasoningPanel events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
     </PanelChrome>
   )
 }
@@ -670,8 +672,16 @@ function EmptyView({ icon, title, body }: { icon: React.ReactNode; title: string
   )
 }
 
-function ReasoningPanel({ events }: { events: RunEvent[] }) {
-  const visibleEvents = useMemo(() => events.slice(-30).reverse(), [events])
+function ReasoningPanel({
+  events,
+  eventsHasMore,
+  onLoadOlderEvents,
+}: {
+  events: RunEvent[]
+  eventsHasMore?: boolean
+  onLoadOlderEvents?: () => void | Promise<void>
+}) {
+  const visibleEvents = useMemo(() => [...events].reverse(), [events])
 
   return (
     <div className="panel-list">
@@ -683,6 +693,28 @@ function ReasoningPanel({ events }: { events: RunEvent[] }) {
           <pre className="mini-pre">{JSON.stringify(event.payload ?? {}, null, 2)}</pre>
         </div>
       ))}
+      {eventsHasMore && onLoadOlderEvents && <LoadOlderEventsButton onClick={onLoadOlderEvents} />}
     </div>
+  )
+}
+
+function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      type="button"
+      className="load-older-events"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await onClick()
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? 'Loading…' : 'Load older events'}
+    </button>
   )
 }
