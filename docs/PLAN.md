@@ -551,7 +551,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 ### 10.2 Build / DX
 
-- [ ] CI: GitHub Actions with build + test + e2e + audit. None today (`.github/` is empty).
+- [x] CI: GitHub Actions workflow exists with build + jsdom test, browser test, e2e, and high+ dependency audit jobs.
 - [x] Drizzle migrations: ENG-008 shipped checked-in SQL migrations, root `pnpm migrate`, and API/worker startup guards via `assertMigrationsApplied()`. The runtime `ensureDatabaseSchema()` bootstrap was removed.
 - [ ] Containerize end-to-end: `docker-compose.full.yml` that runs api + worker + web + postgres + redis. Today only the data tier is composed.
 - [ ] `pnpm dev` should boot everything in one command with `concurrently` or similar.
@@ -575,7 +575,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 - [ ] Coverage report in CI; aim for 80% on `engine` and `domain`.
 - [ ] Property-based tests on `expression.ts` and `parseAiWorkflow` (use `fast-check`).
-- [ ] Vitest browser mode for the React Flow canvas — local `pnpm test:browser` coverage exists for `<WorkflowCanvas>`; CI wiring remains with ENG-015.
+- [x] Vitest browser mode for the React Flow canvas — `<WorkflowCanvas>` covered locally and wired in CI via the `test_browser` job in `.github/workflows/ci.yml` (ENG-010 + ENG-015).
 - [ ] LLM eval harness: maintain a goldens file `evals/generate-workflow.jsonl` with `{ prompt, expected_node_types }`. CI fails if the generated workflow regresses.
 
 ### 10.6 Multi-tenancy maturity
@@ -599,7 +599,7 @@ Goal: provider freedom, cost visibility, MCP server stub.
 - `@janusly/mcp-server` with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`).
 - Replace `parseAiWorkflow` looser/sanitizer with `generateObject({ schema: WorkflowSchema })` (§4 phase B).
 - Drizzle migrations shipped in ENG-008: checked-in SQL migrations, real `pnpm migrate`, and API/worker fail-fast guards before boot.
-- GitHub Actions: build + test + e2e + dep-audit.
+- GitHub Actions shipped in ENG-015: build + jsdom test, browser test, e2e, and high+ dependency audit.
 
 Definition of done: a developer can switch `JANUSLY_LLM_PROVIDER=anthropic` and the AI Studio still works; usage shows up in the Runs view; Claude Desktop can list workflows via MCP.
 
