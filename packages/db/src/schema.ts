@@ -1,3 +1,42 @@
+/**
+ * Janusly database schema — the canonical Drizzle declaration for every
+ * Postgres table the system owns.
+ *
+ * This file is the single source of truth. Migrations under
+ * `packages/db/migrations/` are generated from these declarations via
+ * `pnpm --filter @janusly/db db:generate`; AGENTS.md forbids hand-rolling
+ * migrations or reintroducing a runtime `CREATE TABLE IF NOT EXISTS`
+ * bootstrap.
+ *
+ * Used by:
+ * - Every Drizzle query across `packages/data`, `packages/engine`, `apps/api`.
+ * - `packages/db/migrations/0000_tranquil_gravity.sql` — the initial migration
+ *   was emitted from this exact shape.
+ *
+ * Tables:
+ * - `organizations`, `users`, `org_members` — multi-tenant scope.
+ * - `workflows`, `workflow_versions` — versioned DAG storage.
+ * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
+ *   are paginated by `(run_id, created_at)` per ENG-009).
+ * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
+ * - `routing_stats`, `workflow_improvements` — RL counters and
+ *   improvement-engine bookkeeping.
+ * - `usage_events` — billing telemetry (one row per LLM call once ENG-012
+ *   wires it up).
+ * - `credentials`, `installed_plugins` — secret references and plugin
+ *   manifests.
+ * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
+ *   keys before insertion per ENG-006).
+ *
+ * Invariants:
+ * - Every timestamp is `TIMESTAMPTZ` (the `withTimezone: true` option). Don't
+ *   omit the option — the migration would suggest an `ALTER COLUMN`.
+ * - Index names match the legacy `schema-management.ts` byte-for-byte so
+ *   `\d+ <table>` shows the same shape after migrate as before.
+ * - `org_id` is `NOT NULL` on every business table so multi-tenant scoping
+ *   queries can rely on it without null guards.
+ */
+
 import { pgTable, text, jsonb, timestamp, integer, real, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {

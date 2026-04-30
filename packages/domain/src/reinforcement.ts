@@ -1,3 +1,18 @@
+/**
+ * RL adjustments + reward computation — biases candidate scores by their
+ * historical reinforcement counters (`pulls`, `meanReward`,
+ * success/failure counts) and computes the reward signal each completed
+ * decision feeds back.
+ *
+ * Pure logic, no I/O. The `routing_stats` row provides the inputs; the
+ * runtime applies the output before picking a winner. Today's adjustments
+ * are a counter-based heuristic; ENG-025 will replace them with proper
+ * Thompson sampling.
+ *
+ * Used by `packages/domain/src/decisionEngine.ts` and the runtime's
+ * post-routing reward update path.
+ */
+
 export type RlStats = {
   nodeId: string;
   pulls?: number;

@@ -1,3 +1,19 @@
+/**
+ * Decision engine — scores routing candidates against (cost, latency, quality)
+ * preferences within a budget, then applies any RL adjustments before
+ * returning a ranked list.
+ *
+ * Pure logic, no I/O. Called from `packages/engine/src/core/runtime.ts` when
+ * a `router` node fires — the engine fetches candidate stats from
+ * `packages/data/src/routingStatsRepo.ts` and feeds them in.
+ *
+ * Invariants:
+ * - `scoreCandidate` is deterministic — same inputs always yield the same
+ *   score. Useful for `replayDecision` in `causalReasoning.ts`.
+ * - `decide` returns a *ranked* list, not just the winner; consumers can
+ *   show alternatives in the UI.
+ */
+
 import { applyRlAdjustments, type RlStats } from "./reinforcement";
 
 export type DecisionCandidate = {

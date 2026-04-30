@@ -466,19 +466,29 @@ Every connector below is an MCP server we either consume from upstream or write 
 
 ### Tool-input contract
 
-Today `validateToolInput` is a string-list check. Move to Zod schemas per tool:
+ENG-023 moved the static registry to typed `ToolDefinition` entries with Zod
+input + output schemas. `validateToolInput` now pre-flights through
+`safeParse`, `executeTool` parses input and validates executor output before
+returning, and `listTools()` derives the AI Studio metadata from the schema.
+The next step is provider tool-call integration (ENG-011/ENG-014), not another
+manual registry rewrite.
 
 ```ts
 const httpRequestTool = defineTool({
   name: "http.request",
   description: "Make an HTTP request.",
-  parameters: z.object({
+  inputSchema: z.object({
     url: z.string().url(),
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("GET"),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     body: z.unknown().optional(),
   }),
-  execute: async ({ url, method, headers, body }) => { /* ... */ },
+  outputSchema: z.object({
+    statusCode: z.number(),
+    ok: z.boolean(),
+    body: z.string(),
+  }),
+  execute: async (input) => { /* ... */ },
 });
 ```
 
@@ -685,6 +695,8 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — `POST /start` distinguishes saved vs ad-hoc workflows in audit (`run.started` vs `run.started.adhoc`); env `JANUSLY_REQUIRE_SAVED_WORKFLOW=true` forbids ad-hoc in production.
 - **DONE** — `audit()` redacts `secret*`/`password*`/`token*`/`authorization*`/etc. keys before persisting to `audit_logs`.
 - **DONE** — Rate limiter moved from in-memory state to Redis-backed `INCR` + `PEXPIRE` in ENG-019, shared across API replicas.
+- **DONE** — HTTP SSRF guard pins the validated DNS answer into the actual `undici` connect path in ENG-021.
+- **DONE** — Tool registry entries now carry Zod input/output schemas in ENG-023; `validateToolInput`, `executeTool`, and `listTools()` all derive from those schemas.
 
 Open quick wins:
 
@@ -692,9 +704,7 @@ Open quick wins:
 - Add a `pnpm dev` script at root that boots compose + api + worker + web with `concurrently`.
 - Write `evals/generate-workflow.jsonl` with 10 prompts and the node-type counts we expect; add `pnpm evals` script.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
-- Pin AWS metadata IP after `assertPublicHostname` resolves it (close DNS-rebinding TOCTOU). Use `undici.Agent` with a `connect` hook.
 - Add `service.namespace="janusly"` and `service.instance.id` env-derived to the OTel resource.
-- Convert each tool-registry entry to a Zod schema (foundation for §8 contract migration).
 - Stand up `@janusly/mcp-server` skeleton with one tool (`workflows.list`) and ship it as a `pnpm --filter @janusly/mcp-server dev` workflow.
 
 These don't require strategic alignment and unblock everything later.
