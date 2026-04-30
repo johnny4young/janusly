@@ -1,0 +1,10 @@
+{"id":"http-summary","prompt":"Fetch a webhook URL and summarize the response with AI","expect":{"minNodes":2,"maxNodes":4,"requiredTypes":["http","ai"],"fallbackTemplate":"http-ai-summary"}}
+{"id":"transform-tool","prompt":"Call an HTTP API, transform the JSON, and uppercase one field","expect":{"minNodes":3,"maxNodes":5,"requiredTypes":["http","transform","tool"],"fallbackTemplate":"api-transform-tool"}}
+{"id":"approval-gate","prompt":"Pause for human approval before publishing","expect":{"minNodes":2,"maxNodes":4,"requiredTypes":["approval"],"fallbackTemplate":"approval-gate"}}
+{"id":"branch-by-status","prompt":"GET https://api.example.com/order/123 and branch on whether it succeeded","expect":{"minNodes":2,"maxNodes":6,"requiredTypes":["http"],"requiresMode":"ai"}}
+{"id":"agent-research","prompt":"Run an agent that researches a topic and returns a one-paragraph summary","expect":{"minNodes":1,"maxNodes":4,"requiredTypes":["agent"],"requiresMode":"ai"}}
+{"id":"multi-agent-debate","prompt":"Two agents debate a proposal — one supports, one critiques — and a third reflects on the outcome","expect":{"minNodes":1,"maxNodes":6,"anyOfTypes":["multi_agent","agent"],"requiresMode":"ai"}}
+{"id":"loop-list","prompt":"For each item in the input list, call an HTTP endpoint and collect the responses","expect":{"minNodes":1,"maxNodes":5,"requiredTypes":["loop"],"requiresMode":"ai"}}
+{"id":"router-cheapest","prompt":"Pick the cheapest of three vendor HTTP endpoints to fetch product data","expect":{"minNodes":1,"maxNodes":6,"requiredTypes":["router"],"requiresMode":"ai"}}
+{"id":"webhook-then-followup","prompt":"Wait for an external webhook, then call our internal API to record the event","expect":{"minNodes":2,"maxNodes":5,"requiredTypes":["webhook","http"],"requiresMode":"ai"}}
+{"id":"noop-only","prompt":"Just a placeholder workflow that does nothing","expect":{"minNodes":1,"maxNodes":3,"requiredTypes":["noop"],"requiresMode":"ai"}}

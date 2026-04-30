@@ -586,7 +586,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 - [ ] Coverage report in CI; aim for 80% on `engine` and `domain`.
 - [ ] Property-based tests on `expression.ts` and `parseAiWorkflow` (use `fast-check`).
 - [x] Vitest browser mode for the React Flow canvas — `<WorkflowCanvas>` covered locally and wired in CI via the `test_browser` job in `.github/workflows/ci.yml` (ENG-010 + ENG-015).
-- [ ] LLM eval harness: maintain a goldens file `evals/generate-workflow.jsonl` with `{ prompt, expected_node_types }`. CI fails if the generated workflow regresses.
+- [x] LLM eval harness: ENG-018 adds `evals/generate-workflow.jsonl` and `pnpm evals` for `/ai/generate-workflow` shape checks.
 
 ### 10.6 Multi-tenancy maturity
 
@@ -699,11 +699,11 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — Tool registry entries now carry Zod input/output schemas in ENG-023; `validateToolInput`, `executeTool`, and `listTools()` all derive from those schemas.
 - **DONE** — Root `pnpm dev` now brings up Compose, migrates, starts api/worker/web, and tears everything down on `Ctrl+C` or child exit in ENG-017.
 - **DONE** — OTel traces and metrics now share a Resource with `service.name`, `service.namespace`, and `service.instance.id` in ENG-022.
+- **DONE** — `pnpm evals` now runs `/ai/generate-workflow` shape checks from `evals/generate-workflow.jsonl` in ENG-018.
 
 Open quick wins:
 
 - Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
-- Write `evals/generate-workflow.jsonl` with 10 prompts and the node-type counts we expect; add `pnpm evals` script.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
 - Stand up `@janusly/mcp-server` skeleton with one tool (`workflows.list`) and ship it as a `pnpm --filter @janusly/mcp-server dev` workflow.
 
