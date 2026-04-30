@@ -68,33 +68,23 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 ## Quick start
 
-Five steps to a working local stack with the dev-mode UI (no auth setup needed):
+Three steps to a working local stack with the dev-mode UI (no auth setup needed):
 
 ```bash
 # 1. Install dependencies
 corepack enable
 pnpm install
 
-# 2. Boot Postgres 18 + Redis 8
-docker compose up -d redis postgres
+# 2. Start Postgres, Redis, API, worker, and web
+pnpm dev
 
-# 3. Start the API in one terminal
-pnpm --filter @janusly/api dev      # http://localhost:3001
-
-# 4. Start the worker in another terminal
-pnpm --filter @janusly/engine dev
-
-# 5. Start the UI in a third terminal
-pnpm --filter @janusly/web dev      # http://localhost:5173
+# 3. Open the Studio
+# http://localhost:5173
 ```
 
 Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an OpenAI key — see [§ AI](#ai-janusly-as-an-ai-operator).
 
-When you're done:
-
-```bash
-docker compose down
-```
+When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator shuts down API, worker, web, and Compose.
 
 ### Test commands
 

@@ -564,7 +564,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 - [x] CI: GitHub Actions workflow exists with build + jsdom test, browser test, e2e, and high+ dependency audit jobs.
 - [x] Drizzle migrations: ENG-008 shipped checked-in SQL migrations, root `pnpm migrate`, and API/worker startup guards via `assertMigrationsApplied()`. The runtime `ensureDatabaseSchema()` bootstrap was removed.
 - [ ] Containerize end-to-end: `docker-compose.full.yml` that runs api + worker + web + postgres + redis. Today only the data tier is composed.
-- [ ] `pnpm dev` should boot everything in one command with `concurrently` or similar.
+- [x] `pnpm dev` boots Compose + migrate + api/worker/web through `scripts/run-dev.mjs` (ENG-017). It uses pure Node orchestration instead of `concurrently`.
 - [ ] Storybook for the UI components (especially the DAG node renderer + Right Panel sub-panels).
 - [ ] `package.json` `engines.npm` should also pin pnpm version.
 
@@ -697,11 +697,11 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — Rate limiter moved from in-memory state to Redis-backed `INCR` + `PEXPIRE` in ENG-019, shared across API replicas.
 - **DONE** — HTTP SSRF guard pins the validated DNS answer into the actual `undici` connect path in ENG-021.
 - **DONE** — Tool registry entries now carry Zod input/output schemas in ENG-023; `validateToolInput`, `executeTool`, and `listTools()` all derive from those schemas.
+- **DONE** — Root `pnpm dev` now brings up Compose, migrates, starts api/worker/web, and tears everything down on `Ctrl+C` or child exit in ENG-017.
 
 Open quick wins:
 
 - Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
-- Add a `pnpm dev` script at root that boots compose + api + worker + web with `concurrently`.
 - Write `evals/generate-workflow.jsonl` with 10 prompts and the node-type counts we expect; add `pnpm evals` script.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
 - Add `service.namespace="janusly"` and `service.instance.id` env-derived to the OTel resource.
