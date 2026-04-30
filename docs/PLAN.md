@@ -570,7 +570,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 ### 10.3 Observability
 
-- [ ] `service.name` is `janusly` — extend to `service.namespace = "janusly", service.instance.id = ...` per-process.
+- [x] `service.name` is `janusly` — ENG-022 adds `service.namespace = "janusly"` and env-derived `service.instance.id` through the shared OTel Resource.
 - [ ] Custom spans on every node execution with `node.type`, `attempt`, `org.id`, `workflow.id` attributes. Today only node-level event logs exist.
 - [ ] Frontend: Sentry (or selfhosted Glitchtip) for client errors. The `addToast(error.message)` swallows + displays but doesn't capture.
 - [ ] Slow-query log: drizzle `logger` option in dev.
@@ -698,13 +698,13 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — HTTP SSRF guard pins the validated DNS answer into the actual `undici` connect path in ENG-021.
 - **DONE** — Tool registry entries now carry Zod input/output schemas in ENG-023; `validateToolInput`, `executeTool`, and `listTools()` all derive from those schemas.
 - **DONE** — Root `pnpm dev` now brings up Compose, migrates, starts api/worker/web, and tears everything down on `Ctrl+C` or child exit in ENG-017.
+- **DONE** — OTel traces and metrics now share a Resource with `service.name`, `service.namespace`, and `service.instance.id` in ENG-022.
 
 Open quick wins:
 
 - Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
 - Write `evals/generate-workflow.jsonl` with 10 prompts and the node-type counts we expect; add `pnpm evals` script.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
-- Add `service.namespace="janusly"` and `service.instance.id` env-derived to the OTel resource.
 - Stand up `@janusly/mcp-server` skeleton with one tool (`workflows.list`) and ship it as a `pnpm --filter @janusly/mcp-server dev` workflow.
 
 These don't require strategic alignment and unblock everything later.

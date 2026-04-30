@@ -1,5 +1,6 @@
 import { PrometheusExporter } from "@opentelemetry/exporter-prometheus";
 import { MeterProvider } from "@opentelemetry/sdk-metrics";
+import { janusResource } from "./resource";
 
 const port = Number(process.env.OTEL_METRICS_PORT || 9464);
 
@@ -11,6 +12,7 @@ const exporter = new PrometheusExporter({
 });
 
 const meterProvider = new MeterProvider({
+  resource: janusResource,
   readers: [exporter],
 });
 

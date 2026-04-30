@@ -1,6 +1,7 @@
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { SimpleSpanProcessor, ConsoleSpanExporter } from "@opentelemetry/sdk-trace-base";
 import { JaegerExporter } from "@opentelemetry/exporter-jaeger";
+import { janusResource } from "./resource";
 
 const useJaeger = process.env.OTEL_EXPORTER === "jaeger";
 const spanProcessor = useJaeger
@@ -16,6 +17,7 @@ if (useJaeger) {
 }
 
 const provider = new NodeTracerProvider({
+  resource: janusResource,
   spanProcessors: [spanProcessor],
 });
 
