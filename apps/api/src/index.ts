@@ -1,3 +1,33 @@
+/**
+ * Janusly API — plain Node `http.createServer` with a routed `if/else if`
+ * chain over `(req.method, req.url)`. No Express, no Fastify, no tRPC (the
+ * tRPC stub is intentionally deleted per AGENTS.md; don't reintroduce it).
+ *
+ * Boot sequence:
+ *   1. `assertMigrationsApplied()` — fail-fast on an unmigrated DB.
+ *   2. Per-request: `requireAuth` → route dispatch → `requireRole` (per
+ *      mutation) → handler.
+ *   3. AI surfaces wrap their OpenAI call in try/catch and degrade to
+ *      `{ mode: "fallback", aiError, ... }` (AGENTS.md AI-fallback contract).
+ *
+ * Used by `apps/web` (the only browser client today) and any external
+ * caller that respects dev headers or the Supabase JWT auth.
+ *
+ * Invariants:
+ * - Multi-tenant: every DB query passes `eq(<table>.orgId, auth.orgId)`.
+ * - Pagination cap: `GET /runs` and `GET /workflows` cap at 100/200 rows
+ *   (`?limit=` opt-in). `GET /run` and `GET /status` cap nested events at
+ *   200/500 with a composite cursor (ENG-009).
+ * - Rate limiter: AI surfaces gate on Redis-backed `enforceRateLimit`
+ *   (ENG-019, fails open with `[rate-limit]` warn on Redis errors).
+ * - `parseAiWorkflow` keeps a "looser" pre-pass that coerces wrong-typed
+ *   ids and drops invalid edge/condition expressions before Zod parses,
+ *   so the LLM's near-misses still validate. Don't remove the looser
+ *   without first migrating the call sites to `generateObject` (ENG-014).
+ * - Audit logs: every mutation writes a row with a stable `action` string;
+ *   AI mutations write audit on success AND on fallback (ENG-005/ENG-006).
+ */
+
 import http from "http";
 import OpenAI from "openai";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";

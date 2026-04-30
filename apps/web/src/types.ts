@@ -1,3 +1,16 @@
+/**
+ * Web-side type definitions consumed by the Zustand store, the React Flow
+ * components, and the API call sites in `App.tsx`.
+ *
+ * Some types here mirror server-side schemas declared in `@janusly/shared`
+ * (the workflow contract) and `packages/engine/src/tool-registry.ts` (the
+ * `ToolSchema` shape). They are restated here as TypeScript types — not
+ * Zod — so the browser bundle stays free of Zod runtime weight on every
+ * page load. If the server-side shape changes, update both sides.
+ *
+ * Used by every React component in `apps/web/src/**` and the store.
+ */
+
 import type { Edge, Node } from '@xyflow/react'
 
 export type JsonObject = Record<string, unknown>

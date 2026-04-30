@@ -1,3 +1,22 @@
+/**
+ * `startRun` — bootstrap one run of a workflow.
+ *
+ * Wraps the `runs` insert + the batch `runNodes` insert + the `run.started`
+ * event in a single Drizzle transaction. AGENTS.md invariant: don't split
+ * this back into per-node inserts — the atomicity is what guarantees a
+ * partially-started run never escapes to the queue.
+ *
+ * Used by:
+ * - `apps/api/src/index.ts` `POST /start` — primary caller.
+ * - `packages/engine/src/resume-run.ts` — for restart-from-checkpoint paths.
+ *
+ * Invariants:
+ * - One transaction; all inserts succeed or none do.
+ * - Distinct `run.started` vs `run.started.adhoc` audit events depending on
+ *   whether the workflow was persisted (ENG-005). The split keeps audit
+ *   readers honest about which runs came from saved DAGs.
+ */
+
 import { db } from "@janusly/db";
 import { runs, runNodes, runEvents } from "@janusly/db";
 import { enqueueNode } from "./queue";

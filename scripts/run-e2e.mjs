@@ -1,3 +1,31 @@
+/**
+ * End-to-end test orchestrator.
+ *
+ * Runs the full Janusly stack against a clean Compose-managed Postgres + Redis
+ * so Playwright can drive the real web UI through real API + worker processes.
+ *
+ * Lifecycle:
+ *   1. `docker compose up -d redis postgres`
+ *   2. wait for Postgres to accept connections (`pg_isready`)
+ *   3. `pnpm migrate` — applies the Drizzle migrations from packages/db
+ *   4. spawn `apps/api` and `packages/engine` worker (detached process groups)
+ *   5. wait for the API to answer `GET /tools` with dev headers
+ *   6. delegate to `pnpm --filter @janusly/web test:e2e` (Playwright)
+ *   7. on failure: dump `docker compose logs` for the postmortem
+ *   8. always: shut down child services + `docker compose down`
+ *
+ * Used by:
+ * - root `package.json` `test:e2e` script
+ * - `.github/workflows/ci.yml` `test_e2e` job
+ *
+ * Invariants:
+ * - The harness owns the full Compose lifecycle. Don't move Compose
+ *   orchestration into the workflow YAML — local and CI must use the same
+ *   path so behaviour stays identical.
+ * - SIGINT/SIGTERM handlers are installed; Ctrl+C in dev tears everything
+ *   down rather than orphaning containers.
+ */
+
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 

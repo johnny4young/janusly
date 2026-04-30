@@ -1,3 +1,19 @@
+/**
+ * `resumeRun` — release a run that was paused at an `approval` or `webhook`
+ * node back into the queue.
+ *
+ * Used by:
+ * - `apps/api/src/index.ts` `POST /resume` — when a human approves or a
+ *   webhook payload arrives.
+ *
+ * Invariants:
+ * - Marks the paused node as succeeded and re-enqueues downstream nodes
+ *   through the `BullMQQueueAdapter` (so the DLQ contract stays in the
+ *   path).
+ * - Multi-tenant scope: every query filters on the run's `org_id` via the
+ *   shared `db` instance.
+ */
+
 import { db } from "@janusly/db";
 import { runs } from "@janusly/db";
 import { eq } from "drizzle-orm";

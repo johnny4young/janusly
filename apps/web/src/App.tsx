@@ -1,3 +1,24 @@
+/**
+ * `App` — top-level Janusly Studio shell.
+ *
+ * Owns the React Flow canvas, the sidebar nav, the right-side inspector
+ * panel, and all of the API call sites for workflows, runs, members, AI,
+ * credentials, and plugins. Runs polling against `/status` while a run is
+ * active and tears it down on terminal state.
+ *
+ * Used by `apps/web/src/main.tsx` — single entry point, single instance.
+ *
+ * Invariants:
+ * - Polling at 1500ms calls `loadStatus(runId)` and merges events via the
+ *   Zustand store (`mergeEvents`) — DON'T replace events wholesale or you
+ *   re-introduce the ENG-009 timeline-clobber bug.
+ * - Terminal-state branch fires `bumpPlatformVersion()` so independent
+ *   panels re-fetch (cross-panel reactivity invariant).
+ * - Web deps lockdown: only the AGENTS-approved imports (`react`,
+ *   `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`,
+ *   `lucide-react`). Don't add radix/cva/clsx/tailwind-merge here.
+ */
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from './Layout'
 import { MarkerType } from '@xyflow/react'

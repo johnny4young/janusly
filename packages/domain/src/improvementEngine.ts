@@ -1,3 +1,17 @@
+/**
+ * Improvement engine — confidence math that decides whether a freshly applied
+ * workflow change is winning, holding steady, or regressing vs. its baseline.
+ *
+ * Pure logic, no I/O. The 30%-confidence rollback threshold (per AGENTS.md)
+ * is encoded in `shouldRollback`. Persistence and audit happen elsewhere
+ * (`packages/data/src/improvementsRepo.ts`, runtime event emission).
+ *
+ * Used by:
+ * - the improvement orchestrator in `packages/engine` — calls
+ *   `computeConfidence` after each evaluation cycle and routes to `should*`.
+ * - `apps/api/src/index.ts` — surfaces confidence to the Improvements panel.
+ */
+
 export type WorkflowMetrics = {
   successRate?: number;
   avgLatencyMs?: number;
