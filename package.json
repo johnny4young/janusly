@@ -6,7 +6,7 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "pnpm -r dev",
+    "dev": "node scripts/run-dev.mjs",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",
