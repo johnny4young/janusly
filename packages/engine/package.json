@@ -11,21 +11,22 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@janusly/data": "workspace:*",
+    "@janusly/db": "workspace:*",
+    "@janusly/domain": "workspace:*",
+    "@janusly/shared": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-jaeger": "^2.2.0",
     "@opentelemetry/exporter-prometheus": "^0.215.0",
     "@opentelemetry/sdk-metrics": "^2.7.0",
     "@opentelemetry/sdk-trace-base": "^2.2.0",
     "@opentelemetry/sdk-trace-node": "^2.2.0",
-    "@janusly/data": "workspace:*",
-    "@janusly/db": "workspace:*",
-    "@janusly/domain": "workspace:*",
-    "@janusly/shared": "workspace:*",
     "bullmq": "^5.76.2",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.10.1",
-    "openai": "^6.34.0"
+    "openai": "^6.34.0",
+    "undici": "^8.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
