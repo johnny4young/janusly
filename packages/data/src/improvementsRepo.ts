@@ -1,12 +1,29 @@
+/**
+ * Repository for `workflow_improvements` — the improvement-engine's bookkeeping
+ * table. Each row is one decision the improvement engine made (apply / hold /
+ * rollback) with `before/afterMetrics` and a confidence score.
+ *
+ * Used by:
+ * - `packages/domain/src/improvementEngine.ts` — calls `record...` after each
+ *   evaluation cycle.
+ * - `apps/api/src/index.ts` — surfaces `list...` to the Improvements panel.
+ *
+ * Invariants:
+ * - Every read filters on `orgId` (multi-tenant scope).
+ * - Inserts mint a fresh `crypto.randomUUID()` id; no upserts.
+ */
+
 import { db, workflowImprovements } from "@janusly/db";
 import { desc, eq, and } from "drizzle-orm";
 
+/** Aggregate metrics the improvement engine compares before/after. */
 export type WorkflowMetrics = {
   successRate?: number;
   avgLatencyMs?: number;
   avgCost?: number;
 };
 
+/** Persist one improvement-engine decision to `workflow_improvements`. */
 export async function recordWorkflowImprovement(input: {
   orgId: string;
   workflowId: string;
@@ -24,6 +41,7 @@ export async function recordWorkflowImprovement(input: {
   return { id };
 }
 
+/** Fetch all improvement decisions for a (org, workflow) pair, newest first. */
 export async function listWorkflowImprovements(orgId: string, workflowId: string) {
   return db
     .select()

@@ -1,3 +1,28 @@
+/**
+ * Zustand store — single global state for Janusly Studio.
+ *
+ * Holds the workflow being edited (nodes, edges), the active run (runId,
+ * runNodes, events, paginated cursor + hasMore from ENG-009), tabs, toasts,
+ * Supabase session, and `platformVersion` — the cross-panel reactivity
+ * counter that mutations bump so independent panels refetch (AGENTS.md).
+ *
+ * Used by every component under `apps/web/src/`. Lives in one file
+ * intentionally; the project's small enough that splitting the store into
+ * slices adds noise without value.
+ *
+ * Invariants:
+ * - `bumpPlatformVersion()` is the cross-panel reactivity hook. Every
+ *   server-mutating action (save, run start, terminal run, member
+ *   invite/remove, DLQ replay) must call it so independent panels see the
+ *   change.
+ * - `mergeEvents(events)` deduplicates by id and re-sorts by `(createdAt,
+ *   id)`. It's the path polling uses; `setEvents` is the hard-replace path
+ *   that resets the cursor. Don't conflate the two.
+ * - Pagination cursor + hasMore live alongside the events array so a
+ *   "Load older events" button can fetch backwards without losing the
+ *   already-loaded tail.
+ */
+
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'

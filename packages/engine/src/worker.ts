@@ -1,3 +1,30 @@
+/**
+ * Engine worker process — pulls workflow-node jobs off the BullMQ queue and
+ * runs them through the `WorkflowRuntime`.
+ *
+ * Lifecycle:
+ *   1. `assertMigrationsApplied()` — fail-fast if Postgres isn't migrated
+ *      (ENG-008 invariant; AGENTS.md explicitly forbids the deleted runtime
+ *      `CREATE TABLE` bootstrap).
+ *   2. Build a `WorkflowRuntime` with the Postgres execution store + BullMQ
+ *      queue adapter (which composes the DLQ adapter — the DLQ contract is
+ *      part of the queue layer per AGENTS.md).
+ *   3. Open a BullMQ `Worker` on `connection` from `./queue`. Each job is
+ *      validated with `NodeSchema.parse(job.data)` — bad payloads become
+ *      `UnrecoverableError` so they go to the DLQ instead of retrying
+ *      forever (ENG-002 invariant).
+ *   4. SIGTERM/SIGINT call `worker.close()` so in-flight jobs drain on
+ *      container restart and `running` nodes don't get orphaned.
+ *
+ * Invariants:
+ * - Top-level await is intentional — the migration assertion is mandatory
+ *   before any work happens.
+ * - Don't bypass `BullMQQueueAdapter`'s DLQ composition. Failed-beyond-retry
+ *   jobs must land in `dead_letters`.
+ * - The signal handlers must keep calling `worker.close()` so the project's
+ *   "no orphan running nodes" invariant survives restarts.
+ */
+
 import { Worker, UnrecoverableError } from "bullmq";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";

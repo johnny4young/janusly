@@ -1,3 +1,30 @@
+/**
+ * Node executor registry — maps every `WorkflowNode["type"]` to its async
+ * executor. Sister module to `tool-registry.ts` (which exposes side-effect
+ * tools to agent planners and `tool` nodes).
+ *
+ * Each executor receives a `NodeExecutionContext` (the parsed node config +
+ * the run-wide context) and returns either a completed status with output, a
+ * paused status (`approval`, `webhook`) for the runtime to checkpoint, or
+ * throws for the runtime's retry/DLQ machinery to handle.
+ *
+ * Used by:
+ * - `packages/engine/src/execute-node.ts` — `executor = nodeExecutors[node.type]`.
+ * - The agent planner inside `agent` and `multi_agent` executors invokes
+ *   `executeTool` from `tool-registry.ts`.
+ *
+ * Invariants:
+ * - `multi_agent.*` event payloads are part of the contract that
+ *   `apps/web/src/MultiAgentTimeline.tsx` consumes — don't rename event types
+ *   without also updating the web consumer.
+ * - The `ai` node wraps its OpenAI call in try/catch and returns
+ *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
+ * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
+ *   preserving the SSRF + DNS-rebinding pin from ENG-021.
+ * - Adding a new node type requires updating `nodeTypeValues` in
+ *   `@janusly/shared` so the schema and the registry stay in lockstep.
+ */
+
 import OpenAI from "openai";
 import { loadRootEnv } from "@janusly/db";
 import { evaluateExpression } from "./expression";

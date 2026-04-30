@@ -1,3 +1,38 @@
+/**
+ * `WorkflowRuntime` — the orchestrator that drives workflow execution from
+ * "claim a node" through "emit completion event" and decides what comes next.
+ *
+ * Holds two adapters injected at construction:
+ *   - `ExecutionStore` (today: `PostgresExecutionStore`) — persistence for
+ *     `runs`, `run_nodes`, `run_events` plus the routing-stats update.
+ *   - `QueueAdapter` (today: `BullMQQueueAdapter` composed with the DLQ
+ *     adapter) — enqueueing the next node and routing terminal failures to
+ *     `dead_letters`.
+ *
+ * Used by:
+ * - `packages/engine/src/start-run.ts` — boots a new run via the runtime.
+ * - `packages/engine/src/resume-run.ts` — resumes a paused run after an
+ *   approval / webhook.
+ * - `packages/engine/src/worker.ts` — `executeQueuedNode(runtime, job.data)`
+ *   on every BullMQ message.
+ *
+ * Invariants:
+ * - **Atomic node claim:** downstream nodes are claimed via
+ *   `tryClaimNodeForQueue` (atomic `UPDATE ... WHERE status='pending'`). With
+ *   multiple workers two predecessors can finish in the same instant; only
+ *   one wins the claim. Don't reintroduce a non-atomic claim helper.
+ * - **DLQ contract:** the queue adapter is wired to the DLQ adapter. Don't
+ *   bypass the queue adapter to enqueue directly; failed-beyond-retry jobs
+ *   must land in `dead_letters`.
+ * - **Cross-panel reactivity:** mutations that invalidate server data must
+ *   eventually trigger `bumpPlatformVersion()` on the web store — usually
+ *   indirectly via the API's terminal-state response.
+ * - **Audit logs:** every mutation that writes a `run_events` row carries
+ *   the same shape the AI Studio consumes; don't change the event payload
+ *   contract here without updating the engine event types and the web's
+ *   `RunEvent` consumer.
+ */
+
 import { evaluateExpression } from "../expression";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
