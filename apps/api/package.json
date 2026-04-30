@@ -12,12 +12,13 @@
   },
   "dependencies": {
     "@janusly/ai": "workspace:*",
-    "@supabase/supabase-js": "^2.104.1",
     "@janusly/db": "workspace:*",
     "@janusly/domain": "workspace:*",
     "@janusly/engine": "workspace:*",
     "@janusly/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.104.1",
     "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.10.1",
     "openai": "^6.34.0",
     "zod": "^4.3.6"
   },

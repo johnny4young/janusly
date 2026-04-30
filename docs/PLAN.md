@@ -541,7 +541,7 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 ### 10.1 Security (immediate, do before plan execution)
 
-- [ ] Rate limiter is in-memory only — move to Redis (we already have it). Use `bullmq`'s underlying `ioredis` connection.
+- [x] Rate limiter moved to Redis in ENG-019. API uses a dedicated request-path `ioredis` client with bounded retries instead of BullMQ's `maxRetriesPerRequest: null` connection.
 - [ ] CORS is `*` for some headers — audit and lock to known origins in production.
 - [ ] DLQ stores the full `workflow_json` and `node_json` — these can contain resolved secrets if the engine substitutes `{{secret.X}}` before storage. Verify substitution happens AT the HTTP/tool boundary, NOT before persistence.
 - [ ] Webhook resume is `runId:nodeId` — that's predictable. Add HMAC over the resume token with an org-level key.
@@ -684,13 +684,13 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — `getUsageSummary` now scoped to last 30 days with a 10k-row cap; was an unbounded scan that would OOM the API.
 - **DONE** — `POST /start` distinguishes saved vs ad-hoc workflows in audit (`run.started` vs `run.started.adhoc`); env `JANUSLY_REQUIRE_SAVED_WORKFLOW=true` forbids ad-hoc in production.
 - **DONE** — `audit()` redacts `secret*`/`password*`/`token*`/`authorization*`/etc. keys before persisting to `audit_logs`.
+- **DONE** — Rate limiter moved from in-memory state to Redis-backed `INCR` + `PEXPIRE` in ENG-019, shared across API replicas.
 
 Open quick wins:
 
 - Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
 - Add a `pnpm dev` script at root that boots compose + api + worker + web with `concurrently`.
 - Write `evals/generate-workflow.jsonl` with 10 prompts and the node-type counts we expect; add `pnpm evals` script.
-- Move the in-memory rate limiter to Redis (we already have a connection). Closes the "in-memory rate limiter is bypassed in multi-process deployments" finding.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
 - Pin AWS metadata IP after `assertPublicHostname` resolves it (close DNS-rebinding TOCTOU). Use `undici.Agent` with a `connect` hook.
 - Add `service.namespace="janusly"` and `service.instance.id` env-derived to the OTel resource.

@@ -447,7 +447,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
 
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
-      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const { prompt: rawPrompt } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const promptText = typeof rawPrompt === "string" ? rawPrompt : "";
       if (promptText.length > AI_PROMPT_MAX_CHARS) {
@@ -517,7 +517,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
-      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const { workflow } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const client = getOpenAIClient();
       if (!client) {
@@ -545,7 +545,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/ai/explain-run") {
-      enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
       const questionText = typeof question === "string" ? question : undefined;
