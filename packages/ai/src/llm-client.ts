@@ -40,6 +40,8 @@
 import { generateText as aiGenerateText, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { computeCostUsd, getModelPrice } from "./pricing";
+import { getUsageRecorder, type UsageRecord } from "./usage-recorder";
 
 // ─── (a) Provider registry ───────────────────────────────────────────────
 //
@@ -108,6 +110,18 @@ export type LlmGenerateTextInput = {
    *                              `JANUSLY_LLM_PROVIDER` for this one call
    */
   modelHint?: string;
+  /**
+   * Per-call context for usage telemetry (ENG-012). Optional so unit tests
+   * and outside callers can omit it; in production every call site fills at
+   * least `orgId` so the multi-tenant scope on `usage_events` holds. The
+   * chokepoint silently skips firing the recorder when `orgId` is absent.
+   */
+  context?: {
+    orgId: string;
+    userId?: string;
+    runId?: string;
+    nodeId?: string;
+  };
 };
 
 /** Provider-neutral result shape. */
@@ -116,7 +130,7 @@ export type LlmGenerateTextResult = {
   text: string;
   /** AI SDK's finish reason (`"stop" | "length" | …`). */
   finishReason?: string;
-  /** Token usage (passthrough from the AI SDK; ENG-012 will read it). */
+  /** Token usage (passthrough from the AI SDK; ENG-012 telemetry reads it). */
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -126,6 +140,10 @@ export type LlmGenerateTextResult = {
   provider: string;
   /** Resolved model id. */
   model: string;
+  /** Wall-clock latency from the abstraction's POV (ms). */
+  latencyMs: number;
+  /** Cost in USD; null when no price entry exists for the model. */
+  costUsd?: number | null;
 };
 
 /** The single capability every AI surface depends on. */
@@ -223,33 +241,116 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       const [overrideProvider, overrideModel] = parseModelSpec(input.modelHint);
       const providerName = overrideProvider ?? cfg.provider;
       const spec = PROVIDERS[providerName];
-      if (!spec) throw new Error(`unknown provider '${providerName}'`);
-      const modelId = overrideModel ?? cfg.defaultModels[providerName] ?? spec.defaultModel;
-      const buildModel = factoryFor(providerName);
-      const result = await aiGenerateText({
-        model: buildModel(modelId),
-        system: input.system,
-        prompt: input.prompt,
-        maxRetries: cfg.maxRetries,
-        abortSignal: AbortSignal.timeout(cfg.timeoutMs),
-        ...(input.responseFormat === "json" && spec.jsonModeOptions ? spec.jsonModeOptions() : {}),
-      });
-      return {
-        text: result.text ?? "",
-        finishReason: result.finishReason,
-        usage: result.usage
-          ? {
-              inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens,
-              totalTokens:
-                (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0) || undefined,
-            }
-          : undefined,
+      const modelId = overrideModel ?? cfg.defaultModels[providerName] ?? spec?.defaultModel ?? "unknown";
+
+      // ENG-012: measure wall-clock latency around the SDK invocation so the
+      // recorder can attribute slow calls. The recorder fires on BOTH the
+      // success path AND the failure path so cost analysis sees rate-limit /
+      // timeout / quota events as their own rows. Keep provider/key resolution
+      // inside the try so configuration failures are recorded too.
+      const startedAt = Date.now();
+      let aiResult: Awaited<ReturnType<typeof aiGenerateText>>;
+      try {
+        if (!spec) throw new Error(`unknown provider '${providerName}'`);
+        const buildModel = factoryFor(providerName);
+        aiResult = await aiGenerateText({
+          model: buildModel(modelId),
+          system: input.system,
+          prompt: input.prompt,
+          maxRetries: cfg.maxRetries,
+          abortSignal: AbortSignal.timeout(cfg.timeoutMs),
+          ...(input.responseFormat === "json" && spec.jsonModeOptions ? spec.jsonModeOptions() : {}),
+        });
+      } catch (error) {
+        const latencyMs = Date.now() - startedAt;
+        void fireUsageRecorder({
+          context: input.context,
+          provider: providerName,
+          model: modelId,
+          latencyMs,
+          mode: "fallback",
+          aiError: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
+      const latencyMs = Date.now() - startedAt;
+      const usage = aiResult.usage
+        ? {
+            inputTokens: aiResult.usage.inputTokens,
+            outputTokens: aiResult.usage.outputTokens,
+            totalTokens:
+              (aiResult.usage.inputTokens ?? 0) + (aiResult.usage.outputTokens ?? 0) || undefined,
+          }
+        : undefined;
+      const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
+
+      void fireUsageRecorder({
+        context: input.context,
         provider: providerName,
         model: modelId,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        totalTokens: usage?.totalTokens,
+        latencyMs,
+        costUsd,
+        mode: "ai",
+      });
+
+      return {
+        text: aiResult.text ?? "",
+        finishReason: aiResult.finishReason,
+        usage,
+        provider: providerName,
+        model: modelId,
+        latencyMs,
+        costUsd,
       };
     },
   };
+}
+
+/**
+ * Fire-and-forget the registered usage recorder. Telemetry must NEVER break
+ * an LLM call — failures are caught and dropped. Skips when no recorder is
+ * registered or when the call has no `orgId` (multi-tenant scope).
+ */
+async function fireUsageRecorder(input: {
+  context: LlmGenerateTextInput["context"];
+  provider: string;
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  latencyMs: number;
+  costUsd?: number | null;
+  mode: "ai" | "fallback";
+  aiError?: string;
+}): Promise<void> {
+  const fn = getUsageRecorder();
+  if (!fn) return;
+  const orgId = input.context?.orgId;
+  if (!orgId) return; // No multi-tenant scope ⇒ skip; covers tests and adhoc paths.
+  const record: UsageRecord = {
+    orgId,
+    userId: input.context?.userId,
+    runId: input.context?.runId,
+    nodeId: input.context?.nodeId,
+    provider: input.provider,
+    model: input.model,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    totalTokens: input.totalTokens,
+    latencyMs: input.latencyMs,
+    costUsd: input.costUsd,
+    mode: input.mode,
+    aiError: input.aiError,
+  };
+  try {
+    await fn(record);
+  } catch {
+    // Telemetry failure must NEVER break an LLM call. Drop silently.
+  }
 }
 
 let cachedClient: LlmClient | null | undefined;

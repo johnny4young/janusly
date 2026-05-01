@@ -72,6 +72,7 @@ describe("explainRun", () => {
       text: "AI response here",
       model: "gpt-4o-mini",
       provider: "openai",
+      latencyMs: 10,
     });
     const llm: LlmClient = { generateText };
 
@@ -81,6 +82,7 @@ describe("explainRun", () => {
       question: "what next?",
       llm,
       model: "gpt-4o-mini",
+      context: { orgId: "org-1", runId: "run_1" },
     });
 
     expect(result.mode).toBe("ai");
@@ -88,7 +90,10 @@ describe("explainRun", () => {
     expect(result.model).toBe("gpt-4o-mini");
     expect(result.provider).toBe("openai");
     expect(generateText).toHaveBeenCalledTimes(1);
-    expect(generateText.mock.calls[0][0]).toMatchObject({ modelHint: "gpt-4o-mini" });
+    expect(generateText.mock.calls[0][0]).toMatchObject({
+      modelHint: "gpt-4o-mini",
+      context: { orgId: "org-1", runId: "run_1" },
+    });
   });
 
   it("forwards a 'provider/model' spec verbatim and reflects the resolved model in the response", async () => {
@@ -96,6 +101,7 @@ describe("explainRun", () => {
       text: "Anthropic answer",
       model: "claude-haiku-4-5",
       provider: "anthropic",
+      latencyMs: 5,
     });
     const llm: LlmClient = { generateText };
 

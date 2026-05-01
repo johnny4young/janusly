@@ -112,6 +112,13 @@ export async function planAgentToolWithLLM(
    * have to thread it.
    */
   llmOverride?: LlmClient | null,
+  /**
+   * Per-call telemetry context (ENG-012). Forwarded verbatim to the LLM
+   * abstraction so the recorder attributes the row to org/run/node.
+   * Omitted in unit tests; production calls from `node-registry.ts:runAgentLoop`
+   * fill it from the executor `NodeContext`.
+   */
+  telemetryContext?: { orgId: string; userId?: string; runId?: string; nodeId?: string },
 ): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
@@ -141,6 +148,7 @@ export async function planAgentToolWithLLM(
       }),
       responseFormat: "json",
       modelHint: typeof config.model === "string" ? config.model : undefined,
+      context: telemetryContext,
     });
 
     const parsed = JSON.parse(result.text || "{}");

@@ -7,6 +7,21 @@ export async function getRunStatus(runId: string) {
   return rows[0]?.status ?? null;
 }
 
+/**
+ * Resolve the multi-tenant `orgId` for a run. Used by `executeNode` to thread
+ * the scope into `NodeContext` so executors (notably the LLM-calling `ai`
+ * step and `agent` planner) can attribute usage telemetry (ENG-012). Returns
+ * `null` when the run row doesn't exist; callers treat that as fatal.
+ */
+export async function getRunOrgId(runId: string): Promise<string | null> {
+  const rows = await db
+    .select({ orgId: runs.orgId })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  return rows[0]?.orgId ?? null;
+}
+
 export async function cancelRun(runId: string, reason?: any) {
   await db.update(runs)
     .set({ status: "cancelled" })

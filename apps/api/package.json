@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@janusly/ai": "workspace:*",
+    "@janusly/data": "workspace:*",
     "@janusly/db": "workspace:*",
     "@janusly/domain": "workspace:*",
     "@janusly/engine": "workspace:*",
