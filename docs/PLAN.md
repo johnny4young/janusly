@@ -701,10 +701,10 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — OTel traces and metrics now share a Resource with `service.name`, `service.namespace`, and `service.instance.id` in ENG-022.
 - **DONE** — `pnpm evals` now runs `/ai/generate-workflow` shape checks from `evals/generate-workflow.jsonl` in ENG-018.
 - **DONE** — `@janusly/mcp-server` now exposes the five read-only MCP tools over stdio in ENG-013.
+- **DONE** — Deprecated `@esbuild-kit/*` transitive deps removed by upgrading `drizzle-kit` and `drizzle-orm` in lockstep to 1.0 RC; migration metadata converted to the new folder layout.
 
 Open quick wins:
 
-- Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
 
 These don't require strategic alignment and unblock everything later.
