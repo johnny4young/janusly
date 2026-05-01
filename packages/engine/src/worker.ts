@@ -28,6 +28,8 @@
 import { Worker, UnrecoverableError } from "bullmq";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
+import { setUsageRecorder } from "@janusly/ai";
+import { recordUsage } from "@janusly/data/src/usageRepo";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
@@ -35,6 +37,10 @@ import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 
 await assertMigrationsApplied();
+
+// ENG-012: register the usage_events writer once at boot. Every LLM call
+// from the `ai` node and `agent` planner fires it fire-and-forget.
+setUsageRecorder(recordUsage);
 
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),

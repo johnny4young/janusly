@@ -27,3 +27,15 @@ export {
   type ProviderSpec,
   type ResolvedLlmConfig,
 } from "./llm-client";
+export {
+  setUsageRecorder,
+  getUsageRecorder,
+  _resetUsageRecorderForTests,
+  type UsageRecord,
+  type UsageRecorder,
+} from "./usage-recorder";
+export {
+  computeCostUsd,
+  getModelPrice,
+  type ModelPrice,
+} from "./pricing";

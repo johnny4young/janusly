@@ -42,6 +42,9 @@ loadRootEnv();
 export type NodeContext = {
   runId: string;
   nodeId: string;
+  /** Multi-tenant scope. Plumbed by `executeNode` from `runs.orgId` so the
+   * `ai` node and `agent` planner can attribute usage telemetry (ENG-012). */
+  orgId: string;
   config: any;
   context: Record<string, any>;
 };
@@ -105,7 +108,11 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
 
     const planningContext = { context: ctx.context, memory: summarizedMemory, steps, lastReflection };
     const plan = planner === "openai"
-      ? await planAgentToolWithLLM(agentConfig, planningContext, steps)
+      ? await planAgentToolWithLLM(agentConfig, planningContext, steps, undefined, {
+          orgId: ctx.orgId,
+          runId: ctx.runId,
+          nodeId: ctx.nodeId,
+        })
       : planAgentTool(agentConfig, planningContext);
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
@@ -357,6 +364,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
         prompt: JSON.stringify({ prompt, context: ctx.context }),
         modelHint,
+        context: { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId },
       });
 
       return {
@@ -367,6 +375,11 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           provider: result.provider,
           prompt: previewText(prompt),
           response: result.text,
+          // ENG-012: surface tokens + cost + latency on the node's stateJson
+          // so the web Inspector renders the per-node usage footer.
+          usage: result.usage,
+          costUsd: result.costUsd ?? null,
+          latencyMs: result.latencyMs,
         },
       };
     } catch (err) {

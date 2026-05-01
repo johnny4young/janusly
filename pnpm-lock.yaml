@@ -13,6 +13,9 @@ importers:
       '@janusly/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@janusly/data':
+        specifier: workspace:*
+        version: link:../../packages/data
       '@janusly/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -142,6 +145,9 @@ importers:
 
   packages/data:
     dependencies:
+      '@janusly/ai':
+        specifier: workspace:*
+        version: link:../ai
       '@janusly/db':
         specifier: workspace:*
         version: link:../db
