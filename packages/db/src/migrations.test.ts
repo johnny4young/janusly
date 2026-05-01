@@ -1,11 +1,16 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { assertMigrationsAppliedForClient } from "./migrations";
 
 const migrationsUrl = new URL("../migrations/", import.meta.url);
 const migrationsDir = fileURLToPath(migrationsUrl);
-const journalPath = fileURLToPath(new URL("meta/_journal.json", migrationsUrl));
+
+// drizzle-kit 1.0 layout: each migration is a `<timestamp>_<name>/` folder
+// containing `migration.sql` + `snapshot.json`. The pre-1.0 layout had
+// `<idx>_<name>.sql` flat plus a shared `meta/_journal.json`. The migration
+// folder was upgraded to the 1.0 format via `drizzle-kit up`.
+const migrationFolderPattern = /^\d{14}_/;
 
 const expectedTables = [
   "organizations",
@@ -67,18 +72,22 @@ describe("drizzle migrations", () => {
     );
   });
 
-  it("journal lists the initial migration", () => {
-    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { idx: number; tag: string }[] };
-    expect(journal.entries.length).toBeGreaterThan(0);
-    const initial = journal.entries.find((entry) => entry.idx === 0);
-    expect(initial?.tag).toMatch(/^0000_/);
+  it("migrations folder contains at least one timestamped migration", () => {
+    const folders = readdirSync(migrationsDir).filter((name) => {
+      if (!migrationFolderPattern.test(name)) return false;
+      return statSync(new URL(`${name}/`, migrationsUrl)).isDirectory();
+    });
+    expect(folders.length, "expected at least one <timestamp>_<name>/ migration folder").toBeGreaterThan(0);
   });
 
-  it("0000 migration creates every table and index in schema.ts", () => {
-    const initial = readdirSync(migrationsDir).find((name) => name.startsWith("0000_") && name.endsWith(".sql"));
-    expect(initial, "expected a 0000_*.sql migration file").toBeDefined();
+  it("the initial migration creates every table and index in schema.ts", () => {
+    const folders = readdirSync(migrationsDir)
+      .filter((name) => migrationFolderPattern.test(name))
+      .filter((name) => statSync(new URL(`${name}/`, migrationsUrl)).isDirectory())
+      .sort();
+    expect(folders[0], "expected at least one timestamped migration folder").toBeDefined();
 
-    const sql = readFileSync(new URL(initial!, migrationsUrl), "utf8");
+    const sql = readFileSync(new URL(`${folders[0]}/migration.sql`, migrationsUrl), "utf8");
 
     for (const table of expectedTables) {
       expect(sql, `migration must create table ${table}`).toMatch(new RegExp(`CREATE TABLE\\s+"${table}"`));

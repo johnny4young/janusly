@@ -50,8 +50,10 @@ export const client = postgres(connectionString, {
   onnotice: () => undefined,
 });
 
-/** Typed Drizzle client. The default surface for query building everywhere. */
-export const db = drizzle(client);
+/** Typed Drizzle client. The default surface for query building everywhere.
+ * The drizzle@1.0 wire change: pass the postgres-js client via the `client`
+ * field on the options object rather than as a positional argument. */
+export const db = drizzle({ client });
 
 export * from "./schema";
 export * from "./env";

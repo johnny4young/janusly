@@ -18,7 +18,7 @@
     "@janusly/engine": "workspace:*",
     "@janusly/shared": "workspace:*",
     "@supabase/supabase-js": "^2.104.1",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^1.0.0-rc.1",
     "ioredis": "^5.10.1",
     "zod": "^4.3.6"
   },
