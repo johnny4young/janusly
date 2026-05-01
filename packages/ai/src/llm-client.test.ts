@@ -7,10 +7,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //
 // `vi.mock` is hoisted to the top of the file, so any variables it captures
 // must be declared via `vi.hoisted()` to share the same hoist phase.
-const { generateTextMock } = vi.hoisted(() => ({ generateTextMock: vi.fn() }));
+const { generateTextMock, outputObjectMock } = vi.hoisted(() => ({
+  generateTextMock: vi.fn(),
+  // Stub Output.object so tests can pass arbitrary schema sentinels without
+  // building real Zod schemas. The mocked `generateText` ignores the
+  // returned spec anyway — it just needs to type-check.
+  outputObjectMock: vi.fn((opts) => ({ __mockOutputSpec: true, ...opts })),
+}));
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
-  return { ...actual, generateText: generateTextMock };
+  return {
+    ...actual,
+    generateText: generateTextMock,
+    Output: { ...actual.Output, object: outputObjectMock },
+  };
 });
 
 import {
@@ -515,5 +525,168 @@ describe("ENG-012 — usage recorder fires on success and failure", () => {
     const record = recorder.mock.calls[0][0] as UsageRecord;
     expect(record.model).toBe("gpt-future-9000");
     expect(record.costUsd).toBeNull();
+  });
+});
+
+describe("ENG-014 — generateObject (schema-aware generation)", () => {
+  // The AI SDK exposes the typed payload at `experimental_output`. We mock
+  // `generateText` (the underlying SDK function) AND `Output.object` (so the
+  // schema arg doesn't have to be a real Zod schema) — the abstraction's job
+  // is to thread inputs/outputs around, not to validate the schema itself.
+  const mockSchema = { __mockZodSchema: "stub" } as never;
+
+  afterEach(() => {
+    _resetUsageRecorderForTests();
+  });
+
+  it("returns the typed object on the happy path", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-1", nodes: [], edges: [] },
+      finishReason: "stop",
+      usage: { inputTokens: 50, outputTokens: 25 },
+    });
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateObject<{ id: string; nodes: unknown[]; edges: unknown[] }>({
+      prompt: "build a workflow",
+      schema: mockSchema,
+    });
+
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(outputObjectMock).toHaveBeenCalledWith(
+      expect.objectContaining({ schema: mockSchema }),
+    );
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.experimental_output).toBeDefined();
+    expect(result.object).toEqual({ id: "wf-1", nodes: [], edges: [] });
+    expect(result.provider).toBe("openai");
+    expect(result.model).toBe("gpt-4o-mini");
+    expect(typeof result.latencyMs).toBe("number");
+    expect(result.costUsd).toBeCloseTo((50 * 0.15 + 25 * 0.6) / 1e6, 9);
+  });
+
+  it("falls back to result.output when result.experimental_output is absent", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      output: { id: "wf-2" },
+      finishReason: "stop",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    });
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateObject<{ id: string }>({
+      prompt: "hi",
+      schema: mockSchema,
+    });
+    expect(result.object).toEqual({ id: "wf-2" });
+  });
+
+  it("throws and fires the recorder with mode='fallback' on schema rejection", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("NoObjectGeneratedError: schema invalid"));
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await expect(
+      client.generateObject({
+        prompt: "hi",
+        schema: mockSchema,
+        context: { orgId: "org-1" },
+      }),
+    ).rejects.toThrow(/NoObjectGeneratedError/);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(recorder).toHaveBeenCalledTimes(1);
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record.mode).toBe("fallback");
+    expect(record.aiError).toContain("NoObjectGeneratedError");
+    expect(record.provider).toBe("openai");
+  });
+
+  it("throws and records fallback when the SDK returns neither output nor experimental_output", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      // Neither field present — defensive guard fires.
+      finishReason: "stop",
+      usage: { inputTokens: 3, outputTokens: 2 },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await expect(
+      client.generateObject({
+        prompt: "hi",
+        schema: mockSchema,
+        context: { orgId: "org-1" },
+      }),
+    ).rejects.toThrow(/SDK did not return a parsed output/);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder).toHaveBeenCalledTimes(1);
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record).toMatchObject({
+      orgId: "org-1",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      inputTokens: 3,
+      outputTokens: 2,
+      totalTokens: 5,
+      mode: "fallback",
+      aiError: expect.stringContaining("SDK did not return a parsed output"),
+    });
+  });
+
+  it("threads a 'provider/model' spec through to the resolved provider", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-3" },
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const cfg = resolveLlmConfig({
+      OPENAI_API_KEY: "sk-x",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateObject({
+      prompt: "hi",
+      schema: mockSchema,
+      modelHint: "anthropic/claude-haiku-4-5",
+    });
+    expect(result.provider).toBe("anthropic");
+    expect(result.model).toBe("claude-haiku-4-5");
+  });
+
+  it("a throwing recorder NEVER breaks generateObject (fail-open)", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-4" },
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    setUsageRecorder(() => {
+      throw new Error("recorder exploded");
+    });
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateObject<{ id: string }>({
+      prompt: "hi",
+      schema: mockSchema,
+      context: { orgId: "org-1" },
+    });
+    expect(result.object).toEqual({ id: "wf-4" });
+  });
+
+  it("does NOT fire the recorder when context.orgId is absent", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-5" },
+      finishReason: "stop",
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateObject({ prompt: "hi", schema: mockSchema });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(recorder).not.toHaveBeenCalled();
   });
 });
