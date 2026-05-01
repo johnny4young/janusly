@@ -111,7 +111,7 @@ export type LlmGenerateTextInput = {
    */
   modelHint?: string;
   /**
-   * Per-call context for usage telemetry (ENG-012). Optional so unit tests
+   * Per-call context for usage telemetry. Optional so unit tests
    * and outside callers can omit it; in production every call site fills at
    * least `orgId` so the multi-tenant scope on `usage_events` holds. The
    * chokepoint silently skips firing the recorder when `orgId` is absent.
@@ -130,13 +130,13 @@ export type LlmGenerateTextResult = {
   text: string;
   /** AI SDK's finish reason (`"stop" | "length" | …`). */
   finishReason?: string;
-  /** Token usage (passthrough from the AI SDK; ENG-012 telemetry reads it). */
+  /** Token usage (passthrough from the AI SDK; telemetry reads it). */
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
   };
-  /** Resolved provider name (registry key). Surfaced for telemetry (ENG-012). */
+  /** Resolved provider name (registry key). Surfaced for telemetry. */
   provider: string;
   /** Resolved model id. */
   model: string;
@@ -147,7 +147,7 @@ export type LlmGenerateTextResult = {
 };
 
 /**
- * Input accepted by `LlmClient.generateObject` (ENG-014). Mirrors
+ * Input accepted by `LlmClient.generateObject`. Mirrors
  * `LlmGenerateTextInput` but locks the model output to a typed object that
  * conforms to `schema`. The provider's structured-output surface (OpenAI's
  * `response_format: json_schema`, Anthropic's tool-use trick) handles the
@@ -166,7 +166,7 @@ export type LlmGenerateObjectInput<T> = {
   schemaDescription?: string;
   /** Same `bare-id` or `"<provider>/<model>"` semantics as `generateText`. */
   modelHint?: string;
-  /** Same telemetry context shape as `generateText` (ENG-012 recorder). */
+  /** Same telemetry context shape used by `generateText`. */
   context?: {
     orgId: string;
     userId?: string;
@@ -175,7 +175,7 @@ export type LlmGenerateObjectInput<T> = {
   };
 };
 
-/** Result of `LlmClient.generateObject<T>` (ENG-014). */
+/** Result of `LlmClient.generateObject<T>`. */
 export type LlmGenerateObjectResult<T> = {
   /** The typed, schema-validated object the model emitted. */
   object: T;
@@ -201,7 +201,7 @@ export type LlmGenerateObjectResult<T> = {
 export type LlmClient = {
   generateText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult>;
   /**
-   * Schema-aware generation (ENG-014). The model is asked to emit an object
+   * Schema-aware generation. The model is asked to emit an object
    * that conforms to `input.schema`; the AI SDK's `Output.object()` plumbs
    * the JSON Schema through each provider's structured-output capability and
    * validates the response. Throws when the model emits something the schema
@@ -303,7 +303,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       const spec = PROVIDERS[providerName];
       const modelId = overrideModel ?? cfg.defaultModels[providerName] ?? spec?.defaultModel ?? "unknown";
 
-      // ENG-012: measure wall-clock latency around the SDK invocation so the
+      // Measure wall-clock latency around the SDK invocation so the
       // recorder can attribute slow calls. The recorder fires on BOTH the
       // success path AND the failure path so cost analysis sees rate-limit /
       // timeout / quota events as their own rows. Keep provider/key resolution

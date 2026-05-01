@@ -11,7 +11,7 @@
  * Invariants:
  * - Polling at 1500ms calls `loadStatus(runId)` and merges events via the
  *   Zustand store (`mergeEvents`) — DON'T replace events wholesale or you
- *   re-introduce the ENG-009 timeline-clobber bug.
+ *   re-introduce the timeline-clobber bug.
  * - Terminal-state branch fires `bumpPlatformVersion()` so independent
  *   panels re-fetch (cross-panel reactivity invariant).
  * - Web deps lockdown: only the AGENTS-approved imports (`react`,

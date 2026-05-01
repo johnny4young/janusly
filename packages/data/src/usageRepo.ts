@@ -1,10 +1,10 @@
 /**
- * `usage_events` write path for ENG-012. The single chokepoint registered
+ * `usage_events` write path for LLM telemetry. The single chokepoint registered
  * as the `LlmClient` recorder via `setUsageRecorder(recordUsage)` at api +
  * worker boot; every successful or failed LLM call lands one row here.
  *
  * The schema is intentionally generic: `metric` + `quantity` for fast
- * aggregation (already used by `getUsageSummary` from ENG-004), `metadata`
+ * aggregation (already used by `getUsageSummary`), `metadata`
  * jsonb for everything provider/model/cost-specific. Writing rows with
  * `metric: "llm.completion"` + `quantity: totalTokens` makes the existing
  * billing dashboard (`GET /billing/usage` → web "Usage summary" card) light

@@ -1,9 +1,17 @@
+/**
+ * Supabase login / signup form. Shown only when `isSupabaseConfigured` is
+ * true (production-style auth). Dev-headers mode bypasses this entirely.
+ *
+ * Used by `App.tsx` (mounted as the gate when no session exists).
+ */
+
 import React, { useState } from 'react'
 import { LogIn, UserPlus } from 'lucide-react'
 import { AuthProvider } from '../auth'
 
 type LoginMode = 'login' | 'signup'
 
+/** Email + password form with login/signup toggle; calls `onAuthenticated` on success. */
 export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

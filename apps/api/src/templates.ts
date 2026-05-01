@@ -1,5 +1,23 @@
+/**
+ * Built-in recipe catalog — each entry pairs a description with a fully-
+ * formed `Workflow` DAG. The AI Studio's Templates panel reads this via
+ * `GET /templates`; the evals harness uses the `id`s as deterministic
+ * fallback templates when no LLM key is configured.
+ *
+ * Used by `apps/api/src/index.ts` `GET /templates` and indirectly by the
+ * `/ai/generate-workflow` fallback path (matches an `id` from this catalog
+ * when the LLM is unavailable).
+ *
+ * Invariants:
+ * - Adding a new template means adding a deterministic `fallbackTemplate`
+ *   id to `evals/generate-workflow.jsonl` if the eval should anchor on it.
+ * - `id` values are part of the public API surface — renaming a template
+ *   breaks bookmarks + eval cases.
+ */
+
 import type { Workflow } from "@janusly/shared";
 
+/** One recipe entry: id + display fields + the full DAG. */
 export type WorkflowTemplate = {
   id: string;
   name: string;
@@ -8,6 +26,7 @@ export type WorkflowTemplate = {
   workflow: Workflow;
 };
 
+/** All built-in recipes. New templates append to this array. */
 export const workflowTemplates: WorkflowTemplate[] = [
   {
     id: "http-ai-summary",

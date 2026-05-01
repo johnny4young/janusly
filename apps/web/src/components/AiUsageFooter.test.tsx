@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { AiUsageFooter } from './RightPanel'
 
-describe('AiUsageFooter (ENG-012 per-node usage surfacing)', () => {
+describe('AiUsageFooter (per-node usage surfacing)', () => {
   it('renders nothing when stateJson is null', () => {
     const { container } = render(<AiUsageFooter stateJson={null} />)
     expect(container.firstChild).toBeNull()

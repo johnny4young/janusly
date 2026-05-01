@@ -1,6 +1,20 @@
+/**
+ * Heuristic that walks an arbitrary value and returns true if it looks like
+ * a failure response. Used by the `agent_reflection` node + the agent loop's
+ * reflection step to decide whether to retry vs accept a tool result.
+ *
+ * Used by `node-registry.ts` (`agent_reflection` executor + `runAgentLoop`).
+ *
+ * Invariants:
+ * - Conservative on the "did this fail" side — false positives (claim
+ *   failure on success) are preferred to false negatives (silently accept
+ *   an error). Reflective retries are cheap; missed failures are not.
+ */
+
 const failureKeys = new Set(['error', 'errors', 'exception', 'failure', 'failed'])
 const failedStatuses = new Set(['error', 'errored', 'failed', 'failure'])
 
+/** Recursive failure-shape detector: strings, status fields, error keys, and nested values. */
 export function hasFailureSignal(value: unknown): boolean {
   if (value == null) return false
 

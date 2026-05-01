@@ -20,7 +20,7 @@
  * - `fallbackExplainRun` runs without an LLM client and never throws.
  * - The prompt never includes secrets — the caller must redact `events`
  *   payloads before passing them in (the engine already does this via
- *   `redactValues`, ENG-001).
+ *   `redactValues`).
  */
 
 import type { LlmClient } from "./llm-client";
@@ -36,7 +36,7 @@ export type RunExplanationInput = {
  * answer came from the LLM or the deterministic fallback; `aiError` is set
  * only when AI mode was attempted and failed. `provider` carries the
  * resolved provider name (registry key) on AI-mode success so audit
- * payloads can record cross-vendor cohort signal (ENG-005/ENG-006). */
+ * payloads can record cross-vendor cohort signal. */
 export type RunExplanation = {
   answer: string;
   mode: "ai" | "fallback";
@@ -81,7 +81,7 @@ Return a concise answer with bullet points.`;
  *
  * @param model Optional model override — bare model id or `"<provider>/<model>"` spec.
  *   When omitted, the configured default model is used.
- * @param context Per-call telemetry context (ENG-012). Forwarded to the
+ * @param context Per-call telemetry context. Forwarded to the
  *   abstraction so the usage recorder can attribute the row to org/run.
  */
 export async function explainRun({

@@ -1,9 +1,27 @@
+/**
+ * Workflow graph validator. Goes beyond Zod (`WorkflowSchema`) to check
+ * cross-node invariants: every edge target/source resolves to a node, the
+ * graph has no cycles, every reachable `condition` / edge expression
+ * passes the limited grammar in `expression.ts`, and tool nodes' inputs
+ * pass the tool's Zod schema.
+ *
+ * Used by `apps/api/src/index.ts` `POST /validate` (the AI Studio surfaces
+ * issues to the user) and by `sanitizeAiWorkflow` after `generateObject`
+ * returns.
+ *
+ * Invariants:
+ * - The result is a flat list of issues with stable `code` strings — the
+ *   web UI matches on codes to render localised messages. Renaming a code
+ *   breaks the UI without a TypeScript error.
+ */
+
 import { WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { validateToolInput } from "./tool-registry";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
 
+/** One validation finding. `nodeId` / `edgeId` set when the issue is locatable. */
 export type WorkflowValidationIssue = {
   code: string;
   message: string;
@@ -11,11 +29,13 @@ export type WorkflowValidationIssue = {
   edgeId?: string;
 };
 
+/** Flat issue list + a top-level `valid` flag. */
 export type WorkflowValidationResult = {
   valid: boolean;
   issues: WorkflowValidationIssue[];
 };
 
+/** Run every cross-node check; returns `valid: true` only when no issues. */
 export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
   const issues: WorkflowValidationIssue[] = [];
 

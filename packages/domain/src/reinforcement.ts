@@ -6,7 +6,7 @@
  *
  * Pure logic, no I/O. The `routing_stats` row provides the inputs; the
  * runtime applies the output before picking a winner. Today's adjustments
- * are a counter-based heuristic; ENG-025 will replace them with proper
+ * are a counter-based heuristic; a future probabilistic model can replace them with proper
  * Thompson sampling.
  *
  * Used by `packages/domain/src/decisionEngine.ts` and the runtime's

@@ -2,7 +2,7 @@
  * Zustand store — single global state for Janusly Studio.
  *
  * Holds the workflow being edited (nodes, edges), the active run (runId,
- * runNodes, events, paginated cursor + hasMore from ENG-009), tabs, toasts,
+ * runNodes, events, paginated cursor + hasMore), tabs, toasts,
  * Supabase session, and `platformVersion` — the cross-panel reactivity
  * counter that mutations bump so independent panels refetch (AGENTS.md).
  *

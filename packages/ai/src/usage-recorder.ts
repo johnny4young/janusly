@@ -1,5 +1,5 @@
 /**
- * Process-global recorder for LLM usage telemetry (ENG-012). The DB write
+ * Process-global recorder for LLM usage telemetry. The DB write
  * lives in `packages/data/src/usageRepo.ts`; this module is the seam that
  * lets `packages/ai` stay DB-agnostic — zero `@janusly/db` imports.
  *

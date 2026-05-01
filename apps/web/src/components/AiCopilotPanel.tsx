@@ -1,3 +1,16 @@
+/**
+ * AI Copilot panel — exposes `/ai/generate-workflow` and
+ * `/ai/explain-workflow` to the user. Surfaces the `mode` chip ("AI" /
+ * "Fallback") + `aiError` per AGENTS.md fallback contract whenever the
+ * underlying call degrades.
+ *
+ * Used by `RightPanel.tsx` (the `copilot` tab).
+ *
+ * Invariants:
+ * - When `mode === "fallback"`, `aiError` is rendered prominently so the
+ *   user knows why we degraded (billing / quota / network).
+ */
+
 import React, { useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
@@ -41,6 +54,7 @@ function describeAiError(message: string) {
   return message
 }
 
+/** Renders the Copilot panel: prompt → workflow generator + explain-current-workflow surface. */
 export function AiCopilotPanel({
   health,
   workflowName,

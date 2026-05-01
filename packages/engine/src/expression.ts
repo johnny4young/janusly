@@ -1,7 +1,30 @@
+/**
+ * Limited-grammar expression evaluator used by `condition` nodes and edge
+ * `condition` strings. Recursive-descent parser over a tiny grammar:
+ * boolean composition (`||`, `&&`, `!`, parens), comparisons (`===`, `!==`,
+ * `==`, `!=`, `>`, `<`, `>=`, `<=`), boolean / number / string literals,
+ * `null`, and dotted paths starting with `context.` or `inputs.`.
+ *
+ * Used by `node-registry.ts` (`condition` node executor + edge guard) and
+ * by `apps/api/src/index.ts:sanitizeAiWorkflow` (filters LLM-emitted
+ * grammar-invalid expressions post-Zod).
+ *
+ * Invariants:
+ * - Don't expand the grammar without updating
+ *   `apps/api/src/index.ts:GENERATE_WORKFLOW_SYSTEM_PROMPT` so the LLM
+ *   knows what's emittable. The grammar is published in the system prompt.
+ * - The evaluator must NEVER do template substitution. Template values
+ *   resolve before `evaluateExpression` is called.
+ */
+
 type ExpressionScope = Record<string, unknown>;
 
 const comparisonOperators = ["===", "!==", ">=", "<=", "==", "!=", ">", "<"] as const;
 
+/**
+ * Static-evaluate the expression with empty scopes to surface syntactic /
+ * grammar errors. Returns `{ valid: false, message }` on any throw.
+ */
 export function validateExpression(expression: string) {
   try {
     evaluateExpression(expression, { context: {}, inputs: {} });
@@ -11,6 +34,11 @@ export function validateExpression(expression: string) {
   }
 }
 
+/**
+ * Evaluate the expression against `scope` (`{ context, inputs }`) and
+ * coerce to boolean. Throws on grammar / evaluation errors so callers can
+ * either surface to the user (validate path) or treat as falsy with logging.
+ */
 export function evaluateExpression(expression: string, scope: ExpressionScope) {
   const trimmed = stripOuterParens(expression.trim());
 

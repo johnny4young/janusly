@@ -4,7 +4,7 @@
  *
  * Lifecycle:
  *   1. `assertMigrationsApplied()` — fail-fast if Postgres isn't migrated
- *      (ENG-008 invariant; AGENTS.md explicitly forbids the deleted runtime
+ *      (AGENTS.md explicitly forbids the deleted runtime
  *      `CREATE TABLE` bootstrap).
  *   2. Build a `WorkflowRuntime` with the Postgres execution store + BullMQ
  *      queue adapter (which composes the DLQ adapter — the DLQ contract is
@@ -12,7 +12,7 @@
  *   3. Open a BullMQ `Worker` on `connection` from `./queue`. Each job is
  *      validated with `NodeSchema.parse(job.data)` — bad payloads become
  *      `UnrecoverableError` so they go to the DLQ instead of retrying
- *      forever (ENG-002 invariant).
+ *      forever.
  *   4. SIGTERM/SIGINT call `worker.close()` so in-flight jobs drain on
  *      container restart and `running` nodes don't get orphaned.
  *
@@ -38,7 +38,7 @@ import { executeNode } from "./execute-node";
 
 await assertMigrationsApplied();
 
-// ENG-012: register the usage_events writer once at boot. Every LLM call
+// Register the usage_events writer once at boot. Every LLM call
 // from the `ai` node and `agent` planner fires it fire-and-forget.
 setUsageRecorder(recordUsage);
 

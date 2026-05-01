@@ -11,7 +11,7 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the five read-only tools from the AC", () => {
+  it("exposes the five read-only tools", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "recipes.list",

@@ -1,5 +1,16 @@
+/**
+ * Per-node timeout primitive. `withTimeout` races a promise against a
+ * `setTimeout` reject; on a tie the timeout wins and a `NodeTimeoutError`
+ * is thrown. The timer is always cleared in `finally` so a fast-resolving
+ * promise doesn't leak a pending handle.
+ *
+ * Used by `core/runtime.ts` for top-level node execution and by
+ * `node-registry.ts:runAgentLoop` for tool-call timeouts inside an agent.
+ */
+
 import type { WorkflowNode } from "@janusly/shared";
 
+/** Thrown when `withTimeout` races out. Carries the configured `timeoutMs`. */
 export class NodeTimeoutError extends Error {
   code = "NODE_TIMEOUT";
 
@@ -9,6 +20,7 @@ export class NodeTimeoutError extends Error {
   }
 }
 
+/** Read `config.timeoutMs` off a `WorkflowNode` if it's a positive finite number; otherwise `undefined`. */
 export function getNodeTimeoutMs(node: WorkflowNode): number | undefined {
   const timeoutMs = (node as any)?.config?.timeoutMs;
 
@@ -18,6 +30,10 @@ export function getNodeTimeoutMs(node: WorkflowNode): number | undefined {
   return timeoutMs;
 }
 
+/**
+ * Race a promise against a timeout. When `timeoutMs` is falsy the promise
+ * is returned unchanged. The timer is cleared on resolve/reject either way.
+ */
 export async function withTimeout<T>(promise: Promise<T>, timeoutMs?: number): Promise<T> {
   if (!timeoutMs) return promise;
 

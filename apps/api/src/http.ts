@@ -1,7 +1,25 @@
+/**
+ * Small request/response helpers for `apps/api/src/index.ts` — the project
+ * intentionally uses Node's `http.createServer` directly (no Express /
+ * Fastify) so this file owns the few primitives every route needs:
+ * status-bearing errors, body-size-capped JSON read, JSON / SSE writers,
+ * and CORS headers.
+ *
+ * Used by every route in `apps/api/src/index.ts`.
+ *
+ * Invariants:
+ * - `readJson` enforces `API_MAX_JSON_BODY_BYTES` and rejects 413 when
+ *   exceeded — callers shouldn't read the stream themselves.
+ * - `corsHeaders` returns `null` for the Origin when the request came from
+ *   a non-allowlisted origin; never `*` with credentials.
+ */
+
 import http from "http";
 
+/** `Error` carrying an HTTP status. `index.ts` reads `statusCode` to map throws to responses. */
 export type HttpError = Error & { statusCode?: number };
 
+/** Build an `HttpError` with a fixed status. The route handler's catch maps it to the response. */
 export function httpError(message: string, statusCode: number): HttpError {
   const err = new Error(message) as HttpError;
   err.statusCode = statusCode;
@@ -10,6 +28,7 @@ export function httpError(message: string, statusCode: number): HttpError {
 
 const DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173";
 
+/** `ServerResponse` augmented with the request `Origin` so `corsHeaders` can resolve it. */
 export type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
 
 function getAllowedOrigins() {
@@ -17,6 +36,7 @@ function getAllowedOrigins() {
   return configured.split(",").map(origin => origin.trim()).filter(Boolean);
 }
 
+/** Build the CORS header dict against `API_ALLOWED_ORIGINS`. Echoes the origin only when it's allowlisted. */
 export function corsHeaders(res: http.ServerResponse) {
   const origin = (res as CorsAwareResponse).requestOrigin;
   const allowedOrigins = getAllowedOrigins();
@@ -35,6 +55,7 @@ export function corsHeaders(res: http.ServerResponse) {
   };
 }
 
+/** Write a JSON response with CORS headers. Falls back to 500 if `payload` can't serialise. */
 export function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
   let body: string;
   try {
@@ -50,10 +71,15 @@ export function sendJson(res: http.ServerResponse, payload: unknown, status = 20
   res.end(body);
 }
 
+/** Write one Server-Sent Events frame. Caller manages the stream lifecycle. */
 export function sendEvent(res: http.ServerResponse, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+/**
+ * Read + parse a JSON body. Rejects 413 (`HttpError`) when bytes exceed
+ * `maxBytes`. Resolves `{}` for empty bodies.
+ */
 export async function readJson(req: http.IncomingMessage, maxBytes: number) {
   return new Promise<unknown>((resolve, reject) => {
     let body = "";
@@ -85,10 +111,12 @@ export async function readJson(req: http.IncomingMessage, maxBytes: number) {
   });
 }
 
+/** Narrow `unknown` to `Record<string, unknown>` (or `{}` on miss). Used for JSON-body destructuring. */
 export function asRecord(value: unknown) {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
+/** Narrow `unknown` to a finite `number` (or `undefined` on miss). */
 export function asNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

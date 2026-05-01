@@ -8,7 +8,7 @@
  * - `packages/engine/src/agent-planner.ts` + `node-registry.ts` — both
  *   import `getLlmClient` so the engine never names a vendor.
  *
- * The provider abstraction (ENG-011) is the single chokepoint for every
+ * The provider abstraction is the single chokepoint for every
  * AI call in Janusly; see `./llm-client.ts` for the registry pattern that
  * makes adding a provider a four-field record entry.
  */

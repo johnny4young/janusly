@@ -18,16 +18,16 @@
  * - Multi-tenant: every DB query passes `eq(<table>.orgId, auth.orgId)`.
  * - Pagination cap: `GET /runs` and `GET /workflows` cap at 100/200 rows
  *   (`?limit=` opt-in). `GET /run` and `GET /status` cap nested events at
- *   200/500 with a composite cursor (ENG-009).
+ *   200/500 with a composite cursor.
  * - Rate limiter: AI surfaces gate on Redis-backed `enforceRateLimit`
- *   (ENG-019, fails open with `[rate-limit]` warn on Redis errors).
+ *   (fails open with `[rate-limit]` warn on Redis errors).
  * - `/ai/generate-workflow` calls `llm.generateObject({ schema: WorkflowSchema })`
- *   (ENG-014) so the model returns a typed workflow directly. The post-Zod
+ *   so the model returns a typed workflow directly. The post-Zod
  *   `sanitizeAiWorkflow` step still filters edge `condition` strings and
  *   `condition`-node expressions through `validateExpression` — keep it,
  *   since Zod's `z.string()` is looser than the engine's grammar.
  * - Audit logs: every mutation writes a row with a stable `action` string;
- *   AI mutations write audit on success AND on fallback (ENG-005/ENG-006).
+ *   AI mutations write audit on success AND on fallback.
  */
 
 import http from "http";
@@ -151,14 +151,14 @@ function aiStatus() {
 }
 
 /**
- * Post-Zod sanitization for `/ai/generate-workflow` (ENG-014). The LLM-emitted
+ * Post-Zod sanitization for `/ai/generate-workflow`. The LLM-emitted
  * workflow has already been validated against `WorkflowSchema` by the AI SDK's
  * structured-output path; this step only filters edge `condition` strings and
  * `condition`-node expressions through `validateExpression` (Janusly's limited
  * grammar). Without this, valid-shaped-but-grammar-invalid expressions would
  * crash at runtime instead of being silently dropped or normalised. The
- * `looseAiWorkflow` shape-coercer was retired here when ENG-014 swapped the
- * route to `generateObject({ schema: WorkflowSchema })`.
+ * `looseAiWorkflow` shape-coercer is intentionally not used now that the
+ * route calls `generateObject({ schema: WorkflowSchema })`.
  */
 function sanitizeAiWorkflow(workflow: Workflow): Workflow {
   const sanitizedEdges = workflow.edges.map((edge) => {
@@ -496,7 +496,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       try {
-        // ENG-014: schema-aware generation. The AI SDK plumbs `WorkflowSchema`
+        // Schema-aware generation. The AI SDK plumbs `WorkflowSchema`
         // through each provider's structured-output capability and validates
         // the response. The shape-coercing `looseAiWorkflow` pre-pass that
         // existed before this is gone — schema enforcement is now real.
@@ -813,7 +813,7 @@ const server = http.createServer(async (req, res) => {
 
 await assertMigrationsApplied();
 
-// ENG-012: register the usage_events writer once at boot. Every LLM call
+// Register the usage_events writer once at boot. Every LLM call
 // through `getLlmClient().generateText(...)` fires it fire-and-forget.
 setUsageRecorder(recordUsage);
 

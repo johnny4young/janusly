@@ -1,3 +1,13 @@
+/**
+ * React Flow canvas wrapper — the workflow editor's main surface. The
+ * `workflowNodeTypes` map (from `./WorkflowStepNode`) plugs the custom
+ * step renderer in. The 6 browser-mode tests in `WorkflowCanvas.browser.test.tsx`
+ * lock its render contract; before changing the DOM structure
+ * inspect those tests for selector breakage.
+ *
+ * Used by `App.tsx` (the workspace's main pane).
+ */
+
 import React from 'react'
 import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/react'
 import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
@@ -15,6 +25,7 @@ type WorkflowCanvasProps = {
   onEdgeClick: EdgeMouseHandler<WorkflowGraphEdge>
 }
 
+/** Render the workflow editor canvas with React Flow + custom step nodes. */
 export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick }: WorkflowCanvasProps) {
   return (
     <div className="canvas-frame">

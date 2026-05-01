@@ -1,3 +1,25 @@
+/**
+ * SSRF + DNS-rebinding pin. Resolves the hostname once, validates
+ * every returned address against the private-IP block list, and constructs
+ * an `undici.Agent` whose `connect.lookup` returns the pinned IP — so the
+ * actual TCP connect can't be redirected to a private target by a second
+ * DNS lookup. The pinned `lookup` re-asserts the IP isn't private at
+ * connect time as defence in depth.
+ *
+ * Used by `node-registry.ts` (`http` node executor) and the `http.request`
+ * tool entry in `tool-registry.ts`. Both go through `fetchHttpTarget` so
+ * the same guard applies.
+ *
+ * Invariants:
+ * - Don't unwind the pinned dispatcher path. Calling `undici.fetch` without
+ *   the pinned `Agent` would reopen the DNS rebinding window.
+ * - `ALLOW_PRIVATE_HTTP_TARGETS=true` is the explicit env-flag bypass for
+ *   local-development hosts; never default to true.
+ * - Block list covers loopback (127/8, ::1), link-local (169.254/16,
+ *   fe80::/10), private RFC 1918 ranges, AWS metadata (`169.254.169.254`),
+ *   carrier-grade NAT, and IPv4-mapped IPv6 forms.
+ */
+
 import { lookup } from "node:dns/promises";
 import { isIP, type LookupFunction } from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
@@ -150,11 +172,21 @@ async function validateAndResolveTarget(rawUrl: unknown): Promise<{ url: string;
   return { url: url.toString(), agent };
 }
 
+/**
+ * Validate a URL: ensure scheme is http/https, hostname resolves to public
+ * IPs (unless `ALLOW_PRIVATE_HTTP_TARGETS=true`), and return the normalised
+ * URL string. Throws on any rejection so callers can surface a 400/403.
+ */
 export async function validateHttpTarget(rawUrl: unknown): Promise<string> {
   const { url } = await validateAndResolveTarget(rawUrl);
   return url;
 }
 
+/**
+ * Validated `fetch` for outbound HTTP. Resolves DNS once, pins the IP to
+ * the connect path via `undici.Agent.connect.lookup`, and re-asserts at
+ * connect time. The single chokepoint for `http` node + `http.request` tool.
+ */
 export async function fetchHttpTarget(rawUrl: unknown, init?: RequestInit): Promise<Response> {
   const { url, agent } = await validateAndResolveTarget(rawUrl);
   if (!agent) {
@@ -169,4 +201,5 @@ export async function fetchHttpTarget(rawUrl: unknown, init?: RequestInit): Prom
 
 // Internal-only handle for tests. Not part of the public surface; the name is
 // the convention so `import { __testInternals } from "./http-policy"` is loud.
+/** Test-only escape: surfaces the internal `resolveAndPin` so DNS-rebinding regression tests can drive it. Production code must never call this. */
 export const __testInternals = { resolveAndPin };
