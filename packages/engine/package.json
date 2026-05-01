@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@janusly/ai": "workspace:*",
     "@janusly/data": "workspace:*",
     "@janusly/db": "workspace:*",
     "@janusly/domain": "workspace:*",
@@ -27,7 +28,6 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.10.1",
-    "openai": "^6.34.0",
     "undici": "^8.1.0",
     "zod": "^4.3.6"
   },
