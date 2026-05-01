@@ -17,7 +17,8 @@
  * - `multi_agent.*` event payloads are part of the contract that
  *   `apps/web/src/MultiAgentTimeline.tsx` consumes — don't rename event types
  *   without also updating the web consumer.
- * - The `ai` node wraps its OpenAI call in try/catch and returns
+ * - The `ai` node routes through the provider-neutral `getLlmClient()` from
+ *   `@janusly/ai`, wraps the call in try/catch, and returns
  *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
  * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
  *   preserving the SSRF + DNS-rebinding pin from ENG-021.
@@ -25,8 +26,8 @@
  *   `@janusly/shared` so the schema and the registry stay in lockstep.
  */
 
-import OpenAI from "openai";
 import { loadRootEnv } from "@janusly/db";
+import { getLlmClient } from "@janusly/ai";
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
@@ -51,28 +52,13 @@ export type NodeExecutionResult =
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
 
-const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
-const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-let aiNodeOpenAI: OpenAI | null = null;
-
-function getAiNodeOpenAIClient() {
-  if (!process.env.OPENAI_API_KEY) return null;
-  aiNodeOpenAI ??= new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    timeout: OPENAI_TIMEOUT_MS,
-    maxRetries: OPENAI_MAX_RETRIES,
-  });
-  return aiNodeOpenAI;
-}
-
 function fallbackAiResponse(prompt: string, context: Record<string, any>) {
   const contextKeys = Object.keys(context).filter(key => !["orgId", "userId", "createdBy"].includes(key));
   return [
     "AI fallback response.",
     `Prompt: ${previewText(prompt)}`,
     contextKeys.length ? `Available context: ${contextKeys.join(", ")}.` : "No prior node context was available.",
-    "Configure OPENAI_API_KEY to generate a model-written answer.",
+    "Configure an LLM API key (OPENAI_API_KEY or ANTHROPIC_API_KEY) to generate a model-written answer.",
   ].join("\n");
 }
 
@@ -347,10 +333,13 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   ai: async (ctx) => {
     const prompt = String(ctx.config.prompt ?? "Summarize workflow");
     await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt: previewText(prompt), contextKeys: Object.keys(ctx.context) });
-    const client = getAiNodeOpenAIClient();
-    const model = ctx.config.model ?? OPENAI_MODEL;
+    const llm = getLlmClient();
+    // `config.model` accepts a bare model id ("gpt-4o-mini") OR a
+    // `"<provider>/<model>"` spec ("anthropic/claude-haiku-4-5"); the
+    // provider abstraction parses it so this node works against any backend.
+    const modelHint = typeof ctx.config.model === "string" ? ctx.config.model : undefined;
 
-    if (!client) {
+    if (!llm) {
       return {
         status: "completed",
         output: {
@@ -363,40 +352,31 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     try {
-      const response = await client.responses.create({
-        model,
-        input: [
-          {
-            role: "system",
-            content: "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              prompt,
-              context: ctx.context,
-            }),
-          },
-        ],
+      const result = await llm.generateText({
+        system:
+          "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
+        prompt: JSON.stringify({ prompt, context: ctx.context }),
+        modelHint,
       });
 
       return {
         status: "completed",
         output: {
           mode: "ai",
-          model,
+          model: result.model,
+          provider: result.provider,
           prompt: previewText(prompt),
-          response: response.output_text,
+          response: result.text,
         },
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : "AI request failed";
-      await appendEvent(ctx.runId, ctx.nodeId, "ai.fallback", { error: message, model });
+      await appendEvent(ctx.runId, ctx.nodeId, "ai.fallback", { error: message, modelHint });
       return {
         status: "completed",
         output: {
           mode: "fallback",
-          model,
+          modelHint,
           prompt: previewText(prompt),
           aiError: message,
           response: fallbackAiResponse(String(prompt), ctx.context),

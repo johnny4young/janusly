@@ -7,7 +7,8 @@
  *   1. `assertMigrationsApplied()` — fail-fast on an unmigrated DB.
  *   2. Per-request: `requireAuth` → route dispatch → `requireRole` (per
  *      mutation) → handler.
- *   3. AI surfaces wrap their OpenAI call in try/catch and degrade to
+ *   3. AI surfaces route through the provider-neutral `getLlmClient()` from
+ *      `@janusly/ai` and wrap the call in try/catch, degrading to
  *      `{ mode: "fallback", aiError, ... }` (AGENTS.md AI-fallback contract).
  *
  * Used by `apps/web` (the only browser client today) and any external
@@ -29,7 +30,6 @@
  */
 
 import http from "http";
-import OpenAI from "openai";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
 import { resumeRun } from "@janusly/engine/src/resume-run";
@@ -38,7 +38,7 @@ import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { explainRun } from "@janusly/ai";
+import { explainRun, getLlmClient, resolveLlmConfig } from "@janusly/ai";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { requireAuth } from "./auth";
 import { isRole, requireRole } from "./permissions";
@@ -88,24 +88,61 @@ const RUN_EVENTS_DEFAULT_LIMIT = 200;
 const RUN_EVENTS_MAX_LIMIT = 500;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-let openai: OpenAI | null = null;
-
 const dlqReplay = new DLQReplayAdapter();
 
-function getOpenAIClient() {
-  if (!process.env.OPENAI_API_KEY) return null;
-  openai ??= new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    timeout: OPENAI_TIMEOUT_MS,
-    maxRetries: OPENAI_MAX_RETRIES,
-  });
-  return openai;
-}
+/**
+ * System prompt for `/ai/generate-workflow`. Joined with `"\n"` so the
+ * provider-neutral `LlmClient.generateText` accepts it as a single string
+ * (the AI SDK collapses `system` + `prompt` into the right wire format per
+ * provider). The grammar listed here is intentionally narrow — `looseAiWorkflow`
+ * + `parseAiWorkflow` recover from near-misses; ENG-014 will replace both
+ * with `generateObject({ schema: WorkflowSchema })`.
+ */
+const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
+  "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
+  "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
+  "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
+  "Node types and required config:",
+  "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object }",
+  "- noop: {} (good for explicit start/end markers)",
+  "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
+  "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
+  "- webhook: {} (waits for external resume)",
+  "- approval: { message?: string } (waits for human approval)",
+  "- ai: { prompt: string, model?: string }",
+  "- tool: { tool: 'http.request'|'text.uppercase'|'json.pick', input: object }",
+  "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
+  "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
+  "- agent_reflection: { input?: any }",
+  "- loop: { items: string|array, mapping?: object }",
+  "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
+  "- router_llm: { candidates: Array<{id}> }",
+  "edges[].condition grammar (optional, leave it out unless you really need branching):",
+  "  - boolean literals: true / false",
+  "  - numbers, single/double-quoted strings, null",
+  "  - paths starting with `context.` or `inputs.` (e.g. context.fetch.output.statusCode)",
+  "  - comparisons: ===, !==, ==, !=, >, <, >=, <=",
+  "  - boolean composition: &&, ||, !, parentheses",
+  "  - INVALID: bare identifiers (e.g. risk_is_high), function calls, string concatenation, regex.",
+  "If you can't express a condition with this grammar, omit `condition` and route via a `condition` or `router` node instead.",
+  "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
+].join("\n");
 
 function aiStatus() {
+  // The provider abstraction (`packages/ai/src/llm-client.ts`) reads the env
+  // directly; this surface keeps the legacy field names (`enabled`, `model`)
+  // for back-compat while reflecting whichever provider/model is currently
+  // active for default, no-override calls.
+  const requestedProvider = (process.env.JANUSLY_LLM_PROVIDER ?? "openai").toLowerCase();
+  const cfg = resolveLlmConfig(process.env);
+  const provider = cfg?.provider ?? (requestedProvider === "anthropic" ? "anthropic" : "openai");
+  const model =
+    cfg?.defaultModels[provider] ??
+    (provider === "anthropic" ? process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5" : OPENAI_MODEL);
   return {
-    enabled: Boolean(process.env.OPENAI_API_KEY),
-    model: OPENAI_MODEL,
+    enabled: Boolean(cfg?.apiKeys[provider]),
+    provider,
+    model,
     timeoutMs: OPENAI_TIMEOUT_MS,
     maxRetries: OPENAI_MAX_RETRIES,
   };
@@ -478,63 +515,31 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/ai/generate-workflow") {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
-      const { prompt: rawPrompt } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
-      const promptText = typeof rawPrompt === "string" ? rawPrompt : "";
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const promptText = typeof body.prompt === "string" ? body.prompt : "";
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
       if (promptText.length > AI_PROMPT_MAX_CHARS) {
         return sendJson(res, { error: `prompt exceeds ${AI_PROMPT_MAX_CHARS} characters` }, 413);
       }
-      const client = getOpenAIClient();
+      const llm = getLlmClient();
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
-      if (!client) {
+      if (!llm) {
         return sendJson(res, {
           mode: "fallback",
           ...(fallbackWorkflow ?? {}),
         });
       }
       try {
-        const response = await client.responses.create({
-          model: OPENAI_MODEL,
-          input: [
-            {
-              role: "system",
-              content: [
-                "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
-                "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
-                "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
-                "Node types and required config:",
-                "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object }",
-                "- noop: {} (good for explicit start/end markers)",
-                "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
-                "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
-                "- webhook: {} (waits for external resume)",
-                "- approval: { message?: string } (waits for human approval)",
-                "- ai: { prompt: string, model?: string }",
-                "- tool: { tool: 'http.request'|'text.uppercase'|'json.pick', input: object }",
-                "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
-                "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
-                "- agent_reflection: { input?: any }",
-                "- loop: { items: string|array, mapping?: object }",
-                "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
-                "- router_llm: { candidates: Array<{id}> }",
-                "edges[].condition grammar (optional, leave it out unless you really need branching):",
-                "  - boolean literals: true / false",
-                "  - numbers, single/double-quoted strings, null",
-                "  - paths starting with `context.` or `inputs.` (e.g. context.fetch.output.statusCode)",
-                "  - comparisons: ===, !==, ==, !=, >, <, >=, <=",
-                "  - boolean composition: &&, ||, !, parentheses",
-                "  - INVALID: bare identifiers (e.g. risk_is_high), function calls, string concatenation, regex.",
-                "If you can't express a condition with this grammar, omit `condition` and route via a `condition` or `router` node instead.",
-                "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
-              ].join("\n"),
-            },
-            { role: "user", content: promptText },
-          ],
-          text: { format: { type: "json_object" } },
+        const result = await llm.generateText({
+          system: GENERATE_WORKFLOW_SYSTEM_PROMPT,
+          prompt: promptText,
+          responseFormat: "json",
+          modelHint: modelOverride,
         });
-        const parsed = JSON.parse(response.output_text || "{}");
+        const parsed = JSON.parse(result.text || "{}");
         const workflow = parseAiWorkflow(parsed);
-        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: OPENAI_MODEL });
-        return sendJson(res, { mode: "ai", ...workflow });
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: result.model, provider: result.provider });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
         await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", fallbackWorkflow?.id, { mode: "fallback", error: message });
@@ -548,21 +553,23 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/ai/explain-workflow") {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
-      const { workflow } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
-      const client = getOpenAIClient();
-      if (!client) {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const { workflow } = body;
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const llm = getLlmClient();
+      if (!llm) {
         return sendJson(res, {
           mode: "fallback",
           explanation: fallbackExplainWorkflow(workflow),
         });
       }
       try {
-        const response = await client.responses.create({
-          model: OPENAI_MODEL,
-          input: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+        const result = await llm.generateText({
+          prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+          modelHint: modelOverride,
         });
-        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: OPENAI_MODEL });
-        return sendJson(res, { mode: "ai", explanation: response.output_text });
+        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, explanation: result.text });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
         await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "fallback", error: message });
@@ -588,15 +595,15 @@ const server = http.createServer(async (req, res) => {
 
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
-        openai: getOpenAIClient() ?? undefined,
+        llm: getLlmClient(),
         run: run[0],
         events,
         question: questionText,
-        model: OPENAI_MODEL,
       });
       await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
         mode: result.mode,
         model: result.model,
+        provider: result.provider,
         aiError: result.aiError,
       });
       return sendJson(res, result);

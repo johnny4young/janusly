@@ -1,19 +1,29 @@
-import OpenAI from "openai";
+/**
+ * Agent planner — picks the next tool an `agent` node should run.
+ *
+ * Two planners share one return shape:
+ *   - `planAgentTool` (rules) — pure, deterministic, no I/O.
+ *   - `planAgentToolWithLLM` ("openai" planner) — routes through the
+ *     provider-neutral `getLlmClient()` from `@janusly/ai`. Falls back to
+ *     the rules planner on any error and surfaces `aiError` per the
+ *     AGENTS.md fallback contract.
+ *
+ * Used by `packages/engine/src/node-registry.ts` (`agent` and `multi_agent`
+ * executors) and indirectly by `apps/api/src/index.ts` when those nodes run
+ * inside a workflow.
+ *
+ * Invariants:
+ * - Every LLM call is wrapped in try/catch; failures degrade to the rules
+ *   planner with `aiError` set (don't drop the rules fallback).
+ * - The function takes an optional `llm` injection so tests can hand in a
+ *   mock `LlmClient`. When unset, it resolves the singleton via
+ *   `getLlmClient()` so production callers don't have to thread it through.
+ */
+
 import { loadRootEnv } from "@janusly/db";
+import { getLlmClient, type LlmClient } from "@janusly/ai";
 
 loadRootEnv();
-
-let openai: OpenAI | null = null;
-
-function getOpenAIClient() {
-  if (!process.env.OPENAI_API_KEY) return null;
-  openai ??= new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-    timeout: Number(process.env.OPENAI_TIMEOUT_MS ?? 30_000),
-    maxRetries: Number(process.env.OPENAI_MAX_RETRIES ?? 2),
-  });
-  return openai;
-}
 
 export type AgentPlan = {
   tool: string;
@@ -95,46 +105,45 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
 export async function planAgentToolWithLLM(
   config: any,
   context: Record<string, any>,
-  history: AgentLoopStep[] = []
+  history: AgentLoopStep[] = [],
+  /**
+   * Optional LLM injection — mainly for tests. When omitted, the function
+   * resolves the singleton via `getLlmClient()` so production callers don't
+   * have to thread it.
+   */
+  llmOverride?: LlmClient | null,
 ): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
-  const client = getOpenAIClient();
+  const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
-  if (!client) {
+  if (!llm) {
     return planAgentTool(config, context);
   }
 
   const goal = config.goal ?? "Choose the best tool for this workflow step.";
 
   try {
-    const response = await client.responses.create({
-      model: config.model ?? "gpt-4o-mini",
-      input: [
-        {
-          role: "system",
-          content: "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON."
+    const result = await llm.generateText({
+      system:
+        "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON.",
+      prompt: JSON.stringify({
+        goal,
+        config,
+        context,
+        history,
+        availableTools,
+        requiredJsonShape: {
+          done: "boolean optional",
+          finalAnswer: "string optional",
+          tool: "one available tool name when not done",
+          input: "object with tool input when not done",
+          reason: "short reason",
         },
-        {
-          role: "user",
-          content: JSON.stringify({
-            goal,
-            config,
-            context,
-            history,
-            availableTools,
-            requiredJsonShape: {
-              done: "boolean optional",
-              finalAnswer: "string optional",
-              tool: "one available tool name when not done",
-              input: "object with tool input when not done",
-              reason: "short reason"
-            }
-          })
-        }
-      ],
-      text: { format: { type: "json_object" } }
+      }),
+      responseFormat: "json",
+      modelHint: typeof config.model === "string" ? config.model : undefined,
     });
 
-    const parsed = JSON.parse(response.output_text || "{}");
+    const parsed = JSON.parse(result.text || "{}");
 
     if (parsed.done) {
       return {
