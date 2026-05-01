@@ -1,3 +1,11 @@
+/**
+ * Run-level Q&A chat — calls `/ai/explain-run` for the selected run id.
+ * Surfaces the `mode` ("ai" / "fallback") + `aiError` chip per AGENTS.md
+ * fallback contract; also shows the resolved `model` when AI mode succeeds.
+ *
+ * Used by `RightPanel.tsx` (Runs tab → AI Run Explainer card).
+ */
+
 import React, { useState } from 'react'
 import { api } from '../api'
 import { formatAiModeLabel } from '../constants'
@@ -37,6 +45,7 @@ const starterQuestions = [
   'Did anything need a retry or approval?',
 ]
 
+/** Conversational explainer for the active run. Shows mode chip + aiError when present. */
 export function RunExplainChat({ runId }: { runId?: string | null }) {
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<Message[]>([])

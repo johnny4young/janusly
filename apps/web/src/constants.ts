@@ -1,6 +1,24 @@
+/**
+ * Node-type catalogue + display helpers — the bridge between the runtime
+ * type union (`@janusly/shared/nodeTypeValues`) and the UI's labels +
+ * status styling. Adding a new node type means adding entries here AND
+ * to `nodeTypeValues` (the runtime won't accept it otherwise).
+ *
+ * Used by `components/RightPanel.tsx` (Inspector + node-kind dropdown),
+ * `components/WorkflowStepNode.tsx` (canvas rendering),
+ * `components/AiCopilotPanel.tsx`, and the dashboard helpers.
+ *
+ * Invariants:
+ * - `nodePresets` keys mirror `nodeTypeValues` exactly. A type missing
+ *   here means the "Add step" UI can't seed a config.
+ * - `formatStatusLabel` is the single labeller for statuses surfaced in
+ *   the UI; localising messages happens here, not in 30 component sites.
+ */
+
 import type { CSSProperties } from 'react'
 import type { JsonObject } from './types'
 
+/** Default `config` per node type — used by the "Add step" affordance. */
 export const nodePresets: Record<string, JsonObject> = {
   http: { url: 'https://api.github.com' },
   noop: {},
@@ -28,8 +46,10 @@ export const nodePresets: Record<string, JsonObject> = {
   },
 }
 
+/** Ordered list of supported node-type ids — derived from `nodePresets`. */
 export const nodeTypes = Object.keys(nodePresets)
 
+/** Display label + helper text per node type for the Inspector / step picker. */
 export const nodeUi: Record<string, { label: string; helper: string }> = {
   http: { label: 'Call an API', helper: 'Fetch data from a service' },
   noop: { label: 'Do nothing', helper: 'Start or finish cleanly' },
@@ -47,14 +67,17 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   multi_agent: { label: 'Agent team', helper: 'Coordinate multiple agents' },
 }
 
+/** Human label for a node type (falls back to the raw id with `_` → space). */
 export function getNodeLabel(type: string) {
   return nodeUi[type]?.label ?? type.replaceAll('_', ' ')
 }
 
+/** Helper / hint text for a node type (used in the step-picker subtitle). */
 export function getNodeHelper(type: string) {
   return nodeUi[type]?.helper ?? 'Workflow step'
 }
 
+/** One-line config summary for the Inspector header (e.g. "GET https://api.example.com"). */
 export function getNodeConfigSummary(type: string, config: JsonObject) {
   if (type === 'http') return readString(config.url) ?? 'Add a request URL'
   if (type === 'ai') return compact(readString(config.prompt) ?? 'Add a prompt for Janusly')
@@ -75,6 +98,7 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
   return 'Review step settings'
 }
 
+/** Human label for a node/run status string (e.g. `"running"` → `"Running"`). */
 export function formatStatusLabel(status: string) {
   const labels: Record<string, string> = {
     draft: 'Draft',
@@ -94,12 +118,14 @@ export function formatStatusLabel(status: string) {
   return labels[status] ?? status.replaceAll('_', ' ')
 }
 
+/** Label for the AI mode chip — surfaces `"AI"` / `"Fallback"` / `"Error"` per AGENTS.md fallback contract. */
 export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error') {
   if (mode === 'ai') return 'AI'
   if (mode === 'fallback') return 'Local mode'
   return 'Needs attention'
 }
 
+/** Per-status inline-style map for the canvas + status pills (colour tokens from `index.css`). */
 export const statusStyles: Record<string, CSSProperties> = {
   pending: { border: '1.5px solid var(--we-line-strong)', background: 'var(--we-surface-2)' },
   queued: { border: '1.5px solid var(--we-warning)', background: 'var(--we-warning-soft)' },

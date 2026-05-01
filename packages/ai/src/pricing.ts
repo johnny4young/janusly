@@ -1,5 +1,5 @@
 /**
- * Per-model price map for cost computation (ENG-012). Built-in defaults
+ * Per-model price map for cost computation. Built-in defaults
  * for today's registered providers; `JANUSLY_LLM_PRICE_<UPPER_MODEL>=<input>,<output>`
  * env overrides win. Prices are USD per 1,000,000 tokens — the scale every
  * model card publishes at.

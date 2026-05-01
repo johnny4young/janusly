@@ -1,7 +1,26 @@
+/**
+ * Role gate for `apps/api/src/index.ts`. Reads `org_members` and rejects
+ * 403 when the caller's role is below the required level. The dev-headers
+ * mode falls back to `admin` only when no `org_members` row exists, so
+ * local development just works without seeding; production (Supabase /
+ * service-token) never auto-grants admin.
+ *
+ * Used by every mutating route in `apps/api/src/index.ts`
+ * (`requireRole(auth.orgId, auth.userId, 'editor', auth.mode)` style).
+ *
+ * Invariants:
+ * - Roles are ordinal (`viewer < editor < admin`); a caller satisfies a
+ *   `required` level when their rank is ≥ `rank[required]`.
+ * - Service-token mode does NOT auto-grant admin — the calling system
+ *   must have an explicit `org_members` row.
+ */
+
 import { db, orgMembers } from '@janusly/db'
 import { and, eq } from 'drizzle-orm'
 
+/** Closed enum of org-level roles. */
 export type Role = 'viewer' | 'editor' | 'admin'
+/** Auth mode forwarded from `auth.ts` so dev-headers can fall back to admin. */
 export type AuthMode = 'supabase' | 'dev-headers' | 'service-token'
 
 const rank: Record<Role, number> = {
@@ -10,10 +29,12 @@ const rank: Record<Role, number> = {
   admin: 3,
 }
 
+/** Type guard for the `Role` enum. */
 export function isRole(value: unknown): value is Role {
   return value === 'viewer' || value === 'editor' || value === 'admin'
 }
 
+/** Resolve a user's role in an org, with the dev-headers default-admin fallback. */
 export async function getMemberRole(orgId: string, userId: string, mode: AuthMode = 'supabase'): Promise<Role | null> {
   const rows = await db
     .select()
@@ -26,6 +47,7 @@ export async function getMemberRole(orgId: string, userId: string, mode: AuthMod
   return mode === 'dev-headers' ? 'admin' : null
 }
 
+/** `getMemberRole` + throw 403 when below `required`. The standard route gate. */
 export async function requireRole(orgId: string, userId: string, required: Role, mode: AuthMode = 'supabase') {
   const role = await getMemberRole(orgId, userId, mode)
 

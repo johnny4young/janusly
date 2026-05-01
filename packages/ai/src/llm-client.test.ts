@@ -140,7 +140,7 @@ describe("createLlmClient — happy paths", () => {
       provider: "openai",
       model: "gpt-4o-mini",
     });
-    // ENG-012: latencyMs always reported; costUsd computed from the default
+    // latencyMs always reported; costUsd computed from the default
     // gpt-4o-mini price ($0.15/$0.60 per 1M) for (10,20) tokens.
     expect(typeof result.latencyMs).toBe("number");
     expect(result.latencyMs).toBeGreaterThanOrEqual(0);
@@ -366,7 +366,7 @@ describe("getLlmClient (memoised singleton)", () => {
   });
 });
 
-describe("ENG-012 — usage recorder fires on success and failure", () => {
+describe("usage recorder fires on success and failure", () => {
   afterEach(() => {
     _resetUsageRecorderForTests();
   });
@@ -528,7 +528,7 @@ describe("ENG-012 — usage recorder fires on success and failure", () => {
   });
 });
 
-describe("ENG-014 — generateObject (schema-aware generation)", () => {
+describe("generateObject (schema-aware generation)", () => {
   // The AI SDK exposes the typed payload at `experimental_output`. We mock
   // `generateText` (the underlying SDK function) AND `Output.object` (so the
   // schema arg doesn't have to be a real Zod schema) — the abstraction's job

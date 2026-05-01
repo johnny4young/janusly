@@ -21,7 +21,7 @@
  *   `@janusly/ai`, wraps the call in try/catch, and returns
  *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
  * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
- *   preserving the SSRF + DNS-rebinding pin from ENG-021.
+ *   preserving the SSRF + DNS-rebinding pin.
  * - Adding a new node type requires updating `nodeTypeValues` in
  *   `@janusly/shared` so the schema and the registry stay in lockstep.
  */
@@ -43,7 +43,7 @@ export type NodeContext = {
   runId: string;
   nodeId: string;
   /** Multi-tenant scope. Plumbed by `executeNode` from `runs.orgId` so the
-   * `ai` node and `agent` planner can attribute usage telemetry (ENG-012). */
+   * `ai` node and `agent` planner can attribute usage telemetry. */
   orgId: string;
   config: any;
   context: Record<string, any>;
@@ -375,7 +375,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           provider: result.provider,
           prompt: previewText(prompt),
           response: result.text,
-          // ENG-012: surface tokens + cost + latency on the node's stateJson
+          // Surface tokens + cost + latency on the node's stateJson
           // so the web Inspector renders the per-node usage footer.
           usage: result.usage,
           costUsd: result.costUsd ?? null,

@@ -20,7 +20,7 @@
  *   that `apps/web` reads via `ToolSchema`. Don't change `name`,
  *   `description`, `required`, `optional`, or `inputExample` field names.
  * - `http.request` goes through `fetchHttpTarget` so the SSRF + DNS-rebinding
- *   pin from ENG-021 is preserved on every call.
+ *   pin is preserved on every call.
  * - Adding a new tool without `inputSchema` and `outputSchema` is a TypeScript
  *   error thanks to the `satisfies Record<string, ToolDefinition>` constraint.
  */

@@ -1,3 +1,11 @@
+/**
+ * Workflow version history list. Re-fetches whenever `platformVersion`
+ * changes (the cross-panel reactivity hook from AGENTS.md). Clicking a
+ * version row hydrates the canvas with that DAG.
+ *
+ * Used by `RightPanel.tsx` (Inspector tab → version history).
+ */
+
 import React, { useCallback, useEffect, useState } from 'react'
 import { History } from 'lucide-react'
 import { api } from '../api'
@@ -6,6 +14,7 @@ import type { WorkflowDefinition } from '../types'
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
+/** Render the version-history list for the active workflow with click-to-hydrate. */
 export function VersionHistoryPanel() {
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
   const hydrateWorkflow = useWorkflowStore(state => state.hydrateWorkflow)

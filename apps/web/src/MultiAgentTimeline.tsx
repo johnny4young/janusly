@@ -1,3 +1,20 @@
+/**
+ * Multi-agent run timeline — projects `multi_agent.*` event types from
+ * `run_events` into per-agent lanes with tone-coloured chips. The web's
+ * "Multi-agent timeline" tab consumes this view; the engine
+ * (`packages/engine/src/node-registry.ts`) emits the matching event types.
+ *
+ * Used by `components/RightPanel.tsx` (the `multiAgent` tab).
+ *
+ * Invariants:
+ * - The event-type strings parsed here match the runtime emitter exactly.
+ *   Renaming `multi_agent.agent.completed` (etc) without coordinating
+ *   with `node-registry.ts` breaks this view silently.
+ * - Pagination piggy-backs on the run-events cursor: the
+ *   "Load older events" button calls `onLoadOlderEvents` and the parent
+ *   merges the new page into the same `events` array.
+ */
+
 import React, { useMemo, useState } from 'react'
 import type { JsonObject, RunEvent } from './types'
 
@@ -69,6 +86,7 @@ function readNumber(value: unknown) {
   return typeof value === 'number' ? value : 0
 }
 
+/** Render the per-agent timeline with selectable items and "Load older events" support. */
 export function MultiAgentTimeline({
   events,
   eventsHasMore,

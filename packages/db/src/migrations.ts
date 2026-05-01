@@ -5,7 +5,7 @@
  * time `pnpm migrate` runs successfully. The API and worker query for that
  * table's existence and refuse to boot if it's missing — this is the
  * fail-fast that replaced the old runtime `CREATE TABLE IF NOT EXISTS`
- * bootstrap in `schema-management.ts` (deleted in ENG-008).
+ * bootstrap in `schema-management.ts`.
  *
  * Used by:
  * - `apps/api/src/index.ts` — `await assertMigrationsApplied()` before

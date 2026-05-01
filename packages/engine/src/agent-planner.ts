@@ -113,7 +113,7 @@ export async function planAgentToolWithLLM(
    */
   llmOverride?: LlmClient | null,
   /**
-   * Per-call telemetry context (ENG-012). Forwarded verbatim to the LLM
+   * Per-call telemetry context. Forwarded verbatim to the LLM
    * abstraction so the recorder attributes the row to org/run/node.
    * Omitted in unit tests; production calls from `node-registry.ts:runAgentLoop`
    * fill it from the executor `NodeContext`.

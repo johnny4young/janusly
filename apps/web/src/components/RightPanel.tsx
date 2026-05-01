@@ -1,3 +1,22 @@
+/**
+ * Right-side workspace panel — the heavy router that switches between
+ * Inspector, Templates, Tools, Credentials, Runs, Multi-agent timeline,
+ * AI Copilot, Members, Reasoning, and Workflows tabs. Each tab is a small
+ * inner component (`InspectorPanel`, `TemplatesPanel`, …) that owns its
+ * own data fetch + interactions.
+ *
+ * Used by `App.tsx` (top-level routing on `tab`).
+ *
+ * Invariants:
+ * - Mutations that invalidate server data call `bumpPlatformVersion()` so
+ *   sibling panels refetch (AGENTS.md cross-panel reactivity).
+ * - The `AiUsageFooter` is exported here so the per-node usage
+ *   surface can be unit-tested without mounting the full panel.
+ * - Web deps locked to the AGENTS.md whitelist (`react`, `react-dom`,
+ *   `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`).
+ *   Don't add radix / cva / clsx / tailwind-merge / shadcn here.
+ */
+
 import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
@@ -46,6 +65,7 @@ type RightPanelProps = {
   onOpenTab: (tab: ActiveTab) => void
 }
 
+/** Tab-aware right-side panel router — picks the inner panel component for the active tab. */
 export function RightPanel(props: RightPanelProps) {
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
@@ -248,7 +268,7 @@ function fieldId(scope: string, label: string) {
 }
 
 /**
- * Per-node AI usage footer (ENG-012). Renders only when the selected
+ * Per-node AI usage footer. Renders only when the selected
  * `RunNode.stateJson.output` carries a usage object — i.e. the executor
  * actually ran an LLM call (the `ai` node). Reads provider/model/tokens/cost/latency
  * from the persisted output wrapper; falls back gracefully when individual
