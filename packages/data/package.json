@@ -9,6 +9,7 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
+    "@janusly/ai": "workspace:*",
     "@janusly/db": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },

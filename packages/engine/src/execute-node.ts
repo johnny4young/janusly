@@ -1,5 +1,5 @@
 import { nodeRegistry } from "./node-registry";
-import { getRunContext } from "./persistence";
+import { getRunContext, getRunOrgId } from "./persistence";
 import { redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 
@@ -10,6 +10,17 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
 
   if (!executor) {
     throw new Error(`No executor for node type: ${node.type}`);
+  }
+
+  // ENG-012: resolve org scope once per node execution so executors can
+  // attribute usage telemetry without duplicating the lookup. A missing
+  // run row is fatal — silently writing usage rows with a synthetic
+  // "default" orgId would pollute multi-tenant cost accounting (see the
+  // multi-tenant invariant in AGENTS.md). Same shape as the missing-executor
+  // throw above.
+  const orgId = await getRunOrgId(runId);
+  if (!orgId) {
+    throw new Error(`Cannot execute node: run ${runId} not found`);
   }
 
   const context = await getRunContext(runId);
@@ -24,6 +35,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
   const result = await executor({
     runId,
     nodeId: node.id,
+    orgId,
     config: resolvedConfig,
     context
   });

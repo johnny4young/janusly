@@ -22,6 +22,11 @@ import {
   resolveLlmConfig,
   type ProviderSpec,
 } from "./llm-client";
+import {
+  _resetUsageRecorderForTests,
+  setUsageRecorder,
+  type UsageRecord,
+} from "./usage-recorder";
 
 const baseUsage = { inputTokens: 10, outputTokens: 20 };
 
@@ -118,13 +123,18 @@ describe("createLlmClient — happy paths", () => {
     expect(opts.prompt).toBe("hi");
     expect(opts.maxRetries).toBe(2);
     expect(opts.abortSignal).toBeInstanceOf(AbortSignal);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       text: "hello world",
       finishReason: "stop",
       usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       provider: "openai",
       model: "gpt-4o-mini",
     });
+    // ENG-012: latencyMs always reported; costUsd computed from the default
+    // gpt-4o-mini price ($0.15/$0.60 per 1M) for (10,20) tokens.
+    expect(typeof result.latencyMs).toBe("number");
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(result.costUsd).toBeCloseTo(10 * 0.15 / 1e6 + 20 * 0.6 / 1e6, 9);
   });
 
   it("threads the openai JSON-mode option when responseFormat is 'json'", async () => {
@@ -343,5 +353,167 @@ describe("getLlmClient (memoised singleton)", () => {
     const second = getLlmClient();
     expect(first).not.toBeNull();
     expect(second).toBeNull();
+  });
+});
+
+describe("ENG-012 — usage recorder fires on success and failure", () => {
+  afterEach(() => {
+    _resetUsageRecorderForTests();
+  });
+
+  it("calls the recorder once on the happy path with full record fields", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 100, outputTokens: 50 },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateText({
+      prompt: "hi",
+      context: { orgId: "org-1", userId: "u-1", runId: "r-1", nodeId: "n-1" },
+    });
+    // Allow the void-fired recorder to settle (microtask flush).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder).toHaveBeenCalledTimes(1);
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record).toMatchObject({
+      orgId: "org-1",
+      userId: "u-1",
+      runId: "r-1",
+      nodeId: "n-1",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      mode: "ai",
+    });
+    expect(typeof record.latencyMs).toBe("number");
+    expect(record.costUsd).toBeCloseTo(100 * 0.15 / 1e6 + 50 * 0.6 / 1e6, 9);
+    expect(record.aiError).toBeUndefined();
+  });
+
+  it("calls the recorder once on the failure path with mode='fallback' + aiError", async () => {
+    generateTextMock.mockRejectedValueOnce(new Error("rate limit"));
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await expect(
+      client.generateText({ prompt: "hi", context: { orgId: "org-1" } }),
+    ).rejects.toThrow(/rate limit/);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder).toHaveBeenCalledTimes(1);
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record.mode).toBe("fallback");
+    expect(record.aiError).toBe("rate limit");
+    expect(record.provider).toBe("openai");
+    expect(record.model).toBe("gpt-4o-mini");
+    expect(typeof record.latencyMs).toBe("number");
+  });
+
+  it("records provider configuration failures before the SDK call", async () => {
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+
+    await expect(
+      client.generateText({
+        prompt: "hi",
+        modelHint: "anthropic/claude-x",
+        context: { orgId: "org-1" },
+      }),
+    ).rejects.toThrow(/anthropic.*not configured.*ANTHROPIC_API_KEY/);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(recorder).toHaveBeenCalledTimes(1);
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record).toMatchObject({
+      orgId: "org-1",
+      provider: "anthropic",
+      model: "claude-x",
+      mode: "fallback",
+      aiError: expect.stringContaining("ANTHROPIC_API_KEY"),
+    });
+  });
+
+  it("does NOT fire the recorder when context.orgId is absent", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateText({ prompt: "hi" });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(recorder).not.toHaveBeenCalled();
+  });
+
+  it("a throwing recorder NEVER breaks the LLM call (fail-open)", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    setUsageRecorder(() => {
+      throw new Error("recorder exploded");
+    });
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateText({ prompt: "hi", context: { orgId: "org-1" } });
+    expect(result.text).toBe("ok");
+  });
+
+  it("an async-rejecting recorder NEVER breaks the LLM call (fail-open)", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    setUsageRecorder(async () => {
+      throw new Error("async recorder exploded");
+    });
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    const result = await client.generateText({ prompt: "hi", context: { orgId: "org-1" } });
+    expect(result.text).toBe("ok");
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  it("records costUsd: null when the model has no price entry", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 10, outputTokens: 20 },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateText({
+      prompt: "hi",
+      modelHint: "gpt-future-9000",
+      context: { orgId: "org-1" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    const record = recorder.mock.calls[0][0] as UsageRecord;
+    expect(record.model).toBe("gpt-future-9000");
+    expect(record.costUsd).toBeNull();
   });
 });

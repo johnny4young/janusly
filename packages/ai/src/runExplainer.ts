@@ -81,6 +81,8 @@ Return a concise answer with bullet points.`;
  *
  * @param model Optional model override — bare model id or `"<provider>/<model>"` spec.
  *   When omitted, the configured default model is used.
+ * @param context Per-call telemetry context (ENG-012). Forwarded to the
+ *   abstraction so the usage recorder can attribute the row to org/run.
  */
 export async function explainRun({
   llm,
@@ -88,9 +90,11 @@ export async function explainRun({
   events,
   question,
   model,
+  context,
 }: RunExplanationInput & {
   llm?: LlmClient | null;
   model?: string;
+  context?: { orgId: string; userId?: string; runId?: string; nodeId?: string };
 }): Promise<RunExplanation> {
   if (!llm) {
     return {
@@ -103,6 +107,7 @@ export async function explainRun({
     const result = await llm.generateText({
       prompt: buildRunExplanationPrompt({ run, events, question }),
       modelHint: model,
+      context,
     });
     return {
       answer: result.text,

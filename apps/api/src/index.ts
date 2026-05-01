@@ -38,7 +38,8 @@ import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { explainRun, getLlmClient, resolveLlmConfig } from "@janusly/ai";
+import { explainRun, getLlmClient, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
+import { recordUsage } from "@janusly/data/src/usageRepo";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { requireAuth } from "./auth";
 import { isRole, requireRole } from "./permissions";
@@ -535,6 +536,7 @@ const server = http.createServer(async (req, res) => {
           prompt: promptText,
           responseFormat: "json",
           modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId },
         });
         const parsed = JSON.parse(result.text || "{}");
         const workflow = parseAiWorkflow(parsed);
@@ -567,6 +569,7 @@ const server = http.createServer(async (req, res) => {
         const result = await llm.generateText({
           prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
           modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId },
         });
         await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, explanation: result.text });
@@ -599,6 +602,7 @@ const server = http.createServer(async (req, res) => {
         run: run[0],
         events,
         question: questionText,
+        context: { orgId: auth.orgId, userId: auth.userId, runId },
       });
       await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
         mode: result.mode,
@@ -836,5 +840,9 @@ const server = http.createServer(async (req, res) => {
 });
 
 await assertMigrationsApplied();
+
+// ENG-012: register the usage_events writer once at boot. Every LLM call
+// through `getLlmClient().generateText(...)` fires it fire-and-forget.
+setUsageRecorder(recordUsage);
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));
