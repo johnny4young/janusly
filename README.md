@@ -86,6 +86,28 @@ Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `defa
 
 When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator shuts down API, worker, web, and Compose.
 
+### Use Janusly from Claude Desktop / Cursor (MCP)
+
+`packages/mcp-server` ships an MCP server that exposes five read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) over stdio. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+
+```jsonc
+{
+  "mcpServers": {
+    "janusly": {
+      "command": "pnpm",
+      "args": ["--filter", "@janusly/mcp-server", "start"],
+      "env": {
+        "JANUSLY_API_URL": "http://127.0.0.1:3001",
+        "JANUSLY_API_ORG_ID": "default",
+        "JANUSLY_API_USER_ID": "mcp-user"
+      }
+    }
+  }
+}
+```
+
+See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new (read-only) tools.
+
 ### Test commands
 
 ```bash

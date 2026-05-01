@@ -231,7 +231,7 @@ Bundled as `npx @janusly/mcp-server` or built into a compiled `mcpb` (mcp-bundle
 
 #### Roadmap
 
-1. Stand up `@janusly/mcp-server` with the read-only tools first (list, get, recipes, tools, runs).
+1. Stand up `@janusly/mcp-server` with the read-only tools first (list, get, recipes, tools, runs). Shipped in ENG-013.
 2. Add `draft_from_prompt` with the Vercel AI SDK abstraction (so chat → MCP → Vercel AI → provider).
 3. Add `save` and `validate` (write tools, gated by editor role).
 4. Add `run`, `runs.explain`, `runs.suggest_fix` (operations tools).
@@ -700,11 +700,11 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 - **DONE** — Root `pnpm dev` now brings up Compose, migrates, starts api/worker/web, and tears everything down on `Ctrl+C` or child exit in ENG-017.
 - **DONE** — OTel traces and metrics now share a Resource with `service.name`, `service.namespace`, and `service.instance.id` in ENG-022.
 - **DONE** — `pnpm evals` now runs `/ai/generate-workflow` shape checks from `evals/generate-workflow.jsonl` in ENG-018.
+- **DONE** — `@janusly/mcp-server` now exposes the five read-only MCP tools over stdio in ENG-013.
 
 Open quick wins:
 
 - Drop deprecated `@esbuild-kit/*` subdeps by tracing their parent (likely `drizzle-kit`) and updating it once a clean version ships.
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
-- Stand up `@janusly/mcp-server` skeleton with one tool (`workflows.list`) and ship it as a `pnpm --filter @janusly/mcp-server dev` workflow.
 
 These don't require strategic alignment and unblock everything later.
