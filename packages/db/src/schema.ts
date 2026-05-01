@@ -17,16 +17,15 @@
  * - `organizations`, `users`, `org_members` — multi-tenant scope.
  * - `workflows`, `workflow_versions` — versioned DAG storage.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
- *   are paginated by `(run_id, created_at)` per ENG-009).
+ *   are paginated by `(run_id, created_at)`).
  * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
- * - `usage_events` — billing telemetry (one row per LLM call once ENG-012
- *   wires it up).
+ * - `usage_events` — billing telemetry (one row per LLM call through the shared LLM recorder).
  * - `credentials`, `installed_plugins` — secret references and plugin
  *   manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive
- *   keys before insertion per ENG-006).
+ *   keys before insertion).
  *
  * Invariants:
  * - Every timestamp is `TIMESTAMPTZ` (the `withTimezone: true` option). Don't

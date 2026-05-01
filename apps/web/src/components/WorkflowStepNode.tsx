@@ -1,3 +1,11 @@
+/**
+ * Custom React Flow node renderer for Janusly steps. Per-type icon, label,
+ * config summary, and status pill. The `workflowNodeTypes` export plugs
+ * this renderer into the canvas via React Flow's `nodeTypes` prop.
+ *
+ * Used by `WorkflowCanvas.tsx`.
+ */
+
 import React from 'react'
 import { Activity, Boxes, Bot, CheckCircle2, GitBranch, Layers3, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { Handle, Position } from '@xyflow/react'
@@ -22,6 +30,7 @@ const nodeIcons: Record<string, React.ReactNode> = {
   router_llm: <Sparkles size={15} />,
 }
 
+/** Render one workflow step on the canvas with icon, label, summary, and status pill. */
 export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode>) {
   const status = data.status ?? 'pending'
   const type = data.type
@@ -45,6 +54,7 @@ export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode
   )
 }
 
+/** Map of React Flow `nodeTypes` — one entry, registered as `default`. */
 export const workflowNodeTypes = {
   workflowStep: WorkflowStepNode,
 }

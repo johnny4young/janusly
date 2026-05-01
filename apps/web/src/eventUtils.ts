@@ -1,5 +1,15 @@
+/**
+ * Pure helpers for the Multi-agent timeline + Reasoning panel: dedupe
+ * events, project to display shape, and summarise run status from node
+ * states. No I/O — used by both panels and the store reducer.
+ *
+ * Used by `MultiAgentTimeline.tsx`, `components/RightPanel.tsx:ReasoningPanel`,
+ * and `store.ts` (`bumpPlatformVersion` after merging an events page).
+ */
+
 import type { ReasoningMessage, RunEvent } from './types'
 
+/** Dedupe a `RunEvent[]` by id (or composite key when id is missing). Stable order. */
 export function uniqueEvents(events: RunEvent[]): RunEvent[] {
   const seen = new Set<string>()
   return events.filter(event => {
@@ -10,6 +20,7 @@ export function uniqueEvents(events: RunEvent[]): RunEvent[] {
   })
 }
 
+/** Project a single `RunEvent` to a `ReasoningMessage` for the Reasoning panel; returns `null` for events the panel ignores. */
 export function toReasoningMessage(event: RunEvent): ReasoningMessage | null {
   const payload = event.payload ?? {}
 
@@ -43,6 +54,7 @@ export function toReasoningMessage(event: RunEvent): ReasoningMessage | null {
   return null
 }
 
+/** Aggregate per-node statuses into completed / waiting / failed counts for the run header chip. */
 export function summarizeRunStatus(nodes: Array<{ status: string }>): {
   total: number
   succeeded: number

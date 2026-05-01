@@ -1,8 +1,16 @@
+/**
+ * User dropdown — shows the current user/org, lets the user switch org
+ * (Supabase mode) or sign out. Closes on outside-click via a ref.
+ *
+ * Used by `App.tsx` (top-bar header).
+ */
+
 import React, { useEffect, useRef, useState } from 'react'
 import { ChevronDown, LogOut } from 'lucide-react'
 import { AuthProvider, isSupabaseConfigured } from '../auth'
 import { useWorkflowStore } from '../store'
 
+/** Render the user-info chip with org-switch + sign-out actions. */
 export function UserMenu() {
   const user = useWorkflowStore(state => state.user)
   const userId = useWorkflowStore(state => state.userId)

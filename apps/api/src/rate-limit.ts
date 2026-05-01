@@ -1,5 +1,26 @@
+/**
+ * Redis-backed rate limiter. Counts hits per `(name, key)` in a
+ * sliding window via `INCR` + `PEXPIRE NX`; throws 429 (`HttpError`) when
+ * the count exceeds `max`. Fails OPEN on Redis errors with a `[rate-limit]`
+ * warn — an AI Studio outage during a Redis blip is worse UX than a brief
+ * over-limit window. The DI seam (`createRateLimiter(client)`) lets tests
+ * inject a fake without opening a real Redis connection.
+ *
+ * Used by `apps/api/src/index.ts` `/ai/*` routes (per-org limits) and any
+ * other surface that wants to gate by org / user.
+ *
+ * Invariants:
+ * - **Fail open** on Redis errors (AGENTS.md). Don't change to fail-closed
+ *   without wide signoff — it converts cache outages into product outages.
+ * - `PEXPIRE` uses `NX` so the window doesn't extend when the key was
+ *   already created and TTL'd by a prior INCR.
+ * - Production wiring is lazy (`getProductionRateLimiter`) so importing
+ *   this module doesn't open a Redis connection as a side effect.
+ */
+
 import { httpError } from "./http";
 
+/** Per-call rate-limit configuration. `name` namespaces the Redis key, `windowMs` is the window length. */
 export type RateLimitOptions = {
   name: string;
   windowMs: number;
@@ -9,6 +30,7 @@ export type RateLimitOptions = {
 // The narrow subset of ioredis methods the limiter uses. Lets tests pass a
 // fake without instantiating a real client and keeps the production wiring
 // trivially substitutable in the future.
+/** Subset of ioredis methods the limiter calls. Tests inject a fake without instantiating a real client. */
 export type RateLimitClient = {
   incr(key: string): Promise<number>;
   pexpire(key: string, ms: number, mode?: "NX" | "XX" | "GT" | "LT"): Promise<number>;
@@ -17,6 +39,11 @@ export type RateLimitClient = {
 
 const KEY_PREFIX = "janusly:rate";
 
+/**
+ * Bind a `RateLimitClient` and return the closure every route calls.
+ * Failures within the closure either throw 429 (over limit) or warn-and-
+ * return (Redis error → fail open).
+ */
 export function createRateLimiter(client: RateLimitClient) {
   return async function enforceRateLimit(key: string, options: RateLimitOptions): Promise<void> {
     const windowKey = `${KEY_PREFIX}:${options.name}:${key}`;
@@ -69,6 +96,7 @@ async function getProductionRateLimiter() {
 
 // Production wiring is lazy so tests importing `createRateLimiter` can use a
 // fake client without opening a real Redis connection as an import side effect.
+/** Production rate-limit gate — lazily resolves the singleton against `./redis.ts`. */
 export async function enforceRateLimit(key: string, options: RateLimitOptions): Promise<void> {
   const limiter = await getProductionRateLimiter();
   await limiter(key, options);

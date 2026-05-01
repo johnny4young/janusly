@@ -27,7 +27,7 @@
  *   Compose-lifecycle helpers. Don't drift this away from that one.
  * - Always runs `docker compose down` on exit (AGENTS.md Compose lifecycle).
  * - Runs `pnpm migrate` between Compose-up and api/worker boot — preserves
- *   the ENG-008 invariant that api/worker call `assertMigrationsApplied()`
+ *   the invariant that api/worker call `assertMigrationsApplied()`
  *   and refuse to boot otherwise.
  */
 

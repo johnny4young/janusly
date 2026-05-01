@@ -1,3 +1,17 @@
+/**
+ * `ExecutionStore` implementation backed by Postgres via Drizzle. Thin
+ * pass-through to the function-style helpers in `../persistence.ts`; the
+ * adapter exists so `core/runtime.ts` can be tested with an in-memory
+ * substitute without taking a Drizzle dep.
+ *
+ * Used by `worker.ts` (and any future runtime caller wanting Postgres
+ * persistence).
+ *
+ * Invariants:
+ * - `tryClaimNodeForQueue` is the atomic claim path. Don't
+ *   reintroduce a non-atomic `markNodeQueued` for the same caller.
+ */
+
 import {
   appendEvent,
   getRunContext,
@@ -14,6 +28,7 @@ import {
 import { getNodeStatus } from "../get-node-status";
 import type { ExecutionStore, NodeStatus, RunStatus, SerializedError, WorkflowEvent } from "../core/types";
 
+/** `ExecutionStore` implementation that delegates to `../persistence.ts`. */
 export class PostgresExecutionStore implements ExecutionStore {
   getRunContext(runId: string) {
     return getRunContext(runId);

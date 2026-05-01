@@ -13,7 +13,7 @@
  * Invariants:
  * - One transaction; all inserts succeed or none do.
  * - Distinct `run.started` vs `run.started.adhoc` audit events depending on
- *   whether the workflow was persisted (ENG-005). The split keeps audit
+ *   whether the workflow was persisted. The split keeps audit
  *   readers honest about which runs came from saved DAGs.
  */
 

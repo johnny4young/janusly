@@ -1,3 +1,15 @@
+/**
+ * Org members panel — invite by email + role, change a member's role,
+ * remove a member. Calls `bumpPlatformVersion()` after every mutation so
+ * cross-panel state (RBAC checks elsewhere) refetches.
+ *
+ * Used by `RightPanel.tsx` (the `members` tab).
+ *
+ * Invariants:
+ * - The role list `viewer | editor | admin` matches `apps/api/src/permissions.ts`.
+ *   Don't drift one without the other.
+ */
+
 import React, { useCallback, useEffect, useState } from 'react'
 import { Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
@@ -13,6 +25,7 @@ const roleCopy: Record<OrgRole, string> = {
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/** Render the members list with invite form + per-row role / remove controls. */
 export function MembersPanel() {
   const addToast = useWorkflowStore(state => state.addToast)
   const [members, setMembers] = useState<OrgMember[]>([])

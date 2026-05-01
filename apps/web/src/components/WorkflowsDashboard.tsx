@@ -1,9 +1,18 @@
+/**
+ * Saved-workflows list — calls `/workflows` and renders each as an
+ * openable row. Re-fetches on `platformVersion` changes (cross-panel
+ * reactivity hook from AGENTS.md).
+ *
+ * Used by `RightPanel.tsx` (the `workflows` tab).
+ */
+
 import React, { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 
+/** Render the saved-workflows list with click-to-open + manual refresh. */
 export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)

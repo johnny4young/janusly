@@ -1,6 +1,15 @@
+/**
+ * Dead-letter operations panel — surfaces `dead_letters` rows with replay
+ * + resolve actions. Calls `bumpPlatformVersion()` after a successful
+ * replay so the Runs panel re-fetches and the row's status flips.
+ *
+ * Used by `RightPanel.tsx` (`runs` tab → Operations card).
+ */
+
 import React, { useMemo, useState } from 'react'
 import { formatStatusLabel } from '../constants'
 
+/** Web-side `dead_letters` row shape (matches the API's response). */
 export type DeadLetter = {
   id: string
   runId: string
@@ -30,6 +39,7 @@ const statusLabels: Record<DeadLetterStatusFilter, string> = {
   resolved: 'Resolved',
 }
 
+/** Render the DLQ list with status filter, replay, and resolve controls. */
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)

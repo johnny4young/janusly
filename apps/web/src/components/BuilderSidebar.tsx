@@ -1,3 +1,11 @@
+/**
+ * Left-rail sidebar — workflow name input, primary actions (Validate /
+ * Save / Run), tab navigation that opens panels in `RightPanel`, and the
+ * "Add step" shortcut grid.
+ *
+ * Used by `App.tsx`.
+ */
+
 import React from 'react'
 import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, Database, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { nodeTypes, nodeUi } from '../constants'
@@ -44,6 +52,7 @@ const navItems: Array<{ tab: ActiveTab; label: string; helper: string; icon: Rea
   { tab: 'credentials', label: 'Connections', helper: 'Secrets by reference', icon: <KeyRound size={15} /> },
 ]
 
+/** Render the left-rail sidebar with name + actions + tab nav + node palette. */
 export function BuilderSidebar({
   activeTab,
   aiHealth,

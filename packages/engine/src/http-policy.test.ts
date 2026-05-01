@@ -66,9 +66,9 @@ describe("HTTP target policy", () => {
   it("pins the resolved IP for the connect, defeating a public-then-private DNS rebinding", async () => {
     // The TOCTOU scenario: an attacker controls DNS so that the validation
     // lookup returns a public IP and the connect-time lookup would return a
-    // private IP (e.g. 127.0.0.1, AWS metadata 169.254.169.254). With ENG-021
-    // the agent's pinned lookup must return the public IP it was constructed
-    // with, regardless of any subsequent DNS shift.
+    // private IP (e.g. 127.0.0.1, AWS metadata 169.254.169.254). With the
+    // pinned dispatcher, the agent's pinned lookup must return the public IP
+    // it was constructed with, regardless of any subsequent DNS shift.
     vi.stubEnv("ALLOW_PRIVATE_HTTP_TARGETS", "false");
     lookupMock.mockResolvedValueOnce([{ address: "203.0.113.10", family: 4 }] as never);
 

@@ -1,3 +1,19 @@
+/**
+ * OpenTelemetry tracer bootstrap. Side-effect-only module — importing
+ * registers the `NodeTracerProvider` globally so any `metrics.getMeter` /
+ * `trace.getTracer` call throughout the runtime picks up the same provider.
+ *
+ * Used by `tracer.ts` (which `import "./otel"`s for the side effect) and
+ * indirectly by anything that calls `trace.getTracer("janusly")`.
+ *
+ * Invariants:
+ * - The shared `janusResource` carries `service.name="janusly"`,
+ *   `service.namespace="janusly"`, and `service.instance.id`. Don't
+ *   reconstruct the resource here — reuse `./resource.ts`.
+ * - `OTEL_EXPORTER=jaeger` toggles the production-style exporter; default
+ *   is the console exporter for local development.
+ */
+
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { SimpleSpanProcessor, ConsoleSpanExporter } from "@opentelemetry/sdk-trace-base";
 import { JaegerExporter } from "@opentelemetry/exporter-jaeger";

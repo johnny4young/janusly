@@ -1,7 +1,27 @@
+/**
+ * Retry policy evaluator. Pure logic — no I/O. Maps a serialized error to a
+ * set of label strings (HTTP status, error name/code, "timeout", "network")
+ * and decides whether a `RetryPolicy` should retry it, plus the next delay.
+ *
+ * Used by `core/runtime.ts` after each node-executor failure and by
+ * `BullMQQueueAdapter` to wire BullMQ's per-job retry config.
+ *
+ * Invariants:
+ * - `shouldRetry` returns `false` when no policy is configured — callers
+ *   that want a default policy must construct one explicitly.
+ * - The HTTP-status pattern is `\dxx` (e.g. `5xx` matches 500–599); don't
+ *   add looser patterns without updating the pattern matcher.
+ */
+
 import type { RetryPolicy, SerializedError } from "./types";
 
 const HTTP_STATUS_PATTERN = /^(\d)xx$/;
 
+/**
+ * Convert a serialized error into label strings used for retry-policy
+ * pattern matching: HTTP status code (`"500"`), status family (`"5xx"`),
+ * error name / code, and the synthetic `"timeout"` / `"network"` flags.
+ */
 export function classifyError(error: SerializedError): string[] {
   const labels = new Set<string>();
 
@@ -30,6 +50,11 @@ function matchesPattern(label: string, pattern: string): boolean {
   return label.startsWith(match[1]) && label.length === 3;
 }
 
+/**
+ * Decide whether `error` should trigger a retry under `policy`. Returns
+ * `false` when no policy is supplied; otherwise honours `ignoreOn` first,
+ * then `retryOn` (default: retry everything not ignored).
+ */
 export function shouldRetry(error: SerializedError, policy?: RetryPolicy): boolean {
   if (!policy) return false;
 
@@ -46,6 +71,11 @@ export function shouldRetry(error: SerializedError, policy?: RetryPolicy): boole
   return policy.retryOn.some((pattern) => labels.some((label) => matchesPattern(label, pattern)));
 }
 
+/**
+ * Compute the delay (ms) before the next retry attempt. Supports
+ * exponential backoff (`base * 2^(attempt-1)`), a hard cap (`maxDelayMs`),
+ * and full jitter (sample uniformly in `[delay/2, delay]`).
+ */
 export function computeRetryDelay(attempt: number, policy?: RetryPolicy): number {
   if (!policy) return 0;
 
