@@ -1,0 +1,38 @@
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { describe, expect, it } from "vitest";
+
+const packageDir = fileURLToPath(new URL("..", import.meta.url));
+
+describe("MCP stdio server", () => {
+  it("initializes and lists the read-only tools over stdio", async () => {
+    const transport = new StdioClientTransport({
+      command: "pnpm",
+      args: ["start"],
+      cwd: packageDir,
+      stderr: "pipe",
+    });
+    const client = new Client(
+      { name: "janusly-mcp-smoke", version: "0.0.0" },
+      { capabilities: {} },
+    );
+
+    try {
+      await client.connect(transport);
+      expect(client.getServerCapabilities()?.tools).toBeDefined();
+
+      const result = await client.listTools();
+      const names = result.tools.map((tool) => tool.name).sort();
+      expect(names).toEqual([
+        "recipes.list",
+        "runs.get",
+        "tools.list",
+        "workflows.get",
+        "workflows.list",
+      ]);
+    } finally {
+      await client.close();
+    }
+  }, 15_000);
+});
