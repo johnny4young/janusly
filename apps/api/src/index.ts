@@ -21,10 +21,11 @@
  *   200/500 with a composite cursor (ENG-009).
  * - Rate limiter: AI surfaces gate on Redis-backed `enforceRateLimit`
  *   (ENG-019, fails open with `[rate-limit]` warn on Redis errors).
- * - `parseAiWorkflow` keeps a "looser" pre-pass that coerces wrong-typed
- *   ids and drops invalid edge/condition expressions before Zod parses,
- *   so the LLM's near-misses still validate. Don't remove the looser
- *   without first migrating the call sites to `generateObject` (ENG-014).
+ * - `/ai/generate-workflow` calls `llm.generateObject({ schema: WorkflowSchema })`
+ *   (ENG-014) so the model returns a typed workflow directly. The post-Zod
+ *   `sanitizeAiWorkflow` step still filters edge `condition` strings and
+ *   `condition`-node expressions through `validateExpression` — keep it,
+ *   since Zod's `z.string()` is looser than the engine's grammar.
  * - Audit logs: every mutation writes a row with a stable `action` string;
  *   AI mutations write audit on success AND on fallback (ENG-005/ENG-006).
  */
@@ -57,7 +58,7 @@ import {
   orgMembers,
 } from "@janusly/db";
 import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
-import { NodeSchema, WorkflowSchema } from "@janusly/shared";
+import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import {
   getDeadLetter,
   listDeadLetters,
@@ -95,9 +96,9 @@ const dlqReplay = new DLQReplayAdapter();
  * System prompt for `/ai/generate-workflow`. Joined with `"\n"` so the
  * provider-neutral `LlmClient.generateText` accepts it as a single string
  * (the AI SDK collapses `system` + `prompt` into the right wire format per
- * provider). The grammar listed here is intentionally narrow — `looseAiWorkflow`
- * + `parseAiWorkflow` recover from near-misses; ENG-014 will replace both
- * with `generateObject({ schema: WorkflowSchema })`.
+ * provider). The grammar listed here is intentionally narrow — the AI SDK's
+ * structured-output path enforces shape, and `sanitizeAiWorkflow` filters
+ * grammar-invalid edge / condition expressions post-validation.
  */
 const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
@@ -149,58 +150,22 @@ function aiStatus() {
   };
 }
 
-function looseAiWorkflow(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") return payload;
-  const root = payload as Record<string, unknown>;
-
-  const nodes = Array.isArray(root.nodes) ? root.nodes.map((node) => {
-    if (!node || typeof node !== "object") return node;
-    const n = { ...(node as Record<string, unknown>) };
-    if (n.id != null && typeof n.id !== "string") n.id = String(n.id);
-    if (n.config && typeof n.config === "object" && !Array.isArray(n.config)) {
-      const cfg = n.config as Record<string, unknown>;
-      if (n.type === "condition" && cfg.expression != null && typeof cfg.expression !== "string") {
-        cfg.expression = String(cfg.expression);
-      }
-    } else if (n.config == null) {
-      n.config = {};
-    }
-    return n;
-  }) : root.nodes;
-
-  const edges = Array.isArray(root.edges) ? root.edges.map((edge) => {
-    if (!edge || typeof edge !== "object") return edge;
-    const e = { ...(edge as Record<string, unknown>) };
-    if (e.from != null && typeof e.from !== "string") e.from = String(e.from);
-    if (e.to != null && typeof e.to !== "string") e.to = String(e.to);
-    // The LLM sometimes emits booleans/numbers for condition. Drop anything that
-    // isn't a non-empty string — the workflow will still run unconditionally.
-    if (e.condition != null && (typeof e.condition !== "string" || !e.condition.trim())) {
-      delete e.condition;
-    }
-    return e;
-  }) : root.edges;
-
-  return { ...root, nodes, edges };
-}
-
-function parseAiWorkflow(payload: unknown) {
-  const loosened = looseAiWorkflow(payload);
-  const parsed = WorkflowSchema.safeParse(loosened);
-  if (!parsed.success) {
-    throw httpError(`AI returned an invalid workflow: ${parsed.error.issues.map(issue => issue.message).join(", ")}`, 502);
-  }
-
-  // Sanitize: LLMs often emit edge conditions or `condition` node expressions
-  // that use template syntax (`{{...}}`) or bare identifiers our grammar
-  // doesn't accept. Replace invalid expressions with safe defaults so the
-  // workflow still validates and runs — matching the LLM's intent better than
-  // failing the whole draft.
-  const sanitizedEdges = parsed.data.edges.map((edge) => {
+/**
+ * Post-Zod sanitization for `/ai/generate-workflow` (ENG-014). The LLM-emitted
+ * workflow has already been validated against `WorkflowSchema` by the AI SDK's
+ * structured-output path; this step only filters edge `condition` strings and
+ * `condition`-node expressions through `validateExpression` (Janusly's limited
+ * grammar). Without this, valid-shaped-but-grammar-invalid expressions would
+ * crash at runtime instead of being silently dropped or normalised. The
+ * `looseAiWorkflow` shape-coercer was retired here when ENG-014 swapped the
+ * route to `generateObject({ schema: WorkflowSchema })`.
+ */
+function sanitizeAiWorkflow(workflow: Workflow): Workflow {
+  const sanitizedEdges = workflow.edges.map((edge) => {
     if (!edge.condition) return edge;
     return validateExpression(edge.condition).valid ? edge : { ...edge, condition: undefined };
   });
-  const sanitizedNodes = parsed.data.nodes.map((node) => {
+  const sanitizedNodes = workflow.nodes.map((node) => {
     if (node.type !== "condition") return node;
     const expression = node.config && typeof (node.config as { expression?: unknown }).expression === "string"
       ? String((node.config as { expression: string }).expression)
@@ -210,7 +175,7 @@ function parseAiWorkflow(payload: unknown) {
     }
     return node;
   });
-  const sanitized = { ...parsed.data, nodes: sanitizedNodes, edges: sanitizedEdges };
+  const sanitized = { ...workflow, nodes: sanitizedNodes, edges: sanitizedEdges };
 
   const validation = validateWorkflow(sanitized);
   if (!validation.valid) {
@@ -531,15 +496,22 @@ const server = http.createServer(async (req, res) => {
         });
       }
       try {
-        const result = await llm.generateText({
+        // ENG-014: schema-aware generation. The AI SDK plumbs `WorkflowSchema`
+        // through each provider's structured-output capability and validates
+        // the response. The shape-coercing `looseAiWorkflow` pre-pass that
+        // existed before this is gone — schema enforcement is now real.
+        // Failures (LLM emits non-conformant JSON) throw inside the SDK and
+        // flow through the existing try/catch into the fallback contract.
+        const result = await llm.generateObject<Workflow>({
+          schema: WorkflowSchema,
+          schemaName: "JanuslyWorkflow",
+          schemaDescription: "Workflow DAG for /ai/generate-workflow.",
           system: GENERATE_WORKFLOW_SYSTEM_PROMPT,
           prompt: promptText,
-          responseFormat: "json",
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId },
         });
-        const parsed = JSON.parse(result.text || "{}");
-        const workflow = parseAiWorkflow(parsed);
+        const workflow = sanitizeAiWorkflow(result.object);
         await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: result.model, provider: result.provider });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
       } catch (err) {

@@ -24,6 +24,8 @@ export {
   type LlmClient,
   type LlmGenerateTextInput,
   type LlmGenerateTextResult,
+  type LlmGenerateObjectInput,
+  type LlmGenerateObjectResult,
   type ProviderSpec,
   type ResolvedLlmConfig,
 } from "./llm-client";

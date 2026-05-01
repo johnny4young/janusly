@@ -37,7 +37,7 @@
  *   intentionally underscore-prefixed; production code must never call them.
  */
 
-import { generateText as aiGenerateText, type LanguageModel } from "ai";
+import { generateText as aiGenerateText, Output, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { computeCostUsd, getModelPrice } from "./pricing";
@@ -146,9 +146,69 @@ export type LlmGenerateTextResult = {
   costUsd?: number | null;
 };
 
+/**
+ * Input accepted by `LlmClient.generateObject` (ENG-014). Mirrors
+ * `LlmGenerateTextInput` but locks the model output to a typed object that
+ * conforms to `schema`. The provider's structured-output surface (OpenAI's
+ * `response_format: json_schema`, Anthropic's tool-use trick) handles the
+ * wire format, so the `responseFormat` JSON-mode hint isn't applicable.
+ */
+export type LlmGenerateObjectInput<T> = {
+  /** Optional system prompt — combined with `prompt` per the AI SDK contract. */
+  system?: string;
+  /** User prompt body. Required. */
+  prompt: string;
+  /** Required Zod schema (or any `FlexibleSchema`) the model must conform to. */
+  schema: Parameters<typeof Output.object<T>>[0]["schema"];
+  /** Optional name surfaced to the model for some providers' guidance. */
+  schemaName?: string;
+  /** Optional description surfaced to the model for some providers' guidance. */
+  schemaDescription?: string;
+  /** Same `bare-id` or `"<provider>/<model>"` semantics as `generateText`. */
+  modelHint?: string;
+  /** Same telemetry context shape as `generateText` (ENG-012 recorder). */
+  context?: {
+    orgId: string;
+    userId?: string;
+    runId?: string;
+    nodeId?: string;
+  };
+};
+
+/** Result of `LlmClient.generateObject<T>` (ENG-014). */
+export type LlmGenerateObjectResult<T> = {
+  /** The typed, schema-validated object the model emitted. */
+  object: T;
+  /** AI SDK's finish reason (`"stop" | "length" | …`). */
+  finishReason?: string;
+  /** Token usage (passthrough from the AI SDK). */
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  /** Resolved provider name (registry key). */
+  provider: string;
+  /** Resolved model id. */
+  model: string;
+  /** Wall-clock latency from the abstraction's POV (ms). */
+  latencyMs: number;
+  /** Cost in USD; null when no price entry exists for the model. */
+  costUsd?: number | null;
+};
+
 /** The single capability every AI surface depends on. */
 export type LlmClient = {
   generateText(input: LlmGenerateTextInput): Promise<LlmGenerateTextResult>;
+  /**
+   * Schema-aware generation (ENG-014). The model is asked to emit an object
+   * that conforms to `input.schema`; the AI SDK's `Output.object()` plumbs
+   * the JSON Schema through each provider's structured-output capability and
+   * validates the response. Throws when the model emits something the schema
+   * rejects — caller's outer try/catch maps to `{ mode: "fallback", aiError }`
+   * (AGENTS.md fallback contract).
+   */
+  generateObject<T>(input: LlmGenerateObjectInput<T>): Promise<LlmGenerateObjectResult<T>>;
 };
 
 /** Output of `resolveLlmConfig` — fully-defaulted, provider-agnostic. */
@@ -299,6 +359,107 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
 
       return {
         text: aiResult.text ?? "",
+        finishReason: aiResult.finishReason,
+        usage,
+        provider: providerName,
+        model: modelId,
+        latencyMs,
+        costUsd,
+      };
+    },
+
+    async generateObject<T>(input: LlmGenerateObjectInput<T>): Promise<LlmGenerateObjectResult<T>> {
+      // Same provider/model resolution + recorder fire as `generateText` —
+      // the schema-aware path differs only in the SDK call itself.
+      const [overrideProvider, overrideModel] = parseModelSpec(input.modelHint);
+      const providerName = overrideProvider ?? cfg.provider;
+      const spec = PROVIDERS[providerName];
+      const modelId =
+        overrideModel ?? cfg.defaultModels[providerName] ?? spec?.defaultModel ?? "unknown";
+
+      const startedAt = Date.now();
+      let aiResult: Awaited<ReturnType<typeof aiGenerateText>>;
+      try {
+        if (!spec) throw new Error(`unknown provider '${providerName}'`);
+        const buildModel = factoryFor(providerName);
+        aiResult = await aiGenerateText({
+          model: buildModel(modelId),
+          system: input.system,
+          prompt: input.prompt,
+          maxRetries: cfg.maxRetries,
+          abortSignal: AbortSignal.timeout(cfg.timeoutMs),
+          // `Output.object({ schema })` plumbs the JSON Schema through the
+          // provider's structured-output capability and validates the
+          // response. Schema rejection throws here — caller's try/catch
+          // degrades to fallback per AGENTS.md.
+          experimental_output: Output.object({
+            schema: input.schema,
+            name: input.schemaName,
+            description: input.schemaDescription,
+          }),
+        });
+      } catch (error) {
+        const latencyMs = Date.now() - startedAt;
+        void fireUsageRecorder({
+          context: input.context,
+          provider: providerName,
+          model: modelId,
+          latencyMs,
+          mode: "fallback",
+          aiError: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
+      const latencyMs = Date.now() - startedAt;
+      const usage = aiResult.usage
+        ? {
+            inputTokens: aiResult.usage.inputTokens,
+            outputTokens: aiResult.usage.outputTokens,
+            totalTokens:
+              (aiResult.usage.inputTokens ?? 0) + (aiResult.usage.outputTokens ?? 0) || undefined,
+          }
+        : undefined;
+      const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
+
+      // The AI SDK exposes the typed payload at `experimental_output` (and
+      // also at `output` once the API stabilises). Read both so minor-version
+      // bumps don't break the abstraction; throw before the success recorder
+      // fires if neither is present.
+      const obj =
+        (aiResult as { experimental_output?: T }).experimental_output ??
+        (aiResult as { output?: T }).output;
+      if (obj === undefined) {
+        const error = new Error("generateObject: SDK did not return a parsed output (schema rejected)");
+        void fireUsageRecorder({
+          context: input.context,
+          provider: providerName,
+          model: modelId,
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          totalTokens: usage?.totalTokens,
+          latencyMs,
+          costUsd,
+          mode: "fallback",
+          aiError: error.message,
+        });
+        throw error;
+      }
+
+      void fireUsageRecorder({
+        context: input.context,
+        provider: providerName,
+        model: modelId,
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        totalTokens: usage?.totalTokens,
+        latencyMs,
+        costUsd,
+        mode: "ai",
+      });
+
+      return {
+        object: obj as T,
         finishReason: aiResult.finishReason,
         usage,
         provider: providerName,
