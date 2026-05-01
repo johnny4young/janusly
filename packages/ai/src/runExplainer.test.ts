@@ -74,7 +74,7 @@ describe("explainRun", () => {
       provider: "openai",
       latencyMs: 10,
     });
-    const llm: LlmClient = { generateText };
+    const llm: LlmClient = { generateText, generateObject: vi.fn() };
 
     const result = await explainRun({
       run: { id: "run_1" },
@@ -103,7 +103,7 @@ describe("explainRun", () => {
       provider: "anthropic",
       latencyMs: 5,
     });
-    const llm: LlmClient = { generateText };
+    const llm: LlmClient = { generateText, generateObject: vi.fn() };
 
     const result = await explainRun({
       run: {},
@@ -122,7 +122,7 @@ describe("explainRun", () => {
     const generateText = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("quota exceeded"), { status: 429 }));
-    const llm: LlmClient = { generateText };
+    const llm: LlmClient = { generateText, generateObject: vi.fn() };
 
     const result = await explainRun({
       run: {},
@@ -137,7 +137,7 @@ describe("explainRun", () => {
 
   it("falls back when the abstraction throws an 'unknown provider' error from a bad spec", async () => {
     const generateText = vi.fn().mockRejectedValue(new Error("unknown provider 'bogus'"));
-    const llm: LlmClient = { generateText };
+    const llm: LlmClient = { generateText, generateObject: vi.fn() };
 
     const result = await explainRun({ run: {}, events: [], llm, model: "bogus/foo" });
 
