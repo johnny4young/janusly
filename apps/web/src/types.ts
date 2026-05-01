@@ -35,7 +35,7 @@ export type RunSummary = { id: string; orgId?: string; workflowVersionId?: strin
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
 export type AiMode = 'ai' | 'fallback' | 'error'
-export type AiHealth = { enabled: boolean; model: string; timeoutMs: number; maxRetries: number }
+export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent'
 export type WorkflowDefinition = {
   id?: string
