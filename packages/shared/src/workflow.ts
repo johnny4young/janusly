@@ -55,6 +55,7 @@ export const nodeTypeValues = [
   "webhook",
   "approval",
   "noop",
+  "subworkflow",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

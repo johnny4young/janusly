@@ -59,7 +59,8 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     nodeId: node.id,
     orgId,
     config: resolvedConfig,
-    context
+    context,
+    redactedValues,
   });
 
   if (result.status === "waiting") {

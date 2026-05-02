@@ -486,6 +486,16 @@ function QuickConfigEditor({
     )
   }
 
+  if (type === 'subworkflow') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField scope={nodeId} label="Workflow id" value={readConfigString(config, 'workflowId')} onChange={value => patch({ workflowId: value })} />
+        <JsonConfigField scope={nodeId} label="Override input (optional)" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+      </section>
+    )
+  }
+
   if (type === 'loop') {
     return (
       <section className="quick-config">

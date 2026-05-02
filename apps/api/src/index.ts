@@ -1,12 +1,12 @@
 /**
- * Janusly API — plain Node `http.createServer` with a routed `if/else if`
- * chain over `(req.method, req.url)`. No Express, no Fastify, no tRPC (the
- * tRPC stub is intentionally deleted per AGENTS.md; don't reintroduce it).
+ * Janusly API — plain Node `http.createServer` with a typed route registry.
+ * No Express, no Fastify, no tRPC (the tRPC stub is intentionally deleted
+ * per AGENTS.md; don't reintroduce it).
  *
  * Boot sequence:
  *   1. `assertMigrationsApplied()` — fail-fast on an unmigrated DB.
- *   2. Per-request: `requireAuth` → route dispatch → `requireRole` (per
- *      mutation) → handler.
+ *   2. Per-request: route registry match → `requireAuth` → route-declared
+ *      `requireRole` → handler.
  *   3. AI surfaces route through the provider-neutral `getLlmClient()` from
  *      `@janusly/ai` and wrap the call in try/catch, degrading to
  *      `{ mode: "fallback", aiError, ... }` (AGENTS.md AI-fallback contract).
@@ -39,6 +39,7 @@ import { cancelRun } from "@janusly/engine/src/persistence";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
+import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { explainRun, getLlmClient, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
@@ -122,6 +123,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- loop: { items: string|array, mapping?: object }",
   "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
   "- router_llm: { candidates: Array<{id}> }",
+  "- subworkflow: { workflowId: string, input?: object } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
   "  - numbers, single/double-quoted strings, null",
