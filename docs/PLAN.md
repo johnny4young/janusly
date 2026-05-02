@@ -425,7 +425,7 @@ The `improvementEngine` already computes confidence and triggers rollback. Exten
 
 ## 8. Tool catalog expansion
 
-The current 3 native tools are toy. Without expanding the catalog, the LLM-drafted workflows can't actually do business work. Strategy:
+The native tool catalog is the bridge between LLM-drafted workflows and useful business automation. Strategy:
 
 **Layer 1: native essentials** (build in-tree).
 - `http.request` — already there.
@@ -472,6 +472,10 @@ input + output schemas. `validateToolInput` now pre-flights through
 returning, and `listTools()` derives the AI Studio metadata from the schema.
 The next step is provider tool-call integration (ENG-011/ENG-014), not another
 manual registry rewrite.
+
+### §8.0 Status Update
+
+ENG-035 shipped the first native expansion in-tree: text transforms, JSON set/merge/jq, CSV parse/stringify/filter, time parse/format/diff/add, and crypto hash/HMAC/UUID helpers are now registered with Zod input/output schemas. The remaining gap in this section is no longer another manual registry rewrite; it is wiring these definitions into provider-native tool-call APIs and adding stateful or SaaS tools behind explicit credentials/audit.
 
 ```ts
 const httpRequestTool = defineTool({
