@@ -50,6 +50,20 @@ DLQ via the queue adapter ensures every retry-exhausted job lands in `dead_lette
 
 The SIGTERM/SIGINT handler drains in-flight jobs. Without it, a container restart leaves jobs in `running` state forever (no worker reaps them, BullMQ lock expires but the row still says `running`).
 
+## API routing (Open/Closed)
+
+**What:**
+
+- Every HTTP route on `apps/api/src/index.ts` is one entry in the exported `routes: Route[]` array. The `http.createServer` dispatcher iterates the array (first-match-wins), runs `requireAuth` + `requireRole` based on the route's declared shape, and invokes the handler. `Route` types live in `apps/api/src/routes.ts`.
+- Don't reintroduce inline `if (req.method === "POST" && req.url === "/x") { ... }` branches outside the registry. New routes plug in via `routes.push({...})` (or by appending to the literal at source); the dispatch loop is closed for modification.
+- Per-row multi-tenant scope still lives inside each handler — the dispatcher only handles auth + RBAC.
+
+**Why:**
+
+The dispatcher used to be 33 if/else branches in one giant function. Phase 2 will add 11+ more routes (one per ENG-030..ENG-040 sub-ticket that exposes API surface). Linear extension is unmaintainable; the registry plus a closed dispatcher (Open/Closed, the "O" in SOLID) lets new routes plug in without touching the dispatch loop. ENG-029 (run cancellation) was the first new route to land as a single object literal — that's the working proof of the contract.
+
+**Risk if violated:** dispatcher drift accumulates per ticket; a typo in a new if-branch silently disables a route; auth/RBAC enforcement diverges between branches; `index.ts` becomes unauditable again.
+
 ## OpenTelemetry resource
 
 **What:**

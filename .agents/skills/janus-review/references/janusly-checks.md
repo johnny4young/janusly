@@ -129,3 +129,15 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 **Why:** Doc sync is what keeps `docs/ROADMAP.md` reliable as a ticket pool — if Status flips drift behind reality, the next `janus-ship` invocation picks the wrong tickets. Planning leaking into README means two sources of truth that drift. The split (operational in AGENTS.md, tactical in ROADMAP, strategic in PLAN, descriptive in README) breaks down quickly without enforcement.
 
 **Action:** FIX INLINE when a required doc-sync edit is missing. It is a docs edit, not a code change.
+
+## o. API routing (Open/Closed)
+
+**What:**
+
+- New HTTP routes register as entries in the `routes: Route[]` array exported from `apps/api/src/index.ts`. The dispatcher iterates the array (first-match-wins) and runs `requireAuth` + `requireRole` based on the route's declared shape — handlers don't call them inline.
+- `Route` types live in `apps/api/src/routes.ts`. `skipAuth: true` is set only on `/health`. `role: "editor"` / `role: "admin"` is on the route entry, not in the handler body.
+- No reintroduced `if (req.method === "POST" && req.url === "/x") { ... }` branches outside the dispatcher.
+
+**Why:** ENG-041 closed the dispatcher for modification. The registry is the extension point; new routes plug in via `routes.push({...})`. Bypassing it means duplicate auth logic, RBAC drift, and a return to the unmaintainable 33-if-branch shape we just escaped. Phase 2 will add 11+ more routes — every ticket that bypasses the registry compounds the cost of the next refactor.
+
+**Action:** FIX INLINE when a new route was added as an inline `if` branch outside the dispatcher — convert it to a registry entry, move `requireRole` from handler body to the route's `role` field. REPORT (don't fix) when the change is structural — e.g. introducing per-domain route files (`routes/runs.ts`, `routes/workflows.ts`), path-parameter routing (`/run/:id/cancel`), or middleware composition — those are design discussions, not silent regressions.
