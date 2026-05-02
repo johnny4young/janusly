@@ -403,6 +403,28 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
 
+  const cancelActiveRun = useCallback(async () => {
+    if (!runId) return
+    const activeRun = runs.find(r => r.id === runId)
+    const terminal = new Set(['succeeded', 'failed', 'cancelled', 'skipped', 'timed_out'])
+    if (activeRun && terminal.has(activeRun.status)) {
+      addToast(`Run is already ${activeRun.status}`, 'info')
+      return
+    }
+    try {
+      await api('/run/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ runId, reason: { source: 'ui' } }),
+      })
+      await loadStatus(runId)
+      bumpPlatformVersion()
+      await refreshPlatform()
+      addToast('Run cancelled', 'success')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Cancel failed', 'error')
+    }
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs])
+
   const replayDeadLetter = useCallback(async (deadLetterId: string) => {
     try {
       await api('/dlq/replay', {
@@ -562,6 +584,7 @@ export default function App() {
           onUpdateEdgeCondition={updateEdgeCondition}
           onApproveNode={approveNode}
           onReplayNode={replayNode}
+          onCancelActiveRun={cancelActiveRun}
           onReplayDeadLetter={replayDeadLetter}
           onResolveDeadLetter={resolveDeadLetter}
           onGenerateWorkflow={generateWorkflow}
