@@ -83,6 +83,8 @@ export default function App() {
     selectedEdgeId,
     currentWorkflowId,
     currentWorkflowName,
+    currentWorkflowInputs,
+    currentWorkflowOutputs,
     streamStatus,
     setAuth,
     clearAuth,
@@ -569,6 +571,8 @@ export default function App() {
           usage={usage}
           aiHealth={aiHealth}
           currentWorkflowName={currentWorkflowName}
+          currentWorkflowInputs={currentWorkflowInputs}
+          currentWorkflowOutputs={currentWorkflowOutputs}
           onOpenWorkflow={openWorkflow}
           onUseTemplate={(workflow) => {
             hydrateWorkflow(workflow)

@@ -22,15 +22,24 @@ import { runs, runNodes, runEvents } from "@janusly/db";
 import { enqueueNode } from "./queue";
 import { markNodeQueued, appendEvent } from "./persistence";
 import type { Workflow } from "@janusly/shared";
+import { validateInputs, WorkflowInputValidationError } from "./inputs-validator";
 
 export type StartableWorkflow = Workflow & {
   orgId?: string;
   createdBy?: string | null;
-  input?: Record<string, unknown>;
+  input?: unknown;
   versionId?: string;
 };
 
 export async function startRun(workflow: StartableWorkflow) {
+  // When the workflow declares typed `inputs`, validate the run-start payload
+  // before any DB write so a malformed run never enters the queue. Throws
+  // `WorkflowInputValidationError` — the API route catches and returns 400.
+  if (workflow.inputs) {
+    const result = validateInputs(workflow.inputs, workflow.input ?? {});
+    if (!result.valid) throw new WorkflowInputValidationError(result.errors);
+  }
+
   const runId = crypto.randomUUID();
   const workflowVersionId = workflow.versionId ?? workflow.id ?? runId;
 
