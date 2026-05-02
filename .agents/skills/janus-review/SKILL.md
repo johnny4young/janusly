@@ -90,6 +90,7 @@ The generic review skills do not know about Janusly's conventions. Run through t
 - **m. Banned deps** — no tRPC, no Stripe SDK.
 - **n. Doc sync** — ROADMAP §3b Status flip applied; PLAN updated only when claims drifted; AGENTS only when invariant changed; README without leaked planning.
 - **o. API routing (Open/Closed)** — new HTTP routes register in the `routes: Route[]` array exported from `apps/api/src/index.ts`; no inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` declared on the route entry, not in the handler body.
+- **p. No ticket / roadmap refs in source code** — staged source files under `packages/**/src` and `apps/**/src` (incl. tests, migrations) must not contain `ENG-NNN` / `Phase N` / `Layer N` / `§N` references. ROADMAP / PLAN / AGENTS / report / commit-message-summary may keep them.
 
 For each check, the action when a violation is found (FIX INLINE vs REPORT) is in [`references/janusly-checks.md`](references/janusly-checks.md).
 

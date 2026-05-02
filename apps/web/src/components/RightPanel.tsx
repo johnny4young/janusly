@@ -104,6 +104,7 @@ export function RightPanel(props: RightPanelProps) {
         selectedEdge={props.selectedEdge}
         runNodes={props.runNodes}
         validationIssues={props.validationIssues}
+        tools={props.tools}
         currentWorkflowInputs={props.currentWorkflowInputs}
         currentWorkflowOutputs={props.currentWorkflowOutputs}
         onUpdateNodeConfig={props.onUpdateNodeConfig}
@@ -172,12 +173,13 @@ function InspectorPanel({
   selectedEdge,
   runNodes,
   validationIssues,
+  tools,
   currentWorkflowInputs,
   currentWorkflowOutputs,
   onUpdateNodeConfig,
   onUpdateNodeType,
   onUpdateEdgeCondition,
-}: Pick<RightPanelProps, 'selectedNode' | 'selectedEdge' | 'runNodes' | 'validationIssues' | 'currentWorkflowInputs' | 'currentWorkflowOutputs' | 'onUpdateNodeConfig' | 'onUpdateNodeType' | 'onUpdateEdgeCondition'>) {
+}: Pick<RightPanelProps, 'selectedNode' | 'selectedEdge' | 'runNodes' | 'validationIssues' | 'tools' | 'currentWorkflowInputs' | 'currentWorkflowOutputs' | 'onUpdateNodeConfig' | 'onUpdateNodeType' | 'onUpdateEdgeCondition'>) {
   const [jsonError, setJsonError] = useState<string | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
@@ -216,6 +218,7 @@ function InspectorPanel({
           nodeId={selectedNode.id}
           type={selectedNode.data.type}
           config={selectedNode.data.config ?? {}}
+          tools={tools}
           onUpdate={onUpdateNodeConfig}
         />
 
@@ -396,11 +399,13 @@ function QuickConfigEditor({
   nodeId,
   type,
   config,
+  tools,
   onUpdate,
 }: {
   nodeId: string
   type: string
   config: JsonObject
+  tools: ToolSchema[]
   onUpdate: (config: Record<string, unknown>) => void
 }) {
   const patch = (next: Record<string, unknown>) => onUpdate({ ...config, ...next })
@@ -424,10 +429,42 @@ function QuickConfigEditor({
   }
 
   if (type === 'tool') {
+    const selectedTool = readConfigString(config, 'tool')
+    const matchedTool = tools.find(tool => tool.name === selectedTool) ?? null
+    const showCurrentToolOption = Boolean(selectedTool) && !matchedTool
+    const isUnknown = showCurrentToolOption && tools.length > 0
+    const toolNameId = fieldId(nodeId, 'tool name')
+    const onSelectTool = (next: string) => {
+      // Switching tools clobbers the input only when it's empty — preserves
+      // any edits the author already made on the previous tool's payload.
+      const inputIsEmpty = !config.input || (typeof config.input === 'object' && config.input !== null && !Array.isArray(config.input) && Object.keys(config.input).length === 0)
+      const newTool = tools.find(tool => tool.name === next)
+      const seedInput = inputIsEmpty && newTool?.inputExample ? newTool.inputExample : config.input
+      patch({ tool: next, input: seedInput })
+    }
     return (
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Tool name" value={readConfigString(config, 'tool')} onChange={value => patch({ tool: value })} />
+        <div className="form-grid">
+          <label className="field-label" htmlFor={toolNameId}>Tool</label>
+          <select
+            id={toolNameId}
+            className="text-field"
+            value={selectedTool}
+            onChange={event => onSelectTool(event.target.value)}
+          >
+            {!selectedTool && <option value="">— Pick a tool —</option>}
+            {showCurrentToolOption && <option value={selectedTool}>{selectedTool}{tools.length > 0 ? ' (not registered)' : ' (loading)'}</option>}
+            {tools.map(tool => (
+              <option key={tool.name} value={tool.name}>{tool.name}</option>
+            ))}
+          </select>
+          {matchedTool?.description && <p className="helper-text">{matchedTool.description}</p>}
+          {matchedTool?.required && matchedTool.required.length > 0 && (
+            <p className="helper-text">Required input: {matchedTool.required.join(', ')}{matchedTool.optional?.length ? ` · Optional: ${matchedTool.optional.join(', ')}` : ''}</p>
+          )}
+          {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">This tool is not registered — pick one from the list.</p>}
+        </div>
         <JsonConfigField scope={nodeId} label="Tool input" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
