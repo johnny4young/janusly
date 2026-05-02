@@ -29,6 +29,15 @@ export type StartableWorkflow = Workflow & {
   createdBy?: string | null;
   input?: unknown;
   versionId?: string;
+  /**
+   * Subworkflow linkage. When present, this run was spawned by a
+   * `subworkflow` node in the parent run. Used by `notifyParentOnTerminal`
+   * to resume the parent's node when the child terminates.
+   */
+  parentRunId?: string;
+  parentNodeId?: string;
+  /** OTel trace id shared across a subworkflow chain. Inherited from the parent or generated lazily. */
+  traceId?: string;
 };
 
 export async function startRun(workflow: StartableWorkflow) {
@@ -53,6 +62,9 @@ export async function startRun(workflow: StartableWorkflow) {
       status: "running",
       createdBy: workflow.createdBy ?? null,
       inputJson: { workflow, input: workflow.input ?? {} },
+      parentRunId: workflow.parentRunId ?? null,
+      parentNodeId: workflow.parentNodeId ?? null,
+      traceId: workflow.traceId ?? null,
     });
 
     if (workflow.nodes.length > 0) {

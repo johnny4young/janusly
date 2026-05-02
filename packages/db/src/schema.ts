@@ -113,10 +113,27 @@ export const runs = pgTable(
      * reached `succeeded` yet (failed/cancelled runs never populate this).
      */
     outputJson: jsonb("output_json"),
+    /**
+     * Subworkflow linkage. Non-null = this run was spawned by a `subworkflow`
+     * node in a parent run. Used by `notifyParentOnTerminal` to flip the
+     * parent's subworkflow node when the child reaches a terminal status.
+     */
+    parentRunId: text("parent_run_id"),
+    /** Node id within the parent that spawned this child run. Pairs with `parentRunId`. */
+    parentNodeId: text("parent_node_id"),
+    /**
+     * OTel trace id shared across a subworkflow chain. Inherited from the
+     * parent on `subworkflow` calls; generated lazily when the chain starts.
+     * Column is NULL for top-level runs that aren't part of a subworkflow chain.
+     */
+    traceId: text("trace_id"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("runs_org_created_idx").on(table.orgId, table.createdAt.desc())],
+  (table) => [
+    index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    index("runs_parent_idx").on(table.parentRunId),
+  ],
 );
 
 export const runNodes = pgTable(

@@ -54,6 +54,9 @@ export async function cancelRun(runId: string, reason?: any) {
     .where(and(eq(runNodes.runId, runId), inArray(runNodes.status, ["pending", "queued", "waiting"])));
 
   await appendEvent(runId, null, "run.cancelled", reason ?? {});
+  // Subworkflow children: a cancelled child still notifies the parent so the
+  // parent's subworkflow node fails (the parent decides whether to roll up).
+  await notifyOnTerminal(runId, "cancelled");
 }
 
 /** Transition a node to `running` and stamp `startedAt`. */
@@ -116,15 +119,43 @@ export async function markNodeFailed(runId: string, nodeId: string, error: any) 
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
+/**
+ * Subworkflow terminal-notifier hook. `subworkflow.ts` registers its
+ * `notifyParentOnTerminal` here at module load via `setSubworkflowNotifier`
+ * — `persistence.ts` then calls it after a terminal status flip, without
+ * importing `subworkflow.ts` directly (which would create an import cycle).
+ */
+type SubworkflowNotifier = (runId: string, status: "succeeded" | "failed" | "cancelled") => Promise<void>;
+let subworkflowNotifier: SubworkflowNotifier | null = null;
+
+/** Wire the subworkflow notifier. Called from `subworkflow.ts` once at module load. */
+export function setSubworkflowNotifier(notifier: SubworkflowNotifier | null): void {
+  subworkflowNotifier = notifier;
+}
+
+async function notifyOnTerminal(runId: string, status: "succeeded" | "failed" | "cancelled"): Promise<void> {
+  if (!subworkflowNotifier) return;
+  try {
+    await subworkflowNotifier(runId, status);
+  } catch {
+    // Notifier failures are isolated by `subworkflow.ts` itself; this is a
+    // defense-in-depth catch so a runaway throw can't take down the
+    // status-flip caller.
+  }
+}
+
 /** Roll up node statuses to the run-level status. Cancelled stays cancelled; any failed → failed; all-terminal → succeeded; otherwise running. */
 export async function updateRunStatusFromNodes(runId: string) {
   const status = await getRunStatus(runId);
-  if (status === "cancelled") return "cancelled";
+  if (status === "cancelled" || status === "succeeded" || status === "failed" || status === "timed_out") {
+    return status;
+  }
 
   const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId));
 
   if (nodes.some(node => node.status === "failed")) {
     await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+    await notifyOnTerminal(runId, "failed");
     return "failed";
   }
 
@@ -136,6 +167,7 @@ export async function updateRunStatusFromNodes(runId: string) {
     await db.update(runs)
       .set({ status: "succeeded", outputJson })
       .where(eq(runs.id, runId));
+    await notifyOnTerminal(runId, "succeeded");
     return "succeeded";
   }
 
