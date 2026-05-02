@@ -43,6 +43,10 @@ type WorkflowStore = {
 
   currentWorkflowId: string
   currentWorkflowName: string
+  /** Declared input shape — surfaced in the Inspector + validated at run start. */
+  currentWorkflowInputs: WorkflowDefinition['inputs']
+  /** Declared output projection map — engine renders templates at terminal status. */
+  currentWorkflowOutputs: WorkflowDefinition['outputs']
   nodes: WorkflowGraphNode[]
   edges: WorkflowGraphEdge[]
   selectedNodeId: string | null
@@ -98,7 +102,14 @@ const initialNodes: WorkflowGraphNode[] = [
 
 const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
 
-function graphToWorkflow(id: string, name: string, nodes: WorkflowGraphNode[], edges: WorkflowGraphEdge[]): WorkflowDefinition {
+function graphToWorkflow(
+  id: string,
+  name: string,
+  nodes: WorkflowGraphNode[],
+  edges: WorkflowGraphEdge[],
+  inputs: WorkflowDefinition['inputs'],
+  outputs: WorkflowDefinition['outputs'],
+): WorkflowDefinition {
   return {
     id,
     name,
@@ -112,6 +123,8 @@ function graphToWorkflow(id: string, name: string, nodes: WorkflowGraphNode[], e
       to: edge.target,
       condition: edge.data?.condition || undefined,
     })),
+    ...(inputs ? { inputs } : {}),
+    ...(outputs ? { outputs } : {}),
   }
 }
 
@@ -124,6 +137,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   currentWorkflowId: 'ui-test',
   currentWorkflowName: 'UI Test Workflow',
+  currentWorkflowInputs: undefined,
+  currentWorkflowOutputs: undefined,
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
@@ -157,6 +172,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? 'Untitled Workflow',
+      currentWorkflowInputs: workflow.inputs,
+      currentWorkflowOutputs: workflow.outputs,
       nodes: (workflow.nodes ?? []).map((node, index) => ({
         id: node.id,
         position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
@@ -182,7 +199,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   getWorkflowJson: () => {
     const state = get()
-    return graphToWorkflow(state.currentWorkflowId, state.currentWorkflowName, state.nodes, state.edges)
+    return graphToWorkflow(
+      state.currentWorkflowId,
+      state.currentWorkflowName,
+      state.nodes,
+      state.edges,
+      state.currentWorkflowInputs,
+      state.currentWorkflowOutputs,
+    )
   },
 
   newWorkflow: () => {
@@ -190,6 +214,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       currentWorkflowId: id,
       currentWorkflowName: 'Untitled Workflow',
+      currentWorkflowInputs: undefined,
+      currentWorkflowOutputs: undefined,
       nodes: [],
       edges: [],
       selectedNodeId: null,

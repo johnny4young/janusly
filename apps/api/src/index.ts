@@ -33,6 +33,7 @@
 import http from "http";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
+import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { resumeRun } from "@janusly/engine/src/resume-run";
 import { cancelRun } from "@janusly/engine/src/persistence";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
@@ -686,7 +687,16 @@ export const routes: Route[] = [
   // Run lifecycle (start / resume / cancel)
   { method: "POST", match: "/start", role: "editor",
     handler: async ({ req, res, auth }) => {
-      const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      // Body shape: either a flat workflow (legacy) or `{ workflow, input }`
+      // for typed workflow inputs. The flat form keeps existing callers
+      // working; the wrapped form is required when the workflow declares
+      // `inputs`.
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const workflow = (body.workflow && typeof body.workflow === "object")
+        ? asRecord(body.workflow)
+        : body;
+      const inputValue = Object.hasOwn(body, "input") ? body.input : {};
+
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
@@ -708,12 +718,24 @@ export const routes: Route[] = [
         return sendJson(res, { error: "Ad-hoc workflows are disabled. Save the workflow first." }, 403);
       }
 
-      const result = await startRun({ ...parsedWorkflow, orgId: auth.orgId, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, isAdhoc ? "run.started.adhoc" : "run.started", "run", result.runId, {
-        workflowId: parsedWorkflow.id,
-        adhoc: isAdhoc,
-      });
-      return sendJson(res, result);
+      try {
+        const result = await startRun({
+          ...parsedWorkflow,
+          input: inputValue,
+          orgId: auth.orgId,
+          createdBy: auth.userId,
+        });
+        await audit(auth.orgId, auth.userId, isAdhoc ? "run.started.adhoc" : "run.started", "run", result.runId, {
+          workflowId: parsedWorkflow.id,
+          adhoc: isAdhoc,
+        });
+        return sendJson(res, result);
+      } catch (err) {
+        if (err instanceof WorkflowInputValidationError) {
+          return sendJson(res, { error: "Input validation failed", errors: err.errors }, 400);
+        }
+        throw err;
+      }
     } },
   { method: "POST", match: "/resume", role: "editor",
     handler: async ({ req, res, auth }) => {

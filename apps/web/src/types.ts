@@ -31,17 +31,44 @@ export type Template = { id: string; name: string; description: string; category
 export type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: JsonObject }
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string }
-export type RunSummary = { id: string; orgId?: string; workflowVersionId?: string; status: string; createdBy?: string; createdAt?: string }
+export type RunSummary = {
+  id: string
+  orgId?: string
+  workflowVersionId?: string
+  status: string
+  createdBy?: string
+  createdAt?: string
+  /** Projected workflow output. Populated only when the run reached `succeeded` AND the workflow declared `outputs`. */
+  outputJson?: JsonObject | null
+}
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
 export type AiMode = 'ai' | 'fallback' | 'error'
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent'
+/**
+ * JSON-Schema-subset describing one input field on a workflow's declared
+ * `inputs` shape. Mirrors `WorkflowInputSchemaShape` in `@janusly/shared`.
+ * Restated as a TS type to keep the browser bundle free of Zod runtime weight.
+ */
+export type WorkflowInputSchemaShape = {
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array'
+  description?: string
+  properties?: Record<string, WorkflowInputSchemaShape>
+  required?: string[]
+  items?: WorkflowInputSchemaShape
+  enum?: unknown[]
+}
+
 export type WorkflowDefinition = {
   id?: string
   name?: string
   nodes: Array<{ id: string; type: string; config: JsonObject }>
   edges: Array<{ from: string; to: string; condition?: string }>
+  /** Typed inputs surfaced in the Inspector + validated at run start. */
+  inputs?: WorkflowInputSchemaShape
+  /** Output projection map; engine renders each template at terminal `succeeded`. */
+  outputs?: Record<string, string>
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
 export type WorkflowGraphEdge = Edge<WorkflowEdgeData>

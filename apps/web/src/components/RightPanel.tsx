@@ -47,6 +47,10 @@ type RightPanelProps = {
   usage: Record<string, number>
   aiHealth: AiHealth | null
   currentWorkflowName: string
+  /** Declared workflow input shape; rendered in the no-selection inspector card. */
+  currentWorkflowInputs?: WorkflowDefinition['inputs']
+  /** Declared workflow output projection; rendered alongside `currentWorkflowInputs`. */
+  currentWorkflowOutputs?: WorkflowDefinition['outputs']
   onOpenWorkflow: (id: string) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
@@ -100,6 +104,8 @@ export function RightPanel(props: RightPanelProps) {
         selectedEdge={props.selectedEdge}
         runNodes={props.runNodes}
         validationIssues={props.validationIssues}
+        currentWorkflowInputs={props.currentWorkflowInputs}
+        currentWorkflowOutputs={props.currentWorkflowOutputs}
         onUpdateNodeConfig={props.onUpdateNodeConfig}
         onUpdateNodeType={props.onUpdateNodeType}
         onUpdateEdgeCondition={props.onUpdateEdgeCondition}
@@ -166,10 +172,12 @@ function InspectorPanel({
   selectedEdge,
   runNodes,
   validationIssues,
+  currentWorkflowInputs,
+  currentWorkflowOutputs,
   onUpdateNodeConfig,
   onUpdateNodeType,
   onUpdateEdgeCondition,
-}: Pick<RightPanelProps, 'selectedNode' | 'selectedEdge' | 'runNodes' | 'validationIssues' | 'onUpdateNodeConfig' | 'onUpdateNodeType' | 'onUpdateEdgeCondition'>) {
+}: Pick<RightPanelProps, 'selectedNode' | 'selectedEdge' | 'runNodes' | 'validationIssues' | 'currentWorkflowInputs' | 'currentWorkflowOutputs' | 'onUpdateNodeConfig' | 'onUpdateNodeType' | 'onUpdateEdgeCondition'>) {
   const [jsonError, setJsonError] = useState<string | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
@@ -254,15 +262,88 @@ function InspectorPanel({
     )
   }
 
+  const hasIoSchema = Boolean(currentWorkflowInputs || (currentWorkflowOutputs && Object.keys(currentWorkflowOutputs).length > 0))
+
   return (
-    <section className="panel-card">
-      <div className="empty-panel">
-        <GitBranch size={24} aria-hidden="true" />
-        <strong>Select a step to configure it</strong>
-        <p>Click any node on the canvas to edit inputs, prompts, tools, path rules, and advanced JSON.</p>
-      </div>
+    <>
+      {hasIoSchema && <WorkflowIoCard inputs={currentWorkflowInputs} outputs={currentWorkflowOutputs} />}
+      <section className="panel-card">
+        <div className="empty-panel">
+          <GitBranch size={24} aria-hidden="true" />
+          <strong>Select a step to configure it</strong>
+          <p>Click any node on the canvas to edit inputs, prompts, tools, path rules, and advanced JSON.</p>
+        </div>
+      </section>
+    </>
+  )
+}
+
+/**
+ * Render the workflow's declared I/O contract when no node/edge is selected.
+ * Reads the JSON-Schema-subset `inputs` shape and the `outputs` projection
+ * map. Empty when the workflow declares neither.
+ */
+function WorkflowIoCard({
+  inputs,
+  outputs,
+}: {
+  inputs?: WorkflowDefinition['inputs']
+  outputs?: WorkflowDefinition['outputs']
+}) {
+  return (
+    <section className="panel-card" data-testid="workflow-io-card">
+      <div className="section-kicker">Workflow I/O</div>
+      <h3>Declared inputs &amp; outputs</h3>
+      <p className="helper-text">Surface contract for callers and subworkflow consumers. Inputs validate at run start; outputs project at terminal status.</p>
+
+      {inputs && (
+        <div className="form-grid">
+          <div className="field-label">Inputs</div>
+          <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {renderInputFields(inputs).map((row, idx) => (
+              <li key={`${row.path}-${idx}`}>
+                <span>{row.path}</span>
+                <span>{row.type}{row.required ? ' (required)' : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {outputs && Object.keys(outputs).length > 0 && (
+        <div className="form-grid">
+          <div className="field-label">Outputs</div>
+          <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {Object.entries(outputs).map(([key, template]) => (
+              <li key={key}>
+                <span>{key}</span>
+                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{template}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   )
+}
+
+/** Flatten a nested input schema into a list of `{ path, type, required }` rows for the Inspector. */
+function renderInputFields(
+  schema: NonNullable<WorkflowDefinition['inputs']>,
+  basePath = '',
+): Array<{ path: string; type: string; required: boolean }> {
+  if (schema.type === 'object' && schema.properties) {
+    const requiredSet = new Set(schema.required ?? [])
+    return Object.entries(schema.properties).flatMap(([key, child]) => {
+      const path = basePath ? `${basePath}.${key}` : key
+      const isRequired = requiredSet.has(key)
+      if (child.type === 'object' && child.properties) {
+        return [{ path, type: child.type, required: isRequired }, ...renderInputFields(child, path)]
+      }
+      return [{ path, type: child.type, required: isRequired }]
+    })
+  }
+  return [{ path: basePath || '$', type: schema.type, required: false }]
 }
 
 function fieldId(scope: string, label: string) {
@@ -674,6 +755,14 @@ function RunsPanel({
               ? `Status: ${activeRun.status}. ${isActiveRunCancellable ? "Cancel flips it to cancelled and stops scheduling further nodes." : "Run already finished — cancel is a no-op."}`
               : "Run details are loading."}
           </p>
+          {activeRun?.status === 'succeeded' && activeRun.outputJson && Object.keys(activeRun.outputJson).length > 0 && (
+            <details data-testid="workflow-output" style={{ marginTop: 12 }}>
+              <summary>Workflow output</summary>
+              <pre className="code-field" style={{ marginTop: 8, padding: 8 }}>
+                {JSON.stringify(activeRun.outputJson, null, 2)}
+              </pre>
+            </details>
+          )}
         </section>
       )}
 
