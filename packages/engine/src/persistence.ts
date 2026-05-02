@@ -29,6 +29,20 @@ export async function getRunStatus(runId: string) {
 }
 
 /**
+ * Return the current status of a single node in a run, or `null` when the
+ * row is absent. Used by delayed wake-up handlers to short-circuit when a
+ * paused node has already been advanced (manual resume, cancellation, etc.).
+ */
+export async function getRunNodeStatus(runId: string, nodeId: string): Promise<string | null> {
+  const rows = await db
+    .select({ status: runNodes.status })
+    .from(runNodes)
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
+    .limit(1);
+  return rows[0]?.status ?? null;
+}
+
+/**
  * Resolve the multi-tenant `orgId` for a run. Used by `executeNode` to thread
  * the scope into `NodeContext` so executors (notably the LLM-calling `ai`
  * step and `agent` planner) can attribute usage telemetry. Returns

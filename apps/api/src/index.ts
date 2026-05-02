@@ -124,6 +124,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
   "- router_llm: { candidates: Array<{id}> }",
   "- subworkflow: { workflowId: string, input?: object } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
+  "- wait_until: { duration: string } (ISO 8601 duration; pauses the run until the deadline elapses, e.g. \"P3D\" = 3 days, \"PT2H30M\" = 2.5 hours. Output is empty {}.)",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
   "  - numbers, single/double-quoted strings, null",

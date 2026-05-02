@@ -37,6 +37,7 @@ import { mapInput } from "./template";
 import { fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
 import { subworkflowExecutor } from "./subworkflow";
+import { waitUntilExecutor } from "./wait-until";
 
 loadRootEnv();
 
@@ -409,4 +410,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // Implementation lives in `subworkflow.ts` to keep this registry focused on
   // dispatch + the tightly-coupled inline executors.
   subworkflow: subworkflowExecutor,
+
+  // wait_until node — pauses the run for a configurable ISO 8601 duration.
+  // The wake-up is handled by a delayed BullMQ job dispatched in `worker.ts`
+  // on `job.name === "wait-resume"`.
+  wait_until: waitUntilExecutor,
 };
