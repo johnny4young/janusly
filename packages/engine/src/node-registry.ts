@@ -36,6 +36,7 @@ import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
 import { fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
+import { subworkflowExecutor } from "./subworkflow";
 
 loadRootEnv();
 
@@ -47,6 +48,8 @@ export type NodeContext = {
   orgId: string;
   config: any;
   context: Record<string, any>;
+  /** Resolved secret values that must never be persisted by executors. */
+  redactedValues?: string[];
 };
 
 export type NodeExecutionResult =
@@ -401,4 +404,9 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
   approval: async (ctx) => ({ status: "waiting", reason: "Waiting for human approval", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
   noop: async () => ({ status: "completed" }),
+
+  // Subworkflow node — async pause-and-resume against a child run.
+  // Implementation lives in `subworkflow.ts` to keep this registry focused on
+  // dispatch + the tightly-coupled inline executors.
+  subworkflow: subworkflowExecutor,
 };
