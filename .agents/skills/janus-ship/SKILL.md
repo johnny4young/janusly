@@ -69,6 +69,7 @@ These never bend, in either phase:
 - **OTel `service.name === "janusly"`** in tracer and meter.
 - **Cross-panel reactivity:** mutations that invalidate server data call `bumpPlatformVersion()`.
 - **Pagination cap 100/200** on `/runs` and `/workflows`; new list endpoints follow the pattern.
+- **API routing (Open/Closed):** new HTTP routes plug into `routes: Route[]` in `apps/api/src/index.ts` via `routes.push({...})`. No inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` are declared on the route entry, not called inside the handler.
 - **Web deps lockdown:** `apps/web` imports stay within `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`. No radix, cva, clsx, tailwind-merge, shadcn scaffolding.
 - **Tailwind 4 CSS-first:** no `tailwind.config.ts`, no `postcss.config.js`, no inline hex.
 - **Vite 8:** `manualChunks` is a function.
