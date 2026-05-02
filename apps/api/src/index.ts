@@ -34,6 +34,7 @@ import http from "http";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
 import { resumeRun } from "@janusly/engine/src/resume-run";
+import { cancelRun } from "@janusly/engine/src/persistence";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
@@ -42,7 +43,7 @@ import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { explainRun, getLlmClient, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
 import { recordUsage } from "@janusly/data/src/usageRepo";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
-import { requireAuth } from "./auth";
+import { requireAuth, type AuthContext } from "./auth";
 import { isRole, requireRole } from "./permissions";
 import { workflowTemplates } from "./templates";
 import { db } from "@janusly/db";
@@ -77,6 +78,7 @@ import {
 } from "./http";
 import { enforceRateLimit } from "./rate-limit";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "./run-pagination";
+import { matchesRoute, type Route } from "./routes";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
@@ -290,31 +292,37 @@ async function audit(orgId: string, userId: string, action: string, targetType?:
   }
 }
 
-const server = http.createServer(async (req, res) => {
-  (res as CorsAwareResponse).requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+/**
+ * Route registry. New routes plug in via `routes.push({...})` or
+ * by appending to this literal — the dispatcher (`http.createServer` below)
+ * stays closed for modification. First-match-wins; preserve ordering when
+ * adding routes that overlap (e.g. `/runs` prefix vs `/run?` exact).
+ *
+ * Every route's `handler` runs AFTER `requireAuth` + (optionally) `requireRole`
+ * — handlers receive `auth` already-validated. Multi-tenant scope (per-row
+ * `orgId` checks) still lives inside the handler per AGENTS.md.
+ */
+export const routes: Route[] = [
+  // Health (no auth)
+  { method: "GET", match: "/health", skipAuth: true,
+    handler: async ({ res }) => sendJson(res, { ok: true }) },
 
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, corsHeaders(res));
-    return res.end();
-  }
+  // Catalog reads (any role)
+  { method: "GET", match: "/tools",
+    handler: async ({ res }) => sendJson(res, listTools()) },
+  { method: "GET", match: "/templates",
+    handler: async ({ res }) => sendJson(res, workflowTemplates) },
+  { method: "GET", match: "/billing/usage",
+    handler: async ({ res, auth }) => sendJson(res, await getUsageSummary(auth.orgId)) },
 
-  try {
-    if (req.method === "GET" && req.url === "/health") return sendJson(res, { ok: true });
-
-    const auth = await requireAuth(req);
-
-    if (req.method === "GET" && req.url === "/tools") return sendJson(res, listTools());
-    if (req.method === "GET" && req.url === "/templates") return sendJson(res, workflowTemplates);
-    if (req.method === "GET" && req.url === "/billing/usage") return sendJson(res, await getUsageSummary(auth.orgId));
-
-    // Members / roles
-    if (req.method === "GET" && req.url === "/members") {
+  // Members / roles
+  { method: "GET", match: "/members",
+    handler: async ({ res, auth }) => {
       const rows = await db.select().from(orgMembers).where(eq(orgMembers.orgId, auth.orgId));
       return sendJson(res, rows);
-    }
-
-    if (req.method === "POST" && req.url === "/members/invite") {
-      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+    } },
+  { method: "POST", match: "/members/invite", role: "admin",
+    handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const role = isRole(body.role) ? body.role : "viewer";
@@ -331,10 +339,9 @@ const server = http.createServer(async (req, res) => {
       await db.insert(orgMembers).values({ id, orgId: auth.orgId, userId, email, role, invitedBy: auth.userId });
       await audit(auth.orgId, auth.userId, "member.invited", "member", userId, { email, role });
       return sendJson(res, { id });
-    }
-
-    if (req.method === "POST" && req.url === "/members/role") {
-      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+    } },
+  { method: "POST", match: "/members/role", role: "admin",
+    handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const userId = typeof body.userId === "string" ? body.userId : "";
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
@@ -342,45 +349,46 @@ const server = http.createServer(async (req, res) => {
       await db.update(orgMembers).set({ role: body.role }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
       await audit(auth.orgId, auth.userId, "member.role.updated", "member", userId, { role: body.role });
       return sendJson(res, { ok: true });
-    }
-
-    if (req.method === "DELETE" && req.url?.startsWith("/members")) {
-      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
-      const url = new URL(req.url, "http://localhost");
+    } },
+  { method: "DELETE", match: (url) => url.startsWith("/members"), role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const userId = url.searchParams.get("userId");
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
       await db.delete(orgMembers).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
       await audit(auth.orgId, auth.userId, "member.removed", "member", userId);
       return sendJson(res, { ok: true });
-    }
+    } },
 
-    // Workflows
-    if (req.method === "GET" && req.url?.startsWith("/workflows") && !req.url.startsWith("/workflows/")) {
-      const url = new URL(req.url, "http://localhost");
-      const limitParam = Number(url.searchParams.get("limit"));
-      const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt)).limit(limitValue);
-      return sendJson(res, rows);
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/workflows/versions")) {
-      const url = new URL(req.url, "http://localhost");
+  // Workflows — list + version reads + save
+  // NOTE: `/workflows/versions` and `/workflows/latest` come BEFORE `/workflows`
+  // so the prefix-but-not-`/workflows/` matcher doesn't shadow them.
+  { method: "GET", match: (url) => url.startsWith("/workflows/versions"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions);
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/workflows/latest")) {
-      const url = new URL(req.url, "http://localhost");
+    } },
+  { method: "GET", match: (url) => url.startsWith("/workflows/latest"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
-    }
-
-    if (req.method === "POST" && req.url === "/workflows/save") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+    } },
+  { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
+      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt)).limit(limitValue);
+      return sendJson(res, rows);
+    } },
+  { method: "POST", match: "/workflows/save", role: "editor",
+    handler: async ({ req, res, auth }) => {
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
@@ -422,16 +430,16 @@ const server = http.createServer(async (req, res) => {
 
       await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
       return sendJson(res, { workflowId, versionId, version: nextVersion });
-    }
+    } },
 
-    // Plugins / credentials
-    if (req.method === "GET" && req.url === "/plugins") {
+  // Plugins / credentials
+  { method: "GET", match: "/plugins",
+    handler: async ({ res, auth }) => {
       const installed = await db.select().from(installedPlugins).where(eq(installedPlugins.orgId, auth.orgId));
       return sendJson(res, { available: listTools(), installed });
-    }
-
-    if (req.method === "POST" && req.url === "/plugins/install") {
-      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+    } },
+  { method: "POST", match: "/plugins/install", role: "admin",
+    handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const pluginId = typeof body.pluginId === "string" ? body.pluginId : "";
       if (!pluginId) return sendJson(res, { error: "pluginId is required" }, 400);
@@ -439,15 +447,14 @@ const server = http.createServer(async (req, res) => {
       await db.insert(installedPlugins).values({ id, orgId: auth.orgId, pluginId, configJson: body.config ?? {}, installedBy: auth.userId });
       await audit(auth.orgId, auth.userId, "plugin.installed", "plugin", pluginId, body.config ?? {});
       return sendJson(res, { id });
-    }
-
-    if (req.method === "GET" && req.url === "/credentials") {
+    } },
+  { method: "GET", match: "/credentials",
+    handler: async ({ res, auth }) => {
       const rows = await db.select().from(credentials).where(eq(credentials.orgId, auth.orgId));
       return sendJson(res, rows);
-    }
-
-    if (req.method === "POST" && req.url === "/credentials") {
-      await requireRole(auth.orgId, auth.userId, "admin", auth.mode);
+    } },
+  { method: "POST", match: "/credentials", role: "admin",
+    handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.secretRef !== "string") {
         return sendJson(res, { error: "name, kind, and secretRef are required" }, 400);
@@ -456,10 +463,12 @@ const server = http.createServer(async (req, res) => {
       await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, createdBy: auth.userId });
       await audit(auth.orgId, auth.userId, "credential.created", "credential", id, { kind: body.kind });
       return sendJson(res, { id });
-    }
+    } },
 
-    if (req.method === "GET" && req.url?.startsWith("/audit")) {
-      const url = new URL(req.url, "http://localhost");
+  // Audit
+  { method: "GET", match: (url) => url.startsWith("/audit"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0
         ? Math.min(limitParam, 200)
@@ -469,17 +478,17 @@ const server = http.createServer(async (req, res) => {
         .orderBy(desc(auditLogs.createdAt))
         .limit(limitValue);
       return sendJson(res, rows);
-    }
+    } },
 
-    if (req.method === "POST" && req.url === "/validate") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
-      return sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES)));
-    }
+  // Validate
+  { method: "POST", match: "/validate", role: "editor",
+    handler: async ({ req, res }) => sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES))) },
 
-    // AI helpers
-    if (req.method === "GET" && req.url === "/ai/health") return sendJson(res, aiStatus());
-
-    if (req.method === "POST" && req.url === "/ai/generate-workflow") {
+  // AI helpers
+  { method: "GET", match: "/ai/health",
+    handler: async ({ res }) => sendJson(res, aiStatus()) },
+  { method: "POST", match: "/ai/generate-workflow",
+    handler: async ({ req, res, auth }) => {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const promptText = typeof body.prompt === "string" ? body.prompt : "";
@@ -523,9 +532,9 @@ const server = http.createServer(async (req, res) => {
           ...(fallbackWorkflow ?? {}),
         });
       }
-    }
-
-    if (req.method === "POST" && req.url === "/ai/explain-workflow") {
+    } },
+  { method: "POST", match: "/ai/explain-workflow",
+    handler: async ({ req, res, auth }) => {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const { workflow } = body;
@@ -554,9 +563,9 @@ const server = http.createServer(async (req, res) => {
           explanation: fallbackExplainWorkflow(workflow),
         });
       }
-    }
-
-    if (req.method === "POST" && req.url === "/ai/explain-run") {
+    } },
+  { method: "POST", match: "/ai/explain-run",
+    handler: async ({ req, res, auth }) => {
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
       const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
@@ -583,19 +592,21 @@ const server = http.createServer(async (req, res) => {
         aiError: result.aiError,
       });
       return sendJson(res, result);
-    }
+    } },
 
-    // Runs
-    if (req.method === "GET" && req.url?.startsWith("/runs") && !req.url.startsWith("/run?")) {
-      const url = new URL(req.url, "http://localhost");
+  // Runs — list + reads
+  // NOTE: `/runs` prefix excludes `/run?` so the next entry can claim it.
+  { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
       const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
       return sendJson(res, rows);
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/run?")) {
-      const url = new URL(req.url, "http://localhost");
+    } },
+  { method: "GET", match: (url) => url.startsWith("/run?"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       if (!runId) return sendJson(res, { error: "runId is required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -623,10 +634,10 @@ const server = http.createServer(async (req, res) => {
         .limit(limit + 1);
       const page = paginateRunEvents(rows, limit);
       return sendJson(res, { run: run[0], nodes, ...page });
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/status")) {
-      const url = new URL(req.url, "http://localhost");
+    } },
+  { method: "GET", match: (url) => url.startsWith("/status"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       if (!runId) return sendJson(res, { error: "runId is required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -641,10 +652,10 @@ const server = http.createServer(async (req, res) => {
         .limit(limit + 1);
       const page = paginateRunEvents(rows, limit);
       return sendJson(res, { run: run[0], nodes, ...page });
-    }
-
-    if (req.method === "GET" && req.url?.startsWith("/events")) {
-      const url = new URL(req.url, "http://localhost");
+    } },
+  { method: "GET", match: (url) => url.startsWith("/events"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       if (!runId) return sendJson(res, { error: "runId is required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -670,11 +681,11 @@ const server = http.createServer(async (req, res) => {
         closed = true;
         clearInterval(interval);
       });
-      return;
-    }
+    } },
 
-    if (req.method === "POST" && req.url === "/start") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+  // Run lifecycle (start / resume / cancel)
+  { method: "POST", match: "/start", role: "editor",
+    handler: async ({ req, res, auth }) => {
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
@@ -703,10 +714,9 @@ const server = http.createServer(async (req, res) => {
         adhoc: isAdhoc,
       });
       return sendJson(res, result);
-    }
-
-    if (req.method === "POST" && req.url === "/resume") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+    } },
+  { method: "POST", match: "/resume", role: "editor",
+    handler: async ({ req, res, auth }) => {
       const { runId, nodeId } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -714,10 +724,36 @@ const server = http.createServer(async (req, res) => {
       const result = await resumeRun(runId, nodeId);
       await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
       return sendJson(res, result);
-    }
+    } },
+  // Cancel an in-flight run. Mirrors `/resume`'s shape; `cancelRun`
+  // (engine helper) flips run + non-running nodes to "cancelled" and emits a
+  // `run.cancelled` event. The worker's running job continues to completion;
+  // the cancelled-stays-cancelled rollup absorbs the post-cancel writes.
+  { method: "POST", match: "/run/cancel", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const runId = typeof body.runId === "string" ? body.runId : null;
+      const reason = body.reason;
+      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
 
-    if (req.method === "GET" && req.url?.startsWith("/causal")) {
-      const url = new URL(req.url, "http://localhost");
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0]) return sendJson(res, { error: "Run not found" }, 404);
+      if (run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+
+      const terminalStatuses = new Set(["succeeded", "failed", "cancelled", "skipped", "timed_out"]);
+      if (terminalStatuses.has(run[0].status)) {
+        return sendJson(res, { error: `Run is already ${run[0].status}; cannot cancel` }, 409);
+      }
+
+      await cancelRun(runId, reason);
+      await audit(auth.orgId, auth.userId, "run.cancelled", "run", runId, { reason });
+      return sendJson(res, { runId, status: "cancelled" });
+    } },
+
+  // Causal replay
+  { method: "GET", match: (url) => url.startsWith("/causal"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       const nodeId = url.searchParams.get("nodeId");
       if (!runId || !nodeId) return sendJson(res, { error: "runId and nodeId are required" }, 400);
@@ -737,10 +773,12 @@ const server = http.createServer(async (req, res) => {
       });
 
       return sendJson(res, result);
-    }
+    } },
 
-    if (req.method === "GET" && req.url?.startsWith("/dlq")) {
-      const url = new URL(req.url, "http://localhost");
+  // DLQ
+  { method: "GET", match: (url) => url.startsWith("/dlq"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
       const id = url.searchParams.get("id");
       const status = url.searchParams.get("status");
 
@@ -751,10 +789,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       return sendJson(res, await listDeadLetters(auth.orgId, status));
-    }
-
-    if (req.method === "POST" && req.url === "/dlq/resolve") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+    } },
+  { method: "POST", match: "/dlq/resolve", role: "editor",
+    handler: async ({ req, res, auth }) => {
       const { id } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof id !== "string") return sendJson(res, { error: "id is required" }, 400);
 
@@ -762,10 +799,9 @@ const server = http.createServer(async (req, res) => {
       await audit(auth.orgId, auth.userId, "dlq.resolved", "dlq", id);
 
       return sendJson(res, { ok: true });
-    }
-
-    if (req.method === "POST" && req.url === "/dlq/replay") {
-      await requireRole(auth.orgId, auth.userId, "editor", auth.mode);
+    } },
+  { method: "POST", match: "/dlq/replay", role: "editor",
+    handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       if (typeof body.deadLetterId === "string") {
@@ -801,9 +837,37 @@ const server = http.createServer(async (req, res) => {
       await audit(auth.orgId, auth.userId, "dlq.replayed", "run", runId, { nodeId });
 
       return sendJson(res, { ok: true });
+    } },
+];
+
+const server = http.createServer(async (req, res) => {
+  (res as CorsAwareResponse).requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders(res));
+    return res.end();
+  }
+
+  try {
+    const url = req.url ?? "";
+    const matched = routes.find((route) => route.method === req.method && matchesRoute(route.match, url));
+
+    if (!matched) {
+      return sendJson(res, { error: "Not found" }, 404);
     }
 
-    return sendJson(res, { error: "Not found" }, 404);
+    let auth: AuthContext;
+    if (matched.skipAuth) {
+      // Only `/health` opts out; its handler doesn't read `auth`.
+      auth = undefined as unknown as AuthContext;
+    } else {
+      auth = await requireAuth(req);
+      if (matched.role) {
+        await requireRole(auth.orgId, auth.userId, matched.role, auth.mode);
+      }
+    }
+
+    await matched.handler({ req, res: res as CorsAwareResponse, auth });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal server error";
     const statusCode = err && typeof err === "object" && "statusCode" in err ? Number((err as { statusCode?: number }).statusCode) : 500;

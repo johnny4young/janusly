@@ -58,6 +58,7 @@ type RightPanelProps = {
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
   onApproveNode: (nodeId: string) => void
   onReplayNode: (nodeId: string) => void
+  onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string) => void
   onResolveDeadLetter: (id: string) => void
   onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition }>
@@ -120,6 +121,7 @@ export function RightPanel(props: RightPanelProps) {
       onRefreshPlatform={props.onRefreshPlatform}
       onApproveNode={props.onApproveNode}
       onReplayNode={props.onReplayNode}
+      onCancelActiveRun={props.onCancelActiveRun}
       onReplayDeadLetter={props.onReplayDeadLetter}
       onResolveDeadLetter={props.onResolveDeadLetter}
     />
@@ -628,14 +630,22 @@ function RunsPanel({
   onRefreshPlatform,
   onApproveNode,
   onReplayNode,
+  onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
-}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
+}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode' | 'onCancelActiveRun' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
   const activeRuns = runs.filter(run => run.status === 'running' || run.status === 'queued').length
   const failedRuns = runs.filter(run => run.status === 'failed').length
+
+  // Cancellable when the active run is in a non-terminal status.
+  const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'skipped', 'timed_out'])
+  const activeRun = activeRunId ? runs.find(run => run.id === activeRunId) : null
+  const isActiveRunCancellable = Boolean(
+    activeRunId && onCancelActiveRun && (!activeRun || !terminalStatuses.has(activeRun.status)),
+  )
 
   return (
     <PanelChrome title="Runs" description="Review execution history, approvals, retries, and AI explanations." icon={<Activity size={18} />}>
@@ -645,6 +655,27 @@ function RunsPanel({
         <Metric label="Done" value={completedRuns} icon={<CheckCircle2 size={15} />} />
         <Metric label="Failed" value={failedRuns} icon={<RefreshCw size={15} />} />
       </section>
+
+      {activeRunId && (
+        <section className="panel-card">
+          <div className="split-row">
+            <strong>Active run</strong>
+            <button
+              type="button"
+              className="small-command"
+              onClick={() => onCancelActiveRun?.()}
+              disabled={!isActiveRunCancellable}
+            >
+              Cancel run
+            </button>
+          </div>
+          <p className="helper-text">
+            {activeRun
+              ? `Status: ${activeRun.status}. ${isActiveRunCancellable ? "Cancel flips it to cancelled and stops scheduling further nodes." : "Run already finished — cancel is a no-op."}`
+              : "Run details are loading."}
+          </p>
+        </section>
+      )}
 
       <section className="panel-card">
         <div className="split-row">
