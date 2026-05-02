@@ -35,6 +35,7 @@ import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
+import { handleWaitResume } from "./wait-until";
 
 await assertMigrationsApplied();
 
@@ -74,6 +75,12 @@ function validateJobData(data: unknown): { runId: string; node: unknown; workflo
 export const worker = new Worker(
   "workflow-nodes",
   async (job) => {
+    // Delayed wake-up jobs for `wait_until` nodes carry a different payload
+    // shape than regular execution jobs — dispatch on `job.name` first.
+    if (job.name === "wait-resume") {
+      await handleWaitResume(job.data);
+      return;
+    }
     const { runId, node, workflow } = validateJobData(job.data);
     await runtime.executeQueuedNode({ runId, node: node as any, workflow: workflow as any });
   },

@@ -45,6 +45,7 @@ export const nodePresets: Record<string, JsonObject> = {
     ],
   },
   subworkflow: { workflowId: '' },
+  wait_until: { duration: 'P1D' },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -67,6 +68,7 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   agent_reflection: { label: 'Review result', helper: 'Accept or retry a result' },
   multi_agent: { label: 'Agent team', helper: 'Coordinate multiple agents' },
   subworkflow: { label: 'Call workflow', helper: 'Run another saved workflow as a step' },
+  wait_until: { label: 'Wait', helper: 'Pause the run for an ISO 8601 duration' },
 }
 
 /** Human label for a node type (falls back to the raw id with `_` → space). */
@@ -98,6 +100,7 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
   if (type === 'webhook') return 'Wait for an external event'
   if (type === 'noop') return 'No setup needed'
   if (type === 'subworkflow') return readString(config.workflowId) ?? 'Pick a saved workflow'
+  if (type === 'wait_until') return readString(config.duration) ?? 'Set an ISO 8601 duration'
   return 'Review step settings'
 }
 

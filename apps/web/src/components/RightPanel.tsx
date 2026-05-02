@@ -533,6 +533,16 @@ function QuickConfigEditor({
     )
   }
 
+  if (type === 'wait_until') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField scope={nodeId} label="Duration (ISO 8601)" value={readConfigString(config, 'duration')} onChange={value => patch({ duration: value })} />
+        <p className="helper-text">Examples: <code>PT5M</code> (5 min), <code>PT2H</code> (2 hours), <code>P3D</code> (3 days), <code>P1Y</code> (1 year ≈ 365 days). Manual resume short-circuits the wait.</p>
+      </section>
+    )
+  }
+
   if (type === 'loop') {
     return (
       <section className="quick-config">
