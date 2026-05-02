@@ -234,12 +234,6 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 
 ---
 
-## Roadmap
-
-What is in flight, what shipped, what is intentionally deferred lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Strategic context — why we are picking these bets — lives in [`docs/PLAN.md`](docs/PLAN.md).
-
----
-
 ## Testing
 
 | Package                  | Stack                                                                              |
