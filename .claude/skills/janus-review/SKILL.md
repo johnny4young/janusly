@@ -89,6 +89,7 @@ The generic review skills do not know about Janusly's conventions. Run through t
 - **l. Tests** — edge cases for helpers, AI success+fallback, audit row asserted.
 - **m. Banned deps** — no tRPC, no Stripe SDK.
 - **n. Doc sync** — ROADMAP §3b Status flip applied; PLAN updated only when claims drifted; AGENTS only when invariant changed; README without leaked planning.
+- **o. API routing (Open/Closed)** — new HTTP routes register in the `routes: Route[]` array exported from `apps/api/src/index.ts`; no inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` declared on the route entry, not in the handler body.
 
 For each check, the action when a violation is found (FIX INLINE vs REPORT) is in [`references/janusly-checks.md`](references/janusly-checks.md).
 
