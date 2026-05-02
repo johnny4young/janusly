@@ -94,6 +94,68 @@ export const WorkflowMetadataSchema = z.object({
 }).default({ tags: [] });
 
 /**
+ * Closed set of JSON-Schema-subset primitive `type` discriminators supported
+ * by `WorkflowInputSchema`. Matches the small grammar
+ * `packages/engine/src/inputs-validator.ts` understands — adding a new
+ * primitive here means adding a matching branch there.
+ */
+export const workflowInputTypeValues = ["string", "number", "boolean", "object", "array"] as const;
+/** Zod enum derived from `workflowInputTypeValues`. */
+export const WorkflowInputTypeSchema = z.enum(workflowInputTypeValues);
+
+/**
+ * JSON-Schema-subset describing one input field on a workflow's declared
+ * `inputs` shape. Recursive via `z.lazy` (object → properties → fields;
+ * array → items). Powers `WorkflowSchema.inputs`.
+ *
+ * The grammar is intentionally limited:
+ * - `type`: one of `workflowInputTypeValues`.
+ * - `properties` + `required`: only meaningful for `type: "object"`.
+ * - `items`: only meaningful for `type: "array"`.
+ * - `enum`: closed set of literal values the field must equal one of.
+ * - `description`: free-form, surfaces in the AI Studio Inspector.
+ *
+ * No `oneOf` / `anyOf` / patterns / number ranges yet — expand the subset
+ * (here AND in the hand-rolled validator) only when a real consumer needs it.
+ */
+export const WorkflowInputSchema: z.ZodType<WorkflowInputSchemaShape> = z.lazy(() => z.object({
+  type: WorkflowInputTypeSchema,
+  description: z.string().optional(),
+  properties: z.record(z.string(), WorkflowInputSchema).optional(),
+  required: z.array(z.string()).optional(),
+  items: WorkflowInputSchema.optional(),
+  enum: z.array(z.unknown()).optional(),
+}));
+
+/**
+ * The "shape" type for a `WorkflowInputSchema` value. Hand-written rather than
+ * `z.infer<>` because Zod can't derive the recursive shape through `z.lazy`
+ * without an explicit type seed.
+ */
+export type WorkflowInputSchemaShape = {
+  type: typeof workflowInputTypeValues[number];
+  description?: string;
+  properties?: Record<string, WorkflowInputSchemaShape>;
+  required?: string[];
+  items?: WorkflowInputSchemaShape;
+  enum?: unknown[];
+};
+
+/**
+ * `outputs` is a record of output-name → template string. At terminal
+ * (`succeeded`) status, the engine renders each template against the run's
+ * context using `renderTemplate` (`packages/engine/src/template.ts`) and
+ * persists the result to `runs.outputJson`. Shape:
+ *   { result: "{{context.summarize.output.text}}", count: "{{context.fetch.output.length}}" }
+ *
+ * Outputs are intentionally string templates (not the same JSON-Schema
+ * shape as `inputs`) because outputs are *projections* from existing
+ * context, not types the workflow *declares* it produces. Reusing the
+ * existing template substitution language avoids inventing a second one.
+ */
+export const WorkflowOutputsSchema = z.record(z.string(), z.string());
+
+/**
  * Top-level workflow definition. Persisted as JSON in
  * `workflow_versions.dag_json` and consumed by the engine.
  */
@@ -102,6 +164,8 @@ export const WorkflowSchema = z.object({
   id: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),
   metadata: WorkflowMetadataSchema.optional(),
+  inputs: WorkflowInputSchema.optional(),
+  outputs: WorkflowOutputsSchema.optional(),
   nodes: z.array(NodeSchema),
   edges: z.array(EdgeSchema),
 });
@@ -114,5 +178,9 @@ export type WorkflowNode = z.infer<typeof NodeSchema>;
 export type WorkflowEdge = z.infer<typeof EdgeSchema>;
 /** Parsed metadata block with defaulted `tags`. */
 export type WorkflowMetadata = z.infer<typeof WorkflowMetadataSchema>;
+/** Closed set of JSON-Schema-subset primitive types. */
+export type WorkflowInputType = z.infer<typeof WorkflowInputTypeSchema>;
+/** Output-projection map (output-name → template string). */
+export type WorkflowOutputs = z.infer<typeof WorkflowOutputsSchema>;
 /** Top-level parsed workflow. */
 export type Workflow = z.infer<typeof WorkflowSchema>;

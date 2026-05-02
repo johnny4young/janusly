@@ -19,6 +19,8 @@
 import { db } from "@janusly/db";
 import { runNodes, runEvents, runs } from "@janusly/db";
 import { eq, and, inArray } from "drizzle-orm";
+import { WorkflowSchema } from "@janusly/shared";
+import { projectOutputs } from "./outputs-projector";
 
 /** Return the current top-level run status, or `null` when the row is absent. */
 export async function getRunStatus(runId: string) {
@@ -128,11 +130,43 @@ export async function updateRunStatusFromNodes(runId: string) {
 
   const openStatuses = new Set(["pending", "queued", "running", "waiting"]);
   if (nodes.length > 0 && nodes.every(node => !openStatuses.has(node.status))) {
-    await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, runId));
+    // Project the workflow's declared `outputs` (if any) into runs.outputJson
+    // BEFORE flipping status, so a single UPDATE carries both writes.
+    const outputJson = await computeRunOutputs(runId);
+    await db.update(runs)
+      .set({ status: "succeeded", outputJson })
+      .where(eq(runs.id, runId));
     return "succeeded";
   }
 
   return "running";
+}
+
+/**
+ * Project the workflow's declared `outputs` against the run's terminal
+ * context. Returns `null` for runs without a declared `workflow.outputs`
+ * (the column stays NULL — UI shows nothing).
+ *
+ * The workflow JSON is read from `runs.inputJson.workflow` — the snapshot
+ * captured by `startRun` at run-start time. This is intentional: ad-hoc
+ * runs don't have a `workflow_versions` row, and saved runs should still
+ * project against the workflow as it was when the run started (immune to
+ * subsequent edits to the saved workflow).
+ *
+ * Multi-tenant: scoped by `runId` (callers carry the org gate). No new
+ * cross-tenant query introduced.
+ */
+async function computeRunOutputs(runId: string): Promise<Record<string, unknown> | null> {
+  const rows = await db.select({ inputJson: runs.inputJson }).from(runs).where(eq(runs.id, runId)).limit(1);
+  const inputJson = rows[0]?.inputJson as { workflow?: unknown; input?: unknown } | null;
+  if (!inputJson || typeof inputJson !== "object") return null;
+
+  const workflowParsed = WorkflowSchema.safeParse(inputJson.workflow);
+  if (!workflowParsed.success || !workflowParsed.data.outputs) return null;
+
+  const context = await getRunContext(runId);
+  const inputs = inputJson.input ?? {};
+  return projectOutputs(workflowParsed.data.outputs, context, inputs);
 }
 
 /** Insert one row into `run_events`. The web's run timeline reads these. */

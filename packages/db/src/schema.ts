@@ -106,6 +106,13 @@ export const runs = pgTable(
     workflowVersionId: text("workflow_version_id").notNull(),
     status: text("status").notNull(),
     inputJson: jsonb("input_json"),
+    /**
+     * Projected workflow output, computed once at terminal `succeeded`
+     * status by `computeRunOutputs`. NULL for runs without a
+     * declared `workflow.outputs` projection map, and for runs that haven't
+     * reached `succeeded` yet (failed/cancelled runs never populate this).
+     */
+    outputJson: jsonb("output_json"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
