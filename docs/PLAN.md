@@ -708,3 +708,230 @@ Open quick wins:
 - Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
 
 These don't require strategic alignment and unblock everything later.
+
+---
+
+## 15. Review-derived execution plan — hardening, recovery, and product focus
+
+This section folds the external review findings into the existing roadmap. The core recommendation is to make Janusly the **self-healing AI workflow operator**: observable DAGs that fail safely, explain root cause, propose patches, version changes, and replay/evaluate improvements.
+
+### 15.1 Product focus
+
+Janusly should avoid competing as a generic automation catalog. The strongest wedge is:
+
+> **Run critical workflows, explain failures, propose safe fixes, and evolve workflow versions with auditability.**
+
+Keep the strategic positions from §3, but sequence them more narrowly:
+
+1. **Self-healing failure recovery** — DLQ -> explanation -> patch -> diff -> replay.
+2. **AI-authored and AI-reviewed flows** — generation plus structured review before save.
+3. **MCP-native operations** — read-only first; write tools only after consent/audit policy.
+
+### 15.2 Sequencing
+
+#### Sprint 0 — Trust and safety blockers
+
+Ship before expanding features:
+
+- ENG-042 — Redact executor event payloads.
+- ENG-043 — Treat env templates as secrets.
+- ENG-044 — Add runtime cancellation guards.
+- ENG-045 — Share status constants.
+- ENG-047 — Normalize router candidates.
+- ENG-048 — Bound outbound HTTP execution.
+
+Rationale: these are the issues most likely to break operator trust: secret persistence, post-cancel execution, generated-router mismatch, and worker exposure to slow/large HTTP responses.
+
+#### Sprint 1 — Make learning and observability real
+
+- ENG-046 — Wire runtime learning metadata.
+- ENG-049 — Add safe persistence chokepoint.
+- ENG-050 — Repair concurrent workflow saves.
+- ENG-051 — Add usage breakdown reporting.
+
+Rationale: do not sell advanced learning until routing stats and workflow improvements are actually wired through explicit run metadata. Usage reporting also makes provider/model cost visible enough for customer conversations.
+
+#### Sprint 2 — Self-healing recovery MVP
+
+- ENG-053 — Ship failure recovery MVP.
+- Use ENG-039 (diff UX) as a dependency, not a separate “nice to have.”
+- Use DLQ/replay and run explainer as the product surface.
+
+Rationale: this is the demo that differentiates Janusly from “Zapier/n8n with AI.”
+
+#### Sprint 3 — MCP and tool expansion with guardrails
+
+- ENG-052 — Define MCP write consent policy before MCP write tools.
+- ENG-054 — Prioritize revenue-grade tools.
+- ENG-057 — Define MCP client safety model.
+
+Rationale: MCP write tools and external MCP client tools are powerful but dangerous without consent, audit, allowlists, and bounded execution.
+
+#### Sprint 4 — Demos and market narrative
+
+- ENG-055 — Build canonical recovery demos.
+- ENG-056 — Update product positioning docs.
+
+Rationale: once the recovery loop exists, the docs and demos should converge around the self-healing operator story.
+
+### 15.3 Engineering invariants added by the review
+
+- Any payload persisted to `run_events`, `run_nodes`, DLQ, or audit must pass through a safe persistence sanitizer.
+- `{{env.*}}` must be treated as sensitive or removed from the template grammar.
+- Cancellation is a runtime invariant, not only an API helper: queued jobs must check run status before execution, and completed nodes must not schedule downstream work after cancellation.
+- Runtime learning must use explicit run metadata; it must not depend on node-output context to contain `orgId`, `workflowId`, or `rlStats`.
+- MCP write tools require explicit consent and audit. Read-only MCP is safe as-is; writes are not.
+- Outbound HTTP execution must be bounded by timeout, response-size cap, and redirect revalidation.
+- The product should not overstate “RL/self-learning” until `routing_stats`, decision replay, and improvement records are wired through tested runtime paths.
+
+### 15.4 Demo strategy
+
+The next public-facing demos should be:
+
+1. **Incident triage** — webhook -> AI classify -> route -> GitHub/Linear issue -> Slack -> explain failure.
+2. **Refund triage** — form/webhook -> risk classification -> approval/human form -> action -> audit.
+3. **Failed workflow recovery** — intentionally failing node -> DLQ -> explanation -> patch suggestion -> diff -> replay.
+
+Each demo should show observability, human control, auditability, and recovery.
+
+---
+
+## 16. Market differentiation plan — make Janusly unique and sellable
+
+Janusly should not try to win by having more integrations than Zapier or by being a visual clone of n8n with an AI button. The memorable category is:
+
+> **Self-healing AI workflow operator.**
+
+The product promise is:
+
+> Janusly does not just automate a process. It operates it: every run is observable, every failure is explainable, every proposed fix is reviewable, and every production change is replayable before rollout.
+
+### 16.1 Positioning
+
+Preferred tagline:
+
+> **AI workflows that explain, recover, and safely evolve.**
+
+Alternative short pitches:
+
+- “The recovery layer for AI-powered business workflows.”
+- “Durable AI workflows with failure explanation and safe replay.”
+- “Operate AI automations you can trust in production.”
+
+Anti-positioning:
+
+- Not “better Zapier UI.”
+- Not “n8n with AI.”
+- Not “agents that do everything.”
+- Not generic RPA.
+
+### 16.2 Differentiating product bets
+
+The market-facing product should concentrate around seven distinctive surfaces:
+
+1. **Recovery Queue as the home screen** — failed runs, grouped by pattern, with root cause and next action.
+2. **Workflow Review Agent** — AI-generated workflows get reviewed before save/run.
+3. **Replay Lab** — replay failed runs with the same input and compare patched versions safely.
+4. **Workflow Health Score** — reliability, safety, cost, latency, maintainability, and AI-risk score per workflow.
+5. **Visual Workflow Diff** — operator-readable version/patch diff, not just JSON.
+6. **Run Explain Report** — exportable root-cause and recovery report for Slack/Linear/GitHub.
+7. **MCP operator experience** — inspect and operate Janusly from chat with dry-run/consent guardrails.
+
+These become tickets ENG-058..ENG-073 in the roadmap.
+
+### 16.3 ICP and sales motion
+
+Initial ideal customer profiles:
+
+| ICP | Pain | Janusly pitch |
+| --- | --- | --- |
+| B2B startups with ops workflows | Manual support, billing, onboarding, and escalation workflows break often. | “Automate ops workflows without losing control when AI is involved.” |
+| Engineering/support teams | Incidents, customer bugs, and escalations require triage across Slack/GitHub/Linear. | “Turn incidents and escalations into explainable workflows with recovery built in.” |
+| AI builders/agencies | They build agents for clients but lack durable runtime, audit, and recovery. | “Ship client AI workflows with a runtime, visual ops, MCP, and recovery.” |
+
+### 16.4 Commercial templates
+
+Prioritize templates that sell a story:
+
+1. Failed payment recovery.
+2. Refund triage with approval.
+3. Incident triage to Linear/GitHub.
+4. Customer escalation router.
+5. Lead enrichment + handoff.
+6. Churn risk follow-up.
+7. Bug report summarizer -> GitHub issue.
+8. AI support answer with human review.
+
+Each template should include sample input, required credentials, expected output, and a failure/recovery path.
+
+### 16.5 Minimum integration set
+
+Do not chase hundreds of integrations. Ship the few that make demos and early customers real:
+
+- `slack.post`
+- `email.send`
+- `github.create_issue`
+- `linear.create_issue`
+- `db.query.read`
+- `webhook.signed`
+- Stripe payment/refund/retry primitive when credentials are available
+- `json.merge`, `json.diff`, `time.now`, `time.format`
+
+### 16.6 Landing page structure
+
+Hero:
+
+> **Self-healing workflows for AI operations**
+
+Subcopy:
+
+> Build business workflows as observable DAGs. When they fail, Janusly explains why, proposes a patch, previews the diff, and safely replays the run.
+
+Primary CTAs:
+
+- “Watch 3-minute recovery demo”
+- “Run locally”
+- “Book technical demo”
+
+Sections:
+
+1. The problem — AI automations break silently; logs are messy; fixes are manual.
+2. The Janusly loop — Prompt -> DAG -> Run -> Observe -> Explain -> Patch -> Replay -> Learn.
+3. Recovery demo — one failed run, one patch, one replay.
+4. For technical teams — Node, Postgres, Redis, BullMQ, Zod DSL, MCP, self-host.
+5. Use cases — incident triage, refund triage, payment recovery, support routing.
+6. Security and control — RBAC, audit logs, secret refs, approvals, replay before apply.
+7. Deployment/pricing — self-host and managed cloud.
+
+### 16.7 Packaging
+
+Suggested packaging:
+
+| Package | Audience | Included |
+| --- | --- | --- |
+| Developer / Self-host | Technical builders | Local workflows, core runtime, basic recovery. |
+| Team Cloud | Startups | Managed runtime, templates, Slack/GitHub/email, Recovery Queue. |
+| Business | Ops teams | RBAC, audit logs, MCP, approvals, usage/cost reporting. |
+| Enterprise | Compliance-heavy teams | SSO, retention, isolated environments, advanced audit, support. |
+
+Add-on:
+
+| Add-on | Value |
+| --- | --- |
+| AI Recovery Pack | Failure explanation, patch suggestions, replay/evals, model usage. |
+
+### 16.8 Sales demos
+
+Flagship demos:
+
+1. **Workflow fails, Janusly fixes it** — missing secret or broken HTTP call -> Recovery Queue -> explanation -> patch -> diff -> replay.
+2. **Refund triage** — request -> AI risk classification -> approval/human gate -> action -> audit -> recovery if Stripe/tool fails.
+3. **Incident triage** — webhook -> AI summary/severity -> GitHub/Linear issue -> Slack -> recovery if integration fails.
+
+The primary business metric should be:
+
+> **Mean Time To Recovery for failed automations.**
+
+Marketing copy should say:
+
+> “Cut workflow recovery time from hours to minutes.”
