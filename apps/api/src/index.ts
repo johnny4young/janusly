@@ -116,7 +116,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- webhook: {} (waits for external resume)",
   "- approval: { message?: string } (waits for human approval)",
   "- ai: { prompt: string, model?: string }",
-  "- tool: { tool: 'http.request'|'text.uppercase'|'json.pick', input: object }",
+  "- tool: { tool: 'http.request'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid', input: object }",
   "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
   "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
   "- agent_reflection: { input?: any }",

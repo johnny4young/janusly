@@ -78,6 +78,7 @@ These never bend, in either phase:
 - **Banned deps:** no tRPC, no Stripe SDK.
 - **Compose lifecycle:** when started, bring down before final stage.
 - **Symlink:** edit `AGENTS.md`, never break the `CLAUDE.md → AGENTS.md` symlink.
+- **No ticket / roadmap refs in source code.** This repo is intended to go open source — readers won't have access to `docs/ROADMAP.md` or `docs/PLAN.md`. Source files (`packages/**/src`, `apps/**/src`, migrations, tests) must NOT mention `ENG-NNN`, "Phase 1/2/3", "Layer 1/2", roadmap section numbers (`§9`, `§3b`), or other planning artifacts. Comments in code explain the **what** and **why** in self-contained terms; if invariant motivation matters, copy it inline rather than linking out. The same rule applies to commit messages and JSDoc — the audit trail in chat / `docs/ROADMAP.md` is enough; source code stays clean. ROADMAP / PLAN / AGENTS / commit-message-summary fields ARE allowed to reference ticket ids (those docs are project-management surfaces, not the open-source code).
 
 The full invariant catalogue is in [`references/invariants.md`](references/invariants.md).
 

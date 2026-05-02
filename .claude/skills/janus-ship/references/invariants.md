@@ -207,3 +207,17 @@ Leaked containers hold port 5432 and 6379. The next session that tries to start 
 **Why:**
 
 Different tooling expects each name. Claude Code looks for `CLAUDE.md`; other agent harnesses (and humans browsing GitHub) expect `AGENTS.md`. The symlink lets both work without duplicating the file. Editing through the symlink is fine; replacing the symlink with a copy creates two files that drift.
+
+## No ticket / roadmap refs in source code
+
+**What:**
+
+Source files (`packages/**/src`, `apps/**/src`, migrations, tests) must NOT mention `ENG-NNN`, "Phase 1/2/3", "Layer 1/2", roadmap section numbers (`§9`, `§3b`), or any other planning artifact. Use self-contained descriptive comments instead — explain the **what** and **why** inline rather than linking out. Same rule applies to JSDoc and to commit-message bodies.
+
+`docs/ROADMAP.md`, `docs/PLAN.md`, `AGENTS.md`, and the chat-side report ARE allowed (and expected) to reference ticket ids — those are project-management surfaces, not the open-source code.
+
+**Why:**
+
+This repo will go open source. Readers cloning it from GitHub won't have access to internal planning docs (and those docs may be stripped before the public release). A comment that says "ENG-031 invariant: don't bypass the queue adapter" is meaningless to a future maintainer; "Don't bypass the queue adapter — the DLQ insertion lives there and a direct enqueue would skip it" is durable. Keep the source code self-explanatory; keep the audit trail in the project-management docs.
+
+**Where to enforce:** the implementer skill flags violations during PHASE 2 staging; the reviewer skill (`janus-review`) flags any stray `ENG-NNN` / `Phase N` / `Layer N` / `§N` mention in the staged source diff as FIX INLINE.

@@ -141,3 +141,14 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 **Why:** ENG-041 closed the dispatcher for modification. The registry is the extension point; new routes plug in via `routes.push({...})`. Bypassing it means duplicate auth logic, RBAC drift, and a return to the unmaintainable 33-if-branch shape we just escaped. Phase 2 will add 11+ more routes — every ticket that bypasses the registry compounds the cost of the next refactor.
 
 **Action:** FIX INLINE when a new route was added as an inline `if` branch outside the dispatcher — convert it to a registry entry, move `requireRole` from handler body to the route's `role` field. REPORT (don't fix) when the change is structural — e.g. introducing per-domain route files (`routes/runs.ts`, `routes/workflows.ts`), path-parameter routing (`/run/:id/cancel`), or middleware composition — those are design discussions, not silent regressions.
+
+## p. No ticket / roadmap refs in source code
+
+**What:**
+
+- Source files (`packages/**/src`, `apps/**/src`, migrations, tests) must NOT mention ticket ids (`ENG-NNN`), roadmap phases ("Phase 1/2/3"), tier labels ("Layer 1/2"), or roadmap section numbers (`§9`, `§3b`).
+- `docs/ROADMAP.md`, `docs/PLAN.md`, `AGENTS.md`, and the chat-side report ARE allowed (and expected) to reference ticket ids.
+
+**Why:** the repo is intended to go open source. Comments that link out to internal planning docs become meaningless when those docs aren't shipped (or are stripped before public release). Self-contained explanations age well; planning-artifact links don't.
+
+**Action:** FIX INLINE — rewrite the comment to explain the **what** and **why** in self-contained terms (the motivation usually fits inline in 1–2 sentences). Spot scan: `grep -nE "ENG-[0-9]+|Phase [1-9]|Layer [1-9]|§[0-9]" $(git diff --cached --name-only -- 'packages/*/src/*' 'apps/*/src/*')` should be empty.

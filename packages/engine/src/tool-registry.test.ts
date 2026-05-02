@@ -104,4 +104,245 @@ describe('tool-registry', () => {
     expect(textUpper?.required).toEqual(['value'])
     expect(textUpper?.optional).toBeUndefined()
   })
+
+  /* -------- text.* -------- */
+
+  it('text.lowercase happy path + Zod rejection', async () => {
+    expect(await executeTool('text.lowercase', { value: 'HELLO' }, {})).toEqual({ value: 'hello' })
+    expect(validateToolInput('text.lowercase', {}).issues).toContain('Missing required input: value')
+  })
+
+  it('text.trim happy path + Zod rejection', async () => {
+    expect(await executeTool('text.trim', { value: '  hi\n' }, {})).toEqual({ value: 'hi' })
+    expect(validateToolInput('text.trim', {}).issues).toContain('Missing required input: value')
+  })
+
+  it('text.replace defaults to replace-all and respects all:false', async () => {
+    expect(await executeTool('text.replace', { value: 'a.b.c', search: '.', replacement: '_' }, {})).toEqual({ value: 'a_b_c' })
+    expect(await executeTool('text.replace', { value: 'a.b.c', search: '.', replacement: '_', all: false }, {})).toEqual({ value: 'a_b.c' })
+    const issues = validateToolInput('text.replace', { value: 'x' }).issues
+    expect(issues).toContain('Missing required input: search')
+    expect(issues).toContain('Missing required input: replacement')
+  })
+
+  it('text.regex returns matches and honors capture groups', async () => {
+    expect(await executeTool('text.regex', { value: 'a1 b2 c3', pattern: '[a-z]\\d', flags: 'g' }, {})).toEqual({
+      matches: ['a1', 'b2', 'c3'],
+    })
+    expect(await executeTool('text.regex', { value: 'user@example.com', pattern: '([^@]+)@(.+)', group: 1 }, {})).toEqual({
+      matches: ['user'],
+    })
+    expect(validateToolInput('text.regex', { value: 'x' }).issues).toContain('Missing required input: pattern')
+  })
+
+  it('text.regex uses RE2 syntax and rejects unsafe RegExp-only features', async () => {
+    const backreference = validateToolInput('text.regex', {
+      value: 'catcat',
+      pattern: '(cat)\\1',
+    })
+    expect(backreference.valid).toBe(false)
+    expect(backreference.issues.join('\n')).toMatch(/invalid perl operator|invalid escape sequence|invalid regex/i)
+
+    const lookahead = validateToolInput('text.regex', {
+      value: 'abcdef',
+      pattern: 'abc(?=def)',
+    })
+    expect(lookahead.valid).toBe(false)
+    expect(lookahead.issues.join('\n')).toMatch(/invalid perl operator|invalid regex/i)
+  })
+
+  it('text.regex normalizes unicode mode and rejects unsupported flags', async () => {
+    expect(await executeTool('text.regex', { value: 'A1 a2', pattern: '[a-z]\\d', flags: 'gi' }, {})).toEqual({
+      matches: ['A1', 'a2'],
+    })
+    const unsupported = validateToolInput('text.regex', { value: 'x', pattern: 'x', flags: 'd' })
+    expect(unsupported.valid).toBe(false)
+    expect(unsupported.issues.join('\n')).toContain('Unsupported regular expression flags')
+  })
+
+  /* -------- json.* -------- */
+
+  it('json.set returns a copy with the path set, leaving the source untouched', async () => {
+    const source = { user: { id: 1 } }
+    const result = await executeTool('json.set', { source, path: 'user.name', value: 'Ada' }, {})
+    expect(result).toEqual({ value: { user: { id: 1, name: 'Ada' } } })
+    expect(source).toEqual({ user: { id: 1 } }) // immutability check
+    expect(validateToolInput('json.set', {}).issues).toContain('Missing required input: path')
+  })
+
+  it('json.merge deep-merges objects with b winning on key conflicts', async () => {
+    const a = { user: { id: 1, role: 'editor' }, status: 'active' }
+    const b = { user: { name: 'Ada', role: 'admin' } }
+    const result = await executeTool('json.merge', { a, b }, {})
+    expect(result).toEqual({ value: { user: { id: 1, role: 'admin', name: 'Ada' }, status: 'active' } })
+    expect(a).toEqual({ user: { id: 1, role: 'editor' }, status: 'active' }) // immutability check
+    expect(validateToolInput('json.merge', { a: {} }).issues.some(issue => issue.includes('b'))).toBe(true)
+  })
+
+  it('json.set refuses prototype-targeting path segments', async () => {
+    await expect(executeTool('json.set', { source: {}, path: '__proto__.polluted', value: 'x' }, {})).rejects.toThrow(/prototype-targeting/)
+    await expect(executeTool('json.set', { source: {}, path: 'a.constructor.b', value: 'x' }, {})).rejects.toThrow(/prototype-targeting/)
+    // Sanity check: the global Object.prototype is unaffected even after a rejected attempt.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('json.merge skips prototype-targeting keys when present as own properties on b', async () => {
+    // JSON.parse produces an own-property "__proto__" (unlike object literals where __proto__ is the prototype setter).
+    const b = JSON.parse('{"__proto__":{"polluted":"yes"},"name":"Ada"}') as Record<string, unknown>
+    const result = await executeTool('json.merge', { a: {}, b }, {})
+    expect(result.value).toEqual({ name: 'Ada' })
+    expect((result.value as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('json.jq runs a safe selector subset and validates query syntax', async () => {
+    const source = { users: [{ email: 'a@example.com' }, { email: 'b@example.com' }] }
+    expect(await executeTool('json.jq', { source, query: '.users[] | .email' }, {})).toEqual({
+      value: ['a@example.com', 'b@example.com'],
+    })
+    expect(await executeTool('json.jq', { query: '.current.user' }, { current: { user: 'Ada' } })).toEqual({
+      value: 'Ada',
+    })
+    const invalid = validateToolInput('json.jq', { query: 'users[]' })
+    expect(invalid.valid).toBe(false)
+    expect(invalid.issues.join('\n')).toContain('must start with')
+  })
+
+  /* -------- csv.* -------- */
+
+  it('csv.parse returns object rows by default', async () => {
+    expect(await executeTool('csv.parse', { value: 'a,b\n1,2' }, {})).toEqual({
+      rows: [{ a: '1', b: '2' }],
+    })
+    expect(validateToolInput('csv.parse', {}).issues).toContain('Missing required input: value')
+  })
+
+  it('csv.stringify round-trips through csv.parse', async () => {
+    const parsed = (await executeTool('csv.parse', { value: 'a,b\n1,2\n3,4' }, {})).rows as Array<Record<string, string>>
+    const stringified = await executeTool('csv.stringify', { rows: parsed, header: ['a', 'b'] }, {})
+    expect(stringified).toEqual({ value: 'a,b\n1,2\n3,4' })
+    expect(validateToolInput('csv.stringify', {}).issues.some(issue => issue.includes('rows'))).toBe(true)
+  })
+
+  it('csv.stringify rejects row/header shape mismatches before execution', async () => {
+    const objectRowsWithoutHeader = validateToolInput('csv.stringify', { rows: [{ a: '1' }] })
+    expect(objectRowsWithoutHeader.valid).toBe(false)
+    expect(objectRowsWithoutHeader.issues.join('\n')).toContain('header is required')
+    await expect(executeTool('csv.stringify', { rows: [{ a: '1' }] }, {})).rejects.toThrow(/header is required/)
+
+    const arrayRowsWithHeader = validateToolInput('csv.stringify', { rows: [['1']], header: ['a'] })
+    expect(arrayRowsWithHeader.valid).toBe(false)
+    expect(arrayRowsWithHeader.issues.join('\n')).toContain('header is only valid')
+  })
+
+  it('csv.filter keeps rows matching every where entry', async () => {
+    const result = await executeTool(
+      'csv.filter',
+      {
+        rows: [{ id: '1', s: 'open' }, { id: '2', s: 'closed' }, { id: '3', s: 'open' }],
+        where: { s: 'open' },
+      },
+      {},
+    )
+    expect(result).toEqual({ rows: [{ id: '1', s: 'open' }, { id: '3', s: 'open' }] })
+    expect(validateToolInput('csv.filter', { rows: [] }).issues.some(issue => issue.includes('where'))).toBe(true)
+  })
+
+  /* -------- time.* -------- */
+
+  it('time.now returns ISO + epoch ms in lockstep', async () => {
+    const result = await executeTool('time.now', {}, {})
+    expect(typeof result.iso).toBe('string')
+    expect(typeof result.epochMs).toBe('number')
+    expect(new Date(result.iso as string).getTime()).toBe(result.epochMs)
+  })
+
+  it('time.parse accepts ISO strings and numeric epochs', async () => {
+    expect(await executeTool('time.parse', { value: '2026-01-01T00:00:00Z' }, {})).toEqual({
+      iso: '2026-01-01T00:00:00.000Z',
+      epochMs: Date.parse('2026-01-01T00:00:00Z'),
+    })
+    expect(await executeTool('time.parse', { value: 0 }, {})).toEqual({
+      iso: '1970-01-01T00:00:00.000Z',
+      epochMs: 0,
+    })
+    // Union-typed required inputs produce "value: Invalid input" rather than the
+    // legacy "Missing required input" wording (which is reserved for plain
+    // required strings/objects via the formatIssue heuristic).
+    const invalid = validateToolInput('time.parse', {})
+    expect(invalid.valid).toBe(false)
+    expect(invalid.issues.join('\n')).toContain('value')
+  })
+
+  it('time.format honors the closed-enum format set', async () => {
+    expect(await executeTool('time.format', { value: '2026-01-01T00:00:00Z', format: 'iso' }, {})).toEqual({
+      value: '2026-01-01T00:00:00.000Z',
+    })
+    expect(await executeTool('time.format', { value: '2026-01-01T00:00:00Z', format: 'epoch' }, {})).toEqual({
+      value: Date.parse('2026-01-01T00:00:00Z'),
+    })
+    expect(await executeTool('time.format', { value: '2026-01-01T00:00:00Z', format: 'epochSeconds' }, {})).toEqual({
+      value: Math.trunc(Date.parse('2026-01-01T00:00:00Z') / 1000),
+    })
+    const invalid = validateToolInput('time.format', { value: '2026-01-01T00:00:00Z', format: 'pretty' })
+    expect(invalid.valid).toBe(false)
+  })
+
+  it('time.diff computes b - a in the requested unit (default ms)', async () => {
+    expect(
+      await executeTool(
+        'time.diff',
+        { a: '2026-01-01T00:00:00Z', b: '2026-01-04T00:00:00Z', unit: 'd' },
+        {},
+      ),
+    ).toEqual({ value: 3 })
+    expect(
+      await executeTool('time.diff', { a: 0, b: 1500 }, {}),
+    ).toEqual({ value: 1500 })
+    const invalid = validateToolInput('time.diff', {})
+    expect(invalid.valid).toBe(false)
+    expect(invalid.issues.some(issue => issue.includes('a'))).toBe(true)
+  })
+
+  it('time.add applies an ISO 8601 duration', async () => {
+    const result = await executeTool('time.add', { value: '2026-01-01T00:00:00Z', duration: 'P3D' }, {})
+    expect(result).toEqual({
+      iso: '2026-01-04T00:00:00.000Z',
+      epochMs: Date.parse('2026-01-04T00:00:00Z'),
+    })
+    await expect(executeTool('time.add', { value: '2026-01-01T00:00:00Z', duration: 'oops' }, {})).rejects.toThrow(/Invalid ISO 8601 duration/)
+    expect(validateToolInput('time.add', { value: '2026-01-01T00:00:00Z' }).issues).toContain('Missing required input: duration')
+  })
+
+  /* -------- crypto.* -------- */
+
+  it('crypto.sha256 returns the hex digest of the value', async () => {
+    expect(await executeTool('crypto.sha256', { value: 'hello' }, {})).toEqual({
+      digest: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+    })
+    expect(validateToolInput('crypto.sha256', {}).issues).toContain('Missing required input: value')
+  })
+
+  it('crypto.hmac defaults to sha256 and supports sha512', async () => {
+    const sha256 = await executeTool('crypto.hmac', { value: 'hello', secret: 'topsecret' }, {})
+    expect(sha256.digest).toMatch(/^[0-9a-f]{64}$/)
+    const sha512 = await executeTool('crypto.hmac', { value: 'hello', secret: 'topsecret', algorithm: 'sha512' }, {})
+    expect(sha512.digest).toMatch(/^[0-9a-f]{128}$/)
+    expect(validateToolInput('crypto.hmac', { value: 'x' }).issues).toContain('Missing required input: secret')
+  })
+
+  it('crypto.uuid emits a v4 UUID', async () => {
+    const result = await executeTool('crypto.uuid', {}, {})
+    expect(result.value).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  })
+
+  it('listTools exposes every text/json/csv/time/crypto tool', () => {
+    const names = listTools().map(tool => tool.name)
+    expect(names).toEqual(expect.arrayContaining([
+      'text.lowercase', 'text.trim', 'text.replace', 'text.regex',
+      'json.set', 'json.merge', 'json.jq',
+      'csv.parse', 'csv.stringify', 'csv.filter',
+      'time.now', 'time.parse', 'time.format', 'time.diff', 'time.add',
+      'crypto.sha256', 'crypto.hmac', 'crypto.uuid',
+    ]))
+  })
 })
