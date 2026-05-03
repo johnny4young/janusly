@@ -50,7 +50,7 @@ export class PostgresExecutionStore implements ExecutionStore {
     return tryClaimNodeForQueue(runId, nodeId, attempt);
   }
 
-  markNodeRunning(runId: string, nodeId: string, attempt?: number) {
+  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean> {
     return markNodeRunning(runId, nodeId, attempt);
   }
 
