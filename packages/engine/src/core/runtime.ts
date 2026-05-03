@@ -63,7 +63,34 @@ export class WorkflowRuntime {
     const attempt = input.attempt ?? 1;
     const start = Date.now();
 
-    await this.store.markNodeRunning(runId, node.id, attempt);
+    // Pre-execution cancellation guard: a run that has already reached a
+    // terminal status (cancelled / failed) must NOT have its queued jobs
+    // executed. Without this, a worker pulling a job from the BullMQ queue
+    // for a cancelled run would re-flip the cancelled node back to running
+    // and execute its body — defeating the cancellation.
+    const preStatus = await this.store.getRunStatus(runId);
+    if (preStatus === "cancelled" || preStatus === "failed") {
+      await this.store.appendEvent(workflowEvent({
+        runId, nodeId: node.id,
+        type: "node.skipped",
+        payload: { reason: `Run ${preStatus}`, attempt },
+      }));
+      return;
+    }
+
+    // Atomic `queued → running` claim. Defends against the race window
+    // between the run-status read above and this UPDATE: if cancellation
+    // lands in between, the conditional WHERE clause won't match the
+    // now-cancelled row, the claim fails, and we emit a skip event.
+    const claimed = await this.store.markNodeRunning(runId, node.id, attempt);
+    if (!claimed) {
+      await this.store.appendEvent(workflowEvent({
+        runId, nodeId: node.id,
+        type: "node.skipped",
+        payload: { reason: "Node not in queued state", attempt },
+      }));
+      return;
+    }
     await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } }));
 
     try {
@@ -86,6 +113,11 @@ export class WorkflowRuntime {
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
           await this.store.markNodeSucceeded(runId, node.id, { decision });
+          // Re-check run status before scheduling downstream work — a
+          // cancellation that lands while this node was running shouldn't
+          // re-queue work for the operator who just cancelled.
+          const postDecisionStatus = await this.store.getRunStatus(runId);
+          if (postDecisionStatus === "cancelled" || postDecisionStatus === "failed") return;
           await this.enqueueReadyNodes(input);
           return;
         }
@@ -107,6 +139,13 @@ export class WorkflowRuntime {
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
       await this.evaluateImprovement(runId, context);
+
+      // Re-check run status before scheduling downstream work. The node was
+      // already running when cancellation landed, so its row stays where it
+      // is — but downstream work shouldn't be queued for a cancelled run.
+      const postStatus = await this.store.getRunStatus(runId);
+      if (postStatus === "cancelled" || postStatus === "failed") return;
+
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
       const durationMs = Date.now() - start;
@@ -121,7 +160,10 @@ export class WorkflowRuntime {
       if (attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
         const nextAttempt = attempt + 1;
         const delayMs = computeRetryDelay(nextAttempt, retryPolicy);
+        const retryRunStatus = await this.store.getRunStatus(runId);
+        if (retryRunStatus === "cancelled" || retryRunStatus === "failed") return;
 
+        await this.store.markNodeQueued(runId, node.id, nextAttempt);
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
 
@@ -182,6 +224,11 @@ export class WorkflowRuntime {
 
   async enqueueReadyNodes(input: EnqueueReadyNodesInput): Promise<number> {
     const { runId, workflow } = input;
+    // Defense-in-depth cancellation guard. Direct callers (subworkflow
+    // notifier, resume-run, the runtime itself) all pre-check, but this
+    // guard catches any future caller that forgets to.
+    const status = await this.store.getRunStatus(runId);
+    if (status === "cancelled" || status === "failed") return 0;
     const context = await this.store.getRunContext(runId);
     let queued = 0;
 
