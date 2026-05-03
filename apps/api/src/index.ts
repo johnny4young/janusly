@@ -62,6 +62,7 @@ import {
 } from "@janusly/db";
 import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
   listDeadLetters,
@@ -765,8 +766,7 @@ export const routes: Route[] = [
       if (!run[0]) return sendJson(res, { error: "Run not found" }, 404);
       if (run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
 
-      const terminalStatuses = new Set(["succeeded", "failed", "cancelled", "skipped", "timed_out"]);
-      if (terminalStatuses.has(run[0].status)) {
+      if (isTerminalRunStatus(run[0].status)) {
         return sendJson(res, { error: `Run is already ${run[0].status}; cannot cancel` }, 409);
       }
 

@@ -20,6 +20,7 @@ import { db } from "@janusly/db";
 import { runNodes, runEvents, runs } from "@janusly/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { WorkflowSchema } from "@janusly/shared";
+import { NODE_OPEN_STATUSES, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
 
 /** Return the current top-level run status, or `null` when the row is absent. */
@@ -65,7 +66,9 @@ export async function cancelRun(runId: string, reason?: any) {
 
   await db.update(runNodes)
     .set({ status: "cancelled", stateJson: { cancelled: reason ?? {} }, finishedAt: new Date() })
-    .where(and(eq(runNodes.runId, runId), inArray(runNodes.status, ["pending", "queued", "waiting"])));
+    // `running` is intentionally excluded — running nodes finish naturally;
+    // the runtime's post-success guard then skips downstream scheduling.
+    .where(and(eq(runNodes.runId, runId), inArray(runNodes.status, [...nodeCancellableStatusValues])));
 
   await appendEvent(runId, null, "run.cancelled", reason ?? {});
   // Subworkflow children: a cancelled child still notifies the parent so the
@@ -190,8 +193,7 @@ export async function updateRunStatusFromNodes(runId: string) {
     return "failed";
   }
 
-  const openStatuses = new Set(["pending", "queued", "running", "waiting"]);
-  if (nodes.length > 0 && nodes.every(node => !openStatuses.has(node.status))) {
+  if (nodes.length > 0 && nodes.every(node => !NODE_OPEN_STATUSES.has(node.status as never))) {
     // Project the workflow's declared `outputs` (if any) into runs.outputJson
     // BEFORE flipping status, so a single UPDATE carries both writes.
     const outputJson = await computeRunOutputs(runId);
