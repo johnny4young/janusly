@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 
 describe("MCP stdio server", () => {
-  it("initializes and lists the read-only tools over stdio", async () => {
+  it("initializes and lists the published tools over stdio", async () => {
     const transport = new StdioClientTransport({
       command: "pnpm",
       args: ["start"],
@@ -30,6 +30,8 @@ describe("MCP stdio server", () => {
         "tools.list",
         "workflows.get",
         "workflows.list",
+        "workflows.save",
+        "workflows.validate",
       ]);
     } finally {
       await client.close();
