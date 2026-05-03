@@ -15,6 +15,7 @@
  *
  * Tables:
  * - `organizations`, `users`, `org_members` — multi-tenant scope.
+ * - `org_configs` — tenant-level runtime configuration overrides.
  * - `workflows`, `workflow_versions` — versioned DAG storage.
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
@@ -67,6 +68,28 @@ export const orgMembers = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [uniqueIndex("org_members_org_user_idx").on(table.orgId, table.userId)],
+);
+
+export const orgConfigs = pgTable(
+  "org_configs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    key: text("key").notNull(),
+    valueJson: jsonb("value_json").notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    valueType: text("value_type").notNull(),
+    source: text("source").notNull().default("tenant"),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("org_configs_org_key_idx").on(table.orgId, table.key),
+    index("org_configs_org_category_idx").on(table.orgId, table.category),
+  ],
 );
 
 export const workflows = pgTable(

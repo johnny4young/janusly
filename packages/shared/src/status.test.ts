@@ -3,6 +3,9 @@ import {
   NODE_OPEN_STATUSES,
   TERMINAL_NODE_STATUSES,
   TERMINAL_RUN_STATUSES,
+  isOpenNodeStatus,
+  isTerminalNodeStatus,
+  isTerminalRunStatus,
   nodeCancellableStatusValues,
   nodeOpenStatusValues,
   nodeStatusValues,
@@ -78,6 +81,31 @@ describe('status Set helpers', () => {
   it('NODE_OPEN_STATUSES has every node open value', () => {
     for (const s of nodeOpenStatusValues) expect(NODE_OPEN_STATUSES.has(s)).toBe(true)
     expect(NODE_OPEN_STATUSES.size).toBe(nodeOpenStatusValues.length)
+  })
+})
+
+describe('status type guards', () => {
+  it('recognizes terminal node statuses without accepting run-only or legacy values', () => {
+    expect(isTerminalNodeStatus('succeeded')).toBe(true)
+    expect(isTerminalNodeStatus('skipped')).toBe(true)
+    expect(isTerminalNodeStatus('timed_out')).toBe(false)
+    expect(isTerminalNodeStatus('canceled')).toBe(false)
+    expect(isTerminalNodeStatus(null)).toBe(false)
+  })
+
+  it('recognizes terminal run statuses without accepting node-only or legacy values', () => {
+    expect(isTerminalRunStatus('succeeded')).toBe(true)
+    expect(isTerminalRunStatus('timed_out')).toBe(true)
+    expect(isTerminalRunStatus('skipped')).toBe(false)
+    expect(isTerminalRunStatus('canceled')).toBe(false)
+    expect(isTerminalRunStatus(undefined)).toBe(false)
+  })
+
+  it('recognizes open node statuses without accepting run-only values', () => {
+    expect(isOpenNodeStatus('pending')).toBe(true)
+    expect(isOpenNodeStatus('running')).toBe(true)
+    expect(isOpenNodeStatus('created')).toBe(false)
+    expect(isOpenNodeStatus('succeeded')).toBe(false)
   })
 })
 

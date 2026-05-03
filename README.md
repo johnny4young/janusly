@@ -180,6 +180,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 
 | Topic | File |
 | --- | --- |
+| Environment variables and runtime configuration | [`docs/configuration.md`](docs/configuration.md) |
 | Local AI configuration & verification | [`docs/ai.md`](docs/ai.md) |
 | Node types, configs, outputs, templating | [`docs/nodes.md`](docs/nodes.md) |
 | HTTP API request/response examples | [`docs/api.md`](docs/api.md) |
