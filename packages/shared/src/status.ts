@@ -19,10 +19,9 @@
  * - The constant arrays match `runs.status` / `run_nodes.status` column
  *   values exactly. Adding a new status here without coordinating with
  *   persistence is a wire break.
- * - `cancelled` (double L) is the canonical spelling. `canceled` (single L)
- *   is a known historical typo and must NEVER appear anywhere in the repo.
- *   The TypeScript types here are what enforce the spelling — any
- *   downstream `=== "canceled"` is a compile error.
+ * - `cancelled` (double L) is the canonical spelling. The single-L spelling
+ *   is a known historical typo and must never appear as a runtime status value
+ *   or UI branch. The TypeScript types here are what enforce the spelling.
  * - Node-level vs run-level statuses are deliberately split. `skipped` is a
  *   node terminal status, never a run status. `created` is a run open
  *   status, never a node status. Don't merge the sets.
@@ -72,3 +71,18 @@ export const TERMINAL_RUN_STATUSES: ReadonlySet<RunTerminalStatus> = new Set(run
 
 /** `Set` of node open statuses — used by `updateRunStatusFromNodes` to detect "any work still pending." */
 export const NODE_OPEN_STATUSES: ReadonlySet<NodeOpenStatus> = new Set(nodeOpenStatusValues);
+
+/** Type guard for terminal node statuses received from persisted rows or API payloads. */
+export function isTerminalNodeStatus(status: unknown): status is NodeTerminalStatus {
+  return typeof status === "string" && TERMINAL_NODE_STATUSES.has(status as NodeTerminalStatus);
+}
+
+/** Type guard for terminal run statuses received from persisted rows or API payloads. */
+export function isTerminalRunStatus(status: unknown): status is RunTerminalStatus {
+  return typeof status === "string" && TERMINAL_RUN_STATUSES.has(status as RunTerminalStatus);
+}
+
+/** Type guard for open node statuses received from persisted rows or API payloads. */
+export function isOpenNodeStatus(status: unknown): status is NodeOpenStatus {
+  return typeof status === "string" && NODE_OPEN_STATUSES.has(status as NodeOpenStatus);
+}

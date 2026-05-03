@@ -84,11 +84,15 @@ describe('tool-registry', () => {
   })
 
   it('executeTool rejects outputs that do not match the declared schema', async () => {
+    // statusCode is `z.number()` in the output schema; a string here forces
+    // the validator to reject so the test exercises the executor->validator
+    // boundary even with the post-refactor HttpResult shape.
     fetchHttpTargetMock.mockResolvedValueOnce({
-      status: '200',
+      statusCode: '200' as unknown as number,
       ok: true,
-      text: async () => 'ok',
-    } as never)
+      body: 'ok',
+      headers: {},
+    })
 
     await expect(
       executeTool('http.request', { url: 'https://example.com' }, {}),
@@ -99,7 +103,14 @@ describe('tool-registry', () => {
     const tools = listTools()
     const http = tools.find(tool => tool.name === 'http.request')
     expect(http?.required).toEqual(['url'])
-    expect(http?.optional?.slice().sort()).toEqual(['body', 'headers', 'method'])
+    expect(http?.optional?.slice().sort()).toEqual([
+      'body',
+      'headers',
+      'maxRedirects',
+      'maxResponseBytes',
+      'method',
+      'timeoutMs',
+    ])
     const textUpper = tools.find(tool => tool.name === 'text.uppercase')
     expect(textUpper?.required).toEqual(['value'])
     expect(textUpper?.optional).toBeUndefined()

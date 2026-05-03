@@ -15,10 +15,11 @@
  * Invariants:
  * - Multi-tenant: `loadLatestWorkflowVersion` filters on `orgId` so a child
  *   workflow id never resolves cross-tenant.
- * - Recursion guard: `JANUSLY_MAX_SUBWORKFLOW_DEPTH` (default 5). Walks the
- *   `runs.parent_run_id` chain up; refuses to start when the chain already
- *   has `>= max` depth. Defense-in-depth bound at 100 to terminate even on a
- *   pathological cycle (which shouldn't be possible because runs are insert-only).
+ * - Recursion guard: tenant config `subworkflow.maxDepth` (env fallback
+ *   `JANUSLY_MAX_SUBWORKFLOW_DEPTH`, default 5). Walks the `runs.parent_run_id`
+ *   chain up; refuses to start when the chain already has `>= max` depth.
+ *   Defense-in-depth bound at 100 to terminate even on a pathological cycle
+ *   (which shouldn't be possible because runs are insert-only).
  * - Audit: child runs spawned by a subworkflow node skip an API audit row —
  *   the parent's subworkflow events provide the trail. Run-level audits remain
  *   user-initiated only.
@@ -28,6 +29,7 @@
  */
 
 import { db, runs, workflowVersions } from "@janusly/db";
+import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { eq, and, desc } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import {
@@ -164,7 +166,7 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
 
   // 1. Recursion guard — fail fast before spawning anything.
   const depth = await computeSubworkflowDepth(ctx.runId);
-  const max = maxSubworkflowDepth();
+  const max = (await getOrgConfigSnapshot(ctx.orgId)).runs.subworkflowMaxDepth;
   if (depth >= max) {
     throw new Error(`Subworkflow depth limit reached (${depth} >= ${max})`);
   }

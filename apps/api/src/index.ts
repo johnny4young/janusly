@@ -7,8 +7,8 @@
  *   1. `assertMigrationsApplied()` — fail-fast on an unmigrated DB.
  *   2. Per-request: route registry match → `requireAuth` → route-declared
  *      `requireRole` → handler.
- *   3. AI surfaces route through the provider-neutral `getLlmClient()` from
- *      `@janusly/ai` and wrap the call in try/catch, degrading to
+ *   3. AI surfaces create a provider-neutral `LlmClient` from tenant config
+ *      + env API keys and wrap the call in try/catch, degrading to
  *      `{ mode: "fallback", aiError, ... }` (AGENTS.md AI-fallback contract).
  *
  * Used by `apps/web` (the only browser client today) and any external
@@ -42,7 +42,13 @@ import { listTools } from "@janusly/engine/src/tool-registry";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { explainRun, getLlmClient, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
+import { createLlmClient, explainRun, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
+import {
+  applyOrgConfigToEnv,
+  getOrgConfigSnapshot,
+  listOrgConfig,
+  upsertOrgConfig,
+} from "@janusly/data/src/orgConfigRepo";
 import { recordUsage } from "@janusly/data/src/usageRepo";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { requireAuth, type AuthContext } from "./auth";
@@ -85,11 +91,6 @@ import { matchesRoute, type Route } from "./routes";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
-const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 30_000);
-const OPENAI_MAX_RETRIES = Number(process.env.OPENAI_MAX_RETRIES || 2);
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const AI_PROMPT_MAX_CHARS = Number(process.env.AI_PROMPT_MAX_CHARS || 4_000);
-const AI_RATE_LIMIT_PER_MIN = Number(process.env.AI_RATE_LIMIT_PER_MIN || 30);
 const AUDIT_PAGE_SIZE = 100;
 const RUN_EVENTS_DEFAULT_LIMIT = 200;
 const RUN_EVENTS_MAX_LIMIT = 500;
@@ -110,7 +111,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
   "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
   "Node types and required config:",
-  "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object }",
+  "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object, timeoutMs?:number, maxResponseBytes?:number, maxRedirects?:number } — bounds default to 30000ms / 1MB / 5 hops; only set overrides when the upstream legitimately needs a larger budget",
   "- noop: {} (good for explicit start/end markers)",
   "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
   "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
@@ -137,23 +138,26 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
 ].join("\n");
 
-function aiStatus() {
-  // The provider abstraction (`packages/ai/src/llm-client.ts`) reads the env
-  // directly; this surface keeps the legacy field names (`enabled`, `model`)
-  // for back-compat while reflecting whichever provider/model is currently
-  // active for default, no-override calls.
-  const requestedProvider = (process.env.JANUSLY_LLM_PROVIDER ?? "openai").toLowerCase();
-  const cfg = resolveLlmConfig(process.env);
-  const provider = cfg?.provider ?? (requestedProvider === "anthropic" ? "anthropic" : "openai");
+async function orgLlmRuntime(orgId: string) {
+  const orgConfig = await getOrgConfigSnapshot(orgId);
+  const llmConfig = resolveLlmConfig(applyOrgConfigToEnv(orgConfig));
+  return { orgConfig, llm: llmConfig ? createLlmClient(llmConfig) : null, llmConfig };
+}
+
+async function aiStatus(orgId: string) {
+  // Env still provides API keys and global defaults; `org_configs` can
+  // override safe tenant-level choices such as provider/model and limits.
+  const { orgConfig, llmConfig } = await orgLlmRuntime(orgId);
+  const provider = llmConfig?.provider ?? orgConfig.ai.provider;
   const model =
-    cfg?.defaultModels[provider] ??
-    (provider === "anthropic" ? process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5" : OPENAI_MODEL);
+    llmConfig?.defaultModels[provider] ??
+    (provider === "anthropic" ? orgConfig.ai.anthropicModel : orgConfig.ai.openaiModel);
   return {
-    enabled: Boolean(cfg?.apiKeys[provider]),
+    enabled: Boolean(llmConfig?.apiKeys[provider]),
     provider,
     model,
-    timeoutMs: OPENAI_TIMEOUT_MS,
-    maxRetries: OPENAI_MAX_RETRIES,
+    timeoutMs: orgConfig.ai.timeoutMs,
+    maxRetries: orgConfig.ai.maxRetries,
   };
 }
 
@@ -319,6 +323,23 @@ export const routes: Route[] = [
     handler: async ({ res }) => sendJson(res, workflowTemplates) },
   { method: "GET", match: "/billing/usage",
     handler: async ({ res, auth }) => sendJson(res, await getUsageSummary(auth.orgId)) },
+  { method: "GET", match: "/org/config",
+    handler: async ({ res, auth }) => sendJson(res, { config: await listOrgConfig(auth.orgId) }) },
+  { method: "POST", match: "/org/config", role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const key = typeof body.key === "string" ? body.key : "";
+      if (!key) return sendJson(res, { error: "key is required" }, 400);
+      if (!Object.hasOwn(body, "value")) return sendJson(res, { error: "value is required" }, 400);
+
+      try {
+        const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
+        await audit(auth.orgId, auth.userId, "org.config.updated", "org_config", key, { key, value: entry.value });
+        return sendJson(res, entry);
+      } catch (error) {
+        return sendJson(res, { error: error instanceof Error ? error.message : "Invalid org config" }, 400);
+      }
+    } },
 
   // Members / roles
   { method: "GET", match: "/members",
@@ -491,17 +512,17 @@ export const routes: Route[] = [
 
   // AI helpers
   { method: "GET", match: "/ai/health",
-    handler: async ({ res }) => sendJson(res, aiStatus()) },
+    handler: async ({ res, auth }) => sendJson(res, await aiStatus(auth.orgId)) },
   { method: "POST", match: "/ai/generate-workflow",
     handler: async ({ req, res, auth }) => {
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const promptText = typeof body.prompt === "string" ? body.prompt : "";
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
-      if (promptText.length > AI_PROMPT_MAX_CHARS) {
-        return sendJson(res, { error: `prompt exceeds ${AI_PROMPT_MAX_CHARS} characters` }, 413);
+      if (promptText.length > orgConfig.ai.promptMaxChars) {
+        return sendJson(res, { error: `prompt exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
       }
-      const llm = getLlmClient();
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!llm) {
         return sendJson(res, {
@@ -540,11 +561,11 @@ export const routes: Route[] = [
     } },
   { method: "POST", match: "/ai/explain-workflow",
     handler: async ({ req, res, auth }) => {
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const { workflow } = body;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
-      const llm = getLlmClient();
       if (!llm) {
         return sendJson(res, {
           mode: "fallback",
@@ -571,12 +592,13 @@ export const routes: Route[] = [
     } },
   { method: "POST", match: "/ai/explain-run",
     handler: async ({ req, res, auth }) => {
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: AI_RATE_LIMIT_PER_MIN });
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
       const questionText = typeof question === "string" ? question : undefined;
-      if (questionText && questionText.length > AI_PROMPT_MAX_CHARS) {
-        return sendJson(res, { error: `question exceeds ${AI_PROMPT_MAX_CHARS} characters` }, 413);
+      if (questionText && questionText.length > orgConfig.ai.promptMaxChars) {
+        return sendJson(res, { error: `question exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
       }
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -584,7 +606,7 @@ export const routes: Route[] = [
 
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
-        llm: getLlmClient(),
+        llm,
         run: run[0],
         events,
         question: questionText,
@@ -708,8 +730,9 @@ export const routes: Route[] = [
       // Track whether this run is for a workflow we've persisted (saved) or
       // an ad-hoc one constructed in the request body. Ad-hoc starts are
       // legitimate (AI Studio "Run" before Save) but operators may want to
-      // forbid them in production via JANUSLY_REQUIRE_SAVED_WORKFLOW=true.
-      const requireSaved = process.env.JANUSLY_REQUIRE_SAVED_WORKFLOW === "true";
+      // forbid them per tenant via `runs.requireSavedWorkflow`.
+      const { runs: runConfig } = await getOrgConfigSnapshot(auth.orgId);
+      const requireSaved = runConfig.requireSavedWorkflow;
       let isAdhoc = true;
       if (typeof parsedWorkflow.id === "string" && parsedWorkflow.id) {
         const owned = await db
@@ -902,8 +925,8 @@ const server = http.createServer(async (req, res) => {
 
 await assertMigrationsApplied();
 
-// Register the usage_events writer once at boot. Every LLM call
-// through `getLlmClient().generateText(...)` fires it fire-and-forget.
+// Register the usage_events writer once at boot. Every LLM client call fires
+// it fire-and-forget through the provider-neutral AI package.
 setUsageRecorder(recordUsage);
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));

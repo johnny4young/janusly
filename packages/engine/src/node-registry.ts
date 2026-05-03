@@ -17,7 +17,7 @@
  * - `multi_agent.*` event payloads are part of the contract that
  *   `apps/web/src/MultiAgentTimeline.tsx` consumes — don't rename event types
  *   without also updating the web consumer.
- * - The `ai` node routes through the provider-neutral `getLlmClient()` from
+ * - The `ai` node routes through the provider-neutral `LlmClient` from
  *   `@janusly/ai`, wraps the call in try/catch, and returns
  *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
  * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
@@ -27,7 +27,12 @@
  */
 
 import { loadRootEnv } from "@janusly/db";
-import { getLlmClient } from "@janusly/ai";
+import { createLlmClient, resolveLlmConfig, type LlmClient } from "@janusly/ai";
+import {
+  applyOrgConfigToEnv,
+  getOrgConfigSnapshot,
+  type OrgConfigSnapshot,
+} from "@janusly/data/src/orgConfigRepo";
 import { evaluateExpression } from "./expression";
 import { executeTool } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
@@ -84,10 +89,34 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs?: number, label = "operat
   ]);
 }
 
+function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
+  const llmConfig = resolveLlmConfig(applyOrgConfigToEnv(orgConfig));
+  return llmConfig ? createLlmClient(llmConfig) : null;
+}
+
+async function getTenantLlmClient(orgId: string): Promise<LlmClient | null> {
+  return createTenantLlmClient(await getOrgConfigSnapshot(orgId));
+}
+
+function withHttpToolDefaults(
+  tool: string,
+  input: unknown,
+  orgConfig: OrgConfigSnapshot,
+): unknown {
+  if (tool !== "http.request" || typeof input !== "object" || input === null || Array.isArray(input)) return input;
+  const next = { ...(input as Record<string, unknown>) };
+  next.timeoutMs ??= orgConfig.http.timeoutMs;
+  next.maxResponseBytes ??= orgConfig.http.maxResponseBytes;
+  next.maxRedirects ??= orgConfig.http.maxRedirects;
+  return next;
+}
+
 async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "agent") {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
   const reflectionEnabled = Boolean(agentConfig.reflection);
+  const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
+  const llm = planner === "openai" ? createTenantLlmClient(orgConfig) : undefined;
 
   const memory = await getRunMemory(ctx.runId);
   const summarizedMemory = summarizeMemory(memory);
@@ -112,7 +141,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
 
     const planningContext = { context: ctx.context, memory: summarizedMemory, steps, lastReflection };
     const plan = planner === "openai"
-      ? await planAgentToolWithLLM(agentConfig, planningContext, steps, undefined, {
+      ? await planAgentToolWithLLM(agentConfig, planningContext, steps, llm, {
           orgId: ctx.orgId,
           runId: ctx.runId,
           nodeId: ctx.nodeId,
@@ -141,7 +170,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
     });
 
     const result = await withTimeout(
-      executeTool(plan.tool, plan.input, ctx.context),
+      executeTool(plan.tool, withHttpToolDefaults(plan.tool, plan.input, orgConfig), ctx.context),
       agentConfig.timeoutMs,
       `${agentConfig.name ?? "agent"}.${plan.tool}`
     );
@@ -208,17 +237,21 @@ function aggregateCrewResults(results: any[], strategy = "last") {
 
 export const nodeRegistry: Record<string, NodeExecutor> = {
   http: async (ctx) => {
-    const { url, method, headers, body } = ctx.config;
-    const res = await fetchHttpTarget(url, {
+    const { url, method, headers, body, timeoutMs, maxResponseBytes, maxRedirects } = ctx.config;
+    const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
+    const result = await fetchHttpTarget(url, {
       method: method ?? "GET",
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      // Optional bounds — nodes that fetch large payloads or call slow APIs
+      // pass these through; otherwise tenant/runtime defaults apply.
+      timeoutMs: timeoutMs ?? orgConfig.http.timeoutMs,
+      maxResponseBytes: maxResponseBytes ?? orgConfig.http.maxResponseBytes,
+      maxRedirects: maxRedirects ?? orgConfig.http.maxRedirects,
     });
 
-    const text = await res.text();
-
-    if (!res.ok) throw new Error(`HTTP failed: ${res.status}`);
-    return { status: "completed", output: { statusCode: res.status, ok: res.ok, body: text } };
+    if (!result.ok) throw new Error(`HTTP failed: ${result.statusCode}`);
+    return { status: "completed", output: { statusCode: result.statusCode, ok: result.ok, body: result.body } };
   },
 
   condition: async (ctx) => {
@@ -243,8 +276,11 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
-    await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: mappedInput });
-    const result = await executeTool(tool, mappedInput, ctx.context);
+    const toolInput = tool === "http.request"
+      ? withHttpToolDefaults(tool, mappedInput, await getOrgConfigSnapshot(ctx.orgId))
+      : mappedInput;
+    await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: toolInput });
+    const result = await executeTool(tool, toolInput, ctx.context);
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };
   },
@@ -344,7 +380,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   ai: async (ctx) => {
     const prompt = String(ctx.config.prompt ?? "Summarize workflow");
     await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt: previewText(prompt), contextKeys: Object.keys(ctx.context) });
-    const llm = getLlmClient();
+    const llm = await getTenantLlmClient(ctx.orgId);
     // `config.model` accepts a bare model id ("gpt-4o-mini") OR a
     // `"<provider>/<model>"` spec ("anthropic/claude-haiku-4-5"); the
     // provider abstraction parses it so this node works against any backend.
