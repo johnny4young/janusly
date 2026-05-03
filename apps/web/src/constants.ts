@@ -115,7 +115,7 @@ export function formatStatusLabel(status: string) {
     skipped: 'Skipped',
     succeeded: 'Done',
     failed: 'Needs attention',
-    canceled: 'Canceled',
+    cancelled: 'Cancelled',
     open: 'Open',
     replayed: 'Retried',
     resolved: 'Resolved',
