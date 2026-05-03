@@ -140,7 +140,8 @@ export interface ExecutionStore {
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
   markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
-  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<void>;
+  /** Conditional `queued → running` transition. Returns `true` on a successful claim, `false` when the row had already advanced past `queued`. */
+  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
   markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
   markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;
   markNodeWaiting(runId: string, nodeId: string, metadata?: unknown): Promise<void>;

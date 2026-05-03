@@ -73,11 +73,28 @@ export async function cancelRun(runId: string, reason?: any) {
   await notifyOnTerminal(runId, "cancelled");
 }
 
-/** Transition a node to `running` and stamp `startedAt`. */
-export async function markNodeRunning(runId: string, nodeId: string, attempt = 1) {
-  await db.update(runNodes)
+/**
+ * Conditional `queued → running` transition. Returns `true` when the row
+ * was successfully claimed, `false` when the row had already advanced past
+ * `queued` (e.g. cancelled by a sibling cancellation, swept past by another
+ * worker, etc.).
+ *
+ * The conditional WHERE makes this an atomic claim — same shape as
+ * `tryClaimNodeForQueue`'s `pending → queued` invariant. The runtime's
+ * `executeQueuedNode` checks the boolean and emits a `node.skipped` event
+ * when the claim fails, so a cancellation that lands while a queued job is
+ * being pulled never re-flips the cancelled row back to running.
+ */
+export async function markNodeRunning(runId: string, nodeId: string, attempt = 1): Promise<boolean> {
+  const claimed = await db.update(runNodes)
     .set({ status: "running", attempts: attempt, startedAt: new Date() })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "queued"),
+    ))
+    .returning({ id: runNodes.id });
+  return claimed.length > 0;
 }
 
 /** Unconditional transition to `queued` (caller has already claimed). */
