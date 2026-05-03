@@ -1,9 +1,12 @@
 /**
  * Template engine for node configs and tool inputs. Substitutes
  * `{{context.<nodeId>.output.<field>}}`, `{{inputs.<field>}}`,
- * `{{secret.NAME}}`, and `{{env.NAME}}` references. Tracks which resolved
- * secret values were substituted so `execute-node.ts:redactValues` can
- * strip them from outputs before persistence.
+ * `{{secret.NAME}}`, and `{{env.NAME}}` references. Tracks every resolved
+ * secret AND env value (length >= 4) in a redaction list so
+ * `execute-node.ts` can strip plaintext from outputs and thrown errors before
+ * persistence. Env vars are common carriers for API keys (e.g.
+ * `OPENAI_API_KEY`, `JANUSLY_API_SERVICE_TOKEN`), so they get the same
+ * scrub treatment as the explicit `{{secret.*}}` channel.
  *
  * Used by `execute-node.ts` (every node-config render),
  * `node-registry.ts:loop` (per-iteration mapping), and tool executors
@@ -42,7 +45,14 @@ function renderTemplateInternal(value: any, scope: Record<string, any>, redactio
 
       if (expr.startsWith('env.')) {
         const envName = expr.replace('env.', '').toUpperCase();
-        return process.env[envName] ?? '';
+        const resolved = process.env[envName] ?? '';
+        // Treat env values like secrets: any sufficiently long resolved value
+        // is added to the redaction list so it gets scrubbed from outputs
+        // before persistence. The 4-char floor avoids over-redacting toy
+        // values like "0", "1", "dev", or "prod" — short non-secrets render
+        // verbatim. Same length floor as the secret branch above.
+        if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        return resolved;
       }
 
       const resolved = getByPath(scope, expr);
@@ -70,15 +80,10 @@ export function renderTemplate(value: any, scope: Record<string, any>): any {
 }
 
 /**
- * Render a template AND return the set of secret VALUES that were substituted
- * during the render. The caller is expected to post-process any persisted
- * output through `redactValues(output, redactedValues)` so plaintext secrets
- * never end up in `run_nodes.state_json` or `run_events.payload`.
- */
-/**
  * Render a value's template strings AND collect every resolved
- * `{{secret.NAME}}` value into `redactedValues`. The caller passes that
- * list to `redactValues` after the executor runs.
+ * `{{secret.NAME}}` / `{{env.NAME}}` value into `redactedValues`. The
+ * caller passes that list to `redactValues` / `redactError` before any
+ * executor result or failure is persisted.
  */
 export function renderTemplateWithRedactions(
   value: any,
@@ -90,14 +95,9 @@ export function renderTemplateWithRedactions(
 }
 
 /**
- * Walk a value recursively and replace any string-occurrence of `redactedValues`
- * with `[redacted]`. Used post-execution to scrub secrets from outputs before
- * they are persisted to run_nodes / run_events.
- */
-/**
  * Recursively replace any string occurrences of `redactedValues` (e.g.
- * resolved secrets) with the literal `"[REDACTED]"`. Applied to executor
- * outputs and `waiting` metadata before they reach `run_nodes.state_json`.
+ * resolved secret/env values) with the literal `"[redacted]"`. Applied to
+ * executor outputs and `waiting` metadata before persistence.
  */
 export function redactValues(value: any, redactedValues: string[]): any {
   if (redactedValues.length === 0) return value;
@@ -116,6 +116,30 @@ export function redactValues(value: any, redactedValues: string[]): any {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValues(item, redactedValues)]));
   }
   return value;
+}
+
+/**
+ * Redact resolved secret/env values from thrown errors before the runtime
+ * serializes them into retry events, node failures, or DLQ rows. `Error`
+ * fields such as `message` and `stack` are non-enumerable, so the generic
+ * object walk in `redactValues` cannot handle them by itself.
+ */
+export function redactError(error: unknown, redactedValues: string[]): unknown {
+  if (redactedValues.length === 0) return error;
+  if (error instanceof Error) {
+    error.message = redactValues(error.message, redactedValues);
+    if (error.stack) error.stack = redactValues(error.stack, redactedValues);
+
+    const errorRecord = error as Error & {
+      cause?: unknown;
+      code?: unknown;
+      statusCode?: unknown;
+    };
+    if (errorRecord.cause !== undefined) errorRecord.cause = redactValues(errorRecord.cause, redactedValues);
+    if (errorRecord.code !== undefined) errorRecord.code = redactValues(errorRecord.code, redactedValues);
+    return error;
+  }
+  return redactValues(error, redactedValues);
 }
 
 /** Render a mapping object/string against `scope`. Used by `transform` / `loop` / tool inputs. */
