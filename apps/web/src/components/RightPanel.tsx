@@ -12,9 +12,9 @@
  *   sibling panels refetch (AGENTS.md cross-panel reactivity).
  * - The `AiUsageFooter` is exported here so the per-node usage
  *   surface can be unit-tested without mounting the full panel.
- * - Web deps locked to the AGENTS.md whitelist (`react`, `react-dom`,
- *   `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`).
- *   Don't add radix / cva / clsx / tailwind-merge / shadcn here.
+ * - Web deps locked to the AGENTS.md whitelist plus
+ *   `@janusly/shared/src/status` for zero-dep lifecycle guards. Don't add
+ *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
@@ -28,6 +28,7 @@ import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
+import { isTerminalRunStatus } from '@janusly/shared/src/status'
 
 type RightPanelProps = {
   tab: ActiveTab
@@ -779,10 +780,9 @@ function RunsPanel({
   const failedRuns = runs.filter(run => run.status === 'failed').length
 
   // Cancellable when the active run is in a non-terminal status.
-  const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'skipped', 'timed_out'])
   const activeRun = activeRunId ? runs.find(run => run.id === activeRunId) : null
   const isActiveRunCancellable = Boolean(
-    activeRunId && onCancelActiveRun && (!activeRun || !terminalStatuses.has(activeRun.status)),
+    activeRunId && onCancelActiveRun && (!activeRun || !isTerminalRunStatus(activeRun.status)),
   )
 
   return (

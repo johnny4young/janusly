@@ -14,9 +14,9 @@
  *   re-introduce the timeline-clobber bug.
  * - Terminal-state branch fires `bumpPlatformVersion()` so independent
  *   panels re-fetch (cross-panel reactivity invariant).
- * - Web deps lockdown: only the AGENTS-approved imports (`react`,
- *   `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`,
- *   `lucide-react`). Don't add radix/cva/clsx/tailwind-merge here.
+ * - Web deps lockdown: only the AGENTS-approved imports plus
+ *   `@janusly/shared/src/status` for zero-dep lifecycle guards. Don't add
+ *   radix/cva/clsx/tailwind-merge here.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
@@ -33,8 +33,7 @@ import { api } from './api'
 import { getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
-
-const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled'])
+import { isTerminalRunStatus } from '@janusly/shared/src/status'
 
 type RunResponse = {
   run?: RunSummary
@@ -204,7 +203,7 @@ export default function App() {
         if (closed) return
         setStreamStatus('connected')
 
-        if (status.run?.status && TERMINAL_RUN_STATUSES.has(status.run.status)) {
+        if (isTerminalRunStatus(status.run?.status)) {
           stopped = true
           window.clearInterval(interval)
           bumpPlatformVersion()
@@ -408,8 +407,7 @@ export default function App() {
   const cancelActiveRun = useCallback(async () => {
     if (!runId) return
     const activeRun = runs.find(r => r.id === runId)
-    const terminal = new Set(['succeeded', 'failed', 'cancelled', 'skipped', 'timed_out'])
-    if (activeRun && terminal.has(activeRun.status)) {
+    if (activeRun && isTerminalRunStatus(activeRun.status)) {
       addToast(`Run is already ${activeRun.status}`, 'info')
       return
     }

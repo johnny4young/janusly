@@ -14,27 +14,20 @@
  */
 
 import type { Workflow, WorkflowNode } from "@janusly/shared";
+import type { NodeStatus, RunStatus } from "@janusly/shared/src/status";
 
-/** Terminal node statuses — once set, the runtime stops scheduling more work for the node. */
-export type NodeTerminalStatus = "succeeded" | "failed" | "skipped" | "cancelled";
-
-/** All node lifecycle statuses, including pre-terminal `pending` / `queued` / `running` / `waiting`. */
-export type NodeStatus =
-  | "pending"
-  | "queued"
-  | "running"
-  | "waiting"
-  | NodeTerminalStatus;
-
-/** Run-level lifecycle status (rolls up node statuses). */
-export type RunStatus =
-  | "created"
-  | "running"
-  | "waiting"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "timed_out";
+// Status types are re-exported from the shared constants module so the
+// values stay in lockstep with `runs.status` / `run_nodes.status` and the
+// web's read-side comparisons (which import the same module). Anyone
+// adding a new status edits `packages/shared/src/status.ts` once.
+export type {
+  NodeStatus,
+  NodeOpenStatus,
+  NodeTerminalStatus,
+  RunStatus,
+  RunOpenStatus,
+  RunTerminalStatus,
+} from "@janusly/shared/src/status";
 
 /** Plain-object error shape used in `run_nodes.error_json` and dead-letter rows. */
 export type SerializedError = {

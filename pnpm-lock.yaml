@@ -56,6 +56,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@janusly/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@supabase/supabase-js':
         specifier: ^2.105.0
         version: 2.105.0
