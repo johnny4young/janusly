@@ -88,7 +88,7 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server that exposes five read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) over stdio. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an MCP server that exposes seven tools over stdio: five read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`), `workflows.validate`, and `workflows.save`. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {
@@ -106,7 +106,7 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 }
 ```
 
-See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new (read-only) tools.
+See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new tools.
 
 ### Test commands
 

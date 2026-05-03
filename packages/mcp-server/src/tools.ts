@@ -15,8 +15,15 @@
  * Used by `packages/mcp-server/src/index.ts`'s `setRequestHandler` arms.
  *
  * Invariants:
- * - Read-only tools only. Write surface (start/save/replay) stays behind
- *   `requireRole` in the API and is intentionally NOT exposed to MCP yet.
+ * - Tool surface split: read-only (`workflows.list`, `workflows.get`,
+ *   `recipes.list`, `tools.list`, `runs.get`), pre-flight validation
+ *   (`workflows.validate` — POST but no side effects), and one true write
+ *   (`workflows.save`). The write tool goes through the API's
+ *   `requireRole("editor")` + `audit()` path; the MCP server itself still
+ *   has zero DB access and writes no audit rows of its own.
+ * - Don't add more write tools without an explicit product/security review
+ *   matching the same posture: RBAC enforced upstream + audit row written
+ *   by the API + safe to expose to a remote MCP client.
  * - Errors thrown here are caught by the SDK's request-handler machinery
  *   and surfaced to the model as `{ isError: true, content: [...] }`.
  */
@@ -95,6 +102,38 @@ export const tools: Tool[] = [
       },
     },
   },
+  {
+    name: "workflows.validate",
+    description:
+      "Run shape + graph validation on a workflow without saving. Returns `{ valid: boolean, issues: ValidationIssue[] }`. Useful as a pre-flight before `workflows.save`. No side effects.",
+    inputSchema: {
+      type: "object",
+      required: ["workflow"],
+      properties: {
+        workflow: {
+          type: "object",
+          description:
+            "Full workflow DAG: { dslVersion, nodes, edges, optional id/name/inputs/outputs/metadata }. Same shape `POST /validate` accepts.",
+        },
+      },
+    },
+  },
+  {
+    name: "workflows.save",
+    description:
+      "Save (create or bump the version of) a workflow. Requires editor role on the configured org. Returns `{ id, version, versionId }`. The API writes a `workflow.saved` audit row attributed to the configured user (typically `mcp-user` in dev or the service-token's user-id in production).",
+    inputSchema: {
+      type: "object",
+      required: ["workflow"],
+      properties: {
+        workflow: {
+          type: "object",
+          description:
+            "Full workflow DAG: { dslVersion, nodes, edges, optional id/name/inputs/outputs/metadata }. Same shape `POST /workflows/save` accepts.",
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -147,7 +186,29 @@ async function runOne(
       if (typeof args.eventsCursor === "string") params.set("eventsCursor", args.eventsCursor);
       return callApi(`/run?${params.toString()}`);
     }
+    case "workflows.validate": {
+      if (!isObject(args.workflow)) {
+        throw new Error("workflows.validate requires `workflow` (object)");
+      }
+      return callApi("/validate", {
+        method: "POST",
+        body: JSON.stringify(args.workflow),
+      });
+    }
+    case "workflows.save": {
+      if (!isObject(args.workflow)) {
+        throw new Error("workflows.save requires `workflow` (object)");
+      }
+      return callApi("/workflows/save", {
+        method: "POST",
+        body: JSON.stringify(args.workflow),
+      });
+    }
     default:
       throw new Error(`Unknown MCP tool: ${name}`);
   }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

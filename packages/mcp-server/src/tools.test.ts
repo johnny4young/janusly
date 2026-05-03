@@ -3,7 +3,7 @@ import { dispatchTool, tools } from "./tools";
 
 function makeMockCallApi() {
   const calls: string[] = [];
-  const mock = vi.fn(async (path: string) => {
+  const mock = vi.fn(async (path: string, _init?: RequestInit) => {
     calls.push(path);
     return { ok: true, path };
   });
@@ -11,7 +11,7 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the five read-only tools", () => {
+  it("exposes the seven tools (5 read-only, 1 validation pre-flight, 1 write)", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "recipes.list",
@@ -19,6 +19,8 @@ describe("MCP tool catalog", () => {
       "tools.list",
       "workflows.get",
       "workflows.list",
+      "workflows.save",
+      "workflows.validate",
     ]);
   });
 
@@ -81,6 +83,42 @@ describe("dispatchTool", () => {
   it("runs.get throws when runId is missing", async () => {
     const { mock } = makeMockCallApi();
     await expect(dispatchTool(mock, "runs.get", {})).rejects.toThrow(/runId/);
+  });
+
+  it("workflows.save POSTs the workflow body to /workflows/save", async () => {
+    const { mock } = makeMockCallApi();
+    const workflow = { id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
+    await dispatchTool(mock, "workflows.save", { workflow });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/workflows/save");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(workflow);
+  });
+
+  it("workflows.save throws when workflow is missing or not a plain object", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "workflows.save", {})).rejects.toThrow(/workflow.*object/);
+    await expect(dispatchTool(mock, "workflows.save", { workflow: null })).rejects.toThrow(/workflow.*object/);
+    await expect(dispatchTool(mock, "workflows.save", { workflow: [] })).rejects.toThrow(/workflow.*object/);
+    await expect(dispatchTool(mock, "workflows.save", { workflow: "not-a-workflow" })).rejects.toThrow(/workflow.*object/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("workflows.validate POSTs the workflow body to /validate", async () => {
+    const { mock } = makeMockCallApi();
+    const workflow = { nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
+    await dispatchTool(mock, "workflows.validate", { workflow });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/validate");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(workflow);
+  });
+
+  it("workflows.validate throws when workflow is missing or not a plain object", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "workflows.validate", {})).rejects.toThrow(/workflow.*object/);
+    await expect(dispatchTool(mock, "workflows.validate", { workflow: 42 })).rejects.toThrow(/workflow.*object/);
+    expect(mock).not.toHaveBeenCalled();
   });
 
   it("rejects unknown tools by name", async () => {
