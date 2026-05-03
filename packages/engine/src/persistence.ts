@@ -20,7 +20,7 @@ import { db } from "@janusly/db";
 import { runNodes, runEvents, runs } from "@janusly/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { WorkflowSchema } from "@janusly/shared";
-import { NODE_OPEN_STATUSES, nodeCancellableStatusValues } from "@janusly/shared/src/status";
+import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
 
 /** Return the current top-level run status, or `null` when the row is absent. */
@@ -193,7 +193,7 @@ export async function updateRunStatusFromNodes(runId: string) {
     return "failed";
   }
 
-  if (nodes.length > 0 && nodes.every(node => !NODE_OPEN_STATUSES.has(node.status as never))) {
+  if (nodes.length > 0 && nodes.every(node => !isOpenNodeStatus(node.status))) {
     // Project the workflow's declared `outputs` (if any) into runs.outputJson
     // BEFORE flipping status, so a single UPDATE carries both writes.
     const outputJson = await computeRunOutputs(runId);

@@ -87,6 +87,13 @@ const httpRequestInput = z.object({
   method: z.string().optional(),
   headers: z.record(z.string(), z.string()).optional(),
   body: z.unknown().optional(),
+  // Optional bounds — total request budget in ms, max decoded body size in
+  // bytes, max redirect chain length. Defaults (30000 / 1_000_000 / 5) apply
+  // when omitted; recipes that legitimately need larger payloads or slower
+  // upstreams opt in per call.
+  timeoutMs: z.number().int().min(1).optional(),
+  maxResponseBytes: z.number().int().min(1).optional(),
+  maxRedirects: z.number().int().min(0).optional(),
 });
 const httpRequestOutput = z.object({
   statusCode: z.number(),
@@ -339,13 +346,15 @@ const tools = {
     outputSchema: httpRequestOutput,
     inputExample: { url: "https://example.com", method: "GET" },
     async execute(input) {
-      const res = await fetchHttpTarget(input.url, {
+      const result = await fetchHttpTarget(input.url, {
         method: input.method ?? "GET",
         headers: input.headers,
         body: input.body !== undefined ? JSON.stringify(input.body) : undefined,
+        timeoutMs: input.timeoutMs,
+        maxResponseBytes: input.maxResponseBytes,
+        maxRedirects: input.maxRedirects,
       });
-      const body = await res.text();
-      return { statusCode: res.status, ok: res.ok, body };
+      return { statusCode: result.statusCode, ok: result.ok, body: result.body };
     },
   }),
   "text.uppercase": defineTool({

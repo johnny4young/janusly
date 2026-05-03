@@ -1,0 +1,398 @@
+/**
+ * Tenant-level configuration catalog and persistence helpers.
+ *
+ * The process-level `.env` still owns infrastructure and secrets
+ * (`DATABASE_URL`, `REDIS_URL`, provider API keys). This table is for
+ * org-scoped runtime choices that can safely vary by tenant: LLM defaults,
+ * AI limits, outbound HTTP bounds, and workflow execution policies.
+ *
+ * Used by:
+ * - `apps/api/src/index.ts` — `GET /org/config` and `POST /org/config`.
+ *
+ * Invariants:
+ * - Every DB query filters by `orgId`.
+ * - Values are validated against this closed catalog before insert/update.
+ * - Secret material is not stored here; use `credentials.secret_ref` and env
+ *   or a vault for actual provider keys and workflow secrets.
+ */
+
+import { db, orgConfigs } from "@janusly/db";
+import { and, eq } from "drizzle-orm";
+
+export type OrgConfigValueType = "string" | "number" | "boolean";
+export type OrgConfigSource = "default" | "env" | "tenant";
+
+export type OrgConfigDefinition = {
+  key: string;
+  category: string;
+  description: string;
+  valueType: OrgConfigValueType;
+  defaultValue: string | number | boolean;
+  envKeys?: readonly string[];
+  allowedValues?: readonly string[];
+  min?: number;
+};
+
+export type OrgConfigEntry = OrgConfigDefinition & {
+  orgId: string;
+  value: string | number | boolean;
+  source: OrgConfigSource;
+  updatedAt: Date | null;
+};
+
+export type OrgConfigSnapshot = {
+  ai: {
+    provider: string;
+    openaiModel: string;
+    anthropicModel: string;
+    timeoutMs: number;
+    maxRetries: number;
+    promptMaxChars: number;
+    rateLimitPerMin: number;
+  };
+  http: {
+    timeoutMs: number;
+    maxResponseBytes: number;
+    maxRedirects: number;
+  };
+  runs: {
+    requireSavedWorkflow: boolean;
+    subworkflowMaxDepth: number;
+  };
+};
+
+const ALLOWED_CATEGORIES = ["ai", "http", "runs"] as const;
+const FORBIDDEN_CONFIG_NAME_PATTERN =
+  /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
+const FORBIDDEN_CONFIG_VALUE_PATTERN =
+  /^(sk-|sk-ant-|xox[baprs]-|ghp_|github_pat_|ya29\.|AKIA|Bearer\s+)|^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|-----BEGIN [A-Z ]+PRIVATE KEY-----|postgres(?:ql)?:\/\/|redis:\/\//i;
+
+export const ORG_CONFIG_DEFINITIONS = [
+  {
+    key: "ai.provider",
+    category: "ai",
+    description: "Default LLM provider for this tenant. Provider API keys still come from env or secret management.",
+    valueType: "string",
+    defaultValue: "openai",
+    envKeys: ["JANUSLY_LLM_PROVIDER"],
+    allowedValues: ["openai", "anthropic"],
+  },
+  {
+    key: "ai.openai.model",
+    category: "ai",
+    description: "Default OpenAI model for this tenant.",
+    valueType: "string",
+    defaultValue: "gpt-4o-mini",
+    envKeys: ["OPENAI_MODEL"],
+  },
+  {
+    key: "ai.anthropic.model",
+    category: "ai",
+    description: "Default Anthropic model for this tenant.",
+    valueType: "string",
+    defaultValue: "claude-haiku-4-5",
+    envKeys: ["ANTHROPIC_MODEL"],
+  },
+  {
+    key: "ai.timeoutMs",
+    category: "ai",
+    description: "LLM request timeout in milliseconds.",
+    valueType: "number",
+    defaultValue: 30_000,
+    envKeys: ["OPENAI_TIMEOUT_MS"],
+    min: 1,
+  },
+  {
+    key: "ai.maxRetries",
+    category: "ai",
+    description: "AI SDK retry count for LLM calls.",
+    valueType: "number",
+    defaultValue: 2,
+    envKeys: ["OPENAI_MAX_RETRIES"],
+    min: 0,
+  },
+  {
+    key: "ai.promptMaxChars",
+    category: "ai",
+    description: "Maximum prompt length accepted by AI endpoints.",
+    valueType: "number",
+    defaultValue: 4_000,
+    envKeys: ["AI_PROMPT_MAX_CHARS"],
+    min: 1,
+  },
+  {
+    key: "ai.rateLimitPerMin",
+    category: "ai",
+    description: "Per-org AI request limit per minute.",
+    valueType: "number",
+    defaultValue: 30,
+    envKeys: ["AI_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
+    key: "http.timeoutMs",
+    category: "http",
+    description: "Default outbound HTTP timeout budget in milliseconds.",
+    valueType: "number",
+    defaultValue: 30_000,
+    envKeys: ["JANUSLY_HTTP_TIMEOUT_MS"],
+    min: 1,
+  },
+  {
+    key: "http.maxResponseBytes",
+    category: "http",
+    description: "Default maximum decoded body size for HTTP nodes and http.request.",
+    valueType: "number",
+    defaultValue: 1_000_000,
+    envKeys: ["JANUSLY_HTTP_MAX_RESPONSE_BYTES"],
+    min: 1,
+  },
+  {
+    key: "http.maxRedirects",
+    category: "http",
+    description: "Default maximum redirect hops for outbound HTTP.",
+    valueType: "number",
+    defaultValue: 5,
+    envKeys: ["JANUSLY_HTTP_MAX_REDIRECTS"],
+    min: 0,
+  },
+  {
+    key: "runs.requireSavedWorkflow",
+    category: "runs",
+    description: "Require runs to start from a saved workflow instead of an ad-hoc payload.",
+    valueType: "boolean",
+    defaultValue: false,
+    envKeys: ["JANUSLY_REQUIRE_SAVED_WORKFLOW"],
+  },
+  {
+    key: "subworkflow.maxDepth",
+    category: "runs",
+    description: "Maximum nested subworkflow depth.",
+    valueType: "number",
+    defaultValue: 5,
+    envKeys: ["JANUSLY_MAX_SUBWORKFLOW_DEPTH"],
+    min: 1,
+  },
+] as const satisfies readonly OrgConfigDefinition[];
+
+export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
+
+function assertSafeOrgConfigDefinition(definition: OrgConfigDefinition): void {
+  if (!ALLOWED_CATEGORIES.includes(definition.category as typeof ALLOWED_CATEGORIES[number])) {
+    throw new Error(`Invalid org config category: ${definition.category}`);
+  }
+  if (FORBIDDEN_CONFIG_NAME_PATTERN.test(definition.key)) {
+    throw new Error(`Forbidden org config key: ${definition.key}`);
+  }
+  for (const envKey of definition.envKeys ?? []) {
+    if (FORBIDDEN_CONFIG_NAME_PATTERN.test(envKey)) {
+      throw new Error(`Forbidden org config env fallback: ${envKey}`);
+    }
+  }
+}
+
+for (const definition of ORG_CONFIG_DEFINITIONS) {
+  assertSafeOrgConfigDefinition(definition);
+}
+
+function findDefinition(key: string): OrgConfigDefinition | undefined {
+  return ORG_CONFIG_DEFINITIONS.find((definition) => definition.key === key);
+}
+
+function parseEnvValue(definition: OrgConfigDefinition, raw: string): string | number | boolean {
+  if (definition.valueType === "boolean") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    throw new Error(`${definition.key} must be true or false`);
+  }
+  if (definition.valueType === "number") return normalizeOrgConfigValue(definition, Number(raw));
+  return normalizeOrgConfigValue(definition, raw);
+}
+
+function defaultValueFor(
+  definition: OrgConfigDefinition,
+  env: NodeJS.ProcessEnv,
+): { value: string | number | boolean; source: "default" | "env" } {
+  for (const envKey of definition.envKeys ?? []) {
+    const raw = env[envKey];
+    if (raw === undefined || raw === "") continue;
+    try {
+      return { value: parseEnvValue(definition, raw), source: "env" };
+    } catch {
+      return { value: definition.defaultValue, source: "default" };
+    }
+  }
+  return { value: definition.defaultValue, source: "default" };
+}
+
+function parseStoredValue(value: unknown, fallback: string | number | boolean): string | number | boolean {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
+  return fallback;
+}
+
+/** Validate and normalize one value before it is written to `org_configs`. */
+export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: unknown): string | number | boolean {
+  if (definition.valueType === "boolean") {
+    if (typeof value !== "boolean") throw new Error(`${definition.key} must be a boolean`);
+    return value;
+  }
+
+  if (definition.valueType === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${definition.key} must be a finite number`);
+    const normalized = Math.floor(value);
+    if (definition.min !== undefined && normalized < definition.min) {
+      throw new Error(`${definition.key} must be >= ${definition.min}`);
+    }
+    return normalized;
+  }
+
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${definition.key} must be a non-empty string`);
+  const normalized = value.trim();
+  if (FORBIDDEN_CONFIG_VALUE_PATTERN.test(normalized)) {
+    throw new Error(`${definition.key} must not contain secret-like values`);
+  }
+  if (definition.allowedValues && !definition.allowedValues.includes(normalized)) {
+    throw new Error(`${definition.key} must be one of: ${definition.allowedValues.join(", ")}`);
+  }
+  return normalized;
+}
+
+/** List tenant-visible configuration values, merging tenant rows over env defaults. */
+export async function listOrgConfig(orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<OrgConfigEntry[]> {
+  const rows = await db.select().from(orgConfigs).where(eq(orgConfigs.orgId, orgId));
+  const byKey = new Map(rows.map((row) => [row.key, row]));
+
+  return ORG_CONFIG_DEFINITIONS.map((definition) => {
+    const row = byKey.get(definition.key);
+    const fallback = defaultValueFor(definition, env);
+    return {
+      ...definition,
+      orgId,
+      value: row ? parseStoredValue(row.valueJson, fallback.value) : fallback.value,
+      source: row ? "tenant" : fallback.source,
+      updatedAt: row?.updatedAt ?? null,
+    };
+  });
+}
+
+function valuesByKey(entries: OrgConfigEntry[]): Map<OrgConfigKey, string | number | boolean> {
+  return new Map(entries.map((entry) => [entry.key as OrgConfigKey, entry.value]));
+}
+
+function readString(values: Map<OrgConfigKey, string | number | boolean>, key: OrgConfigKey): string {
+  const value = values.get(key);
+  if (typeof value !== "string") throw new Error(`${key} must resolve to a string`);
+  return value;
+}
+
+function readNumber(values: Map<OrgConfigKey, string | number | boolean>, key: OrgConfigKey): number {
+  const value = values.get(key);
+  if (typeof value !== "number") throw new Error(`${key} must resolve to a number`);
+  return value;
+}
+
+function readBoolean(values: Map<OrgConfigKey, string | number | boolean>, key: OrgConfigKey): boolean {
+  const value = values.get(key);
+  if (typeof value !== "boolean") throw new Error(`${key} must resolve to a boolean`);
+  return value;
+}
+
+/** Return a typed config snapshot for runtime code that should honor tenant overrides. */
+export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<OrgConfigSnapshot> {
+  const values = valuesByKey(await listOrgConfig(orgId, env));
+  return {
+    ai: {
+      provider: readString(values, "ai.provider"),
+      openaiModel: readString(values, "ai.openai.model"),
+      anthropicModel: readString(values, "ai.anthropic.model"),
+      timeoutMs: readNumber(values, "ai.timeoutMs"),
+      maxRetries: readNumber(values, "ai.maxRetries"),
+      promptMaxChars: readNumber(values, "ai.promptMaxChars"),
+      rateLimitPerMin: readNumber(values, "ai.rateLimitPerMin"),
+    },
+    http: {
+      timeoutMs: readNumber(values, "http.timeoutMs"),
+      maxResponseBytes: readNumber(values, "http.maxResponseBytes"),
+      maxRedirects: readNumber(values, "http.maxRedirects"),
+    },
+    runs: {
+      requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
+      subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
+    },
+  };
+}
+
+/** Overlay tenant config onto process env names consumed by provider/runtime helpers. */
+export function applyOrgConfigToEnv(
+  config: OrgConfigSnapshot,
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    JANUSLY_LLM_PROVIDER: config.ai.provider,
+    OPENAI_MODEL: config.ai.openaiModel,
+    ANTHROPIC_MODEL: config.ai.anthropicModel,
+    OPENAI_TIMEOUT_MS: String(config.ai.timeoutMs),
+    OPENAI_MAX_RETRIES: String(config.ai.maxRetries),
+    AI_PROMPT_MAX_CHARS: String(config.ai.promptMaxChars),
+    AI_RATE_LIMIT_PER_MIN: String(config.ai.rateLimitPerMin),
+    JANUSLY_HTTP_TIMEOUT_MS: String(config.http.timeoutMs),
+    JANUSLY_HTTP_MAX_RESPONSE_BYTES: String(config.http.maxResponseBytes),
+    JANUSLY_HTTP_MAX_REDIRECTS: String(config.http.maxRedirects),
+    JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
+    JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
+  };
+}
+
+/** Insert or update one tenant config override after catalog validation. */
+export async function upsertOrgConfig(input: {
+  orgId: string;
+  key: string;
+  value: unknown;
+  userId?: string;
+}): Promise<OrgConfigEntry> {
+  const definition = findDefinition(input.key);
+  if (!definition) throw new Error(`Unknown org config key: ${input.key}`);
+
+  const value = normalizeOrgConfigValue(definition, input.value);
+  const existing = await db
+    .select()
+    .from(orgConfigs)
+    .where(and(eq(orgConfigs.orgId, input.orgId), eq(orgConfigs.key, input.key)));
+
+  if (existing[0]) {
+    await db
+      .update(orgConfigs)
+      .set({
+        valueJson: value,
+        category: definition.category,
+        description: definition.description,
+        valueType: definition.valueType,
+        source: "tenant",
+        updatedBy: input.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(orgConfigs.id, existing[0].id));
+  } else {
+    await db.insert(orgConfigs).values({
+      id: crypto.randomUUID(),
+      orgId: input.orgId,
+      key: input.key,
+      valueJson: value,
+      category: definition.category,
+      description: definition.description,
+      valueType: definition.valueType,
+      source: "tenant",
+      createdBy: input.userId,
+      updatedBy: input.userId,
+    });
+  }
+
+  return {
+    ...definition,
+    orgId: input.orgId,
+    value,
+    source: "tenant",
+    updatedAt: new Date(),
+  };
+}
