@@ -1,8 +1,8 @@
 /**
  * Single entry point per BullMQ workflow job. Resolves the run's `orgId`,
- * pulls the per-run `context`, runs the executor for `node.type`,
- * and applies secret redaction to the output before returning to the
- * runtime.
+ * pulls the per-run `context`, runs the executor for `node.type`, and
+ * applies secret/env redaction to successful outputs, waiting metadata, and
+ * thrown errors before returning to the runtime.
  *
  * Used by `worker.ts` (every BullMQ job's handler) and indirectly by
  * `core/runtime.ts` through the `NodeExecutorRegistry` adapter.
@@ -10,20 +10,20 @@
  * Invariants:
  * - A missing run row is fatal — don't synthesise a default `orgId` (the
  *   multi-tenant scope on `usage_events` would break).
- * - Secret values are stripped from `output` and `metadata` before they
- *   leave this function so they never reach `run_nodes.state_json` /
- *   `run_events.payload`.
+ * - Secret/env values are stripped before they leave this function so they
+ *   never reach `run_nodes.state_json`, `run_events.payload`, or DLQ
+ *   `error_json`.
  */
 
 import { nodeRegistry } from "./node-registry";
 import { getRunContext, getRunOrgId } from "./persistence";
-import { redactValues, renderTemplateWithRedactions } from "./template";
+import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 
 /**
  * Run one node end-to-end: look up org/context, render templates with
- * secret tracking, dispatch to the executor, and redact resolved secret
- * values before returning.
+ * secret/env tracking, dispatch to the executor, and redact resolved values
+ * before returning or rethrowing.
  */
 export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node">): Promise<NodeExecutionResult> {
   const { node, runId } = input;
@@ -54,14 +54,19 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
 
   const { rendered: resolvedConfig, redactedValues } = renderTemplateWithRedactions(node.config, scope);
 
-  const result = await executor({
-    runId,
-    nodeId: node.id,
-    orgId,
-    config: resolvedConfig,
-    context,
-    redactedValues,
-  });
+  let result: Awaited<ReturnType<typeof executor>>;
+  try {
+    result = await executor({
+      runId,
+      nodeId: node.id,
+      orgId,
+      config: resolvedConfig,
+      context,
+      redactedValues,
+    });
+  } catch (err) {
+    throw redactError(err, redactedValues);
+  }
 
   if (result.status === "waiting") {
     const metadata = result.reason
@@ -73,11 +78,10 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     };
   }
 
-  // Defense-in-depth: if any output value echoes a resolved secret (e.g. an
-  // HTTP node returning the Authorization header it just sent), strip the
-  // plaintext value before it is persisted to run_nodes.state_json or
-  // run_events.payload. The actual call to the upstream service happened with
-  // the resolved value; we just don't keep it in our DB.
+  // Defense-in-depth: if any output value echoes a resolved secret/env value
+  // (e.g. an HTTP node returning the Authorization header it just sent),
+  // strip the plaintext value before it is persisted. The actual upstream
+  // call happened with the resolved value; we just don't keep it in our DB.
   return {
     status: "succeeded",
     output: redactValues(result.output ?? {}, redactedValues),
