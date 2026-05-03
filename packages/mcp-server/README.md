@@ -1,12 +1,12 @@
 # `@janusly/mcp-server`
 
-A read-only [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). Five tools today; all proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes five read-only tools, one validation pre-flight tool, and one workflow save tool. All tools proxy HTTP to the running Janusly API.
 
 ## What is MCP and why ship a server?
 
 MCP is Anthropic's open protocol for letting AI assistants talk to external systems. An **MCP client** (e.g. Claude Desktop) speaks a JSON-RPC dialect over stdio or HTTP+SSE to one or more **MCP servers**. Each server advertises a list of *tools* (function-shaped capabilities); the client surfaces those in its UI and the model decides when to call them.
 
-Janusly's strategic bet (per [`docs/PLAN.md`](../../docs/PLAN.md) §3) is that workflow engines that aren't reachable from chat-shaped assistants get bypassed. By being a first-class MCP server, a developer running Claude Desktop can ask "what workflows do I have, what tools can I call from a flow, how did `run-42` actually fail" without leaving the chat. The same surface eventually lets the assistant *author* flows ("draft a workflow that watches a webhook and posts to Slack on failure"), but that's the write path — out of scope here.
+By being a first-class MCP server, a developer running Claude Desktop can ask "what workflows do I have, what tools can I call from a flow, how did `run-42` actually fail" without leaving the chat. The same surface can validate and save a workflow through the API, so authored flows still pass through Janusly's normal validation, RBAC, and audit path.
 
 ## Architecture: protocol-translation layer over the HTTP API
 
@@ -29,14 +29,14 @@ The MCP server is intentionally **not** a second consumer of the database. Every
 
 - **Auth** — dev headers (`x-org-id` / `x-user-id`) when Supabase is unset and `NODE_ENV !== "production"`, or service-token mode (`Authorization: Bearer <API_SERVICE_TOKEN>`).
 - **Multi-tenant scope** — every Drizzle query carries `eq(<table>.orgId, auth.orgId)`.
-- **Rate limiting** — `apps/api/src/rate-limit.ts` (Redis-backed, ENG-019) gates AI surfaces; the MCP server's read-only tools don't trip it but inherit the gating for free if we ever add AI-flavoured tools.
-- **Audit logs** — write endpoints already audit; reads (the only thing this server exposes) don't.
+- **Rate limiting** — `apps/api/src/rate-limit.ts` gates AI surfaces; MCP tools inherit API-side controls because the server never bypasses the HTTP layer.
+- **Audit logs** — `workflows.save` writes the same `workflow.saved` audit row as the web UI. Read tools and `workflows.validate` have no side effects.
 
 The proxy choice is the most important architectural decision. It means:
 
 - We don't duplicate org scope in two places (a known footgun in any system that grows a "second backend").
-- Future write tools, when added, automatically inherit `requireRole`, audit, and rate-limit by going through the same API.
-- The MCP server itself is small enough to fit on one screen — it's a JSON-RPC dispatcher with five `case` arms.
+- Write tools inherit `requireRole`, audit, and rate-limit by going through the same API.
+- The MCP server itself stays small — it's a JSON-RPC dispatcher over named API calls.
 
 ## Transport: stdio
 
@@ -44,15 +44,17 @@ MCP supports two transports: **stdio** (the server is spawned as a subprocess; c
 
 Boot story: Claude Desktop reads its config file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS), spawns `pnpm --filter @janusly/mcp-server start` as a subprocess, and pipes JSON-RPC over stdio. The server stays alive as long as the parent's pipes are open; closing Claude Desktop tears the subprocess down via SIGTERM.
 
-## The five tools
+## Published tools
 
-| MCP tool        | API endpoint                                                | Purpose                                                                 |
-| --------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `workflows.list`| `GET /workflows[?limit=]`                                   | List workflows in the configured org. Caps at 100 (max 200).            |
-| `workflows.get` | `GET /workflows/latest?workflowId=…`                        | Fetch the latest version of one workflow. Returns null when unknown.    |
-| `recipes.list`  | `GET /templates`                                            | List the built-in workflow templates (recipes).                         |
-| `tools.list`    | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
-| `runs.get`      | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events (cap 200/500 from ENG-009).         |
+| MCP tool             | API endpoint                                                | Purpose                                                                 |
+| -------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `workflows.list`     | `GET /workflows[?limit=]`                                   | List workflows in the configured org. Caps at 100 (max 200).            |
+| `workflows.get`      | `GET /workflows/latest?workflowId=…`                        | Fetch the latest version of one workflow. Returns null when unknown.    |
+| `recipes.list`       | `GET /templates`                                            | List the built-in workflow templates (recipes).                         |
+| `tools.list`         | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
+| `runs.get`           | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
+| `workflows.validate` | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
+| `workflows.save`     | `POST /workflows/save`                                      | Save a workflow through the API's editor-role and audit path.           |
 
 Every tool returns a single MCP `text` content block carrying the API response JSON-stringified. That's the documented MCP convention for "data-shaped" results; the AI client reads it as text and reasons over it. Future tools could surface structured `resource` content blocks if the UX warrants.
 
@@ -97,7 +99,7 @@ Drop this into `~/Library/Application Support/Claude/claude_desktop_config.json`
 }
 ```
 
-Restart Claude Desktop. The five tools appear in the tool picker. Make sure `pnpm dev` is running in another terminal — the MCP server proxies to `127.0.0.1:3001`.
+Restart Claude Desktop. The Janusly tools appear in the tool picker. Make sure `pnpm dev` is running in another terminal — the MCP server proxies to `127.0.0.1:3001`.
 
 ## Boot, dev, test
 
@@ -121,15 +123,15 @@ packages/mcp-server/
     ├── index.ts         ← entry point — wires Server + StdioServerTransport
     ├── api-client.ts    ← env resolver + auth-aware fetch closure
     ├── api-client.test.ts
-    ├── tools.ts         ← five Tool descriptors + dispatchTool() with switch over names
+    ├── tools.ts         ← Tool descriptors + dispatchTool() with switch over names
     └── tools.test.ts
 ```
 
-## Adding a new (read-only) tool
+## Adding a new tool
 
 1. Add a descriptor to `tools` in [`src/tools.ts`](src/tools.ts) — `name`, `description`, `inputSchema` (JSON Schema, not Zod — MCP speaks JSON Schema natively).
 2. Add a `case` arm to `runOne` mapping the tool to its API URL. Use `URLSearchParams` for query strings (catches encoding bugs).
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
 4. Bump the package version if anything is downstream-visible.
 
-Don't add destructive tools without first widening the AC — the read-only constraint is what makes the MCP surface safe to expose by default. A future ticket can add write tools (`runs.start`, `workflows.save`) once the UX is designed (likely with a confirmation/dry-run step).
+Write tools must go through the API, keep RBAC at the route layer, and rely on API-side audit rows. Do not add destructive tools directly in this package.
