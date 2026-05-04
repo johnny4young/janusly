@@ -1,26 +1,47 @@
 /**
- * AI Copilot panel — exposes `/ai/generate-workflow` and
- * `/ai/explain-workflow` to the user. Surfaces the `mode` chip ("AI" /
- * "Fallback") + `aiError` per AGENTS.md fallback contract whenever the
- * underlying call degrades.
+ * AI Copilot panel — exposes `/ai/generate-workflow`,
+ * `/ai/explain-workflow`, and `/ai/review-workflow` to the user. Surfaces
+ * the `mode` chip ("AI" / "Fallback") + `aiError` per AGENTS.md fallback
+ * contract whenever the underlying call degrades.
  *
  * Used by `RightPanel.tsx` (the `copilot` tab).
  *
  * Invariants:
  * - When `mode === "fallback"`, `aiError` is rendered prominently so the
  *   user knows why we degraded (billing / quota / network).
+ * - The review action falls back to the deterministic readiness check
+ *   from the API engine when the LLM is unavailable, so the findings
+ *   list is never empty just because the model is down.
  */
 
 import React, { useMemo, useState } from 'react'
-import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, Sparkles, Workflow } from 'lucide-react'
+import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
+
+type ReviewSeverity = 'info' | 'warn' | 'fail'
+
+type ReviewFinding = {
+  code: string
+  severity: ReviewSeverity
+  message: string
+  nodeId?: string
+  edgeId?: string
+  rationale: string
+  suggestion: string
+}
+
+type ReviewFindings = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: ReviewFinding[]
+}
 
 type AiCopilotPanelProps = {
   health: AiHealth | null
   workflowName: string
   onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string }>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
+  onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>
   onOpenRuns: () => void
   onOpenTemplates: () => void
 }
@@ -28,6 +49,7 @@ type AiCopilotPanelProps = {
 type ResultState =
   | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string }
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
+  | { kind: 'review'; mode: AiMode; title: string; review: ReviewFindings; aiError?: string }
 
 const starterPrompts = [
   'Watch a GitHub release, summarize what changed, and ask for approval when risk is high.',
@@ -60,11 +82,12 @@ export function AiCopilotPanel({
   workflowName,
   onGenerateWorkflow,
   onExplainWorkflow,
+  onReviewWorkflow,
   onOpenRuns,
   onOpenTemplates,
 }: AiCopilotPanelProps) {
   const [prompt, setPrompt] = useState(starterPrompts[0])
-  const [loading, setLoading] = useState<'generate' | 'explain' | null>(null)
+  const [loading, setLoading] = useState<'generate' | 'explain' | 'review' | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
 
   const healthLabel = health?.enabled ? 'AI is connected' : 'Local mode is active'
@@ -181,6 +204,32 @@ export function AiCopilotPanel({
     }
   }
 
+  const review = async () => {
+    setLoading('review')
+    try {
+      const response = await onReviewWorkflow()
+      setResult({
+        kind: 'review',
+        mode: response.mode,
+        title: response.aiError
+          ? `Local readiness review for ${workflowName} (AI failed)`
+          : `Production readiness review for ${workflowName}`,
+        review: response.review,
+        aiError: response.aiError,
+      })
+    } catch (error) {
+      setResult({
+        kind: 'review',
+        mode: 'error',
+        title: 'Review failed',
+        review: { status: 'fail', issues: [] },
+        aiError: error instanceof Error ? error.message : 'Janusly could not review this workflow.',
+      })
+    } finally {
+      setLoading(null)
+    }
+  }
+
   return (
     <div className="panel-stack">
       <section className="copilot-hero">
@@ -230,10 +279,14 @@ export function AiCopilotPanel({
             <CheckCircle2 size={16} aria-hidden="true" />
             <span>{loading === 'explain' ? 'Explaining…' : 'Explain this flow'}</span>
           </button>
+          <button className="command-button" disabled={loading === 'review'} onClick={review}>
+            <ShieldCheck size={16} aria-hidden="true" />
+            <span>{loading === 'review' ? 'Reviewing…' : 'Review this flow'}</span>
+          </button>
         </div>
       </section>
 
-      {result && (
+      {result && result.kind !== 'review' && (
         <section className="panel-card result-panel">
           <div className="split-row">
             <strong>{result.title}</strong>
@@ -246,6 +299,44 @@ export function AiCopilotPanel({
               <strong>AI request failed.</strong>{' '}
               <span>{describeAiError(result.aiError)}</span>
             </div>
+          )}
+        </section>
+      )}
+
+      {result && result.kind === 'review' && (
+        <section className="panel-card result-panel">
+          <div className="split-row">
+            <strong>{result.title}</strong>
+            <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
+          </div>
+          <p className="helper-text">
+            {result.mode === 'error'
+              ? 'The review could not be completed. Check the API connection and try again.'
+              : result.review.status === 'pass'
+              ? 'No production-readiness blockers found.'
+              : result.review.status === 'warn'
+                ? `${result.review.issues.length} issue${result.review.issues.length === 1 ? '' : 's'} worth reviewing before production.`
+                : `${result.review.issues.filter((i) => i.severity === 'fail').length} blocker${result.review.issues.filter((i) => i.severity === 'fail').length === 1 ? '' : 's'} — fix before production-mode runs.`}
+          </p>
+          {result.aiError && (
+            <div className={`issue ${result.mode === 'error' ? 'issue-error' : 'issue-warn'}`} role="status">
+              <strong>{result.mode === 'error' ? 'Review request failed.' : 'AI review fell back to local rules.'}</strong>{' '}
+              <span>{describeAiError(result.aiError)}</span>
+            </div>
+          )}
+          {result.review.issues.length > 0 && (
+            <ul className="we-readiness-badge__issues" style={{ position: 'static', maxWidth: 'none' }}>
+              {result.review.issues.map((issue, index) => (
+                <li key={`${issue.code}-${index}`} className={`we-readiness-issue we-readiness-issue--${issue.severity === 'info' ? 'warn' : issue.severity}`}>
+                  <strong className="we-readiness-issue__code">{issue.code}</strong>
+                  {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
+                  {issue.edgeId && <span className="we-readiness-issue__node"> · {issue.edgeId}</span>}
+                  <p className="we-readiness-issue__message">{issue.message}</p>
+                  <p className="we-readiness-issue__suggestion">Why: {issue.rationale}</p>
+                  <p className="we-readiness-issue__suggestion">Fix: {issue.suggestion}</p>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       )}

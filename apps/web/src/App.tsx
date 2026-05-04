@@ -63,6 +63,25 @@ type ExplainWorkflowResponse = {
   aiError?: string
 }
 
+type ReviewWorkflowResponse = {
+  mode?: AiMode
+  model?: string
+  review?: {
+    status: 'pass' | 'warn' | 'fail'
+    issues: Array<{
+      code: string
+      severity: 'info' | 'warn' | 'fail'
+      message: string
+      nodeId?: string
+      edgeId?: string
+      rationale: string
+      suggestion: string
+    }>
+  }
+  error?: string
+  aiError?: string
+}
+
 export default function App() {
   const {
     nodes,
@@ -481,6 +500,22 @@ export default function App() {
     }
   }, [getWorkflowJson])
 
+  const reviewWorkflow = useCallback(async () => {
+    const workflow = getWorkflowJson()
+    const result = await api('/ai/review-workflow', {
+      method: 'POST',
+      body: JSON.stringify({ workflow }),
+    }) as ReviewWorkflowResponse
+
+    if (result.error) throw new Error(result.error)
+    return {
+      mode: result.mode ?? 'fallback',
+      review: result.review ?? { status: 'fail' as const, issues: [] },
+      model: result.model,
+      aiError: result.aiError,
+    }
+  }, [getWorkflowJson])
+
   const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
     try {
       await api('/dlq/resolve', {
@@ -593,6 +628,7 @@ export default function App() {
           onResolveDeadLetter={resolveDeadLetter}
           onGenerateWorkflow={generateWorkflow}
           onExplainWorkflow={explainWorkflow}
+          onReviewWorkflow={reviewWorkflow}
           onOpenTab={setActiveTab}
         />
       }

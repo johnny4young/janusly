@@ -41,6 +41,7 @@ import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
+import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -248,6 +249,30 @@ const AiGenerationWorkflowSchema = z.object({
   nodes: z.array(AiNodeSchema),
   edges: z.array(EdgeSchema),
 });
+
+/**
+ * Schema for `/ai/review-workflow` structured output. Each finding is a
+ * concrete-typed object — no `z.unknown()` (Anthropic's structured-output
+ * surface rejects empty `{}` schemas), no recursion (Anthropic + AI SDK
+ * reject self-`$ref`), and a hard `max(50)` cap on the issue array so a
+ * hallucinating model can't dump a wall of text. The shape matches
+ * `ReviewFindings` from `@janusly/engine/src/workflow-review-fallback`,
+ * so the AI-mode and fallback responses are wire-compatible.
+ */
+const ReviewFindingSchema = z.object({
+  code: z.string().min(1),
+  severity: z.enum(["info", "warn", "fail"]),
+  message: z.string().min(1),
+  nodeId: z.string().optional(),
+  edgeId: z.string().optional(),
+  rationale: z.string().min(1),
+  suggestion: z.string().min(1),
+});
+
+const ReviewFindingsSchema = z.object({
+  status: z.enum(["pass", "warn", "fail"]),
+  issues: z.array(ReviewFindingSchema).max(50),
+});
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -321,6 +346,41 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
   "EXAMPLE — abstract router prompt (\"smart router that picks between fast_path and accurate_path\"):",
   '{"dslVersion":"1.0","id":"smart_router_demo","name":"Smart Router Demo","nodes":[{"id":"start","type":"noop","config":{}},{"id":"pick","type":"router","config":{"candidates":[{"nodeId":"fast_path"},{"nodeId":"accurate_path"}],"strategy":"auto"}},{"id":"fast_path","type":"noop","config":{}},{"id":"accurate_path","type":"noop","config":{}}],"edges":[{"from":"start","to":"pick"}]}',
+].join("\n");
+
+/**
+ * System prompt for `/ai/review-workflow`. Sister to the deterministic
+ * readiness gate — this is the AI semantic-pass that catches things
+ * rules can't (ambiguous prompts, PII risk in downstream context refs,
+ * malformed-but-shape-valid tool inputs). The structured-output schema
+ * (`ReviewFindingsSchema`) enforces the response shape; this prompt
+ * gives the model the policy + checklist + severity rubric.
+ */
+const REVIEW_WORKFLOW_SYSTEM_PROMPT = [
+  "You are a Janusly production-readiness reviewer. Review the workflow JSON the user submits and emit structured findings only — no prose, no explanation outside the schema.",
+  "Severity rules:",
+  "- 'fail': blocking issue an operator must fix before production. Examples: hardcoded secret, missing retries on external call, dangerous action without an approval ancestor, malformed router (candidates that don't reference real node ids), unknown tool name.",
+  "- 'warn': non-blocking but worth flagging. Examples: missing HTTP timeoutMs override on a slow upstream, ambiguous AI prompt, missing outputs declaration, write-side action without explicit human gate.",
+  "- 'info': neutral observation that improves quality but isn't a defect. Examples: workflow could benefit from a transform step to shape AI input.",
+  "Checks to apply (non-exhaustive — flag anything you'd hesitate to ship):",
+  "- Retries on http/tool/ai/agent nodes (config.retry.maxAttempts).",
+  "- HTTP bounds (timeoutMs / maxResponseBytes / maxRedirects) — defaults are sensible but explicit values record operator intent.",
+  "- Hardcoded secrets in node config — a string value that looks like a token, key, or bearer literal should be a {{secret.X}} / {{env.X}} / {{credential.X}} template.",
+  "- Approval gate upstream of write-side actions (POST/PUT/PATCH/DELETE http nodes; tool calls that send/create/delete; multi_agent crews making external changes).",
+  "- Unknown tools — a `tool` node whose `tool` field doesn't match a real registered tool name; flag as ambiguous.",
+  "- Malformed routers — router/router_llm with empty candidates, candidates pointing at nodes that don't exist in the workflow, or candidates that all do the same work (no real choice).",
+  "- Missing outputs declaration — workflow.outputs is missing or empty.",
+  "- Ambiguous AI prompts — prompts lacking concrete grounding in context (e.g. \"do something useful\" instead of \"summarize {{context.fetch.output.body}} in 2 sentences\").",
+  "- PII / sensitive-action risk — an AI prompt that includes a body field from a user-data upstream without scrubbing or redaction.",
+  "Per-finding format:",
+  "- code: snake_case stable identifier (e.g. http_missing_retry, raw_secret_in_config). Reuse readiness codes when the AI semantic finding matches a deterministic rule.",
+  "- severity: 'info' | 'warn' | 'fail'.",
+  "- message: one-sentence problem statement.",
+  "- nodeId: id of the affected node when locatable. Omit for workflow-level issues.",
+  "- edgeId: id of the affected edge when locatable.",
+  "- rationale: why this matters in production. Be specific.",
+  "- suggestion: one concrete edit that fixes the finding (e.g. 'set config.retry.maxAttempts to 3 with backoff: exponential').",
+  "Roll up status: any 'fail' → 'fail'; otherwise any 'warn' → 'warn'; clean → 'pass'.",
 ].join("\n");
 
 async function orgLlmRuntime(orgId: string) {
@@ -837,6 +897,80 @@ export const routes: Route[] = [
         });
       }
     } },
+
+  // AI second-pass workflow review. Sister to the deterministic readiness
+  // gate at /workflows/readiness — this calls the LLM with a structured-
+  // output schema to surface semantic issues rules can't see (ambiguous
+  // prompts, PII risk, malformed-but-shape-valid tool inputs). Falls back
+  // to the deterministic readiness check when LLM is unavailable so the
+  // route always returns useful findings — `mode: "fallback"` flags the
+  // source per the AGENTS.md AI-fallback contract.
+  { method: "POST", match: "/ai/review-workflow",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const parsed = WorkflowSchema.safeParse(candidate);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((issue) => ({
+          code: "invalid_workflow_shape",
+          severity: "fail" as const,
+          message: `${issue.path.join(".") || "workflow"}: ${issue.message}`,
+          rationale: "The workflow JSON failed structural validation before review could run.",
+          suggestion: "Fix the schema-level errors and re-submit.",
+        }));
+        // Audit even shape-invalid fallbacks — every AI mutation surface
+        // must record success AND fallback per the AGENTS.md AI-fallback
+        // contract. Without this, "shape invalid" requests leave no
+        // operator audit trail.
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", undefined, { mode: "fallback", reason: "invalid_workflow_shape" });
+        return sendJson(res, { mode: "fallback", aiError: "Workflow shape invalid", review: { status: "fail", issues } });
+      }
+
+      const workflow = parsed.data;
+      if (!llm) {
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", reason: "no_llm_configured" });
+        return sendJson(res, {
+          mode: "fallback",
+          review: buildReviewFallback(workflow),
+        });
+      }
+
+      try {
+        const result = await llm.generateObject<ReviewFindings>({
+          schema: ReviewFindingsSchema,
+          schemaName: "JanuslyWorkflowReview",
+          schemaDescription: "Production-readiness review of a Janusly workflow DAG.",
+          system: REVIEW_WORKFLOW_SYSTEM_PROMPT,
+          prompt: JSON.stringify(workflow),
+          modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId },
+        });
+        const review = mergeReviewFindings(
+          sanitizeAiReview(result.object as ReviewFindings, workflow),
+          buildReviewFallback(workflow),
+        );
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, {
+          mode: "ai",
+          model: result.model,
+          provider: result.provider,
+          totalIssues: review.issues.length,
+          blockingCount: review.issues.filter((issue) => issue.severity === "fail").length,
+        });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, review });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI review failed";
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          review: buildReviewFallback(workflow),
+        });
+      }
+    } },
+
   { method: "POST", match: "/ai/explain-run",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
