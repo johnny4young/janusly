@@ -28,6 +28,7 @@ import { RightPanel } from './components/RightPanel'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
+import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
@@ -549,6 +550,7 @@ export default function App() {
             </div>
           </div>
           <WorkflowReadinessBadge />
+          <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
           <UserMenu />
         </>
       }

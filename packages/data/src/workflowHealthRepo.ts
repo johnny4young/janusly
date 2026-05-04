@@ -1,0 +1,209 @@
+/**
+ * Repository for workflow health signals — the run-time inputs the
+ * `computeWorkflowHealth` aggregator (in `@janusly/engine`) consumes.
+ *
+ * Single function `collectHealthSignals(orgId, workflowId, windowDays)`
+ * runs the SQL aggregations across `runs`, `run_events`, `dead_letters`,
+ * `usage_events`, and `workflow_versions` for one workflow over a rolling
+ * window. Returns the typed `HealthSignals` shape the engine expects.
+ *
+ * Used by `apps/api/src/index.ts:GET /workflows/health`. The engine layer
+ * computes the score from these signals + the static readiness check;
+ * this module only collects.
+ *
+ * Invariants:
+ * - Multi-tenant scope: every query carries `eq(workflowVersions.orgId,
+ *   orgId)` AND `eq(workflowVersions.workflowId, workflowId)`. Joining
+ *   through `workflow_versions` enforces both scopes in a single
+ *   predicate set.
+ * - Window cap: matches `getUsageSummary`'s 30-day default. Don't unbound
+ *   the scan — long-running orgs would OOM the API on every dashboard
+ *   poll. Pre-aggregated tables come later if needed.
+ * - p95 below 5 runs is unstable, so we return `null` and let the engine
+ *   fall back to its neutral default rather than emit a noisy small-N
+ *   percentile.
+ *
+ * Note on the cross-module shape: `HealthSignals` is duplicated here and
+ * in `@janusly/engine/src/workflow-health.ts` so `data` never imports
+ * from `engine`. The API wires repo → engine through structural typing.
+ */
+
+import { db } from "@janusly/db";
+import { runs, runEvents, deadLetters, usageEvents, workflowVersions } from "@janusly/db";
+import { and, asc, eq, gte, sql } from "drizzle-orm";
+
+/**
+ * Run-time signals collected for one workflow over a rolling window.
+ *
+ * Defined here (not in `@janusly/engine`) because `packages/data` is a
+ * lower layer than `engine` — `engine` imports from `data`, never the
+ * other way around. The engine's `computeWorkflowHealth` accepts this
+ * exact shape via structural typing; both modules duplicate the field
+ * list to keep the dependency direction clean. Adding a field means
+ * editing both type definitions; the repo's tests + the engine's
+ * `computeWorkflowHealth.test.ts` together pin both shapes.
+ */
+export type HealthSignals = {
+  totalRuns: number;
+  successCount: number;
+  failureCount: number;
+  retryCount: number;
+  dlqOpenCount: number;
+  p95LatencyMs: number | null;
+  totalCostUsd: number;
+  totalTokens: number;
+  versionCount: number;
+};
+
+const DEFAULT_HEALTH_WINDOW_DAYS = 30;
+
+/** Run all signal-collection queries for one workflow + return the typed shape. */
+export async function collectHealthSignals(
+  orgId: string,
+  workflowId: string,
+  windowDays = DEFAULT_HEALTH_WINDOW_DAYS,
+): Promise<HealthSignals> {
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+  // 1. Run aggregates: total / success / failure counts + run-id list for
+  //    follow-up joins. The list lets us scope subsequent queries by the
+  //    same set of run rows the success counts were computed against,
+  //    without re-running the (org, workflow) join.
+  const runRows = await db
+    .select({
+      id: runs.id,
+      status: runs.status,
+      createdAt: runs.createdAt,
+    })
+    .from(runs)
+    .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+    .where(and(
+      eq(workflowVersions.orgId, orgId),
+      eq(workflowVersions.workflowId, workflowId),
+      gte(runs.createdAt, since),
+    ));
+
+  const totalRuns = runRows.length;
+  const successCount = runRows.filter((row) => row.status === "succeeded").length;
+  const failureCount = runRows.filter((row) => row.status === "failed").length;
+  const runIds = runRows.map((row) => row.id);
+
+  // 2. Retry events + DLQ + usage signals. Each is gated on the runIds
+  //    above so we never read rows that belong to a different workflow.
+  const [retryCount, dlqOpenCount, usageAggregate, p95LatencyMs] = await Promise.all([
+    countRetryEvents(runIds),
+    countOpenDeadLetters(orgId, runIds),
+    sumUsage(orgId, runIds),
+    computeP95Latency(runIds),
+  ]);
+
+  // 3. Distinct version count for the workflow — independent of the run
+  //    window. Rollback availability checks rely on `versionCount >= 2`.
+  const versionRows = await db
+    .select({ id: workflowVersions.id })
+    .from(workflowVersions)
+    .where(and(
+      eq(workflowVersions.orgId, orgId),
+      eq(workflowVersions.workflowId, workflowId),
+    ));
+
+  return {
+    totalRuns,
+    successCount,
+    failureCount,
+    retryCount,
+    dlqOpenCount,
+    p95LatencyMs,
+    totalCostUsd: usageAggregate.totalCostUsd,
+    totalTokens: usageAggregate.totalTokens,
+    versionCount: versionRows.length,
+  };
+}
+
+async function countRetryEvents(runIds: string[]): Promise<number> {
+  if (runIds.length === 0) return 0;
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(runEvents)
+    .where(and(
+      eq(runEvents.type, "node.retry"),
+      sql`${runEvents.runId} = ANY (${runIds})`,
+    ));
+  return rows[0]?.count ?? 0;
+}
+
+async function countOpenDeadLetters(orgId: string, runIds: string[]): Promise<number> {
+  if (runIds.length === 0) return 0;
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(deadLetters)
+    .where(and(
+      eq(deadLetters.orgId, orgId),
+      eq(deadLetters.status, "open"),
+      sql`${deadLetters.runId} = ANY (${runIds})`,
+    ));
+  return rows[0]?.count ?? 0;
+}
+
+async function sumUsage(orgId: string, runIds: string[]): Promise<{ totalCostUsd: number; totalTokens: number }> {
+  if (runIds.length === 0) return { totalCostUsd: 0, totalTokens: 0 };
+  const rows = await db
+    .select({
+      quantity: usageEvents.quantity,
+      metadata: usageEvents.metadata,
+    })
+    .from(usageEvents)
+    .where(and(
+      eq(usageEvents.orgId, orgId),
+      sql`${usageEvents.runId} = ANY (${runIds})`,
+    ));
+
+  let totalCostUsd = 0;
+  let totalTokens = 0;
+  for (const row of rows) {
+    totalTokens += row.quantity ?? 0;
+    const metadata = row.metadata as { costUsd?: number } | null;
+    const cost = metadata?.costUsd;
+    if (typeof cost === "number" && Number.isFinite(cost)) {
+      totalCostUsd += cost;
+    }
+  }
+  return { totalCostUsd, totalTokens };
+}
+
+async function computeP95Latency(runIds: string[]): Promise<number | null> {
+  if (runIds.length < 5) return null;
+  // The `node.succeeded`-event timestamp on the run's terminal node is
+  // close enough to "run finished" for this rollup; using runs.createdAt
+  // → max(run_events.createdAt) keeps the math in one query.
+  const rows = await db
+    .select({
+      runId: runEvents.runId,
+      createdAt: runEvents.createdAt,
+    })
+    .from(runEvents)
+    .where(sql`${runEvents.runId} = ANY (${runIds})`)
+    .orderBy(asc(runEvents.createdAt));
+
+  // Map each runId to (firstEvent, lastEvent) timestamps.
+  const range = new Map<string, { first: number; last: number }>();
+  for (const event of rows) {
+    if (!event.createdAt) continue;
+    const ts = event.createdAt.getTime();
+    const prev = range.get(event.runId);
+    if (!prev) {
+      range.set(event.runId, { first: ts, last: ts });
+    } else {
+      prev.last = ts;
+    }
+  }
+
+  const durations = Array.from(range.values()).map((entry) => entry.last - entry.first).filter((ms) => ms > 0);
+  if (durations.length < 5) return null;
+  durations.sort((a, b) => a - b);
+  // Nearest-rank percentile, 0-indexed: for length N the p95 sits at
+  // ceil(N * 0.95) - 1. Using floor(N * 0.95) returned the max (p100) at
+  // sizes where N * 0.95 is an integer (20, 40, 100 …).
+  const index = Math.max(0, Math.ceil(durations.length * 0.95) - 1);
+  return durations[Math.min(index, durations.length - 1)];
+}

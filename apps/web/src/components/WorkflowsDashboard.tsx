@@ -11,6 +11,7 @@ import { RefreshCw } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
+import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 
 /** Render the saved-workflows list with click-to-open + manual refresh. */
 export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
@@ -61,7 +62,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             <strong>{workflow.name}</strong>
             <span>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString() : workflow.id}</span>
           </div>
-          <button onClick={() => onOpen(workflow.id)} className="small-command">Open flow</button>
+          <div className="workflow-row-actions">
+            <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
+            <button onClick={() => onOpen(workflow.id)} className="small-command">Open flow</button>
+          </div>
         </div>
       ))}
     </div>
