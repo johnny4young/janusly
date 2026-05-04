@@ -54,6 +54,7 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
   const nodes = parsed.data.nodes;
   const edges = parsed.data.edges;
   const nodeIds = new Set<string>();
+  const allNodeIds = new Set(nodes.map((node) => node.id));
 
   if (nodes.length === 0) {
     issues.push({ code: "empty_workflow", message: "Workflow must include at least one node" });
@@ -82,6 +83,36 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
     }
     if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
     if (node.type === "multi_agent" && (!Array.isArray(node.config.agents) || node.config.agents.length === 0)) issues.push({ code: "multi_agent_missing_agents", message: "Multi-agent node requires at least one agent", nodeId: node.id });
+    if (node.type === "router" || node.type === "router_llm") {
+      // Router nodes feed `config.candidates` into the decision engine, which
+      // indexes by `nodeId`. The runtime accepts a legacy `id` field for
+      // back-compat (older AI-generated workflows used `id`), but every
+      // candidate must carry at least one of the two — otherwise the runtime
+      // produces a decision with `chosenNodeId: undefined`, which silently
+      // breaks routing without surfacing an error.
+      const candidates = node.config.candidates;
+      if (!Array.isArray(candidates) || candidates.length === 0) {
+        issues.push({ code: "router_missing_candidates", message: `${node.type} node requires a non-empty config.candidates array`, nodeId: node.id });
+      } else {
+        candidates.forEach((candidate, index) => {
+          if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+            issues.push({ code: "router_invalid_candidate", message: `${node.type} candidate at index ${index} must be an object`, nodeId: node.id });
+            return;
+          }
+          const entry = candidate as Record<string, unknown>;
+          const hasNodeId = typeof entry.nodeId === "string" && entry.nodeId.trim().length > 0;
+          const hasLegacyId = typeof entry.id === "string" && entry.id.trim().length > 0;
+          if (!hasNodeId && !hasLegacyId) {
+            issues.push({ code: "router_candidate_missing_node_id", message: `${node.type} candidate at index ${index} must have a non-empty nodeId (legacy "id" also accepted)`, nodeId: node.id });
+            return;
+          }
+          const targetNodeId = hasNodeId ? String(entry.nodeId).trim() : String(entry.id).trim();
+          if (!allNodeIds.has(targetNodeId)) {
+            issues.push({ code: "router_candidate_unknown_node_id", message: `${node.type} candidate at index ${index} references an unknown node: ${targetNodeId}`, nodeId: node.id });
+          }
+        });
+      }
+    }
   }
 
   for (const [index, edge] of edges.entries()) {

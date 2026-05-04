@@ -67,7 +67,183 @@ import {
   orgMembers,
 } from "@janusly/db";
 import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
-import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { EdgeSchema, NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { z } from "zod";
+
+/**
+ * Schema used by `/ai/generate-workflow` ONLY. Different from the engine's
+ * strict `WorkflowSchema` for two reasons:
+ *
+ *   1. **`WorkflowInputSchema` is recursive** (`z.lazy(() => z.object({
+ *      properties: z.record(...), items: WorkflowInputSchema, ... }))`). The
+ *      AI SDK's Zod-to-JSON-Schema converter emits a self-`$ref` that
+ *      Anthropic's provider rejects ("circular reference detected") and
+ *      OpenAI's strict mode separately rejects via the `propertyNames`
+ *      keyword `z.record(z.string(), X)` produces. Both `inputs` and
+ *      `outputs` are operator-curated — the AI prompt doesn't mention them —
+ *      so the AI-side schema omits them entirely.
+ *
+ *   2. **The engine's `NodeSchema.config` is `z.record(z.string(),
+ *      z.unknown())`** — every node type accepts any object. That makes
+ *      sense at the engine layer (each executor parses its own config), but
+ *      at AI-generation time the model needs to know which fields are
+ *      required per node type. Without that, a prompt like "create a router
+ *      that picks between fast_path and accurate_path" gets a router with
+ *      empty `candidates: []` and HTTP nodes with no `url`, which
+ *      `validateWorkflow` then rightly rejects as malformed. The
+ *      discriminated union below pins each node type to its required config
+ *      shape, so the model is forced (at structured-output enforcement
+ *      time) to populate `url` for `http`, `candidates` for `router`,
+ *      `expression` for `condition`, etc.
+ *
+ * The post-generation `sanitizeAiWorkflow` step re-validates the model's
+ * output against the strict engine `WorkflowSchema`, so the engine's parse
+ * contract is unchanged. Adding a new node type means adding a branch here
+ * AND adding it to `nodeTypeValues` in `@janusly/shared`.
+ */
+// Schema constraints to keep in mind:
+//   - Anthropic structured output rejects empty `{}` schemas (`z.unknown()`,
+//     `z.any()`) with "Empty schema that accepts any JSON value is not
+//     supported." Every field below has a concrete type.
+//   - Anthropic limits total optional parameters across the schema to 24
+//     for grammar compilation. We aggressively drop nice-to-have optionals
+//     (tuning fields like `timeoutMs`, `model`, `planner`, scoring stats on
+//     candidates, etc.) that the operator can fill in the Inspector after
+//     generation. Required fields per node type stay; the AI must populate
+//     them or the structured-output enforcement rejects the response.
+
+const AiCandidateSchema = z.object({
+  nodeId: z.string().min(1),
+});
+
+const AiHttpNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("http"),
+  config: z.object({
+    url: z.string().min(1),
+    method: z.string().optional(),
+  }),
+});
+
+const AiNoopNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("noop"),
+  config: z.object({}),
+});
+
+const AiTransformNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("transform"),
+  config: z.object({
+    mapping: z.record(z.string(), z.string()),
+  }),
+});
+
+const AiConditionNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("condition"),
+  config: z.object({
+    expression: z.string().min(1),
+  }),
+});
+
+const AiAiNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("ai"),
+  config: z.object({
+    prompt: z.string().min(1),
+  }),
+});
+
+const AiToolNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("tool"),
+  config: z.object({
+    tool: z.string().min(1),
+  }),
+});
+
+const AiAgentNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("agent"),
+  config: z.object({
+    goal: z.string().min(1),
+  }),
+});
+
+const AiRouterNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("router"),
+  config: z.object({
+    candidates: z.array(AiCandidateSchema).min(1),
+    strategy: z.enum(["cheapest", "fastest", "balanced", "auto"]).optional(),
+  }),
+});
+
+const AiApprovalNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("approval"),
+  config: z.object({
+    message: z.string().optional(),
+  }),
+});
+
+const AiMultiAgentNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("multi_agent"),
+  config: z.object({
+    goal: z.string().min(1),
+    agents: z.array(z.object({
+      name: z.string().min(1),
+      role: z.string().min(1),
+      goal: z.string().min(1),
+    })).min(1),
+  }),
+});
+
+const AiLoopNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("loop"),
+  config: z.object({
+    // Comma-separated template string. Array form is filled by the operator
+    // in the Inspector when needed.
+    items: z.string().min(1),
+  }),
+});
+
+// AI generation emits 11 of the engine's 16 node types. Anthropic's
+// structured-output grammar compiler caps schema size — empirically the
+// limit is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
+// `claude-opus-4-7` (all three accept up to 11 branches with the full
+// envelope below; 12+ rejects with "The compiled grammar is too large").
+// The remaining 5 (`wait_until`, `webhook`, `agent_reflection`,
+// `router_llm`, `subworkflow`) stay operator-only — AI emits a `noop`
+// placeholder named after the requested step and the operator promotes it
+// in the Inspector. The engine's strict `WorkflowSchema` (used by /save,
+// /start, /validate) still accepts all 16, so once a workflow leaves AI
+// generation it has full expressiveness. Re-evaluate the cap when a
+// provider exposes a larger grammar limit — see ENG-076 for the follow-up.
+const AiNodeSchema = z.discriminatedUnion("type", [
+  AiNoopNode,
+  AiHttpNode,
+  AiTransformNode,
+  AiConditionNode,
+  AiAiNode,
+  AiToolNode,
+  AiAgentNode,
+  AiRouterNode,
+  AiApprovalNode,
+  AiMultiAgentNode,
+  AiLoopNode,
+]);
+
+const AiGenerationWorkflowSchema = z.object({
+  dslVersion: z.literal("1.0").optional(),
+  id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  nodes: z.array(AiNodeSchema),
+  edges: z.array(EdgeSchema),
+});
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -110,22 +286,25 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
   "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
   "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
+  "SUPPORTED AI-GENERATION TYPES: only emit nodes of these 11 types: 'noop', 'http', 'transform', 'condition', 'ai', 'tool', 'agent', 'router', 'approval', 'multi_agent', 'loop'. The platform supports 5 more types (wait_until, webhook, agent_reflection, router_llm, subworkflow), but those are added by the operator in the Inspector after generation. If a prompt asks for one of those five, use 'noop' as a placeholder named after the requested step (e.g. id='wait_24h' type='noop', id='ext_webhook' type='noop'). Use 'multi_agent' when the prompt explicitly asks for a team/crew/group of agents working together; use 'agent' for a single autonomous step. Use 'approval' when the prompt mentions a human gate, sign-off, or confirmation step. Use 'loop' for batch / for-each iterations.",
+  "PLACEHOLDER RULE: when the user prompt mentions a branch name or step that has NO concrete action (e.g. 'fast_path', 'accurate_path', 'review', 'send_email') without specifying a URL, tool name, AI prompt, or backend action, use type 'noop' for that step. NEVER emit an 'http' node without a real URL or an 'ai' node without a prompt — the workflow will fail validation. Use 'http' only when the user explicitly gives a URL or describes calling a specific API. Use 'ai' only when the user wants the model to summarize, decide, or generate text. Use 'tool' only with a tool name from the list below.",
+  "ROUTER RULE: every router/router_llm node MUST have at least one candidate, and every candidate's `nodeId` MUST match the `id` of another node in the same workflow. Add the target nodes (typically as 'noop' placeholders) before the router references them.",
   "Node types and required config:",
-  "- http: { url:string, method?:'GET'|'POST'|..., headers?:object, body?:object, timeoutMs?:number, maxResponseBytes?:number, maxRedirects?:number } — bounds default to 30000ms / 1MB / 5 hops; only set overrides when the upstream legitimately needs a larger budget",
+  "- http: { url:string, method?:'GET'|'POST'|..., timeoutMs?:number, maxResponseBytes?:number, maxRedirects?:number } — bounds default to 30000ms / 1MB / 5 hops. Headers and request body are added by the operator in the Inspector after generation; do not include them in the JSON you emit.",
   "- noop: {} (good for explicit start/end markers)",
   "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
   "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
   "- webhook: {} (waits for external resume)",
   "- approval: { message?: string } (waits for human approval)",
   "- ai: { prompt: string, model?: string }",
-  "- tool: { tool: 'http.request'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid', input: object }",
+  "- tool: { tool: 'http.request'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid', input?: { [key: string]: string } } — the input is a flat string-keyed map of template values. Tools needing richer inputs (csv rows, nested config) are filled by the operator after generation.",
   "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
   "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
-  "- agent_reflection: { input?: any }",
-  "- loop: { items: string|array, mapping?: object }",
-  "- router: { candidates: Array<{id, scoreFn?: string}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' }",
-  "- router_llm: { candidates: Array<{id}> }",
-  "- subworkflow: { workflowId: string, input?: object } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
+  "- agent_reflection: { input?: string } — typically a template referencing a prior agent's output, e.g. \"{{context.agent.output}}\".",
+  "- loop: { items: string | string[], mapping?: { [key: string]: string } } — `items` is either a comma-separated template string or a string array; `mapping` is a flat string-keyed map of templates per item.",
+  "- router: { candidates: Array<{nodeId: string, avgCost?: number, avgLatencyMs?: number, successRate?: number}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' } — `nodeId` must reference an existing node id; scoring fields are optional and the runtime seeds them from prior runs when stats are available",
+  "- router_llm: { candidates: Array<{nodeId: string}> } — same candidate identifier shape as router with scoring fields omitted; downstream steps can inspect the decision output from context",
+  "- subworkflow: { workflowId: string, input?: { [key: string]: string } } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
   "- wait_until: { duration: string } (ISO 8601 duration; pauses the run until the deadline elapses, e.g. \"P3D\" = 3 days, \"PT2H30M\" = 2.5 hours. Output is empty {}.)",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
@@ -136,6 +315,8 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "  - INVALID: bare identifiers (e.g. risk_is_high), function calls, string concatenation, regex.",
   "If you can't express a condition with this grammar, omit `condition` and route via a `condition` or `router` node instead.",
   "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
+  "EXAMPLE — abstract router prompt (\"smart router that picks between fast_path and accurate_path\"):",
+  '{"dslVersion":"1.0","id":"smart_router_demo","name":"Smart Router Demo","nodes":[{"id":"start","type":"noop","config":{}},{"id":"pick","type":"router","config":{"candidates":[{"nodeId":"fast_path"},{"nodeId":"accurate_path"}],"strategy":"auto"}},{"id":"fast_path","type":"noop","config":{}},{"id":"accurate_path","type":"noop","config":{}}],"edges":[{"from":"start","to":"pick"}]}',
 ].join("\n");
 
 async function orgLlmRuntime(orgId: string) {
@@ -537,8 +718,8 @@ export const routes: Route[] = [
         // existed before this is gone — schema enforcement is now real.
         // Failures (LLM emits non-conformant JSON) throw inside the SDK and
         // flow through the existing try/catch into the fallback contract.
-        const result = await llm.generateObject<Workflow>({
-          schema: WorkflowSchema,
+        const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
+          schema: AiGenerationWorkflowSchema,
           schemaName: "JanuslyWorkflow",
           schemaDescription: "Workflow DAG for /ai/generate-workflow.",
           system: GENERATE_WORKFLOW_SYSTEM_PROMPT,
@@ -546,7 +727,12 @@ export const routes: Route[] = [
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId },
         });
-        const workflow = sanitizeAiWorkflow(result.object);
+        // Cast: the AI-side discriminated-union node configs are strict
+        // subsets of the engine's loose `config: Record<string, unknown>`,
+        // so the inferred AI shape structurally satisfies `Workflow`. The
+        // post-validation `sanitizeAiWorkflow` re-parses through
+        // `WorkflowSchema` so a bad cast can never reach persistence.
+        const workflow = sanitizeAiWorkflow(result.object as unknown as Workflow);
         await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: result.model, provider: result.provider });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
       } catch (err) {

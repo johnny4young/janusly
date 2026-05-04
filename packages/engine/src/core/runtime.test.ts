@@ -11,11 +11,6 @@ vi.mock('./improvementEngine', () => ({
   rollbackToVersion: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock('../decisionEngine', () => ({
-  computeConfidence: vi.fn().mockReturnValue({ confidence: 0, status: 'unknown' }),
-  shouldRollback: vi.fn().mockReturnValue(false),
-}))
-
 vi.mock('../routing', () => ({
   updateRoutingStats: vi.fn().mockResolvedValue(undefined),
 }))
@@ -188,6 +183,86 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.markNodeQueued).not.toHaveBeenCalled()
     expect(queue.enqueueNode).not.toHaveBeenCalled()
     expect(store.markNodeFailed).not.toHaveBeenCalled()
+  })
+})
+
+describe('executeQueuedNode — router candidate normalization', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('normalizes legacy { id } candidates so chosenNodeId is a real string', async () => {
+    // Workflow with a router node whose candidates use the legacy `id` field.
+    // The runtime must convert these into `{ nodeId }` before the decision
+    // engine scores them; otherwise chosenNodeId comes back undefined and the
+    // persisted decision is nameless.
+    const routerNode = { id: 'pick', type: 'router' as const, config: { candidates: [{ id: 'fast_path' }] } }
+    const routerWorkflow = { dslVersion: '1.0' as const, nodes: [routerNode], edges: [] }
+    const store = makeStore()
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: routerWorkflow })
+
+    expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
+      decision: expect.objectContaining({
+        chosenNodeId: 'fast_path',
+        ranking: expect.arrayContaining([expect.objectContaining({ nodeId: 'fast_path' })]),
+      }),
+    }))
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'decision.made',
+      payload: expect.objectContaining({ chosenNodeId: 'fast_path' }),
+    }))
+  })
+
+  it('forwards a valid config.strategy to the decision engine so the chosen candidate matches the strategy', async () => {
+    // Two candidates differing only in avgLatencyMs. With strategy="fastest"
+    // the lower-latency candidate must win; this proves config.strategy is
+    // actually plumbed into decide() rather than silently ignored.
+    const routerNode = {
+      id: 'pick',
+      type: 'router' as const,
+      config: {
+        strategy: 'fastest',
+        candidates: [
+          { nodeId: 'slow', avgLatencyMs: 1500 },
+          { nodeId: 'fast', avgLatencyMs: 200 },
+        ],
+      },
+    }
+    const routerWorkflow = { dslVersion: '1.0' as const, nodes: [routerNode], edges: [] }
+    const store = makeStore()
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: routerWorkflow })
+
+    expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
+      decision: expect.objectContaining({ chosenNodeId: 'fast' }),
+    }))
+  })
+
+  it('preserves scoring fields across mixed-shape candidates so the cheaper one wins under default scoring', async () => {
+    // Two candidates: one legacy { id }, one canonical { nodeId }, with
+    // different avgCost values. The default score formula penalises higher
+    // cost, so the cheap candidate must win — proving both shapes feed into
+    // scoring identically and avgCost survives the normaliser.
+    const routerNode = {
+      id: 'pick',
+      type: 'router' as const,
+      config: {
+        candidates: [
+          { id: 'expensive', avgCost: 0.5 },
+          { nodeId: 'cheap', avgCost: 0.1 },
+        ],
+      },
+    }
+    const routerWorkflow = { dslVersion: '1.0' as const, nodes: [routerNode], edges: [] }
+    const store = makeStore()
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: routerWorkflow })
+
+    expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
+      decision: expect.objectContaining({ chosenNodeId: 'cheap' }),
+    }))
   })
 })
 
