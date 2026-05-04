@@ -65,7 +65,7 @@ describe("resolveLlmConfig", () => {
     } as NodeJS.ProcessEnv);
     expect(cfg!.provider).toBe("anthropic");
     expect(cfg!.apiKeys).toEqual({ anthropic: "sk-ant-x" });
-    expect(cfg!.defaultModels.anthropic).toBe("claude-haiku-4-5");
+    expect(cfg!.defaultModels.anthropic).toBe("claude-haiku-4-5-20251001");
   });
 
   it("exposes both keys when both are set so per-call overrides work", () => {

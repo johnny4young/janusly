@@ -82,9 +82,22 @@ const PROVIDERS: Record<string, ProviderSpec> = {
   anthropic: {
     envApiKey: "ANTHROPIC_API_KEY",
     envModel: "ANTHROPIC_MODEL",
-    defaultModel: "claude-haiku-4-5",
+    defaultModel: "claude-haiku-4-5-20251001",
     create: (apiKey) => {
-      const anthropic = createAnthropic({ apiKey });
+      // Defensive baseURL handling: Claude Desktop sets a shell-wide
+      // `ANTHROPIC_BASE_URL=https://api.anthropic.com` (without `/v1`) which
+      // the SDK reads as-is, producing `/messages` 404s instead of
+      // `/v1/messages`. Auto-append `/v1` when the env points at the
+      // canonical host but is missing the version segment, so a stale
+      // shell var doesn't quietly break the AI surface. Operators who
+      // intentionally proxy elsewhere set their own URL with `/v1` and the
+      // condition below leaves it alone.
+      const envBaseURL = process.env.ANTHROPIC_BASE_URL?.trim();
+      const needsV1 =
+        envBaseURL &&
+        /^https?:\/\/api\.anthropic\.com\/?$/i.test(envBaseURL);
+      const baseURL = needsV1 ? "https://api.anthropic.com/v1" : undefined;
+      const anthropic = createAnthropic(baseURL ? { apiKey, baseURL } : { apiKey });
       return (modelId) => anthropic(modelId);
     },
     // No jsonModeOptions — Anthropic relies on the prompt's "Output only JSON".
