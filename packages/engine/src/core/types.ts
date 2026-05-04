@@ -113,6 +113,8 @@ export type EnqueueNodeInput = {
 /** Payload the queue adapter writes when a node exhausts its retries. */
 export type DeadLetterInput = {
   runId: string;
+  /** Org that owns the failed run. Required for multi-tenant DLQ reads. */
+  orgId: string;
   workflow: Workflow;
   node: WorkflowNode;
   attempt: number;

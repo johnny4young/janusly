@@ -243,7 +243,14 @@ export class WorkflowRuntime {
       }
 
       if (this.queue.enqueueDeadLetter) {
-        await this.queue.enqueueDeadLetter({ runId, workflow: input.workflow, node, attempt, error });
+        await this.queue.enqueueDeadLetter({
+          runId,
+          orgId: metadata?.orgId ?? "default",
+          workflow: input.workflow,
+          node,
+          attempt,
+          error,
+        });
       }
 
       await this.store.markNodeFailed(runId, node.id, error);
