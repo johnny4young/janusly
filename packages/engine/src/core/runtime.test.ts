@@ -6,19 +6,35 @@ import type {
   QueueAdapter,
 } from './types'
 
-vi.mock('./improvementEngine', () => ({
-  recordWorkflowImprovement: vi.fn().mockResolvedValue(undefined),
-  rollbackToVersion: vi.fn().mockResolvedValue(undefined),
+// Mock the data repos the runtime imports so tests don't reach Postgres.
+// Each mock returns a benign no-op default; individual tests can override
+// per-call via `.mockImplementationOnce()` / `.mockResolvedValueOnce()`
+// against the imported reference.
+vi.mock('@janusly/data/src/routingStatsRepo', () => ({
+  getRoutingStats: vi.fn().mockResolvedValue({}),
+  updateRoutingStats: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock('../routing', () => ({
-  updateRoutingStats: vi.fn().mockResolvedValue(undefined),
+vi.mock('@janusly/data/src/improvementsRepo', () => ({
+  recordWorkflowImprovement: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@janusly/data/src/workflowRollbackRepo', () => ({
+  rollbackWorkflowVersion: vi.fn().mockResolvedValue({ rolledBack: true }),
 }))
 
 function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
   return {
     getRunContext: vi.fn().mockResolvedValue({}),
     getRunStatus: vi.fn().mockResolvedValue('running'),
+    // Sensible default — test-org with a workflow + version. Tests that
+    // probe the null-metadata branch override this with `mockResolvedValue(null)`.
+    getRunMetadata: vi.fn().mockResolvedValue({
+      orgId: 'test-org',
+      workflowVersionId: 'wv-1',
+      workflowId: 'wf-1',
+      createdBy: null,
+    }),
     getNodeStatus: vi.fn().mockResolvedValue('pending'),
     markNodeQueued: vi.fn().mockResolvedValue(undefined),
     tryClaimNodeForQueue: vi.fn().mockResolvedValue(true),
@@ -263,6 +279,182 @@ describe('executeQueuedNode — router candidate normalization', () => {
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'cheap' }),
     }))
+  })
+})
+
+describe('executeQueuedNode — runtime learning metadata', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('forwards orgId from getRunMetadata into updateRoutingStats on success', async () => {
+    // Today's no-op behavior was: orgId pulled from the loose RunContext
+    // bag → undefined → repo silently returned. With getRunMetadata, the
+    // org-scoped write happens for real on every healthy run.
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const store = makeStore({
+      getRunMetadata: vi.fn().mockResolvedValue({
+        orgId: 'paying-customer',
+        workflowVersionId: 'wv-42',
+        workflowId: 'wf-42',
+        createdBy: 'alice',
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode(input)
+
+    expect(updateRoutingStats).toHaveBeenCalledWith({
+      orgId: 'paying-customer',
+      nodeId: 'n1',
+      reward: 1,
+      success: true,
+    })
+  })
+
+  it('passes the org\'s routing stats as live rlStats into decide()', async () => {
+    // Before this wiring landed, rlStats was always undefined — the bandit
+    // term in decide() was effectively dead. Verify a router node now sees
+    // the org's prior reinforcement counters.
+    const { getRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    ;(getRoutingStats as any).mockResolvedValueOnce({
+      fast_path: { nodeId: 'fast_path', pulls: 12, meanReward: 0.8, successCount: 10, failureCount: 2 },
+    })
+
+    const routerNode = {
+      id: 'pick',
+      type: 'router' as const,
+      config: { candidates: [{ nodeId: 'fast_path' }] },
+    }
+    const routerWorkflow = { dslVersion: '1.0' as const, nodes: [routerNode], edges: [] }
+    const store = makeStore({
+      getRunMetadata: vi.fn().mockResolvedValue({
+        orgId: 'org-with-history',
+        workflowVersionId: 'wv-1',
+        workflowId: 'wf-1',
+        createdBy: null,
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: routerWorkflow })
+
+    expect(getRoutingStats).toHaveBeenCalledWith('org-with-history')
+    // The decision is computed against rlStats — assert the persisted
+    // ranking includes the candidate (proves the call didn't crash on the
+    // shape) and that chosenNodeId is real.
+    expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
+      decision: expect.objectContaining({ chosenNodeId: 'fast_path' }),
+    }))
+  })
+
+  it('records workflow improvement when metadata.workflowId is present', async () => {
+    const { recordWorkflowImprovement } = await import('@janusly/data/src/improvementsRepo')
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        // Improvement-eval triggers when the context bag carries metric
+        // snapshots. orgId/workflowId no longer matter here — they come
+        // from `metadata` now — but the metrics still flow through context.
+        metricsBefore: { successRate: 0.6 },
+        metricsAfter: { successRate: 0.9 },
+      }),
+      getRunMetadata: vi.fn().mockResolvedValue({
+        orgId: 'org-1',
+        workflowVersionId: 'wv-1',
+        workflowId: 'wf-1',
+        createdBy: null,
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode(input)
+
+    expect(recordWorkflowImprovement).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: 'org-1',
+      workflowId: 'wf-1',
+    }))
+  })
+
+  it('skips workflow improvement when metadata.workflowId is null (deleted version row)', async () => {
+    // Soft race: the workflow_versions row pointed at by runs.workflowVersionId
+    // was deleted between scheduling and execution. The leftJoin in
+    // getRunMetadata returns null workflowId. Improvement evaluation must
+    // no-op gracefully without crashing the run.
+    const { recordWorkflowImprovement } = await import('@janusly/data/src/improvementsRepo')
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        metricsBefore: { x: 1 },
+        metricsAfter: { x: 2 },
+      }),
+      getRunMetadata: vi.fn().mockResolvedValue({
+        orgId: 'org-1',
+        workflowVersionId: 'wv-stale',
+        workflowId: null,
+        createdBy: null,
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode(input)
+
+    expect(recordWorkflowImprovement).not.toHaveBeenCalled()
+    // Run still succeeds — node is marked succeeded; no crash.
+    expect(store.markNodeSucceeded).toHaveBeenCalled()
+  })
+
+  it('runs the executor when getRunMetadata returns null (run row deleted mid-flight)', async () => {
+    // Defensive: if the runs row vanished between scheduling and worker
+    // pickup, metadata-dependent branches no-op but the executor still
+    // runs so node-status correctness is preserved.
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const store = makeStore({
+      getRunMetadata: vi.fn().mockResolvedValue(null),
+    })
+    const executors = makeExecutors()
+    const runtime = new WorkflowRuntime(store, makeQueue(), executors)
+
+    await runtime.executeQueuedNode(input)
+
+    // Executor still ran.
+    expect(executors.execute).toHaveBeenCalled()
+    expect(store.markNodeSucceeded).toHaveBeenCalled()
+    // Routing-stats write was made (the repo's own guard short-circuits on
+    // undefined orgId).
+    expect(updateRoutingStats).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: undefined,
+    }))
+  })
+
+  it('routes getRunMetadata failures through the node failure lifecycle', async () => {
+    // The node has already been claimed and announced as running before
+    // metadata is loaded. If the metadata query fails, the runtime must use
+    // the same failure/DLQ path as executor errors instead of leaving the
+    // node stuck in `running`.
+    const metadataError = new Error('metadata query failed')
+    const store = makeStore({
+      getRunMetadata: vi.fn().mockRejectedValue(metadataError),
+    })
+    const queue = makeQueue()
+    const executors = makeExecutors()
+    const runtime = new WorkflowRuntime(store, queue, executors)
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('metadata query failed')
+
+    expect(executors.execute).not.toHaveBeenCalled()
+    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'r1',
+      node,
+      attempt: 1,
+      error: expect.objectContaining({ message: 'metadata query failed' }),
+    }))
+    expect(store.markNodeFailed).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
+      message: 'metadata query failed',
+    }))
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'node.failed',
+      payload: expect.objectContaining({
+        error: expect.objectContaining({ message: 'metadata query failed' }),
+      }),
+    }))
+    expect(store.updateRunStatusFromNodes).toHaveBeenCalledWith('r1')
   })
 })
 

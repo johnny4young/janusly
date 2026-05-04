@@ -15,6 +15,7 @@
 import {
   appendEvent,
   getRunContext,
+  getRunMetadata,
   getRunStatus,
   markNodeFailed,
   markNodeQueued,
@@ -26,7 +27,7 @@ import {
   updateRunStatusFromNodes,
 } from "../persistence";
 import { getNodeStatus } from "../get-node-status";
-import type { ExecutionStore, NodeStatus, RunStatus, SerializedError, WorkflowEvent } from "../core/types";
+import type { ExecutionStore, NodeStatus, RunMetadata, RunStatus, SerializedError, WorkflowEvent } from "../core/types";
 
 /** `ExecutionStore` implementation that delegates to `../persistence.ts`. */
 export class PostgresExecutionStore implements ExecutionStore {
@@ -36,6 +37,10 @@ export class PostgresExecutionStore implements ExecutionStore {
 
   async getRunStatus(runId: string): Promise<RunStatus | null> {
     return getRunStatus(runId) as Promise<RunStatus | null>;
+  }
+
+  async getRunMetadata(runId: string): Promise<RunMetadata | null> {
+    return getRunMetadata(runId);
   }
 
   async getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus> {

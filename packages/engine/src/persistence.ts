@@ -17,7 +17,7 @@
  */
 
 import { db } from "@janusly/db";
-import { runNodes, runEvents, runs } from "@janusly/db";
+import { runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { WorkflowSchema } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
@@ -56,6 +56,58 @@ export async function getRunOrgId(runId: string): Promise<string | null> {
     .where(eq(runs.id, runId))
     .limit(1);
   return rows[0]?.orgId ?? null;
+}
+
+/** Stable per-run metadata loaded once at runtime entry: org scope, the
+ *  active workflow-version pointer, the workflow id (resolved through the
+ *  versions table), and the user who started the run. */
+export type RunMetadata = {
+  orgId: string;
+  workflowVersionId: string;
+  workflowId: string | null;
+  createdBy: string | null;
+};
+
+/**
+ * Load the small bag of stable metadata the runtime needs whenever it has
+ * to write org-scoped rows (`routing_stats`, `workflow_improvements`) or
+ * decide whether the improvement-evaluation path is even applicable.
+ *
+ * Sister to `getRunOrgId` — same single-row, indexed-by-PK lookup, just
+ * widened to also include `workflowVersionId` (off the run row), the
+ * resolved `workflowId` (joined through `workflow_versions`), and the
+ * `createdBy` user.
+ *
+ * Returns `null` when the run row is missing (rare race: the run was
+ * deleted between scheduling and worker pickup). Callers must treat that
+ * as a soft failure — skip the metadata-dependent branch but let the
+ * executor still make progress; engine atomicity is unaffected.
+ *
+ * The `leftJoin` on `workflow_versions` keeps the helper resilient when a
+ * stale `workflowVersionId` points at a deleted version row: `workflowId`
+ * comes back `null` and the runtime no-ops the improvement path while the
+ * run itself completes.
+ */
+export async function getRunMetadata(runId: string): Promise<RunMetadata | null> {
+  const rows = await db
+    .select({
+      orgId: runs.orgId,
+      workflowVersionId: runs.workflowVersionId,
+      workflowId: workflowVersions.workflowId,
+      createdBy: runs.createdBy,
+    })
+    .from(runs)
+    .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+    .where(eq(runs.id, runId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    orgId: row.orgId,
+    workflowVersionId: row.workflowVersionId,
+    workflowId: row.workflowId ?? null,
+    createdBy: row.createdBy ?? null,
+  };
 }
 
 /** Cancel a run + every still-open node, append a `run.cancelled` event. */
