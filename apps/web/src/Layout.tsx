@@ -10,12 +10,17 @@
 import React from 'react'
 import { ToastRenderer } from './components/ToastRenderer'
 
-/** Render the app's three-pane shell with optional header. */
-export function Layout({ sidebar, main, panel, header }: {
+/**
+ * Render the app's three-pane shell with optional header. The optional
+ * `overlay` slot mounts above the workspace (modal dialogs, full-screen
+ * confirms) without forcing each caller to portal into the document body.
+ */
+export function Layout({ sidebar, main, panel, header, overlay }: {
   sidebar: React.ReactNode
   main: React.ReactNode
   panel: React.ReactNode
   header?: React.ReactNode
+  overlay?: React.ReactNode
 }) {
   return (
     <div className="app-shell">
@@ -39,6 +44,7 @@ export function Layout({ sidebar, main, panel, header }: {
         </aside>
       </div>
 
+      {overlay}
       <ToastRenderer />
     </div>
   )

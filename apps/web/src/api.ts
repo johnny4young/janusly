@@ -17,7 +17,17 @@ import { supabase } from './auth'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 
-/** Make an authenticated request to the API; resolves the parsed body or throws on non-2xx. */
+/**
+ * Make an authenticated request to the API; resolves the parsed body or
+ * throws on non-2xx.
+ *
+ * Exception: `POST /start` 400 responses whose body matches
+ * `{ errors: string[] }` are resolved (not thrown) and returned as-is.
+ * This is the field-level validation envelope the API emits when a workflow
+ * declares typed `inputs` and the payload doesn't satisfy them — the
+ * run-input form needs to surface those errors next to the right field
+ * rather than losing them in a toast. Other 400 bodies still throw.
+ */
 export async function api(path: string, options: RequestInit = {}) {
   const session = supabase ? await supabase.auth.getSession() : { data: { session: null } }
   const token = session.data.session?.access_token
@@ -38,9 +48,21 @@ export async function api(path: string, options: RequestInit = {}) {
   const payload = await res.json().catch(() => ({}))
 
   if (!res.ok) {
+    if (path === '/start' && res.status === 400 && isFieldErrorEnvelope(payload)) {
+      return payload
+    }
     const message = typeof payload?.error === 'string' ? payload.error : `Request failed with ${res.status}`
     throw new Error(message)
   }
 
   return payload
+}
+
+function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as { errors?: unknown }).errors) &&
+    (value as { errors: unknown[] }).errors.every((entry) => typeof entry === 'string')
+  )
 }
