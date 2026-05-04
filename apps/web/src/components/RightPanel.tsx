@@ -68,6 +68,12 @@ type RightPanelProps = {
   onResolveDeadLetter: (id: string) => void
   onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition }>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
+  onReviewWorkflow: () => Promise<{
+    mode: AiMode
+    review: { status: 'pass' | 'warn' | 'fail'; issues: Array<{ code: string; severity: 'info' | 'warn' | 'fail'; message: string; nodeId?: string; edgeId?: string; rationale: string; suggestion: string }> }
+    model?: string
+    aiError?: string
+  }>
   onOpenTab: (tab: ActiveTab) => void
 }
 
@@ -79,6 +85,7 @@ export function RightPanel(props: RightPanelProps) {
       workflowName={props.currentWorkflowName}
       onGenerateWorkflow={props.onGenerateWorkflow}
       onExplainWorkflow={props.onExplainWorkflow}
+      onReviewWorkflow={props.onReviewWorkflow}
       onOpenRuns={() => props.onOpenTab('runs')}
       onOpenTemplates={() => props.onOpenTab('templates')}
     />
