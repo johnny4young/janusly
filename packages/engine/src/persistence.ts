@@ -22,6 +22,16 @@ import { eq, and, inArray } from "drizzle-orm";
 import { WorkflowSchema } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
+import { safePersistPayload } from "./safe-persist";
+
+// Per-surface size caps for jsonb writes. The chokepoint's default cap
+// (256 KB) is conservative for narrow surfaces (events, errors, audit) but
+// too tight for `state_json.output` which legitimately carries http body
+// outputs up to the http chokepoint's 1 MB cap. Each surface picks the cap
+// that matches its real-world payload distribution; over-cap writes get a
+// `__truncated` sentinel via `safePersistPayload`.
+const STATE_JSON_MAX_BYTES = 1_000_000;
+const ERROR_JSON_MAX_BYTES = 64_000;
 
 /** Return the current top-level run status, or `null` when the row is absent. */
 export async function getRunStatus(runId: string) {
@@ -117,7 +127,7 @@ export async function cancelRun(runId: string, reason?: any) {
     .where(eq(runs.id, runId));
 
   await db.update(runNodes)
-    .set({ status: "cancelled", stateJson: { cancelled: reason ?? {} }, finishedAt: new Date() })
+    .set({ status: "cancelled", stateJson: safePersistPayload({ cancelled: reason ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
     // `running` is intentionally excluded — running nodes finish naturally;
     // the runtime's post-success guard then skips downstream scheduling.
     .where(and(eq(runNodes.runId, runId), inArray(runNodes.status, [...nodeCancellableStatusValues])));
@@ -180,28 +190,28 @@ export async function tryClaimNodeForQueue(runId: string, nodeId: string, attemp
 /** Transition a node to `waiting` (webhook / approval pause). Metadata stored under `state_json.waiting`. */
 export async function markNodeWaiting(runId: string, nodeId: string, metadata?: any) {
   await db.update(runNodes)
-    .set({ status: "waiting", stateJson: { waiting: metadata ?? {} } })
+    .set({ status: "waiting", stateJson: safePersistPayload({ waiting: metadata ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }) })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
 /** Mark a node skipped (e.g. edge condition false). Terminal — `finishedAt` set. */
 export async function markNodeSkipped(runId: string, nodeId: string, reason?: any) {
   await db.update(runNodes)
-    .set({ status: "skipped", stateJson: { skipped: reason ?? {} }, finishedAt: new Date() })
+    .set({ status: "skipped", stateJson: safePersistPayload({ skipped: reason ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
 /** Mark a node succeeded; `output` lands under `state_json.output` (the web Inspector reads from there). */
 export async function markNodeSucceeded(runId: string, nodeId: string, output?: any) {
   await db.update(runNodes)
-    .set({ status: "succeeded", stateJson: { output: output ?? {} }, finishedAt: new Date() })
+    .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
 /** Mark a node failed with the serialized error in `error_json`. Terminal. */
 export async function markNodeFailed(runId: string, nodeId: string, error: any) {
   await db.update(runNodes)
-    .set({ status: "failed", errorJson: error, finishedAt: new Date() })
+    .set({ status: "failed", errorJson: safePersistPayload(error, { maxBytes: ERROR_JSON_MAX_BYTES }), finishedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
@@ -293,7 +303,7 @@ export async function appendEvent(runId: string, nodeId: string | null, type: st
     runId,
     nodeId,
     type,
-    payload,
+    payload: safePersistPayload(payload),
   });
 }
 

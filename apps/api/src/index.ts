@@ -39,6 +39,7 @@ import { cancelRun } from "@janusly/engine/src/persistence";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
+import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -222,7 +223,9 @@ const AiLoopNode = z.object({
 // in the Inspector. The engine's strict `WorkflowSchema` (used by /save,
 // /start, /validate) still accepts all 16, so once a workflow leaves AI
 // generation it has full expressiveness. Re-evaluate the cap when a
-// provider exposes a larger grammar limit — see ENG-076 for the follow-up.
+// provider exposes a larger grammar limit (or when a two-pass generation
+// path lets a noop placeholder be promoted to one of the omitted types in
+// a follow-up call with a tighter, single-type schema).
 const AiNodeSchema = z.discriminatedUnion("type", [
   AiNoopNode,
   AiHttpNode,
@@ -451,20 +454,10 @@ function decisionCandidatesFromPayload(payload: unknown): DecisionCandidate[] {
   });
 }
 
-const SENSITIVE_AUDIT_KEYS = /^(secret|password|token|api[_-]?key|authorization|cookie|x-api-key|client[_-]?secret|private[_-]?key)$/i;
-
-function redactAuditMetadata(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactAuditMetadata);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        SENSITIVE_AUDIT_KEYS.test(key) ? "[redacted]" : redactAuditMetadata(item),
-      ]),
-    );
-  }
-  return value;
-}
+// Audit metadata cap — audit rows are read by humans and should stay tight.
+// 64 KB lets a row carry an explanation + a small input snapshot but caps
+// before a megabyte of caller payload sneaks into the audit log.
+const AUDIT_METADATA_MAX_BYTES = 64_000;
 
 async function audit(orgId: string, userId: string, action: string, targetType?: string, targetId?: string, metadata: unknown = {}) {
   try {
@@ -475,7 +468,11 @@ async function audit(orgId: string, userId: string, action: string, targetType?:
       action,
       targetType,
       targetId,
-      metadata: redactAuditMetadata(metadata),
+      // Sanitizer chokepoint scrubs sensitive keys (`secret*`, `token*`,
+      // `Authorization`, etc.) and bounds the row size with a `__truncated`
+      // sentinel for over-cap payloads. Same sensitive-key regex the
+      // engine writes go through, so audit + run_events stay consistent.
+      metadata: safePersistPayload(metadata, { maxBytes: AUDIT_METADATA_MAX_BYTES }),
     });
   } catch (error) {
     console.warn("audit write failed", error);
