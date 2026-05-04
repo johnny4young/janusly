@@ -42,6 +42,8 @@ import { listTools } from "@janusly/engine/src/tool-registry";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
+import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
+import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -810,6 +812,59 @@ export const routes: Route[] = [
       const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsed.id);
       const merged = mergeReadiness(baseResult, rollbackIssues);
       return sendJson(res, merged);
+    } },
+
+  // Workflow health rollup. Sister to /workflows/readiness — readiness is
+  // a static rules-only gate; health is the rolled-up score across the
+  // last 30 days of run activity (success rate, DLQ count, retry events,
+  // p95 latency, cost-per-run, rollback availability) plus the static
+  // readiness signal as the safety dimension. Returns a 0–100 score with
+  // a per-category breakdown the web badge renders. Read-only — viewer
+  // role suffices.
+  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.searchParams.get("workflowId");
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+
+      // Multi-tenant gate: confirm the workflow belongs to the caller's org
+      // before doing any work.
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, { error: "Workflow not found" }, 404);
+
+      // Latest version drives the readiness check (the workflow JSON the
+      // operator currently saved). Falling back to readiness on the
+      // latest snapshot mirrors the dashboard expectation: "what does
+      // production look like right now?"
+      const latestVersion = await db
+        .select({ dagJson: workflowVersions.dagJson })
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.orgId, auth.orgId), eq(workflowVersions.workflowId, workflowId)))
+        .orderBy(desc(workflowVersions.version))
+        .limit(1);
+      if (latestVersion.length === 0) {
+        return sendJson(res, { error: "Workflow has no versions" }, 404);
+      }
+
+      const parsedWorkflow = WorkflowSchema.safeParse(latestVersion[0].dagJson);
+      if (!parsedWorkflow.success) {
+        return sendJson(res, { error: "Workflow version is malformed" }, 422);
+      }
+      // Layer rollback-availability on top of the static readiness check
+      // so the health rollup's safety dimension counts the same issues
+      // /workflows/readiness reports — single-version workflows otherwise
+      // score higher on safety in the health badge than the readiness
+      // badge admits.
+      const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
+      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
+      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+      const signals = await collectHealthSignals(auth.orgId, workflowId);
+      const health = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals });
+      return sendJson(res, health);
     } },
 
   // AI helpers
