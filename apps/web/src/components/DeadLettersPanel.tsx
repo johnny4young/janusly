@@ -8,6 +8,7 @@
 
 import React, { useMemo, useState } from 'react'
 import { formatStatusLabel } from '../constants'
+import { FailureClustersCard } from './FailureClustersCard'
 
 /** Web-side `dead_letters` row shape (matches the API's response). */
 export type DeadLetter = {
@@ -52,7 +53,9 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
 
   return (
-    <section className="panel-card">
+    <>
+      <FailureClustersCard />
+      <section className="panel-card">
       <div className="split-row">
         <div>
           <div className="section-kicker">Operations</div>
@@ -116,7 +119,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           <DetailBlock title="Flow payload" value={selected.workflowJson} />
         </section>
       )}
-    </section>
+      </section>
+    </>
   )
 }
 
