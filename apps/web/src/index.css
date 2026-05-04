@@ -125,6 +125,7 @@ a { color: var(--we-primary); }
    ========================================================================== */
 .app-shell {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 56px 1fr;
   height: 100vh;
   overflow: hidden;
@@ -186,6 +187,8 @@ a { color: var(--we-primary); }
 .workspace-grid {
   display: grid;
   grid-template-columns: 300px minmax(460px, 1fr) 420px;
+  min-width: 0;
+  width: 100%;
   min-height: 0;
 }
 
@@ -1077,6 +1080,12 @@ a { color: var(--we-primary); }
   border: 1px solid rgba(239, 68, 68, 0.25);
   background: var(--we-danger-soft);
   color: var(--we-danger);
+}
+
+.issue-warn {
+  border: 1px solid var(--we-warning);
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
 }
 
 .mini-pre {
