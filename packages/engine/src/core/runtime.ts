@@ -41,6 +41,7 @@ import { updateRoutingStats } from "@janusly/data/src/routingStatsRepo";
 import { recordWorkflowImprovement } from "@janusly/data/src/improvementsRepo";
 import { rollbackWorkflowVersion } from "@janusly/data/src/workflowRollbackRepo";
 import { computeConfidence, shouldRollback } from "@janusly/domain/src/improvementEngine";
+import type { DecisionCandidate } from "@janusly/domain/src/decisionEngine";
 import type {
   ExecutionStore,
   QueueAdapter,
@@ -50,6 +51,39 @@ import type {
   RetryPolicy,
   SerializedError,
 } from "./types";
+
+/**
+ * Normalise the loosely-typed `config.candidates` of a `router` / `router_llm`
+ * node into the strict `DecisionCandidate[]` the decision engine consumes.
+ *
+ * Why: AI-generated workflows historically used `{ id }` for the candidate
+ * identifier, while the decision engine indexes by `{ nodeId }`. Without this
+ * normaliser the engine receives `nodeId: undefined`, the chosen winner is
+ * `undefined`, the persisted ranking is nameless, and the replay endpoint
+ * filters everything out — a silent break with no surfaced error. We accept
+ * either field, prefer `nodeId` when both are present, and drop entries that
+ * carry neither so the engine never sees a corrupt candidate. The validator
+ * already flags missing identifiers; this is defence-in-depth at the boundary.
+ */
+function normalizeRouterCandidates(raw: unknown): DecisionCandidate[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DecisionCandidate[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    const explicit = typeof e.nodeId === "string" && e.nodeId.trim() ? e.nodeId.trim() : null;
+    const legacy = typeof e.id === "string" && e.id.trim() ? e.id.trim() : null;
+    const nodeId = explicit ?? legacy;
+    if (!nodeId) continue;
+    const candidate: DecisionCandidate = { nodeId };
+    if (typeof e.avgCost === "number") candidate.avgCost = e.avgCost;
+    if (typeof e.avgLatencyMs === "number") candidate.avgLatencyMs = e.avgLatencyMs;
+    if (typeof e.successRate === "number") candidate.successRate = e.successRate;
+    if (e.metadata !== undefined) candidate.metadata = e.metadata;
+    out.push(candidate);
+  }
+  return out;
+}
 
 export class WorkflowRuntime {
   constructor(
@@ -97,8 +131,17 @@ export class WorkflowRuntime {
       const context = await this.store.getRunContext(runId);
 
       if (node.type === "router" || node.type === "router_llm") {
-        const candidates = (node as any)?.config?.candidates ?? [];
+        const candidates = normalizeRouterCandidates((node as any)?.config?.candidates);
         const rlStats = (context as any)?.rlStats;
+        const rawStrategy = (node as any)?.config?.strategy;
+        // `decide()` accepts the closed enum below; anything else is silently
+        // ignored so the workflow author isn't punished for a typo, but a
+        // valid value is forwarded so the prompt's documented `strategy`
+        // field actually changes ranking behaviour.
+        const strategy: "auto" | "cheapest" | "fastest" | "balanced" | undefined =
+          rawStrategy === "auto" || rawStrategy === "cheapest" || rawStrategy === "fastest" || rawStrategy === "balanced"
+            ? rawStrategy
+            : undefined;
 
         if (candidates.length > 0) {
           const { decide } = await import("@janusly/domain/src/decisionEngine");
@@ -108,6 +151,7 @@ export class WorkflowRuntime {
             preferences: (context as any)?.preferences,
             budget: (context as any)?.budget,
             rlStats,
+            strategy,
           });
 
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));

@@ -92,4 +92,78 @@ describe('validateWorkflow', () => {
     const codes = result.issues.map(i => i.code)
     expect(codes).toContain('missing_start_node')
   })
+
+  it('rejects router nodes with empty candidates', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'pick', type: 'router', config: { candidates: [] } },
+      ],
+      edges: [{ from: 'start', to: 'pick' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'router_missing_candidates',
+      nodeId: 'pick',
+    }))
+  })
+
+  it('accepts router nodes with the canonical { nodeId } candidate shape', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'fast' }] } },
+        { id: 'fast', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'start', to: 'pick' }],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('accepts router_llm nodes with the legacy { id } candidate shape (back-compat)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'pick', type: 'router_llm', config: { candidates: [{ id: 'legacy_path' }] } },
+        { id: 'legacy_path', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'start', to: 'pick' }],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects router candidates that carry neither nodeId nor a legacy id', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'pick', type: 'router', config: { candidates: [{}] } },
+      ],
+      edges: [{ from: 'start', to: 'pick' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'router_candidate_missing_node_id',
+      nodeId: 'pick',
+    }))
+  })
+
+  it('rejects router candidates that reference an unknown node id', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'missing_path' }] } },
+      ],
+      edges: [{ from: 'start', to: 'pick' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'router_candidate_unknown_node_id',
+      nodeId: 'pick',
+    }))
+  })
 })
