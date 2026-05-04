@@ -27,6 +27,7 @@ import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
+import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
@@ -512,6 +513,7 @@ export default function App() {
               <span>{currentWorkflowName} · {orgId ?? 'default'}</span>
             </div>
           </div>
+          <WorkflowReadinessBadge />
           <UserMenu />
         </>
       }
