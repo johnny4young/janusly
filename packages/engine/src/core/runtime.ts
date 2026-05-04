@@ -37,7 +37,7 @@ import { evaluateExpression } from "../expression";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
-import { updateRoutingStats } from "@janusly/data/src/routingStatsRepo";
+import { getRoutingStats, updateRoutingStats } from "@janusly/data/src/routingStatsRepo";
 import { recordWorkflowImprovement } from "@janusly/data/src/improvementsRepo";
 import { rollbackWorkflowVersion } from "@janusly/data/src/workflowRollbackRepo";
 import { computeConfidence, shouldRollback } from "@janusly/domain/src/improvementEngine";
@@ -49,6 +49,7 @@ import type {
   ExecuteQueuedNodeInput,
   EnqueueReadyNodesInput,
   RetryPolicy,
+  RunMetadata,
   SerializedError,
 } from "./types";
 
@@ -127,12 +128,34 @@ export class WorkflowRuntime {
     }
     await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } }));
 
+    let metadata: RunMetadata | null = null;
     try {
+      // Stable per-run metadata loaded once after the claim wins. Used by
+      // the router branch (org-scoped routing-stats writes + RL bandit input
+      // to `decide`) and the improvement-evaluation branch
+      // (workflow-version-scoped improvement ledger). Loaded post-claim so a
+      // cancellation landing while a job sits queued doesn't burn an extra
+      // DB round-trip — `markNodeRunning` already short-circuits when the
+      // row has advanced past `queued`. Returns `null` if the run row was
+      // deleted between scheduling and execution; metadata-dependent
+      // branches no-op gracefully and the executor still runs so node-status
+      // correctness is preserved. A lookup failure stays inside the node
+      // failure handler so the already-claimed node can retry or land in DLQ.
+      metadata = await this.store.getRunMetadata(runId);
       const context = await this.store.getRunContext(runId);
 
       if (node.type === "router" || node.type === "router_llm") {
         const candidates = normalizeRouterCandidates((node as any)?.config?.candidates);
-        const rlStats = (context as any)?.rlStats;
+        // RL bandit input: load the org's reinforcement counters once per
+        // router decision. The decision engine only reads `pulls` /
+        // `meanReward` per candidate so passing the full DB-row shape is
+        // structurally compatible with the `RlStats` contract. Without this
+        // load, `decide()` only saw static `avgCost`/`avgLatencyMs`/
+        // `successRate` from the workflow JSON — every routing decision was
+        // effectively memoryless.
+        const rlStats = metadata?.orgId
+          ? await getRoutingStats(metadata.orgId)
+          : undefined;
         const rawStrategy = (node as any)?.config?.strategy;
         // `decide()` accepts the closed enum below; anything else is silently
         // ignored so the workflow author isn't punished for a typo, but a
@@ -146,7 +169,7 @@ export class WorkflowRuntime {
         if (candidates.length > 0) {
           const { decide } = await import("@janusly/domain/src/decisionEngine");
           const decision = await decide({
-            orgId: (context as any)?.orgId,
+            orgId: metadata?.orgId,
             candidates,
             preferences: (context as any)?.preferences,
             budget: (context as any)?.budget,
@@ -178,11 +201,15 @@ export class WorkflowRuntime {
       }
 
       await this.store.markNodeSucceeded(runId, node.id, result?.output ?? {});
-      await updateRoutingStats({ orgId: (context as any)?.orgId, nodeId: node.id, reward: 1, success: true });
+      // Routing-stats writes are gated on a real `orgId` from the run row,
+      // not the loose context bag. The repo's own `if (!orgId) return`
+      // guard remains as defence in depth, but on a healthy run the
+      // metadata helper above hands it a structured value every time.
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
-      await this.evaluateImprovement(runId, context);
+      await this.evaluateImprovement(runId, context, metadata);
 
       // Re-check run status before scheduling downstream work. The node was
       // already running when cancellation landed, so its row stays where it
@@ -196,7 +223,7 @@ export class WorkflowRuntime {
       const context = await this.store.getRunContext(runId).catch(() => ({}));
       const error: SerializedError = { message: err.message, name: err.name, code: err.code, statusCode: err.statusCode };
 
-      await updateRoutingStats({ orgId: (context as any)?.orgId, nodeId: node.id, reward: -1, success: false });
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
 
       const retryPolicy = (node as any)?.config?.retry as RetryPolicy | undefined;
       const maxAttempts = retryPolicy?.maxAttempts ?? 1;
@@ -227,10 +254,27 @@ export class WorkflowRuntime {
     }
   }
 
-  private async evaluateImprovement(runId: string, context: Record<string, unknown>) {
-    const orgId = context?.orgId;
-    const workflowId = context?.workflowId;
-    if (typeof orgId !== "string" || typeof workflowId !== "string") return;
+  /**
+   * Evaluate the improvement metric for a completed node and write a
+   * `workflow_improvements` row when the run has enough metadata. The
+   * before/after metric snapshots and `improvementAction` still flow
+   * through the loose `RunContext` bag (an existing per-node convention),
+   * but the org/workflow identifiers come from the structured `metadata`
+   * argument so the path no longer no-ops on a missing context field.
+   *
+   * Skips silently when `metadata` is null (run row deleted mid-flight) or
+   * when `metadata.workflowId` is null (the active version row was deleted
+   * out from under the run). Both are rare-but-real races; treating them
+   * as soft skips keeps the run completing instead of crashing.
+   */
+  private async evaluateImprovement(
+    runId: string,
+    context: Record<string, unknown>,
+    metadata: RunMetadata | null,
+  ) {
+    if (!metadata?.orgId || !metadata.workflowId) return;
+    const orgId = metadata.orgId;
+    const workflowId = metadata.workflowId;
 
     const beforeMetrics = (context?.metricsBefore ?? {}) as Record<string, unknown>;
     const afterMetrics = (context?.metricsAfter ?? {}) as Record<string, unknown>;
@@ -258,7 +302,11 @@ export class WorkflowRuntime {
         orgId,
         workflowId,
         targetVersion: context.baseVersion,
-        createdBy: typeof context.createdBy === "string" ? context.createdBy : "system",
+        // `createdBy` is the run's initiator (from the `runs` row) when
+        // known, "system" otherwise. The `RunContext` bag is keyed by node
+        // id, so checking `context.createdBy` would only match a node
+        // literally named "createdBy" — never a real per-run author.
+        createdBy: metadata.createdBy ?? "system",
         reason: "auto-rollback: low confidence",
       });
 

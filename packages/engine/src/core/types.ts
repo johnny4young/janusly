@@ -15,6 +15,7 @@
 
 import type { Workflow, WorkflowNode } from "@janusly/shared";
 import type { NodeStatus, RunStatus } from "@janusly/shared/src/status";
+import type { RunMetadata } from "../persistence";
 
 // Status types are re-exported from the shared constants module so the
 // values stay in lockstep with `runs.status` / `run_nodes.status` and the
@@ -28,6 +29,12 @@ export type {
   RunOpenStatus,
   RunTerminalStatus,
 } from "@janusly/shared/src/status";
+
+// `RunMetadata` is loaded once per `executeQueuedNode` invocation to give
+// the runtime structured access to org/workflow/version identifiers
+// without rummaging through the loose `RunContext` bag. Re-exported here
+// so adapter implementations can type their `getRunMetadata` return.
+export type { RunMetadata } from "../persistence";
 
 /** Plain-object error shape used in `run_nodes.error_json` and dead-letter rows. */
 export type SerializedError = {
@@ -130,6 +137,8 @@ export type EnqueueReadyNodesInput = {
 export interface ExecutionStore {
   getRunContext(runId: string): Promise<RunContext>;
   getRunStatus(runId: string): Promise<RunStatus | null>;
+  /** Stable per-run metadata (orgId/workflow/createdBy) — `null` when the run row is absent. */
+  getRunMetadata(runId: string): Promise<RunMetadata | null>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
   markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
