@@ -40,6 +40,7 @@ import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
+import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -480,6 +481,41 @@ async function audit(orgId: string, userId: string, action: string, targetType?:
 }
 
 /**
+ * Layer the DB-aware rollback-availability check on top of the pure
+ * `checkWorkflowReadiness` result. Workflows with only one persisted
+ * version have no rollback target if a future save introduces a
+ * regression; the readiness gate surfaces this as a `warn` so the
+ * operator knows. Anonymous workflows (no `id`) skip the check —
+ * `workflow_versions` is keyed by the saved id, so an ad-hoc workflow
+ * has nothing to count.
+ */
+async function checkRollbackAvailability(orgId: string, workflowId: string | undefined): Promise<ReadinessIssue[]> {
+  if (!workflowId) return [];
+  const rows = await db
+    .select({ id: workflowVersions.id })
+    .from(workflowVersions)
+    .where(and(eq(workflowVersions.orgId, orgId), eq(workflowVersions.workflowId, workflowId)));
+  if (rows.length >= 2) return [];
+  return [{
+    code: "workflow_missing_rollback_version",
+    severity: "warn",
+    message: "Only one workflow version exists. If a future save introduces a regression there is no prior version to roll back to.",
+    suggestion: "Save the workflow at least once more (or duplicate the current version) so the runtime improvement path can roll back if confidence drops.",
+  }];
+}
+
+/** Combine the pure readiness result with extra issues from DB-aware checks. Re-rolls up status to the worst severity across the union. */
+function mergeReadiness(base: ReadinessResult, extra: ReadinessIssue[]): ReadinessResult {
+  const issues = [...base.issues, ...extra];
+  const status = issues.some((issue) => issue.severity === "fail")
+    ? "fail"
+    : issues.some((issue) => issue.severity === "warn")
+      ? "warn"
+      : "pass";
+  return { status, issues };
+}
+
+/**
  * Route registry. New routes plug in via `routes.push({...})` or
  * by appending to this literal — the dispatcher (`http.createServer` below)
  * stays closed for modification. First-match-wins; preserve ordering when
@@ -687,6 +723,34 @@ export const routes: Route[] = [
   // Validate
   { method: "POST", match: "/validate", role: "editor",
     handler: async ({ req, res }) => sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES))) },
+
+  // Production-readiness gate. Sister to `/validate` — this asserts
+  // production posture (retries, bounds, raw secrets, approval upstream of
+  // write-side actions, output declarations, rollback availability) on
+  // top of the structural validation `/validate` already covers. The
+  // engine portion is pure; the rollback-availability check is layered
+  // here because it needs `workflow_versions` access. Body shape: either
+  // a flat workflow JSON or `{ workflow }` envelope (mirrors `/validate`).
+  { method: "POST", match: "/workflows/readiness", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
+      const validation = validateWorkflow(candidate);
+      if (!validation.valid) {
+        const issues: ReadinessIssue[] = validation.issues.map((issue) => ({
+          code: `invalid_workflow_${issue.code}`,
+          severity: "fail" as const,
+          message: issue.message,
+          nodeId: issue.nodeId,
+        }));
+        return sendJson(res, { status: "fail", issues } satisfies ReadinessResult);
+      }
+      const parsed = WorkflowSchema.parse(candidate);
+      const baseResult = checkWorkflowReadiness(parsed);
+      const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsed.id);
+      const merged = mergeReadiness(baseResult, rollbackIssues);
+      return sendJson(res, merged);
+    } },
 
   // AI helpers
   { method: "GET", match: "/ai/health",
@@ -909,6 +973,24 @@ export const routes: Route[] = [
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
+
+      // Production-mode opt-in gate: when `JANUSLY_PRODUCTION_MODE=true`, the
+      // deterministic readiness check runs before `startRun` and rejects
+      // fail-level issues with HTTP 422. The check is the same one
+      // `/workflows/readiness` exposes, layered with the rollback-availability
+      // helper. Dev mode (env unset) keeps the existing behaviour — anything
+      // structurally valid runs. Operators that need per-workflow opt-in
+      // should set the env in their production deploy and leave it unset
+      // locally. Adhoc unsaved workflows skip the rollback check (no
+      // workflow_versions rows to count).
+      if (process.env.JANUSLY_PRODUCTION_MODE === "true") {
+        const baseReadiness = checkWorkflowReadiness(parsedWorkflow);
+        const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsedWorkflow.id);
+        const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+        if (readiness.status === "fail") {
+          return sendJson(res, { error: "Workflow not production-ready", readiness }, 422);
+        }
+      }
 
       // Track whether this run is for a workflow we've persisted (saved) or
       // an ad-hoc one constructed in the request body. Ad-hoc starts are
