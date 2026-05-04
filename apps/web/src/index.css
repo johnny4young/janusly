@@ -737,6 +737,13 @@ a { color: var(--we-primary); }
   min-width: 0;
 }
 
+.workflow-row-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .list-card-action {
   color: var(--we-primary);
   font-size: 12px;
@@ -1732,6 +1739,11 @@ a { color: var(--we-primary); }
 .we-readiness-issue--warn {
   background: var(--we-warning-soft);
   border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.we-readiness-issue--pass {
+  background: var(--we-success-soft);
+  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
 .we-readiness-issue__code {
