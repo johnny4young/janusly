@@ -21,6 +21,7 @@
    17. Agent team timeline
    18. Team member list
    19. Responsive rules
+   20. Run input dialog
    ========================================================================== */
 
 /* ==========================================================================
@@ -73,7 +74,9 @@
   --we-accent-soft: var(--color-we-accent-soft);
   --we-bg: var(--color-we-bg);
   --we-surface: var(--color-we-surface);
+  --we-surface-1: var(--color-we-surface);
   --we-surface-2: var(--color-we-surface-2);
+  --we-surface-3: var(--color-we-surface-muted);
   --we-surface-muted: var(--color-we-surface-muted);
   --we-line: var(--color-we-line);
   --we-line-strong: var(--color-we-line-strong);
@@ -81,6 +84,8 @@
   --we-grid-strong: color-mix(in srgb, var(--we-primary) 16%, transparent);
   --we-ink: var(--color-we-ink);
   --we-ink-soft: var(--color-we-ink-soft);
+  --we-text-1: var(--color-we-ink);
+  --we-text-2: var(--color-we-muted);
   --we-muted: var(--color-we-muted);
   --we-faint: var(--color-we-faint);
   --we-success: var(--color-we-success);
@@ -1771,4 +1776,168 @@ a { color: var(--we-primary); }
   font-size: 12px;
   line-height: 1.4;
   font-style: italic;
+}
+
+/* ----------------- Run input dialog (schema-driven form) ----------------- */
+
+.run-input-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--we-text-1) 55%, transparent);
+  backdrop-filter: blur(2px);
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  animation: run-input-fade-in 120ms ease-out;
+}
+
+.run-input-dialog {
+  width: 100%;
+  max-width: 560px;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px -12px var(--we-primary-shadow);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+  animation: run-input-rise 160ms ease-out;
+}
+
+.run-input-dialog__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--we-line);
+}
+
+.run-input-dialog__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.run-input-dialog__heading h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--we-text-1);
+}
+
+.run-input-dialog__heading .helper-text {
+  margin: 4px 0 0;
+}
+
+.run-input-dialog__close {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--we-text-2);
+}
+
+.run-input-dialog__close:hover {
+  background: var(--we-surface-2);
+  color: var(--we-text-1);
+}
+
+.run-input-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 24px 0;
+  overflow-y: auto;
+}
+
+.run-input-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  margin-top: 12px;
+  border-top: 1px solid var(--we-line);
+  background: var(--we-surface-2);
+}
+
+.run-input-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.run-input-fieldset {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--we-surface-muted);
+}
+
+.run-input-fieldset > legend {
+  padding: 0 4px;
+}
+
+.run-input-required {
+  color: var(--we-primary);
+  margin-left: 4px;
+}
+
+.run-input-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--we-text-1);
+}
+
+.run-input-field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--we-danger);
+  margin: 4px 0 0;
+}
+
+.run-input-form-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--we-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--we-danger) 25%, transparent);
+  color: var(--we-danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@keyframes run-input-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes run-input-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-input-backdrop,
+  .run-input-dialog {
+    animation: none;
+  }
 }

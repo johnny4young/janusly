@@ -29,6 +29,7 @@ import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
+import { RunInputDialog } from './components/RunInputDialog'
 import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
@@ -140,6 +141,13 @@ export default function App() {
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
   const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  // Run-input dialog state. Open when the active workflow declares typed
+  // `inputs` and the user presses Run; closed otherwise. Server errors
+  // (JSONPath strings) are stored separately so the dialog can surface
+  // them next to the right field without losing them in a toast.
+  const [runInputOpen, setRunInputOpen] = useState(false)
+  const [runInputServerErrors, setRunInputServerErrors] = useState<string[]>([])
+  const [runInputSubmitting, setRunInputSubmitting] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -321,23 +329,59 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, validateWorkflow])
 
+  /**
+   * Internal helper: send the actual `POST /start` request with an optional
+   * typed input. Returns the parsed body so the caller can surface server-
+   * side validation errors from `{ errors: string[] }` envelopes (the
+   * shape the API emits for typed-input rejections).
+   */
+  const startRunWith = useCallback(async (input: unknown | undefined): Promise<{ runId?: string; errors?: string[] }> => {
+    const workflow = getWorkflowJson()
+    const body = input !== undefined ? { workflow, input } : workflow
+    const result = await api('/start', { method: 'POST', body: JSON.stringify(body) }) as { runId?: string; errors?: string[] }
+    if (result?.errors) return result
+    if (!result?.runId) throw new Error('API did not return runId')
+    resetRun()
+    setRunId(result.runId)
+    setActiveTab('multiAgent')
+    addToast(`Run started: ${result.runId.slice(0, 8)}`, 'success')
+    bumpPlatformVersion()
+    await refreshPlatform()
+    return result
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId])
+
   const startWorkflow = useCallback(async () => {
     if (!await validateWorkflow()) return
-
+    // Workflows that declared typed `inputs` open the dialog so the
+    // operator can provide a payload before we fire `POST /start`.
+    if (currentWorkflowInputs) {
+      setRunInputServerErrors([])
+      setRunInputOpen(true)
+      return
+    }
     try {
-      const workflow = getWorkflowJson()
-      const result = await api('/start', { method: 'POST', body: JSON.stringify(workflow) }) as { runId?: string }
-      if (!result.runId) throw new Error('API did not return runId')
-      resetRun()
-      setRunId(result.runId)
-      setActiveTab('multiAgent')
-      addToast(`Run started: ${result.runId.slice(0, 8)}`, 'success')
-      bumpPlatformVersion()
-      await refreshPlatform()
+      await startRunWith(undefined)
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Run failed to start', 'error')
     }
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId, validateWorkflow])
+  }, [addToast, currentWorkflowInputs, startRunWith, validateWorkflow])
+
+  const submitRunInput = useCallback(async (input: unknown) => {
+    setRunInputSubmitting(true)
+    setRunInputServerErrors([])
+    try {
+      const result = await startRunWith(input)
+      if (result?.errors && result.errors.length > 0) {
+        setRunInputServerErrors(result.errors)
+        return
+      }
+      setRunInputOpen(false)
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Run failed to start', 'error')
+    } finally {
+      setRunInputSubmitting(false)
+    }
+  }, [addToast, startRunWith])
 
   const openWorkflow = useCallback(async (id: string) => {
     try {
@@ -633,6 +677,18 @@ export default function App() {
           onReviewWorkflow={reviewWorkflow}
           onOpenTab={setActiveTab}
         />
+      }
+      overlay={
+        runInputOpen && currentWorkflowInputs ? (
+          <RunInputDialog
+            inputs={currentWorkflowInputs}
+            workflowName={currentWorkflowName}
+            serverErrors={runInputServerErrors}
+            submitting={runInputSubmitting}
+            onSubmit={submitRunInput}
+            onCancel={() => setRunInputOpen(false)}
+          />
+        ) : undefined
       }
     />
   )
