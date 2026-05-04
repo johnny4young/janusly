@@ -35,6 +35,7 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
   async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
     await db.insert(deadLetters).values({
       id: crypto.randomUUID(),
+      orgId: input.orgId,
       runId: input.runId,
       nodeId: input.node.id,
       attempt: input.attempt,

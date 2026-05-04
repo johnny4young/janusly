@@ -44,6 +44,8 @@ import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } fro
 import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
 import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
 import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
+import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
+import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -1277,6 +1279,18 @@ export const routes: Route[] = [
       return sendJson(res, result);
     } },
 
+  // DLQ — cluster rollup must register BEFORE the generic /dlq dispatcher
+  // because the registry is first-match-wins; otherwise the wildcard
+  // handler below would swallow `/dlq/clusters` requests.
+  { method: "GET", match: (url) => url === "/dlq/clusters" || url.startsWith("/dlq/clusters?"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const samples = await collectFailureSamples(auth.orgId, windowDays);
+      const clusters = clusterFailureSamples(samples);
+      return sendJson(res, { clusters, totalSamples: samples.length, windowDays });
+    } },
   // DLQ
   { method: "GET", match: (url) => url.startsWith("/dlq"),
     handler: async ({ req, res, auth }) => {

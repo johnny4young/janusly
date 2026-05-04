@@ -22,6 +22,7 @@
    18. Team member list
    19. Responsive rules
    20. Run input dialog
+   21. Failure clusters card
    ========================================================================== */
 
 /* ==========================================================================
@@ -1940,4 +1941,151 @@ a { color: var(--we-primary); }
   .run-input-dialog {
     animation: none;
   }
+}
+
+/* ----------------- Failure clusters card (Recovery Queue) --------------- */
+
+.we-cluster-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.we-cluster-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-cluster-row {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface);
+  overflow: hidden;
+}
+
+.we-cluster-row--fail { border-left: 3px solid var(--we-danger); }
+.we-cluster-row--warn { border-left: 3px solid var(--we-warning); }
+.we-cluster-row--pass { border-left: 3px solid var(--we-success); }
+
+.we-cluster-row__summary {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--we-text-1);
+}
+
+.we-cluster-row__summary:hover {
+  background: var(--we-surface-2);
+}
+
+.we-cluster-row__icon {
+  display: grid;
+  place-items: center;
+  color: var(--we-text-2);
+}
+
+.we-cluster-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.we-cluster-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.we-cluster-row__title strong {
+  font-weight: 600;
+  color: var(--we-text-1);
+}
+
+.we-cluster-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 11px;
+  color: var(--we-text-2);
+  align-items: center;
+}
+
+.we-cluster-meta-sep {
+  color: var(--we-text-2);
+}
+
+.we-cluster-row__owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--we-surface-muted);
+  color: var(--we-text-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.we-cluster-row__details {
+  border-top: 1px solid var(--we-line);
+  background: var(--we-surface-2);
+  padding: 12px;
+  display: grid;
+  gap: 14px;
+}
+
+.we-cluster-row__section .field-label {
+  margin-bottom: 6px;
+}
+
+.we-cluster-row__workflows,
+.we-cluster-row__samples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-cluster-row__workflows li,
+.we-cluster-row__samples li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.we-cluster-row__samples code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-text-1);
+}
+
+.we-cluster-pill--secret_missing,
+.we-cluster-pill--ai_provider {
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+.we-cluster-pill--http_error,
+.we-cluster-pill--network_timeout,
+.we-cluster-pill--parse_error,
+.we-cluster-pill--tool_input,
+.we-cluster-pill--unknown {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
 }

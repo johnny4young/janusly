@@ -200,6 +200,20 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(queue.enqueueNode).not.toHaveBeenCalled()
     expect(store.markNodeFailed).not.toHaveBeenCalled()
   })
+
+  it('passes the run orgId into the DLQ row when a node exhausts retries', async () => {
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(makeStore(), queue, makeFailingExecutors())
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('temporary outage')
+
+    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'r1',
+      orgId: 'test-org',
+      node,
+      attempt: 1,
+    }))
+  })
 })
 
 describe('executeQueuedNode — router candidate normalization', () => {
@@ -441,6 +455,7 @@ describe('executeQueuedNode — runtime learning metadata', () => {
     expect(executors.execute).not.toHaveBeenCalled()
     expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
+      orgId: 'default',
       node,
       attempt: 1,
       error: expect.objectContaining({ message: 'metadata query failed' }),
