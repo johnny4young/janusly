@@ -21,8 +21,11 @@ import { db } from "@janusly/db";
 import { runs, runNodes, runEvents } from "@janusly/db";
 import { enqueueNode } from "./queue";
 import { markNodeQueued, appendEvent } from "./persistence";
+import { safePersistPayload } from "./safe-persist";
 import type { Workflow } from "@janusly/shared";
 import { validateInputs, WorkflowInputValidationError } from "./inputs-validator";
+
+const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
 
 export type StartableWorkflow = Workflow & {
   orgId?: string;
@@ -73,7 +76,7 @@ export async function startRun(workflow: StartableWorkflow) {
         runId,
         nodeId: node.id,
         status: "pending",
-        stateJson: {},
+        stateJson: safePersistPayload({}, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
       })));
     }
 
@@ -82,7 +85,7 @@ export async function startRun(workflow: StartableWorkflow) {
       runId,
       nodeId: null,
       type: "run.started",
-      payload: { workflowVersionId },
+      payload: safePersistPayload({ workflowVersionId }),
     });
   });
 
