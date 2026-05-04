@@ -1613,3 +1613,141 @@ a { color: var(--we-primary); }
     flex-basis: 100%;
   }
 }
+
+/* ----- Production-readiness badge ----- */
+
+.we-readiness-badge {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.we-readiness-badge__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-2);
+  color: var(--we-text-2);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.we-readiness-badge__summary:hover {
+  background: var(--we-surface-3, var(--we-surface-2));
+  border-color: var(--we-line-strong);
+}
+
+.we-readiness-badge--pass .we-readiness-badge__summary {
+  color: var(--we-success);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: var(--we-success-soft);
+}
+
+.we-readiness-badge--warn .we-readiness-badge__summary {
+  color: var(--we-warning);
+  border-color: rgba(245, 158, 11, 0.35);
+  background: var(--we-warning-soft);
+}
+
+.we-readiness-badge--fail .we-readiness-badge__summary {
+  color: var(--we-danger);
+  border-color: rgba(239, 68, 68, 0.4);
+  background: var(--we-danger-soft);
+}
+
+.we-readiness-badge--loading,
+.we-readiness-badge--error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-2);
+  color: var(--we-text-2);
+}
+
+.we-readiness-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--we-text-2);
+}
+
+.we-readiness-dot--idle {
+  background: var(--we-text-2);
+  opacity: 0.6;
+}
+
+.we-readiness-badge__issues {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 5;
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  min-width: 320px;
+  max-width: 480px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--we-surface-1);
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+
+.we-readiness-issue {
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.we-readiness-issue + .we-readiness-issue {
+  margin-top: 4px;
+}
+
+.we-readiness-issue--fail {
+  background: var(--we-danger-soft);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.we-readiness-issue--warn {
+  background: var(--we-warning-soft);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.we-readiness-issue__code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  color: var(--we-text-1);
+}
+
+.we-readiness-issue__node {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-readiness-issue__message {
+  margin: 4px 0 0;
+  color: var(--we-text-1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.we-readiness-issue__suggestion {
+  margin: 4px 0 0;
+  color: var(--we-text-2);
+  font-size: 12px;
+  line-height: 1.4;
+  font-style: italic;
+}
