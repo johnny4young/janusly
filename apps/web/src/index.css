@@ -2406,3 +2406,57 @@ a { color: var(--we-primary); }
   font-size: 11px;
   color: var(--we-text-1);
 }
+
+/* ----------------- Recovery dialog -------------------------------------- */
+
+.we-recovery-dialog {
+  /* Wider than the run-input dialog because the diff panel needs room. */
+  max-width: 720px;
+}
+
+.we-recovery-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.we-recovery-warning,
+.we-recovery-error,
+.we-recovery-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.we-recovery-warning {
+  background: var(--we-warning-soft);
+  border: 1px solid color-mix(in srgb, var(--we-warning) 25%, transparent);
+  color: var(--we-warning);
+}
+
+.we-recovery-error {
+  background: var(--we-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--we-danger) 25%, transparent);
+  color: var(--we-danger);
+}
+
+.we-recovery-success {
+  background: var(--we-success-soft);
+  border: 1px solid color-mix(in srgb, var(--we-success) 25%, transparent);
+  color: var(--we-success);
+}
+
+.small-command--primary {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.small-command--primary:hover:not(:disabled) {
+  background: var(--we-primary);
+  color: var(--we-surface);
+}

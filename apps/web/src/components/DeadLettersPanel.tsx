@@ -7,8 +7,10 @@
  */
 
 import React, { useMemo, useState } from 'react'
+import { Sparkles } from 'lucide-react'
 import { formatStatusLabel } from '../constants'
 import { FailureClustersCard } from './FailureClustersCard'
+import { RecoveryDialog } from './RecoveryDialog'
 
 /** Web-side `dead_letters` row shape (matches the API's response). */
 export type DeadLetter = {
@@ -44,6 +46,7 @@ const statusLabels: Record<DeadLetterStatusFilter, string> = {
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
+  const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
 
   const filtered = useMemo(() => {
     if (status === 'all') return deadLetters
@@ -106,6 +109,13 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           </div>
 
           <div className="split-row">
+            <button
+              className="small-command small-command--primary"
+              disabled={selected.status === 'replayed' || selected.status === 'resolved'}
+              onClick={() => setRecoveryDeadLetter(selected)}
+            >
+              <Sparkles size={12} aria-hidden="true" /> Suggest fix
+            </button>
             <button className="small-command" disabled={selected.status === 'replayed'} onClick={() => onReplay(selected.id)}>
               Retry
             </button>
@@ -120,6 +130,13 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         </section>
       )}
       </section>
+
+      {recoveryDeadLetter && (
+        <RecoveryDialog
+          dlq={recoveryDeadLetter}
+          onClose={() => setRecoveryDeadLetter(null)}
+        />
+      )}
     </>
   )
 }
