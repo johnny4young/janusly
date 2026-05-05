@@ -43,14 +43,22 @@
 
 import { redactValues } from "./template";
 
+import { SENSITIVE_KEY_PATTERN } from "@janusly/shared/src/sensitive-keys";
+
 /**
  * Field-name regex for sensitive-key redaction. Matches whole keys and
  * common separator/camel-case suffixes case-insensitively so the recursive
  * walker scrubs `Authorization`, `secretKey`, `password_hash`, `api_key`,
  * etc. without false-positive matches on substrings like `not-a-secret` or
  * lowercase words like `tokenizer`.
+ *
+ * Re-exported from `@janusly/shared` so the structural workflow diff
+ * (browser-side, can't reach into `@janusly/engine`) can match against
+ * the same source of truth. Lives in `shared` because adding a new key
+ * shape there should improve redaction at write time AND secret-ref
+ * tagging at diff time without one layer depending on the other.
  */
-export const SENSITIVE_KEY_PATTERN = /^(?:[sS][eE][cC][rR][eE][tT](?:$|[_-].*|[A-Z].*)|[pP][aA][sS][sS][wW][oO][rR][dD](?:$|[_-].*|[A-Z].*)|[tT][oO][kK][eE][nN](?:$|[_-].*|[A-Z].*)|[aA][pP][iI][_-]?[kK][eE][yY]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[cC][oO][oO][kK][iI][eE]|[xX]-[aA][pP][iI]-[kK][eE][yY]|[cC][lL][iI][eE][nN][tT][_-]?[sS][eE][cC][rR][eE][tT]|[pP][rR][iI][vV][aA][tT][eE][_-]?[kK][eE][yY])$/;
+export { SENSITIVE_KEY_PATTERN };
 
 /**
  * Default cap for `safePersistPayload`. 256 KB is enough for typical run

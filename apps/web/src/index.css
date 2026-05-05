@@ -23,6 +23,7 @@
    19. Responsive rules
    20. Run input dialog
    21. Failure clusters card
+   22. Workflow version diff
    ========================================================================== */
 
 /* ==========================================================================
@@ -2088,4 +2089,217 @@ a { color: var(--we-primary); }
 .we-cluster-pill--unknown {
   background: var(--we-warning-soft);
   color: var(--we-warning);
+}
+
+/* ----------------- Workflow version diff -------------------------------- */
+
+.version-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.small-command--active {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.version-button--selected {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+}
+
+.version-button__check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 4px;
+  border: 1px solid var(--we-line-strong);
+  background: var(--we-surface);
+  font-size: 11px;
+  color: var(--we-primary);
+}
+
+.version-button__check--on {
+  background: var(--we-primary);
+  color: var(--we-surface);
+  border-color: var(--we-primary);
+}
+
+.we-diff-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.we-diff-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--we-text-1);
+}
+
+.we-diff-summary .helper-text {
+  margin: 0;
+}
+
+.we-diff-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-diff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-diff-row {
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--we-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-diff-row--added {
+  border-left: 3px solid var(--we-success);
+  background: var(--we-success-soft);
+}
+
+.we-diff-row--removed {
+  border-left: 3px solid var(--we-danger);
+  background: var(--we-danger-soft);
+}
+
+.we-diff-row--changed {
+  border-left: 3px solid var(--we-warning);
+  background: var(--we-warning-soft);
+}
+
+.we-diff-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.we-diff-row__verb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.we-diff-row__id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-text-1);
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.we-diff-condition {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-diff-fields {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 1px dashed var(--we-line);
+}
+
+.we-diff-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.we-diff-field__path {
+  font-family: var(--font-mono);
+  color: var(--we-text-1);
+}
+
+.we-diff-field__values {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--we-text-2);
+}
+
+.we-diff-field__before {
+  text-decoration: line-through;
+  text-decoration-color: var(--we-danger);
+  font-family: var(--font-mono);
+  color: var(--we-text-2);
+}
+
+.we-diff-field__after {
+  font-family: var(--font-mono);
+  color: var(--we-text-1);
+}
+
+.we-diff-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.we-diff-tag--secret_ref,
+.we-diff-tag--approval {
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+.we-diff-tag--retry,
+.we-diff-tag--timeout,
+.we-diff-tag--bounds {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+}
+
+.we-diff-tag--rationale {
+  background: var(--we-info-soft);
+  color: var(--we-info);
+}
+
+.we-diff-rationale {
+  background: var(--we-info-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
 }
