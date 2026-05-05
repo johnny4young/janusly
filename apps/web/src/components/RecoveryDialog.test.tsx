@@ -91,4 +91,19 @@ describe('<RecoveryDialog />', () => {
     const applyButton = screen.getByRole('button', { name: /Apply.*replay/i })
     expect(applyButton).toBeDisabled()
   })
+
+  it('disables Apply when an AI suggestion has no structural workflow changes', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      mode: 'ai',
+      suggestedWorkflow: baseDlq.workflowJson,
+      rationale: 'Raise the timeout in the Inspector before replaying.',
+    })
+
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+    await waitFor(() => screen.getByText(/No structural patch/i))
+    const applyButton = screen.getByRole('button', { name: /Apply.*replay/i })
+    expect(applyButton).toBeDisabled()
+  })
 })
