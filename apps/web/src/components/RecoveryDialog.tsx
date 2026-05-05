@@ -47,14 +47,25 @@ type PatchSuggestion = {
   aiError?: string
 }
 
+type ClusterApplyError = {
+  deadLetterId: string
+  error: string
+}
+
+type ClusterApplyResult = {
+  replayed: number
+  failed: number
+  errors: ClusterApplyError[]
+}
+
 type Step =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'review'; suggestion: PatchSuggestion }
   | { kind: 'validating'; suggestion: PatchSuggestion; runId: string }
   | { kind: 'validation-failed'; suggestion: PatchSuggestion; runId: string; errorJson: unknown }
-  | { kind: 'applying' }
-  | { kind: 'applied'; runId?: string }
+  | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
+  | { kind: 'applied'; runId?: string; cluster?: ClusterApplyResult }
   | { kind: 'error'; message: string }
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
@@ -63,14 +74,38 @@ const VALIDATION_POLL_INTERVAL_MS = 1500
 type RecoveryDialogProps = {
   dlq: DeadLetter
   onClose: () => void
+  /**
+   * Cluster-mode props. When `clusterMembers` is set, the dialog applies
+   * the saved patch to every listed DLQ id via `POST /dlq/cluster-apply`
+   * instead of replaying just `dlq.id`. Validation still runs once on
+   * the representative `dlq` so the sandbox cost stays bounded.
+   * `clusterSignature` is required when `clusterMembers` is set — it
+   * goes into the audit metadata and the server-side signature gate.
+   */
+  clusterMembers?: string[]
+  clusterSignature?: string
+  clusterMembersCapped?: boolean
+  clusterMembersTotal?: number
 }
 
 const DESCRIPTION =
   'Janusly will analyse the failure and propose a workflow change. Review the diff before anything is saved.'
 
-export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
+export function RecoveryDialog({
+  dlq,
+  onClose,
+  clusterMembers,
+  clusterSignature,
+  clusterMembersCapped,
+  clusterMembersTotal,
+}: RecoveryDialogProps) {
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+  const isClusterMode = Array.isArray(clusterMembers) && clusterMembers.length > 0 && typeof clusterSignature === 'string'
+  const clusterMemberCount = clusterMembers?.length ?? 0
+  const clusterVisibleTotal = clusterMembersTotal && clusterMembersTotal > clusterMemberCount
+    ? clusterMembersTotal
+    : clusterMemberCount
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const canApplyPatch = step.kind === 'review'
     ? isActionableSuggestion(dlq.workflowJson, step.suggestion)
@@ -183,7 +218,9 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
   }
 
   const applyAfterValidation = async (suggestion: PatchSuggestion) => {
-    setStep({ kind: 'applying' })
+    const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
+    const total = isClusterMode ? clusterMembers!.length : undefined
+    setStep({ kind: 'applying', mode, total })
     try {
       await api('/workflows/save', {
         method: 'POST',
@@ -194,6 +231,22 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
       // replay throws — without this, a save+replay sequence that fails
       // at replay leaves panels stale until a manual refresh.
       bumpPlatformVersion()
+      if (isClusterMode) {
+        // Bulk replay — one save above + N replays in series. The route
+        // re-validates each row's signature server-side so a stale
+        // member list (rows replayed via another path between fetch and
+        // apply) is rejected per-row instead of corrupting the batch.
+        const result = await api('/dlq/cluster-apply', {
+          method: 'POST',
+          body: JSON.stringify({
+            clusterSignature,
+            deadLetterIds: clusterMembers,
+          }),
+        }) as ClusterApplyResult
+        setStep({ kind: 'applied', cluster: result })
+        bumpPlatformVersion()
+        return
+      }
       const replay = await api('/dlq/replay', {
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
@@ -246,8 +299,14 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
           {step.kind === 'idle' && (
             <p className="helper-text">
               The failing node is <code>{dlq.nodeId}</code> on run <code>{dlq.runId.slice(0, 8)}…</code> after
-              {' '}{dlq.attempt} attempt{dlq.attempt === 1 ? '' : 's'}. Click <strong>Generate suggestion</strong> to ask
-              Janusly for a patch.
+              {' '}{dlq.attempt} attempt{dlq.attempt === 1 ? '' : 's'}.
+              {isClusterMode ? (
+                <>
+                  {' '}This pattern matches <strong>{clusterMemberCount}{clusterMembersCapped ? ` of ${clusterVisibleTotal}` : ''}</strong> open DLQ entries —
+                  approving the patch will replay {clusterMembersCapped ? 'this capped batch' : 'all of them'} after the sandbox check.
+                </>
+              ) : null}
+              {' '}Click <strong>Generate suggestion</strong> to ask Janusly for a patch.
             </p>
           )}
 
@@ -278,20 +337,17 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
 
           {step.kind === 'applying' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
-              Saving the new workflow version and replaying the failed entry…
+              {step.mode === 'cluster' && step.total
+                ? `Saving the new workflow version and replaying ${step.total} matching DLQ entries…`
+                : 'Saving the new workflow version and replaying the failed entry…'}
             </p>
           )}
 
           {step.kind === 'applied' && (
-            <div className="we-recovery-success" role="alert">
-              <CheckCircle2 size={14} aria-hidden="true" />
-              <div>
-                <strong>Patch applied.</strong>
-                {step.runId
-                  ? ` Replay started — run id ${step.runId.slice(0, 8)}…`
-                  : ' DLQ entry replayed.'}
-              </div>
-            </div>
+            <AppliedBody
+              runId={step.runId}
+              cluster={step.cluster}
+            />
           )}
 
           {step.kind === 'error' && (
@@ -333,7 +389,11 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
                 disabled={!canApplyPatch}
               >
                 <Play size={14} aria-hidden="true" />
-                <span>Apply &amp; validate</span>
+                <span>
+                  {isClusterMode
+                    ? `Apply & validate (${clusterMembers!.length} entries)`
+                    : 'Apply & validate'}
+                </span>
               </button>
             </>
           )}
@@ -469,6 +529,52 @@ function ValidationFailedBody({
         aiPatchRationale={suggestion.rationale}
       />
     </>
+  )
+}
+
+function AppliedBody({
+  runId,
+  cluster,
+}: {
+  runId?: string
+  cluster?: ClusterApplyResult
+}) {
+  if (cluster) {
+    const total = cluster.replayed + cluster.failed
+    return (
+      <div className="we-recovery-success" role="alert">
+        <CheckCircle2 size={14} aria-hidden="true" />
+        <div>
+          <strong>Patch applied.</strong>
+          {' '}Replayed {cluster.replayed} of {total}
+          {cluster.failed > 0 ? `; ${cluster.failed} failed` : ''}.
+          {cluster.errors.length > 0 ? (
+            <details className="we-recovery-cluster-errors">
+              <summary>Show per-row errors ({cluster.errors.length})</summary>
+              <ul>
+                {cluster.errors.map((entry) => (
+                  <li key={entry.deadLetterId}>
+                    <code>{entry.deadLetterId.slice(0, 12)}…</code>
+                    <span className="helper-text">{entry.error}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="we-recovery-success" role="alert">
+      <CheckCircle2 size={14} aria-hidden="true" />
+      <div>
+        <strong>Patch applied.</strong>
+        {runId
+          ? ` Replay started — run id ${runId.slice(0, 8)}…`
+          : ' DLQ entry replayed.'}
+      </div>
+    </div>
   )
 }
 
