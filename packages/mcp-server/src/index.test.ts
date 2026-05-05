@@ -30,7 +30,6 @@ describe("MCP stdio server", () => {
         "tools.list",
         "workflows.get",
         "workflows.list",
-        "workflows.save",
         "workflows.validate",
       ]);
     } finally {

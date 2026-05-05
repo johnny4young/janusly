@@ -14,6 +14,7 @@
  */
 
 export * from "./runExplainer";
+export * from "./patch-workflow";
 export {
   createLlmClient,
   getLlmClient,

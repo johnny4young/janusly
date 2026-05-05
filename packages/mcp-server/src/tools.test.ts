@@ -11,7 +11,7 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the seven tools (5 read-only, 1 validation pre-flight, 1 write)", () => {
+  it("exposes the six tools (5 read-only, 1 validation pre-flight, 0 writes)", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "recipes.list",
@@ -19,7 +19,6 @@ describe("MCP tool catalog", () => {
       "tools.list",
       "workflows.get",
       "workflows.list",
-      "workflows.save",
       "workflows.validate",
     ]);
   });
@@ -85,22 +84,10 @@ describe("dispatchTool", () => {
     await expect(dispatchTool(mock, "runs.get", {})).rejects.toThrow(/runId/);
   });
 
-  it("workflows.save POSTs the workflow body to /workflows/save", async () => {
+  it("workflows.save is disabled and never calls the API", async () => {
     const { mock } = makeMockCallApi();
     const workflow = { id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
-    await dispatchTool(mock, "workflows.save", { workflow });
-    const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/workflows/save");
-    expect(init?.method).toBe("POST");
-    expect(JSON.parse(init?.body as string)).toEqual(workflow);
-  });
-
-  it("workflows.save throws when workflow is missing or not a plain object", async () => {
-    const { mock } = makeMockCallApi();
-    await expect(dispatchTool(mock, "workflows.save", {})).rejects.toThrow(/workflow.*object/);
-    await expect(dispatchTool(mock, "workflows.save", { workflow: null })).rejects.toThrow(/workflow.*object/);
-    await expect(dispatchTool(mock, "workflows.save", { workflow: [] })).rejects.toThrow(/workflow.*object/);
-    await expect(dispatchTool(mock, "workflows.save", { workflow: "not-a-workflow" })).rejects.toThrow(/workflow.*object/);
+    await expect(dispatchTool(mock, "workflows.save", { workflow })).rejects.toThrow(/disabled.*consent policy/i);
     expect(mock).not.toHaveBeenCalled();
   });
 

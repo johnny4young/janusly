@@ -1,12 +1,12 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes five read-only tools, one validation pre-flight tool, and one workflow save tool. All tools proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes five read-only tools and one validation pre-flight tool. All tools proxy HTTP to the running Janusly API.
 
 ## What is MCP and why ship a server?
 
 MCP is Anthropic's open protocol for letting AI assistants talk to external systems. An **MCP client** (e.g. Claude Desktop) speaks a JSON-RPC dialect over stdio or HTTP+SSE to one or more **MCP servers**. Each server advertises a list of *tools* (function-shaped capabilities); the client surfaces those in its UI and the model decides when to call them.
 
-By being a first-class MCP server, a developer running Claude Desktop can ask "what workflows do I have, what tools can I call from a flow, how did `run-42` actually fail" without leaving the chat. The same surface can validate and save a workflow through the API, so authored flows still pass through Janusly's normal validation, RBAC, and audit path.
+By being a first-class MCP server, a developer running Claude Desktop can ask "what workflows do I have, what tools can I call from a flow, how did `run-42` actually fail" without leaving the chat. The same surface can validate a workflow through the API, so authored flows can be checked before an operator saves them in Janusly.
 
 ## Architecture: protocol-translation layer over the HTTP API
 
@@ -30,12 +30,12 @@ The MCP server is intentionally **not** a second consumer of the database. Every
 - **Auth** — dev headers (`x-org-id` / `x-user-id`) when Supabase is unset and `NODE_ENV !== "production"`, or service-token mode (`Authorization: Bearer <API_SERVICE_TOKEN>`).
 - **Multi-tenant scope** — every Drizzle query carries `eq(<table>.orgId, auth.orgId)`.
 - **Rate limiting** — `apps/api/src/rate-limit.ts` gates AI surfaces; MCP tools inherit API-side controls because the server never bypasses the HTTP layer.
-- **Audit logs** — `workflows.save` writes the same `workflow.saved` audit row as the web UI. Read tools and `workflows.validate` have no side effects.
+- **Audit logs** — read tools and `workflows.validate` have no side effects. MCP write tools stay unavailable until the explicit consent/audit policy lands.
 
 The proxy choice is the most important architectural decision. It means:
 
 - We don't duplicate org scope in two places (a known footgun in any system that grows a "second backend").
-- Write tools inherit `requireRole`, audit, and rate-limit by going through the same API.
+- Future write tools must inherit `requireRole`, audit, and rate-limit by going through the same API after the consent policy exists.
 - The MCP server itself stays small — it's a JSON-RPC dispatcher over named API calls.
 
 ## Transport: stdio
@@ -54,7 +54,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `tools.list`         | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
 | `runs.get`           | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
 | `workflows.validate` | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
-| `workflows.save`     | `POST /workflows/save`                                      | Save a workflow through the API's editor-role and audit path.           |
+
+`workflows.save` is intentionally not advertised and direct calls are rejected until the MCP write consent policy exists. Save workflows through the Janusly UI/API for now.
 
 Every tool returns a single MCP `text` content block carrying the API response JSON-stringified. That's the documented MCP convention for "data-shaped" results; the AI client reads it as text and reasons over it. Future tools could surface structured `resource` content blocks if the UX warrants.
 
@@ -134,4 +135,4 @@ packages/mcp-server/
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
 4. Bump the package version if anything is downstream-visible.
 
-Write tools must go through the API, keep RBAC at the route layer, and rely on API-side audit rows. Do not add destructive tools directly in this package.
+Write tools must stay unavailable until the MCP write consent policy exists. Once enabled, they must go through the API, keep RBAC at the route layer, and rely on API-side audit rows. Do not add destructive tools directly in this package.

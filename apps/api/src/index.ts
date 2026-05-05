@@ -51,7 +51,7 @@ import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetrics
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { createLlmClient, explainRun, resolveLlmConfig, setUsageRecorder } from "@janusly/ai";
+import { createLlmClient, explainRun, resolveLlmConfig, setUsageRecorder, suggestWorkflowPatch, RUN_EVENT_PROMPT_CAP, type PatchSuggestion } from "@janusly/ai";
 import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
@@ -1042,6 +1042,108 @@ export const routes: Route[] = [
           review: buildReviewFallback(workflow),
         });
       }
+    } },
+
+  // Failure recovery — suggest a workflow patch for a failing DLQ entry.
+  // Loads the failing workflow + run events from the persisted DLQ row,
+  // hands them to the LLM with a structured-output schema reusing
+  // `AiGenerationWorkflowSchema`, sanitizes the output through the same
+  // grammar gate the generation route uses, and returns the suggestion
+  // envelope for the recovery dialog. Audits both AI-mode and fallback
+  // paths per the AGENTS.md AI-mutation contract.
+  { method: "POST", match: "/ai/patch-workflow", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
+      if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+
+      // Multi-tenant gate via the existing repo helper.
+      const dlq = await getDeadLetter(auth.orgId, deadLetterId);
+      if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
+
+      // Recent events around the failure for run context. Multi-tenant
+      // scope flows through runs.orgId on the run row.
+      const run = await db.select().from(runs).where(eq(runs.id, dlq.runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) {
+        return sendJson(res, { error: "Run not found" }, 404);
+      }
+      const events = (await db
+        .select({
+          type: runEvents.type,
+          nodeId: runEvents.nodeId,
+          payload: runEvents.payload,
+          createdAt: runEvents.createdAt,
+        })
+        .from(runEvents)
+        .where(eq(runEvents.runId, dlq.runId))
+        .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
+        .limit(RUN_EVENT_PROMPT_CAP)).reverse();
+
+      // Structured-output envelope: reuses the existing 11-type AI
+      // generation union for the workflow side so the LLM emits the
+      // same grammar `/ai/generate-workflow` does. Rationale is a
+      // free-text paragraph the recovery dialog renders next to the diff.
+      const PatchEnvelopeSchema = z.object({
+        workflow: AiGenerationWorkflowSchema,
+        rationale: z.string().min(1),
+      });
+
+      let suggestion: PatchSuggestion = await suggestWorkflowPatch({
+        llm,
+        envelopeSchema: PatchEnvelopeSchema,
+        workflow: dlq.workflowJson,
+        failedNodeId: dlq.nodeId,
+        errorJson: safePersistPayload(dlq.errorJson ?? null),
+        // Pass every event payload through the persistence chokepoint
+        // before it leaves the API boundary. `safe-persist` was applied at
+        // write time which key-redacted known sensitive keys, but free-form
+        // value content (e.g. an `http` node's response body) survives
+        // verbatim — a re-application here scrubs any nested
+        // sensitive-keyed fields that landed inside an inner object since
+        // the original write. Defense in depth: never ship the prompt to a
+        // remote LLM with un-scrubbed payloads.
+        runEvents: events.map((event) => ({
+          type: event.type,
+          nodeId: event.nodeId ?? null,
+          payload: safePersistPayload(event.payload ?? null),
+          createdAt: event.createdAt ?? null,
+        })),
+      });
+
+      // Sanitize on AI-mode through the same grammar gate the generation
+      // route uses. Schema-validation failures and sanitize throws both
+      // degrade to fallback so the response shape stays consistent.
+      if (suggestion.mode === "ai") {
+        try {
+          const parsed = WorkflowSchema.safeParse(suggestion.suggestedWorkflow);
+          if (!parsed.success) {
+            throw new Error(`AI workflow failed strict schema: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+          }
+          suggestion = {
+            ...suggestion,
+            suggestedWorkflow: sanitizeAiWorkflow(parsed.data),
+          };
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          suggestion = {
+            mode: "fallback",
+            suggestedWorkflow: dlq.workflowJson,
+            rationale: `AI returned a workflow that didn't pass the engine's grammar gate. The original workflow is unchanged. Reason: ${reason}`,
+            aiError: `Sanitize failed: ${reason}`,
+          };
+        }
+      }
+
+      await audit(auth.orgId, auth.userId, "ai.workflow.patch_suggested", "dlq", deadLetterId, {
+        mode: suggestion.mode,
+        model: suggestion.model,
+        provider: suggestion.provider,
+        aiError: suggestion.aiError,
+      });
+
+      return sendJson(res, suggestion);
     } },
 
   { method: "POST", match: "/ai/explain-run",
