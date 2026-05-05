@@ -179,7 +179,7 @@ Goal: open Claude Desktop / Cursor / Continue.dev and say "build me a workflow t
 | `janusly.workflows.list` | `GET /workflows` | Paginated. |
 | `janusly.workflows.get` | `GET /workflows/latest?workflowId=...` | Returns the DAG. |
 | `janusly.workflows.draft_from_prompt` | `POST /ai/generate-workflow` | Returns the draft DAG without saving — the chat agent reviews. |
-| `janusly.workflows.save` | `POST /workflows/save` | Creates a new version. |
+| `janusly.workflows.save` | `POST /workflows/save` | Future write tool; disabled until the MCP write consent/audit policy lands. |
 | `janusly.workflows.validate` | `POST /validate` | Pre-save validation. |
 | `janusly.workflows.run` | `POST /start` | Dev-mode only by default; production needs explicit consent. |
 | `janusly.runs.get` | `GET /run?runId=...` | Run status and events. |
@@ -625,7 +625,7 @@ Goal: workflows can do real business work.
 - Add tool catalog Layer 1 (text, json, csv, time, crypto) + Layer 2 essentials (`email.send`, `pdf.generate`, `db.query.*`).
 - Workflow inputs schema + outputs mapping.
 - Diff UX: "what changed in v4 vs v3" + AI patch preview before apply.
-- MCP server write tools (`workflows.save`, `workflows.validate`).
+- MCP server validation pre-flight (`workflows.validate`); write tools wait for the MCP consent/audit policy.
 - Run cancellation (already documented in `docs/architecture/run-cancellation.md`).
 
 Definition of done: ship 3 of the §9 use cases as ready-to-fork recipes (refund triage, lead enrich, scheduled summarizer).
