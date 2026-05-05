@@ -69,6 +69,17 @@ type ToolDefinition<
     input: z.infer<TIn>,
     context: Record<string, unknown>,
   ) => Promise<z.infer<TOut>>;
+  /**
+   * True when this tool can mutate external state and should be skipped
+   * in sandbox/validation runs (`runs.replayMode === "validation"`,
+   * surfaced as `NodeContext.dryRun`). The tool node executor checks
+   * this flag before invoking the tool and, for invocations where the
+   * write-side intent depends on the input (e.g. `http.request` only
+   * mutates on non-safe HTTP methods), refines further before deciding
+   * whether to skip. Pure transformation tools (text / json / csv /
+   * time / crypto) leave this unset.
+   */
+  writeSide?: boolean;
 };
 
 /**
@@ -345,6 +356,7 @@ const tools = {
     inputSchema: httpRequestInput,
     outputSchema: httpRequestOutput,
     inputExample: { url: "https://example.com", method: "GET" },
+    writeSide: true,
     async execute(input) {
       const result = await fetchHttpTarget(input.url, {
         method: input.method ?? "GET",
@@ -740,6 +752,21 @@ export function validateToolInput(name: string, input: unknown): { valid: boolea
  * @throws when the tool name is unregistered, the input fails the schema, or
  *         the executor returns a value that doesn't match the output schema.
  */
+/**
+ * Whether a registered tool is flagged write-side (mutates external state)
+ * and should be skipped in sandbox/validation runs. Returns `false` for
+ * unknown names so a typo doesn't accidentally short-circuit tool calls.
+ *
+ * Note: for tools whose write-side intent depends on the input (e.g.
+ * `http.request` only mutates on non-safe HTTP methods), the caller must
+ * refine further by inspecting the input. This helper only reports the
+ * registration-time flag.
+ */
+export function isToolWriteSide(name: string): boolean {
+  const tool = tools[name as RegisteredTool];
+  return tool?.writeSide === true;
+}
+
 export async function executeTool(
   name: string,
   input: unknown,

@@ -5,7 +5,7 @@ vi.mock('./http-policy', () => ({
 }))
 
 import { fetchHttpTarget } from './http-policy'
-import { listTools, validateToolInput, executeTool } from './tool-registry'
+import { listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
 
@@ -97,6 +97,14 @@ describe('tool-registry', () => {
     await expect(
       executeTool('http.request', { url: 'https://example.com' }, {}),
     ).rejects.toThrow('Tool http.request returned invalid output')
+  })
+
+  it('isToolWriteSide flags http.request and ignores read-side tools', () => {
+    expect(isToolWriteSide('http.request')).toBe(true)
+    expect(isToolWriteSide('text.uppercase')).toBe(false)
+    expect(isToolWriteSide('json.pick')).toBe(false)
+    expect(isToolWriteSide('time.now')).toBe(false)
+    expect(isToolWriteSide('does.not.exist')).toBe(false)
   })
 
   it('listTools derives required and optional from each input schema', () => {

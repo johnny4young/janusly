@@ -34,7 +34,7 @@ import {
   type OrgConfigSnapshot,
 } from "@janusly/data/src/orgConfigRepo";
 import { evaluateExpression } from "./expression";
-import { executeTool } from "./tool-registry";
+import { executeTool, isToolWriteSide } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 import { appendEvent } from "./persistence";
 import { getRunMemory, summarizeMemory } from "./memory";
@@ -56,7 +56,21 @@ export type NodeContext = {
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
   redactedValues?: string[];
+  /**
+   * True when this node is executing inside a sandbox/validation run
+   * (`runs.replayMode === "validation"`). Plumbed by `executeNode` from
+   * the run row. Write-side actions — HTTP non-safe methods (POST / PUT
+   * / PATCH / DELETE), tools flagged `writeSide` in the registry — are
+   * gated when this is true: the executor emits a `node.dry_run.skipped`
+   * (or `tool.dry_run.skipped`) event and returns a stub result instead
+   * of mutating external state. Read-side actions still execute so the
+   * validation run produces a real terminal status.
+   */
+  dryRun?: boolean;
 };
+
+/** HTTP methods that read state without mutating it; safe to execute in dryRun mode. */
+const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export type NodeExecutionResult =
   | { status: "completed"; output?: Record<string, unknown> }
@@ -238,9 +252,24 @@ function aggregateCrewResults(results: any[], strategy = "last") {
 export const nodeRegistry: Record<string, NodeExecutor> = {
   http: async (ctx) => {
     const { url, method, headers, body, timeoutMs, maxResponseBytes, maxRedirects } = ctx.config;
+    const resolvedMethod = (method ?? "GET").toUpperCase();
+
+    // In sandbox/validation mode, skip non-safe methods so the validation
+    // run can't double-charge an external API or insert a duplicate row.
+    // Read-side methods (GET / HEAD / OPTIONS) still execute — they give
+    // the validation real signal without mutating external state.
+    if (ctx.dryRun && !SAFE_HTTP_METHODS.has(resolvedMethod)) {
+      await appendEvent(ctx.runId, ctx.nodeId, "node.dry_run.skipped", {
+        reason: "write-side HTTP method skipped in validation mode",
+        method: resolvedMethod,
+        url,
+      });
+      return { status: "completed", output: { statusCode: 0, ok: true, body: null, dryRun: true } };
+    }
+
     const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const result = await fetchHttpTarget(url, {
-      method: method ?? "GET",
+      method: resolvedMethod,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       // Optional bounds — nodes that fetch large payloads or call slow APIs
@@ -279,6 +308,26 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     const toolInput = tool === "http.request"
       ? withHttpToolDefaults(tool, mappedInput, await getOrgConfigSnapshot(ctx.orgId))
       : mappedInput;
+
+    // In sandbox/validation mode, skip write-side tool invocations.
+    // For `http.request` the write-side intent depends on the method —
+    // safe methods (GET / HEAD / OPTIONS) still execute so the validation
+    // run can read state without mutating it; non-safe methods are
+    // skipped to avoid double-charging external APIs.
+    if (ctx.dryRun && isToolWriteSide(tool)) {
+      const inputObj = (toolInput ?? {}) as Record<string, unknown>;
+      const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
+      const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
+      if (!isHttpRead) {
+        await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", {
+          reason: "write-side tool skipped in validation mode",
+          tool,
+          method: tool === "http.request" ? method : undefined,
+        });
+        return { status: "completed", output: { tool, dryRun: true, skipped: true } };
+      }
+    }
+
     await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: toolInput });
     const result = await executeTool(tool, toolInput, ctx.context);
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
