@@ -27,6 +27,7 @@ import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
+import { OperationsPanel } from './OperationsPanel'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 
@@ -100,6 +101,7 @@ export function RightPanel(props: RightPanelProps) {
       <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
     </PanelChrome>
   )
+  if (props.tab === 'operations') return <OperationsPanel />
   if (props.tab === 'members') return (
     <PanelChrome title="Team" description="Invite teammates and choose what they can operate." icon={<Users size={18} />}>
       <MembersPanel />
