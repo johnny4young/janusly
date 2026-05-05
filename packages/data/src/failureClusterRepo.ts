@@ -45,6 +45,8 @@ export type FailureSample = {
   toolName?: string;
   /** The error envelope as persisted; safe-persist already key-redacted before this point. */
   errorJson: unknown;
+  /** DLQ status for `dead_letter` samples. Absent for `failed_run_node` samples. */
+  status?: string;
   createdAt: Date;
 };
 
@@ -81,6 +83,7 @@ async function queryDeadLetters(orgId: string, since: Date, limit: number): Prom
       workflowJson: deadLetters.workflowJson,
       nodeJson: deadLetters.nodeJson,
       errorJson: deadLetters.errorJson,
+      status: deadLetters.status,
       createdAt: deadLetters.createdAt,
       workflowId: workflowVersions.workflowId,
       workflowName: workflows.name,
@@ -113,6 +116,7 @@ async function queryDeadLetters(orgId: string, since: Date, limit: number): Prom
       nodeType: extractNodeType(row.nodeJson),
       toolName: extractToolName(row.nodeJson),
       errorJson: row.errorJson,
+      status: row.status,
       createdAt: row.createdAt ?? new Date(0),
     };
   });
