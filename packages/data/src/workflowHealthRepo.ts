@@ -30,7 +30,7 @@
 
 import { db } from "@janusly/db";
 import { runs, runEvents, deadLetters, usageEvents, workflowVersions } from "@janusly/db";
-import { and, asc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 
 /**
  * Run-time signals collected for one workflow over a rolling window.
@@ -81,6 +81,10 @@ export async function collectHealthSignals(
       eq(workflowVersions.orgId, orgId),
       eq(workflowVersions.workflowId, workflowId),
       gte(runs.createdAt, since),
+      // Exclude sandbox/validation runs — they execute in dryRun mode
+      // (skipping write-side actions) and would skew reliability,
+      // latency, and cost signals against production runs.
+      isNull(runs.replayMode),
     ));
 
   const totalRuns = runRows.length;

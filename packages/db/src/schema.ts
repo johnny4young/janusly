@@ -150,12 +150,24 @@ export const runs = pgTable(
      * Column is NULL for top-level runs that aren't part of a subworkflow chain.
      */
     traceId: text("trace_id"),
+    /**
+     * Optional replay-mode tag. NULL for production runs; `"validation"`
+     * for sandbox runs created by the recovery dialog's "Validating fix…"
+     * step before the operator commits the patched workflow. Validation
+     * runs are intentionally excluded from health, cluster, and recovery
+     * metric rollups so they don't pollute production signals. Engine
+     * executors read this through `NodeContext.dryRun` and gate
+     * write-side actions (HTTP non-safe methods, tools flagged
+     * `writeSide`) when set.
+     */
+    replayMode: text("replay_mode"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
     index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
     index("runs_parent_idx").on(table.parentRunId),
+    index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
   ],
 );
 

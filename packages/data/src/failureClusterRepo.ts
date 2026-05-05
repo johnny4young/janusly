@@ -28,7 +28,7 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, runNodes, runs, workflowVersions, workflows } from "@janusly/db";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 
 /** One row read from either `dead_letters` or a failed `run_nodes` row. */
 export type FailureSample = {
@@ -92,6 +92,11 @@ async function queryDeadLetters(orgId: string, since: Date, limit: number): Prom
     .where(and(
       eq(deadLetters.orgId, orgId),
       gte(deadLetters.createdAt, since),
+      // Sandbox/validation runs (`runs.replayMode = "validation"`) emit
+      // dry-run skip events instead of executing write-side actions, so
+      // any DLQ rows attached to them are sandbox failures, not
+      // production failures — exclude from cluster signals.
+      isNull(runs.replayMode),
     ))
     .orderBy(desc(deadLetters.createdAt))
     .limit(limit);
@@ -139,6 +144,11 @@ async function queryFailedRunNodes(orgId: string, since: Date, limit: number): P
     .where(and(
       eq(runs.orgId, orgId),
       eq(runNodes.status, "failed"),
+      // Sandbox/validation runs (`runs.replayMode = "validation"`)
+      // intentionally fail the failing node from the operator's
+      // perspective when the patch doesn't unstick; that's a sandbox
+      // signal, not a production failure — exclude from cluster signals.
+      isNull(runs.replayMode),
       // Force ISO 8601 for the timestamptz comparison. Inside a `sql`
       // template, `${since}` (a JS Date) is rendered via `String()`
       // which yields the JS `Date.toString()` form ("Sat Apr 04 2026

@@ -68,6 +68,21 @@ export async function getRunOrgId(runId: string): Promise<string | null> {
   return rows[0]?.orgId ?? null;
 }
 
+/**
+ * Resolve the optional `replayMode` tag on a run. Sister to `getRunOrgId`,
+ * loaded once per node execution by `executeNode` so `NodeContext.dryRun`
+ * can be set when this is `"validation"`. Returns `null` for production
+ * runs and for missing rows; callers treat both as "not a sandbox run."
+ */
+export async function getRunReplayMode(runId: string): Promise<string | null> {
+  const rows = await db
+    .select({ replayMode: runs.replayMode })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .limit(1);
+  return rows[0]?.replayMode ?? null;
+}
+
 /** Stable per-run metadata loaded once at runtime entry: org scope, the
  *  active workflow-version pointer, the workflow id (resolved through the
  *  versions table), and the user who started the run. */
