@@ -16,7 +16,7 @@
  */
 
 import { nodeRegistry } from "./node-registry";
-import { getRunContext, getRunOrgId } from "./persistence";
+import { getRunContext, getRunOrgId, getRunReplayMode } from "./persistence";
 import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 
@@ -45,6 +45,14 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     throw new Error(`Cannot execute node: run ${runId} not found`);
   }
 
+  // Sandbox/validation runs (`runs.replayMode === "validation"`) carry a
+  // dryRun flag through every node execution so write-side actions
+  // (HTTP non-safe methods, tools flagged `writeSide`) can be skipped
+  // without committing external state. Loaded once per node execution,
+  // same pattern as `getRunOrgId`.
+  const replayMode = await getRunReplayMode(runId);
+  const dryRun = replayMode === "validation";
+
   const context = await getRunContext(runId);
 
   const scope = {
@@ -63,6 +71,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
       config: resolvedConfig,
       context,
       redactedValues,
+      dryRun,
     });
   } catch (err) {
     throw redactError(err, redactedValues);

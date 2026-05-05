@@ -1245,6 +1245,69 @@ export const routes: Route[] = [
 
       return sendJson(res, { ok: true });
     } },
+  // Sandbox replay — execute the failing DLQ entry against a proposed
+  // workflow patch in a fresh validation run WITHOUT writing a
+  // `workflow_versions` row. Recovery dialog calls this between Review
+  // and Apply; the production save+replay only fires after the
+  // validation run reaches `succeeded`. Validation runs carry
+  // `runs.replayMode = "validation"` so they're excluded from health,
+  // cluster, and recovery metric rollups, and so the engine's HTTP and
+  // tool executors can gate write-side actions via `NodeContext.dryRun`.
+  { method: "POST", match: "/dlq/validate-fix", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+
+      const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
+      if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+      const suggestedWorkflow = body.suggestedWorkflow;
+      if (!suggestedWorkflow || typeof suggestedWorkflow !== "object") {
+        return sendJson(res, { error: "suggestedWorkflow is required" }, 400);
+      }
+
+      const item = await getDeadLetter(auth.orgId, deadLetterId);
+      if (!item) return sendJson(res, { error: "DLQ entry not found" }, 404);
+
+      // Validate the proposed workflow through the same grammar gate
+      // `/ai/patch-workflow` runs on its output: strict schema parse +
+      // expression-grammar sanitization. Reject early so the validation
+      // run can't be seeded with a malformed DAG.
+      const parsed = WorkflowSchema.safeParse(suggestedWorkflow);
+      if (!parsed.success) {
+        return sendJson(res, {
+          error: `suggestedWorkflow failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+        }, 400);
+      }
+      let sanitized: Workflow;
+      try {
+        sanitized = sanitizeAiWorkflow(parsed.data);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return sendJson(res, { error: `suggestedWorkflow sanitize failed: ${reason}` }, 400);
+      }
+
+      const failingNode = sanitized.nodes.find((n) => n.id === item.nodeId);
+      if (!failingNode) {
+        return sendJson(res, {
+          error: `suggestedWorkflow does not contain the failing node id "${item.nodeId}"`,
+        }, 400);
+      }
+
+      const { runId } = await dlqReplay.replayDeadLetterAsValidation({
+        orgId: auth.orgId,
+        originalRunId: item.runId,
+        suggestedWorkflow: sanitized,
+        failingNode,
+        createdBy: auth.userId,
+      });
+
+      await audit(auth.orgId, auth.userId, "recovery.validation_started", "dlq", deadLetterId, {
+        validationRunId: runId,
+      });
+
+      return sendJson(res, { runId });
+    } },
   { method: "POST", match: "/dlq/replay", role: "editor",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
