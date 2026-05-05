@@ -23,6 +23,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, Play, Sparkles, X } from 'lucide-react'
+import { computeWorkflowDiff } from '@janusly/shared/src/workflow-diff'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
@@ -58,6 +59,9 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const canApplyPatch = step.kind === 'review'
+    ? isActionableSuggestion(dlq.workflowJson, step.suggestion)
+    : false
 
   // Focus the primary action on mount so keyboard users can hit Enter.
   useEffect(() => { primaryRef.current?.focus() }, [])
@@ -167,7 +171,7 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
           )}
 
           {step.kind === 'review' && (
-            <ReviewBody suggestion={step.suggestion} dlq={dlq} />
+            <ReviewBody suggestion={step.suggestion} dlq={dlq} canApplyPatch={canApplyPatch} />
           )}
 
           {step.kind === 'applying' && (
@@ -224,7 +228,7 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
                 ref={primaryRef}
                 className="command-button command-button-primary"
                 onClick={applyPatch}
-                disabled={step.suggestion.mode === 'fallback'}
+                disabled={!canApplyPatch}
               >
                 <Play size={14} aria-hidden="true" />
                 <span>Apply &amp; replay</span>
@@ -270,7 +274,15 @@ export function RecoveryDialog({ dlq, onClose }: RecoveryDialogProps) {
   )
 }
 
-function ReviewBody({ suggestion, dlq }: { suggestion: PatchSuggestion; dlq: DeadLetter }) {
+function ReviewBody({
+  suggestion,
+  dlq,
+  canApplyPatch,
+}: {
+  suggestion: PatchSuggestion
+  dlq: DeadLetter
+  canApplyPatch: boolean
+}) {
   return (
     <>
       {suggestion.mode === 'fallback' && (
@@ -280,6 +292,15 @@ function ReviewBody({ suggestion, dlq }: { suggestion: PatchSuggestion; dlq: Dea
             <strong>AI was unavailable.</strong> The original workflow is shown below — Apply is disabled because there's
             nothing to change.
             {suggestion.aiError ? ` Reason: ${suggestion.aiError}` : null}
+          </div>
+        </div>
+      )}
+      {suggestion.mode === 'ai' && !canApplyPatch && (
+        <div className="we-recovery-warning" role="alert">
+          <AlertCircle size={14} aria-hidden="true" />
+          <div>
+            <strong>No structural patch was returned.</strong> Review the rationale and make the Inspector change manually
+            before replaying.
           </div>
         </div>
       )}
@@ -296,4 +317,15 @@ function ReviewBody({ suggestion, dlq }: { suggestion: PatchSuggestion; dlq: Dea
 
 function describeDeadLetter(dlq: DeadLetter): string {
   return `Recover ${dlq.nodeId} on run ${dlq.runId.slice(0, 8)}…`
+}
+
+function isActionableSuggestion(currentWorkflow: unknown, suggestion: PatchSuggestion): boolean {
+  if (suggestion.mode !== 'ai') return false
+  const diff = computeWorkflowDiff(toWorkflow(currentWorkflow), toWorkflow(suggestion.suggestedWorkflow))
+  return diff.summary.totalChanges > 0
+}
+
+function toWorkflow(value: unknown): WorkflowDefinition {
+  if (value && typeof value === 'object') return value as WorkflowDefinition
+  return { dslVersion: '1.0', nodes: [], edges: [] }
 }
