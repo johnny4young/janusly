@@ -91,10 +91,15 @@ const SYSTEM_PROMPT = `You are Janusly's failure-recovery agent. You are given a
 Produce a structured patch that fixes the cause. Rules:
 - Output a complete updated Workflow object (every node, every edge), NOT a delta.
 - Keep node ids stable. Keep edge from/to/condition stable unless an edge change is the fix.
-- Modify only the failing node's config when possible (e.g. fix a typo in a URL, swap a literal token to \`{{secret.NAME}}\` / \`{{credential.NAME}}\` / \`{{env.NAME}}\` template reference, or change the HTTP method). Resilience knobs (\`retry\`, \`timeoutMs\`, response-size cap) are surfaced via the rationale text — the operator applies those via the Inspector after seeing the suggestion.
+- Modify only the failing node's config when possible (e.g. fix a typo in a URL, swap a literal token to \`{{secret.NAME}}\` / \`{{credential.NAME}}\` / \`{{env.NAME}}\` template reference, or change the HTTP method).
+- Resilience fixes belong in \`config\` directly. When the failure is transient (5xx, network reset, timeout, body-cap exceeded), set the relevant resilience field on the failing node and reference the same change in the rationale:
+  - \`config.retry: { maxAttempts: <2-5> }\` — for transient retryable failures (5xx, ECONNRESET, ETIMEDOUT). Pick a small integer; maxAttempts must be at least 2 because 1 means no retry. The engine fills sensible defaults for delay and backoff.
+  - \`config.timeoutMs: <milliseconds>\` — when the failure is a timeout. Default is 30000 ms; raise modestly (60000-120000) rather than removing the bound.
+  - \`config.maxResponseBytes: <bytes>\` — when the failure is a body-cap rejection. Default is 1048576 (1 MB); raise to 5242880 (5 MB) or 10485760 (10 MB) when the response is legitimately larger.
+  - \`config.maxRedirects: <integer>\` — when the failure is a redirect-loop or insufficient redirects. Default is 5.
 - Do NOT add unrelated nodes or remove existing nodes.
 - Do NOT include any secret values verbatim.
-- Provide a one-paragraph \`rationale\` explaining what you changed and why, written for a workflow operator (not a developer).`;
+- Provide a one-paragraph \`rationale\` explaining what you changed and why, written for a workflow operator (not a developer). When you set a resilience field, name the field and the value you chose so the operator can verify.`;
 
 /**
  * Propose a workflow patch for a failed run. Never throws — every

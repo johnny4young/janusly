@@ -76,209 +76,13 @@ import {
   orgMembers,
 } from "@janusly/db";
 import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
-import { EdgeSchema, NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import { z } from "zod";
-
-/**
- * Schema used by `/ai/generate-workflow` ONLY. Different from the engine's
- * strict `WorkflowSchema` for two reasons:
- *
- *   1. **`WorkflowInputSchema` is recursive** (`z.lazy(() => z.object({
- *      properties: z.record(...), items: WorkflowInputSchema, ... }))`). The
- *      AI SDK's Zod-to-JSON-Schema converter emits a self-`$ref` that
- *      Anthropic's provider rejects ("circular reference detected") and
- *      OpenAI's strict mode separately rejects via the `propertyNames`
- *      keyword `z.record(z.string(), X)` produces. Both `inputs` and
- *      `outputs` are operator-curated — the AI prompt doesn't mention them —
- *      so the AI-side schema omits them entirely.
- *
- *   2. **The engine's `NodeSchema.config` is `z.record(z.string(),
- *      z.unknown())`** — every node type accepts any object. That makes
- *      sense at the engine layer (each executor parses its own config), but
- *      at AI-generation time the model needs to know which fields are
- *      required per node type. Without that, a prompt like "create a router
- *      that picks between fast_path and accurate_path" gets a router with
- *      empty `candidates: []` and HTTP nodes with no `url`, which
- *      `validateWorkflow` then rightly rejects as malformed. The
- *      discriminated union below pins each node type to its required config
- *      shape, so the model is forced (at structured-output enforcement
- *      time) to populate `url` for `http`, `candidates` for `router`,
- *      `expression` for `condition`, etc.
- *
- * The post-generation `sanitizeAiWorkflow` step re-validates the model's
- * output against the strict engine `WorkflowSchema`, so the engine's parse
- * contract is unchanged. Adding a new node type means adding a branch here
- * AND adding it to `nodeTypeValues` in `@janusly/shared`.
- */
-// Schema constraints to keep in mind:
-//   - Anthropic structured output rejects empty `{}` schemas (`z.unknown()`,
-//     `z.any()`) with "Empty schema that accepts any JSON value is not
-//     supported." Every field below has a concrete type.
-//   - Anthropic limits total optional parameters across the schema to 24
-//     for grammar compilation. We aggressively drop nice-to-have optionals
-//     (tuning fields like `timeoutMs`, `model`, `planner`, scoring stats on
-//     candidates, etc.) that the operator can fill in the Inspector after
-//     generation. Required fields per node type stay; the AI must populate
-//     them or the structured-output enforcement rejects the response.
-
-const AiCandidateSchema = z.object({
-  nodeId: z.string().min(1),
-});
-
-const AiHttpNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("http"),
-  config: z.object({
-    url: z.string().min(1),
-    method: z.string().optional(),
-  }),
-});
-
-const AiNoopNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("noop"),
-  config: z.object({}),
-});
-
-const AiTransformNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("transform"),
-  config: z.object({
-    mapping: z.record(z.string(), z.string()),
-  }),
-});
-
-const AiConditionNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("condition"),
-  config: z.object({
-    expression: z.string().min(1),
-  }),
-});
-
-const AiAiNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("ai"),
-  config: z.object({
-    prompt: z.string().min(1),
-  }),
-});
-
-const AiToolNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("tool"),
-  config: z.object({
-    tool: z.string().min(1),
-  }),
-});
-
-const AiAgentNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("agent"),
-  config: z.object({
-    goal: z.string().min(1),
-  }),
-});
-
-const AiRouterNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("router"),
-  config: z.object({
-    candidates: z.array(AiCandidateSchema).min(1),
-    strategy: z.enum(["cheapest", "fastest", "balanced", "auto"]).optional(),
-  }),
-});
-
-const AiApprovalNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("approval"),
-  config: z.object({
-    message: z.string().optional(),
-  }),
-});
-
-const AiMultiAgentNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("multi_agent"),
-  config: z.object({
-    goal: z.string().min(1),
-    agents: z.array(z.object({
-      name: z.string().min(1),
-      role: z.string().min(1),
-      goal: z.string().min(1),
-    })).min(1),
-  }),
-});
-
-const AiLoopNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("loop"),
-  config: z.object({
-    // Comma-separated template string. Array form is filled by the operator
-    // in the Inspector when needed.
-    items: z.string().min(1),
-  }),
-});
-
-// AI generation emits 11 of the engine's 16 node types. Anthropic's
-// structured-output grammar compiler caps schema size — empirically the
-// limit is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
-// `claude-opus-4-7` (all three accept up to 11 branches with the full
-// envelope below; 12+ rejects with "The compiled grammar is too large").
-// The remaining 5 (`wait_until`, `webhook`, `agent_reflection`,
-// `router_llm`, `subworkflow`) stay operator-only — AI emits a `noop`
-// placeholder named after the requested step and the operator promotes it
-// in the Inspector. The engine's strict `WorkflowSchema` (used by /save,
-// /start, /validate) still accepts all 16, so once a workflow leaves AI
-// generation it has full expressiveness. Re-evaluate the cap when a
-// provider exposes a larger grammar limit (or when a two-pass generation
-// path lets a noop placeholder be promoted to one of the omitted types in
-// a follow-up call with a tighter, single-type schema).
-const AiNodeSchema = z.discriminatedUnion("type", [
-  AiNoopNode,
-  AiHttpNode,
-  AiTransformNode,
-  AiConditionNode,
-  AiAiNode,
-  AiToolNode,
-  AiAgentNode,
-  AiRouterNode,
-  AiApprovalNode,
-  AiMultiAgentNode,
-  AiLoopNode,
-]);
-
-const AiGenerationWorkflowSchema = z.object({
-  dslVersion: z.literal("1.0").optional(),
-  id: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-  nodes: z.array(AiNodeSchema),
-  edges: z.array(EdgeSchema),
-});
-
-/**
- * Schema for `/ai/review-workflow` structured output. Each finding is a
- * concrete-typed object — no `z.unknown()` (Anthropic's structured-output
- * surface rejects empty `{}` schemas), no recursion (Anthropic + AI SDK
- * reject self-`$ref`), and a hard `max(50)` cap on the issue array so a
- * hallucinating model can't dump a wall of text. The shape matches
- * `ReviewFindings` from `@janusly/engine/src/workflow-review-fallback`,
- * so the AI-mode and fallback responses are wire-compatible.
- */
-const ReviewFindingSchema = z.object({
-  code: z.string().min(1),
-  severity: z.enum(["info", "warn", "fail"]),
-  message: z.string().min(1),
-  nodeId: z.string().optional(),
-  edgeId: z.string().optional(),
-  rationale: z.string().min(1),
-  suggestion: z.string().min(1),
-});
-
-const ReviewFindingsSchema = z.object({
-  status: z.enum(["pass", "warn", "fail"]),
-  issues: z.array(ReviewFindingSchema).max(50),
-});
+import {
+  AiGenerationWorkflowSchema,
+  AiPatchGenerationWorkflowSchema,
+  ReviewFindingsSchema,
+} from "./ai-schemas";
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -1046,11 +850,13 @@ export const routes: Route[] = [
 
   // Failure recovery — suggest a workflow patch for a failing DLQ entry.
   // Loads the failing workflow + run events from the persisted DLQ row,
-  // hands them to the LLM with a structured-output schema reusing
-  // `AiGenerationWorkflowSchema`, sanitizes the output through the same
-  // grammar gate the generation route uses, and returns the suggestion
-  // envelope for the recovery dialog. Audits both AI-mode and fallback
-  // paths per the AGENTS.md AI-mutation contract.
+  // hands them to the LLM with `AiPatchGenerationWorkflowSchema` (parallel
+  // to the generation schema but with richer http/tool/agent configs so
+  // retry / timeout / bounds fixes survive the structured-output
+  // boundary), sanitizes the output through the same grammar gate the
+  // generation route uses, and returns the suggestion envelope for the
+  // recovery dialog. Audits both AI-mode and fallback paths per the
+  // AGENTS.md AI-mutation contract.
   { method: "POST", match: "/ai/patch-workflow", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
@@ -1081,12 +887,17 @@ export const routes: Route[] = [
         .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
         .limit(RUN_EVENT_PROMPT_CAP)).reverse();
 
-      // Structured-output envelope: reuses the existing 11-type AI
-      // generation union for the workflow side so the LLM emits the
-      // same grammar `/ai/generate-workflow` does. Rationale is a
-      // free-text paragraph the recovery dialog renders next to the diff.
+      // Structured-output envelope: uses `AiPatchGenerationWorkflowSchema`,
+      // a parallel 11-branch union with richer `http` / `tool` / `agent`
+      // configs that allow optional `retry` / `timeoutMs` /
+      // `maxResponseBytes` / `maxRedirects` so resilience fixes show up
+      // in `node.config` (and therefore in the structural diff) instead
+      // of being stripped at the structured-output boundary. The
+      // generation route stays on the slim `AiGenerationWorkflowSchema`
+      // because its compiled grammar is at Anthropic's cap. Rationale is
+      // a free-text paragraph the recovery dialog renders next to the diff.
       const PatchEnvelopeSchema = z.object({
-        workflow: AiGenerationWorkflowSchema,
+        workflow: AiPatchGenerationWorkflowSchema,
         rationale: z.string().min(1),
       });
 
