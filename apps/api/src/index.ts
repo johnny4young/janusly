@@ -45,6 +45,12 @@ import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type Review
 import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
 import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
+import {
+  CLUSTER_MEMBERS_DEFAULT_LIMIT,
+  CLUSTER_MEMBERS_MAX_LIMIT,
+  findClusterMembers,
+  recheckSignature,
+} from "./cluster-recovery";
 import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
@@ -1220,6 +1226,22 @@ export const routes: Route[] = [
       const clusters = clusterFailureSamples(samples);
       return sendJson(res, { clusters, totalSamples: samples.length, windowDays });
     } },
+  // Cluster member listing — feeds the bulk recovery dialog with the
+  // bounded list of DLQ ids whose normalized error signature matches a
+  // claimed cluster. Registered BEFORE the generic /dlq dispatcher for
+  // the same first-match-wins reason as `/dlq/clusters`.
+  { method: "GET", match: (url) => url.startsWith("/dlq/cluster-members"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const signature = url.searchParams.get("signature");
+      if (!signature) return sendJson(res, { error: "signature is required" }, 400);
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const limit = Number.isFinite(rawLimit) ? rawLimit : CLUSTER_MEMBERS_DEFAULT_LIMIT;
+      const result = await findClusterMembers(auth.orgId, signature, windowDays, limit);
+      return sendJson(res, { ...result, windowDays });
+    } },
   // DLQ
   { method: "GET", match: (url) => url.startsWith("/dlq"),
     handler: async ({ req, res, auth }) => {
@@ -1307,6 +1329,82 @@ export const routes: Route[] = [
       });
 
       return sendJson(res, { runId });
+    } },
+  // Bulk recovery apply — replay up to 100 DLQ entries that share a
+  // cluster signature, in series, after the operator has approved the
+  // patch and the sandbox gate has passed on the representative entry.
+  // Each row is re-validated against the claimed signature server-side
+  // so a stale member list (some rows replayed via another path between
+  // fetch and apply) doesn't sneak through. Each replayed row gets a
+  // `recovery.cluster_apply` audit row tagged with the cluster signature
+  // and its sequence index in the batch.
+  { method: "POST", match: "/dlq/cluster-apply", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+
+      const clusterSignature = typeof body.clusterSignature === "string" ? body.clusterSignature : null;
+      if (!clusterSignature) return sendJson(res, { error: "clusterSignature is required" }, 400);
+      const idsRaw = body.deadLetterIds;
+      if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
+        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+      }
+      if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
+        return sendJson(res, {
+          error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}`,
+        }, 400);
+      }
+      const deadLetterIds: string[] = [];
+      for (const candidate of idsRaw) {
+        if (typeof candidate !== "string" || candidate.length === 0) {
+          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+        }
+        deadLetterIds.push(candidate);
+      }
+
+      const errors: Array<{ deadLetterId: string; error: string }> = [];
+      let replayed = 0;
+      const totalInCluster = deadLetterIds.length;
+
+      for (let i = 0; i < deadLetterIds.length; i += 1) {
+        const id = deadLetterIds[i]!;
+        const item = await getDeadLetter(auth.orgId, id);
+        if (!item) {
+          errors.push({ deadLetterId: id, error: "DLQ entry not found" });
+          continue;
+        }
+        if (item.status !== "open") {
+          errors.push({ deadLetterId: id, error: `DLQ entry already ${item.status}` });
+          continue;
+        }
+        if (!recheckSignature(item, clusterSignature)) {
+          errors.push({ deadLetterId: id, error: "DLQ entry signature no longer matches the claimed cluster" });
+          continue;
+        }
+
+        try {
+          await dlqReplay.replayDeadLetter({
+            runId: item.runId,
+            workflow: WorkflowSchema.parse(item.workflowJson),
+            node: NodeSchema.parse(item.nodeJson),
+          });
+          await markDeadLetterReplayed(auth.orgId, id);
+          await audit(auth.orgId, auth.userId, "recovery.cluster_apply", "dlq", id, {
+            clusterSignature,
+            sequenceIndex: i,
+            totalInCluster,
+          });
+          replayed += 1;
+        } catch (err) {
+          errors.push({
+            deadLetterId: id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      return sendJson(res, { replayed, failed: errors.length, errors });
     } },
   { method: "POST", match: "/dlq/replay", role: "editor",
     handler: async ({ req, res, auth }) => {

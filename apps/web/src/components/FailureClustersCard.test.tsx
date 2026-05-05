@@ -57,4 +57,50 @@ describe('<FailureClustersCard />', () => {
       expect(screen.getByText(/Cluster rollup unavailable — service down/i)).toBeInTheDocument()
     })
   })
+
+  it('falls back to a still-open DLQ member when the representative is stale', async () => {
+    const staleDlq = {
+      id: 'dlq-stale',
+      runId: 'run-stale-1234567890',
+      nodeId: 'fetch',
+      attempt: 1,
+      status: 'replayed',
+      workflowJson: { dslVersion: '1.0', nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://x' } }], edges: [] },
+      nodeJson: { id: 'fetch', type: 'http', config: { url: 'https://x' } },
+      errorJson: { message: 'already replayed' },
+    }
+    const openDlq = {
+      ...staleDlq,
+      id: 'dlq-open',
+      runId: 'run-open-1234567890',
+      status: 'open',
+      errorJson: { message: 'still open' },
+    }
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        totalSamples: 2,
+        windowDays: 30,
+        clusters: [{
+          signature: 'HTTP 401 on http node',
+          category: 'http_error',
+          frequency: 2,
+          affectedWorkflows: [{ workflowId: 'wf-billing', workflowName: 'Billing Flow', count: 2 }],
+          firstSeen: '2026-01-01T10:00:00.000Z',
+          lastSeen: '2026-01-01T11:00:00.000Z',
+          suggestedOwner: 'workflow_author',
+          samples: [{ source: 'dead_letter', id: 'dlq-stale', runId: 'run-stale-1234567890' }],
+        }],
+      })
+      .mockResolvedValueOnce({ deadLetterIds: ['dlq-open'], total: 1, capped: false })
+      .mockResolvedValueOnce(staleDlq)
+      .mockResolvedValueOnce(openDlq)
+
+    render(<FailureClustersCard />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /HTTP 401 on http node/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Recover this pattern/i }))
+
+    expect(await screen.findByText(/Recover fetch on run run-open/i)).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.map((call) => call[0])).toContain('/dlq?id=dlq-open')
+  })
 })

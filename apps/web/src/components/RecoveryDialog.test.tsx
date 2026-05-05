@@ -148,4 +148,58 @@ describe('<RecoveryDialog />', () => {
     const applyButton = screen.getByRole('button', { name: /Apply.*validate/i })
     expect(applyButton).toBeDisabled()
   })
+
+  describe('cluster mode', () => {
+    it('calls /dlq/cluster-apply (not /dlq/replay) and surfaces "Replayed N of M"', async () => {
+      vi.mocked(api)
+        .mockResolvedValueOnce(aiSuggestion)
+        // /dlq/validate-fix
+        .mockResolvedValueOnce({ runId: 'val-run-cluster' })
+        // GET /run polling — succeeded
+        .mockResolvedValueOnce({
+          run: { id: 'val-run-cluster', status: 'succeeded' },
+          nodes: [{ nodeId: 'fetch', status: 'succeeded' }],
+        })
+        // /workflows/save
+        .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
+        // /dlq/cluster-apply
+        .mockResolvedValueOnce({ replayed: 9, failed: 1, errors: [{ deadLetterId: 'dlq-7', error: 'DLQ entry already replayed' }] })
+
+      render(
+        <RecoveryDialog
+          dlq={baseDlq}
+          onClose={vi.fn()}
+          clusterMembers={['dlq-1', 'dlq-2', 'dlq-3', 'dlq-4', 'dlq-5', 'dlq-6', 'dlq-7', 'dlq-8', 'dlq-9', 'dlq-10']}
+          clusterSignature="Missing secret: GITHUB_TOKEN"
+          clusterMembersCapped
+          clusterMembersTotal={24}
+        />,
+      )
+
+      // Idle copy mentions both the capped batch count and total matches.
+      expect(screen.getByText(/10 of 24/)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      await waitFor(() => screen.getByRole('button', { name: /Apply.*validate.*10 entries/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate.*10 entries/i }))
+
+      await waitFor(() => {
+        expect(screen.getByText(/Patch applied/i)).toBeInTheDocument()
+      }, { timeout: 4000 })
+      expect(screen.getByText(/Replayed 9 of 10/i)).toBeInTheDocument()
+      expect(screen.getByText(/1 failed/i)).toBeInTheDocument()
+      expect(screen.getByText(/Show per-row errors/i)).toBeInTheDocument()
+
+      const calls = vi.mocked(api).mock.calls.map((call) => call[0])
+      expect(calls).toContain('/dlq/cluster-apply')
+      expect(calls).not.toContain('/dlq/replay')
+
+      // Verify the cluster-apply payload contains the signature + members.
+      const clusterApplyCall = vi.mocked(api).mock.calls.find((call) => call[0] === '/dlq/cluster-apply')
+      expect(clusterApplyCall).toBeDefined()
+      const body = JSON.parse((clusterApplyCall![1] as { body: string }).body)
+      expect(body.clusterSignature).toBe('Missing secret: GITHUB_TOKEN')
+      expect(body.deadLetterIds).toHaveLength(10)
+    })
+  })
 })

@@ -16,9 +16,11 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Users } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { RecoveryDialog } from './RecoveryDialog'
+import type { DeadLetter } from './DeadLettersPanel'
 
 type ClusterCategory =
   | 'secret_missing'
@@ -64,6 +66,14 @@ type ClusterData = ClustersResponse & {
   fetchedAtMs: number
 }
 
+/** State held while loading + driving the cluster-recovery dialog. */
+type ClusterRecoveryState =
+  | { kind: 'loading'; signature: string }
+  | { kind: 'open'; signature: string; dlq: DeadLetter; members: string[]; capped: boolean; total: number }
+  | { kind: 'error'; signature: string; message: string }
+
+const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
+
 const CATEGORY_LABELS: Record<ClusterCategory, string> = {
   secret_missing: 'Secret',
   http_error: 'HTTP',
@@ -98,6 +108,58 @@ export function FailureClustersCard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [recovery, setRecovery] = useState<ClusterRecoveryState | null>(null)
+
+  const openClusterRecovery = async (cluster: FailureCluster) => {
+    // Pick a DLQ-source representative — only those carry a DLQ id we
+    // can replay against. Falls back to the first sample if no DLQ
+    // entry is present (the button is gated upstream so this branch is
+    // defensive only).
+    const representative = cluster.samples.find((s) => s.source === 'dead_letter')
+    if (!representative) return
+    setRecovery({ kind: 'loading', signature: cluster.signature })
+    try {
+      // Fetch the bounded member list and the representative DLQ row in
+      // parallel. The members route enforces the same 100-row cap as
+      // the apply route — the dialog renders "100 of 247" when the
+      // window has more matching rows than fit in one batch.
+      const [membersResp, dlqResp] = await Promise.all([
+        api(`/dlq/cluster-members?signature=${encodeURIComponent(cluster.signature)}`) as Promise<{
+          deadLetterIds: string[]
+          total: number
+          capped: boolean
+        }>,
+        api(`/dlq?id=${encodeURIComponent(representative.id)}`) as Promise<DeadLetter>,
+      ])
+      let selectedDlq = dlqResp
+      if (!membersResp.deadLetterIds.includes(representative.id)) {
+        // Defensive: representative should always be in the member list,
+        // but if a race replayed/resolved it between cluster fetch and
+        // now, fall back to the first still-open member and validate the
+        // patch against that row instead.
+        const fallback = membersResp.deadLetterIds[0]
+        if (!fallback) {
+          setRecovery({ kind: 'error', signature: cluster.signature, message: 'No open DLQ entries match this pattern any more.' })
+          return
+        }
+        selectedDlq = await api(`/dlq?id=${encodeURIComponent(fallback)}`) as DeadLetter
+      }
+      setRecovery({
+        kind: 'open',
+        signature: cluster.signature,
+        dlq: selectedDlq,
+        members: membersResp.deadLetterIds,
+        capped: membersResp.capped,
+        total: membersResp.total,
+      })
+    } catch (err) {
+      setRecovery({
+        kind: 'error',
+        signature: cluster.signature,
+        message: err instanceof Error ? err.message : 'Failed to load cluster members',
+      })
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -216,12 +278,46 @@ export function FailureClustersCard() {
                       ))}
                     </ul>
                   </div>
+                  {cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
+                    && cluster.samples.some((s) => s.source === 'dead_letter') && (
+                    <div className="we-cluster-row__section">
+                      <button
+                        type="button"
+                        className="command-button command-button-primary"
+                        onClick={() => openClusterRecovery(cluster)}
+                        disabled={recovery?.kind === 'loading' && recovery.signature === cluster.signature}
+                      >
+                        <Sparkles size={14} aria-hidden="true" />
+                        <span>
+                          {recovery?.kind === 'loading' && recovery.signature === cluster.signature
+                            ? 'Loading members…'
+                            : 'Recover this pattern'}
+                        </span>
+                      </button>
+                      {recovery?.kind === 'error' && recovery.signature === cluster.signature && (
+                        <p className="helper-text we-recovery-warning" role="alert">
+                          Could not start cluster recovery — {recovery.message}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </li>
           )
         })}
       </ul>
+
+      {recovery?.kind === 'open' && (
+        <RecoveryDialog
+          dlq={recovery.dlq}
+          clusterMembers={recovery.members}
+          clusterSignature={recovery.signature}
+          clusterMembersCapped={recovery.capped}
+          clusterMembersTotal={recovery.total}
+          onClose={() => setRecovery(null)}
+        />
+      )}
     </section>
   )
 }
