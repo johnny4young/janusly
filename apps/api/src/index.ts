@@ -46,6 +46,8 @@ import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
 import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
+import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
+import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -867,6 +869,20 @@ export const routes: Route[] = [
       const signals = await collectHealthSignals(auth.orgId, workflowId);
       const health = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals });
       return sendJson(res, health);
+    } },
+
+  // Org-level recovery metrics — composes run status counts, MTTR, p95
+  // latency, approvals pending, replay rate, and cost-by-provider into
+  // a single rollup the Operations dashboard renders.
+  { method: "GET", match: (url) => url === "/recovery/metrics" || url.startsWith("/recovery/metrics?"),
+    role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const signals = await collectRecoveryMetricsSignals(auth.orgId, windowDays);
+      const metrics = composeRecoveryMetrics(signals, windowDays);
+      return sendJson(res, metrics);
     } },
 
   // AI helpers

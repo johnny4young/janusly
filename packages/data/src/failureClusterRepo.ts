@@ -139,9 +139,15 @@ async function queryFailedRunNodes(orgId: string, since: Date, limit: number): P
     .where(and(
       eq(runs.orgId, orgId),
       eq(runNodes.status, "failed"),
-      gte(sql`COALESCE(${runNodes.finishedAt}, ${runs.createdAt})`, since),
+      // Force ISO 8601 for the timestamptz comparison. Inside a `sql`
+      // template, `${since}` (a JS Date) is rendered via `String()`
+      // which yields the JS `Date.toString()` form ("Sat Apr 04 2026
+      // …") — postgres rejects it as an invalid timestamp. Calling
+      // `.toISOString()` produces the format the driver round-trips
+      // cleanly. Same fix applies if/when this expression is reused.
+      sql`COALESCE(${runNodes.finishedAt}, ${runs.createdAt}) >= ${since.toISOString()}::timestamptz`,
     ))
-    .orderBy(desc(sql`COALESCE(${runNodes.finishedAt}, ${runs.createdAt})`))
+    .orderBy(sql`COALESCE(${runNodes.finishedAt}, ${runs.createdAt}) DESC`)
     .limit(limit);
 
   return rows.map((row) => {

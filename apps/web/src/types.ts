@@ -45,7 +45,7 @@ export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
 export type AiMode = 'ai' | 'fallback' | 'error'
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent'
+export type ActiveTab = 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
 /**
  * JSON-Schema-subset describing one input field on a workflow's declared
  * `inputs` shape. Mirrors `WorkflowInputSchemaShape` in `@janusly/shared`.

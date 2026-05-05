@@ -24,6 +24,7 @@
    20. Run input dialog
    21. Failure clusters card
    22. Workflow version diff
+   23. Operations dashboard
    ========================================================================== */
 
 /* ==========================================================================
@@ -2302,4 +2303,106 @@ a { color: var(--we-primary); }
   background: var(--we-info-soft);
   border-radius: 6px;
   padding: 8px 10px;
+}
+
+/* ----------------- Operations dashboard ------------------------------ */
+
+.we-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.we-ops-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+
+.we-ops-metric-card--healthy { border-left-color: var(--we-success); }
+.we-ops-metric-card--warn { border-left-color: var(--we-warning); }
+.we-ops-metric-card--unhealthy { border-left-color: var(--we-danger); }
+.we-ops-metric-card--neutral { border-left-color: var(--we-line-strong); }
+
+.we-ops-metric-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.we-ops-metric-card__icon {
+  display: grid;
+  place-items: center;
+  color: var(--we-text-2);
+}
+
+.we-ops-metric-card__label {
+  margin-bottom: 0;
+}
+
+.we-ops-metric-card__value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--we-text-1);
+  letter-spacing: 0;
+}
+
+.we-ops-metric-card__rationale {
+  margin: 0;
+}
+
+.we-ops-progress {
+  position: relative;
+  height: 6px;
+  width: 100%;
+}
+
+.we-ops-progress__rail {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--we-surface-muted);
+}
+
+.we-ops-progress__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+}
+
+.we-ops-progress__fill--healthy { background: var(--we-success); }
+.we-ops-progress__fill--warn { background: var(--we-warning); }
+.we-ops-progress__fill--unhealthy { background: var(--we-danger); }
+.we-ops-progress__fill--neutral { background: var(--we-line-strong); }
+
+.we-ops-cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.we-ops-cost-table th,
+.we-ops-cost-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+}
+
+.we-ops-cost-table th {
+  color: var(--we-text-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.we-ops-cost-table td code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-text-1);
 }

@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, Database, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, Database, Gauge, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { nodeTypes, nodeUi } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 
@@ -46,6 +46,7 @@ const navItems: Array<{ tab: ActiveTab; label: string; helper: string; icon: Rea
   { tab: 'multiAgent', label: 'Multi-agent timeline', helper: 'Agent events', icon: <Layers3 size={15} /> },
   { tab: 'inspector', label: 'Step setup', helper: 'Edit selected step', icon: <GitBranch size={15} /> },
   { tab: 'runs', label: 'Runs', helper: 'Execution history', icon: <Activity size={15} /> },
+  { tab: 'operations', label: 'Operations', helper: 'Org-wide recovery posture', icon: <Gauge size={15} /> },
   { tab: 'members', label: 'Team', helper: 'Access control', icon: <Users size={15} /> },
   { tab: 'templates', label: 'Recipes', helper: 'Starting patterns', icon: <Workflow size={15} /> },
   { tab: 'marketplace', label: 'Tools', helper: 'Backend actions', icon: <Boxes size={15} /> },
