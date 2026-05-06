@@ -134,6 +134,200 @@ describe('<RecoveryDialog />', () => {
     expect(applyButton).toBeDisabled()
   })
 
+  describe('multi-suggestion tabs', () => {
+    const fetchUrl = (url: string) => ({
+      dslVersion: '1.0' as const,
+      nodes: [{ id: 'fetch', type: 'http' as const, config: { url } }],
+      edges: [],
+    })
+
+    const threeSuggestionResponse = {
+      mode: 'ai' as const,
+      // Back-compat mirror — point at the highest-confidence suggestion.
+      suggestedWorkflow: {
+        dslVersion: '1.0' as const,
+        nodes: [{ id: 'fetch', type: 'http' as const, config: { url: 'https://x', retry: { maxAttempts: 3 } } }],
+        edges: [],
+      },
+      rationale: 'Added retry to handle transient ECONNRESET.',
+      suggestions: [
+        {
+          workflow: {
+            dslVersion: '1.0' as const,
+            nodes: [{ id: 'fetch', type: 'http' as const, config: { url: 'https://x', retry: { maxAttempts: 3 } } }],
+            edges: [],
+          },
+          rationale: 'Added retry to handle transient ECONNRESET.',
+          approachLabel: 'add_retry' as const,
+          confidence: 85,
+        },
+        {
+          workflow: {
+            dslVersion: '1.0' as const,
+            nodes: [{ id: 'fetch', type: 'http' as const, config: { url: 'https://x', timeoutMs: 60_000 } }],
+            edges: [],
+          },
+          rationale: 'Or raise the timeout if upstream is just slow.',
+          approachLabel: 'raise_timeout' as const,
+          confidence: 65,
+        },
+        {
+          workflow: fetchUrl('https://x.example/fixed'),
+          rationale: 'Or fix the typo in the URL.',
+          approachLabel: 'fix_url' as const,
+          confidence: 40,
+        },
+      ],
+    }
+
+    it('renders one tab per suggestion when length > 1, with the highest-confidence default-selected', async () => {
+      vi.mocked(api).mockResolvedValueOnce(threeSuggestionResponse)
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+      await waitFor(() => screen.getByRole('tab', { name: /Add retry.*85/i }))
+      expect(screen.getByRole('tab', { name: /Add retry.*85/i })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: /Raise timeout.*65/i })).toHaveAttribute('aria-selected', 'false')
+      expect(screen.getByRole('tab', { name: /Fix URL.*40/i })).toHaveAttribute('aria-selected', 'false')
+      // Default rationale shown is the highest-confidence one.
+      expect(screen.getByText(/Added retry to handle transient/i)).toBeInTheDocument()
+    })
+
+    it('clicking a different tab swaps the rendered diff and rationale', async () => {
+      vi.mocked(api).mockResolvedValueOnce(threeSuggestionResponse)
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+      await waitFor(() => screen.getByRole('tab', { name: /Add retry.*85/i }))
+      fireEvent.click(screen.getByRole('tab', { name: /Raise timeout.*65/i }))
+
+      // The newly-active tab now claims aria-selected, and the diff +
+      // rationale come from the second suggestion.
+      expect(screen.getByRole('tab', { name: /Raise timeout.*65/i })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByText(/raise the timeout/i)).toBeInTheDocument()
+    })
+
+    it('supports keyboard navigation across suggestion tabs', async () => {
+      vi.mocked(api).mockResolvedValueOnce(threeSuggestionResponse)
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+      const firstTab = await screen.findByRole('tab', { name: /Add retry.*85/i })
+      firstTab.focus()
+      fireEvent.keyDown(firstTab, { key: 'ArrowRight' })
+
+      expect(screen.getByRole('tab', { name: /Raise timeout.*65/i })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByText(/raise the timeout/i)).toBeInTheDocument()
+    })
+
+    it('Apply posts the SELECTED suggestion to /dlq/validate-fix', async () => {
+      vi.mocked(api)
+        .mockResolvedValueOnce(threeSuggestionResponse)
+        // /dlq/validate-fix
+        .mockResolvedValueOnce({ runId: 'val-run-tabs' })
+        // GET /run poll — keep the dialog stuck in validating so we don't fall through to save
+        .mockResolvedValue({ run: { id: 'val-run-tabs', status: 'queued' }, nodes: [] })
+
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      await waitFor(() => screen.getByRole('tab', { name: /Add retry.*85/i }))
+      // Pick the second tab (raise_timeout) before applying.
+      fireEvent.click(screen.getByRole('tab', { name: /Raise timeout.*65/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+
+      await waitFor(() => {
+        const validateCall = vi.mocked(api).mock.calls.find((call) => call[0] === '/dlq/validate-fix')
+        expect(validateCall).toBeDefined()
+      })
+      const validateCall = vi.mocked(api).mock.calls.find((call) => call[0] === '/dlq/validate-fix')!
+      const body = JSON.parse((validateCall[1] as { body: string }).body)
+      expect(body.suggestedWorkflow.nodes[0].config).toMatchObject({ timeoutMs: 60_000 })
+      expect(body.suggestedWorkflow.nodes[0].config.retry).toBeUndefined()
+    })
+
+    it('renders no tabs when only one suggestion is returned', async () => {
+      vi.mocked(api).mockResolvedValueOnce({
+        ...threeSuggestionResponse,
+        suggestions: [threeSuggestionResponse.suggestions[0]],
+      })
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      await waitFor(() => screen.getByText(/Added retry to handle/i))
+
+      // No tablist mounts when the array has just one item — the UI is identical to today's single-suggestion path.
+      expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    })
+
+    it('back-compat: renders a single-suggestion review for legacy ai responses without a `suggestions` field', async () => {
+      // A future cached or older-server response could omit `suggestions`.
+      // The dialog's normalisePatchSuggestion shim must synthesize a single
+      // item from the legacy `suggestedWorkflow` + `rationale` fields so
+      // Apply stays enabled and the diff renders.
+      vi.mocked(api).mockResolvedValueOnce({
+        mode: 'ai',
+        suggestedWorkflow: {
+          dslVersion: '1.0' as const,
+          nodes: [{ id: 'fetch', type: 'http' as const, config: { url: 'https://x', retry: { maxAttempts: 3 } } }],
+          edges: [],
+        },
+        rationale: 'Legacy single-suggestion shape — Add retry.',
+      })
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+      await waitFor(() => screen.getByText(/Legacy single-suggestion shape/i))
+      // No tabs render for a single suggestion.
+      expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+      // Apply is enabled — the synthesized item carries the legacy workflow as its `workflow`.
+      const applyButton = screen.getByRole('button', { name: /Apply.*validate/i })
+      expect(applyButton).not.toBeDisabled()
+    })
+
+    it('a fresh suggestion request resets the selected tab back to the highest-confidence one', async () => {
+      // Pin the contract: switching tabs and then asking for a NEW
+      // suggestion (e.g. via the Iterate button after a sandbox failure)
+      // must reset the selection to tab 0. Otherwise a stale "fix_url"
+      // selection from the prior round would silently drive the next
+      // Apply.
+      const secondResponse = {
+        ...threeSuggestionResponse,
+        suggestions: threeSuggestionResponse.suggestions.map((suggestion, index) => ({
+          ...suggestion,
+          rationale: `${suggestion.rationale} (round 2 #${index})`,
+        })),
+      }
+      vi.mocked(api)
+        .mockResolvedValueOnce(threeSuggestionResponse)
+        // /dlq/validate-fix
+        .mockResolvedValueOnce({ runId: 'val-run-tabs-reset' })
+        // GET /run — failed
+        .mockResolvedValueOnce({
+          run: { id: 'val-run-tabs-reset', status: 'failed' },
+          nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502' } }],
+        })
+        // Second suggestion request after Iterate
+        .mockResolvedValueOnce(secondResponse)
+
+      render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      await waitFor(() => screen.getByRole('tab', { name: /Add retry.*85/i }))
+
+      // Pick the third tab in the first round.
+      fireEvent.click(screen.getByRole('tab', { name: /Fix URL.*40/i }))
+      expect(screen.getByRole('tab', { name: /Fix URL.*40/i })).toHaveAttribute('aria-selected', 'true')
+
+      // Apply → fails → Iterate.
+      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+      await waitFor(() => screen.getByText(/Sandbox replay failed/i), { timeout: 4000 })
+      fireEvent.click(screen.getByRole('button', { name: /Iterate/i }))
+
+      await waitFor(() => screen.getByText(/round 2 #0/i))
+      // After the new suggestion arrives, tab 0 is selected again.
+      expect(screen.getByRole('tab', { name: /Add retry.*85/i })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: /Fix URL.*40/i })).toHaveAttribute('aria-selected', 'false')
+    })
+  })
+
   it('disables Apply when an AI suggestion has no structural workflow changes', async () => {
     vi.mocked(api).mockResolvedValueOnce({
       mode: 'ai',

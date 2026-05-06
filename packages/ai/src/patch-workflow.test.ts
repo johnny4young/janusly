@@ -1,17 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { LlmClient, LlmGenerateObjectInput, LlmGenerateObjectResult } from "./llm-client";
-import { RUN_EVENT_PROMPT_CAP, suggestWorkflowPatch } from "./patch-workflow";
+import { RUN_EVENT_PROMPT_CAP, suggestWorkflowPatch, type PatchEnvelopeSchemaResult } from "./patch-workflow";
 
 // The runtime Zod object — used by the helper at call time. Mirrors
 // the per-failing-node-type envelope shape the route picks (a single
-// non-union `{ patchedConfig, rationale }` schema). Cast at the
+// non-union envelope wrapping a 1-3 `suggestions` array). Cast at the
 // boundary so the schema's inferred shape doesn't trip TS2589 ("type
 // instantiation excessively deep") when the tests inline the helper.
 const envelopeSchema = z.object({
-  patchedConfig: z.record(z.string(), z.unknown()),
-  rationale: z.string().min(1),
-}) as unknown as LlmGenerateObjectInput<{ patchedConfig: Record<string, unknown>; rationale: string }>["schema"];
+  suggestions: z.array(z.object({
+    patchedConfig: z.record(z.string(), z.unknown()),
+    rationale: z.string().min(1),
+    approachLabel: z.enum(["add_retry", "raise_timeout", "swap_secret_ref", "add_approval", "fix_url", "other"]),
+    confidence: z.number().int().min(0).max(100),
+  })).min(1).max(3),
+}) as unknown as LlmGenerateObjectInput<PatchEnvelopeSchemaResult>["schema"];
 
 const baseInput = {
   workflow: {
@@ -34,11 +38,23 @@ function makeLlm(result: LlmGenerateObjectResult<unknown>): LlmClient {
 }
 
 describe("suggestWorkflowPatch — AI mode", () => {
-  it("returns the structured envelope (patchedConfig + rationale) on success", async () => {
+  it("returns the structured suggestions array on success", async () => {
     const llm = makeLlm({
       object: {
-        patchedConfig: { retry: { maxAttempts: 3 } },
-        rationale: "Added retry to handle the transient ECONNRESET.",
+        suggestions: [
+          {
+            patchedConfig: { retry: { maxAttempts: 3 } },
+            rationale: "Added retry to handle the transient ECONNRESET.",
+            approachLabel: "add_retry",
+            confidence: 85,
+          },
+          {
+            patchedConfig: { timeoutMs: 60000 },
+            rationale: "Or raise the timeout if upstream is just slow.",
+            approachLabel: "raise_timeout",
+            confidence: 60,
+          },
+        ],
       },
       model: "claude-haiku-4-5-20251001",
       provider: "anthropic",
@@ -53,27 +69,53 @@ describe("suggestWorkflowPatch — AI mode", () => {
     });
 
     expect(result.mode).toBe("ai");
-    expect(result.rationale).toContain("retry");
     expect(result.model).toBe("claude-haiku-4-5-20251001");
     expect(result.provider).toBe("anthropic");
-    // The helper now returns the LLM envelope verbatim — the route is
-    // responsible for composing the full workflow by merging
-    // `patchedConfig` onto the original snapshot.
-    const envelope = result.suggestedWorkflow as { patchedConfig?: { retry?: { maxAttempts?: number } } };
-    expect(envelope.patchedConfig?.retry?.maxAttempts).toBe(3);
+    expect(result.suggestions).toHaveLength(2);
+    expect(result.suggestions[0]!.approachLabel).toBe("add_retry");
+    expect(result.suggestions[0]!.confidence).toBe(85);
+    expect(result.suggestions[0]!.rationale).toContain("retry");
+    const firstPatch = result.suggestions[0]!.patchedConfig as { retry?: { maxAttempts?: number } };
+    expect(firstPatch.retry?.maxAttempts).toBe(3);
+    expect(result.suggestions[1]!.approachLabel).toBe("raise_timeout");
+  });
+
+  it("preserves the model's order of suggestions verbatim (route owns confidence-desc sort)", async () => {
+    const llm = makeLlm({
+      object: {
+        suggestions: [
+          { patchedConfig: { retry: { maxAttempts: 3 } }, rationale: "first", approachLabel: "add_retry", confidence: 40 },
+          { patchedConfig: { timeoutMs: 60000 }, rationale: "second", approachLabel: "raise_timeout", confidence: 90 },
+        ],
+      },
+      model: "x",
+      provider: "anthropic",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    });
+
+    const result = await suggestWorkflowPatch({ llm, envelopeSchema, ...baseInput });
+    // The helper does NOT sort. The route sorts after merging; helper
+    // boundary stays neutral so a future change to the sort key (e.g.
+    // calibrated confidence from operator feedback) lives entirely in the route.
+    expect(result.suggestions[0]!.confidence).toBe(40);
+    expect(result.suggestions[1]!.confidence).toBe(90);
   });
 });
 
 describe("suggestWorkflowPatch — fallback paths", () => {
-  it("returns fallback when llm is null", async () => {
+  it("returns a single 0-confidence 'other' suggestion when llm is null", async () => {
     const result = await suggestWorkflowPatch({
       llm: null,
       envelopeSchema,
       ...baseInput,
     });
     expect(result.mode).toBe("fallback");
-    expect(result.suggestedWorkflow).toEqual(baseInput.workflow);
-    expect(result.rationale).toMatch(/AI is unavailable/i);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]!.approachLabel).toBe("other");
+    expect(result.suggestions[0]!.confidence).toBe(0);
+    expect(result.suggestions[0]!.patchedConfig).toEqual({});
+    expect(result.suggestions[0]!.rationale).toMatch(/AI is unavailable/i);
     expect(result.aiError).toBeUndefined();
   });
 
@@ -91,12 +133,13 @@ describe("suggestWorkflowPatch — fallback paths", () => {
       ...baseInput,
     });
     expect(result.mode).toBe("fallback");
-    expect(result.suggestedWorkflow).toEqual(baseInput.workflow);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]!.confidence).toBe(0);
     expect(result.aiError).toContain("rate limited");
-    expect(result.rationale).toContain("rate limited");
+    expect(result.suggestions[0]!.rationale).toContain("rate limited");
   });
 
-  it("returns fallback when LLM returns an empty rationale", async () => {
+  it("returns fallback when LLM throws a structured-output validation error", async () => {
     // Edge case: provider returned object that doesn't satisfy the
     // schema. The Vercel AI SDK throws `NoObjectGeneratedError` in
     // this case; we exercise the same path here via a thrown error.
@@ -120,7 +163,7 @@ describe("suggestWorkflowPatch — fallback paths", () => {
 describe("suggestWorkflowPatch — prompt content", () => {
   it("truncates run events to RUN_EVENT_PROMPT_CAP", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { patchedConfig: {}, rationale: "noop" },
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -148,7 +191,7 @@ describe("suggestWorkflowPatch — prompt content", () => {
 
   it("includes the failedNodeId + already-redacted errorJson in the prompt", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { patchedConfig: {}, rationale: "noop" },
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -169,9 +212,9 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).toContain('"401 unauthorized"');
   });
 
-  it("instructs typed envelopes to use null for unchanged fields", async () => {
+  it("instructs the model to emit 1-3 suggestions with approachLabel + confidence", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { patchedConfig: {}, rationale: "noop" },
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -186,13 +229,16 @@ describe("suggestWorkflowPatch — prompt content", () => {
     });
 
     const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).toContain("up to 3 ALTERNATIVE config patches");
     expect(callArg.system).toContain("set unchanged fields to `null`");
     expect(callArg.system).toContain("filters `null` before shallow-merging");
+    expect(callArg.system).toContain("approachLabel");
+    expect(callArg.system).toContain("confidence");
   });
 
   it("scrubs secret-shaped string values before sending the prompt", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { patchedConfig: {}, rationale: "noop" },
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },

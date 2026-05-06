@@ -38,13 +38,41 @@ import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import type { DeadLetter } from './DeadLettersPanel'
 
+type PatchApproachLabel =
+  | 'add_retry'
+  | 'raise_timeout'
+  | 'swap_secret_ref'
+  | 'add_approval'
+  | 'fix_url'
+  | 'other'
+
+type SuggestionTab = {
+  workflow: WorkflowDefinition
+  rationale: string
+  approachLabel: PatchApproachLabel
+  confidence: number
+}
+
 type PatchSuggestion = {
   mode: 'ai' | 'fallback'
+  /** Legacy mirror of `suggestions[0]` — kept so older test fixtures and callers still work. */
   suggestedWorkflow: WorkflowDefinition
+  /** Legacy mirror of `suggestions[0].rationale`. */
   rationale: string
+  /** 1-3 alternative patches sorted by confidence desc. The route guarantees length ≥ 1. */
+  suggestions: SuggestionTab[]
   model?: string
   provider?: string
   aiError?: string
+}
+
+const APPROACH_LABEL_DISPLAY: Record<PatchApproachLabel, string> = {
+  add_retry: 'Add retry',
+  raise_timeout: 'Raise timeout',
+  swap_secret_ref: 'Swap secret',
+  add_approval: 'Add approval',
+  fix_url: 'Fix URL',
+  other: 'Other',
 }
 
 type ClusterApplyError = {
@@ -62,8 +90,8 @@ type Step =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'review'; suggestion: PatchSuggestion }
-  | { kind: 'validating'; suggestion: PatchSuggestion; runId: string }
-  | { kind: 'validation-failed'; suggestion: PatchSuggestion; runId: string; errorJson: unknown }
+  | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
+  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
   | { kind: 'applied'; runId?: string; cluster?: ClusterApplyResult }
   | { kind: 'error'; message: string }
@@ -101,14 +129,23 @@ export function RecoveryDialog({
 }: RecoveryDialogProps) {
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+  // Which suggestion the operator picked from the tab strip. Reset to 0
+  // every time a new review step starts so a fresh "Generate suggestion"
+  // call doesn't carry over a stale tab from a prior run.
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0)
   const isClusterMode = Array.isArray(clusterMembers) && clusterMembers.length > 0 && typeof clusterSignature === 'string'
   const clusterMemberCount = clusterMembers?.length ?? 0
   const clusterVisibleTotal = clusterMembersTotal && clusterMembersTotal > clusterMemberCount
     ? clusterMembersTotal
     : clusterMemberCount
   const primaryRef = useRef<HTMLButtonElement | null>(null)
-  const canApplyPatch = step.kind === 'review'
-    ? isActionableSuggestion(dlq.workflowJson, step.suggestion)
+  const reviewSuggestions = step.kind === 'review' ? step.suggestion.suggestions : []
+  const safeSelectedIndex = Math.min(selectedSuggestionIndex, Math.max(reviewSuggestions.length - 1, 0))
+  const selectedSuggestion: SuggestionTab | null = step.kind === 'review'
+    ? (reviewSuggestions[safeSelectedIndex] ?? null)
+    : null
+  const canApplyPatch = step.kind === 'review' && selectedSuggestion
+    ? isActionableSuggestion(dlq.workflowJson, step.suggestion, selectedSuggestion)
     : false
 
   // Focus the primary action on mount so keyboard users can hit Enter.
@@ -151,13 +188,14 @@ export function RecoveryDialog({
         // double-save and double-replay).
         cancelled = true
         if (status === 'succeeded') {
-          await applyAfterValidation(step.suggestion)
+          await applyAfterValidation(step.suggestion, step.selectedIndex)
           return
         }
         const errorJson = pickFailedNodeErrorJson(result.nodes ?? [], dlq.nodeId)
         setStep({
           kind: 'validation-failed',
           suggestion: step.suggestion,
+          selectedIndex: step.selectedIndex,
           runId: step.runId,
           errorJson,
         })
@@ -188,7 +226,9 @@ export function RecoveryDialog({
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
       }) as PatchSuggestion
-      setStep({ kind: 'review', suggestion: result })
+      const normalised = normalisePatchSuggestion(result)
+      setSelectedSuggestionIndex(0)
+      setStep({ kind: 'review', suggestion: normalised })
     } catch (error) {
       setStep({
         kind: 'error',
@@ -200,15 +240,17 @@ export function RecoveryDialog({
   const validateAndApply = async () => {
     if (step.kind !== 'review') return
     const suggestion = step.suggestion
+    const selected = suggestion.suggestions[safeSelectedIndex]
+    if (!selected) return
     try {
       const result = await api('/dlq/validate-fix', {
         method: 'POST',
         body: JSON.stringify({
           deadLetterId: dlq.id,
-          suggestedWorkflow: suggestion.suggestedWorkflow,
+          suggestedWorkflow: selected.workflow,
         }),
       }) as { runId: string }
-      setStep({ kind: 'validating', suggestion, runId: result.runId })
+      setStep({ kind: 'validating', suggestion, selectedIndex: safeSelectedIndex, runId: result.runId })
     } catch (error) {
       setStep({
         kind: 'error',
@@ -217,14 +259,19 @@ export function RecoveryDialog({
     }
   }
 
-  const applyAfterValidation = async (suggestion: PatchSuggestion) => {
+  const applyAfterValidation = async (suggestion: PatchSuggestion, selectedIndex: number) => {
+    const selected = suggestion.suggestions[selectedIndex]
+    if (!selected) {
+      setStep({ kind: 'error', message: 'Selected suggestion is no longer available.' })
+      return
+    }
     const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
     const total = isClusterMode ? clusterMembers!.length : undefined
     setStep({ kind: 'applying', mode, total })
     try {
       await api('/workflows/save', {
         method: 'POST',
-        body: JSON.stringify(suggestion.suggestedWorkflow),
+        body: JSON.stringify(selected.workflow),
       })
       // Save is durable. Bump now so sibling panels (Workflows list,
       // Version history, Health badge) refetch even when the downstream
@@ -316,8 +363,15 @@ export function RecoveryDialog({
             </p>
           )}
 
-          {step.kind === 'review' && (
-            <ReviewBody suggestion={step.suggestion} dlq={dlq} canApplyPatch={canApplyPatch} />
+          {step.kind === 'review' && selectedSuggestion && (
+            <ReviewBody
+              suggestion={step.suggestion}
+              selected={selectedSuggestion}
+              selectedIndex={safeSelectedIndex}
+              onSelectIndex={setSelectedSuggestionIndex}
+              dlq={dlq}
+              canApplyPatch={canApplyPatch}
+            />
           )}
 
           {step.kind === 'validating' && (
@@ -329,6 +383,7 @@ export function RecoveryDialog({
           {step.kind === 'validation-failed' && (
             <ValidationFailedBody
               suggestion={step.suggestion}
+              selectedIndex={step.selectedIndex}
               dlq={dlq}
               runId={step.runId}
               errorJson={step.errorJson}
@@ -455,13 +510,40 @@ export function RecoveryDialog({
 
 function ReviewBody({
   suggestion,
+  selected,
+  selectedIndex,
+  onSelectIndex,
   dlq,
   canApplyPatch,
 }: {
   suggestion: PatchSuggestion
+  selected: SuggestionTab
+  selectedIndex: number
+  onSelectIndex: (index: number) => void
   dlq: DeadLetter
   canApplyPatch: boolean
 }) {
+  const tabs = suggestion.suggestions
+  const showTabs = tabs.length > 1
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!showTabs) return
+    const lastIndex = tabs.length - 1
+    const nextIndexByKey: Record<string, number> = {
+      ArrowRight: index === lastIndex ? 0 : index + 1,
+      ArrowDown: index === lastIndex ? 0 : index + 1,
+      ArrowLeft: index === 0 ? lastIndex : index - 1,
+      ArrowUp: index === 0 ? lastIndex : index - 1,
+      Home: 0,
+      End: lastIndex,
+    }
+    const nextIndex = nextIndexByKey[event.key]
+    if (nextIndex === undefined) return
+    event.preventDefault()
+    onSelectIndex(nextIndex)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`we-recovery-tab-${nextIndex}`)?.focus()
+    })
+  }
   return (
     <>
       {suggestion.mode === 'fallback' && (
@@ -483,29 +565,60 @@ function ReviewBody({
           </div>
         </div>
       )}
-      <WorkflowDiffView
-        before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
-        after={suggestion.suggestedWorkflow}
-        beforeLabel="Current"
-        afterLabel="Suggested"
-        aiPatchRationale={suggestion.rationale}
-      />
+      {showTabs && (
+        <div className="we-recovery-tabs" role="tablist" aria-label="Alternative suggestions">
+          {tabs.map((tab, index) => (
+            <button
+              key={index}
+              type="button"
+              role="tab"
+              id={`we-recovery-tab-${index}`}
+              aria-controls="we-recovery-tabpanel"
+              aria-selected={index === selectedIndex}
+              tabIndex={index === selectedIndex ? 0 : -1}
+              className={`we-recovery-tab${index === selectedIndex ? ' we-recovery-tab--active' : ''}`}
+              onClick={() => onSelectIndex(index)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              title={`Self-rated confidence: ${tab.confidence}%`}
+            >
+              <span className="we-recovery-tab__label">{APPROACH_LABEL_DISPLAY[tab.approachLabel] ?? tab.approachLabel}</span>
+              <span className="we-recovery-tab__confidence">{tab.confidence}%</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        id="we-recovery-tabpanel"
+        role={showTabs ? 'tabpanel' : undefined}
+        aria-labelledby={showTabs ? `we-recovery-tab-${selectedIndex}` : undefined}
+      >
+        <WorkflowDiffView
+          before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
+          after={selected.workflow}
+          beforeLabel="Current"
+          afterLabel={showTabs ? `Suggested · ${APPROACH_LABEL_DISPLAY[selected.approachLabel] ?? selected.approachLabel}` : 'Suggested'}
+          aiPatchRationale={selected.rationale}
+        />
+      </div>
     </>
   )
 }
 
 function ValidationFailedBody({
   suggestion,
+  selectedIndex,
   dlq,
   runId,
   errorJson,
 }: {
   suggestion: PatchSuggestion
+  selectedIndex: number
   dlq: DeadLetter
   runId: string
   errorJson: unknown
 }) {
   const message = pickErrorMessage(errorJson)
+  const selected = suggestion.suggestions[selectedIndex] ?? suggestion.suggestions[0]!
   return (
     <>
       <div className="we-recovery-warning" role="alert">
@@ -523,10 +636,10 @@ function ValidationFailedBody({
       ) : null}
       <WorkflowDiffView
         before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
-        after={suggestion.suggestedWorkflow}
+        after={selected.workflow}
         beforeLabel="Current"
         afterLabel="Suggested (rejected)"
-        aiPatchRationale={suggestion.rationale}
+        aiPatchRationale={selected.rationale}
       />
     </>
   )
@@ -609,13 +722,40 @@ function pickErrorMessage(errorJson: unknown): string | null {
   }
 }
 
-function isActionableSuggestion(currentWorkflow: unknown, suggestion: PatchSuggestion): boolean {
+function isActionableSuggestion(
+  currentWorkflow: unknown,
+  suggestion: PatchSuggestion,
+  selected: SuggestionTab,
+): boolean {
   if (suggestion.mode !== 'ai') return false
-  const diff = computeWorkflowDiff(toWorkflow(currentWorkflow), toWorkflow(suggestion.suggestedWorkflow))
+  const diff = computeWorkflowDiff(toWorkflow(currentWorkflow), toWorkflow(selected.workflow))
   return diff.summary.totalChanges > 0
 }
 
 function toWorkflow(value: unknown): WorkflowDefinition {
   if (value && typeof value === 'object') return value as WorkflowDefinition
   return { dslVersion: '1.0', nodes: [], edges: [] }
+}
+
+/**
+ * Normalise the patch-route response into the multi-suggestion shape.
+ * The current route always emits `suggestions: [...]`, but older test
+ * fixtures and a future cached response from before the upgrade might
+ * still return only the legacy `{ mode, suggestedWorkflow, rationale }`
+ * fields — fall back to a single-item array in that case so the dialog
+ * code never has to branch on which shape it received.
+ */
+function normalisePatchSuggestion(raw: PatchSuggestion): PatchSuggestion {
+  if (Array.isArray(raw.suggestions) && raw.suggestions.length > 0) {
+    return raw
+  }
+  return {
+    ...raw,
+    suggestions: [{
+      workflow: raw.suggestedWorkflow,
+      rationale: raw.rationale,
+      approachLabel: 'other',
+      confidence: raw.mode === 'ai' ? 50 : 0,
+    }],
+  }
 }
