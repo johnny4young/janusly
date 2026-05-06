@@ -2132,6 +2132,39 @@ a { color: var(--we-primary); }
   border-color: var(--we-primary);
 }
 
+.version-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.version-row .version-button {
+  margin-top: 0;
+  flex: 1 1 auto;
+}
+
+.version-row__rollback {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.version-row__rollback:hover {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.version-row__rollback:active { transform: translateY(1px); }
+
 .we-diff-section {
   display: flex;
   flex-direction: column;
