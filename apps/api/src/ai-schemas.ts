@@ -1,52 +1,58 @@
 /**
  * Structured-output Zod schemas for the AI surfaces in `apps/api/src/index.ts`.
  *
- * Two parallel workflow schemas live here:
+ * Two surfaces, two strategies:
  *
- *   - `AiGenerationWorkflowSchema` — used by `/ai/generate-workflow`. Slim
- *     11-branch discriminated union; each `http` / `tool` / `agent` config
- *     declares only the fields the operator MUST populate. Optional tuning
- *     (retry, timeouts, bounds, planner, model) is dropped to stay under
- *     Anthropic's structured-output grammar cap.
+ *   - **`/ai/generate-workflow`** — full-workflow generation. Uses
+ *     `AiGenerationWorkflowSchema`, an 11-branch slim discriminated union.
+ *     Each `http` / `tool` / `agent` config declares only the fields the
+ *     operator MUST populate. Optional tuning (retry, timeouts, bounds,
+ *     planner, model) is dropped to stay under Anthropic's grammar cap.
+ *     This compiles to JSON Schema `oneOf` and works against Anthropic.
+ *     OpenAI strict mode rejects `oneOf`; tracked separately as a
+ *     follow-up.
  *
- *   - `AiPatchGenerationWorkflowSchema` — used by `/ai/patch-workflow`.
- *     Parallel 11-branch union with richer `http` / `tool` / `agent`
- *     configs that allow optional `retry` / `timeoutMs` /
- *     `maxResponseBytes` / `maxRedirects` so the most common
- *     failure-recovery fixes survive the structured-output boundary.
+ *   - **`/ai/patch-workflow`** — failure-recovery config patch. Uses
+ *     ONE non-union envelope per call, picked by failing-node type via
+ *     `patchEnvelopeForNodeType`. The LLM emits only the patched config
+ *     (single concrete shape, no discriminator), and the route composes
+ *     the suggested workflow server-side by merging into the original.
+ *     Compiles WITHOUT `oneOf` — works on both providers.
  *
- * Why two schemas instead of one rich schema: Anthropic's grammar compiler
- * rejects an extended generation union with "The compiled grammar is too
- * large". Empirically, even a one-field `{ maxAttempts: number }`
- * referenced from `http` / `tool` / `agent` trips the cap when added to
- * the generation union — that union is already at the edge with 11
- * branches and ~7 optionals. The patch schema is its own compilation
- * unit, so it has its own grammar budget. Splitting them lets the patch
- * route express resilience fixes without bloating the generation route.
+ * Why two strategies: a single union schema compiled at the
+ * structured-output boundary is incompatible with both providers under
+ * realistic field counts. Anthropic caps compiled-grammar size; OpenAI
+ * strict mode bans `oneOf` outright. The generation route is constrained
+ * to a slim union (one model has to emit any of the 11 types, can't
+ * pre-dispatch). The patch route knows the failing-node type at request
+ * time, so it can dispatch to a single concrete schema per call.
  *
  * Used by:
- *   - `apps/api/src/index.ts` — both AI route handlers reference these.
- *   - `apps/api/src/ai-patch-schema.test.ts` — pins parse behavior.
+ *   - `apps/api/src/index.ts` — `/ai/generate-workflow` and
+ *     `/ai/patch-workflow` route handlers.
+ *   - `apps/api/src/ai-patch-schema.test.ts` — pins per-envelope parse
+ *     behavior and the dispatcher.
  *
  * Schema constraints to keep in mind:
- *   - Anthropic structured output rejects empty `{}` schemas (`z.unknown()`,
- *     `z.any()`) with "Empty schema that accepts any JSON value is not
- *     supported." Every field below has a concrete type.
- *   - Anthropic limits total optional parameters across the schema to 24
- *     for grammar compilation. Both schemas stay comfortably under that
- *     budget; if a future field push trips the cap on a real call, fall
- *     back to flat fields (e.g. `retryMaxAttempts` instead of
- *     `retry.maxAttempts`) before splitting more schemas.
+ *   - Anthropic structured output rejects empty `{}` schemas
+ *     (`z.unknown()`, `z.any()`) with "Empty schema that accepts any
+ *     JSON value is not supported." Every typed field has a concrete
+ *     type. Generic config patches stay open at the Zod boundary; provider
+ *     strict-mode support for those node types needs concrete per-type fields.
+ *   - OpenAI strict mode rejects root-level union/composition shapes from
+ *     `discriminatedUnion` and does not support `not`. Leaf `anyOf` is fine
+ *     for nullable fields when each branch is otherwise valid.
  *
- * Output of either schema is re-validated by the engine's strict
- * `WorkflowSchema` and then passed through `sanitizeAiWorkflow` in
- * `apps/api/src/index.ts` before reaching the operator. Engine
- * `NodeSchema.config` is `Record<string, unknown>`, so retry and bounds
- * fields pass through verbatim.
+ * Output is re-validated by the engine's strict `WorkflowSchema` and
+ * passed through `sanitizeAiWorkflow` in `apps/api/src/index.ts` before
+ * reaching the operator. Engine `NodeSchema.config` is `Record<string,
+ * unknown>`, so retry and bounds fields pass through verbatim.
  *
- * Adding a new node type means adding a branch to BOTH `AiNodeSchema` and
- * `AiPatchNodeSchema` (or only one, if the type isn't AI-generated /
- * AI-patched), AND adding it to `nodeTypeValues` in `@janusly/shared`.
+ * Adding a new node type means adding a branch to `AiNodeSchema` (for
+ * the generation route) AND, if the type has rich resilience fields the
+ * AI should be allowed to set, adding a per-type envelope here plus a
+ * branch in `patchEnvelopeForNodeType`. Otherwise the generic envelope
+ * picks it up automatically.
  */
 
 import { EdgeSchema } from "@janusly/shared";
@@ -187,78 +193,142 @@ export const AiGenerationWorkflowSchema = z.object({
 });
 
 /**
- * Retry shape for the patch schema's `http` / `tool` / `agent` branches.
- * `maxAttempts` only, mirroring `RetryPolicy.maxAttempts` from
- * `@janusly/engine/core/types`. The engine accepts a partial
- * `RetryPolicy` and applies its own defaults at runtime, so a single
- * field is enough to express the common fix; require at least 2 attempts
- * because runtime `maxAttempts: 1` means "do not retry". Richer tuning
- * (`delayMs`, `backoff`, `jitter`) stays operator-only via the Inspector.
+ * Patch-route schemas — `/ai/patch-workflow`. Each LLM call uses ONE
+ * concrete envelope picked by the failing-node's type. The envelope is a
+ * single non-union shape: `{ patchedConfig, rationale }`. The LLM emits
+ * only the patched config for the failing node, NOT a full workflow.
+ * The route composes the suggested workflow server-side by merging the
+ * patched config into the original snapshot.
+ *
+ * Why per-type envelopes instead of a single full-workflow schema:
+ *
+ *   - **Anthropic** caps compiled grammar size. A multi-branch
+ *     `discriminatedUnion` with resilience optionals on http/tool/agent
+ *     trips "The compiled grammar is too large".
+ *   - **OpenAI strict mode** rejects root-level composition generated by
+ *     `discriminatedUnion` (for example `oneOf`) and does not support
+ *     `not`. Leaf `anyOf` is allowed for nullable fields when each branch
+ *     is otherwise valid.
+ *
+ * A single non-union envelope per call sidesteps both: no `oneOf`
+ * keyword in the compiled JSON Schema, and the per-type schema has only
+ * 3-5 leaf fields so Anthropic's cap is comfortable.
+ *
+ * The four envelopes:
+ *
+ *   - `AiPatchHttpConfigEnvelope` — `url` / `method` / `retry` /
+ *     `timeoutMs` / `maxResponseBytes` / `maxRedirects` (all required
+ *     nullable fields; the LLM sends `null` for fields it doesn't want
+ *     to change). Covers URL fixes, method swaps, retry adds, timeout
+ *     raises, body-cap raises.
+ *   - `AiPatchToolConfigEnvelope` — `tool` / `retry` / `timeoutMs`.
+ *   - `AiPatchAgentConfigEnvelope` — `goal` / `retry` / `timeoutMs`.
+ *   - `AiPatchGenericConfigEnvelope` — `patchedConfig: Record<string,
+ *     unknown>` for the other 8 node types (transform/condition/ai/
+ *     router/approval/multi_agent/loop/noop). This keeps local Zod parsing
+ *     flexible, but provider strict-mode compatibility for those node types
+ *     should move to concrete envelopes.
+ *
+ * `patchEnvelopeForNodeType(nodeType)` is the dispatch helper. The route
+ * passes its result to `suggestWorkflowPatch` as the `envelopeSchema`.
+ *
+ * Retry shape: `{ maxAttempts: number }` only, with `min(2)` because
+ * runtime `maxAttempts: 1` means "do not retry" and the operator already
+ * had at least one attempt. The engine accepts a partial `RetryPolicy`
+ * and applies its own defaults for delay/backoff/jitter.
  */
+// OpenAI strict-mode constraint: every property in an object schema MUST
+// appear in `required`. Optional fields aren't allowed; instead each leaf
+// is `.nullable()` so the LLM ALWAYS emits the field — sending `null`
+// when it doesn't want to change. The route's merge step filters null
+// values before applying the patch so they don't overwrite existing
+// config. Anthropic accepts the same nullable-field shape, so this
+// pattern unblocks both providers without per-provider code paths.
 const AiPatchRetryConfig = z.object({
   maxAttempts: z.number().int().min(2).max(10),
 });
 
-const AiPatchHttpNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("http"),
-  config: z.object({
-    url: z.string().min(1),
-    method: z.string().optional(),
-    retry: AiPatchRetryConfig.optional(),
-    timeoutMs: z.number().int().min(1).optional(),
-    maxResponseBytes: z.number().int().min(1).optional(),
-    maxRedirects: z.number().int().min(0).optional(),
-  }),
+const AiPatchHttpConfig = z.object({
+  url: z.string().min(1).nullable(),
+  method: z.string().nullable(),
+  retry: AiPatchRetryConfig.nullable(),
+  timeoutMs: z.number().int().min(1).nullable(),
+  maxResponseBytes: z.number().int().min(1).nullable(),
+  maxRedirects: z.number().int().min(0).nullable(),
 });
 
-const AiPatchToolNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("tool"),
-  config: z.object({
-    tool: z.string().min(1),
-    retry: AiPatchRetryConfig.optional(),
-    timeoutMs: z.number().int().min(1).optional(),
-  }),
+const AiPatchToolConfig = z.object({
+  tool: z.string().min(1).nullable(),
+  retry: AiPatchRetryConfig.nullable(),
+  timeoutMs: z.number().int().min(1).nullable(),
 });
 
-const AiPatchAgentNode = z.object({
-  id: z.string().min(1),
-  type: z.literal("agent"),
-  config: z.object({
-    goal: z.string().min(1),
-    retry: AiPatchRetryConfig.optional(),
-    timeoutMs: z.number().int().min(1).optional(),
-  }),
+const AiPatchAgentConfig = z.object({
+  goal: z.string().min(1).nullable(),
+  retry: AiPatchRetryConfig.nullable(),
+  timeoutMs: z.number().int().min(1).nullable(),
 });
 
-const AiPatchNodeSchema = z.discriminatedUnion("type", [
-  AiNoopNode,
-  AiPatchHttpNode,
-  AiTransformNode,
-  AiConditionNode,
-  AiAiNode,
-  AiPatchToolNode,
-  AiPatchAgentNode,
-  AiRouterNode,
-  AiApprovalNode,
-  AiMultiAgentNode,
-  AiLoopNode,
-]);
+const AiPatchGenericConfig = z.record(z.string(), z.unknown());
+
+/** Envelope for http-typed failing nodes. Single non-union shape. */
+export const AiPatchHttpConfigEnvelope = z.object({
+  patchedConfig: AiPatchHttpConfig,
+  rationale: z.string().min(1),
+});
+
+/** Envelope for tool-typed failing nodes. */
+export const AiPatchToolConfigEnvelope = z.object({
+  patchedConfig: AiPatchToolConfig,
+  rationale: z.string().min(1),
+});
+
+/** Envelope for agent-typed failing nodes. */
+export const AiPatchAgentConfigEnvelope = z.object({
+  patchedConfig: AiPatchAgentConfig,
+  rationale: z.string().min(1),
+});
 
 /**
- * Workflow envelope for `/ai/patch-workflow`. Richer than
- * `AiGenerationWorkflowSchema` on the resilience-knob axis (retry,
- * timeoutMs, maxResponseBytes, maxRedirects on http/tool/agent configs).
- * The 8 non-richer branches reuse the slim node schemas verbatim.
+ * Envelope for every other node type. The patched config is an open
+ * record — the system prompt narrates valid fields per type, and the
+ * route's post-validation chain catches structurally-invalid output.
  */
-export const AiPatchGenerationWorkflowSchema = z.object({
-  dslVersion: z.literal("1.0").optional(),
-  id: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
-  nodes: z.array(AiPatchNodeSchema),
-  edges: z.array(EdgeSchema),
+export const AiPatchGenericConfigEnvelope = z.object({
+  patchedConfig: AiPatchGenericConfig,
+  rationale: z.string().min(1),
 });
+
+/** Discriminator returned alongside the schema so callers can branch on the parsed shape. */
+export type PatchEnvelopeKind = "http" | "tool" | "agent" | "generic";
+
+export type PatchEnvelopeChoice = {
+  schema:
+    | typeof AiPatchHttpConfigEnvelope
+    | typeof AiPatchToolConfigEnvelope
+    | typeof AiPatchAgentConfigEnvelope
+    | typeof AiPatchGenericConfigEnvelope;
+  kind: PatchEnvelopeKind;
+};
+
+/**
+ * Pick the patch envelope for a failing-node type. Falls back to the
+ * generic envelope for any type that doesn't have a richer schema —
+ * keeps the patch path open for transform/condition/router/etc. without
+ * inventing a per-type schema for every one of them.
+ */
+export function patchEnvelopeForNodeType(nodeType: string): PatchEnvelopeChoice {
+  switch (nodeType) {
+    case "http":
+      return { schema: AiPatchHttpConfigEnvelope, kind: "http" };
+    case "tool":
+      return { schema: AiPatchToolConfigEnvelope, kind: "tool" };
+    case "agent":
+      return { schema: AiPatchAgentConfigEnvelope, kind: "agent" };
+    default:
+      return { schema: AiPatchGenericConfigEnvelope, kind: "generic" };
+  }
+}
 
 /** Single review-finding for `/ai/review-workflow` structured output. */
 const ReviewFindingSchema = z.object({

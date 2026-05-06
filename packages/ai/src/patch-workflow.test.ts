@@ -3,16 +3,15 @@ import { z } from "zod";
 import type { LlmClient, LlmGenerateObjectInput, LlmGenerateObjectResult } from "./llm-client";
 import { RUN_EVENT_PROMPT_CAP, suggestWorkflowPatch } from "./patch-workflow";
 
-// The runtime Zod object — used by the helper at call time. Cast at the
+// The runtime Zod object — used by the helper at call time. Mirrors
+// the per-failing-node-type envelope shape the route picks (a single
+// non-union `{ patchedConfig, rationale }` schema). Cast at the
 // boundary so the schema's inferred shape doesn't trip TS2589 ("type
 // instantiation excessively deep") when the tests inline the helper.
 const envelopeSchema = z.object({
-  workflow: z.object({
-    nodes: z.array(z.object({ id: z.string(), type: z.string(), config: z.record(z.string(), z.unknown()).optional() })),
-    edges: z.array(z.unknown()).optional(),
-  }),
+  patchedConfig: z.record(z.string(), z.unknown()),
   rationale: z.string().min(1),
-}) as unknown as LlmGenerateObjectInput<{ workflow: unknown; rationale: string }>["schema"];
+}) as unknown as LlmGenerateObjectInput<{ patchedConfig: Record<string, unknown>; rationale: string }>["schema"];
 
 const baseInput = {
   workflow: {
@@ -35,13 +34,10 @@ function makeLlm(result: LlmGenerateObjectResult<unknown>): LlmClient {
 }
 
 describe("suggestWorkflowPatch — AI mode", () => {
-  it("returns the LLM's structured workflow + rationale on success", async () => {
+  it("returns the structured envelope (patchedConfig + rationale) on success", async () => {
     const llm = makeLlm({
       object: {
-        workflow: {
-          nodes: [{ id: "fetch", type: "http", config: { url: "https://x", retry: { maxAttempts: 3 } } }],
-          edges: [],
-        },
+        patchedConfig: { retry: { maxAttempts: 3 } },
         rationale: "Added retry to handle the transient ECONNRESET.",
       },
       model: "claude-haiku-4-5-20251001",
@@ -60,7 +56,11 @@ describe("suggestWorkflowPatch — AI mode", () => {
     expect(result.rationale).toContain("retry");
     expect(result.model).toBe("claude-haiku-4-5-20251001");
     expect(result.provider).toBe("anthropic");
-    expect((result.suggestedWorkflow as { nodes: Array<{ config?: { retry?: unknown } }> }).nodes[0].config?.retry).toBeDefined();
+    // The helper now returns the LLM envelope verbatim — the route is
+    // responsible for composing the full workflow by merging
+    // `patchedConfig` onto the original snapshot.
+    const envelope = result.suggestedWorkflow as { patchedConfig?: { retry?: { maxAttempts?: number } } };
+    expect(envelope.patchedConfig?.retry?.maxAttempts).toBe(3);
   });
 });
 
@@ -120,7 +120,7 @@ describe("suggestWorkflowPatch — fallback paths", () => {
 describe("suggestWorkflowPatch — prompt content", () => {
   it("truncates run events to RUN_EVENT_PROMPT_CAP", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { workflow: baseInput.workflow, rationale: "noop" },
+      object: { patchedConfig: {}, rationale: "noop" },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -148,7 +148,7 @@ describe("suggestWorkflowPatch — prompt content", () => {
 
   it("includes the failedNodeId + already-redacted errorJson in the prompt", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { workflow: baseInput.workflow, rationale: "noop" },
+      object: { patchedConfig: {}, rationale: "noop" },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -169,9 +169,30 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).toContain('"401 unauthorized"');
   });
 
+  it("instructs typed envelopes to use null for unchanged fields", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: { patchedConfig: {}, rationale: "noop" },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    const llm = { generateText: vi.fn(), generateObject } as unknown as LlmClient;
+
+    await suggestWorkflowPatch({
+      llm,
+      envelopeSchema,
+      ...baseInput,
+    });
+
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).toContain("set unchanged fields to `null`");
+    expect(callArg.system).toContain("filters `null` before shallow-merging");
+  });
+
   it("scrubs secret-shaped string values before sending the prompt", async () => {
     const generateObject = vi.fn(async () => ({
-      object: { workflow: baseInput.workflow, rationale: "noop" },
+      object: { patchedConfig: {}, rationale: "noop" },
       model: "x",
       provider: "y",
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },

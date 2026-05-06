@@ -2,218 +2,214 @@ import { describe, expect, it } from "vitest";
 import { WorkflowSchema } from "@janusly/shared";
 import {
   AiGenerationWorkflowSchema,
-  AiPatchGenerationWorkflowSchema,
+  AiPatchAgentConfigEnvelope,
+  AiPatchGenericConfigEnvelope,
+  AiPatchHttpConfigEnvelope,
+  AiPatchToolConfigEnvelope,
+  patchEnvelopeForNodeType,
 } from "./ai-schemas";
 
-describe("AiPatchGenerationWorkflowSchema — accepts resilience fields", () => {
-  it("preserves retry / timeoutMs / maxResponseBytes / maxRedirects on http config", () => {
-    const parsed = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: {
-            url: "https://x.example",
-            method: "GET",
-            retry: { maxAttempts: 3 },
-            timeoutMs: 5000,
-            maxResponseBytes: 1_048_576,
-            maxRedirects: 3,
-          },
-        },
-      ],
-      edges: [],
+describe("patch envelopes — per-failing-node-type single-shape schemas", () => {
+  it("http envelope accepts a full resilience patch (all fields populated)", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      patchedConfig: {
+        url: "https://x.example",
+        method: "POST",
+        retry: { maxAttempts: 3 },
+        timeoutMs: 5_000,
+        maxResponseBytes: 1_048_576,
+        maxRedirects: 3,
+      },
+      rationale: "Added retry and raised timeout for transient ECONNRESET.",
     });
-
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-
-    const httpNode = parsed.data.nodes[0];
-    expect(httpNode.type).toBe("http");
-    if (httpNode.type !== "http") return;
-    expect(httpNode.config.retry?.maxAttempts).toBe(3);
-    expect(httpNode.config.timeoutMs).toBe(5000);
-    expect(httpNode.config.maxResponseBytes).toBe(1_048_576);
-    expect(httpNode.config.maxRedirects).toBe(3);
+    expect(parsed.data.patchedConfig.retry?.maxAttempts).toBe(3);
+    expect(parsed.data.patchedConfig.timeoutMs).toBe(5_000);
+    expect(parsed.data.patchedConfig.maxResponseBytes).toBe(1_048_576);
+    expect(parsed.data.patchedConfig.maxRedirects).toBe(3);
   });
 
-  it("preserves retry / timeoutMs on tool config", () => {
-    const parsed = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "lookup",
-          type: "tool",
-          config: {
-            tool: "http.request",
-            retry: { maxAttempts: 2 },
-            timeoutMs: 3000,
-          },
-        },
-      ],
-      edges: [],
+  it("http envelope accepts a 'patch retry only' shape with nulls everywhere else", () => {
+    // OpenAI strict mode requires every field to be present (just
+    // possibly null). The LLM emits the full shape on every call;
+    // omitted-as-null is how it expresses 'don't change this field'.
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      patchedConfig: {
+        url: null,
+        method: null,
+        retry: { maxAttempts: 2 },
+        timeoutMs: null,
+        maxResponseBytes: null,
+        maxRedirects: null,
+      },
+      rationale: "Single retry on a 5xx burst.",
     });
-
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-
-    const toolNode = parsed.data.nodes[0];
-    expect(toolNode.type).toBe("tool");
-    if (toolNode.type !== "tool") return;
-    expect(toolNode.config.retry?.maxAttempts).toBe(2);
-    expect(toolNode.config.timeoutMs).toBe(3000);
+    expect(parsed.data.patchedConfig.retry?.maxAttempts).toBe(2);
+    expect(parsed.data.patchedConfig.url).toBeNull();
+    expect(parsed.data.patchedConfig.timeoutMs).toBeNull();
   });
 
-  it("preserves retry / timeoutMs on agent config", () => {
-    const parsed = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "summarize",
-          type: "agent",
-          config: {
-            goal: "summarize the article",
-            retry: { maxAttempts: 2 },
-            timeoutMs: 60_000,
-          },
-        },
-      ],
-      edges: [],
-    });
-
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-
-    const agentNode = parsed.data.nodes[0];
-    expect(agentNode.type).toBe("agent");
-    if (agentNode.type !== "agent") return;
-    expect(agentNode.config.retry?.maxAttempts).toBe(2);
-    expect(agentNode.config.timeoutMs).toBe(60_000);
-  });
-
-  it("rejects retry.maxAttempts above the cap of 10", () => {
-    const parsed = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: { url: "https://x.example", retry: { maxAttempts: 99 } },
-        },
-      ],
-      edges: [],
+  it("http envelope rejects retry.maxAttempts below 2 (1 means no retry)", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      patchedConfig: {
+        url: null, method: null, retry: { maxAttempts: 1 },
+        timeoutMs: null, maxResponseBytes: null, maxRedirects: null,
+      },
+      rationale: "x",
     });
     expect(parsed.success).toBe(false);
   });
 
-  it("rejects retry without an actionable maxAttempts value", () => {
-    const emptyRetry = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: { url: "https://x.example", retry: {} },
-        },
-      ],
-      edges: [],
+  it("http envelope rejects retry.maxAttempts above 10", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      patchedConfig: {
+        url: null, method: null, retry: { maxAttempts: 99 },
+        timeoutMs: null, maxResponseBytes: null, maxRedirects: null,
+      },
+      rationale: "x",
     });
-    expect(emptyRetry.success).toBe(false);
-
-    const noRetry = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: { url: "https://x.example", retry: { maxAttempts: 1 } },
-        },
-      ],
-      edges: [],
-    });
-    expect(noRetry.success).toBe(false);
+    expect(parsed.success).toBe(false);
   });
 
-  it("still accepts a slim http node with just url + method (no resilience fields)", () => {
-    const parsed = AiPatchGenerationWorkflowSchema.safeParse({
-      nodes: [
-        { id: "fetch", type: "http", config: { url: "https://x.example", method: "GET" } },
-      ],
-      edges: [],
+  it("http envelope rejects empty rationale", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      patchedConfig: {
+        url: "https://x", method: null, retry: null,
+        timeoutMs: null, maxResponseBytes: null, maxRedirects: null,
+      },
+      rationale: "",
     });
-    expect(parsed.success).toBe(true);
+    expect(parsed.success).toBe(false);
   });
-});
 
-describe("AiGenerationWorkflowSchema — strips resilience fields (regression pin)", () => {
-  it("parses but does not surface retry / timeoutMs / bounds on http config", () => {
-    // Same payload the patch schema accepts. The slim generation schema
-    // is intentionally narrower — its `http.config` only declares `url`
-    // and optional `method`. Zod's default is to strip extra keys, so
-    // the parse succeeds but the `parsed.data` strips the resilience
-    // fields. This pin proves the generation route stays slim while the
-    // patch route can express the same fields.
-    const parsed = AiGenerationWorkflowSchema.safeParse({
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: {
-            url: "https://x.example",
-            method: "GET",
-            retry: { maxAttempts: 3 },
-            timeoutMs: 5000,
-            maxResponseBytes: 1_048_576,
-            maxRedirects: 3,
-          },
-        },
-      ],
-      edges: [],
+  it("tool envelope accepts retry + timeout patch (all fields populated)", () => {
+    const parsed = AiPatchToolConfigEnvelope.safeParse({
+      patchedConfig: {
+        tool: "http.request",
+        retry: { maxAttempts: 2 },
+        timeoutMs: 3_000,
+      },
+      rationale: "Retry the tool once.",
     });
-
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
+    expect(parsed.data.patchedConfig.tool).toBe("http.request");
+    expect(parsed.data.patchedConfig.retry?.maxAttempts).toBe(2);
+    expect(parsed.data.patchedConfig.timeoutMs).toBe(3_000);
+  });
 
-    const node = parsed.data.nodes[0];
-    expect(node.type).toBe("http");
-    if (node.type !== "http") return;
-    expect(node.config).toEqual({ url: "https://x.example", method: "GET" });
-    // Zod strips unknown keys in default mode; resilience fields don't
-    // show up on the parsed output, so the LLM can't surface them via
-    // this schema even if it tries.
-    expect((node.config as Record<string, unknown>).retry).toBeUndefined();
-    expect((node.config as Record<string, unknown>).timeoutMs).toBeUndefined();
-    expect((node.config as Record<string, unknown>).maxResponseBytes).toBeUndefined();
-    expect((node.config as Record<string, unknown>).maxRedirects).toBeUndefined();
+  it("tool envelope accepts a partial patch with nulls", () => {
+    const parsed = AiPatchToolConfigEnvelope.safeParse({
+      patchedConfig: { tool: null, retry: { maxAttempts: 3 }, timeoutMs: null },
+      rationale: "Retry the existing tool.",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("agent envelope accepts goal + retry + timeout patch (all fields populated)", () => {
+    const parsed = AiPatchAgentConfigEnvelope.safeParse({
+      patchedConfig: {
+        goal: "summarize the article",
+        retry: { maxAttempts: 2 },
+        timeoutMs: 60_000,
+      },
+      rationale: "Tightened the goal and added retry.",
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.patchedConfig.goal).toBe("summarize the article");
+    expect(parsed.data.patchedConfig.timeoutMs).toBe(60_000);
+  });
+
+  it("generic envelope accepts arbitrary record patches", () => {
+    const parsed = AiPatchGenericConfigEnvelope.safeParse({
+      patchedConfig: { mapping: { a: "{{context.x.output}}" }, anything: 42 },
+      rationale: "Tweaked the transform mapping.",
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.patchedConfig.mapping).toEqual({ a: "{{context.x.output}}" });
+    expect(parsed.data.patchedConfig.anything).toBe(42);
+  });
+
+  it("generic envelope rejects non-object patchedConfig", () => {
+    const parsed = AiPatchGenericConfigEnvelope.safeParse({
+      patchedConfig: "not an object",
+      rationale: "x",
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 
-describe("AiPatchGenerationWorkflowSchema — round-trip through the engine's strict schema", () => {
-  it("a patch-schema workflow with retry / bounds passes WorkflowSchema unchanged", () => {
-    const patchParsed = AiPatchGenerationWorkflowSchema.safeParse({
-      dslVersion: "1.0",
-      nodes: [
-        {
-          id: "fetch",
-          type: "http",
-          config: {
-            url: "https://x.example",
-            retry: { maxAttempts: 3 },
-            timeoutMs: 5000,
-            maxResponseBytes: 5_242_880,
-          },
-        },
-      ],
+describe("patchEnvelopeForNodeType — dispatch", () => {
+  it("returns the http envelope for http nodes", () => {
+    const choice = patchEnvelopeForNodeType("http");
+    expect(choice.kind).toBe("http");
+    expect(choice.schema).toBe(AiPatchHttpConfigEnvelope);
+  });
+
+  it("returns the tool envelope for tool nodes", () => {
+    const choice = patchEnvelopeForNodeType("tool");
+    expect(choice.kind).toBe("tool");
+    expect(choice.schema).toBe(AiPatchToolConfigEnvelope);
+  });
+
+  it("returns the agent envelope for agent nodes", () => {
+    const choice = patchEnvelopeForNodeType("agent");
+    expect(choice.kind).toBe("agent");
+    expect(choice.schema).toBe(AiPatchAgentConfigEnvelope);
+  });
+
+  it("falls back to the generic envelope for everything else", () => {
+    for (const type of ["transform", "condition", "router", "ai", "approval", "noop", "loop", "multi_agent", "unknown_type"]) {
+      const choice = patchEnvelopeForNodeType(type);
+      expect(choice.kind, `for type=${type}`).toBe("generic");
+      expect(choice.schema).toBe(AiPatchGenericConfigEnvelope);
+    }
+  });
+});
+
+describe("AiGenerationWorkflowSchema — generation route stays untouched", () => {
+  it("still parses a basic AI-generated workflow shape", () => {
+    const parsed = AiGenerationWorkflowSchema.safeParse({
+      nodes: [{ id: "fetch", type: "http", config: { url: "https://x" } }],
       edges: [],
     });
-    expect(patchParsed.success).toBe(true);
-    if (!patchParsed.success) return;
+    expect(parsed.success).toBe(true);
+  });
+});
 
-    // The engine's strict schema treats `node.config` as
-    // `Record<string, unknown>` — resilience fields pass through
-    // untouched, which is what lets the engine apply them at runtime.
-    const enginedParsed = WorkflowSchema.safeParse(patchParsed.data);
-    expect(enginedParsed.success).toBe(true);
-    if (!enginedParsed.success) return;
-
-    const engineNode = enginedParsed.data.nodes[0];
-    expect(engineNode.config.retry).toEqual({ maxAttempts: 3 });
-    expect(engineNode.config.timeoutMs).toBe(5000);
-    expect(engineNode.config.maxResponseBytes).toBe(5_242_880);
+describe("merged config integration — produces a valid engine workflow", () => {
+  it("composing a patched config with the original workflow passes WorkflowSchema", () => {
+    // Mirrors what the route does: shallow-merge patchedConfig onto the
+    // failing node's existing config, leaving other nodes untouched.
+    const original = {
+      dslVersion: "1.0" as const,
+      nodes: [
+        { id: "fetch", type: "http" as const, config: { url: "https://x", method: "GET" } },
+        { id: "noop", type: "noop" as const, config: {} },
+      ],
+      edges: [{ from: "fetch", to: "noop" }],
+    };
+    const patchedConfig = { retry: { maxAttempts: 3 }, timeoutMs: 5_000 };
+    const merged = {
+      ...original,
+      nodes: original.nodes.map((node) =>
+        node.id === "fetch" ? { ...node, config: { ...node.config, ...patchedConfig } } : node,
+      ),
+    };
+    const parsed = WorkflowSchema.safeParse(merged);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const fetchNode = parsed.data.nodes.find((n) => n.id === "fetch");
+    expect(fetchNode?.config).toMatchObject({
+      url: "https://x",
+      method: "GET",
+      retry: { maxAttempts: 3 },
+      timeoutMs: 5_000,
+    });
   });
 });
