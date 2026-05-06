@@ -2483,6 +2483,54 @@ a { color: var(--we-primary); }
   color: var(--we-success);
 }
 
+.we-recovery-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.we-recovery-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.we-recovery-tab:hover {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-recovery-tab--active {
+  background: var(--we-primary);
+  border-color: var(--we-primary);
+  color: var(--we-surface);
+}
+
+.we-recovery-tab--active:hover {
+  background: var(--we-primary);
+  color: var(--we-surface);
+}
+
+.we-recovery-tab__label {
+  font-weight: 600;
+}
+
+.we-recovery-tab__confidence {
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
 .small-command--primary {
   background: var(--we-primary-soft);
   border-color: var(--we-primary);

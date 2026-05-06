@@ -1,20 +1,23 @@
 /**
- * AI helper that proposes a config patch for a failing node.
+ * AI helper that proposes 1-3 alternative config patches for a failing
+ * node. The operator picks between them in the recovery dialog.
  *
  * Accepts an `LlmClient` (nullable for the fallback path), a workflow
  * snapshot, the failing node id, the error envelope, and the recent run
  * events. Calls `llm.generateObject({ schema })` with a structured-output
  * schema the route owns — one concrete envelope per failing-node type
- * (http / tool / agent / generic), all of shape `{ patchedConfig,
- * rationale }`. The LLM emits ONLY the patched config for the failing
- * node (not a full workflow), and the route composes the suggested
- * workflow server-side by shallow-merging the patched config onto the
- * original snapshot.
+ * (http / tool / agent / generic), each wrapping a `suggestions` array
+ * of 1-3 items with shape `{ patchedConfig, rationale, approachLabel,
+ * confidence }`. The LLM emits ONLY the patched configs for the failing
+ * node (not full workflows), and the route fan-out-merges each
+ * suggestion onto the original snapshot before validating.
  *
- * Why per-type envelopes: a multi-branch discriminated union compiles
- * to JSON Schema `oneOf`, which OpenAI strict mode rejects outright and
- * Anthropic's grammar cap chokes on once you add resilience optionals.
- * One concrete envelope per call sidesteps both.
+ * Why per-type envelopes (and not a multi-type union): a multi-branch
+ * discriminated union compiles to JSON Schema `oneOf`, which OpenAI
+ * strict mode rejects outright and Anthropic's grammar cap chokes on
+ * once you add resilience optionals. One concrete envelope per call
+ * sidesteps both. The 1-3 array is a single repeated `items` constraint —
+ * the compiled grammar stays compact.
  *
  * The structured-output schema is owned by the API route, not this
  * helper — same pattern as `explainRun`. Keeps `packages/ai`
@@ -24,43 +27,61 @@
  * Hard contract per AGENTS.md AI-fallback invariant: this helper
  * NEVER throws. Any LLM failure (no client, quota, network, schema
  * mismatch from the model) becomes a `mode: "fallback"` response
- * with the original workflow returned untouched and a rationale
- * explaining what to do manually. The route adds a safe-parse step
- * on AI-mode output to catch mismatches against the engine's strict
- * `WorkflowSchema`.
+ * with a single 0-confidence "other" suggestion that carries an empty
+ * patch and a rationale explaining what to do manually. The route
+ * adds a safe-parse step on each AI-mode suggestion to catch mismatches
+ * against the engine's strict `WorkflowSchema`; suggestions that fail
+ * are dropped, and if none survive the route degrades to fallback.
  *
  * Used by `apps/api/src/index.ts:POST /ai/patch-workflow`.
  */
 
 import type { LlmClient, LlmGenerateObjectInput } from "./llm-client";
 
+/** Closed approach-label set the model picks per suggestion. Mirrors the route's Zod enum. */
+export type PatchApproachLabel =
+  | "add_retry"
+  | "raise_timeout"
+  | "swap_secret_ref"
+  | "add_approval"
+  | "fix_url"
+  | "other";
+
+/** Single suggestion as the LLM emits it — config patch + metadata. The route fans out and merges. */
+export type PatchSuggestionItem = {
+  /**
+   * Fields the LLM wants changed on the failing node's config. Per-type
+   * envelopes require every known field to be present (with `null` for
+   * unchanged fields, which the route filters before merging). Generic
+   * envelopes carry only the fields being changed.
+   */
+  patchedConfig: Record<string, unknown>;
+  /** One-paragraph operator-facing explanation. Naming the resilience field + value when set. */
+  rationale: string;
+  /** Dominant intent of this suggestion — drives the chip on the dialog tab. */
+  approachLabel: PatchApproachLabel;
+  /** Self-rated confidence 0-100. Pre-calibration; the dialog labels it as a self-rating. */
+  confidence: number;
+};
+
 /**
- * Result returned by `suggestWorkflowPatch`.
+ * Result returned by `suggestWorkflowPatch`. The helper-boundary contract
+ * is exclusively the array form — the route is responsible for the
+ * back-compat `suggestedWorkflow`/`rationale` mirroring on the response
+ * to the dialog.
  *
- * On `mode: "ai"`, `suggestedWorkflow` is the LLM's structured-output
- * envelope as parsed by the route's per-type schema — a
- * `{ patchedConfig, rationale }` shape, NOT a full workflow. The route
- * is responsible for composing the full workflow by merging the patched
- * config into the original snapshot before the dialog ever sees it.
+ * On `mode: "ai"`, `suggestions` is 1-3 envelope items. The route
+ * shallow-merges each item's `patchedConfig` onto the original workflow,
+ * validates each, returns the surviving ones sorted by confidence desc.
  *
- * On `mode: "fallback"`, `suggestedWorkflow` is the original (failing)
- * workflow returned untouched so the dialog can render a "no changes"
- * diff and disable Apply.
- *
- * Either way, the API route normalises this back to a full
- * `Workflow` shape before sending to the operator — the UI contract
- * never sees a `patchedConfig` envelope.
+ * On `mode: "fallback"`, `suggestions` is exactly one item:
+ * `{ patchedConfig: {}, rationale: <reason>, approachLabel: "other", confidence: 0 }`.
+ * The route renders that as a no-changes diff with Apply disabled.
  */
 export type PatchSuggestion = {
   mode: "ai" | "fallback";
-  /**
-   * `mode: "ai"` → `{ patchedConfig: Record<string, unknown>, rationale }` envelope.
-   * `mode: "fallback"` → the original workflow snapshot, untouched.
-   * The route reconciles into a full workflow before returning to the UI.
-   */
-  suggestedWorkflow: unknown;
-  /** Free-text paragraph explaining what changed and why. Surfaces in the recovery dialog. */
-  rationale: string;
+  /** 1-3 alternative patches in `mode: "ai"`; exactly one zero-confidence item in `mode: "fallback"`. */
+  suggestions: PatchSuggestionItem[];
   model?: string;
   provider?: string;
   /** Set only when AI mode was attempted and degraded to fallback. */
@@ -76,18 +97,17 @@ export type RunEventForPrompt = {
 };
 
 /**
- * Schema-shape contract the route hands the helper. Both fields
- * required. The route picks one of several per-type envelopes (http /
- * tool / agent / generic) and the LLM emits a `patchedConfig` object
- * containing only the fields it wants changed on the failing node. The
- * helper itself stays type-loose at this boundary — the per-type
- * schemas live in `apps/api/src/ai-schemas.ts` and validate at parse
- * time, then the route filters null sentinel fields and merges the
- * patched config into the original workflow.
+ * Schema-shape contract the route hands the helper. The route picks one
+ * of several per-type envelopes (http / tool / agent / generic), each
+ * wrapping a `suggestions` array of 1-3 items. Each item contains the
+ * fields the LLM wants changed on the failing node plus the per-suggestion
+ * metadata (`approachLabel`, `confidence`). The helper itself stays
+ * type-loose at this boundary — the per-type schemas live in
+ * `apps/api/src/ai-schemas.ts` and validate at parse time, then the
+ * route fan-out-merges each surviving item onto the original workflow.
  */
 export type PatchEnvelopeSchemaResult = {
-  patchedConfig: Record<string, unknown>;
-  rationale: string;
+  suggestions: PatchSuggestionItem[];
 };
 
 export type SuggestWorkflowPatchInput = {
@@ -131,13 +151,20 @@ const FALLBACK_RATIONALE_NO_LLM =
 
 const SYSTEM_PROMPT = `You are Janusly's failure-recovery agent. You are given a workflow that just failed, the id of the failing node, the error envelope (already redacted of secret values), and recent run events.
 
-Produce a config patch for the failing node — NOT a full workflow.
+Produce up to 3 ALTERNATIVE config patches for the failing node — NOT full workflows. The operator sees them as tabs and picks one.
 
 Output shape (enforced by the structured-output schema you receive):
-- \`patchedConfig\`: the fields you want changed on the failing node's config. Some typed envelopes require every known field to be present for provider strict mode; set unchanged fields to \`null\`. The system filters \`null\` before shallow-merging your patch onto the original config, so those fields are preserved. For generic record envelopes, include only the fields you're changing.
-- \`rationale\`: a one-paragraph explanation written for a workflow operator (not a developer). When you set a resilience field, name the field and the value you chose so the operator can verify.
+- \`suggestions\`: an array of 1-3 items, ordered most-likely-fix first. Each item is:
+  - \`patchedConfig\`: the fields you want changed on the failing node's config. Some typed envelopes require every known field to be present for provider strict mode; set unchanged fields to \`null\`. The system filters \`null\` before shallow-merging your patch onto the original config, so those fields are preserved. For generic record envelopes, include only the fields you're changing.
+  - \`rationale\`: a one-paragraph explanation written for a workflow operator (not a developer). When you set a resilience field, name the field and the value you chose so the operator can verify.
+  - \`approachLabel\`: the dominant intent of THIS suggestion. Closed enum: \`add_retry\` / \`raise_timeout\` / \`swap_secret_ref\` / \`add_approval\` / \`fix_url\` / \`other\`. Match the field you're changing.
+  - \`confidence\`: a 0-100 integer self-rating. The system labels it as a self-rating in the UI; pick honestly. Use the highest score for the suggestion you'd recommend first.
 
-Rules:
+Number of suggestions:
+- When the failure clearly has only one sensible fix (e.g. a typo in a URL, a missing required field), return ONE suggestion. Don't pad to 3.
+- When the failure has alternative valid responses (e.g. a 5xx could be \`add_retry\` OR \`raise_timeout\` depending on what the operator wants), return 2-3 distinct alternatives ordered by likelihood.
+
+Rules per suggestion:
 - Patch ONLY the failing node. Common fixes:
   - Fix a typo in a URL.
   - Swap a literal token to a \`{{secret.NAME}}\` / \`{{credential.NAME}}\` / \`{{env.NAME}}\` template reference.
@@ -151,7 +178,8 @@ Rules:
   - \`maxRedirects: <integer>\` — when the failure is a redirect-loop or insufficient redirects. Default is 5.
 - Do NOT include any secret values verbatim.
 - Do NOT emit a \`patchedConfig\` larger than the failing node's actual config — you patch one node, not the whole workflow.
-- If you cannot find a sensible fix from the error and run events, return an empty \`patchedConfig: {}\` and explain in the rationale what the operator needs to inspect manually.`;
+- Suggestions should be DISTINCT. If you can only justify one approach, return one — don't repeat the same fix with different wording.
+- If you cannot find any sensible fix from the error and run events, return ONE suggestion with empty \`patchedConfig: {}\`, \`approachLabel: "other"\`, \`confidence: 0\`, and explain in the rationale what the operator needs to inspect manually.`;
 
 /**
  * Propose a workflow patch for a failed run. Never throws — every
@@ -166,8 +194,12 @@ export async function suggestWorkflowPatch(
   if (!llm) {
     return {
       mode: "fallback",
-      suggestedWorkflow: workflow,
-      rationale: FALLBACK_RATIONALE_NO_LLM,
+      suggestions: [{
+        patchedConfig: {},
+        rationale: FALLBACK_RATIONALE_NO_LLM,
+        approachLabel: "other",
+        confidence: 0,
+      }],
     };
   }
 
@@ -191,29 +223,36 @@ export async function suggestWorkflowPatch(
       // forwards it to the provider's structured-output enforcement.
       // The route picks one concrete envelope per failing-node type so
       // the compiled JSON Schema has no `oneOf` keyword (works on
-      // OpenAI strict mode AND fits Anthropic's grammar cap).
+      // OpenAI strict mode AND fits Anthropic's grammar cap). The
+      // 1-3 array form is one repeated `items` constraint, not three
+      // branches — the compiled grammar stays compact.
       schema: envelopeSchema,
       schemaName: "JanuslyWorkflowPatch",
-      schemaDescription: "Patched config for the failing node plus a rationale.",
+      schemaDescription: "1-3 alternative config patches for the failing node, ordered most-likely-fix first.",
       system: SYSTEM_PROMPT,
       prompt: promptBody,
       modelHint: model,
     });
-    // The result.object is the parsed envelope: `{ patchedConfig, rationale }`.
-    // The route receives this verbatim as `suggestedWorkflow` and merges the
-    // patched config into the original workflow before returning to the UI.
+    // The route is responsible for merging each `patchedConfig` into a
+    // full workflow, validating, and degrading to fallback when no
+    // suggestions survive. The helper returns the LLM-emitted array
+    // verbatim so the route keeps schema-validation responsibilities
+    // in one place.
     return {
       mode: "ai",
-      suggestedWorkflow: result.object,
-      rationale: result.object.rationale,
+      suggestions: result.object.suggestions,
       model: result.model,
       provider: result.provider,
     };
   } catch (error) {
     return {
       mode: "fallback",
-      suggestedWorkflow: workflow,
-      rationale: `${FALLBACK_RATIONALE_NO_LLM} (Reason: ${error instanceof Error ? error.message : String(error)})`,
+      suggestions: [{
+        patchedConfig: {},
+        rationale: `${FALLBACK_RATIONALE_NO_LLM} (Reason: ${error instanceof Error ? error.message : String(error)})`,
+        approachLabel: "other",
+        confidence: 0,
+      }],
       aiError: error instanceof Error ? error.message : String(error),
     };
   }
