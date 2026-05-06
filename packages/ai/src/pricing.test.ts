@@ -9,9 +9,9 @@ describe("getModelPrice — built-in defaults", () => {
     });
   });
 
-  it("returns the Anthropic claude-haiku-4-5 default", () => {
+  it("returns the Anthropic claude-haiku-4-5-20251001 default", () => {
     expect(
-      getModelPrice("anthropic", "claude-haiku-4-5", {} as NodeJS.ProcessEnv),
+      getModelPrice("anthropic", "claude-haiku-4-5-20251001", {} as NodeJS.ProcessEnv),
     ).toEqual({
       inputUsdPer1M: 1.0,
       outputUsdPer1M: 5.0,
