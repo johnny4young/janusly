@@ -90,7 +90,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     category: "ai",
     description: "Default Anthropic model for this tenant.",
     valueType: "string",
-    defaultValue: "claude-haiku-4-5",
+    defaultValue: "claude-haiku-4-5-20251001",
     envKeys: ["ANTHROPIC_MODEL"],
   },
   {

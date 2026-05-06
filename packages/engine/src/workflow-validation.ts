@@ -82,6 +82,19 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
       }
     }
     if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+    // Future AI generation strategies may produce looser node shapes,
+    // and direct operator input can still submit malformed configs, so
+    // this validator is the strict runtime gate for required fields on
+    // `ai` / `agent` / `transform` nodes. Mirrors the per-type checks
+    // above for `http` / `tool` / `condition` / `loop`.
+    if (node.type === "ai" && !node.config.prompt) issues.push({ code: "ai_missing_prompt", message: "AI node requires config.prompt", nodeId: node.id });
+    if (node.type === "agent" && !node.config.goal) issues.push({ code: "agent_missing_goal", message: "Agent node requires config.goal", nodeId: node.id });
+    if (node.type === "transform") {
+      const mapping = node.config.mapping;
+      if (!mapping || typeof mapping !== "object" || Array.isArray(mapping) || Object.keys(mapping as Record<string, unknown>).length === 0) {
+        issues.push({ code: "transform_missing_mapping", message: "Transform node requires a non-empty config.mapping object", nodeId: node.id });
+      }
+    }
     if (node.type === "multi_agent" && (!Array.isArray(node.config.agents) || node.config.agents.length === 0)) issues.push({ code: "multi_agent_missing_agents", message: "Multi-agent node requires at least one agent", nodeId: node.id });
     if (node.type === "router" || node.type === "router_llm") {
       // Router nodes feed `config.candidates` into the decision engine, which

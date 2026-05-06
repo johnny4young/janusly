@@ -21,7 +21,7 @@ Provider-neutral LLM abstraction + the run explainer. Every AI surface in Janusl
 | `OPENAI_API_KEY` | openai | API key. Absent ⇒ AI surfaces degrade to fallback. | _(unset)_ |
 | `OPENAI_MODEL` | openai | Override default model id. | `gpt-4o-mini` |
 | `ANTHROPIC_API_KEY` | anthropic | API key. | _(unset)_ |
-| `ANTHROPIC_MODEL` | anthropic | Override default model id. | `claude-haiku-4-5` |
+| `ANTHROPIC_MODEL` | anthropic | Override default model id. | `claude-haiku-4-5-20251001` |
 | `OPENAI_TIMEOUT_MS` | _shared_ | Per-call timeout (passed to `AbortSignal.timeout`). | `30000` |
 | `OPENAI_MAX_RETRIES` | _shared_ | AI SDK retries on rate-limit + 5xx. | `2` |
 
@@ -34,14 +34,14 @@ Both `LlmGenerateTextInput.modelHint` and the `model` field on workflow nodes / 
 | Form | Meaning |
 | --- | --- |
 | `"gpt-4o-mini"` | Bare model id — uses the configured provider, this model. |
-| `"anthropic/claude-haiku-4-5"` | `<provider>/<model>` — overrides provider for that one call, ignoring `JANUSLY_LLM_PROVIDER`. |
+| `"anthropic/claude-haiku-4-5-20251001"` | `<provider>/<model>` — overrides provider for that one call, ignoring `JANUSLY_LLM_PROVIDER`. |
 
 The latter requires the named provider's API key to be present; absent → throws a descriptive error caught by the caller's try/catch and surfaced as `aiError`. A non-default provider key is enough for explicit overrides to work; the deploy-time default key is only required for calls that do not name a provider.
 
 A workflow author writing this on a single `ai` node:
 
 ```json
-{ "type": "ai", "config": { "prompt": "…", "model": "anthropic/claude-haiku-4-5" } }
+{ "type": "ai", "config": { "prompt": "…", "model": "anthropic/claude-haiku-4-5-20251001" } }
 ```
 
 …runs THAT node alone against Anthropic, regardless of the deploy's `JANUSLY_LLM_PROVIDER`. Per-step provider override comes for free.

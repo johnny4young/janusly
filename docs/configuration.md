@@ -67,7 +67,7 @@ Guardrails:
 | --- | --- | --- | --- | --- |
 | `ai.provider` | `JANUSLY_LLM_PROVIDER` | `openai` | API AI endpoints, engine AI/agent nodes | Default provider for tenant-level LLM calls. API keys still come from env or secret management. |
 | `ai.openai.model` | `OPENAI_MODEL` | `gpt-4o-mini` | API AI endpoints, engine AI/agent nodes | Default OpenAI model for this tenant. |
-| `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant. |
+| `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant. |
 | `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds. |
 | `ai.maxRetries` | `OPENAI_MAX_RETRIES` | `2` | API AI endpoints, engine AI/agent nodes | AI SDK retry count for LLM calls. |
 | `ai.promptMaxChars` | `AI_PROMPT_MAX_CHARS` | `4000` | API AI endpoints | Prompt/question length cap. |
@@ -116,7 +116,7 @@ only to select the safe provider/model/limit behavior.
 | `AI_RATE_LIMIT_PER_MIN` | `30` | `apps/api` | Per-org AI rate limit window capacity. |
 | `JANUSLY_LLM_PROVIDER` | `openai` | `packages/ai`, `apps/api` | Default provider registry key. Currently `openai` or `anthropic`. |
 | `ANTHROPIC_API_KEY` | unset | `packages/ai` | Enables Anthropic-backed AI calls and explicit `anthropic/model` overrides. |
-| `ANTHROPIC_MODEL` | `claude-haiku-4-5` | `packages/ai`, `apps/api` | Default Anthropic model. |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | `packages/ai`, `apps/api` | Default Anthropic model. |
 | `JANUSLY_LLM_PRICE_<MODEL>` | built-in pricing table | `packages/ai/src/pricing.ts` | Optional cost override as `<inputUsdPer1M>,<outputUsdPer1M>`, for example `JANUSLY_LLM_PRICE_GPT_4O_MINI=0.15,0.60`. |
 
 ## MCP Server
