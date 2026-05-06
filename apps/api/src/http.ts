@@ -26,7 +26,7 @@ export function httpError(message: string, statusCode: number): HttpError {
   return err;
 }
 
-const DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173";
+const DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174";
 
 /** `ServerResponse` augmented with the request `Origin` so `corsHeaders` can resolve it. */
 export type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
