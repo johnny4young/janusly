@@ -211,11 +211,15 @@ export const AiGenerationWorkflowSchema = z.object({
 
 /**
  * Patch-route schemas — `/ai/patch-workflow`. Each LLM call uses ONE
- * concrete envelope picked by the failing-node's type. The envelope is a
- * single non-union shape: `{ patchedConfig, rationale }`. The LLM emits
+ * concrete envelope picked by the failing-node's type. The envelope wraps
+ * an array of 1-3 suggestions, each with the per-type config patch plus
+ * `approachLabel` + `confidence` metadata so the recovery dialog can show
+ * tabs and let the operator pick between alternative fixes. The LLM emits
  * only the patched config for the failing node, NOT a full workflow.
- * The route composes the suggested workflow server-side by merging the
- * patched config into the original snapshot.
+ * The route fan-out-merges each suggestion's `patchedConfig` onto the
+ * original snapshot, validates each, returns the surviving ones sorted
+ * by confidence desc. Legacy `suggestedWorkflow`/`rationale` fields on
+ * the response mirror `suggestions[0]` so older callers keep working.
  *
  * Why per-type envelopes instead of a single full-workflow schema:
  *
@@ -229,7 +233,9 @@ export const AiGenerationWorkflowSchema = z.object({
  *
  * A single non-union envelope per call sidesteps both: no `oneOf`
  * keyword in the compiled JSON Schema, and the per-type schema has only
- * 3-5 leaf fields so Anthropic's cap is comfortable.
+ * 3-5 leaf fields so Anthropic's cap is comfortable. The 1-3 array form
+ * adds one repeated `items: <single shape>` constraint, not three branches —
+ * the compiled grammar stays compact.
  *
  * The four envelopes:
  *
@@ -248,6 +254,13 @@ export const AiGenerationWorkflowSchema = z.object({
  *
  * `patchEnvelopeForNodeType(nodeType)` is the dispatch helper. The route
  * passes its result to `suggestWorkflowPatch` as the `envelopeSchema`.
+ *
+ * Per-suggestion metadata:
+ *   - `approachLabel` — closed enum (`add_retry` / `raise_timeout` /
+ *     `swap_secret_ref` / `add_approval` / `fix_url` / `other`). The
+ *     dialog renders a chip per tab.
+ *   - `confidence` — integer 0-100, raw LLM self-rating. Calibration
+ *     against past acceptance rates lands later.
  *
  * Retry shape: `{ maxAttempts: number }` only, with `min(2)` because
  * runtime `maxAttempts: 1` means "do not retry" and the operator already
@@ -288,22 +301,57 @@ const AiPatchAgentConfig = z.object({
 
 const AiPatchGenericConfig = z.record(z.string(), z.unknown());
 
-/** Envelope for http-typed failing nodes. Single non-union shape. */
+/**
+ * Closed set of approach labels the model picks for each suggestion.
+ * Used for the tab chip in the recovery dialog and for downstream
+ * calibration once the feedback table lands.
+ */
+export const AiPatchApproachLabel = z.enum([
+  "add_retry",
+  "raise_timeout",
+  "swap_secret_ref",
+  "add_approval",
+  "fix_url",
+  "other",
+]);
+export type AiPatchApproachLabelValue = z.infer<typeof AiPatchApproachLabel>;
+
+/** Hard upper bound on suggestions per call. Mirrors the Zod `.max(3)`. */
+export const PATCH_MAX_SUGGESTIONS = 3;
+
+function suggestionItemSchema<T extends z.ZodTypeAny>(configSchema: T) {
+  return z.object({
+    patchedConfig: configSchema,
+    rationale: z.string().min(1),
+    approachLabel: AiPatchApproachLabel,
+    // Self-rated confidence 0-100. Pre-calibration MVP: the value is the
+    // LLM's own number; the dialog labels it as a self-rating so operators
+    // don't over-trust raw scores. Future calibration pass will rebase
+    // these against past acceptance rates per `approachLabel`.
+    confidence: z.number().int().min(0).max(100),
+  });
+}
+
+function suggestionsArraySchema<T extends z.ZodTypeAny>(configSchema: T) {
+  // The `items: <single shape>` constraint is the same for every position
+  // in the array — Anthropic's compiled grammar treats this as one shape,
+  // not N branches, so the `.max(3)` doesn't blow the size cap.
+  return z.array(suggestionItemSchema(configSchema)).min(1).max(PATCH_MAX_SUGGESTIONS);
+}
+
+/** Envelope for http-typed failing nodes. Wraps 1-3 typed http suggestions. */
 export const AiPatchHttpConfigEnvelope = z.object({
-  patchedConfig: AiPatchHttpConfig,
-  rationale: z.string().min(1),
+  suggestions: suggestionsArraySchema(AiPatchHttpConfig),
 });
 
 /** Envelope for tool-typed failing nodes. */
 export const AiPatchToolConfigEnvelope = z.object({
-  patchedConfig: AiPatchToolConfig,
-  rationale: z.string().min(1),
+  suggestions: suggestionsArraySchema(AiPatchToolConfig),
 });
 
 /** Envelope for agent-typed failing nodes. */
 export const AiPatchAgentConfigEnvelope = z.object({
-  patchedConfig: AiPatchAgentConfig,
-  rationale: z.string().min(1),
+  suggestions: suggestionsArraySchema(AiPatchAgentConfig),
 });
 
 /**
@@ -312,8 +360,7 @@ export const AiPatchAgentConfigEnvelope = z.object({
  * route's post-validation chain catches structurally-invalid output.
  */
 export const AiPatchGenericConfigEnvelope = z.object({
-  patchedConfig: AiPatchGenericConfig,
-  rationale: z.string().min(1),
+  suggestions: suggestionsArraySchema(AiPatchGenericConfig),
 });
 
 /** Discriminator returned alongside the schema so callers can branch on the parsed shape. */

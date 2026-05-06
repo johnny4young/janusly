@@ -881,16 +881,15 @@ export const routes: Route[] = [
       }
     } },
 
-  // Failure recovery — suggest a workflow patch for a failing DLQ entry.
-  // Dispatches to a per-failing-node-type envelope schema (single
-  // non-union shape: `{ patchedConfig, rationale }`) so the LLM call
-  // works against both Anthropic (compiled-grammar cap) and OpenAI
-  // (strict-mode `oneOf` ban). The LLM emits only the patched config
-  // for the failing node; the route composes the suggested workflow
-  // server-side by merging into the original snapshot, then re-validates
-  // through the same `WorkflowSchema.safeParse` + `sanitizeAiWorkflow`
-  // chain `/ai/generate-workflow` uses. Audits both AI-mode and fallback
-  // paths per the AGENTS.md AI-mutation contract.
+  // Failure recovery — suggest workflow patches for a failing DLQ entry.
+  // Dispatches to a per-failing-node-type envelope schema that wraps
+  // 1-3 config-only suggestions. Each envelope stays a single non-union
+  // shape so the LLM call works against both Anthropic (compiled-grammar
+  // cap) and OpenAI (strict-mode `oneOf` ban). The route composes each
+  // suggested workflow server-side by merging into the original snapshot,
+  // then re-validates through the same `WorkflowSchema.safeParse` +
+  // `sanitizeAiWorkflow` chain `/ai/generate-workflow` uses. Audits both
+  // AI-mode and fallback paths per the AGENTS.md AI-mutation contract.
   { method: "POST", match: "/ai/patch-workflow", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
@@ -922,14 +921,15 @@ export const routes: Route[] = [
         .limit(RUN_EVENT_PROMPT_CAP)).reverse();
 
       // Pick the per-type envelope based on the failing node's type.
-      // The typed envelopes are single non-union `{ patchedConfig, rationale }`
-      // shapes — no full-workflow union, so http/tool/agent patches work
-      // across OpenAI strict mode and Anthropic's compiled-grammar cap.
+      // The typed envelopes wrap a `suggestions` array of 1-3 items —
+      // single repeated shape, no full-workflow union — so the compiled
+      // grammar stays small for Anthropic and the JSON Schema has no
+      // `oneOf` keyword (works for OpenAI strict mode too).
       const failingNode = NodeSchema.safeParse(dlq.nodeJson);
       const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
       const envelope = patchEnvelopeForNodeType(failingNodeType);
 
-      let suggestion: PatchSuggestion = await suggestWorkflowPatch({
+      const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
         envelopeSchema: envelope.schema,
         workflow: dlq.workflowJson,
@@ -951,47 +951,112 @@ export const routes: Route[] = [
         })),
       });
 
-      // On AI mode the helper returned a `patchedConfig` (config-only
-      // patch for the failing node). Compose the suggested workflow:
-      // clone the original, find the failing node by id, strip nullable
-      // envelope sentinels, then shallow-merge the patch onto its config.
-      // Other nodes pass through untouched. Then re-validate through the
-      // engine's strict `WorkflowSchema` + the sanitize chokepoint, same as the
-      // generation route. Failures degrade to fallback.
-      if (suggestion.mode === "ai") {
-        try {
-          const original = WorkflowSchema.safeParse(dlq.workflowJson);
-          if (!original.success) {
-            throw new Error(`Original workflow failed strict schema: ${original.error.issues[0]?.message ?? "unknown"}`);
+      // Fan-out merge: each helper-emitted suggestion goes through the
+      // strict `WorkflowSchema` + `sanitizeAiWorkflow` chain that the
+      // single-suggestion path used. Suggestions that fail validation
+      // are dropped without breaking the rest of the batch. Survivors
+      // are sorted by confidence desc so the dialog's default tab is
+      // the model's most-confident pick.
+      type ValidatedSuggestion = {
+        workflow: Workflow;
+        rationale: string;
+        approachLabel: string;
+        confidence: number;
+      };
+      let response: {
+        mode: "ai" | "fallback";
+        suggestedWorkflow: Workflow | unknown;
+        rationale: string;
+        suggestions: ValidatedSuggestion[];
+        model?: string;
+        provider?: string;
+        aiError?: string;
+      };
+
+      if (helperResult.mode === "ai") {
+        const originalParsed = WorkflowSchema.safeParse(dlq.workflowJson);
+        const validated: ValidatedSuggestion[] = [];
+        if (originalParsed.success) {
+          for (const item of helperResult.suggestions) {
+            try {
+              const merged = applyConfigPatchToWorkflow(originalParsed.data, dlq.nodeId, item.patchedConfig);
+              const sanitized = sanitizeAiWorkflow(merged);
+              validated.push({
+                workflow: sanitized,
+                rationale: item.rationale,
+                approachLabel: item.approachLabel,
+                confidence: item.confidence,
+              });
+            } catch {
+              // Drop this suggestion; keep going. If none survive, the
+              // empty-list branch below degrades to fallback.
+            }
           }
-          const rawPatchedConfig = (suggestion.suggestedWorkflow as { patchedConfig?: Record<string, unknown> } | null | undefined)
-            ?.patchedConfig ?? {};
-          const merged = applyConfigPatchToWorkflow(original.data, dlq.nodeId, rawPatchedConfig);
-          const sanitized = sanitizeAiWorkflow(merged);
-          suggestion = {
-            ...suggestion,
-            suggestedWorkflow: sanitized,
+          validated.sort((a, b) => b.confidence - a.confidence);
+        }
+
+        if (validated.length > 0) {
+          const top = validated[0]!;
+          response = {
+            mode: "ai",
+            // Back-compat: legacy callers reading these top-level fields
+            // see the highest-confidence suggestion's content. The new UI
+            // reads the `suggestions` array directly.
+            suggestedWorkflow: top.workflow,
+            rationale: top.rationale,
+            suggestions: validated,
+            model: helperResult.model,
+            provider: helperResult.provider,
           };
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          suggestion = {
+        } else {
+          // No suggestion survived validation — degrade to fallback.
+          const reason = originalParsed.success
+            ? "All AI suggestions failed validation."
+            : `Original workflow failed strict schema: ${originalParsed.error.issues[0]?.message ?? "unknown"}`;
+          response = {
             mode: "fallback",
             suggestedWorkflow: dlq.workflowJson,
-            rationale: `AI returned a patch that could not be applied safely. The original workflow is unchanged. Reason: ${reason}`,
-            aiError: `Patch validation failed: ${reason}`,
+            rationale: `AI returned suggestions that could not be applied safely. The original workflow is unchanged. Reason: ${reason}`,
+            suggestions: [{
+              workflow: dlq.workflowJson as Workflow,
+              rationale: `AI returned suggestions that could not be applied safely. ${reason}`,
+              approachLabel: "other",
+              confidence: 0,
+            }],
+            model: helperResult.model,
+            provider: helperResult.provider,
+            aiError: helperResult.aiError ?? "no_valid_suggestions",
           };
         }
+      } else {
+        const fallbackItem = helperResult.suggestions[0]!;
+        response = {
+          mode: "fallback",
+          suggestedWorkflow: dlq.workflowJson,
+          rationale: fallbackItem.rationale,
+          suggestions: [{
+            workflow: dlq.workflowJson as Workflow,
+            rationale: fallbackItem.rationale,
+            approachLabel: fallbackItem.approachLabel,
+            confidence: fallbackItem.confidence,
+          }],
+          model: helperResult.model,
+          provider: helperResult.provider,
+          aiError: helperResult.aiError,
+        };
       }
 
       await audit(auth.orgId, auth.userId, "ai.workflow.patch_suggested", "dlq", deadLetterId, {
-        mode: suggestion.mode,
-        model: suggestion.model,
-        provider: suggestion.provider,
-        aiError: suggestion.aiError,
+        mode: response.mode,
+        model: response.model,
+        provider: response.provider,
+        aiError: response.aiError,
         envelopeKind: envelope.kind,
+        suggestionsCount: response.suggestions.length,
+        topApproachLabel: response.suggestions[0]?.approachLabel,
       });
 
-      return sendJson(res, suggestion);
+      return sendJson(res, response);
     } },
 
   { method: "POST", match: "/ai/explain-run",
