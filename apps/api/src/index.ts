@@ -90,6 +90,7 @@ import {
   ReviewFindingsSchema,
 } from "./ai-schemas";
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
+import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-rollback";
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -547,6 +548,31 @@ export const routes: Route[] = [
 
       await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
       return sendJson(res, { workflowId, versionId, version: nextVersion });
+    } },
+  { method: "POST", match: "/workflows/rollback", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
+      const sourceVersionId = typeof body.sourceVersionId === "string" ? body.sourceVersionId : "";
+      if (!workflowId || !sourceVersionId) {
+        return sendJson(res, { error: "workflowId and sourceVersionId are required" }, 400);
+      }
+      const result = await rollbackWorkflowToVersion({
+        orgId: auth.orgId,
+        userId: auth.userId,
+        workflowId,
+        sourceVersionId,
+      });
+      if (!result.ok) {
+        return sendJson(res, { error: "Source version not found" }, 404);
+      }
+      await audit(auth.orgId, auth.userId, "workflow.rolled_back", "workflow", workflowId, rollbackAuditMetadata(result));
+      return sendJson(res, {
+        workflowId,
+        versionId: result.versionId,
+        version: result.version,
+        sourceVersion: result.sourceVersion,
+      });
     } },
 
   // Plugins / credentials
