@@ -33,6 +33,7 @@ const DEFAULT_PRICES: Record<string, ModelPrice> = {
   "gpt-4.1": { inputUsdPer1M: 2.0, outputUsdPer1M: 8.0 },
   "gpt-4.1-mini": { inputUsdPer1M: 0.4, outputUsdPer1M: 1.6 },
   // Anthropic
+  "claude-haiku-4-5-20251001": { inputUsdPer1M: 1.0, outputUsdPer1M: 5.0 },
   "claude-haiku-4-5": { inputUsdPer1M: 1.0, outputUsdPer1M: 5.0 },
   "claude-sonnet-4-5": { inputUsdPer1M: 3.0, outputUsdPer1M: 15.0 },
   "claude-opus-4": { inputUsdPer1M: 15.0, outputUsdPer1M: 75.0 },

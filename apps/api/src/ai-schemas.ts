@@ -4,13 +4,14 @@
  * Two surfaces, two strategies:
  *
  *   - **`/ai/generate-workflow`** — full-workflow generation. Uses
- *     `AiGenerationWorkflowSchema`, an 11-branch slim discriminated union.
- *     Each `http` / `tool` / `agent` config declares only the fields the
- *     operator MUST populate. Optional tuning (retry, timeouts, bounds,
- *     planner, model) is dropped to stay under Anthropic's grammar cap.
- *     This compiles to JSON Schema `oneOf` and works against Anthropic.
- *     OpenAI strict mode rejects `oneOf`; tracked separately as a
- *     follow-up.
+ *     `AiGenerationWorkflowSchema`, an 11-branch slim discriminated
+ *     union. Each `http` / `tool` / `agent` config declares only the
+ *     fields the operator MUST populate. Compiles to JSON Schema
+ *     `oneOf` and works against Anthropic. OpenAI strict mode rejects
+ *     `oneOf`; tracked as a follow-up — empirically, relaxing to an
+ *     open shape regresses Anthropic (the model skips required fields
+ *     when the schema doesn't force them), so the real fix is heavier
+ *     than a one-line schema swap.
  *
  *   - **`/ai/patch-workflow`** — failure-recovery config patch. Uses
  *     ONE non-union envelope per call, picked by failing-node type via
@@ -166,6 +167,20 @@ const AiLoopNode = z.object({
 // in the Inspector. The engine's strict `WorkflowSchema` (used by /save,
 // /start, /validate) still accepts all 16, so once a workflow leaves AI
 // generation it has full expressiveness.
+//
+// CROSS-PROVIDER NOTE: this `discriminatedUnion` compiles to JSON Schema
+// `oneOf`, which OpenAI strict mode rejects (`'oneOf' is not permitted`).
+// Today Anthropic works (the only registered provider that accepts
+// `oneOf` for structured output). OpenAI tenants on the generation
+// route degrade to `mode: "fallback"`. Attempted relaxation to an open
+// node shape regressed Anthropic (the model started skipping required
+// fields when the schema didn't enforce them); reverted in favour of
+// keeping Anthropic functional. A real cross-provider fix needs a
+// heavier design — candidate paths include intent-dispatch (operator
+// picks a flow style first, each style has a single non-union schema),
+// two-pass generation (loose draft + per-type fill-in), or wrapping
+// the AI SDK's strict-mode toggle so OpenAI accepts the union without
+// enforcing.
 const AiNodeSchema = z.discriminatedUnion("type", [
   AiNoopNode,
   AiHttpNode,
@@ -181,8 +196,10 @@ const AiNodeSchema = z.discriminatedUnion("type", [
 ]);
 
 /**
- * Workflow envelope for `/ai/generate-workflow`. Slim — see the file
- * header for why retry / timeout / bounds are not allowed here.
+ * Workflow envelope for `/ai/generate-workflow`. Slim discriminated
+ * union, 11 branches. Works on Anthropic; OpenAI strict mode rejects
+ * the compiled `oneOf`. See `AiNodeSchema` above for the cross-provider
+ * note.
  */
 export const AiGenerationWorkflowSchema = z.object({
   dslVersion: z.literal("1.0").optional(),

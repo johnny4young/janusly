@@ -63,6 +63,46 @@ describe('validateWorkflow', () => {
     expect(codes).toContain('multi_agent_missing_agents')
   })
 
+  it('detects ai nodes without a prompt, agent nodes without a goal, and transform nodes without a mapping', () => {
+    // Future AI generation strategies may produce looser node shapes,
+    // and direct operator input can still submit malformed configs, so
+    // this validator is the strict runtime gate for required fields.
+    // Pin each rejection so the gate doesn't drift back to permissive.
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'summarize', type: 'ai', config: {} },
+        { id: 'analyst', type: 'agent', config: {} },
+        { id: 'shape', type: 'transform', config: {} },
+        { id: 'shape_empty', type: 'transform', config: { mapping: {} } },
+      ],
+      edges: [],
+    })
+
+    const codes = result.issues.map(i => i.code)
+    expect(codes).toContain('ai_missing_prompt')
+    expect(codes).toContain('agent_missing_goal')
+    expect(codes.filter(c => c === 'transform_missing_mapping').length).toBe(2)
+  })
+
+  it('accepts ai/agent/transform nodes when their required fields are present', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'summarize', type: 'ai', config: { prompt: 'summarize the article' } },
+        { id: 'analyst', type: 'agent', config: { goal: 'analyze the data' } },
+        { id: 'shape', type: 'transform', config: { mapping: { out: '{{context.summarize.output}}' } } },
+      ],
+      edges: [
+        { from: 'summarize', to: 'analyst' },
+        { from: 'analyst', to: 'shape' },
+      ],
+    })
+
+    const codes = result.issues.map(i => i.code)
+    expect(codes).not.toContain('ai_missing_prompt')
+    expect(codes).not.toContain('agent_missing_goal')
+    expect(codes).not.toContain('transform_missing_mapping')
+  })
+
   it('validates expressions on condition nodes and edge conditions', () => {
     const result = validateWorkflow({
       nodes: [
