@@ -86,9 +86,10 @@ import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import { z } from "zod";
 import {
   AiGenerationWorkflowSchema,
-  AiPatchGenerationWorkflowSchema,
+  patchEnvelopeForNodeType,
   ReviewFindingsSchema,
 } from "./ai-schemas";
+import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -855,14 +856,15 @@ export const routes: Route[] = [
     } },
 
   // Failure recovery — suggest a workflow patch for a failing DLQ entry.
-  // Loads the failing workflow + run events from the persisted DLQ row,
-  // hands them to the LLM with `AiPatchGenerationWorkflowSchema` (parallel
-  // to the generation schema but with richer http/tool/agent configs so
-  // retry / timeout / bounds fixes survive the structured-output
-  // boundary), sanitizes the output through the same grammar gate the
-  // generation route uses, and returns the suggestion envelope for the
-  // recovery dialog. Audits both AI-mode and fallback paths per the
-  // AGENTS.md AI-mutation contract.
+  // Dispatches to a per-failing-node-type envelope schema (single
+  // non-union shape: `{ patchedConfig, rationale }`) so the LLM call
+  // works against both Anthropic (compiled-grammar cap) and OpenAI
+  // (strict-mode `oneOf` ban). The LLM emits only the patched config
+  // for the failing node; the route composes the suggested workflow
+  // server-side by merging into the original snapshot, then re-validates
+  // through the same `WorkflowSchema.safeParse` + `sanitizeAiWorkflow`
+  // chain `/ai/generate-workflow` uses. Audits both AI-mode and fallback
+  // paths per the AGENTS.md AI-mutation contract.
   { method: "POST", match: "/ai/patch-workflow", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
@@ -893,23 +895,17 @@ export const routes: Route[] = [
         .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
         .limit(RUN_EVENT_PROMPT_CAP)).reverse();
 
-      // Structured-output envelope: uses `AiPatchGenerationWorkflowSchema`,
-      // a parallel 11-branch union with richer `http` / `tool` / `agent`
-      // configs that allow optional `retry` / `timeoutMs` /
-      // `maxResponseBytes` / `maxRedirects` so resilience fixes show up
-      // in `node.config` (and therefore in the structural diff) instead
-      // of being stripped at the structured-output boundary. The
-      // generation route stays on the slim `AiGenerationWorkflowSchema`
-      // because its compiled grammar is at Anthropic's cap. Rationale is
-      // a free-text paragraph the recovery dialog renders next to the diff.
-      const PatchEnvelopeSchema = z.object({
-        workflow: AiPatchGenerationWorkflowSchema,
-        rationale: z.string().min(1),
-      });
+      // Pick the per-type envelope based on the failing node's type.
+      // The typed envelopes are single non-union `{ patchedConfig, rationale }`
+      // shapes — no full-workflow union, so http/tool/agent patches work
+      // across OpenAI strict mode and Anthropic's compiled-grammar cap.
+      const failingNode = NodeSchema.safeParse(dlq.nodeJson);
+      const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
+      const envelope = patchEnvelopeForNodeType(failingNodeType);
 
       let suggestion: PatchSuggestion = await suggestWorkflowPatch({
         llm,
-        envelopeSchema: PatchEnvelopeSchema,
+        envelopeSchema: envelope.schema,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
         errorJson: safePersistPayload(dlq.errorJson ?? null),
@@ -929,26 +925,34 @@ export const routes: Route[] = [
         })),
       });
 
-      // Sanitize on AI-mode through the same grammar gate the generation
-      // route uses. Schema-validation failures and sanitize throws both
-      // degrade to fallback so the response shape stays consistent.
+      // On AI mode the helper returned a `patchedConfig` (config-only
+      // patch for the failing node). Compose the suggested workflow:
+      // clone the original, find the failing node by id, strip nullable
+      // envelope sentinels, then shallow-merge the patch onto its config.
+      // Other nodes pass through untouched. Then re-validate through the
+      // engine's strict `WorkflowSchema` + the sanitize chokepoint, same as the
+      // generation route. Failures degrade to fallback.
       if (suggestion.mode === "ai") {
         try {
-          const parsed = WorkflowSchema.safeParse(suggestion.suggestedWorkflow);
-          if (!parsed.success) {
-            throw new Error(`AI workflow failed strict schema: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+          const original = WorkflowSchema.safeParse(dlq.workflowJson);
+          if (!original.success) {
+            throw new Error(`Original workflow failed strict schema: ${original.error.issues[0]?.message ?? "unknown"}`);
           }
+          const rawPatchedConfig = (suggestion.suggestedWorkflow as { patchedConfig?: Record<string, unknown> } | null | undefined)
+            ?.patchedConfig ?? {};
+          const merged = applyConfigPatchToWorkflow(original.data, dlq.nodeId, rawPatchedConfig);
+          const sanitized = sanitizeAiWorkflow(merged);
           suggestion = {
             ...suggestion,
-            suggestedWorkflow: sanitizeAiWorkflow(parsed.data),
+            suggestedWorkflow: sanitized,
           };
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           suggestion = {
             mode: "fallback",
             suggestedWorkflow: dlq.workflowJson,
-            rationale: `AI returned a workflow that didn't pass the engine's grammar gate. The original workflow is unchanged. Reason: ${reason}`,
-            aiError: `Sanitize failed: ${reason}`,
+            rationale: `AI returned a patch that could not be applied safely. The original workflow is unchanged. Reason: ${reason}`,
+            aiError: `Patch validation failed: ${reason}`,
           };
         }
       }
@@ -958,6 +962,7 @@ export const routes: Route[] = [
         model: suggestion.model,
         provider: suggestion.provider,
         aiError: suggestion.aiError,
+        envelopeKind: envelope.kind,
       });
 
       return sendJson(res, suggestion);
