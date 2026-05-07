@@ -146,6 +146,15 @@ export const AIRISK_AI_NODE_PENALTY = 5;
 export const AIRISK_TOKEN_PENALTY_PER_100K = 1;
 export const AIRISK_RAW_SECRET_PENALTY = 30;
 
+/**
+ * Minimum number of post-Apply runs required before the recovery
+ * before/after delta surfaces a meaningful health-score comparison. Below
+ * this threshold the delta route returns `hasEnoughData: false` and the
+ * dialog renders the run counter + same-failure pills instead of the
+ * full delta. Pinned here so the dialog and the route agree.
+ */
+export const MIN_RUNS_FOR_DELTA = 5;
+
 // --- Aggregator ---------------------------------------------------------------
 
 /** Compute the weighted health score + breakdown. Pure — no I/O. */

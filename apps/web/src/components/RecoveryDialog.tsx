@@ -29,13 +29,15 @@
  * this dialog with the selected DLQ row.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { computeWorkflowDiff } from '@janusly/shared/src/workflow-diff'
+import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
+import { RecoveryDeltaCard, type PreSaveBeforeSnapshot } from './RecoveryDeltaCard'
 import type { DeadLetter } from './DeadLettersPanel'
 
 type PatchApproachLabel =
@@ -93,7 +95,18 @@ type Step =
   | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
   | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
-  | { kind: 'applied'; runId?: string; cluster?: ClusterApplyResult }
+  | {
+      kind: 'applied'
+      runId?: string
+      cluster?: ClusterApplyResult
+      // Threaded through to <RecoveryDeltaCard>. All optional so save-route
+      // responses without a parseable shape (defensive — the route's
+      // contract guarantees these) fall back to the legacy ribbon.
+      appliedWorkflowId?: string
+      appliedVersion?: number
+      priorFailureSignature?: string | null
+      preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+    }
   | { kind: 'error'; message: string }
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
@@ -129,6 +142,20 @@ export function RecoveryDialog({
 }: RecoveryDialogProps) {
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
+
+  // Derive the original failure's signature once when the source DLQ
+  // mounts. The delta route uses this to count "same failure since
+  // Apply" — if the operator's fix worked, that count stays at 0.
+  // Defense-in-depth: the helper scrubs token-shaped substrings before
+  // returning, so the signature surfaced through the URL is safe.
+  const priorFailureSignature = useMemo(() => {
+    const errorJson = dlq.errorJson
+    const nodeJson = dlq.nodeJson as { type?: string } | null
+    return normalizeErrorSignature(errorJson, {
+      nodeId: dlq.nodeId,
+      nodeType: nodeJson?.type,
+    }).signature
+  }, [dlq.errorJson, dlq.nodeId, dlq.nodeJson])
   // Which suggestion the operator picked from the tab strip. Reset to 0
   // every time a new review step starts so a fresh "Generate suggestion"
   // call doesn't carry over a stale tab from a prior run.
@@ -268,11 +295,44 @@ export function RecoveryDialog({
     const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
     const total = isClusterMode ? clusterMembers!.length : undefined
     setStep({ kind: 'applying', mode, total })
+
+    // Capture the pre-save snapshot of the workflow's current health so
+    // the delta card can render the "before" pills statically without a
+    // loading flash. Non-blocking: when this fails the card falls back
+    // to fetching everything via /workflows/health/delta.
+    const targetWorkflowId = selected.workflow.id ?? null
+    let preSaveBeforeSnapshot: PreSaveBeforeSnapshot | null = null
+    if (targetWorkflowId) {
+      try {
+        const snapshot = await api(`/workflows/health?workflowId=${encodeURIComponent(targetWorkflowId)}`) as {
+          score?: number
+          status?: string
+          signals?: { p95LatencyMs?: number | null; totalRuns?: number; totalCostUsd?: number }
+        }
+        if (typeof snapshot.score === 'number' && typeof snapshot.status === 'string' && snapshot.signals) {
+          preSaveBeforeSnapshot = {
+            score: snapshot.score,
+            status: snapshot.status,
+            signals: {
+              p95LatencyMs: snapshot.signals.p95LatencyMs ?? null,
+              totalRuns: snapshot.signals.totalRuns ?? 0,
+              totalCostUsd: snapshot.signals.totalCostUsd ?? 0,
+            },
+          }
+        }
+      } catch {
+        // Ignore — card fetches before-side on its own as a fallback.
+      }
+    }
+
     try {
-      await api('/workflows/save', {
+      const saveResponse = await api('/workflows/save', {
         method: 'POST',
         body: JSON.stringify(selected.workflow),
-      })
+      }) as { workflowId?: string; versionId?: string; version?: number }
+      const appliedWorkflowId = typeof saveResponse.workflowId === 'string' ? saveResponse.workflowId : undefined
+      const appliedVersion = typeof saveResponse.version === 'number' ? saveResponse.version : undefined
+
       // Save is durable. Bump now so sibling panels (Workflows list,
       // Version history, Health badge) refetch even when the downstream
       // replay throws — without this, a save+replay sequence that fails
@@ -290,7 +350,14 @@ export function RecoveryDialog({
             deadLetterIds: clusterMembers,
           }),
         }) as ClusterApplyResult
-        setStep({ kind: 'applied', cluster: result })
+        setStep({
+          kind: 'applied',
+          cluster: result,
+          appliedWorkflowId,
+          appliedVersion,
+          priorFailureSignature,
+          preSaveBeforeSnapshot,
+        })
         bumpPlatformVersion()
         return
       }
@@ -298,7 +365,14 @@ export function RecoveryDialog({
         method: 'POST',
         body: JSON.stringify({ deadLetterId: dlq.id }),
       }) as { runId?: string }
-      setStep({ kind: 'applied', runId: replay.runId })
+      setStep({
+        kind: 'applied',
+        runId: replay.runId,
+        appliedWorkflowId,
+        appliedVersion,
+        priorFailureSignature,
+        preSaveBeforeSnapshot,
+      })
       bumpPlatformVersion()
     } catch (error) {
       setStep({
@@ -402,6 +476,10 @@ export function RecoveryDialog({
             <AppliedBody
               runId={step.runId}
               cluster={step.cluster}
+              appliedWorkflowId={step.appliedWorkflowId}
+              appliedVersion={step.appliedVersion}
+              priorFailureSignature={step.priorFailureSignature ?? null}
+              preSaveBeforeSnapshot={step.preSaveBeforeSnapshot ?? null}
             />
           )}
 
@@ -648,37 +726,46 @@ function ValidationFailedBody({
 function AppliedBody({
   runId,
   cluster,
+  appliedWorkflowId,
+  appliedVersion,
+  priorFailureSignature,
+  preSaveBeforeSnapshot,
 }: {
   runId?: string
   cluster?: ClusterApplyResult
+  appliedWorkflowId?: string
+  appliedVersion?: number
+  priorFailureSignature?: string | null
+  preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
 }) {
-  if (cluster) {
-    const total = cluster.replayed + cluster.failed
-    return (
-      <div className="we-recovery-success" role="alert">
-        <CheckCircle2 size={14} aria-hidden="true" />
-        <div>
-          <strong>Patch applied.</strong>
-          {' '}Replayed {cluster.replayed} of {total}
-          {cluster.failed > 0 ? `; ${cluster.failed} failed` : ''}.
-          {cluster.errors.length > 0 ? (
-            <details className="we-recovery-cluster-errors">
-              <summary>Show per-row errors ({cluster.errors.length})</summary>
-              <ul>
-                {cluster.errors.map((entry) => (
-                  <li key={entry.deadLetterId}>
-                    <code>{entry.deadLetterId.slice(0, 12)}…</code>
-                    <span className="helper-text">{entry.error}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
+  const ribbon = cluster ? (
+    (() => {
+      const total = cluster.replayed + cluster.failed
+      return (
+        <div className="we-recovery-success" role="alert">
+          <CheckCircle2 size={14} aria-hidden="true" />
+          <div>
+            <strong>Patch applied.</strong>
+            {' '}Replayed {cluster.replayed} of {total}
+            {cluster.failed > 0 ? `; ${cluster.failed} failed` : ''}.
+            {cluster.errors.length > 0 ? (
+              <details className="we-recovery-cluster-errors">
+                <summary>Show per-row errors ({cluster.errors.length})</summary>
+                <ul>
+                  {cluster.errors.map((entry) => (
+                    <li key={entry.deadLetterId}>
+                      <code>{entry.deadLetterId.slice(0, 12)}…</code>
+                      <span className="helper-text">{entry.error}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
         </div>
-      </div>
-    )
-  }
-  return (
+      )
+    })()
+  ) : (
     <div className="we-recovery-success" role="alert">
       <CheckCircle2 size={14} aria-hidden="true" />
       <div>
@@ -687,6 +774,25 @@ function AppliedBody({
           ? ` Replay started — run id ${runId.slice(0, 8)}…`
           : ' DLQ entry replayed.'}
       </div>
+    </div>
+  )
+
+  // Mount the delta card alongside the ribbon when the save response
+  // gave us the workflow id + version. Defensive fall-through to
+  // ribbon-only when the save route returned an unexpected shape.
+  if (!appliedWorkflowId || typeof appliedVersion !== 'number') {
+    return ribbon
+  }
+
+  return (
+    <div className="we-recovery-applied">
+      {ribbon}
+      <RecoveryDeltaCard
+        workflowId={appliedWorkflowId}
+        afterVersion={appliedVersion}
+        priorFailureSignature={priorFailureSignature ?? null}
+        preSaveBeforeSnapshot={preSaveBeforeSnapshot ?? null}
+      />
     </div>
   )
 }
