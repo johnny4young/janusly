@@ -239,12 +239,19 @@ export const AiGenerationWorkflowSchema = z.object({
  *
  * The four envelopes:
  *
- *   - `AiPatchHttpConfigEnvelope` — `url` / `method` / `retry` /
- *     `timeoutMs` / `maxResponseBytes` / `maxRedirects` (all required
- *     nullable fields; the LLM sends `null` for fields it doesn't want
- *     to change). Covers URL fixes, method swaps, retry adds, timeout
- *     raises, body-cap raises.
- *   - `AiPatchToolConfigEnvelope` — `tool` / `retry` / `timeoutMs`.
+ *   - `AiPatchHttpConfigEnvelope` — `url` / `method` / `headers` /
+ *     `retry` / `timeoutMs` / `maxResponseBytes` / `maxRedirects` (all
+ *     required nullable fields; the LLM sends `null` for fields it
+ *     doesn't want to change). Covers URL fixes, method swaps, header
+ *     swaps (including literal-token → `{{secret.NAME}}` substitutions),
+ *     retry adds, timeout raises, body-cap raises. The `headers` field
+ *     uses an `Array<{ name, value }>` patch form so the merge layer
+ *     can fold individual header changes against the existing config
+ *     without replacing the whole object — provider-safe shape that
+ *     avoids `propertyNames` (OpenAI strict-mode reject).
+ *   - `AiPatchToolConfigEnvelope` — `tool` / `input` / `retry` /
+ *     `timeoutMs`. The `input` field uses the same `Array<{ name,
+ *     value }>` patch form for the tool's flat string-keyed input map.
  *   - `AiPatchAgentConfigEnvelope` — `goal` / `retry` / `timeoutMs`.
  *   - `AiPatchGenericConfigEnvelope` — `patchedConfig: Record<string,
  *     unknown>` for the other 8 node types (transform/condition/ai/
@@ -278,9 +285,39 @@ const AiPatchRetryConfig = z.object({
   maxAttempts: z.number().int().min(2).max(10),
 });
 
+/**
+ * Bounded array-of-pairs patch form for fields that are normally a flat
+ * record (`headers` on http nodes, `input` on tool nodes). The LLM emits
+ * only the keys it wants to change. The merge layer in
+ * `apps/api/src/patch-workflow-merge.ts` folds these against the
+ * existing record before shallow-merging the rest of the patched config:
+ * non-null `value` sets/replaces; `null` removes the key from the merged
+ * record; missing keys in the array preserve whatever's already in the
+ * existing config.
+ *
+ * Shape choice driven by provider strict modes: a `Record<string, ...>`
+ * compiles to `propertyNames` which OpenAI strict mode rejects outright.
+ * `Array<{ name, value }>` is one repeated `items` shape — Anthropic's
+ * compiled grammar treats it as a single rule rather than N branches.
+ */
+const AiPatchHttpHeader = z.object({
+  name: z.string().min(1),
+  value: z.string().nullable(),
+});
+
+const AiPatchToolInputItem = z.object({
+  name: z.string().min(1),
+  value: z.string().nullable(),
+});
+
+/** Hard bound on bounded-array fields. Keeps the compiled grammar small and the merge predictable. */
+const PATCH_HEADERS_MAX = 20;
+const PATCH_TOOL_INPUT_MAX = 30;
+
 const AiPatchHttpConfig = z.object({
   url: z.string().min(1).nullable(),
   method: z.string().nullable(),
+  headers: z.array(AiPatchHttpHeader).max(PATCH_HEADERS_MAX).nullable(),
   retry: AiPatchRetryConfig.nullable(),
   timeoutMs: z.number().int().min(1).nullable(),
   maxResponseBytes: z.number().int().min(1).nullable(),
@@ -289,6 +326,7 @@ const AiPatchHttpConfig = z.object({
 
 const AiPatchToolConfig = z.object({
   tool: z.string().min(1).nullable(),
+  input: z.array(AiPatchToolInputItem).max(PATCH_TOOL_INPUT_MAX).nullable(),
   retry: AiPatchRetryConfig.nullable(),
   timeoutMs: z.number().int().min(1).nullable(),
 });

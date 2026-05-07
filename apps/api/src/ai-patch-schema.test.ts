@@ -19,10 +19,29 @@ const httpItem = (overrides: {
   patchedConfig: {
     url: null,
     method: null,
+    headers: null,
     retry: null,
     timeoutMs: null,
     maxResponseBytes: null,
     maxRedirects: null,
+    ...(overrides.patchedConfig ?? {}),
+  },
+  rationale: overrides.rationale ?? "x",
+  approachLabel: overrides.approachLabel ?? "other",
+  confidence: overrides.confidence ?? 50,
+});
+
+const toolItem = (overrides: {
+  patchedConfig?: Record<string, unknown>;
+  rationale?: string;
+  approachLabel?: string;
+  confidence?: number;
+} = {}) => ({
+  patchedConfig: {
+    tool: null,
+    input: null,
+    retry: null,
+    timeoutMs: null,
     ...(overrides.patchedConfig ?? {}),
   },
   rationale: overrides.rationale ?? "x",
@@ -38,6 +57,7 @@ describe("patch envelopes — multi-suggestion array form", () => {
           patchedConfig: {
             url: "https://x.example",
             method: "POST",
+            headers: [{ name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" }],
             retry: { maxAttempts: 3 },
             timeoutMs: 5_000,
             maxResponseBytes: 1_048_576,
@@ -53,6 +73,7 @@ describe("patch envelopes — multi-suggestion array form", () => {
     if (!parsed.success) return;
     expect(parsed.data.suggestions).toHaveLength(1);
     expect(parsed.data.suggestions[0]!.patchedConfig.retry?.maxAttempts).toBe(3);
+    expect(parsed.data.suggestions[0]!.patchedConfig.headers).toEqual([{ name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" }]);
     expect(parsed.data.suggestions[0]!.approachLabel).toBe("add_retry");
     expect(parsed.data.suggestions[0]!.confidence).toBe(85);
   });
@@ -115,26 +136,61 @@ describe("patch envelopes — multi-suggestion array form", () => {
 
   it("http envelope rejects retry.maxAttempts below 2 (1 means no retry)", () => {
     const parsed = AiPatchHttpConfigEnvelope.safeParse({
-      suggestions: [{
-        patchedConfig: { url: null, method: null, retry: { maxAttempts: 1 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null },
-        rationale: "x",
-        approachLabel: "add_retry",
-        confidence: 50,
-      }],
+      suggestions: [httpItem({ patchedConfig: { retry: { maxAttempts: 1 } }, approachLabel: "add_retry" })],
     });
     expect(parsed.success).toBe(false);
   });
 
   it("http envelope rejects retry.maxAttempts above 10", () => {
     const parsed = AiPatchHttpConfigEnvelope.safeParse({
-      suggestions: [{
-        patchedConfig: { url: null, method: null, retry: { maxAttempts: 99 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null },
-        rationale: "x",
-        approachLabel: "add_retry",
-        confidence: 50,
-      }],
+      suggestions: [httpItem({ patchedConfig: { retry: { maxAttempts: 99 } }, approachLabel: "add_retry" })],
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("http envelope accepts a `headers` array of pairs (set, replace, remove via null)", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      suggestions: [httpItem({
+        patchedConfig: {
+          headers: [
+            { name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" },
+            { name: "X-Trace-Id", value: null },
+          ],
+        },
+        approachLabel: "swap_secret_ref",
+      })],
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.suggestions[0]!.patchedConfig.headers).toHaveLength(2);
+  });
+
+  it("http envelope rejects a `headers` array longer than 20 items", () => {
+    const oversize = Array.from({ length: 21 }, (_, i) => ({ name: `H-${i}`, value: `${i}` }));
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      suggestions: [httpItem({ patchedConfig: { headers: oversize } })],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("http envelope rejects a header item with empty `name`", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      suggestions: [httpItem({ patchedConfig: { headers: [{ name: "", value: "x" }] } })],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("http envelope accepts the multi-knob 'headers + retry' patch shape together", () => {
+    const parsed = AiPatchHttpConfigEnvelope.safeParse({
+      suggestions: [httpItem({
+        patchedConfig: {
+          headers: [{ name: "Authorization", value: "Bearer {{secret.NAME}}" }],
+          retry: { maxAttempts: 3 },
+        },
+        approachLabel: "swap_secret_ref",
+      })],
+    });
+    expect(parsed.success).toBe(true);
   });
 
   it("http envelope rejects empty rationale", () => {
@@ -146,12 +202,12 @@ describe("patch envelopes — multi-suggestion array form", () => {
 
   it("tool envelope accepts retry + timeout suggestions", () => {
     const parsed = AiPatchToolConfigEnvelope.safeParse({
-      suggestions: [{
+      suggestions: [toolItem({
         patchedConfig: { tool: "http.request", retry: { maxAttempts: 2 }, timeoutMs: 3_000 },
         rationale: "Retry the tool once.",
         approachLabel: "add_retry",
         confidence: 70,
-      }],
+      })],
     });
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
@@ -160,14 +216,39 @@ describe("patch envelopes — multi-suggestion array form", () => {
 
   it("tool envelope accepts a partial patch with nulls", () => {
     const parsed = AiPatchToolConfigEnvelope.safeParse({
-      suggestions: [{
-        patchedConfig: { tool: null, retry: { maxAttempts: 3 }, timeoutMs: null },
+      suggestions: [toolItem({
+        patchedConfig: { retry: { maxAttempts: 3 } },
         rationale: "Retry the existing tool.",
         approachLabel: "add_retry",
         confidence: 60,
-      }],
+      })],
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("tool envelope accepts an `input` array of pairs", () => {
+    const parsed = AiPatchToolConfigEnvelope.safeParse({
+      suggestions: [toolItem({
+        patchedConfig: {
+          input: [
+            { name: "pattern", value: "\\\\bfoo\\\\b" },
+            { name: "replacement", value: "bar" },
+          ],
+        },
+        approachLabel: "other",
+      })],
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.suggestions[0]!.patchedConfig.input).toHaveLength(2);
+  });
+
+  it("tool envelope rejects an `input` array longer than 30 items", () => {
+    const oversize = Array.from({ length: 31 }, (_, i) => ({ name: `field${i}`, value: `${i}` }));
+    const parsed = AiPatchToolConfigEnvelope.safeParse({
+      suggestions: [toolItem({ patchedConfig: { input: oversize } })],
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("agent envelope accepts goal + retry + timeout patch", () => {

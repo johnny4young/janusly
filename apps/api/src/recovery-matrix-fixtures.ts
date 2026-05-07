@@ -180,13 +180,13 @@ export const RECOVERY_MATRIX_FIXTURES: readonly RecoveryMatrixFixture[] = [
     workflow: wf("recovery_matrix_tool_input_invalid", "Recovery Matrix · Tool input invalid", [
       toolNode("transform", {
         tool: "text.replace",
-        input: { input: "{{context.fetch.output.body}}" }, // Missing `pattern` and `replacement`.
+        input: { input: "{{context.fetch.output.body}}" }, // Missing `value`, `search`, and `replacement`.
       }),
     ]),
     failedNodeId: "transform",
     errorJson: {
       code: "E_TOOL_INPUT_INVALID",
-      message: "Tool 'text.replace' input failed schema validation: pattern is required, replacement is required",
+      message: "Tool 'text.replace' input failed schema validation: value is required, search is required, replacement is required",
       tool: "text.replace",
     },
     expectedTopApproachLabel: "other",

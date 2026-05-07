@@ -234,6 +234,51 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.system).toContain("filters `null` before shallow-merging");
     expect(callArg.system).toContain("approachLabel");
     expect(callArg.system).toContain("confidence");
+    // Headers + tool input array-of-pairs patch shape: the prompt names
+    // both surfaces, the {{secret.NAME}} template guidance, and the
+    // `swap_secret_ref` clarification.
+    expect(callArg.system).toContain("Headers (HTTP) and tool inputs use an `Array<{ name, value }>` patch form");
+    expect(callArg.system).toContain("{{secret.NAME}}");
+    expect(callArg.system).toContain('{ name: "search", value: "<text-or-pattern>" }');
+    expect(callArg.system).toContain("`approachLabel: \"swap_secret_ref\"` is the right tag");
+    // Tool-failure contract: the prompt names the `extraContext.toolInputContract`
+    // field and tells the LLM to use the `required` / `optional` field names
+    // verbatim instead of guessing from the runtime error message.
+    expect(callArg.system).toContain("extraContext.toolInputContract");
+    expect(callArg.system).toContain("USE THE `required` AND `optional` FIELD NAMES VERBATIM");
+  });
+
+  it("threads extraContext.toolInputContract verbatim into the prompt body", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    const llm = { generateText: vi.fn(), generateObject } as unknown as LlmClient;
+
+    await suggestWorkflowPatch({
+      llm,
+      envelopeSchema,
+      ...baseInput,
+      extraContext: {
+        toolInputContract: {
+          name: "text.replace",
+          description: "Replace literal occurrences of a substring (all by default).",
+          required: ["value", "search", "replacement"],
+          optional: ["all"],
+          inputExample: { value: "hello world", search: "world", replacement: "there" },
+        },
+      },
+    });
+
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { prompt: string };
+    expect(callArg.prompt).toContain('"toolInputContract"');
+    expect(callArg.prompt).toContain('"name":"text.replace"');
+    expect(callArg.prompt).toContain('"value"');
+    expect(callArg.prompt).toContain('"search"');
+    expect(callArg.prompt).toContain('"replacement"');
   });
 
   it("scrubs secret-shaped string values before sending the prompt", async () => {
