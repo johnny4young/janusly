@@ -2,12 +2,18 @@
  * Repository for workflow health signals — the run-time inputs the
  * `computeWorkflowHealth` aggregator (in `@janusly/engine`) consumes.
  *
- * Single function `collectHealthSignals(orgId, workflowId, windowDays)`
- * runs the SQL aggregations across `runs`, `run_events`, `dead_letters`,
- * `usage_events`, and `workflow_versions` for one workflow over a rolling
- * window. Returns the typed `HealthSignals` shape the engine expects.
+ * Single function `collectHealthSignals(orgId, workflowId, windowDays,
+ * versionFilter?)` runs the SQL aggregations across `runs`,
+ * `run_events`, `dead_letters`, `usage_events`, and `workflow_versions`
+ * for one workflow over a rolling window. Returns the typed
+ * `HealthSignals` shape the engine expects. The optional 4th argument
+ * lets the recovery delta route split the same window by version side
+ * (before / after a recovery patch) so before/after deltas reuse the
+ * same query plan.
  *
- * Used by `apps/api/src/index.ts:GET /workflows/health`. The engine layer
+ * Used by `apps/api/src/index.ts:GET /workflows/health` (no version
+ * filter) and `GET /workflows/health/delta` (called twice per request,
+ * once per side). The engine layer
  * computes the score from these signals + the static readiness check;
  * this module only collects.
  *
@@ -30,7 +36,19 @@
 
 import { db } from "@janusly/db";
 import { runs, runEvents, deadLetters, usageEvents, workflowVersions } from "@janusly/db";
-import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+
+/**
+ * Optional version-cutoff filter for `collectHealthSignals`. Used by the
+ * recovery before/after delta route to split the same time window by
+ * version: rows with `workflow_versions.version < cutoffVersion` form
+ * the "before" side; rows with `version >= cutoffVersion` form the
+ * "after" side. Discriminated union so the SQL switch is exhaustive at
+ * compile time.
+ */
+export type VersionFilter =
+  | { side: "before"; cutoffVersion: number }
+  | { side: "after"; cutoffVersion: number };
 
 /**
  * Run-time signals collected for one workflow over a rolling window.
@@ -55,15 +73,26 @@ export type HealthSignals = {
   versionCount: number;
 };
 
-const DEFAULT_HEALTH_WINDOW_DAYS = 30;
+export const DEFAULT_HEALTH_WINDOW_DAYS = 30;
 
 /** Run all signal-collection queries for one workflow + return the typed shape. */
 export async function collectHealthSignals(
   orgId: string,
   workflowId: string,
   windowDays = DEFAULT_HEALTH_WINDOW_DAYS,
+  versionFilter?: VersionFilter,
 ): Promise<HealthSignals> {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+  // Optional version cutoff: split the same window by version side. The
+  // before-side counts runs whose version < cutoff; the after-side counts
+  // runs whose version >= cutoff. Used by the recovery delta route to
+  // compare "before Apply" vs "after Apply" without splitting the window.
+  const versionPredicate = versionFilter
+    ? versionFilter.side === "before"
+      ? lt(workflowVersions.version, versionFilter.cutoffVersion)
+      : gte(workflowVersions.version, versionFilter.cutoffVersion)
+    : undefined;
 
   // 1. Run aggregates: total / success / failure counts + run-id list for
   //    follow-up joins. The list lets us scope subsequent queries by the
@@ -85,6 +114,7 @@ export async function collectHealthSignals(
       // (skipping write-side actions) and would skew reliability,
       // latency, and cost signals against production runs.
       isNull(runs.replayMode),
+      ...(versionPredicate ? [versionPredicate] : []),
     ));
 
   const totalRuns = runRows.length;
@@ -126,12 +156,15 @@ export async function collectHealthSignals(
 
 async function countRetryEvents(runIds: string[]): Promise<number> {
   if (runIds.length === 0) return 0;
+  // `inArray` for the runIds gate — `sql\`= ANY (${runIds})\`` was binding
+  // the JS array as a single text param under drizzle 1.0 RC, producing
+  // `= ANY ($3)` where $3 is a string and Postgres rejected the query.
   const rows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(runEvents)
     .where(and(
       eq(runEvents.type, "node.retry"),
-      sql`${runEvents.runId} = ANY (${runIds})`,
+      inArray(runEvents.runId, runIds),
     ));
   return rows[0]?.count ?? 0;
 }
@@ -144,7 +177,7 @@ async function countOpenDeadLetters(orgId: string, runIds: string[]): Promise<nu
     .where(and(
       eq(deadLetters.orgId, orgId),
       eq(deadLetters.status, "open"),
-      sql`${deadLetters.runId} = ANY (${runIds})`,
+      inArray(deadLetters.runId, runIds),
     ));
   return rows[0]?.count ?? 0;
 }
@@ -159,7 +192,7 @@ async function sumUsage(orgId: string, runIds: string[]): Promise<{ totalCostUsd
     .from(usageEvents)
     .where(and(
       eq(usageEvents.orgId, orgId),
-      sql`${usageEvents.runId} = ANY (${runIds})`,
+      inArray(usageEvents.runId, runIds),
     ));
 
   let totalCostUsd = 0;
@@ -186,7 +219,7 @@ async function computeP95Latency(runIds: string[]): Promise<number | null> {
       createdAt: runEvents.createdAt,
     })
     .from(runEvents)
-    .where(sql`${runEvents.runId} = ANY (${runIds})`)
+    .where(inArray(runEvents.runId, runIds))
     .orderBy(asc(runEvents.createdAt));
 
   // Map each runId to (firstEvent, lastEvent) timestamps.

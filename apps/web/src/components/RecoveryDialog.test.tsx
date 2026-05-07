@@ -69,6 +69,21 @@ describe('<RecoveryDialog />', () => {
       .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
       // /dlq/replay (production)
       .mockResolvedValueOnce({ runId: 'run-replay-xyz' })
+      // /workflows/health/delta — the delta card fetches this on mount.
+      // Return a "gathering data" shape so the card renders without
+      // depending on the fuller delta-math branches.
+      .mockResolvedValueOnce({
+        workflowId: 'wf',
+        afterVersion: 2,
+        windowDays: 1,
+        hasEnoughData: false,
+        before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+        after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 1, totalCostUsd: 0 } },
+        delta: null,
+        recentRunsAgainstAfter: { totalRuns: 1, succeeded: 1, failed: 0, running: 0 },
+        sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
+        priorVersion: { version: 1, versionId: 'v0' },
+      })
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
@@ -93,6 +108,26 @@ describe('<RecoveryDialog />', () => {
     expect(validateIdx).toBeLessThan(pollIdx)
     expect(pollIdx).toBeLessThan(saveIdx)
     expect(saveIdx).toBeLessThan(replayIdx)
+
+    // Delta card mounts after replay with the saved version + DLQ's
+    // failure signature threaded in. The card calls /workflows/health/delta
+    // and surfaces the run-status counter even when hasEnoughData=false.
+    const deltaCall = calls.find((path) => typeof path === 'string' && path.startsWith('/workflows/health/delta'))
+    expect(deltaCall).toBeTruthy()
+    if (typeof deltaCall === 'string') {
+      const url = new URL(deltaCall, 'http://localhost')
+      expect(url.searchParams.get('workflowId')).toBe('wf')
+      expect(url.searchParams.get('afterVersion')).toBe('2')
+      // The DLQ has errorJson `{ message: 'ECONNRESET' }` and
+      // nodeJson.type = 'http', so the normalizer produces this signature.
+      expect(url.searchParams.get('priorFailureSignature')).toBe('Network timeout on http node')
+    }
+    await waitFor(() => {
+      expect(screen.getByTestId('recovery-delta-counter')).toBeInTheDocument()
+    })
+    expect(screen.getAllByText(/Runs against v2/i).length).toBeGreaterThan(0)
+    expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
+    expect(screen.getAllByText(/of 5 runs collected/i).length).toBeGreaterThan(0)
   })
 
   it('surfaces validation failure with an Iterate button instead of applying', async () => {
@@ -358,6 +393,19 @@ describe('<RecoveryDialog />', () => {
         .mockResolvedValueOnce({ workflowId: 'wf', versionId: 'v1', version: 2 })
         // /dlq/cluster-apply
         .mockResolvedValueOnce({ replayed: 9, failed: 1, errors: [{ deadLetterId: 'dlq-7', error: 'DLQ entry already replayed' }] })
+        // /workflows/health/delta — the delta card mounts in cluster mode too.
+        .mockResolvedValueOnce({
+          workflowId: 'wf',
+          afterVersion: 2,
+          windowDays: 1,
+          hasEnoughData: false,
+          before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+          after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+          delta: null,
+          recentRunsAgainstAfter: { totalRuns: 9, succeeded: 9, failed: 0, running: 0 },
+          sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
+          priorVersion: { version: 1, versionId: 'v0' },
+        })
 
       render(
         <RecoveryDialog
