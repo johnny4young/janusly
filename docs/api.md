@@ -2,7 +2,7 @@
 
 Base URL: `http://localhost:3001`. Every request must carry an auth context. In dev, send `x-org-id` and `x-user-id` headers. In production with Supabase, send a `Bearer <jwt>` whose `user_metadata.orgId` resolves the org.
 
-CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173`). Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
+CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). The `5174` ports are included so dev still works when Vite falls back from `5173` due to a port collision. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
 
 All examples below assume the dev-headers shorthand `-H "x-org-id: default" -H "x-user-id: dev-user"`.
 
@@ -330,7 +330,7 @@ In workflow nodes, use `{{secret.SLACK_BOT_TOKEN}}` to dereference.
 
 ### `POST /ai/generate-workflow`
 
-Generates a workflow JSON from a natural-language prompt. Falls back to the first template when `OPENAI_API_KEY` is not set.
+Generates a workflow JSON from a natural-language prompt. In the supported MVP setup this uses Anthropic through `JANUSLY_LLM_PROVIDER=anthropic`; it falls back to a deterministic template when the selected provider key is not available or the model call fails.
 
 **Request**
 ```json
@@ -351,6 +351,94 @@ Generates a workflow JSON from a natural-language prompt. Falls back to the firs
 ```json
 { "explanation": "This workflow fetches data and ..." }
 ```
+
+### `POST /ai/review-workflow`
+
+AI semantic readiness pass that complements the deterministic readiness gate (`POST /workflows/readiness`). The LLM looks for ambiguous prompts, raw secrets in node config, missing approvals upstream of write-side actions, and ambiguous tool inputs — every finding carries `severity: "info" | "warn" | "fail"`, `code`, `message`, `nodeId`, `rationale`, `suggestion`. AI mode and the deterministic findings are merged at the route layer. Falls back gracefully without a provider key.
+
+### `POST /ai/explain-run`
+
+```json
+{ "runId": "...", "question": "Why did this fail?" }
+```
+
+```json
+{ "mode": "ai", "answer": "...", "model": "claude-haiku-4-5-20251001", "provider": "anthropic" }
+```
+
+---
+
+## Failure recovery loop
+
+These routes power the Recovery dialog, the Failure Clusters card, and the Operations recovery metrics. The deterministic surfaces (validate-fix, cluster-apply, rollback, clusters, metrics, health) are always available; only `/ai/patch-workflow` requires a provider key. See [`docs/ai.md`](ai.md) §1b for the full feature matrix.
+
+### `POST /ai/patch-workflow`
+
+```json
+{ "deadLetterId": "<uuid>" }
+```
+
+Returns 1–3 alternative config patches for the failing node, sorted by self-rated `confidence` desc:
+
+```json
+{
+  "mode": "ai",
+  "suggestedWorkflow": { "...mirrors suggestions[0].workflow for back-compat..." },
+  "rationale": "...mirrors suggestions[0].rationale for back-compat...",
+  "suggestions": [
+    {
+      "workflow": { "...full DAG with the failing node patched..." },
+      "rationale": "Added retry to handle transient ECONNRESET.",
+      "approachLabel": "add_retry",
+      "confidence": 85
+    }
+  ],
+  "model": "claude-haiku-4-5-20251001",
+  "provider": "anthropic"
+}
+```
+
+`approachLabel` enum: `add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`. Audited as `ai.workflow.patch_suggested` with `suggestionsCount` + `topApproachLabel` + `envelopeKind` metadata.
+
+### `POST /dlq/validate-fix`
+
+```json
+{ "deadLetterId": "<uuid>", "suggestedWorkflow": { "...DAG..." } }
+```
+
+Replays the proposed patch in a writes-skipped sandbox run. Returns `{ "runId": "<uuid>" }`. Poll `GET /run?runId=<uuid>` until terminal — `succeeded` gates the production save+replay chain; `failed` / `cancelled` surfaces the failed node's `errorJson` so the operator can iterate.
+
+### `GET /dlq/clusters?windowDays=30`
+
+Failure-cluster rollup grouped by normalized error signature. Used by the Failure Clusters card.
+
+### `GET /dlq/cluster-members?signature=...&windowDays=30&limit=100`
+
+DLQ ids whose normalized signature matches `signature`. Capped at 100 by default. Used by the Recovery dialog when entering cluster mode.
+
+### `POST /dlq/cluster-apply`
+
+```json
+{ "clusterSignature": "...", "deadLetterIds": ["<uuid>", "..."] }
+```
+
+Bulk replay across the cluster. Re-validates each row's signature server-side before replaying, runs in series, marks accepted rows replayed, and writes one `recovery.cluster_apply` audit row per accepted row. Returns `{ "replayed": N, "failed": M, "errors": [{ "deadLetterId", "error" }] }`.
+
+### `POST /workflows/rollback`
+
+```json
+{ "workflowId": "<id>", "sourceVersionId": "<uuid>" }
+```
+
+Saves the source version's `dagJson` as a new latest in a single transaction. Returns `{ "workflowId", "versionId", "version", "sourceVersion" }`. Audited as `workflow.rolled_back` with `{ sourceVersionId, sourceVersion, newVersion }`. Returns `404` with the same message for cross-org / wrong-workflow / missing source — no enumeration leak.
+
+### `GET /workflows/health?workflowId=<id>`
+
+Per-workflow 0–100 score with six per-category sub-scores (reliability, safety, cost, latency, maintainability, AI risk). Status thresholds: `≥80 healthy / ≥60 warn / <60 unhealthy`. New workflows (`totalRuns < 5`) return a neutral default 80 so an untested workflow isn't graded as unhealthy.
+
+### `GET /recovery/metrics?windowDays=30`
+
+Org-level Operations dashboard payload — six metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, cost) each with `value` / `display` / `severity` / `rationale`. Severity bands are tunable constants in the engine module.
 
 ---
 

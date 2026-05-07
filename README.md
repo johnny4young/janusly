@@ -1,8 +1,8 @@
 # Janusly
 
-> The AI operator for your business workflows.
+> **Operator-grade workflow recovery.** When a run fails, AI proposes 1–3 alternative fixes with confidence scores. Sandbox-validate before saving. Apply across every similar failure with one click. One-click rollback if a patch goes wrong.
 
-Janusly turns business processes into observable, learning DAGs. It runs them on a BullMQ worker, decides routes with a built-in decision engine + RL adjustments, rolls back when confidence drops, and explains every run in natural language. With an OpenAI key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → rollback → conversational explainability. Without one, every deterministic path still works.
+Janusly is an AI operator for business workflows — a DAG runtime where AI is part of the loop, not glued on top. The differentiator is the **failure-recovery loop**: AI patch suggestions with self-rated confidence, sandbox replay before commit, cluster apply across DLQ entries that share a failure signature, and one-click rollback. Generic workflow execution (durable retries, decision engine, RL adjustments, NL run explanations) is the table-stakes layer underneath. With an Anthropic key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → recovery → rollback → conversational explainability. Without one, every deterministic path still works.
 
 > Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
 
@@ -10,13 +10,17 @@ Janusly turns business processes into observable, learning DAGs. It runs them on
 
 ## What Janusly does
 
-- **Plan**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`).
-- **Run**: execute it on a Postgres-backed runtime + BullMQ workers, with retries, dead-letter queue, timeouts.
+- **Build**: generate a workflow DAG from a prompt (`POST /ai/generate-workflow`), draft / edit on a React Flow canvas with Run timeline + Step setup panels, save versions automatically.
+- **Run**: execute on a Postgres-backed runtime + BullMQ workers with retries, dead-letter queue, timeouts, and per-org rate limits.
+- **Recover** (the differentiator):
+  - **Suggest a fix.** When a run lands in DLQ, `POST /ai/patch-workflow` returns 1–3 alternative patches with self-rated confidence (0–100) and an `approachLabel` per option (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). The Recovery dialog renders them as tabs sorted by confidence desc.
+  - **Sandbox before commit.** `POST /dlq/validate-fix` runs the proposed patch against a writes-skipped sandbox replay. Save + production replay only fire when the sandbox terminates `succeeded`.
+  - **Apply across the cluster.** `GET /dlq/clusters` groups DLQ entries by failure signature; `POST /dlq/cluster-apply` replays every entry that shares the cluster signature in one bulk action with per-row signature recheck.
+  - **Rollback.** `POST /workflows/rollback` saves any prior version's DAG as the new latest in a single transaction with a `workflow.rolled_back` audit row.
 - **Decide**: `router` / `router_llm` nodes pick a route via a decision engine (cost / latency / quality + RL on past pulls).
-- **Learn**: every node outcome updates `routing_stats`; reinforcement learning shifts future scoring.
-- **Improve & rollback**: a confidence model compares before/after metrics; below 30% it auto-creates a rollback workflow version.
-- **Explain**: natural-language Q&A about any past run (`POST /ai/explain-run`), and counterfactual decision replay (`GET /causal`).
-- **Operate**: visual builder with React Flow, Crew Timeline for multi-agent runs, Dead Letters operations panel.
+- **Learn**: every node outcome updates `routing_stats`; reinforcement learning shifts future scoring. Rollback fires automatically when a confidence delta drops below 30%.
+- **Explain**: natural-language Q&A about any past run (`POST /ai/explain-run`), counterfactual decision replay (`GET /causal`), readiness review with structured findings (`POST /ai/review-workflow`), per-workflow health rollup (`GET /workflows/health`), org-wide recovery metrics dashboard (`GET /recovery/metrics`).
+- **Operate**: visual builder with React Flow, Failure Clusters card on the Operations dashboard, per-row Suggest fix + Recover-this-pattern affordances, multi-tenant scoping enforced on every query.
 
 ---
 
@@ -31,7 +35,7 @@ packages/
   engine     -> runtime, scheduler, executors, BullMQ worker, OTEL
   domain     -> decision engine, RL, causal reasoning, improvement engine
   data       -> drizzle repos: routing stats, improvements, rollback
-  ai         -> OpenAI-backed run explainer + deterministic fallback
+  ai         -> provider-neutral LLM surfaces + deterministic fallback
   db         -> drizzle schema + idempotent bootstrap
   shared     -> Zod 4 contracts for the workflow DSL
 ```
@@ -46,8 +50,8 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 | ----------- | ---------------------------------------------------------------------- |
 | Runtime     | Node.js 24 LTS (Krypton), Postgres 18, Redis 8                         |
 | TypeScript  | 6.0                                                                     |
-| Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, `openai`             |
-| AI          | `openai` SDK with `gpt-4o-mini` default; fallback paths everywhere     |
+| Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
+| AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback (try/catch + `{ mode: "fallback", aiError, ... }`). |
 | Validation  | `zod` 4                                                                 |
 | UI          | React 19, Vite 8 (Rolldown), `@xyflow/react`, Tailwind 4               |
 | State       | `zustand` 5                                                             |
@@ -62,7 +66,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 - Node.js **24+** (`engines.node` enforced at root)
 - PNPM **10** (`corepack enable`)
 - Docker (for Postgres 18 + Redis 8 services)
-- (Optional) OpenAI API key — see [`docs/ai.md`](docs/ai.md)
+- (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
 
 ---
 
@@ -82,7 +86,7 @@ pnpm dev
 # http://localhost:5173
 ```
 
-Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an OpenAI key — see [§ AI](#ai-janusly-as-an-ai-operator).
+Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). (If port 5173 is already in use, Vite falls back to 5174; both are in `API_ALLOWED_ORIGINS` by default.)
 
 When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator shuts down API, worker, web, and Compose.
 
@@ -111,9 +115,11 @@ See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the arc
 ### Test commands
 
 ```bash
-pnpm test       # 96 Vitest tests (shared + engine + ai + domain + web) + tsc on api/db/data
+pnpm test       # ~535 Vitest tests across shared / engine / ai / domain / web / api / mcp-server
+pnpm test:browser  # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
 pnpm build      # type-check + Vite production build (Rolldown, manualChunks)
 pnpm test:e2e   # Playwright; boots Compose, runs UI flow, tears Compose down
+pnpm evals      # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
 ```
 
 ### End-to-end smoke via curl
@@ -140,27 +146,45 @@ curl -s "http://localhost:3001/run?runId=$RUNID" \
 
 The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summary:
 
-| Feature | Endpoint / surface | Without OpenAI key | With key |
+### Authoring & explanation
+
+| Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
-| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits a real DAG |
+| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits a typed DAG via `generateObject({ schema: WorkflowSchema })` |
 | Explain a workflow | `POST /ai/explain-workflow` | Generic placeholder | Bullet walkthrough |
+| Review a workflow for production-readiness | `POST /ai/review-workflow` | Deterministic readiness gate (`checkWorkflowReadiness`) | LLM semantic pass on top of the deterministic gate |
 | Run-level Q&A chat | `POST /ai/explain-run` + UI Runs tab | Deterministic summary (failures / retries / decisions / rollbacks) | Free-form answers |
 | Agent planner | `agent.config.planner: "openai"` | Rules planner | LLM picks tools per step |
 | Causal reasoning | `GET /causal?runId=...&nodeId=...` | Always available — pure logic | Same |
-| Health check | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, model, ... }` |
+| Health check | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, provider, model }` |
 
-**Activate AI in 30 seconds:**
+### Failure recovery loop
+
+| Feature | Endpoint / surface | Without provider key | With key |
+| --- | --- | --- | --- |
+| Suggest 1–3 alternative patches for a failed run | `POST /ai/patch-workflow` | `{ mode: "fallback" }` with the original workflow untouched | Array of suggestions with `approachLabel` + self-rated confidence per tab; route fan-out-merges + validates each |
+| Sandbox-validate a patch before saving | `POST /dlq/validate-fix` | Always available — sandbox is provider-agnostic | Same; gates the production save+replay chain |
+| Apply a patch across every DLQ entry sharing a failure signature | `POST /dlq/cluster-apply` | Always available | Same; recovery dialog reuses the multi-suggestion tabs in cluster mode |
+| Failure clustering | `GET /dlq/clusters` | Always available — deterministic signature classifier | Same |
+| Roll back a workflow to any prior version | `POST /workflows/rollback` | Always available — pure CRUD with single-transaction insert + audit row | Same |
+| Per-workflow health rollup | `GET /workflows/health` | Always available — pure aggregation | Same |
+| Org-wide recovery metrics | `GET /recovery/metrics` | Always available — pure aggregation | Same |
+
+**Activate AI in 30 seconds (Anthropic, MVP-supported):**
 
 ```bash
 cp .env.example .env
-echo "OPENAI_API_KEY=sk-xxxxxxxxxxxx" >> .env
+echo "ANTHROPIC_API_KEY=sk-ant-xxxxxxxx" >> .env
+echo "JANUSLY_LLM_PROVIDER=anthropic" >> .env
 pnpm --filter @janusly/api dev    # restart
 curl -s http://localhost:3001/ai/health -H "x-org-id: default" -H "x-user-id: dev-user"
 ```
 
 ```json
-{ "enabled": true, "model": "gpt-4o-mini", "timeoutMs": 30000, "maxRetries": 2 }
+{ "enabled": true, "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "timeoutMs": 30000, "maxRetries": 2 }
 ```
+
+OpenAI is registered in the provider abstraction for future expansion but is **not a supported runtime target** in the current MVP — the `/ai/generate-workflow` schema currently trips OpenAI's strict-mode `oneOf` rejection. Don't switch a tenant's `ai.provider` away from `anthropic` without a verification plan; see `AGENTS.md` "AI integration" for the full operating posture.
 
 ---
 
@@ -195,7 +219,7 @@ Three independent layers, see [§ Credentials](#credentials):
 
 1. **App login** — dev headers (`x-org-id` + `x-user-id`) or Supabase JWT for production.
 2. **Workflow secrets** — `{{secret.NAME}}` resolves at run time from `process.env.NAME`. Register the *name* via the **Secrets** tab; keep the value in `.env` / your vault.
-3. **AI provider** — `OPENAI_API_KEY` for the AI-native paths.
+3. **AI provider** — `ANTHROPIC_API_KEY` + `JANUSLY_LLM_PROVIDER=anthropic` for the AI-native paths.
 
 ### Credentials
 
@@ -239,15 +263,17 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 
 | Package                  | Stack                                                                              |
 | ------------------------ | ---------------------------------------------------------------------------------- |
-| `apps/web`               | Vitest 4 + jsdom + Testing Library (utilities, store, components). Playwright e2e. |
-| `packages/shared`        | Vitest 4 over the Zod workflow contracts.                                          |
-| `packages/engine`        | Vitest 4 for expressions, validation, templates, tool registry, secrets, memory, planner. |
+| `apps/web`               | Vitest 4 + jsdom + Testing Library (utilities, store, components, recovery dialog tabs). Playwright e2e. Browser-mode pool for `*.browser.test.tsx`. |
+| `packages/shared`        | Vitest 4 over the Zod workflow contracts + `computeWorkflowDiff` + status enums.   |
+| `packages/engine`        | Vitest 4 for expressions, validation, templates, tool registry, secrets, memory, planner, error-signature classifier, recovery metrics, workflow health, cluster failures. |
 | `packages/domain`        | Vitest 4 for decision engine, causal reasoning, improvement engine, RL.            |
-| `packages/ai`            | Vitest 4 for run explainer (mocks the OpenAI client).                              |
-| `apps/api`, `packages/db`, `packages/data` | `tsc --noEmit` as a type guard.                                  |
+| `packages/ai`            | Vitest 4 for the provider-neutral `LlmClient`, run explainer, multi-suggestion patch helper (mocked LLM). |
+| `apps/api`               | Vitest 4 for the patch envelopes (multi-suggestion array), the recovery-fixture matrix, rollback transaction, cluster recovery glue, route registry, rate limiter, run pagination. |
+| `packages/db`, `packages/data` | `tsc --noEmit` as a type guard.                                              |
 
 ```bash
-pnpm test               # full unit test suite (101 tests)
+pnpm test               # full unit test suite (~535 tests across shared/engine/ai/domain/web/api/mcp-server)
+pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
 pnpm --filter @janusly/web test:watch   # Vitest watch

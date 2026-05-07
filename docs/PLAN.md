@@ -16,16 +16,16 @@ What's already here is solid:
 - Graceful fallback on every AI surface, with `aiError` surfaced to the UI and human-readable copy for quota / rate-limit / auth failures.
 - A friendly AI-first UI: AI Studio, Run timeline, Step setup, Recovery queue, Recipes, Tools, Connections.
 
-What's missing to be "the one":
+What's still missing to be "the one":
 
-1. **One AI provider, hardcoded.** Vercel AI SDK should be the abstraction layer, with OpenAI, Anthropic, Google, Mistral, Ollama, and Azure as configurable providers — per-request, per-step, per-tenant.
-2. **A toy tool catalog.** `text.uppercase`, `json.pick`, `http.request`. Real businesses need send-email, slack-post, sql-query, vector-search, file-read, github-issue, calendar, etc.
-3. **No external integration surface.** Janusly should be an MCP server (Claude Desktop, Cursor, IDE agents author flows in chat) AND an MCP client (Janusly steps invoke external MCP tools). This single change makes Janusly part of every agent's toolbelt.
-4. **Memory is "events of this run".** No vector store, no cross-run knowledge, no RAG. Agents can't learn that "this customer always wants X."
-5. **RL is a counter, not a policy.** `routing_stats` tracks pulls and rewards but the engine doesn't run a Thompson-sampling / UCB / contextual-bandit policy on top.
-6. **Improvement loop is half-wired.** `improvementEngine` computes confidence and triggers rollback, but doesn't propose patches based on DLQ patterns or A/B-test alternative DAGs.
-7. **Trigger surface is anemic.** Manual run, webhook, approval. Production workflows need cron, file events, email, calendar, message queue, SaaS event subscriptions.
-8. **No diff UX.** Workflows are snapshotted as versions, but users can't see "what changed between v3 and v4" or "preview the AI's suggested patch before applying".
+1. **Provider breadth is intentionally paused.** The Vercel AI SDK abstraction is in place, but the supported MVP runtime is Anthropic-only until product explicitly reopens multi-provider verification. OpenAI remains registered for future expansion, not current production posture.
+2. **The tool catalog is useful but not business-complete.** Native text / JSON / CSV / time / crypto helpers exist alongside `http.request`; real teams still need revenue-grade tools such as email, Slack, SQL, vector search, file IO, GitHub, calendar, and PDF.
+3. **MCP server exists, MCP client is still the bigger unlock.** Janusly exposes read-only MCP tools plus validation. Write tools are intentionally disabled until consent/audit policy lands. External MCP tools as workflow steps remain future work.
+4. **Memory is still mostly "events of this run".** No vector store, no cross-run knowledge, no RAG. Agents can't learn that "this customer always wants X."
+5. **RL is a counter, not a full policy.** `routing_stats` tracks pulls and rewards and affects router scoring, but there is no Thompson-sampling / UCB / contextual-bandit policy across route, model, prompt, and retry choices.
+6. **Recovery is real but feedback learning is next.** Janusly now proposes patches, previews diffs, validates in sandbox, applies across clusters, and rolls back. It still needs operator feedback capture, calibrated confidence, A/B testing, and broader structural patches.
+7. **Trigger surface is still narrow.** Manual run, webhook, approval, and replay cover the MVP. Production workflows need cron, file events, email, calendar, message queue, and SaaS event subscriptions.
+8. **Distribution surface is thin.** HTTP API + local MCP are enough for development, but customers will want Node/Python SDKs, webhook receiver helpers, release bundles, and Terraform.
 
 The plan is structured so each item below is independently shippable and individually adds value, even if the next ones never happen.
 
@@ -38,19 +38,19 @@ The plan is structured so each item below is independently shippable and individ
 - Clean engine boundaries: `domain` is pure logic, `data` is repos, `engine` is runtime, `shared` is the contract. No DB calls in domain.
 - Atomic semantics where they matter: `tryClaimNodeForQueue`, transactional `startRun`, DLQ-on-final-failure, audit on mutations.
 - Graceful degradation everywhere AI is used. The `mode + aiError` contract is consistent.
-- Good test ratio for a project this young: 101 unit, 7 e2e. Domain is well-tested (23 tests for decision/RL/causal/improvement).
+- Good test ratio for a project this young: 500+ Vitest tests, browser-mode coverage for the canvas, and 7 Playwright e2e flows. Domain is well-tested for decision/RL/causal/improvement logic.
 - Single-language stack. Postgres + Redis only. No Kubernetes-shaped complexity.
 
 ### Weaknesses (pivot points)
 
-- **Workflow expressiveness ceiling.** No subworkflows, no scheduled triggers, no event subscriptions, no parallel-fan-out beyond simple DAG topology, no human form input beyond an "Approve" button.
-- **AI is OpenAI-shaped.** Every prompt assumes `responses.create` semantics, `output_text`, `text.format = json_object`. Hard to swap.
-- **Tool input contracts are JSON Schema-ish but not actually validated against runtime types.** The `validateToolInput` is a string-matching check.
+- **Workflow expressiveness ceiling.** Subworkflows, workflow inputs/outputs, loops, approvals, and sandbox replay exist, but scheduled triggers, event subscriptions, parallel fan-out ergonomics, and richer human forms are still thin.
+- **AI is provider-neutral in code but Anthropic-only in posture.** The abstraction exists and every surface has fallback, but production support currently depends on Anthropic structured-output behavior. Multi-provider verification is intentionally deferred.
+- **Tool input contracts are typed, but not yet provider-native.** The in-tree registry validates Zod input/output schemas and exposes AI Studio metadata, but those definitions are not yet wired into provider-native tool-call APIs or external MCP tools.
 - **Memory is event-log scrolling.** The agent loop reads `getRunMemory(runId)` which returns ordered run events. Useful, but it's not "knowledge."
 - **The reinforcement layer doesn't influence model choice, prompt template, or retry strategy** — only `router` node candidate selection. Model routing should be RL-driven too: cheaper model for low-stakes, premium for high-stakes.
 - **One template format.** No notion of parameterized templates ("Slack alert → fill in {channel}"), no template marketplace, no per-org template forks.
-- **Distributed state is local.** Rate limit is in-process; fine for single-API single-worker but breaks the moment you scale out.
-- **No cost / token telemetry surfaced to the org admin.** `usage_events` exists but nothing writes to it on AI calls. Per-run token cost is invisible.
+- **Some distributed posture is fixed, broader SaaS controls are not.** Rate limiting is Redis-backed and migrations are enforced at boot, but per-org plan limits, quotas, and billing UX are still placeholders.
+- **Cost telemetry exists, but cost governance does not.** Every LLM call writes `usage_events` with provider/model/tokens/cost where known; the admin-facing spend controls, budget alerts, and per-plan limits are still future work.
 - **No SDK.** All integration today is via the HTTP API. Customers will want a Node/Python SDK, a webhook receiver helper, and Terraform.
 
 ---
@@ -85,7 +85,9 @@ Anti-positions (reject):
 
 ### Migration plan
 
-#### Phase A — Add a provider-neutral `LlmClient` interface (one PR, no behavior change)
+Current status: the provider-neutral `LlmClient`, `generateObject` workflow generation, usage-event recording, per-node model overrides, and org-level runtime config are already implemented. The operating posture has narrowed since the original migration plan: production, demos, evals, and smoke checks should use Anthropic (`anthropic/claude-haiku-4-5-20251001`) until provider breadth is explicitly reopened. OpenAI remains registered for compatibility and future verification, not as a supported MVP runtime target.
+
+#### Phase A — Add a provider-neutral `LlmClient` interface (shipped)
 
 `packages/ai/src/llm-client.ts`:
 
@@ -110,49 +112,45 @@ export interface LlmClient {
 }
 ```
 
-Implementations:
-- `OpenAiLlmClient` (existing behavior, kept for compatibility)
-- `VercelLlmClient` (new — wraps `ai` package with provider switching)
+Implementation status:
+- `packages/ai/src/llm-client.ts` is the single provider-neutral chokepoint.
+- The registry keeps OpenAI and Anthropic entries, but supported runtime use is Anthropic-only until verification expands.
+- API and engine call sites route through `LlmClient`, preserve fallback mode, and record usage through the shared recorder.
 
-Wire `getOpenAIClient()` in `apps/api/src/index.ts`, `packages/engine/src/agent-planner.ts`, `packages/engine/src/node-registry.ts` to all go through `getLlmClient()` which returns one or the other based on `JANUSLY_LLM_PROVIDER` env (default: keep OpenAI direct).
+The client must preserve the existing `mode: "fallback" | "ai"` + `aiError` contract.
 
-Both implementations must preserve the existing `mode: "fallback" | "ai"` + `aiError` contract.
+#### Phase B — Switch internals to `generateObject` for structured output (shipped)
 
-#### Phase B — Switch internals to `generateObject` for structured output
-
-The current `parseAiWorkflow` uses raw JSON-mode + a custom looser/sanitizer because the OpenAI Responses API `text.format = json_object` doesn't enforce schemas. Vercel AI SDK's `generateObject({ schema: WorkflowSchema })` does — provider-level structured output, with retries and Zod validation built in. Removes 80% of `parseAiWorkflow`.
+`/ai/generate-workflow` now calls `llm.generateObject({ schema: WorkflowSchema })` so the model returns a typed workflow object through the provider abstraction. The route still keeps `sanitizeAiWorkflow` after schema validation because the engine's expression grammar is stricter than a generic `z.string()`.
 
 #### Phase C — Add provider config
 
-New env block in `.env.example`:
+Current env block in `.env.example`:
 
 ```env
 # AI provider routing
-JANUSLY_LLM_PROVIDER=openai   # openai | anthropic | google | mistral | ollama | azure
-OPENAI_API_KEY=sk-...
+JANUSLY_LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_GENERATIVE_AI_API_KEY=...
-OLLAMA_BASE_URL=http://localhost:11434
-JANUSLY_LLM_MODEL_GENERATE=gpt-4o-mini    # specifically for /ai/generate-workflow
-JANUSLY_LLM_MODEL_EXPLAIN=gpt-4o-mini     # for /ai/explain-*
-JANUSLY_LLM_MODEL_AGENT=gpt-4o-mini       # for agent planner
-JANUSLY_LLM_MODEL_AI_STEP=gpt-4o-mini     # for `ai` node type
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+
+# Registered for future provider verification, not a supported MVP runtime target.
+# OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o-mini
 ```
 
-Rationale: a tenant might use OpenAI for generation but a cheaper Mistral for `ai` steps, or a local Ollama for sensitive runs. Per-surface override is the unit they'll want.
+Rationale: provider/model selection should remain a runtime setting, but the supported release surface needs one verified provider. Tenant-level `ai.provider` and `ai.model` values live in `org_configs`; secrets stay in env or vault-backed credential references.
 
 #### Phase D — Per-org / per-workflow override
 
-Move provider/model selection into:
-- `organizations.preferences` (new column, jsonb) for org defaults
-- `workflows.metadata.llm` for workflow-level pinning
-- `agent.config.model` (already supported) and `ai.config.model` (already supported) at node level
+Provider/model selection now resolves through:
+- `org_configs` for tenant runtime defaults (`ai.provider`, `ai.model`, limits).
+- `agent.config.model` and `ai.config.model` for node-level overrides.
 
-Resolution order: node config → workflow metadata → org preferences → env defaults.
+Resolution order: node config -> org config -> env defaults.
 
 #### Phase E — Cost/usage capture
 
-Every LLM call writes a `usage_events` row with `metric: "llm.tokens.in" | "llm.tokens.out"`, `metadata: { provider, model, surface, runId? }`. New `/billing/usage?breakdown=provider` endpoint and dashboard card.
+Every LLM call writes one `usage_events` row with `metric: "llm.completion"`, token counts, latency, model/provider, optional node/run context, and best-effort cost. Cost governance, budgets, and billing dashboards remain product work.
 
 #### Migration risk register
 
@@ -608,14 +606,14 @@ Each phase is ~6 weeks for a 2-person engineering team. Items inside a phase are
 
 Goal: provider freedom, cost visibility, MCP server stub.
 
-- AI provider abstraction migration (§4 phases A–C). Default stays OpenAI; Anthropic and Ollama become tested alternatives.
-- `usage_events` instrumentation: every LLM call writes one row.
-- `@janusly/mcp-server` with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`).
-- Replace `parseAiWorkflow` looser/sanitizer with `generateObject({ schema: WorkflowSchema })` (§4 phase B).
+- AI provider abstraction migration (§4 phases A–C) shipped through `LlmClient`; supported MVP runtime is Anthropic-only while OpenAI remains registered for future verification.
+- `usage_events` instrumentation shipped: every LLM call writes one row with provider/model/tokens/cost metadata.
+- `@janusly/mcp-server` shipped with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) plus `workflows.validate`; writes stay disabled until consent/audit policy lands.
+- `/ai/generate-workflow` now uses `generateObject({ schema: WorkflowSchema })` plus a sanitize pass.
 - Drizzle migrations shipped in ENG-008: checked-in SQL migrations, real `pnpm migrate`, and API/worker fail-fast guards before boot.
 - GitHub Actions shipped in ENG-015: build + jsdom test, browser test, e2e, and high+ dependency audit.
 
-Definition of done: a developer can switch `JANUSLY_LLM_PROVIDER=anthropic` and the AI Studio still works; usage shows up in the Runs view; Claude Desktop can list workflows via MCP.
+Definition of done: a developer runs the Anthropic-supported AI path end-to-end, usage is recorded for each LLM call, and Claude Desktop / Cursor can inspect workflows through the read-only MCP server.
 
 ### Phase 2 — Workflow expressiveness (weeks 7–12)
 

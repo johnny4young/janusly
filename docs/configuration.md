@@ -16,12 +16,15 @@ secret values stay env-only.
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/workflow` | `packages/db` | Postgres connection string for Drizzle, API, worker, and migrations. |
 | `REDIS_URL` | `redis://localhost:6379` | API rate limiter, engine queue | Redis connection for shared rate-limit state and BullMQ. |
 | `PORT` | `3001` | `apps/api` | API HTTP port. |
-| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. |
+| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. Includes `5174` so dev still works when Vite falls back from `5173` due to a port collision. |
 | `API_MAX_JSON_BODY_BYTES` | `1048576` | `apps/api` | Maximum request JSON body size. |
 | `API_SERVICE_TOKEN` | unset | `apps/api/src/auth.ts` | Optional Bearer token for service clients, including production MCP mode. |
 | `JANUSLY_REQUIRE_SAVED_WORKFLOW` | `false` | `apps/api` | When `true`, rejects ad-hoc `POST /start` workflow payloads. |
+| `JANUSLY_PRODUCTION_MODE` | `false` | `apps/api`, `packages/engine/src/workflow-readiness.ts` | When `true`, `POST /start` runs the deterministic readiness gate (`checkWorkflowReadiness` + DB-aware `checkRollbackAvailability`) and rejects fail-level workflows with HTTP 422. Dev mode (unset) preserves the old "anything structurally valid runs" behaviour. |
+| `JANUSLY_REQUIRE_EVAL_COVERAGE` | `false` | `packages/engine/src/workflow-readiness.ts` | Opt-in addition to the readiness gate that warns when a workflow has no associated eval. Off by default so clean MVP workflows can reach `status: "pass"` without eval tracking. |
 | `WORKER_CONCURRENCY` | `10` | `packages/engine/src/worker.ts` | BullMQ worker concurrency. |
 | `JANUSLY_MAX_SUBWORKFLOW_DEPTH` | `5` | `packages/engine/src/subworkflow.ts` | Maximum nested subworkflow depth. |
+| `JANUSLY_PERSIST_MAX_BYTES` | `262144` (256 KiB) | `packages/engine/src/safe-persist.ts` | Default size cap for jsonb writes through the safe-persist chokepoint. Over-cap payloads are replaced with a `{ __truncated: true, ... }` sentinel. |
 
 `docker-compose.yml` also sets Postgres container-internal values
 (`POSTGRES_USER=postgres`, `POSTGRES_PASSWORD=postgres`,
@@ -63,13 +66,15 @@ Guardrails:
 - Every tenant write goes through `POST /org/config`, admin RBAC, and the API
   audit log.
 
+> **MVP operating posture:** AGENTS.md locks runtime AI to **Anthropic only** (`claude-haiku-4-5-20251001`). The `openai` provider stays in the registry for future expansion but is unverified in production — do not switch a tenant's `ai.provider` away from `anthropic` unless a verification plan exists. Set `JANUSLY_LLM_PROVIDER=anthropic` in `.env`. Ignore the historical `openai` defaults below for any new deployment.
+
 | Config key | Env fallback | Default | Used by | Purpose |
 | --- | --- | --- | --- | --- |
-| `ai.provider` | `JANUSLY_LLM_PROVIDER` | `openai` | API AI endpoints, engine AI/agent nodes | Default provider for tenant-level LLM calls. API keys still come from env or secret management. |
-| `ai.openai.model` | `OPENAI_MODEL` | `gpt-4o-mini` | API AI endpoints, engine AI/agent nodes | Default OpenAI model for this tenant. |
-| `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant. |
-| `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds. |
-| `ai.maxRetries` | `OPENAI_MAX_RETRIES` | `2` | API AI endpoints, engine AI/agent nodes | AI SDK retry count for LLM calls. |
+| `ai.provider` | `JANUSLY_LLM_PROVIDER` | `openai` (registry default; **set to `anthropic`** for MVP) | API AI endpoints, engine AI/agent nodes | Default provider for tenant-level LLM calls. API keys still come from env or secret management. |
+| `ai.openai.model` | `OPENAI_MODEL` | `gpt-4o-mini` | API AI endpoints, engine AI/agent nodes | Default OpenAI model for this tenant. Not a supported runtime target right now; tracked for future expansion. |
+| `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant — the supported MVP target. |
+| `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds (env name is historical; applies to every registered provider). |
+| `ai.maxRetries` | `OPENAI_MAX_RETRIES` | `2` | API AI endpoints, engine AI/agent nodes | AI SDK retry count for LLM calls (env name is historical; applies to every registered provider). |
 | `ai.promptMaxChars` | `AI_PROMPT_MAX_CHARS` | `4000` | API AI endpoints | Prompt/question length cap. |
 | `ai.rateLimitPerMin` | `AI_RATE_LIMIT_PER_MIN` | `30` | API AI endpoints | Per-org AI request limit per minute. |
 | `http.timeoutMs` | `JANUSLY_HTTP_TIMEOUT_MS` | `30000` | Engine `http` nodes and `http.request` tool | Default outbound HTTP timeout budget in milliseconds. |
@@ -108,13 +113,13 @@ only to select the safe provider/model/limit behavior.
 
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
-| `OPENAI_API_KEY` | unset | `packages/ai` | Enables OpenAI-backed AI surfaces. Without a provider key, callers stay in fallback mode. |
-| `OPENAI_MODEL` | `gpt-4o-mini` | `packages/ai`, `apps/api` | Default OpenAI model. |
+| `OPENAI_API_KEY` | unset | `packages/ai` | Enables the registered OpenAI provider for future verification work. Not a supported MVP runtime target; without the selected provider key, callers stay in fallback mode. |
+| `OPENAI_MODEL` | `gpt-4o-mini` | `packages/ai`, `apps/api` | Default OpenAI model for the compatibility registry. Not a supported MVP runtime target. |
 | `OPENAI_TIMEOUT_MS` | `30000` | `packages/ai`, `apps/api` | LLM request timeout. Shared by registered providers for now. |
 | `OPENAI_MAX_RETRIES` | `2` | `packages/ai`, `apps/api` | AI SDK retry count for LLM calls. |
 | `AI_PROMPT_MAX_CHARS` | `4000` | `apps/api` | Prompt length cap for AI endpoints. |
 | `AI_RATE_LIMIT_PER_MIN` | `30` | `apps/api` | Per-org AI rate limit window capacity. |
-| `JANUSLY_LLM_PROVIDER` | `openai` | `packages/ai`, `apps/api` | Default provider registry key. Currently `openai` or `anthropic`. |
+| `JANUSLY_LLM_PROVIDER` | `openai` (registry default; **set to `anthropic`** for MVP deployments) | `packages/ai`, `apps/api` | Default provider registry key. Registered values: `openai`, `anthropic`. The supported runtime target is `anthropic` — see AGENTS.md "AI integration" for the operating posture. |
 | `ANTHROPIC_API_KEY` | unset | `packages/ai` | Enables Anthropic-backed AI calls and explicit `anthropic/model` overrides. |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | `packages/ai`, `apps/api` | Default Anthropic model. |
 | `JANUSLY_LLM_PRICE_<MODEL>` | built-in pricing table | `packages/ai/src/pricing.ts` | Optional cost override as `<inputUsdPer1M>,<outputUsdPer1M>`, for example `JANUSLY_LLM_PRICE_GPT_4O_MINI=0.15,0.60`. |
