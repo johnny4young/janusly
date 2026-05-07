@@ -27,9 +27,15 @@ import { validateWorkflow } from "@janusly/engine";
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import {
   AiPatchAgentConfigEnvelope,
+  AiPatchAiConfigEnvelope,
+  AiPatchApprovalConfigEnvelope,
+  AiPatchConditionConfigEnvelope,
   AiPatchGenericConfigEnvelope,
   AiPatchHttpConfigEnvelope,
+  AiPatchLoopConfigEnvelope,
+  AiPatchRouterConfigEnvelope,
   AiPatchToolConfigEnvelope,
+  AiPatchTransformConfigEnvelope,
   patchEnvelopeForNodeType,
   type AiPatchApproachLabelValue,
 } from "./ai-schemas";
@@ -49,7 +55,7 @@ type ApproachLabel = AiPatchApproachLabelValue;
  * present; generic envelopes carry only the fields being changed.
  */
 function suggestionsForFixture(fixture: typeof RECOVERY_MATRIX_FIXTURES[number]): {
-  envelopeKind: "http" | "tool" | "agent" | "generic";
+  envelopeKind: "http" | "tool" | "agent" | "transform" | "condition" | "ai" | "router" | "approval" | "loop" | "generic";
   parsed: { suggestions: Array<{ patchedConfig: Record<string, unknown>; rationale: string; approachLabel: ApproachLabel; confidence: number }> };
 } {
   const failingNode = fixture.workflow.nodes.find((node) => node.id === fixture.failedNodeId)!;
@@ -144,6 +150,62 @@ function suggestionsForFixture(fixture: typeof RECOVERY_MATRIX_FIXTURES[number])
       patchedConfig = { goal: null, retry: { maxAttempts: 3 }, timeoutMs: null };
       break;
     }
+    case "transform": {
+      // mapping is the array-of-pairs patch form. Use a non-empty array
+      // so the merge fold produces a non-empty record.
+      patchedConfig = {
+        mapping: [
+          { name: "summary", value: "{{context.fetch.output.body}}" },
+        ],
+      };
+      break;
+    }
+    case "condition": {
+      // Single nullable-required scalar field. Engine grammar accepts
+      // `context.<id>.output.<path>` so the post-merge `validateExpression`
+      // step doesn't drop the suggestion.
+      patchedConfig = { expression: "context.calc.output.x > 5" };
+      break;
+    }
+    case "ai": {
+      // ai envelope: prompt + model + retry. Pick the field that
+      // matters per fixture: ai_prompt_missing_grounding wants a fresh
+      // prompt; ai_provider_transient wants a retry.
+      if (fixture.id === "ai_prompt_missing_grounding") {
+        patchedConfig = {
+          prompt: "Summarize {{context.fetch.output.body}} in 2 sentences.",
+          model: null,
+          retry: null,
+        };
+      } else {
+        patchedConfig = { prompt: null, model: null, retry: { maxAttempts: 3 } };
+      }
+      break;
+    }
+    case "router": {
+      // candidates is a verbatim-replace array. The current
+      // `router_unknown_candidate` fixture's workflow includes a real
+      // node id ("real_path") so the synthesizer's hardcoded reference
+      // produces a structurally-valid merge. If a future router fixture
+      // doesn't include a node named "real_path", switch on `fixture.id`
+      // here to pick a node id that exists in that fixture's workflow.
+      patchedConfig = {
+        candidates: [{ nodeId: "real_path" }],
+        strategy: null,
+      };
+      break;
+    }
+    case "approval": {
+      patchedConfig = { message: "Please approve the operation." };
+      break;
+    }
+    case "loop": {
+      patchedConfig = {
+        items: "{{context.fetch.output.list}}",
+        mapping: null,
+      };
+      break;
+    }
     default: {
       // generic envelope is open — emit only the changed field. Pick
       // something minimal that demonstrates a patch was made.
@@ -169,6 +231,12 @@ const ENVELOPE_BY_KIND = {
   http: AiPatchHttpConfigEnvelope,
   tool: AiPatchToolConfigEnvelope,
   agent: AiPatchAgentConfigEnvelope,
+  transform: AiPatchTransformConfigEnvelope,
+  condition: AiPatchConditionConfigEnvelope,
+  ai: AiPatchAiConfigEnvelope,
+  router: AiPatchRouterConfigEnvelope,
+  approval: AiPatchApprovalConfigEnvelope,
+  loop: AiPatchLoopConfigEnvelope,
   generic: AiPatchGenericConfigEnvelope,
 } as const;
 
