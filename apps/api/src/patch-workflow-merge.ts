@@ -33,6 +33,8 @@ type PairItem = { name: string; value: string | null };
 const PAIR_ARRAY_FIELDS_BY_NODE_TYPE: Readonly<Record<string, readonly string[]>> = {
   http: ["headers"],
   tool: ["input"],
+  transform: ["mapping"],
+  loop: ["mapping"],
 };
 
 /** Remove `null` sentinel fields emitted by provider-strict nullable envelopes. */
