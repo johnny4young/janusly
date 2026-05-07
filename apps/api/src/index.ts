@@ -929,12 +929,38 @@ export const routes: Route[] = [
       const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
       const envelope = patchEnvelopeForNodeType(failingNodeType);
 
+      // Tool-typed failures benefit from per-tool field-name hints —
+      // the LLM otherwise has to infer required input field names from
+      // a possibly-misleading runtime error message. The tool registry's
+      // `listTools()` already produces the operator-facing description
+      // (`required` / `optional` / `inputExample`); pluck the entry for
+      // the failing node's tool and pass it through `extraContext`.
+      // Returns undefined for non-tool failures, unknown tools, or
+      // failing nodes without a `config.tool` string — the helper
+      // omits the field in those cases.
+      const toolInputContract = (() => {
+        if (envelope.kind !== "tool") return undefined;
+        const failingNodeJson = dlq.nodeJson as { config?: { tool?: unknown } } | null;
+        const toolName = typeof failingNodeJson?.config?.tool === "string" ? failingNodeJson.config.tool : null;
+        if (!toolName) return undefined;
+        const entry = listTools().find((tool) => tool.name === toolName);
+        if (!entry) return undefined;
+        return {
+          name: entry.name,
+          description: entry.description,
+          required: entry.required,
+          optional: entry.optional ?? [],
+          inputExample: entry.inputExample,
+        };
+      })();
+
       const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
         envelopeSchema: envelope.schema,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
         errorJson: safePersistPayload(dlq.errorJson ?? null),
+        extraContext: toolInputContract ? { toolInputContract } : undefined,
         // Pass every event payload through the persistence chokepoint
         // before it leaves the API boundary. `safe-persist` was applied at
         // write time which key-redacted known sensitive keys, but free-form

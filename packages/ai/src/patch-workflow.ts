@@ -130,6 +130,18 @@ export type SuggestWorkflowPatchInput = {
   errorJson: unknown;
   /** Recent run events; the helper truncates to `RUN_EVENT_PROMPT_CAP`. */
   runEvents: RunEventForPrompt[];
+  /**
+   * Optional extra context to inject into the prompt body verbatim.
+   * The route uses this to narrate per-failing-node-type contracts
+   * the LLM can't infer from the workflow alone — e.g. for a `tool`
+   * failure, the registered tool's required / optional input field
+   * names so the LLM emits a patch with the right keys (vs guessing
+   * from a possibly-misleading error message).
+   *
+   * Keys are JSON-stringified into the prompt body next to
+   * `workflow` / `failedNodeId` / `errorJson` / `runEvents`.
+   */
+  extraContext?: Record<string, unknown>;
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
 };
@@ -176,6 +188,12 @@ Rules per suggestion:
   - \`timeoutMs: <milliseconds>\` — when the failure is a timeout. Default is 30000 ms; raise modestly (60000-120000) rather than removing the bound.
   - \`maxResponseBytes: <bytes>\` — when the failure is a body-cap rejection. Default is 1048576 (1 MB); raise to 5242880 (5 MB) or 10485760 (10 MB) when the response is legitimately larger.
   - \`maxRedirects: <integer>\` — when the failure is a redirect-loop or insufficient redirects. Default is 5.
+- Headers (HTTP) and tool inputs use an \`Array<{ name, value }>\` patch form because flat record shapes are rejected by some provider strict modes. Emit ONLY the keys you're changing; the system folds them against the existing record (other keys preserved). Use a literal value or a template like \`{{secret.NAME}}\` / \`{{credential.NAME}}\` / \`{{env.NAME}}\` to set/override; emit \`value: null\` to remove the key from the merged config. Examples:
+  - HTTP 401 with a literal token → \`headers: [{ name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" }]\`
+  - Missing-secret template ({{secret.NAME}}) where the secret isn't bound → swap the same Authorization header to a different known-good secret reference.
+  - \`text.replace\` tool with missing required fields → \`input: [{ name: "value", value: "{{context.fetch.output.body}}" }, { name: "search", value: "<text-or-pattern>" }, { name: "replacement", value: "<value>" }]\`
+  - \`approachLabel: "swap_secret_ref"\` is the right tag whenever you change a header or input field to a template reference.
+- TOOL FAILURES — when the prompt body contains \`extraContext.toolInputContract\`, those are the EXACT field names the registered tool's runtime input validator (Zod) expects: \`required: string[]\` (must be present in the merged config), \`optional: string[]\` (allowed but not required), and \`inputExample\` (a concrete example map of valid input). USE THE \`required\` AND \`optional\` FIELD NAMES VERBATIM in your \`input\` array — the tool registry rejects merged configs missing a required field, even if the existing config has a similarly-named-but-wrong key (e.g. a stale \`input.input\` entry will NOT satisfy a required \`value\` field). When the existing config has the wrong keys, emit the right ones with placeholder values that mirror the example shape; the operator refines them in the Inspector before replaying. Don't invent field names that aren't in \`required\` or \`optional\`.
 - Do NOT include any secret values verbatim.
 - Do NOT emit a \`patchedConfig\` larger than the failing node's actual config — you patch one node, not the whole workflow.
 - Suggestions should be DISTINCT. If you can only justify one approach, return one — don't repeat the same fix with different wording.
@@ -189,7 +207,7 @@ Rules per suggestion:
 export async function suggestWorkflowPatch(
   input: SuggestWorkflowPatchInput,
 ): Promise<PatchSuggestion> {
-  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model } = input;
+  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext } = input;
 
   if (!llm) {
     return {
@@ -215,6 +233,10 @@ export async function suggestWorkflowPatch(
     failedNodeId,
     errorJson: scrubPromptSecretShapes(errorJson),
     runEvents: promptEvents,
+    // The route narrates per-type contracts the LLM can't infer from
+    // the workflow alone (e.g. registered tool input field names).
+    // Scrubbed for parity with the rest of the body.
+    ...(extraContext ? { extraContext: scrubPromptSecretShapes(extraContext) } : {}),
   });
 
   try {

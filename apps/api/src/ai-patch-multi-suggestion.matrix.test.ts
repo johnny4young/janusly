@@ -11,8 +11,8 @@
  *   2. Merging the suggestion's `patchedConfig` onto the failing node
  *      produces a structurally-different workflow vs the original
  *      (otherwise the dialog's diff would be empty and Apply disabled).
- *   3. The merged workflow passes `WorkflowSchema.safeParse` (the engine
- *      will accept it on replay).
+ *   3. The merged workflow passes `validateWorkflow` (the route's
+ *      post-merge gate, including tool input validation).
  *   4. The fixture's `expectedTopApproachLabel` is one of the closed
  *      enum values — defensive against typos creeping into the catalog.
  *
@@ -23,6 +23,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { WorkflowSchema } from "@janusly/shared";
+import { validateWorkflow } from "@janusly/engine";
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import {
   AiPatchAgentConfigEnvelope,
@@ -57,54 +58,86 @@ function suggestionsForFixture(fixture: typeof RECOVERY_MATRIX_FIXTURES[number])
 
   // The patch shapes below are intentionally minimal but structurally
   // valid — enough to produce a non-zero diff against the original
-  // workflow so the actionable-suggestion check passes.
-  const patchByApproach: Record<ApproachLabel, Record<string, unknown>> = {
-    add_retry: { retry: { maxAttempts: 3 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null, url: null, method: null },
-    raise_timeout: { retry: null, timeoutMs: 60_000, maxResponseBytes: null, maxRedirects: null, url: null, method: null },
-    swap_secret_ref: {
-      retry: null,
-      timeoutMs: null,
-      maxResponseBytes: null,
-      maxRedirects: null,
-      url: null,
-      method: null,
-      // For typed envelopes, swap_secret_ref doesn't have a dedicated
-      // field — the LLM would change `url` or a header. The generic
-      // path just emits the changed fields. Below we override with the
-      // right shape per envelope kind.
-    },
-    add_approval: { retry: null, timeoutMs: null, maxResponseBytes: null, maxRedirects: null, url: null, method: null },
-    fix_url: { url: "https://api.example/fixed", method: null, retry: null, timeoutMs: null, maxResponseBytes: null, maxRedirects: null },
-    other: {},
+  // workflow so the actionable-suggestion check passes. http carries
+  // 7 nullable-required fields (`headers` is the array-of-pairs patch
+  // form added in this ticket); tool carries 4 (`input` is the
+  // equivalent array-of-pairs form).
+  const baseHttp: Record<string, unknown> = {
+    url: null,
+    method: null,
+    headers: null,
+    retry: null,
+    timeoutMs: null,
+    maxResponseBytes: null,
+    maxRedirects: null,
+  };
+  const baseTool: Record<string, unknown> = {
+    tool: null,
+    input: null,
+    retry: null,
+    timeoutMs: null,
   };
 
   let patchedConfig: Record<string, unknown>;
   switch (envelope.kind) {
     case "http": {
-      // http envelope has all 6 fields nullable-required
-      patchedConfig = patchByApproach[fixture.expectedTopApproachLabel];
-      // Rewrite for swap_secret_ref / add_approval / other so the diff is non-empty.
-      if (fixture.expectedTopApproachLabel === "swap_secret_ref") {
-        patchedConfig = { url: null, method: null, retry: { maxAttempts: 2 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null };
-      } else if (fixture.expectedTopApproachLabel === "add_approval") {
-        // Engine-side "add an approval upstream" isn't a config patch on
-        // the failing node — closest representation is adding a retry
-        // so the diff is non-empty. Structural multi-node patches are
-        // covered by the roadmap, outside this config-only matrix.
-        patchedConfig = { url: null, method: null, retry: { maxAttempts: 2 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null };
-      } else if (fixture.expectedTopApproachLabel === "other") {
-        if (fixture.id === "http_body_cap") {
-          patchedConfig = { url: null, method: null, retry: null, timeoutMs: null, maxResponseBytes: 5_242_880, maxRedirects: null };
-        } else if (fixture.id === "http_redirect_loop") {
-          patchedConfig = { url: null, method: null, retry: null, timeoutMs: null, maxResponseBytes: null, maxRedirects: 10 };
-        } else {
-          patchedConfig = { url: null, method: null, retry: { maxAttempts: 2 }, timeoutMs: null, maxResponseBytes: null, maxRedirects: null };
-        }
+      switch (fixture.expectedTopApproachLabel) {
+        case "fix_url":
+          patchedConfig = { ...baseHttp, url: "https://api.example/fixed" };
+          break;
+        case "add_retry":
+          patchedConfig = { ...baseHttp, retry: { maxAttempts: 3 } };
+          break;
+        case "raise_timeout":
+          patchedConfig = { ...baseHttp, timeoutMs: 60_000 };
+          break;
+        case "swap_secret_ref":
+          // The fix lives in the headers map — the array-of-pairs patch
+          // form swaps the literal `Authorization` token to a
+          // `{{secret.NAME}}` template. The merge layer folds against
+          // the existing `node.config.headers` record.
+          patchedConfig = {
+            ...baseHttp,
+            headers: [{ name: "Authorization", value: "Bearer {{secret.GITHUB_TOKEN}}" }],
+          };
+          break;
+        case "add_approval":
+          // Engine-side "add an approval upstream" isn't a config patch
+          // on the failing node — closest representation is adding a
+          // retry so the diff is non-empty. Structural multi-node
+          // patches are outside this config-only matrix.
+          patchedConfig = { ...baseHttp, retry: { maxAttempts: 2 } };
+          break;
+        case "other":
+          if (fixture.id === "http_body_cap") {
+            patchedConfig = { ...baseHttp, maxResponseBytes: 5_242_880 };
+          } else if (fixture.id === "http_redirect_loop") {
+            patchedConfig = { ...baseHttp, maxRedirects: 10 };
+          } else {
+            patchedConfig = { ...baseHttp, retry: { maxAttempts: 2 } };
+          }
+          break;
+        default:
+          patchedConfig = { ...baseHttp, retry: { maxAttempts: 2 } };
+          break;
       }
       break;
     }
     case "tool": {
-      patchedConfig = { tool: "text.regex", retry: null, timeoutMs: null };
+      if (fixture.id === "tool_input_invalid") {
+        // The fix is to populate `text.replace`'s required input fields;
+        // exercises the new array-of-pairs `input` patch form.
+        patchedConfig = {
+          ...baseTool,
+          input: [
+            { name: "value", value: "{{context.fetch.output.body}}" },
+            { name: "search", value: "foo" },
+            { name: "replacement", value: "bar" },
+          ],
+        };
+      } else {
+        patchedConfig = { ...baseTool, tool: "text.regex" };
+      }
       break;
     }
     case "agent": {
@@ -183,14 +216,15 @@ describe("recovery matrix — per-fixture contract", () => {
         expect(JSON.stringify(merged)).not.toBe(JSON.stringify(fixture.workflow));
       });
 
-      it("merged workflow passes the engine's strict WorkflowSchema", () => {
+      it("merged workflow passes the route's post-merge workflow validation", () => {
         const original = WorkflowSchema.safeParse(fixture.workflow);
         expect(original.success).toBe(true);
         if (!original.success) return;
         const item = built.parsed.suggestions[0]!;
         const merged = applyConfigPatchToWorkflow(original.data, fixture.failedNodeId, item.patchedConfig);
-        const reparsed = WorkflowSchema.safeParse(merged);
-        expect(reparsed.success).toBe(true);
+        const validation = validateWorkflow(merged);
+        expect(validation.issues).toEqual([]);
+        expect(validation.valid).toBe(true);
       });
     });
   }
