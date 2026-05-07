@@ -246,6 +246,16 @@ describe("suggestWorkflowPatch — prompt content", () => {
     // verbatim instead of guessing from the runtime error message.
     expect(callArg.system).toContain("extraContext.toolInputContract");
     expect(callArg.system).toContain("USE THE `required` AND `optional` FIELD NAMES VERBATIM");
+    // Per-type guidance for the non-resilience envelopes (transform /
+    // condition / ai / router / approval / loop) — one assertion per
+    // node-type bullet so a future prompt edit that drops a section
+    // fails the test loudly.
+    expect(callArg.system).toContain("TRANSFORM nodes");
+    expect(callArg.system).toContain("CONDITION nodes");
+    expect(callArg.system).toContain("AI nodes");
+    expect(callArg.system).toContain("ROUTER nodes");
+    expect(callArg.system).toContain("APPROVAL nodes");
+    expect(callArg.system).toContain("LOOP nodes");
   });
 
   it("threads extraContext.toolInputContract verbatim into the prompt body", async () => {

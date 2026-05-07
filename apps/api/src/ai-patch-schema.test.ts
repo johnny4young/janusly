@@ -3,9 +3,15 @@ import { WorkflowSchema } from "@janusly/shared";
 import {
   AiGenerationWorkflowSchema,
   AiPatchAgentConfigEnvelope,
+  AiPatchAiConfigEnvelope,
+  AiPatchApprovalConfigEnvelope,
+  AiPatchConditionConfigEnvelope,
   AiPatchGenericConfigEnvelope,
   AiPatchHttpConfigEnvelope,
+  AiPatchLoopConfigEnvelope,
+  AiPatchRouterConfigEnvelope,
   AiPatchToolConfigEnvelope,
+  AiPatchTransformConfigEnvelope,
   PATCH_MAX_SUGGESTIONS,
   patchEnvelopeForNodeType,
 } from "./ai-schemas";
@@ -288,6 +294,192 @@ describe("patch envelopes — multi-suggestion array form", () => {
   });
 });
 
+describe("non-resilience envelopes — concrete shapes for transform/condition/ai/router/approval/loop", () => {
+  // Helper that wraps any concrete patchedConfig in the multi-suggestion array shape.
+  const wrap = (patchedConfig: Record<string, unknown>, approachLabel = "other", confidence = 50) => ({
+    suggestions: [{ patchedConfig, rationale: "x", approachLabel, confidence }],
+  });
+
+  describe("AiPatchTransformConfigEnvelope", () => {
+    it("parses a `mapping` array of pairs (1-50 items), null `value` allowed for remove", () => {
+      const parsed = AiPatchTransformConfigEnvelope.safeParse(wrap({
+        mapping: [
+          { name: "summary", value: "{{context.fetch.output.body}}" },
+          { name: "stale_key", value: null },
+        ],
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("accepts `mapping: null` (preserve existing)", () => {
+      const parsed = AiPatchTransformConfigEnvelope.safeParse(wrap({ mapping: null }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects a `mapping` array longer than 50 items", () => {
+      const oversize = Array.from({ length: 51 }, (_, i) => ({ name: `k${i}`, value: `v${i}` }));
+      const parsed = AiPatchTransformConfigEnvelope.safeParse(wrap({ mapping: oversize }));
+      expect(parsed.success).toBe(false);
+    });
+
+    it("rejects a mapping item with empty `name`", () => {
+      const parsed = AiPatchTransformConfigEnvelope.safeParse(wrap({
+        mapping: [{ name: "", value: "x" }],
+      }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe("AiPatchConditionConfigEnvelope", () => {
+    it("parses a non-empty `expression` string", () => {
+      const parsed = AiPatchConditionConfigEnvelope.safeParse(wrap({
+        expression: "context.calc.output.x > 5",
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("accepts `expression: null` (preserve existing)", () => {
+      const parsed = AiPatchConditionConfigEnvelope.safeParse(wrap({ expression: null }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects an empty-string `expression` (the engine grammar runs server-side post-merge)", () => {
+      const parsed = AiPatchConditionConfigEnvelope.safeParse(wrap({ expression: "" }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe("AiPatchAiConfigEnvelope", () => {
+    it("parses full shape with prompt + model + retry", () => {
+      const parsed = AiPatchAiConfigEnvelope.safeParse(wrap({
+        prompt: "Summarize {{context.fetch.output.body}} in 2 sentences.",
+        model: "anthropic/claude-haiku-4-5-20251001",
+        retry: { maxAttempts: 3 },
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("accepts every field nullable (preserve existing)", () => {
+      const parsed = AiPatchAiConfigEnvelope.safeParse(wrap({
+        prompt: null,
+        model: null,
+        retry: null,
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects an empty-string `prompt`", () => {
+      const parsed = AiPatchAiConfigEnvelope.safeParse(wrap({
+        prompt: "", model: null, retry: null,
+      }));
+      expect(parsed.success).toBe(false);
+    });
+
+    it("rejects retry.maxAttempts below 2 (1 means no retry)", () => {
+      const parsed = AiPatchAiConfigEnvelope.safeParse(wrap({
+        prompt: null, model: null, retry: { maxAttempts: 1 },
+      }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe("AiPatchRouterConfigEnvelope", () => {
+    it("parses `candidates` array of {nodeId} (1-10 items) + nullable `strategy`", () => {
+      const parsed = AiPatchRouterConfigEnvelope.safeParse(wrap({
+        candidates: [{ nodeId: "fast_path" }, { nodeId: "accurate_path" }],
+        strategy: "balanced",
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("accepts both fields nullable (preserve existing)", () => {
+      const parsed = AiPatchRouterConfigEnvelope.safeParse(wrap({
+        candidates: null, strategy: null,
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects more than 10 candidates", () => {
+      const oversize = Array.from({ length: 11 }, (_, i) => ({ nodeId: `n${i}` }));
+      const parsed = AiPatchRouterConfigEnvelope.safeParse(wrap({
+        candidates: oversize, strategy: null,
+      }));
+      expect(parsed.success).toBe(false);
+    });
+
+    it("rejects a candidate with empty nodeId", () => {
+      const parsed = AiPatchRouterConfigEnvelope.safeParse(wrap({
+        candidates: [{ nodeId: "" }], strategy: null,
+      }));
+      expect(parsed.success).toBe(false);
+    });
+
+    it("rejects a non-enum strategy", () => {
+      const parsed = AiPatchRouterConfigEnvelope.safeParse(wrap({
+        candidates: null, strategy: "fake",
+      }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe("AiPatchApprovalConfigEnvelope", () => {
+    it("parses a non-empty `message` string and accepts null", () => {
+      expect(AiPatchApprovalConfigEnvelope.safeParse(wrap({
+        message: "Please approve the $X transfer.",
+      })).success).toBe(true);
+      expect(AiPatchApprovalConfigEnvelope.safeParse(wrap({ message: null })).success).toBe(true);
+    });
+
+    it("rejects an empty-string message", () => {
+      const parsed = AiPatchApprovalConfigEnvelope.safeParse(wrap({ message: "" }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  describe("AiPatchLoopConfigEnvelope", () => {
+    it("parses `items` string + `mapping` array of pairs", () => {
+      const parsed = AiPatchLoopConfigEnvelope.safeParse(wrap({
+        items: "{{context.fetch.output.list}}",
+        mapping: [
+          { name: "id", value: "{{item.id}}" },
+        ],
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("accepts both fields nullable", () => {
+      const parsed = AiPatchLoopConfigEnvelope.safeParse(wrap({
+        items: null, mapping: null,
+      }));
+      expect(parsed.success).toBe(true);
+    });
+
+    it("rejects empty-string items", () => {
+      const parsed = AiPatchLoopConfigEnvelope.safeParse(wrap({
+        items: "", mapping: null,
+      }));
+      expect(parsed.success).toBe(false);
+    });
+
+    it("rejects a `mapping` array longer than 30 items", () => {
+      const oversize = Array.from({ length: 31 }, (_, i) => ({ name: `k${i}`, value: `v${i}` }));
+      const parsed = AiPatchLoopConfigEnvelope.safeParse(wrap({
+        items: null, mapping: oversize,
+      }));
+      expect(parsed.success).toBe(false);
+    });
+  });
+
+  it("multi-knob ai patch (prompt + retry together) parses", () => {
+    const parsed = AiPatchAiConfigEnvelope.safeParse(wrap({
+      prompt: "Summarize {{context.fetch.output.body}}",
+      model: null,
+      retry: { maxAttempts: 3 },
+    }));
+    expect(parsed.success).toBe(true);
+  });
+});
+
 describe("patchEnvelopeForNodeType — dispatch", () => {
   it("returns the http envelope for http nodes", () => {
     const choice = patchEnvelopeForNodeType("http");
@@ -307,8 +499,29 @@ describe("patchEnvelopeForNodeType — dispatch", () => {
     expect(choice.schema).toBe(AiPatchAgentConfigEnvelope);
   });
 
-  it("falls back to the generic envelope for everything else", () => {
-    for (const type of ["transform", "condition", "router", "ai", "approval", "noop", "loop", "multi_agent", "unknown_type"]) {
+  it("returns the concrete envelope for non-resilience node types", () => {
+    const cases: Array<{ type: string; kind: string }> = [
+      { type: "transform", kind: "transform" },
+      { type: "condition", kind: "condition" },
+      { type: "ai", kind: "ai" },
+      { type: "router", kind: "router" },
+      { type: "router_llm", kind: "router" },
+      { type: "approval", kind: "approval" },
+      { type: "loop", kind: "loop" },
+    ];
+    for (const { type, kind } of cases) {
+      const choice = patchEnvelopeForNodeType(type);
+      expect(choice.kind, `for type=${type}`).toBe(kind);
+      expect(choice.schema).not.toBe(AiPatchGenericConfigEnvelope);
+    }
+  });
+
+  it("falls back to the generic envelope for multi_agent / noop / unknown types", () => {
+    // multi_agent stays on generic — agents-array shape too complex for v1.
+    // noop stays on generic — no actionable runtime config (always falls back).
+    // Unknown types pass through to generic so the patch path stays open
+    // for future node types without a code change.
+    for (const type of ["multi_agent", "noop", "unknown_type"]) {
       const choice = patchEnvelopeForNodeType(type);
       expect(choice.kind, `for type=${type}`).toBe("generic");
       expect(choice.schema).toBe(AiPatchGenericConfigEnvelope);

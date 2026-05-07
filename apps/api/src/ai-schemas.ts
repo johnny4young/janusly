@@ -337,6 +337,79 @@ const AiPatchAgentConfig = z.object({
   timeoutMs: z.number().int().min(1).nullable(),
 });
 
+/**
+ * Concrete `patchedConfig` shapes for the non-resilience node types
+ * (transform / condition / ai / router / approval / loop). Each is a
+ * single non-union object with nullable-required leaf fields — same
+ * provider-strict pattern as the http / tool / agent envelopes. Two
+ * types intentionally fall through to the generic envelope below:
+ *
+ *   - `multi_agent` — the `agents` array carries structurally-complex
+ *     items (`name` / `role` / `goal` / optional `persona`). Encoding
+ *     it provider-strict would bloat Anthropic's compiled grammar
+ *     without product value: operators rarely re-shape the crew
+ *     mid-recovery; they iterate on the workflow-level `goal`.
+ *   - `noop` — has no actionable runtime config; an empty patch always
+ *     trips the no-op guard in `patch-workflow-merge.ts`. The
+ *     fall-through to the generic envelope produces the same
+ *     "always falls back" behaviour without a dedicated schema.
+ */
+const AiPatchTransformConfig = z.object({
+  // Mapping uses the same `Array<{ name, value }>` patch form as
+  // `headers` / `tool input` so the LLM emits only the keys it wants
+  // changed; the merge layer folds against the existing flat record.
+  // Reuses `AiPatchHttpHeader` because the shape is identical today
+  // (`{ name: string.min(1), value: string.nullable() }`). If HTTP
+  // headers ever grow extra constraints (e.g. a lowercase-only rule),
+  // factor a shared `AiPatchKeyValueItem` instead so transform doesn't
+  // silently inherit them.
+  mapping: z.array(AiPatchHttpHeader).max(50).nullable(),
+});
+
+const AiPatchConditionConfig = z.object({
+  // The engine's `validateExpression` runs server-side after the merge
+  // (in `sanitizeAiWorkflow`). The envelope only enforces non-empty
+  // string; grammar-invalid expressions are dropped per-suggestion at
+  // the post-validation chain.
+  expression: z.string().min(1).nullable(),
+});
+
+const AiPatchAiConfig = z.object({
+  prompt: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+  retry: AiPatchRetryConfig.nullable(),
+});
+
+const AiPatchRouterCandidate = z.object({
+  nodeId: z.string().min(1),
+});
+
+const AiPatchRouterConfig = z.object({
+  // Replace the full candidates list verbatim (no fold). Each entry
+  // must reference an existing node by id; `validateWorkflow` runs
+  // server-side after the merge to enforce that.
+  candidates: z.array(AiPatchRouterCandidate).max(10).nullable(),
+  strategy: z.enum(["cheapest", "fastest", "balanced", "auto"]).nullable(),
+});
+
+const AiPatchApprovalConfig = z.object({
+  message: z.string().min(1).nullable(),
+});
+
+const AiPatchLoopConfig = z.object({
+  // Items takes a comma-separated template string OR a string array
+  // at the engine boundary; the patch envelope only exposes the
+  // string form (most common operator fix). If the existing config
+  // uses the array form the merge replaces with a string — the
+  // sanitize step keeps the workflow valid because both shapes pass
+  // the engine's loop-items validation.
+  items: z.string().min(1).nullable(),
+  // Same reuse note as transform.mapping above — `AiPatchToolInputItem`
+  // is structurally identical to `AiPatchHttpHeader` today; if either
+  // source diverges, factor a shared `AiPatchKeyValueItem`.
+  mapping: z.array(AiPatchToolInputItem).max(30).nullable(),
+});
+
 const AiPatchGenericConfig = z.record(z.string(), z.unknown());
 
 /**
@@ -392,32 +465,80 @@ export const AiPatchAgentConfigEnvelope = z.object({
   suggestions: suggestionsArraySchema(AiPatchAgentConfig),
 });
 
+/** Envelope for transform-typed failing nodes — `mapping` array-of-pairs. */
+export const AiPatchTransformConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchTransformConfig),
+});
+
+/** Envelope for condition-typed failing nodes — single `expression` field. */
+export const AiPatchConditionConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchConditionConfig),
+});
+
+/** Envelope for ai-typed failing nodes — prompt swap, model swap, retry add. */
+export const AiPatchAiConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchAiConfig),
+});
+
+/** Envelope for router-typed failing nodes — replace candidates list, swap strategy. */
+export const AiPatchRouterConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchRouterConfig),
+});
+
+/** Envelope for approval-typed failing nodes — message text fixes. */
+export const AiPatchApprovalConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchApprovalConfig),
+});
+
+/** Envelope for loop-typed failing nodes — items expression + mapping array-of-pairs. */
+export const AiPatchLoopConfigEnvelope = z.object({
+  suggestions: suggestionsArraySchema(AiPatchLoopConfig),
+});
+
 /**
- * Envelope for every other node type. The patched config is an open
- * record — the system prompt narrates valid fields per type, and the
- * route's post-validation chain catches structurally-invalid output.
+ * Envelope for every other node type (multi_agent, noop, and any
+ * unrecognised future types). The patched config is an open record —
+ * the system prompt narrates valid fields per type, and the route's
+ * post-validation chain catches structurally-invalid output.
  */
 export const AiPatchGenericConfigEnvelope = z.object({
   suggestions: suggestionsArraySchema(AiPatchGenericConfig),
 });
 
 /** Discriminator returned alongside the schema so callers can branch on the parsed shape. */
-export type PatchEnvelopeKind = "http" | "tool" | "agent" | "generic";
+export type PatchEnvelopeKind =
+  | "http"
+  | "tool"
+  | "agent"
+  | "transform"
+  | "condition"
+  | "ai"
+  | "router"
+  | "approval"
+  | "loop"
+  | "generic";
 
 export type PatchEnvelopeChoice = {
   schema:
     | typeof AiPatchHttpConfigEnvelope
     | typeof AiPatchToolConfigEnvelope
     | typeof AiPatchAgentConfigEnvelope
+    | typeof AiPatchTransformConfigEnvelope
+    | typeof AiPatchConditionConfigEnvelope
+    | typeof AiPatchAiConfigEnvelope
+    | typeof AiPatchRouterConfigEnvelope
+    | typeof AiPatchApprovalConfigEnvelope
+    | typeof AiPatchLoopConfigEnvelope
     | typeof AiPatchGenericConfigEnvelope;
   kind: PatchEnvelopeKind;
 };
 
 /**
- * Pick the patch envelope for a failing-node type. Falls back to the
- * generic envelope for any type that doesn't have a richer schema —
- * keeps the patch path open for transform/condition/router/etc. without
- * inventing a per-type schema for every one of them.
+ * Pick the patch envelope for a failing-node type. The dispatcher
+ * routes 9 of the 11 supported node types to concrete envelopes; the
+ * remaining 2 (`multi_agent` — agents-array shape too complex for v1;
+ * `noop` — no actionable config) plus any unrecognised future types
+ * fall through to the open generic envelope.
  */
 export function patchEnvelopeForNodeType(nodeType: string): PatchEnvelopeChoice {
   switch (nodeType) {
@@ -427,6 +548,19 @@ export function patchEnvelopeForNodeType(nodeType: string): PatchEnvelopeChoice 
       return { schema: AiPatchToolConfigEnvelope, kind: "tool" };
     case "agent":
       return { schema: AiPatchAgentConfigEnvelope, kind: "agent" };
+    case "transform":
+      return { schema: AiPatchTransformConfigEnvelope, kind: "transform" };
+    case "condition":
+      return { schema: AiPatchConditionConfigEnvelope, kind: "condition" };
+    case "ai":
+      return { schema: AiPatchAiConfigEnvelope, kind: "ai" };
+    case "router":
+    case "router_llm":
+      return { schema: AiPatchRouterConfigEnvelope, kind: "router" };
+    case "approval":
+      return { schema: AiPatchApprovalConfigEnvelope, kind: "approval" };
+    case "loop":
+      return { schema: AiPatchLoopConfigEnvelope, kind: "loop" };
     default:
       return { schema: AiPatchGenericConfigEnvelope, kind: "generic" };
   }

@@ -61,7 +61,7 @@ const wf = (id: string, name: string, nodes: Workflow["nodes"], edges: Workflow[
 });
 
 /**
- * Catalog of 10 failure shapes covering the recovery surface. Order is
+ * Catalog of 15 failure shapes covering the recovery surface. Order is
  * stable — both the matrix test and the seed script iterate this array
  * in declaration order so log output and test-case names align.
  */
@@ -246,5 +246,115 @@ export const RECOVERY_MATRIX_FIXTURES: readonly RecoveryMatrixFixture[] = [
       readinessCode: "write_side_missing_approval",
     },
     expectedTopApproachLabel: "add_approval",
+  },
+
+  {
+    id: "transform_invalid_mapping",
+    label: "Transform mapping references missing upstream",
+    description: "`transform` node maps from `{{context.X.output}}` where `X` doesn't exist in the workflow.",
+    workflow: wf("recovery_matrix_transform_invalid_mapping", "Recovery Matrix · Transform invalid mapping", [
+      httpNode("fetch", { url: "https://api.example/data", method: "GET" }),
+      {
+        id: "shape",
+        type: "transform" as const,
+        config: { mapping: { summary: "{{context.missing_node.output.body}}" } },
+      },
+    ], [{ from: "fetch", to: "shape" }]),
+    failedNodeId: "shape",
+    errorJson: {
+      code: "E_TEMPLATE_RESOLUTION",
+      message: "Template '{{context.missing_node.output.body}}' could not resolve — node 'missing_node' is not in the workflow.",
+      template: "{{context.missing_node.output.body}}",
+    },
+    expectedTopApproachLabel: "other",
+  },
+
+  {
+    id: "condition_invalid_expression",
+    label: "Condition expression uses invalid grammar",
+    description: "`condition` node expression uses a bare identifier (`x > 5`) instead of `context.<id>.output.<path>`.",
+    workflow: wf("recovery_matrix_condition_invalid_expression", "Recovery Matrix · Condition invalid expression", [
+      {
+        id: "calc",
+        type: "noop" as const,
+        config: {},
+      },
+      {
+        id: "check",
+        type: "condition" as const,
+        config: { expression: "x > 5" },
+      },
+    ], [{ from: "calc", to: "check" }]),
+    failedNodeId: "check",
+    errorJson: {
+      code: "E_EXPRESSION_INVALID",
+      message: "Condition expression 'x > 5' uses a bare identifier; the engine grammar requires paths starting with 'context.' or 'inputs.'.",
+      expression: "x > 5",
+    },
+    expectedTopApproachLabel: "other",
+  },
+
+  {
+    id: "router_unknown_candidate",
+    label: "Router candidate references missing node",
+    description: "`router` node lists a candidate `nodeId` that doesn't exist in the workflow.",
+    workflow: wf("recovery_matrix_router_unknown_candidate", "Recovery Matrix · Router unknown candidate", [
+      { id: "start", type: "noop" as const, config: {} },
+      {
+        id: "pick",
+        type: "router" as const,
+        config: { candidates: [{ nodeId: "missing_path" }] },
+      },
+      { id: "real_path", type: "noop" as const, config: {} },
+    ], [{ from: "start", to: "pick" }]),
+    failedNodeId: "pick",
+    errorJson: {
+      code: "E_ROUTER_CANDIDATE_UNKNOWN",
+      message: "Router candidate references unknown node id 'missing_path'.",
+      missingNodeId: "missing_path",
+    },
+    expectedTopApproachLabel: "other",
+  },
+
+  {
+    id: "loop_invalid_items",
+    label: "Loop items references missing upstream",
+    description: "`loop` node items expression references `{{context.unknown.value}}` with no upstream provider.",
+    workflow: wf("recovery_matrix_loop_invalid_items", "Recovery Matrix · Loop invalid items", [
+      httpNode("fetch", { url: "https://api.example/list", method: "GET" }),
+      {
+        id: "iterate",
+        type: "loop" as const,
+        config: { items: "{{context.unknown.value}}" },
+      },
+    ], [{ from: "fetch", to: "iterate" }]),
+    failedNodeId: "iterate",
+    errorJson: {
+      code: "E_TEMPLATE_RESOLUTION",
+      message: "Loop items template '{{context.unknown.value}}' could not resolve — node 'unknown' is not in the workflow.",
+      template: "{{context.unknown.value}}",
+    },
+    expectedTopApproachLabel: "other",
+  },
+
+  {
+    id: "ai_prompt_missing_grounding",
+    label: "AI prompt is too vague",
+    description: "`ai` node prompt is `do something useful` — no concrete grounding in upstream context.",
+    workflow: wf("recovery_matrix_ai_prompt_missing_grounding", "Recovery Matrix · AI prompt missing grounding", [
+      httpNode("fetch", { url: "https://api.example/article", method: "GET" }),
+      {
+        id: "summarize",
+        type: "ai" as const,
+        config: { prompt: "do something useful" },
+      },
+    ], [{ from: "fetch", to: "summarize" }]),
+    failedNodeId: "summarize",
+    errorJson: {
+      code: "E_AI_OUTPUT_INVALID",
+      message: "AI returned an empty / unusable response. The prompt was too vague to ground the output in upstream context.",
+      prompt: "do something useful",
+    },
+    expectedTopApproachLabel: "other",
   },
 ] as const;
