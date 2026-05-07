@@ -400,6 +400,25 @@ Returns 1–3 alternative config patches for the failing node, sorted by self-ra
 
 `approachLabel` enum: `add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`. Audited as `ai.workflow.patch_suggested` with `suggestionsCount` + `topApproachLabel` + `envelopeKind` metadata.
 
+For `headers` (HTTP nodes) and `input` (tool nodes), the LLM emits a bounded `Array<{ name, value }>` patch shape — non-null `value` sets/replaces the key, `null` removes it. The merge layer folds the patch against the failing node's existing record before shallow-merging the rest. Example header swap:
+
+```json
+{
+  "patchedConfig": {
+    "headers": [{ "name": "Authorization", "value": "Bearer {{secret.GITHUB_TOKEN}}" }],
+    "url": null,
+    "method": null,
+    "retry": null,
+    "timeoutMs": null,
+    "maxResponseBytes": null,
+    "maxRedirects": null
+  },
+  "approachLabel": "swap_secret_ref",
+  "confidence": 90,
+  "rationale": "Swap the literal Bearer token to a secret-template reference."
+}
+```
+
 ### `POST /dlq/validate-fix`
 
 ```json
