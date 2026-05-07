@@ -42,8 +42,9 @@ import { listTools } from "@janusly/engine/src/tool-registry";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
-import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
-import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
+import { computeWorkflowHealth, MIN_RUNS_FOR_DELTA } from "@janusly/engine/src/workflow-health";
+import { collectHealthSignals, DEFAULT_HEALTH_WINDOW_DAYS } from "@janusly/data/src/workflowHealthRepo";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import {
   CLUSTER_MEMBERS_DEFAULT_LIMIT,
@@ -80,8 +81,9 @@ import {
   installedPlugins,
   auditLogs,
   orgMembers,
+  deadLetters,
 } from "@janusly/db";
-import { eq, desc, asc, and, gt, lt, or } from "drizzle-orm";
+import { eq, desc, asc, and, gt, gte, isNull, lt, or } from "drizzle-orm";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import { z } from "zod";
 import {
@@ -91,7 +93,7 @@ import {
 } from "./ai-schemas";
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-rollback";
-import { isTerminalRunStatus } from "@janusly/shared/src/status";
+import { isTerminalRunStatus, runOpenStatusValues, runTerminalStatusValues } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
   listDeadLetters,
@@ -118,6 +120,8 @@ const AUDIT_PAGE_SIZE = 100;
 const RUN_EVENTS_DEFAULT_LIMIT = 200;
 const RUN_EVENTS_MAX_LIMIT = 500;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const OPEN_RUN_STATUS_SET = new Set<string>(runOpenStatusValues);
+const FAILED_RUN_STATUS_SET = new Set<string>(runTerminalStatusValues.filter((status) => status !== "succeeded"));
 
 const dlqReplay = new DLQReplayAdapter();
 
@@ -662,6 +666,197 @@ export const routes: Route[] = [
   // readiness signal as the safety dimension. Returns a 0–100 score with
   // a per-category breakdown the web badge renders. Read-only — viewer
   // role suffices.
+  // Recovery before/after delta — registered BEFORE `/workflows/health`
+  // so the more-specific path wins in the first-match-wins dispatcher.
+  // Splits the same time window by version cutoff: runs whose version
+  // < `afterVersion` form the "before" side; runs whose version >= cutoff
+  // form the "after" side. Returns both health scores plus a per-signal
+  // delta, the run-status counter (always populated), the same-failure
+  // check (when the caller supplies the prior signature), and the prior
+  // version's id (for the regression-rollback affordance in the dialog).
+  { method: "GET", match: (url) => url === "/workflows/health/delta" || url.startsWith("/workflows/health/delta?"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.searchParams.get("workflowId");
+      const rawAfter = url.searchParams.get("afterVersion");
+      const parsedAfterVersion = rawAfter == null ? NaN : Number(rawAfter);
+      const afterVersion = Number.isInteger(parsedAfterVersion) ? parsedAfterVersion : NaN;
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!Number.isFinite(afterVersion) || afterVersion < 1) {
+        return sendJson(res, { error: "afterVersion must be a positive integer" }, 400);
+      }
+      const parsedWindowDays = Number(url.searchParams.get("windowDays") ?? NaN);
+      // Default to the same 30-day window the bare /workflows/health route
+      // uses. With a 1-day default, production runs accumulating over weeks
+      // would never meet the 5-run threshold and the dialog would
+      // perpetually show the gathering-data state.
+      const windowDays = Number.isInteger(parsedWindowDays)
+        ? Math.min(30, Math.max(1, parsedWindowDays))
+        : DEFAULT_HEALTH_WINDOW_DAYS;
+      const rawSignature = url.searchParams.get("priorFailureSignature");
+      const priorFailureSignature = rawSignature && rawSignature.length <= 256 ? rawSignature : null;
+
+      // Multi-tenant gate first — same enumeration-safe message as the
+      // bare `/workflows/health` route.
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, { error: "Workflow not found" }, 404);
+
+      // Latest version drives readiness (the workflow JSON the operator
+      // currently saved is the post-Apply state). The before-side health
+      // score uses the same readiness — it's per-DAG, not per-window.
+      const latestVersion = await db
+        .select({ dagJson: workflowVersions.dagJson })
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.orgId, auth.orgId), eq(workflowVersions.workflowId, workflowId)))
+        .orderBy(desc(workflowVersions.version))
+        .limit(1);
+      if (latestVersion.length === 0) {
+        return sendJson(res, { error: "Workflow has no versions" }, 404);
+      }
+      const parsedWorkflow = WorkflowSchema.safeParse(latestVersion[0].dagJson);
+      if (!parsedWorkflow.success) {
+        return sendJson(res, { error: "Workflow version is malformed" }, 422);
+      }
+
+      const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
+      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
+      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+
+      // Before/after signal collection in parallel — each side reuses the
+      // same query plan with a single new `lt`/`gte` predicate on the
+      // joined `workflow_versions.version` column.
+      const [beforeSignals, afterSignals] = await Promise.all([
+        collectHealthSignals(auth.orgId, workflowId, windowDays, { side: "before", cutoffVersion: afterVersion }),
+        collectHealthSignals(auth.orgId, workflowId, windowDays, { side: "after", cutoffVersion: afterVersion }),
+      ]);
+
+      const before = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: beforeSignals });
+      const after = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: afterSignals });
+
+      // Run-status counter — distinct from `after.signals.totalRuns`
+      // because the health rollup counts only terminal runs. The counter
+      // surfaces in-flight runs so the operator sees "1 running, 0
+      // terminal" right after Apply rather than a dead "0 runs".
+      // Excludes sandbox/validation runs (replayMode = "validation") so a
+      // dry-run from the Recovery dialog's validation gate doesn't appear
+      // as a phantom production run in the counter.
+      const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+      const recentRunsRows = await db
+        .select({ status: runs.status })
+        .from(runs)
+        .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+        .where(and(
+          eq(workflowVersions.orgId, auth.orgId),
+          eq(workflowVersions.workflowId, workflowId),
+          gte(workflowVersions.version, afterVersion),
+          gte(runs.createdAt, since),
+          isNull(runs.replayMode),
+        ));
+      const recentRunsAgainstAfter = {
+        totalRuns: recentRunsRows.length,
+        succeeded: recentRunsRows.filter((row) => row.status === "succeeded").length,
+        failed: recentRunsRows.filter((row) => FAILED_RUN_STATUS_SET.has(row.status)).length,
+        running: recentRunsRows.filter((row) => OPEN_RUN_STATUS_SET.has(row.status)).length,
+      };
+
+      // Same-failure check — only when the caller supplies the original
+      // signature. We re-normalize each new DLQ row and count matches.
+      // Defense-in-depth: the response only echoes back the
+      // caller-supplied signature, never a freshly-derived one, so a
+      // leaked-secret-in-error-message can't slip through this surface.
+      let sameFailureSinceApply: { count: number; sampleDeadLetterIds: string[]; priorSignature: string } | null = null;
+      if (priorFailureSignature) {
+        const dlqRows = await db
+          .select({
+            id: deadLetters.id,
+            errorJson: deadLetters.errorJson,
+            nodeId: deadLetters.nodeId,
+            nodeJson: deadLetters.nodeJson,
+          })
+          .from(deadLetters)
+          .innerJoin(runs, eq(runs.id, deadLetters.runId))
+          .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+          .where(and(
+            eq(deadLetters.orgId, auth.orgId),
+            eq(workflowVersions.orgId, auth.orgId),
+            eq(workflowVersions.workflowId, workflowId),
+            gte(workflowVersions.version, afterVersion),
+            gte(deadLetters.createdAt, since),
+          ))
+          .limit(100);
+        const matchingIds: string[] = [];
+        for (const row of dlqRows) {
+          const nodeJson = row.nodeJson as { type?: string } | null;
+          const sig = normalizeErrorSignature(row.errorJson, {
+            nodeId: row.nodeId,
+            nodeType: nodeJson?.type,
+          });
+          if (sig.signature === priorFailureSignature) {
+            matchingIds.push(row.id);
+          }
+        }
+        sameFailureSinceApply = {
+          count: matchingIds.length,
+          sampleDeadLetterIds: matchingIds.slice(0, 5),
+          // Echo the caller-supplied signature only — never a derived one.
+          priorSignature: priorFailureSignature,
+        };
+      }
+
+      // Prior version availability — drives the regression-rollback
+      // affordance in the dialog. We only need {version, versionId}; the
+      // dagJson is fetched lazily on button click via /workflows/versions.
+      let priorVersion: { version: number; versionId: string } | null = null;
+      if (afterVersion > 1) {
+        const priorRows = await db
+          .select({ version: workflowVersions.version, versionId: workflowVersions.id })
+          .from(workflowVersions)
+          .where(and(
+            eq(workflowVersions.orgId, auth.orgId),
+            eq(workflowVersions.workflowId, workflowId),
+            eq(workflowVersions.version, afterVersion - 1),
+          ))
+          .limit(1);
+        if (priorRows.length > 0 && priorRows[0]) {
+          priorVersion = { version: priorRows[0].version, versionId: priorRows[0].versionId };
+        }
+      }
+
+      // Delta math — only meaningful with enough samples on the after side.
+      const hasEnoughData = afterSignals.totalRuns >= MIN_RUNS_FOR_DELTA;
+      let delta: { score: number; p95LatencyMs: number | null; costPerRunUsd: number | null } | null = null;
+      if (hasEnoughData) {
+        const p95Delta = (afterSignals.p95LatencyMs == null || beforeSignals.p95LatencyMs == null)
+          ? null
+          : afterSignals.p95LatencyMs - beforeSignals.p95LatencyMs;
+        const costPerRunBefore = beforeSignals.totalRuns > 0 ? beforeSignals.totalCostUsd / beforeSignals.totalRuns : null;
+        const costPerRunAfter = afterSignals.totalRuns > 0 ? afterSignals.totalCostUsd / afterSignals.totalRuns : null;
+        const costDelta = (costPerRunBefore == null || costPerRunAfter == null) ? null : costPerRunAfter - costPerRunBefore;
+        delta = {
+          score: after.score - before.score,
+          p95LatencyMs: p95Delta,
+          costPerRunUsd: costDelta,
+        };
+      }
+
+      return sendJson(res, {
+        workflowId,
+        afterVersion,
+        windowDays,
+        hasEnoughData,
+        before,
+        after,
+        delta,
+        recentRunsAgainstAfter,
+        sameFailureSinceApply,
+        priorVersion,
+      });
+    } },
+
   { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");

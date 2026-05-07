@@ -2541,3 +2541,216 @@ a { color: var(--we-primary); }
   background: var(--we-primary);
   color: var(--we-surface);
 }
+
+/* ----------------- Recovery delta card ---------------------------------- */
+/* Mounted inside the Recovery dialog's `applied` step alongside the
+ * existing success ribbon. Surfaces five signals: run counter,
+ * same-failure check, health pill, p95 latency pill, cost-per-run pill —
+ * plus an optional regression-rollback affordance. */
+
+.we-recovery-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-recovery-delta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface);
+}
+
+.we-recovery-delta-card--error {
+  border-color: color-mix(in srgb, var(--we-danger) 30%, transparent);
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+.we-recovery-delta-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-delta-skeleton__label {
+  font-weight: 600;
+  color: var(--we-text-1);
+}
+
+.we-recovery-delta-skeleton__hint {
+  font-style: italic;
+  color: var(--we-text-2);
+}
+
+.we-recovery-delta-pills {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.we-recovery-delta-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface);
+  font-size: 12px;
+}
+
+.we-recovery-delta-pill__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.we-recovery-delta-pill__sentence {
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-delta-pill--counter {
+  background: var(--we-primary-soft);
+  border-color: color-mix(in srgb, var(--we-primary) 25%, transparent);
+}
+
+.we-recovery-delta-pill--success,
+.we-recovery-delta-pill--success-strong {
+  background: var(--we-success-soft);
+  border-color: color-mix(in srgb, var(--we-success) 30%, transparent);
+}
+
+.we-recovery-delta-pill--success-strong .we-recovery-delta-pill__value {
+  color: var(--we-success);
+}
+
+.we-recovery-delta-pill--danger,
+.we-recovery-delta-pill--danger-strong {
+  background: var(--we-danger-soft);
+  border-color: color-mix(in srgb, var(--we-danger) 30%, transparent);
+}
+
+.we-recovery-delta-pill--danger-strong .we-recovery-delta-pill__value {
+  color: var(--we-danger);
+}
+
+.we-recovery-delta-pill--neutral {
+  background: var(--we-surface);
+}
+
+.we-recovery-delta-pill--same-failure {
+  grid-column: 1 / -1;
+}
+
+/* Arrow-glyph base colour is the muted "neutral" tone. The
+ * pill-class overrides below lift up/down arrows to success/danger
+ * tints based on the parent pill's classification. This keeps an arrow
+ * inside an unclassified container from misleading the operator with a
+ * green tint. */
+.we-recovery-delta-arrow--up,
+.we-recovery-delta-arrow--down,
+.we-recovery-delta-arrow--neutral {
+  color: var(--we-text-2);
+}
+
+.we-recovery-delta-pill--success .we-recovery-delta-arrow--up,
+.we-recovery-delta-pill--success-strong .we-recovery-delta-arrow--up,
+.we-recovery-delta-pill--success .we-recovery-delta-arrow--down,
+.we-recovery-delta-pill--success-strong .we-recovery-delta-arrow--down {
+  color: var(--we-success);
+}
+
+.we-recovery-delta-pill--danger .we-recovery-delta-arrow--up,
+.we-recovery-delta-pill--danger-strong .we-recovery-delta-arrow--up,
+.we-recovery-delta-pill--danger .we-recovery-delta-arrow--down,
+.we-recovery-delta-pill--danger-strong .we-recovery-delta-arrow--down {
+  color: var(--we-danger);
+}
+
+.we-recovery-delta-gathering {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px dashed var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface);
+}
+
+.we-recovery-delta-gathering__label {
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-delta-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--we-primary) 12%, transparent);
+  overflow: hidden;
+}
+
+.we-recovery-delta-progress__fill {
+  height: 100%;
+  background: var(--we-primary);
+  transition: width 200ms ease;
+}
+
+.we-recovery-delta-rollback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--we-danger) 30%, transparent);
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.we-recovery-delta-rollback:hover:not(:disabled) {
+  background: var(--we-danger);
+  color: var(--we-surface);
+}
+
+.we-recovery-delta-rollback:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.we-recovery-delta-error-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--we-danger);
+}
+
+.we-recovery-delta-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--we-primary);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.we-recovery-delta-failure-link {
+  color: var(--we-danger);
+  font-weight: 600;
+}

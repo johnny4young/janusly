@@ -455,6 +455,27 @@ Saves the source version's `dagJson` as a new latest in a single transaction. Re
 
 Per-workflow 0–100 score with six per-category sub-scores (reliability, safety, cost, latency, maintainability, AI risk). Status thresholds: `≥80 healthy / ≥60 warn / <60 unhealthy`. New workflows (`totalRuns < 5`) return a neutral default 80 so an untested workflow isn't graded as unhealthy.
 
+### `GET /workflows/health/delta?workflowId=<id>&afterVersion=<n>&windowDays=<1..30>&priorFailureSignature=<sig>`
+
+Recovery before/after rollup. Splits the same time window by version cutoff: runs whose `workflow_versions.version < afterVersion` form the "before" side; runs whose `version >= afterVersion` form the "after" side. Returns:
+
+```json
+{
+  "workflowId": "wf-xyz",
+  "afterVersion": 4,
+  "windowDays": 1,
+  "hasEnoughData": true,
+  "before": { "score": 81, "status": "healthy", "breakdown": { ... }, "signals": { ... } },
+  "after":  { "score": 85, "status": "healthy", "breakdown": { ... }, "signals": { ... } },
+  "delta": { "score": 4, "p95LatencyMs": -1900, "costPerRunUsd": -0.004 },
+  "recentRunsAgainstAfter": { "totalRuns": 6, "succeeded": 6, "failed": 0, "running": 0 },
+  "sameFailureSinceApply": { "count": 0, "sampleDeadLetterIds": [], "priorSignature": "HTTP 500 on http node" },
+  "priorVersion": { "version": 3, "versionId": "ver-prev" }
+}
+```
+
+`delta` is `null` until `after.signals.totalRuns >= 5` (constant `MIN_RUNS_FOR_DELTA` in `@janusly/engine/src/workflow-health`); the dialog renders the run counter + same-failure pill while waiting. `recentRunsAgainstAfter` is always populated and includes in-flight runs (`running`) so the operator sees activity from run 1. `sameFailureSinceApply` is `null` when `priorFailureSignature` is omitted — when supplied, the route normalizes each new DLQ row's `errorJson` and counts matches against the supplied signature; defense-in-depth, the `priorSignature` echoed in the response is the caller-supplied input verbatim, never a freshly-derived signature. `priorVersion` is `null` when the workflow only has one version. Mounted by `<RecoveryDeltaCard>` inside the recovery dialog's `applied` step.
+
 ### `GET /recovery/metrics?windowDays=30`
 
 Org-level Operations dashboard payload — six metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, cost) each with `value` / `display` / `severity` / `rationale`. Severity bands are tunable constants in the engine module.
