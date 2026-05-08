@@ -480,6 +480,28 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 Org-level Operations dashboard payload — six metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, cost) each with `value` / `display` / `severity` / `rationale`. Severity bands are tunable constants in the engine module.
 
+### `POST /recovery/feedback`
+
+Operator → system feedback channel for the recovery loop. Captures every accept/reject decision the operator makes in the Recovery dialog so future patch suggestions for the same workflow can deprioritize already-rejected approaches.
+
+Body:
+
+```json
+{
+  "deadLetterId": "dlq-xyz",
+  "suggestionMode": "ai",
+  "approachLabel": "add_retry",
+  "accepted": false,
+  "comment": "Wrong approach"
+}
+```
+
+Closed enums: `suggestionMode ∈ {"ai", "fallback"}`; `approachLabel ∈ {"add_retry", "raise_timeout", "swap_secret_ref", "add_approval", "fix_url", "other"}`. `comment` is optional and capped at 2000 chars; secret-shape substrings (`Bearer sk-…`, `ghp_…`, JWTs) are scrubbed via `scrubSecretShapes` at write time.
+
+Returns `{ "ok": true }` on success, 404 on cross-tenant DLQ, 400 on schema-invalid body, 422 when the DLQ's workflow has no saved id (anonymous workflows aren't aggregated). Audited as `recovery.feedback` with metadata `{ deadLetterId, approachLabel, suggestionMode, accepted }`.
+
+The dialog calls this fire-and-forget at four moments: Apply success (`accepted: true`), Cancel from review or validation-failed (`accepted: false` with the chip text or free-text comment), Iterate from validation-failed (`accepted: false, comment: "validation_failed"` BEFORE re-entering generate). The next call to `/ai/patch-workflow` for the same workflow reads back an aggregated summary via `summarizePastFeedback` and threads it into the LLM prompt as `extraContext.pastFeedbackSummary`.
+
 ---
 
 ## Audit & Billing

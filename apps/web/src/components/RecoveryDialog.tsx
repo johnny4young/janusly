@@ -94,6 +94,19 @@ type Step =
   | { kind: 'review'; suggestion: PatchSuggestion }
   | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
   | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
+  | {
+      kind: 'cancelling'
+      suggestion: PatchSuggestion
+      selectedIndex: number
+      // Where the operator came from — drives the back button when they
+      // change their mind. `validation-failed` returns to the failure
+      // body; `review` returns to the diff.
+      sourceStep: 'review' | 'validation-failed'
+      // Validation-failed cancels carry the runId / errorJson so the
+      // back button can restore the prior step without losing context.
+      runId?: string
+      errorJson?: unknown
+    }
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
   | {
       kind: 'applied'
@@ -108,6 +121,20 @@ type Step =
       preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
     }
   | { kind: 'error'; message: string }
+
+/**
+ * Closed enum of quick-pick reasons shown as chips in the cancel UX.
+ * Clicking a chip writes a feedback row with `comment = chip` and
+ * closes the dialog. The operator can also type a free-text comment
+ * below the chips, or skip and close with no comment.
+ */
+const CANCEL_REASON_CHIPS = [
+  'Wrong approach',
+  "Doesn't fix root cause",
+  'Risky',
+  'Too narrow',
+  'Other',
+] as const
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
 const VALIDATION_POLL_INTERVAL_MS = 1500
@@ -131,6 +158,32 @@ type RecoveryDialogProps = {
 
 const DESCRIPTION =
   'Janusly will analyse the failure and propose a workflow change. Review the diff before anything is saved.'
+
+/**
+ * Fire-and-forget POST to `/recovery/feedback`. Captures the operator's
+ * accept/reject decision so the next patch suggestion for the same
+ * workflow can deprioritize approaches that have already been
+ * rejected. Failures are logged (console warn) but never surface to
+ * the operator — the feedback is supplementary, losing one row is
+ * better than blocking the apply chain on a transport error.
+ */
+async function recordFeedback(input: {
+  deadLetterId: string
+  suggestionMode: 'ai' | 'fallback'
+  approachLabel: string
+  accepted: boolean
+  comment?: string
+}): Promise<void> {
+  try {
+    await api('/recovery/feedback', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  } catch (error) {
+    // Non-blocking — feedback is supplementary signal.
+    console.warn('[recovery-feedback] write failed', error)
+  }
+}
 
 export function RecoveryDialog({
   dlq,
@@ -179,11 +232,21 @@ export function RecoveryDialog({
   useEffect(() => { primaryRef.current?.focus() }, [])
 
   // ESC closes — but only when no async work is in flight, otherwise
-  // the operator could lose an in-progress save.
+  // the operator could lose an in-progress save. The cancelling step
+  // is also blocked: a fat-finger ESC there would silently close the
+  // dialog without writing the rejection-feedback row, breaking the
+  // recovery-loop contract that every dialog decision must be labeled.
+  // The operator can use Skip & close, Submit & close, or Back from
+  // the cancelling body itself.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
-      if (step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating') return
+      if (
+        step.kind === 'loading'
+        || step.kind === 'applying'
+        || step.kind === 'validating'
+        || step.kind === 'cancelling'
+      ) return
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
@@ -359,6 +422,16 @@ export function RecoveryDialog({
           preSaveBeforeSnapshot,
         })
         bumpPlatformVersion()
+        // Operator → system feedback: Apply succeeded, so the operator
+        // accepted this approach for THIS workflow. Future patch
+        // suggestions for the same workflow will see this as accepted.
+        // Fire-and-forget: a feedback-write failure must not block the UX.
+        void recordFeedback({
+          deadLetterId: dlq.id,
+          suggestionMode: suggestion.mode,
+          approachLabel: selected.approachLabel,
+          accepted: true,
+        })
         return
       }
       const replay = await api('/dlq/replay', {
@@ -374,6 +447,13 @@ export function RecoveryDialog({
         preSaveBeforeSnapshot,
       })
       bumpPlatformVersion()
+      // Operator → system feedback: same as cluster mode above.
+      void recordFeedback({
+        deadLetterId: dlq.id,
+        suggestionMode: suggestion.mode,
+        approachLabel: selected.approachLabel,
+        accepted: true,
+      })
     } catch (error) {
       setStep({
         kind: 'error',
@@ -383,7 +463,15 @@ export function RecoveryDialog({
   }
 
   const onBackdropClick = () => {
-    if (step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating') return
+    // Same guard as the ESC handler — cancelling has its own dedicated
+    // close paths (Skip/Submit/Back) and the backdrop click would
+    // otherwise silently bypass the feedback write.
+    if (
+      step.kind === 'loading'
+      || step.kind === 'applying'
+      || step.kind === 'validating'
+      || step.kind === 'cancelling'
+    ) return
     onClose()
   }
 
@@ -410,7 +498,12 @@ export function RecoveryDialog({
             className="run-input-dialog__close"
             onClick={onClose}
             aria-label="Close recovery dialog"
-            disabled={step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating'}
+            disabled={
+              step.kind === 'loading'
+              || step.kind === 'applying'
+              || step.kind === 'validating'
+              || step.kind === 'cancelling'
+            }
           >
             <X size={16} aria-hidden="true" />
           </button>
@@ -464,6 +557,40 @@ export function RecoveryDialog({
             />
           )}
 
+          {step.kind === 'cancelling' && (
+            <CancellingBody
+              dlq={dlq}
+              suggestion={step.suggestion}
+              selectedIndex={step.selectedIndex}
+              onSubmit={(comment) => {
+                const selected = step.suggestion.suggestions[step.selectedIndex]
+                if (selected) {
+                  void recordFeedback({
+                    deadLetterId: dlq.id,
+                    suggestionMode: step.suggestion.mode,
+                    approachLabel: selected.approachLabel,
+                    accepted: false,
+                    comment: comment.length > 0 ? comment : undefined,
+                  })
+                }
+                onClose()
+              }}
+              onBack={() => {
+                if (step.sourceStep === 'review') {
+                  setStep({ kind: 'review', suggestion: step.suggestion })
+                } else {
+                  setStep({
+                    kind: 'validation-failed',
+                    suggestion: step.suggestion,
+                    selectedIndex: step.selectedIndex,
+                    runId: step.runId ?? '',
+                    errorJson: step.errorJson,
+                  })
+                }
+              }}
+            />
+          )}
+
           {step.kind === 'applying' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
               {step.mode === 'cluster' && step.total
@@ -511,7 +638,16 @@ export function RecoveryDialog({
 
           {step.kind === 'review' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <button
+                type="button"
+                className="command-button"
+                onClick={() => setStep({
+                  kind: 'cancelling',
+                  suggestion: step.suggestion,
+                  selectedIndex: safeSelectedIndex,
+                  sourceStep: 'review',
+                })}
+              >
                 Cancel
               </button>
               <button
@@ -533,14 +669,43 @@ export function RecoveryDialog({
 
           {step.kind === 'validation-failed' && (
             <>
-              <button type="button" className="command-button" onClick={onClose}>
+              <button
+                type="button"
+                className="command-button"
+                onClick={() => setStep({
+                  kind: 'cancelling',
+                  suggestion: step.suggestion,
+                  selectedIndex: step.selectedIndex,
+                  sourceStep: 'validation-failed',
+                  runId: step.runId,
+                  errorJson: step.errorJson,
+                })}
+              >
                 Cancel
               </button>
               <button
                 type="button"
                 ref={primaryRef}
                 className="command-button command-button-primary"
-                onClick={generateSuggestion}
+                onClick={() => {
+                  // Operator → system feedback: the operator chose to
+                  // iterate because the sandbox replay rejected this
+                  // approach. Tag with the special `validation_failed`
+                  // marker so the prompt-enrichment helper can surface
+                  // "the operator iterated past this approach" distinct
+                  // from "the operator rejected it outright."
+                  const selected = step.suggestion.suggestions[step.selectedIndex]
+                  if (selected) {
+                    void recordFeedback({
+                      deadLetterId: dlq.id,
+                      suggestionMode: step.suggestion.mode,
+                      approachLabel: selected.approachLabel,
+                      accepted: false,
+                      comment: 'validation_failed',
+                    })
+                  }
+                  generateSuggestion()
+                }}
               >
                 <RefreshCcw size={14} aria-hidden="true" />
                 <span>Iterate</span>
@@ -679,6 +844,98 @@ function ReviewBody({
         />
       </div>
     </>
+  )
+}
+
+/**
+ * The cancel UX step. Operator landed here because they pressed Cancel
+ * from the review or validation-failed step — they're rejecting the
+ * suggestion. We capture WHY in two layers:
+ *
+ *   1. A row of 5 quick-pick chips (`CANCEL_REASON_CHIPS`) — clicking
+ *      one auto-fills the comment and submits in a single click.
+ *   2. A free-text textarea below — for reasons the chips don't cover.
+ *
+ * "Skip & close" submits with no comment (the operator just wanted out)
+ * — the row still gets written with `accepted: false` so the count is
+ * accurate, but there's no qualitative reason. "Back" returns to the
+ * source step (review or validation-failed) without writing anything.
+ *
+ * The component itself doesn't talk to the API; the parent's `onSubmit`
+ * handles the write so the dialog stays as the single owner of network
+ * side effects.
+ */
+function CancellingBody({
+  dlq,
+  suggestion,
+  selectedIndex,
+  onSubmit,
+  onBack,
+}: {
+  dlq: DeadLetter
+  suggestion: PatchSuggestion
+  selectedIndex: number
+  onSubmit: (comment: string) => void
+  onBack: () => void
+}) {
+  const [comment, setComment] = useState('')
+  const selected = suggestion.suggestions[selectedIndex]
+  const approachLabel = selected ? APPROACH_LABEL_DISPLAY[selected.approachLabel] : 'this approach'
+
+  return (
+    <div className="we-recovery-cancelling">
+      <p className="helper-text">
+        Why is <strong>{approachLabel}</strong> not the right fix for{' '}
+        <code>{dlq.nodeId}</code>? Your reason helps Janusly suggest a better
+        approach next time the same workflow fails.
+      </p>
+      <div className="we-recovery-cancelling__chips" role="group" aria-label="Quick reason">
+        {CANCEL_REASON_CHIPS.map((chip) => (
+          <button
+            key={chip}
+            type="button"
+            className="we-recovery-cancelling__chip"
+            onClick={() => onSubmit(chip)}
+          >
+            {chip}
+          </button>
+        ))}
+      </div>
+      <label className="we-recovery-cancelling__label" htmlFor="recovery-cancel-comment">
+        Or write your own (optional):
+      </label>
+      <textarea
+        id="recovery-cancel-comment"
+        className="we-recovery-cancelling__textarea"
+        value={comment}
+        maxLength={2000}
+        onChange={(event) => setComment(event.target.value)}
+        rows={3}
+        placeholder="e.g. The retry approach masks a deeper auth issue we should fix instead."
+      />
+      <div className="we-recovery-cancelling__actions">
+        <button
+          type="button"
+          className="we-recovery-cancelling__skip"
+          onClick={() => onSubmit('')}
+        >
+          Skip &amp; close
+        </button>
+        <div className="we-recovery-cancelling__primary">
+          <button type="button" className="command-button" onClick={onBack}>
+            Back
+          </button>
+          <button
+            type="button"
+            className="command-button command-button-primary"
+            onClick={() => onSubmit(comment.trim())}
+            disabled={comment.trim().length === 0}
+          >
+            Submit &amp; close
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
