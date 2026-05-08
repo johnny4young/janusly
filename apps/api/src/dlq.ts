@@ -24,13 +24,25 @@ export function isDeadLetterStatus(value: unknown): value is DeadLetterStatus {
   return typeof value === "string" && (deadLetterStatuses as readonly string[]).includes(value);
 }
 
-/** List DLQ rows for an org, newest first. Optional `status` filter. */
-export async function listDeadLetters(orgId: string, status?: string | null) {
+/** Default cap when no `limit` is supplied. Matches the rest of the API. */
+export const DLQ_LIST_DEFAULT_LIMIT = 100;
+/** Hard cap on `limit` to prevent unbounded scans. */
+export const DLQ_LIST_MAX_LIMIT = 200;
+
+/**
+ * List DLQ rows for an org, newest first. Optional `status` filter.
+ * `limit` is bounded `[1, DLQ_LIST_MAX_LIMIT]` and defaults to
+ * `DLQ_LIST_DEFAULT_LIMIT` so a noisy org can't blow the response size.
+ */
+export async function listDeadLetters(orgId: string, status?: string | null, limit?: number) {
   const where = isDeadLetterStatus(status)
     ? and(eq(deadLetters.orgId, orgId), eq(deadLetters.status, status))
     : eq(deadLetters.orgId, orgId);
+  const limitValue = typeof limit === "number" && Number.isFinite(limit) && limit > 0
+    ? Math.min(limit, DLQ_LIST_MAX_LIMIT)
+    : DLQ_LIST_DEFAULT_LIMIT;
 
-  return db.select().from(deadLetters).where(where).orderBy(desc(deadLetters.createdAt));
+  return db.select().from(deadLetters).where(where).orderBy(desc(deadLetters.createdAt)).limit(limitValue);
 }
 
 /** Fetch one DLQ row by id, scoped to the org. Returns `null` when absent. */
