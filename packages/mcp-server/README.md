@@ -1,6 +1,6 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes five read-only tools and one validation pre-flight tool. All tools proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes nine read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`) plus two POST pre-flight checks with no side effects (`workflows.validate`, `workflows.readiness`). All tools proxy HTTP to the running Janusly API.
 
 ## What is MCP and why ship a server?
 
@@ -46,16 +46,23 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 
 ## Published tools
 
-| MCP tool             | API endpoint                                                | Purpose                                                                 |
-| -------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `workflows.list`     | `GET /workflows[?limit=]`                                   | List workflows in the configured org. Caps at 100 (max 200).            |
-| `workflows.get`      | `GET /workflows/latest?workflowId=…`                        | Fetch the latest version of one workflow. Returns null when unknown.    |
-| `recipes.list`       | `GET /templates`                                            | List the built-in workflow templates (recipes).                         |
-| `tools.list`         | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
-| `runs.get`           | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
-| `workflows.validate` | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
+| MCP tool              | API endpoint                                                | Purpose                                                                 |
+| --------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `workflows.list`      | `GET /workflows[?limit=]`                                   | List workflows in the configured org. Caps at 100 (max 200).            |
+| `workflows.get`       | `GET /workflows/latest?workflowId=…`                        | Fetch the latest version of one workflow. Returns null when unknown.    |
+| `workflows.versions`  | `GET /workflows/versions?workflowId=…`                      | List every saved version newest-first. Useful for rollback suggestions. |
+| `workflows.health`    | `GET /workflows/health?workflowId=…`                        | Compute the 0-100 health score + 6 sub-scores for one workflow.         |
+| `recipes.list`        | `GET /templates`                                            | List the built-in workflow templates (recipes).                         |
+| `tools.list`          | `GET /tools`                                                | List the runtime tool catalog (`http.request`, `text.uppercase`, etc.). |
+| `runs.get`            | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
+| `runs.list`           | `GET /runs[?workflowId=…&limit=…]`                          | List recent runs newest-first; optional `workflowId` filter.            |
+| `dlq.list`            | `GET /dlq[?status=…&limit=…]`                               | List DLQ entries newest-first; optional `status` filter.                |
+| `workflows.validate`  | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
+| `workflows.readiness` | `POST /workflows/readiness`                                 | Pre-flight readiness check (safety / rollback / approvals / secrets).   |
 
 `workflows.save` is intentionally not advertised and direct calls are rejected until the MCP write consent policy exists. Save workflows through the Janusly UI/API for now.
+
+The two POST tools (`workflows.validate` and `workflows.readiness`) take a workflow body and return a verdict; neither writes to the database.
 
 Every tool returns a single MCP `text` content block carrying the API response JSON-stringified. That's the documented MCP convention for "data-shaped" results; the AI client reads it as text and reasons over it. Future tools could surface structured `resource` content blocks if the UX warrants.
 

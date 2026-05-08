@@ -98,6 +98,7 @@ import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-ro
 import { isTerminalRunStatus, runOpenStatusValues, runTerminalStatusValues } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
+  isDeadLetterStatus,
   listDeadLetters,
   markDeadLetterReplayed,
   markDeadLetterResolved,
@@ -1381,11 +1382,48 @@ export const routes: Route[] = [
 
   // Runs — list + reads
   // NOTE: `/runs` prefix excludes `/run?` so the next entry can claim it.
+  // Optional `?workflowId=<id>` filter joins through `workflow_versions` so
+  // the caller can scope the listing to one workflow's runs.
   { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?"),
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
+      const workflowIdFilter = url.searchParams.get("workflowId");
+
+      if (workflowIdFilter) {
+        const rows = await db
+          .select({
+            id: runs.id,
+            orgId: runs.orgId,
+            workflowVersionId: runs.workflowVersionId,
+            status: runs.status,
+            inputJson: runs.inputJson,
+            outputJson: runs.outputJson,
+            parentRunId: runs.parentRunId,
+            parentNodeId: runs.parentNodeId,
+            traceId: runs.traceId,
+            replayMode: runs.replayMode,
+            createdBy: runs.createdBy,
+            createdAt: runs.createdAt,
+          })
+          .from(runs)
+          .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+          .where(and(
+            eq(runs.orgId, auth.orgId),
+            or(
+              and(
+                eq(workflowVersions.orgId, auth.orgId),
+                eq(workflowVersions.workflowId, workflowIdFilter),
+              ),
+              eq(runs.workflowVersionId, workflowIdFilter),
+            ),
+          ))
+          .orderBy(desc(runs.createdAt))
+          .limit(limitValue);
+        return sendJson(res, rows);
+      }
+
       const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
       return sendJson(res, rows);
     } },
@@ -1633,14 +1671,19 @@ export const routes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const id = url.searchParams.get("id");
       const status = url.searchParams.get("status");
+      const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
 
       if (id) {
         const item = await getDeadLetter(auth.orgId, id);
         if (!item) return sendJson(res, { error: "Not found" }, 404);
         return sendJson(res, item);
       }
+      if (status && !isDeadLetterStatus(status)) {
+        return sendJson(res, { error: "Invalid DLQ status" }, 400);
+      }
 
-      return sendJson(res, await listDeadLetters(auth.orgId, status));
+      return sendJson(res, await listDeadLetters(auth.orgId, status, limit));
     } },
   { method: "POST", match: "/dlq/resolve", role: "editor",
     handler: async ({ req, res, auth }) => {
