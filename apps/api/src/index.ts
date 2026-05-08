@@ -55,6 +55,8 @@ import {
 import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
+import { recordRecoveryFeedback, summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
+import { composeFeedbackHint, RecoveryFeedbackBodySchema } from "./ai-patch-feedback";
 import "@janusly/engine/src/subworkflow";
 import { getUsageSummary } from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -917,6 +919,54 @@ export const routes: Route[] = [
       return sendJson(res, metrics);
     } },
 
+  // Operator → system feedback channel for the recovery loop. The
+  // RecoveryDialog calls this on every decision (Apply / Cancel /
+  // Iterate). The row gets read back by `/ai/patch-workflow` on
+  // subsequent recoveries for the same workflow (via
+  // `summarizePastFeedback` + `composeFeedbackHint`) so the LLM can
+  // deprioritize approaches the operator has already rejected.
+  // Audited as `recovery.feedback`. Editor role — viewers can't
+  // capture their own decisions.
+  { method: "POST", match: "/recovery/feedback", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: 120 });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = RecoveryFeedbackBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(res, { error: "Invalid feedback body", issues: parsed.error.issues }, 400);
+      }
+      const dlq = await getDeadLetter(auth.orgId, parsed.data.deadLetterId);
+      if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
+
+      const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
+      const workflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
+      if (!workflowId) {
+        // Anonymous (ad-hoc) workflows have no aggregation key — the
+        // dialog only opens on saved workflows in practice, so this is
+        // defensive.
+        return sendJson(res, { error: "Feedback is only recorded for saved workflows" }, 422);
+      }
+
+      await recordRecoveryFeedback({
+        orgId: auth.orgId,
+        userId: auth.userId,
+        deadLetterId: parsed.data.deadLetterId,
+        workflowId,
+        suggestionMode: parsed.data.suggestionMode,
+        approachLabel: parsed.data.approachLabel,
+        accepted: parsed.data.accepted,
+        comment: parsed.data.comment ?? null,
+      });
+
+      await audit(auth.orgId, auth.userId, "recovery.feedback", "dead_letter", parsed.data.deadLetterId, {
+        approachLabel: parsed.data.approachLabel,
+        suggestionMode: parsed.data.suggestionMode,
+        accepted: parsed.data.accepted,
+      });
+
+      return sendJson(res, { ok: true });
+    } },
+
   // AI helpers
   { method: "GET", match: "/ai/health",
     handler: async ({ res, auth }) => sendJson(res, await aiStatus(auth.orgId)) },
@@ -1149,13 +1199,31 @@ export const routes: Route[] = [
         };
       })();
 
+      // Past-feedback enrichment — the operator → system half of the
+      // recovery loop. If the failing workflow has a saved id, look up
+      // the operator's recent accept/reject decisions for it and slip
+      // a one-line summary into the prompt as soft prior, so the LLM
+      // can deprioritize approaches the operator has already rejected.
+      // Returns "" for first-time recoveries (no rows match) — the
+      // prompt then has the same shape it had pre-enrichment.
+      const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
+      const failingWorkflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
+      const pastFeedbackSummary = failingWorkflowId
+        ? composeFeedbackHint(await summarizePastFeedback(auth.orgId, failingWorkflowId))
+        : "";
+
+      const extraContext: Record<string, unknown> = {
+        ...(toolInputContract ? { toolInputContract } : {}),
+        ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
+      };
+
       const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
         envelopeSchema: envelope.schema,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
         errorJson: safePersistPayload(dlq.errorJson ?? null),
-        extraContext: toolInputContract ? { toolInputContract } : undefined,
+        extraContext: Object.keys(extraContext).length > 0 ? extraContext : undefined,
         // Pass every event payload through the persistence chokepoint
         // before it leaves the API boundary. `safe-persist` was applied at
         // write time which key-redacted known sensitive keys, but free-form

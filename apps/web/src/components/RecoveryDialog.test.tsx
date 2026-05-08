@@ -33,9 +33,36 @@ const aiSuggestion = {
   rationale: 'Added retry to handle transient ECONNRESET.',
 }
 
+// Fallback for unmocked paths. After every test's
+// `mockResolvedValueOnce` chain is consumed, the dialog's fire-and-forget
+// side-effects (`/recovery/feedback`, card's `/workflows/health/delta`
+// refetch on platformVersion bump, etc.) still fire. Each gets a
+// path-shape-appropriate stub so consumers don't crash when accessing
+// expected fields.
+const inertFallback = (path: string) => {
+  if (typeof path === 'string') {
+    if (path.startsWith('/workflows/health/delta')) {
+      return Promise.resolve({
+        workflowId: 'wf',
+        afterVersion: 2,
+        windowDays: 1,
+        hasEnoughData: false,
+        before: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+        after: { score: 80, status: 'healthy', signals: { p95LatencyMs: null, totalRuns: 0, totalCostUsd: 0 } },
+        delta: null,
+        recentRunsAgainstAfter: { totalRuns: 0, succeeded: 0, failed: 0, running: 0 },
+        sameFailureSinceApply: { count: 0, sampleDeadLetterIds: [], priorSignature: 'Network timeout on http node' },
+        priorVersion: null,
+      })
+    }
+  }
+  return Promise.resolve({ ok: true })
+}
+
 describe('<RecoveryDialog />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
+    vi.mocked(api).mockImplementation((path: string) => inertFallback(path))
     vi.useRealTimers()
   })
 
@@ -128,6 +155,94 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getAllByText(/Runs against v2/i).length).toBeGreaterThan(0)
     expect(screen.getByTestId('recovery-delta-same-failure')).toBeInTheDocument()
     expect(screen.getAllByText(/of 5 runs collected/i).length).toBeGreaterThan(0)
+
+    // Operator → system feedback: Apply success writes one row with
+    // `accepted: true` so the next patch suggestion for THIS workflow
+    // can deprioritize already-rejected approaches.
+    await waitFor(() => {
+      const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+      expect(feedbackCall).toBeTruthy()
+    })
+    const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+    expect(feedbackCall).toBeTruthy()
+    if (feedbackCall) {
+      const body = JSON.parse((feedbackCall[1] as RequestInit).body as string)
+      expect(body).toMatchObject({
+        deadLetterId: 'dlq-1',
+        accepted: true,
+        suggestionMode: 'ai',
+        // The aiSuggestion fixture has no explicit approachLabel and
+        // normalisePatchSuggestion fills in the legacy fallback "other".
+        approachLabel: 'other',
+      })
+    }
+  })
+
+  it('cancel-from-review opens the cancelling step; selecting a chip writes feedback with the chip text', async () => {
+    vi.mocked(api).mockResolvedValueOnce(aiSuggestion)
+    const onClose = vi.fn()
+    render(<RecoveryDialog dlq={baseDlq} onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
+
+    // Click the review-state Cancel — should NOT close the dialog (no
+    // /recovery/feedback call yet); instead enters the `cancelling` step
+    // with the 5 reason chips visible.
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/ }))
+    expect(onClose).not.toHaveBeenCalled()
+    await waitFor(() => screen.getByRole('group', { name: /Quick reason/i }))
+
+    // Click a chip → writes feedback with the chip text + closes.
+    fireEvent.click(screen.getByRole('button', { name: /Wrong approach/i }))
+
+    await waitFor(() => {
+      const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+      expect(feedbackCall).toBeTruthy()
+    })
+    const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+    if (feedbackCall) {
+      const body = JSON.parse((feedbackCall[1] as RequestInit).body as string)
+      expect(body).toMatchObject({
+        deadLetterId: 'dlq-1',
+        accepted: false,
+        comment: 'Wrong approach',
+      })
+    }
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('Iterate from validation-failed writes a feedback row with comment="validation_failed" before re-entering generate', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce(aiSuggestion)
+      .mockResolvedValueOnce({ runId: 'val-run-iter' })
+      .mockResolvedValueOnce({
+        run: { id: 'val-run-iter', status: 'failed' },
+        nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502 after retry' } }],
+      })
+      // Iterate calls /ai/patch-workflow again — we don't care what it returns; just resolve.
+      .mockResolvedValue(aiSuggestion)
+
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+
+    await waitFor(() => screen.getByText(/Sandbox replay failed/i), { timeout: 4000 })
+    fireEvent.click(screen.getByRole('button', { name: /Iterate/i }))
+
+    await waitFor(() => {
+      const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+      expect(feedbackCall).toBeTruthy()
+    })
+    const feedbackCall = vi.mocked(api).mock.calls.find((entry) => entry[0] === '/recovery/feedback')
+    if (feedbackCall) {
+      const body = JSON.parse((feedbackCall[1] as RequestInit).body as string)
+      expect(body).toMatchObject({
+        deadLetterId: 'dlq-1',
+        accepted: false,
+        comment: 'validation_failed',
+      })
+    }
   })
 
   it('surfaces validation failure with an Iterate button instead of applying', async () => {
@@ -340,6 +455,10 @@ describe('<RecoveryDialog />', () => {
           run: { id: 'val-run-tabs-reset', status: 'failed' },
           nodes: [{ nodeId: 'fetch', status: 'failed', errorJson: { message: 'still 502' } }],
         })
+        // /recovery/feedback — Iterate captures the rejection BEFORE
+        // re-entering generateSuggestion. Inserted into the chain
+        // explicitly so the next slot is the second suggestion call.
+        .mockResolvedValueOnce({ ok: true })
         // Second suggestion request after Iterate
         .mockResolvedValueOnce(secondResponse)
 

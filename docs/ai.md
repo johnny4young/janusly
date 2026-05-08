@@ -37,6 +37,46 @@ This guide covers local setup. For production secret management, point the same 
 
 Note: causal reasoning, decision engine, RL adjustments, sandbox replay, cluster apply, rollback, failure clustering, and metrics are 100% deterministic and run without a provider key. The provider key only unlocks AI-mode for the patch suggestions themselves and the authoring/explanation surfaces in 1a.
 
+### 1c. Recovery learning loop (operator → system)
+
+The recovery dialog isn't a one-shot suggestion engine — it's a closed feedback loop. Every time the operator decides whether a patch worked, that decision is captured in the `recovery_feedback` table and re-shown to the LLM the next time the same workflow fails. The LLM treats it as soft prior: prefer approaches with higher acceptance, deprioritize ones the operator has already rejected, address prior pushback in the rationale.
+
+```
+       ┌──────────────────────────┐
+       │   Recovery dialog opens  │
+       │  (DLQ → Suggest fix)     │
+       └────────────┬─────────────┘
+                    │
+                    ▼
+   /ai/patch-workflow   ◀────────────────────────┐
+   reads `summarizePastFeedback`                 │
+   → `composeFeedbackHint`                       │
+   → `extraContext.pastFeedbackSummary`          │
+                    │                            │ next failure for the
+                    ▼                            │ same workflow reads
+       ┌──────────────────────────┐              │ back this row's
+       │  LLM emits 1-3 patches,  │              │ accept/reject decision
+       │  considering past prior  │              │
+       └────────────┬─────────────┘              │
+                    │                            │
+                    ▼                            │
+       ┌──────────────────────────┐              │
+       │   Operator decides       │              │
+       │   • Apply  → accepted    │ ─────┐       │
+       │   • Cancel → rejected    │      │       │
+       │     + chip / reason      │      │       │
+       │   • Iterate → rejected   │      │       │
+       │     ("validation_failed")│      │       │
+       └──────────────────────────┘      │       │
+                                         ▼       │
+                            POST /recovery/feedback
+                            row in `recovery_feedback`
+                                         │       │
+                                         └───────┘
+```
+
+Hard contract: every dialog decision writes a row. The labelled signal is what makes the loop *learn* — silent dialog paths break the contract. The free-text `comment` runs through `scrubSecretShapes` at write time and again in `composeFeedbackHint` (defense in depth) before it reaches the LLM, so a leaked-secret in an operator's reason never round-trips out to a remote provider.
+
 ---
 
 ## 2. Get an Anthropic key (with credit!)

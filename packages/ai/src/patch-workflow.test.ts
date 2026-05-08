@@ -291,6 +291,35 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).toContain('"replacement"');
   });
 
+  it("threads extraContext.pastFeedbackSummary into the prompt body so the LLM sees prior operator decisions", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    const llm = { generateText: vi.fn(), generateObject } as unknown as LlmClient;
+
+    const pastFeedbackSummary = "Past operator decisions for this workflow: add_retry accepted 0/2 (\"timeout still fires under load\"); raise_timeout accepted 1/1.";
+
+    await suggestWorkflowPatch({
+      llm,
+      envelopeSchema,
+      ...baseInput,
+      extraContext: { pastFeedbackSummary },
+    });
+
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { prompt: string; system: string };
+    // The summary string lands verbatim inside the prompt body (the
+    // helper JSON-stringifies extraContext, so the substring is intact).
+    expect(callArg.prompt).toContain('"pastFeedbackSummary"');
+    expect(callArg.prompt).toContain("add_retry accepted 0/2");
+    expect(callArg.prompt).toContain("timeout still fires under load");
+    // System prompt teaches the model how to use the field.
+    expect(callArg.system).toContain("extraContext.pastFeedbackSummary");
+  });
+
   it("scrubs secret-shaped string values before sending the prompt", async () => {
     const generateObject = vi.fn(async () => ({
       object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
