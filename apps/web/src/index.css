@@ -2754,3 +2754,94 @@ a { color: var(--we-primary); }
   color: var(--we-danger);
   font-weight: 600;
 }
+
+/* ----------------- Recovery cancel UX (operator → system feedback) ------ */
+/* Reuses the .we-recovery-tab visual language for the reason chips so the
+ * dialog feels visually consistent across the suggestion-tab strip and
+ * the cancel-state chip strip. The textarea + actions row are
+ * locally-styled. */
+
+.we-recovery-cancelling {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-recovery-cancelling__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-recovery-cancelling__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface);
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.we-recovery-cancelling__chip:hover {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-recovery-cancelling__label {
+  font-size: 11px;
+  color: var(--we-text-2);
+  margin-top: 4px;
+}
+
+.we-recovery-cancelling__textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface);
+  color: var(--we-text-1);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.we-recovery-cancelling__textarea:focus {
+  outline: none;
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 2px var(--we-primary-soft);
+}
+
+.we-recovery-cancelling__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.we-recovery-cancelling__skip {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--we-text-2);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.we-recovery-cancelling__skip:hover {
+  color: var(--we-text-1);
+}
+
+.we-recovery-cancelling__primary {
+  display: flex;
+  gap: 8px;
+}

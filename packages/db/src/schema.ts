@@ -37,7 +37,7 @@
  *   queries can rely on it without null guards.
  */
 
-import { pgTable, text, jsonb, timestamp, integer, real, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
@@ -309,4 +309,45 @@ export const auditLogs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc())],
+);
+
+/**
+ * Operator → system feedback channel for the recovery loop.
+ *
+ * Every time an operator acts on an AI-suggested patch in the Recovery
+ * dialog (Apply / Cancel / Iterate), the dialog posts a row here. Future
+ * patch suggestions for the SAME workflow read back an aggregated
+ * summary of these decisions and slip it into the LLM prompt as soft
+ * prior — so an approach that the operator has rejected multiple times
+ * for this workflow gets deprioritized in subsequent suggestions. This
+ * is the labeled signal a future eval framework can train against.
+ *
+ * Multi-tenant scope: every row carries `org_id`; both indexes lead with
+ * `org_id` so the read-side aggregation never scans across tenants.
+ *
+ * `comment` is operator free-text — sanitized through
+ * `scrubSecretShapes` in the data repo at write time so a leaked-secret
+ * in the comment becomes `[redacted]` before it lands.
+ */
+export const recoveryFeedback = pgTable(
+  "recovery_feedback",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    userId: text("user_id"),
+    deadLetterId: text("dead_letter_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    suggestionMode: text("suggestion_mode").notNull(),
+    approachLabel: text("approach_label").notNull(),
+    accepted: boolean("accepted").notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // Read-side aggregation: list past feedback for this workflow when
+    // the patch route enriches a new prompt.
+    index("recovery_feedback_org_workflow_idx").on(table.orgId, table.workflowId, table.createdAt.desc()),
+    // Direct DLQ-row scoping for per-row audits.
+    index("recovery_feedback_org_dlq_idx").on(table.orgId, table.deadLetterId),
+  ],
 );
