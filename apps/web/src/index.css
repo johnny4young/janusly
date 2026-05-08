@@ -2302,6 +2302,124 @@ a { color: var(--we-primary); }
   color: var(--we-text-1);
 }
 
+/* AI improvement-suggestion affordance — sits below the structural
+ * diff in Compare mode. Editor-role-only. The button is the same
+ * `small-command` style as Compare/Cancel; the result pane mirrors the
+ * Recovery dialog's chip-list pattern but lives inline in the panel. */
+.we-suggest-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.we-suggest-hint {
+  margin: 0;
+  font-size: 11px;
+}
+
+.we-suggest-result {
+  margin-top: 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--we-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-suggest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.we-suggest-close {
+  border: 1px solid var(--we-line);
+  background: transparent;
+  color: var(--we-text-2);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.we-suggest-close:hover {
+  border-color: var(--we-text-1);
+  color: var(--we-text-1);
+}
+
+.we-suggest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-suggest-chip {
+  border: 1px solid var(--we-line);
+  background: transparent;
+  color: var(--we-text-2);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.we-suggest-chip:hover {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-suggest-chip--active {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-suggest-fallback {
+  margin-top: 12px;
+  border: 1px solid var(--we-warning);
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: relative;
+}
+
+.we-suggest-fallback__title {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.we-suggest-fallback__detail {
+  font-size: 11px;
+  color: var(--we-text-1);
+}
+
+.we-suggest-fallback__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--we-warning);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.we-suggest-fallback__close:hover {
+  border-color: var(--we-warning);
+}
+
 .we-diff-tag {
   display: inline-flex;
   align-items: center;

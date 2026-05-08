@@ -566,6 +566,91 @@ export function patchEnvelopeForNodeType(nodeType: string): PatchEnvelopeChoice 
   }
 }
 
+/**
+ * Suggest-improvement schemas — `/ai/suggest-improvement`. The route
+ * mirrors `/ai/patch-workflow`'s response shape (a `suggestions` array
+ * of items with rationale + approachLabel + confidence) but operates
+ * in authoring context (no failing-node id, no DLQ row).
+ *
+ * Shape choice — JSON-encoded workflow string vs typed inner schema:
+ *
+ *   Both `/ai/generate-workflow` and the failed exploratory shape
+ *   here started by emitting `AiGenerationWorkflowSchema` directly as
+ *   the structured output. Anthropic accepts the bare 11-branch
+ *   schema (proven by the generation route running in production),
+ *   but wrapping it in an outer object plus a `suggestions` array
+ *   plus metadata fields (`rationale`, `approachLabel`, `confidence`)
+ *   pushes the compiled grammar over the cap (`"The compiled grammar
+ *   is too large…"`). The patch route sidesteps this by emitting
+ *   tiny config-only patches (3-7 leaf fields) — but the suggest
+ *   surface needs the full workflow because improvements span
+ *   multiple nodes/edges.
+ *
+ *   The minimal grammar that fits: `patchedWorkflowJson: z.string()`.
+ *   The LLM emits the proposed workflow as a JSON-stringified blob.
+ *   The route runs `JSON.parse` then `WorkflowSchema.safeParse` +
+ *   `sanitizeAiWorkflow` server-side. Validation moves from
+ *   structured-output-time to server-time, but the safety guarantee
+ *   is identical — every suggestion still passes the engine's strict
+ *   schema before reaching the operator. Suggestions whose JSON or
+ *   schema parse fails are dropped by the route, and the surface
+ *   degrades to fallback when none survive.
+ *
+ * Cross-provider note: this string-payload shape works on both
+ * Anthropic (no `oneOf`, no nested unions, fits the cap comfortably)
+ * AND OpenAI strict mode (every property `required`, no
+ * `propertyNames`, no composition). When OpenAI re-opens as a
+ * supported runtime target this surface should work without changes.
+ * Per AGENTS.md the supported posture is Anthropic-only until
+ * further notice.
+ */
+export const AiSuggestApproachLabel = z.enum([
+  "add_retry",
+  "raise_timeout",
+  "swap_secret_ref",
+  "add_approval",
+  "add_observability",
+  "simplify",
+  "other",
+]);
+export type AiSuggestApproachLabelValue = z.infer<typeof AiSuggestApproachLabel>;
+
+/**
+ * Hard upper bound on improvement suggestions per call. Mirrors the
+ * patch-route posture: 1-3 distinct alternatives, using one repeated
+ * `items` schema so Anthropic's compiled grammar stays compact.
+ */
+export const SUGGEST_MAX_SUGGESTIONS = 3;
+
+const AiSuggestImprovementItem = z.object({
+  // JSON-stringified workflow — see envelope docstring for the
+  // grammar-cap rationale. The route runs `JSON.parse` then
+  // `WorkflowSchema.safeParse` + `sanitizeAiWorkflow` before
+  // returning to the operator; suggestions whose parse or schema
+  // fails are dropped, and the surface degrades to fallback when
+  // none survive.
+  patchedWorkflowJson: z.string().min(1).max(20000),
+  rationale: z.string().min(1).max(800),
+  approachLabel: AiSuggestApproachLabel,
+  // Self-rated confidence 0-100. Same posture as the patch route: the
+  // dialog labels it as a self-rating so operators don't over-trust raw
+  // scores. Future calibration pass will rebase against accept/reject
+  // history if a feedback loop for this surface lands.
+  confidence: z.number().int().min(0).max(100),
+});
+
+/**
+ * Envelope for `/ai/suggest-improvement`. Wraps 1-3
+ * improvement-suggestion items — JSON-encoded workflow + rationale +
+ * approachLabel + confidence. The route post-processes each item:
+ * `JSON.parse` → `WorkflowSchema.safeParse` → `sanitizeAiWorkflow`,
+ * dropping the suggestion if any step fails and degrading to
+ * fallback when none survive.
+ */
+export const AiSuggestImprovementEnvelope = z.object({
+  suggestions: z.array(AiSuggestImprovementItem).min(1).max(SUGGEST_MAX_SUGGESTIONS),
+});
+
 /** Single review-finding for `/ai/review-workflow` structured output. */
 const ReviewFindingSchema = z.object({
   code: z.string().min(1),
