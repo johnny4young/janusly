@@ -12,8 +12,8 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
-import { GitCompare, History, RotateCcw } from 'lucide-react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
@@ -22,8 +22,59 @@ import { WorkflowDiffView } from './WorkflowDiffView'
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
+/**
+ * Improvement suggestion as the API returns it. Mirrors the helper's
+ * `SuggestImprovementItem` after the route's per-suggestion validation
+ * + sanitisation pass — every workflow here is already engine-valid.
+ */
+type ImprovementSuggestion = {
+  workflow: WorkflowDefinition
+  rationale: string
+  approachLabel: string
+  confidence: number
+}
+
+/**
+ * State machine for the "Suggest improvement" affordance. The button
+ * lives in Compare mode below the diff and is only available to
+ * editors / admins. Each terminal state renders a different cluster of
+ * UI: idle shows just the button; loading disables it; ai mounts a
+ * second `<WorkflowDiffView>` with chips to switch between angles;
+ * fallback shows a ribbon with the AI error and the original workflow
+ * left untouched.
+ */
+type ImprovementState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | {
+      kind: 'ai'
+      suggestions: ImprovementSuggestion[]
+      activeIdx: number
+      baseWorkflow: WorkflowDefinition
+      baseLabel: string
+      model?: string
+    }
+  | { kind: 'fallback'; aiError: string }
+
 function canRollbackWithRole(role: OrgRole | null) {
   return role === 'editor' || role === 'admin'
+}
+
+/** Same role posture as Rollback — read-only viewers can't trigger AI mutation routes. */
+const canSuggestWithRole = canRollbackWithRole
+
+const APPROACH_LABEL_TEXT: Record<string, string> = {
+  add_retry: 'Add retry',
+  raise_timeout: 'Raise timeout',
+  swap_secret_ref: 'Swap secret-ref',
+  add_approval: 'Add approval',
+  add_observability: 'Add observability',
+  simplify: 'Simplify',
+  other: 'Other',
+}
+
+function approachLabelText(label: string): string {
+  return APPROACH_LABEL_TEXT[label] ?? label
 }
 
 /** Render the version-history list for the active workflow with click-to-hydrate. */
@@ -45,12 +96,28 @@ export function VersionHistoryPanel() {
   // shift "current" to a newer version under the operator — the diff
   // they're looking at would silently change.
   const [rollbackPair, setRollbackPair] = useState<{ currentId: string; targetId: string } | null>(null)
+  // Local state for the AI improvement-suggestion affordance. Local —
+  // not Zustand — because no other panel cares about this transient
+  // suggestion state, and a fetch in flight should not survive a
+  // workflow switch. Cleared whenever the active workflow changes,
+  // compare mode toggles, or the operator picks a different version
+  // pair (see effects below).
+  const [improvement, setImprovement] = useState<ImprovementState>({ kind: 'idle' })
+  // Cancel flag for an in-flight `/ai/suggest-improvement` call. Each
+  // of the three invalidation sites (workflow change, compare-mode
+  // toggle, version-pair change) flips this to true before resetting
+  // `improvement` to idle; the click handler checks it after the
+  // `await` so a stale promise can't overwrite the now-cleared state
+  // with a suggestion that's tied to a different baseline.
+  const suggestCancelRef = useRef(false)
 
   useEffect(() => {
+    suggestCancelRef.current = true
     setVersions([])
     setSelectedIds([])
     setCompareMode(false)
     setRollbackPair(null)
+    setImprovement({ kind: 'idle' })
   }, [currentWorkflowId])
 
   useEffect(() => {
@@ -83,7 +150,16 @@ export function VersionHistoryPanel() {
 
     const loadEffectiveRole = async () => {
       if (!userId) {
-        setEffectiveRole(null)
+        // Dev-headers mode has no Supabase session AND no userId in
+        // the store (App.tsx clears auth on every onAuthStateChange
+        // when the dev `session` is null, which wipes the dev
+        // identity). Backend role checks intentionally fall back to
+        // admin in dev when no org_members row exists, so mirror that
+        // here — otherwise role-gated UI (Rollback, Suggest
+        // improvement) is silently hidden in dev. Production with a
+        // session but a still-loading userId still resolves to null
+        // here, hiding the button until userId lands.
+        setEffectiveRole(!session ? 'admin' : null)
         return
       }
 
@@ -92,10 +168,6 @@ export function VersionHistoryPanel() {
         if (cancelled) return
         const members = Array.isArray(data) ? (data as OrgMember[]) : []
         const member = members.find((row) => row.userId === userId)
-        // Dev-headers mode has no Supabase session. Backend role checks
-        // intentionally fall back to admin only when no org_members row
-        // exists, so mirror that here to avoid hiding editor-only UI in
-        // fresh local checkouts.
         setEffectiveRole(member?.role ?? (!session ? 'admin' : null))
       } catch {
         if (!cancelled) setEffectiveRole(null)
@@ -142,9 +214,77 @@ export function VersionHistoryPanel() {
     setCompareMode((prev) => {
       const next = !prev
       if (!next) setSelectedIds([])
+      // Picking a fresh comparison invalidates any in-flight or
+      // already-rendered improvement suggestions — they were tied to
+      // a different version pair.
+      suggestCancelRef.current = true
+      setImprovement({ kind: 'idle' })
       return next
     })
   }
+
+  // Drop any rendered improvement when the operator changes which two
+  // versions they're comparing. The suggestions hung off the previous
+  // pair's "newer" version; keeping them around would silently mismatch.
+  useEffect(() => {
+    suggestCancelRef.current = true
+    setImprovement({ kind: 'idle' })
+  }, [selectedIds])
+
+  const onSuggestImprovement = async () => {
+    if (!comparePair) return
+    // Reset the cancel flag for THIS call. Subsequent invalidation
+    // sites flip it back to true; we check after `await` to bail out
+    // of the resolved (or rejected) promise's setState path.
+    suggestCancelRef.current = false
+    const newer = comparePair[1]
+    setImprovement({ kind: 'loading' })
+    try {
+      const data = await api('/ai/suggest-improvement', {
+        method: 'POST',
+        body: JSON.stringify({ workflow: newer.dagJson }),
+      }) as {
+        mode?: 'ai' | 'fallback'
+        suggestions?: ImprovementSuggestion[]
+        aiError?: string
+        model?: string
+      }
+      if (suggestCancelRef.current) return
+      if (data.mode === 'ai' && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+        setImprovement({
+          kind: 'ai',
+          suggestions: data.suggestions,
+          activeIdx: 0,
+          baseWorkflow: newer.dagJson,
+          baseLabel: `v${newer.version}`,
+          model: data.model,
+        })
+      } else {
+        setImprovement({
+          kind: 'fallback',
+          aiError: data.aiError ?? 'AI improvement is not available right now.',
+        })
+      }
+    } catch (error) {
+      if (suggestCancelRef.current) return
+      setImprovement({
+        kind: 'fallback',
+        aiError: error instanceof Error ? error.message : 'AI improvement request failed.',
+      })
+    }
+  }
+
+  const onResetImprovement = () => {
+    suggestCancelRef.current = true
+    setImprovement({ kind: 'idle' })
+  }
+
+  const showSuggestButton =
+    compareMode &&
+    Boolean(comparePair) &&
+    canSuggestWithRole(effectiveRole) &&
+    improvement.kind !== 'ai' &&
+    improvement.kind !== 'fallback'
 
   return (
     <div className="panel-card">
@@ -217,6 +357,84 @@ export function VersionHistoryPanel() {
         <p className="helper-text" aria-live="polite">
           Pick two versions to see the diff.
         </p>
+      )}
+
+      {showSuggestButton && (
+        <div className="we-suggest-actions">
+          <button
+            type="button"
+            className="small-command"
+            onClick={onSuggestImprovement}
+            disabled={improvement.kind === 'loading'}
+          >
+            <Sparkles size={12} aria-hidden="true" />{' '}
+            {improvement.kind === 'loading' ? 'Generating…' : 'Suggest improvement'}
+          </button>
+          <p className="helper-text we-suggest-hint">
+            Ask the AI to suggest improvements to v{comparePair![1].version}. Suggestions are previewed as a diff — apply by saving as a new version.
+          </p>
+        </div>
+      )}
+
+      {improvement.kind === 'ai' && comparePair && improvement.suggestions[improvement.activeIdx] && (() => {
+        const active = improvement.suggestions[improvement.activeIdx]!
+        return (
+          <div className="we-suggest-result" aria-label="AI suggested improvement">
+            <div className="we-suggest-header">
+              <span className="section-kicker">
+                <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
+                AI suggestions vs {improvement.baseLabel}
+              </span>
+              <button
+                type="button"
+                className="we-suggest-close"
+                onClick={onResetImprovement}
+                aria-label="Dismiss AI suggestions"
+                title="Dismiss"
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </div>
+            {improvement.suggestions.length > 1 && (
+              <div className="we-suggest-chips" role="tablist" aria-label="Suggested improvement angles">
+                {improvement.suggestions.map((suggestion, idx) => (
+                  <button
+                    key={`${suggestion.approachLabel}:${idx}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={idx === improvement.activeIdx}
+                    className={`we-suggest-chip${idx === improvement.activeIdx ? ' we-suggest-chip--active' : ''}`}
+                    onClick={() => setImprovement({ ...improvement, activeIdx: idx })}
+                  >
+                    {approachLabelText(suggestion.approachLabel)} · {suggestion.confidence}%
+                  </button>
+                ))}
+              </div>
+            )}
+            <WorkflowDiffView
+              before={improvement.baseWorkflow}
+              after={active.workflow}
+              beforeLabel={improvement.baseLabel}
+              afterLabel={`Suggested · ${approachLabelText(active.approachLabel)}`}
+              aiPatchRationale={active.rationale}
+            />
+          </div>
+        )
+      })()}
+
+      {improvement.kind === 'fallback' && (
+        <div className="we-suggest-fallback" role="status" aria-live="polite">
+          <span className="we-suggest-fallback__title">AI improvement unavailable</span>
+          <span className="we-suggest-fallback__detail">{improvement.aiError}</span>
+          <button
+            type="button"
+            className="we-suggest-fallback__close"
+            onClick={onResetImprovement}
+            aria-label="Dismiss AI fallback notice"
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </div>
       )}
 
       {rollbackPair && (() => {
