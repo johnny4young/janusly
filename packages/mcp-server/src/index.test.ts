@@ -25,12 +25,17 @@ describe("MCP stdio server", () => {
       const result = await client.listTools();
       const names = result.tools.map((tool) => tool.name).sort();
       expect(names).toEqual([
+        "dlq.list",
         "recipes.list",
         "runs.get",
+        "runs.list",
         "tools.list",
         "workflows.get",
+        "workflows.health",
         "workflows.list",
+        "workflows.readiness",
         "workflows.validate",
+        "workflows.versions",
       ]);
     } finally {
       await client.close();

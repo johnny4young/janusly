@@ -16,11 +16,13 @@
  *
  * Invariants:
  * - Tool surface split: read-only (`workflows.list`, `workflows.get`,
- *   `recipes.list`, `tools.list`, `runs.get`), pre-flight validation
- *   (`workflows.validate` — POST but no side effects), and no writes.
- *   `workflows.save` stays unadvertised and rejected until the MCP write
- *   consent/audit policy lands. The MCP server itself still has zero DB
- *   access and writes no audit rows of its own.
+ *   `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`,
+ *   `runs.get`, `runs.list`, `dlq.list`), pre-flight checks
+ *   (`workflows.validate` and `workflows.readiness` — POST but no side
+ *   effects), and no writes. `workflows.save` stays unadvertised and
+ *   rejected until the MCP write consent/audit policy lands. The MCP
+ *   server itself still has zero DB access and writes no audit rows of
+ *   its own.
  * - Don't add more write tools without an explicit product/security review
  *   matching the required posture: explicit consent, RBAC enforced upstream,
  *   audit row written by the API, and safe exposure to a remote MCP client.
@@ -30,6 +32,8 @@
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { CallApi } from "./api-client";
+
+const DLQ_STATUSES = ["open", "replayed", "resolved"] as const;
 
 /**
  * Static tool catalog the MCP server advertises. Add a new entry here when
@@ -118,6 +122,94 @@ export const tools: Tool[] = [
       },
     },
   },
+  {
+    name: "workflows.versions",
+    description:
+      "List every saved version of a workflow newest-first. Returns id, version number, dagJson, createdBy, and createdAt for each. Useful for showing the operator what versions exist before suggesting a rollback or comparing two snapshots.",
+    inputSchema: {
+      type: "object",
+      required: ["workflowId"],
+      properties: {
+        workflowId: {
+          type: "string",
+          description: "Stable workflow id.",
+        },
+      },
+    },
+  },
+  {
+    name: "workflows.health",
+    description:
+      "Compute the per-workflow health rollup: a 0-100 score plus six per-category sub-scores (reliability, safety, latency, cost, maintainability, AI risk). Reads recent runs + readiness + DLQ counts. No side effects. Returns the same shape `GET /workflows/health` does.",
+    inputSchema: {
+      type: "object",
+      required: ["workflowId"],
+      properties: {
+        workflowId: {
+          type: "string",
+          description: "Stable workflow id.",
+        },
+      },
+    },
+  },
+  {
+    name: "workflows.readiness",
+    description:
+      "Pre-flight a draft workflow against the safety / rollback / approval / secret-shape gates that production-mode `POST /start` enforces. Distinct from `workflows.validate` (which only checks structural validity). Returns `{ status: 'pass' | 'warn' | 'fail', issues: ReadinessIssue[] }`. No side effects.",
+    inputSchema: {
+      type: "object",
+      required: ["workflow"],
+      properties: {
+        workflow: {
+          type: "object",
+          description:
+            "Full workflow DAG to pre-flight. Same shape `workflows.validate` accepts.",
+        },
+      },
+    },
+  },
+  {
+    name: "runs.list",
+    description:
+      "List recent workflow runs newest-first. Optionally filter by `workflowId`. The upstream route caps at 100 by default and 200 max — pass `limit` to widen.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workflowId: {
+          type: "string",
+          description:
+            "Optional filter — when present, only runs against this workflow id are returned.",
+        },
+        limit: {
+          type: "number",
+          minimum: 1,
+          maximum: 200,
+          description: "Optional cap; defaults to 100.",
+        },
+      },
+    },
+  },
+  {
+    name: "dlq.list",
+    description:
+      "List dead-letter queue entries newest-first. Optionally filter by `status` (`open` | `replayed` | `resolved`). Useful for surfacing failures the operator hasn't attended to yet. The upstream route caps at 100 by default and 200 max.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["open", "replayed", "resolved"],
+          description: "Optional status filter; omit to list all entries.",
+        },
+        limit: {
+          type: "number",
+          minimum: 1,
+          maximum: 200,
+          description: "Optional cap; defaults to 100.",
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -178,6 +270,52 @@ async function runOne(
         method: "POST",
         body: JSON.stringify(args.workflow),
       });
+    }
+    case "workflows.versions": {
+      if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
+        throw new Error("workflows.versions requires `workflowId` (non-empty string)");
+      }
+      return callApi(`/workflows/versions?workflowId=${encodeURIComponent(args.workflowId)}`);
+    }
+    case "workflows.health": {
+      if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
+        throw new Error("workflows.health requires `workflowId` (non-empty string)");
+      }
+      return callApi(`/workflows/health?workflowId=${encodeURIComponent(args.workflowId)}`);
+    }
+    case "workflows.readiness": {
+      if (!isObject(args.workflow)) {
+        throw new Error("workflows.readiness requires `workflow` (object)");
+      }
+      return callApi("/workflows/readiness", {
+        method: "POST",
+        body: JSON.stringify(args.workflow),
+      });
+    }
+    case "runs.list": {
+      const params = new URLSearchParams();
+      if (typeof args.workflowId === "string" && args.workflowId.length > 0) {
+        params.set("workflowId", args.workflowId);
+      }
+      if (typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0) {
+        params.set("limit", String(args.limit));
+      }
+      const query = params.toString();
+      return callApi(query ? `/runs?${query}` : "/runs");
+    }
+    case "dlq.list": {
+      const params = new URLSearchParams();
+      if (typeof args.status === "string" && args.status.length > 0) {
+        if (!DLQ_STATUSES.includes(args.status as typeof DLQ_STATUSES[number])) {
+          throw new Error("dlq.list status must be one of: open, replayed, resolved");
+        }
+        params.set("status", args.status);
+      }
+      if (typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0) {
+        params.set("limit", String(args.limit));
+      }
+      const query = params.toString();
+      return callApi(query ? `/dlq?${query}` : "/dlq");
     }
     case "workflows.save": {
       throw new Error("workflows.save is disabled until the MCP write consent policy is implemented");
