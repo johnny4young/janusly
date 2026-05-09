@@ -13,6 +13,7 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "migrate": "pnpm --filter @janusly/db db:migrate",
     "evals": "node scripts/run-evals.mjs",
-    "seed:recovery-matrix": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-recovery-matrix.ts"
+    "seed:recovery-matrix": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-recovery-matrix.ts",
+    "backfill:usage-workflowid": "pnpm --filter @janusly/api exec tsx ../../scripts/backfill-usage-workflowid.ts"
   }
 }

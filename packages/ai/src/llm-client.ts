@@ -134,6 +134,15 @@ export type LlmGenerateTextInput = {
     userId?: string;
     runId?: string;
     nodeId?: string;
+    /**
+     * Workflow id when the LLM call is attributable to a saved
+     * workflow. Routes that have the workflow in scope (explain,
+     * review, suggest-improvement, patch) pass it; the engine's
+     * `ai`/`agent` executors plumb it from `getRunMetadata(runId)`.
+     * Used by the recorder to populate `metadata.workflowId` so the
+     * billing breakdown can group by workflow.
+     */
+    workflowId?: string;
   };
 };
 
@@ -185,6 +194,15 @@ export type LlmGenerateObjectInput<T> = {
     userId?: string;
     runId?: string;
     nodeId?: string;
+    /**
+     * Workflow id when the LLM call is attributable to a saved
+     * workflow. Routes that have the workflow in scope (explain,
+     * review, suggest-improvement, patch) pass it; the engine's
+     * `ai`/`agent` executors plumb it from `getRunMetadata(runId)`.
+     * Used by the recorder to populate `metadata.workflowId` so the
+     * billing breakdown can group by workflow.
+     */
+    workflowId?: string;
   };
 };
 
@@ -510,6 +528,7 @@ async function fireUsageRecorder(input: {
     userId: input.context?.userId,
     runId: input.context?.runId,
     nodeId: input.context?.nodeId,
+    workflowId: input.context?.workflowId,
     provider: input.provider,
     model: input.model,
     inputTokens: input.inputTokens,

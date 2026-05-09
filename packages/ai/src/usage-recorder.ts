@@ -30,6 +30,15 @@ export type UsageRecord = {
   userId?: string;
   runId?: string;
   nodeId?: string;
+  /**
+   * Workflow id when the LLM call is attributable to a saved workflow.
+   * Populated by `/ai/*` routes that already have the workflow id in
+   * scope (explain, review, suggest-improvement, patch) and by the
+   * engine's `ai`/`agent` node executors via `getRunMetadata`.
+   * `/ai/generate-workflow` leaves this absent — the workflow doesn't
+   * exist yet at LLM-call time.
+   */
+  workflowId?: string;
   /** Registry key from `LlmGenerateTextResult.provider` (e.g. "openai"). */
   provider: string;
   /** Resolved model id (e.g. "gpt-4o-mini"). */

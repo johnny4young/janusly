@@ -16,7 +16,7 @@
  */
 
 import { nodeRegistry } from "./node-registry";
-import { getRunContext, getRunOrgId, getRunReplayMode } from "./persistence";
+import { getRunContext, getRunMetadata, getRunReplayMode } from "./persistence";
 import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 
@@ -34,16 +34,20 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     throw new Error(`No executor for node type: ${node.type}`);
   }
 
-  // Resolve org scope once per node execution so executors can
-  // attribute usage telemetry without duplicating the lookup. A missing
-  // run row is fatal — silently writing usage rows with a synthetic
-  // "default" orgId would pollute multi-tenant cost accounting (see the
-  // multi-tenant invariant in AGENTS.md). Same shape as the missing-executor
-  // throw above.
-  const orgId = await getRunOrgId(runId);
-  if (!orgId) {
+  // Resolve org scope + workflow id once per node execution so
+  // executors can attribute usage telemetry without duplicating the
+  // lookup. A missing run row is fatal — silently writing usage rows
+  // with a synthetic "default" orgId would pollute multi-tenant cost
+  // accounting (see the multi-tenant invariant in AGENTS.md). Same
+  // shape as the missing-executor throw above. `getRunMetadata`
+  // joins through `workflow_versions` so executors get the workflow
+  // id for the billing breakdown surface as well.
+  const meta = await getRunMetadata(runId);
+  if (!meta) {
     throw new Error(`Cannot execute node: run ${runId} not found`);
   }
+  const orgId = meta.orgId;
+  const workflowId = meta.workflowId;
 
   // Sandbox/validation runs (`runs.replayMode === "validation"`) carry a
   // dryRun flag through every node execution so write-side actions
@@ -68,6 +72,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
       runId,
       nodeId: node.id,
       orgId,
+      workflowId,
       config: resolvedConfig,
       context,
       redactedValues,

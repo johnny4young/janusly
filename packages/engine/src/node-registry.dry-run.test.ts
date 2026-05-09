@@ -42,6 +42,7 @@ const baseCtx: Omit<NodeContext, 'config'> = {
   runId: 'run-1',
   nodeId: 'fetch',
   orgId: 'org-1',
+  workflowId: null,
   context: {},
   redactedValues: [],
 }

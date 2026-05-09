@@ -144,6 +144,13 @@ export type SuggestWorkflowPatchInput = {
   extraContext?: Record<string, unknown>;
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
+  /**
+   * Telemetry context forwarded to `LlmClient.generateObject`. The
+   * route owns this and threads `orgId` (always) and `workflowId`
+   * (resolved from `dlq.workflowJson.id`) so the recorder can write
+   * `metadata.workflowId` for the breakdown surface.
+   */
+  context?: LlmGenerateObjectInput<PatchEnvelopeSchemaResult>["context"];
 };
 
 /** Maximum number of run events embedded in the prompt. Keeps the model from drowning in noisy logs. */
@@ -214,7 +221,7 @@ Rules per suggestion:
 export async function suggestWorkflowPatch(
   input: SuggestWorkflowPatchInput,
 ): Promise<PatchSuggestion> {
-  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext } = input;
+  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context } = input;
 
   if (!llm) {
     return {
@@ -261,6 +268,7 @@ export async function suggestWorkflowPatch(
       system: SYSTEM_PROMPT,
       prompt: promptBody,
       modelHint: model,
+      context,
     });
     // The route is responsible for merging each `patchedConfig` into a
     // full workflow, validating, and degrading to fallback when no
