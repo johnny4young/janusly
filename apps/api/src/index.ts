@@ -96,6 +96,7 @@ import {
 } from "./ai-schemas";
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-rollback";
+import { saveWorkflowVersion } from "./workflows-save";
 import { isTerminalRunStatus, runOpenStatusValues, runTerminalStatusValues } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -519,43 +520,34 @@ export const routes: Route[] = [
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
-      const workflowId = parsedWorkflow.id ?? crypto.randomUUID();
-      const workflowName = parsedWorkflow.name ?? workflowId;
-      const versionId = crypto.randomUUID();
 
-      // Atomic so we never end up with a workflow row missing its first version
-      // or a version row pointing at a non-existent workflow.
-      const { nextVersion } = await db.transaction(async (tx) => {
-        const existingVersions = await tx.select().from(workflowVersions)
-          .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)))
-          .orderBy(desc(workflowVersions.version));
-        const nextVersion = (existingVersions[0]?.version ?? 0) + 1;
-
-        const existingWorkflow = await tx.select().from(workflows)
-          .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-        if (existingWorkflow[0]) {
-          if (existingWorkflow[0].name !== workflowName) {
-            await tx.update(workflows).set({ name: workflowName })
-              .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-          }
-        } else {
-          await tx.insert(workflows).values({ id: workflowId, orgId: auth.orgId, name: workflowName, createdBy: auth.userId });
-        }
-
-        await tx.insert(workflowVersions).values({
-          id: versionId,
-          orgId: auth.orgId,
-          workflowId,
-          version: nextVersion,
-          dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName },
-          createdBy: auth.userId,
-        });
-
-        return { nextVersion };
+      // Concurrent saves for the same `(orgId, workflowId)` resolve via
+      // a bounded unique-constraint retry inside `saveWorkflowVersion`.
+      // On exhausted retries the helper returns `kind: "conflict"` so
+      // the operator sees a clean 409 ("please retry") instead of the
+      // 5xx the inline transaction used to emit.
+      const result = await saveWorkflowVersion({
+        orgId: auth.orgId,
+        userId: auth.userId,
+        parsedWorkflow,
       });
 
-      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", workflowId, { version: nextVersion });
-      return sendJson(res, { workflowId, versionId, version: nextVersion });
+      if (result.kind === "conflict") {
+        return sendJson(res, {
+          error: "Concurrent save conflict — please retry",
+          attempts: result.attempts,
+        }, 409);
+      }
+
+      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", result.workflowId, {
+        version: result.version,
+        attempts: result.attempts,
+      });
+      return sendJson(res, {
+        workflowId: result.workflowId,
+        versionId: result.versionId,
+        version: result.version,
+      });
     } },
   { method: "POST", match: "/workflows/rollback", role: "editor",
     handler: async ({ req, res, auth }) => {
