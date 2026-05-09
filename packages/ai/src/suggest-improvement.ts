@@ -123,6 +123,13 @@ export type SuggestWorkflowImprovementInput = {
   focus?: string;
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
+  /**
+   * Telemetry context forwarded to `LlmClient.generateObject`. The
+   * route owns this and threads `orgId` (always) and `workflowId`
+   * (when the input workflow has a saved id) so the recorder can
+   * write `metadata.workflowId` for the breakdown surface.
+   */
+  context?: LlmGenerateObjectInput<SuggestEnvelopeSchemaResult>["context"];
 };
 
 /** Maximum focus length the route accepts before trimming. */
@@ -171,7 +178,7 @@ Rules per suggestion:
 export async function suggestWorkflowImprovement(
   input: SuggestWorkflowImprovementInput,
 ): Promise<SuggestImprovementResult> {
-  const { llm, envelopeSchema, workflow, focus, model } = input;
+  const { llm, envelopeSchema, workflow, focus, model, context } = input;
 
   if (!llm) {
     return {
@@ -193,6 +200,7 @@ export async function suggestWorkflowImprovement(
       schemaDescription: "One to three distinct high-impact improvements to a workflow snapshot.",
       system: SYSTEM_PROMPT,
       prompt: promptBody,
+      context,
       modelHint: model,
     });
     return {

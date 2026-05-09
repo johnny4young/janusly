@@ -40,6 +40,11 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       latencyMs: record.latencyMs,
       costUsd: record.costUsd ?? null,
       nodeId: record.nodeId ?? null,
+      // Workflow attribution — populated by /ai/* routes that have
+      // the workflow in scope and by the engine's node executors via
+      // `getRunMetadata`. Drives the `workflow` breakdown dimension
+      // surfaced by `GET /billing/usage?breakdown=workflow`.
+      workflowId: record.workflowId ?? null,
       mode: record.mode,
       aiError: record.aiError ?? null,
     },
