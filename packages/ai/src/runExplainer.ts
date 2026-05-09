@@ -94,7 +94,7 @@ export async function explainRun({
 }: RunExplanationInput & {
   llm?: LlmClient | null;
   model?: string;
-  context?: { orgId: string; userId?: string; runId?: string; nodeId?: string };
+  context?: { orgId: string; userId?: string; runId?: string; nodeId?: string; workflowId?: string };
 }): Promise<RunExplanation> {
   if (!llm) {
     return {

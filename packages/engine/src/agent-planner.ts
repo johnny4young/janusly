@@ -118,7 +118,7 @@ export async function planAgentToolWithLLM(
    * Omitted in unit tests; production calls from `node-registry.ts:runAgentLoop`
    * fill it from the executor `NodeContext`.
    */
-  telemetryContext?: { orgId: string; userId?: string; runId?: string; nodeId?: string },
+  telemetryContext?: { orgId: string; userId?: string; runId?: string; nodeId?: string; workflowId?: string },
 ): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 

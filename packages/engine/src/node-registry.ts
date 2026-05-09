@@ -52,6 +52,16 @@ export type NodeContext = {
   /** Multi-tenant scope. Plumbed by `executeNode` from `runs.orgId` so the
    * `ai` node and `agent` planner can attribute usage telemetry. */
   orgId: string;
+  /**
+   * Workflow id for the active run, plumbed by `executeNode` via
+   * `getRunMetadata`. Forwarded to `LlmClient.generateText` /
+   * `generateObject` context so the recorder writes
+   * `metadata.workflowId` and the `GET /billing/usage?breakdown=workflow`
+   * surface can attribute cost per workflow. `null` when the workflow
+   * row was deleted between scheduling and node execution (left-join
+   * miss in `getRunMetadata`).
+   */
+  workflowId: string | null;
   config: any;
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
@@ -159,6 +169,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
           orgId: ctx.orgId,
           runId: ctx.runId,
           nodeId: ctx.nodeId,
+          workflowId: ctx.workflowId ?? undefined,
         })
       : planAgentTool(agentConfig, planningContext);
 
@@ -453,7 +464,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           "You are Janusly, an AI operator for business workflows. Answer clearly for an operator, and keep the response concise.",
         prompt: JSON.stringify({ prompt, context: ctx.context }),
         modelHint,
-        context: { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId },
+        context: { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, workflowId: ctx.workflowId ?? undefined },
       });
 
       return {

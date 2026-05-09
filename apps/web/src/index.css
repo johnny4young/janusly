@@ -2420,6 +2420,91 @@ a { color: var(--we-primary); }
   border-color: var(--we-warning);
 }
 
+/* Usage breakdown — chip strip + bucket list under the Usage summary
+ * panel-card. Inside the existing .panel-card, so vertical rhythm uses
+ * the same spacing tokens as the surrounding sections. */
+.we-usage-breakdown-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.we-usage-breakdown-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-usage-breakdown-chip {
+  border: 1px solid var(--we-line);
+  background: transparent;
+  color: var(--we-text-2);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.we-usage-breakdown-chip:hover {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-usage-breakdown-chip--active {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-usage-breakdown-list {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-usage-breakdown-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface);
+  font-size: 12px;
+}
+
+.we-usage-breakdown-label {
+  font-weight: 500;
+  color: var(--we-text-1);
+}
+
+.we-usage-breakdown-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-usage-breakdown-stats > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.we-usage-breakdown-fallback {
+  color: var(--we-warning);
+}
+
+.we-usage-breakdown-more {
+  display: flex;
+  justify-content: center;
+}
+
 .we-diff-tag {
   display: inline-flex;
   align-items: center;

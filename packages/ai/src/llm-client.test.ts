@@ -383,7 +383,7 @@ describe("usage recorder fires on success and failure", () => {
     const client = createLlmClient(cfg);
     await client.generateText({
       prompt: "hi",
-      context: { orgId: "org-1", userId: "u-1", runId: "r-1", nodeId: "n-1" },
+      context: { orgId: "org-1", userId: "u-1", runId: "r-1", nodeId: "n-1", workflowId: "wf-1" },
     });
     // Allow the void-fired recorder to settle (microtask flush).
     await Promise.resolve();
@@ -396,6 +396,7 @@ describe("usage recorder fires on success and failure", () => {
       userId: "u-1",
       runId: "r-1",
       nodeId: "n-1",
+      workflowId: "wf-1",
       provider: "openai",
       model: "gpt-4o-mini",
       inputTokens: 100,

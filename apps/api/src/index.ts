@@ -58,7 +58,13 @@ import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetrics
 import { recordRecoveryFeedback, summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { composeFeedbackHint, RecoveryFeedbackBodySchema } from "./ai-patch-feedback";
 import "@janusly/engine/src/subworkflow";
-import { getUsageSummary } from "@janusly/engine/src/billing";
+import {
+  DEFAULT_USAGE_WINDOW_DAYS,
+  getUsageBreakdown,
+  getUsageSummary,
+  isUsageBreakdownDimension,
+  type UsageBreakdownDimension,
+} from "@janusly/engine/src/billing";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { createLlmClient, explainRun, resolveLlmConfig, setUsageRecorder, suggestWorkflowImprovement, suggestWorkflowPatch, RUN_EVENT_PROMPT_CAP, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
 import {
@@ -422,8 +428,33 @@ export const routes: Route[] = [
     handler: async ({ res }) => sendJson(res, listTools()) },
   { method: "GET", match: "/templates",
     handler: async ({ res }) => sendJson(res, workflowTemplates) },
-  { method: "GET", match: "/billing/usage",
-    handler: async ({ res, auth }) => sendJson(res, await getUsageSummary(auth.orgId)) },
+  // Usage reporting. Default response is the existing flat
+  // `Record<metric, quantity>` for back-compat. When the caller passes
+  // `?breakdown=provider,model,mode,day,node,workflow` (any combination of the
+  // closed-enum dimensions), the response also includes a `breakdown`
+  // array of per-bucket aggregates (token totals, call count, fallback
+  // count, costUsd, latency p50/p95/avg). Both paths read the same
+  // bounded 30-day / 10k-row slice — the unbounded-scan invariant
+  // stays intact.
+  { method: "GET", match: (url) => url === "/billing/usage" || url.startsWith("/billing/usage?"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const raw = url.searchParams.get("breakdown");
+      const tokens = (raw ?? "").split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      const dimensions: UsageBreakdownDimension[] = [];
+      for (const token of tokens) {
+        if (!isUsageBreakdownDimension(token)) {
+          return sendJson(res, { error: `Unknown breakdown dimension: ${token}` }, 400);
+        }
+        if (!dimensions.includes(token)) dimensions.push(token);
+      }
+      const summary = await getUsageSummary(auth.orgId);
+      if (dimensions.length === 0) {
+        return sendJson(res, summary);
+      }
+      const breakdown = await getUsageBreakdown(auth.orgId, dimensions);
+      return sendJson(res, { summary, breakdown, windowDays: DEFAULT_USAGE_WINDOW_DAYS });
+    } },
   { method: "GET", match: "/org/config",
     handler: async ({ res, auth }) => sendJson(res, { config: await listOrgConfig(auth.orgId) }) },
   { method: "POST", match: "/org/config", role: "admin",
@@ -1029,10 +1060,13 @@ export const routes: Route[] = [
         });
       }
       try {
+        const explainWorkflowId = (workflow && typeof workflow === "object" && "id" in workflow && typeof (workflow as { id?: unknown }).id === "string")
+          ? (workflow as { id: string }).id
+          : undefined;
         const result = await llm.generateText({
           prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
           modelHint: modelOverride,
-          context: { orgId: auth.orgId, userId: auth.userId },
+          context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
         });
         await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, explanation: result.text });
@@ -1095,7 +1129,7 @@ export const routes: Route[] = [
           system: REVIEW_WORKFLOW_SYSTEM_PROMPT,
           prompt: JSON.stringify(workflow),
           modelHint: modelOverride,
-          context: { orgId: auth.orgId, userId: auth.userId },
+          context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
         });
         const review = mergeReviewFindings(
           sanitizeAiReview(result.object as ReviewFindings, workflow),
@@ -1218,6 +1252,7 @@ export const routes: Route[] = [
         failedNodeId: dlq.nodeId,
         errorJson: safePersistPayload(dlq.errorJson ?? null),
         extraContext: Object.keys(extraContext).length > 0 ? extraContext : undefined,
+        context: { orgId: auth.orgId, userId: auth.userId, workflowId: failingWorkflowId ?? undefined },
         // Pass every event payload through the persistence chokepoint
         // before it leaves the API boundary. `safe-persist` was applied at
         // write time which key-redacted known sensitive keys, but free-form
@@ -1384,6 +1419,7 @@ export const routes: Route[] = [
         workflow,
         focus,
         model: modelOverride,
+        context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
       });
 
       // Fan-out validation: each suggestion's `patchedWorkflowJson` must
@@ -1508,13 +1544,22 @@ export const routes: Route[] = [
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
 
+      // Resolve the workflow id via the same join `getRunMetadata` uses
+      // so the recorder can attribute usage rows to the workflow. The
+      // join is multi-tenant scoped via the prior `run[0].orgId` check.
+      const versionRow = await db
+        .select({ workflowId: workflowVersions.workflowId })
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.id, run[0].workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
+      const explainRunWorkflowId = versionRow[0]?.workflowId ?? undefined;
+
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
         llm,
         run: run[0],
         events,
         question: questionText,
-        context: { orgId: auth.orgId, userId: auth.userId, runId },
+        context: { orgId: auth.orgId, userId: auth.userId, runId, workflowId: explainRunWorkflowId },
       });
       await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
         mode: result.mode,
