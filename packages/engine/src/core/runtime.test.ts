@@ -497,3 +497,89 @@ describe('enqueueReadyNodes — cancellation head guard', () => {
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
   })
 })
+
+describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
+  // Three-branch fan-out workflow:  fork → (a, b, c) → merge
+  // Lets us pin: the merge only queues when ALL branch predecessors are
+  // succeeded; the merge does not queue when even one branch is still
+  // pending; and the merge does not queue when one branch terminally
+  // failed (the AC's "one branch failing fails the whole join").
+  const fanInWorkflow = {
+    dslVersion: '1.0' as const,
+    nodes: [
+      { id: 'fork', type: 'parallel_fork' as const, config: { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] } },
+      { id: 'a', type: 'noop' as const, config: {} },
+      { id: 'b', type: 'noop' as const, config: {} },
+      { id: 'c', type: 'noop' as const, config: {} },
+      { id: 'merge', type: 'join' as const, config: { sources: { a: 'a', b: 'b', c: 'c' } } },
+    ],
+    edges: [
+      { from: 'fork', to: 'a' },
+      { from: 'fork', to: 'b' },
+      { from: 'fork', to: 'c' },
+      { from: 'a', to: 'merge' },
+      { from: 'b', to: 'merge' },
+      { from: 'c', to: 'merge' },
+    ],
+  }
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it('queues merge exactly once when all branches have succeeded', async () => {
+    const store = makeStore({
+      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
+        if (nodeId === 'fork') return 'succeeded'
+        if (nodeId === 'a' || nodeId === 'b' || nodeId === 'c') return 'succeeded'
+        if (nodeId === 'merge') return 'pending'
+        return 'pending'
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: fanInWorkflow })
+
+    expect(queued).toBe(1)
+    expect(store.tryClaimNodeForQueue).toHaveBeenCalledWith('r1', 'merge', 1)
+    expect(queue.enqueueNode).toHaveBeenCalledTimes(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ runId: 'r1', node: expect.objectContaining({ id: 'merge' }) }))
+  })
+
+  it('does NOT queue merge while one branch is still running (pending fan-in)', async () => {
+    const store = makeStore({
+      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
+        if (nodeId === 'fork') return 'succeeded'
+        if (nodeId === 'a' || nodeId === 'b') return 'succeeded'
+        if (nodeId === 'c') return 'running'
+        if (nodeId === 'merge') return 'pending'
+        return 'pending'
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    await runtime.enqueueReadyNodes({ runId: 'r1', workflow: fanInWorkflow })
+
+    expect(store.tryClaimNodeForQueue).not.toHaveBeenCalledWith('r1', 'merge', expect.anything())
+    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'merge' }) }))
+  })
+
+  it('does NOT queue merge when one branch failed terminally (join never runs)', async () => {
+    const store = makeStore({
+      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
+        if (nodeId === 'fork') return 'succeeded'
+        if (nodeId === 'a' || nodeId === 'b') return 'succeeded'
+        if (nodeId === 'c') return 'failed'
+        if (nodeId === 'merge') return 'pending'
+        return 'pending'
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    await runtime.enqueueReadyNodes({ runId: 'r1', workflow: fanInWorkflow })
+
+    expect(store.tryClaimNodeForQueue).not.toHaveBeenCalledWith('r1', 'merge', expect.anything())
+    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'merge' }) }))
+  })
+})

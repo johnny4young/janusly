@@ -43,6 +43,7 @@ import { fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
 import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
+import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 
 loadRootEnv();
 
@@ -556,4 +557,14 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // The wake-up is handled by a delayed BullMQ job dispatched in `worker.ts`
   // on `job.name === "wait-resume"`.
   wait_until: waitUntilExecutor,
+
+  // parallel_fork / join — DAG fan-out / fan-in pair. Both are declarative
+  // shells over the existing runtime semantics: the fan-out is "this node
+  // has multiple outgoing edges", the fan-in is the runtime's existing
+  // ALL-AND readiness check (every predecessor must be `succeeded` or
+  // `skipped` before the join queues), and the atomic single-claim of the
+  // join is the existing `tryClaimNodeForQueue` UPDATE...WHERE...pending
+  // guard. The executors here only validate and shape outputs.
+  parallel_fork: parallelForkExecutor,
+  join: joinExecutor,
 };
