@@ -14,8 +14,9 @@
  *   wrapping it).
  *
  * Invariants:
- * - One process-wide Redis pool per engine process. Don't add a second
- *   ioredis client for ad-hoc commands; route through the adapters.
+ * - One process-wide BullMQ Redis pool per engine process. Do not reuse this
+ *   connection for request-path/ad-hoc commands; those need bounded retry
+ *   clients such as `rate-limit-redis.ts`.
  * - `removeOnComplete: 1000` keeps the most recent thousand successful jobs
  *   for debugging while bounding memory.
  */

@@ -33,6 +33,9 @@ import { fetchHttpTarget } from "./http-policy";
 import { filterCsv, parseCsv, stringifyCsv } from "./csv";
 import { parseIsoDuration } from "./iso-duration";
 import { evaluateJsonJq, parseJsonJqQuery } from "./json-jq";
+import { getMailer } from "./mailer";
+import { getEngineRateLimiter } from "./rate-limit";
+import { getEmailUsageRecorder } from "./email-usage";
 
 /**
  * Public-facing tool metadata returned by `listTools()` for the AI Studio.
@@ -56,6 +59,25 @@ export type ToolSchema = {
  * `z.object({...})` schemas gives the executor a fully-typed `input` and a
  * type-checked `Promise<output>`.
  */
+/**
+ * Per-call execution context carrying engine-side identity bits that
+ * write-side tools need (rate-limit + usage-record attribution). Pure
+ * read-side tools (text / json / csv / time / crypto / json.pick)
+ * ignore the field. Optional throughout so unit tests can call
+ * `executeTool(name, input, context)` without threading mocks.
+ */
+export type ToolExecutionContext = {
+  orgId?: string;
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+  email?: {
+    provider?: string;
+    from?: string;
+    rateLimitPerMin?: number;
+  };
+};
+
 type ToolDefinition<
   TIn extends z.ZodTypeAny = z.ZodTypeAny,
   TOut extends z.ZodTypeAny = z.ZodTypeAny,
@@ -68,6 +90,7 @@ type ToolDefinition<
   execute: (
     input: z.infer<TIn>,
     context: Record<string, unknown>,
+    executionContext: ToolExecutionContext,
   ) => Promise<z.infer<TOut>>;
   /**
    * True when this tool can mutate external state and should be skipped
@@ -349,7 +372,166 @@ function isPlainObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function envPositiveInt(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) return fallback;
+  return Math.floor(value);
+}
+
+/**
+ * Fires the registered email-usage recorder, swallowing any failure so
+ * a recorder bug can't break the `email.send` tool path. Skipped when
+ * no recorder is registered (unit tests).
+ */
+async function fireEmailRecorder(input: {
+  orgId: string;
+  executionContext: ToolExecutionContext;
+  to: string;
+  from: string;
+  provider: "resend" | "sendgrid" | "noop";
+  providerMessageId?: string;
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+}): Promise<void> {
+  const recorder = getEmailUsageRecorder();
+  if (!recorder) return;
+  try {
+    await recorder({
+      orgId: input.orgId,
+      runId: input.executionContext.runId,
+      nodeId: input.executionContext.nodeId,
+      workflowId: input.executionContext.workflowId,
+      to: input.to,
+      from: input.from,
+      provider: input.provider,
+      providerMessageId: input.providerMessageId,
+      ok: input.ok,
+      error: input.error,
+      latencyMs: input.latencyMs,
+    });
+  } catch {
+    // Telemetry must never break the tool. Drop silently.
+  }
+}
+
+const emailSendInput = z.object({
+  /** Recipient email address. v1 ships single-recipient only; multi-to lands when the AC asks. */
+  to: z.string().min(1),
+  /**
+   * Sender email address. When omitted, the tool falls back to
+   * `process.env.JANUSLY_MAILER_FROM` at execute time. Resend's
+   * sandbox sender is `onboarding@resend.dev`; SendGrid requires a
+   * DNS-verified domain.
+   */
+  from: z.string().min(1).optional(),
+  /** Subject line. Capped at RFC 5322's 998-char line length. */
+  subject: z.string().min(1).max(998),
+  /** Plain-text body. Required when `html` is not supplied. */
+  text: z.string().max(200_000).optional(),
+  /** HTML body. Required when `text` is not supplied. */
+  html: z.string().max(500_000).optional(),
+  /**
+   * Provider metadata: Resend `tags`, SendGrid `custom_args`. Kept
+   * intentionally small because it is copied into outbound provider
+   * payloads and billing telemetry.
+   */
+  metadata: z.record(z.string().min(1).max(64), z.string().max(256))
+    .refine((value) => Object.keys(value).length <= 20, {
+      message: "email.send metadata supports at most 20 entries",
+    })
+    .optional(),
+}).refine(
+  (input) => Boolean(input.text || input.html),
+  { message: "email.send requires `text` or `html` (or both)." },
+);
+
+const emailSendOutput = z.object({
+  /** True iff the provider accepted the email for delivery. */
+  ok: z.boolean(),
+  /** Which mailer handled the call. `"noop"` when no API key was configured. */
+  provider: z.enum(["resend", "sendgrid", "noop"]),
+  /** Provider-assigned id; populated on success. */
+  providerMessageId: z.string().optional(),
+  /** Failure reason; populated when `ok === false`. Mirrors the AGENTS.md AI-fallback contract for write-side tools. */
+  error: z.string().optional(),
+});
+
 const tools = {
+  "email.send": defineTool({
+    name: "email.send",
+    description: "Send a transactional email via the configured mailer (Resend or SendGrid).",
+    inputSchema: emailSendInput,
+    outputSchema: emailSendOutput,
+    inputExample: { to: "user@example.com", subject: "Hello", text: "Body of the email." },
+    writeSide: true,
+    async execute(input, _context, executionContext) {
+      const start = Date.now();
+      const orgId = executionContext.orgId;
+      const limiter = getEngineRateLimiter();
+      const rateLimitPerMin = executionContext.email?.rateLimitPerMin
+        ?? envPositiveInt("JANUSLY_EMAIL_RATE_LIMIT_PER_MIN", 100);
+
+      // Per-org rate gate. The injected limiter throws when over
+      // limit; the tool wrapper converts the throw to a clean
+      // `{ ok: false, error }` envelope so the AI-fallback contract
+      // holds and the workflow run doesn't fail.
+      if (orgId && limiter) {
+        try {
+          await limiter("email.send", orgId, { windowMs: 60_000, max: rateLimitPerMin });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : "Rate limit exceeded";
+          await fireEmailRecorder({
+            orgId,
+            executionContext,
+            to: input.to,
+            from: input.from ?? executionContext.email?.from ?? process.env.JANUSLY_MAILER_FROM ?? "onboarding@resend.dev",
+            provider: "noop",
+            ok: false,
+            error,
+            latencyMs: Date.now() - start,
+          });
+          return { ok: false, provider: "noop" as const, error };
+        }
+      }
+
+      const from = input.from ?? executionContext.email?.from ?? process.env.JANUSLY_MAILER_FROM ?? "onboarding@resend.dev";
+      const mailer = getMailer(executionContext.email?.provider);
+      const result = await mailer.send({
+        to: input.to,
+        from,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+        metadata: input.metadata,
+      });
+      const latencyMs = Date.now() - start;
+
+      // Best-effort audit row. Wrapped in try/catch inside the helper
+      // so a recorder failure can't break the tool path. Skipped when
+      // there's no orgId (unit tests, ad-hoc paths).
+      if (orgId) {
+        await fireEmailRecorder({
+          orgId,
+          executionContext,
+          to: input.to,
+          from,
+          provider: result.provider,
+          providerMessageId: result.ok ? result.providerMessageId : undefined,
+          ok: result.ok,
+          error: result.ok ? undefined : result.error,
+          latencyMs,
+        });
+      }
+
+      if (result.ok) {
+        return { ok: true, provider: result.provider, providerMessageId: result.providerMessageId };
+      }
+      return { ok: false, provider: result.provider, error: result.error };
+    },
+  }),
   "http.request": defineTool({
     name: "http.request",
     description: "Make an HTTP request to an external API.",
@@ -771,6 +953,7 @@ export async function executeTool(
   name: string,
   input: unknown,
   context: Record<string, unknown>,
+  executionContext: ToolExecutionContext = {},
 ): Promise<Record<string, unknown>> {
   const tool = tools[name as RegisteredTool];
   if (!tool) {
@@ -788,9 +971,14 @@ export async function executeTool(
   // input shape — impossible to satisfy with one parsed value. The runtime
   // safety comes from `parsedInput` matching exactly this tool's schema, so
   // casting to the executor's expected shape is sound.
-  const result = await (tool.execute as (input: unknown, context: Record<string, unknown>) => Promise<unknown>)(
+  const result = await (tool.execute as (
+    input: unknown,
+    context: Record<string, unknown>,
+    executionContext: ToolExecutionContext,
+  ) => Promise<unknown>)(
     parsedInput.data,
     context,
+    executionContext,
   );
 
   // Output validation catches executor drift early. A misbehaving tool is a

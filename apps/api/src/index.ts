@@ -73,7 +73,9 @@ import {
   listOrgConfig,
   upsertOrgConfig,
 } from "@janusly/data/src/orgConfigRepo";
-import { recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
+import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { requireAuth, type AuthContext } from "./auth";
 import { isRole, requireRole } from "./permissions";
@@ -2104,5 +2106,22 @@ await assertMigrationsApplied();
 // Register the usage_events writer once at boot. Every LLM client call fires
 // it fire-and-forget through the provider-neutral AI package.
 setUsageRecorder(recordUsage);
+
+// Inject the Redis-backed rate limiter into the engine for write-side
+// tools (today: `email.send`). The engine can't import from `apps/api`
+// directly without inverting the dependency graph; this DI seam is the
+// bridge. Adapter shape: the engine signs `(bucket, orgId, options)`
+// while `enforceRateLimit` expects `(key, { name, windowMs, max })` —
+// the bucket name namespaces the Redis key, `orgId` is the per-tenant
+// counter key. Same fail-open Redis-blip behavior as the LLM rate gate.
+setEngineRateLimiter(async (bucket, orgId, options) => {
+  await enforceRateLimit(orgId, { name: bucket, windowMs: options.windowMs, max: options.max });
+});
+
+// Mirror of `setUsageRecorder` for the `email.send` tool. Every send
+// (success OR failure) writes a `usage_events` row with `metric:
+// "email.sent"`, surfacing in the existing breakdown UI without
+// changes.
+setEmailUsageRecorder(recordEmailUsage);
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));

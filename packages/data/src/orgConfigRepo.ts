@@ -4,7 +4,8 @@
  * The process-level `.env` still owns infrastructure and secrets
  * (`DATABASE_URL`, `REDIS_URL`, provider API keys). This table is for
  * org-scoped runtime choices that can safely vary by tenant: LLM defaults,
- * AI limits, outbound HTTP bounds, and workflow execution policies.
+ * AI limits, outbound HTTP bounds, email delivery posture, and workflow
+ * execution policies.
  *
  * Used by:
  * - `apps/api/src/index.ts` — `GET /org/config` and `POST /org/config`.
@@ -55,13 +56,18 @@ export type OrgConfigSnapshot = {
     maxResponseBytes: number;
     maxRedirects: number;
   };
+  email: {
+    provider: string;
+    from: string;
+    rateLimitPerMin: number;
+  };
   runs: {
     requireSavedWorkflow: boolean;
     subworkflowMaxDepth: number;
   };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "runs"] as const;
+const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs"] as const;
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -155,6 +161,32 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 5,
     envKeys: ["JANUSLY_HTTP_MAX_REDIRECTS"],
     min: 0,
+  },
+  {
+    key: "email.provider",
+    category: "email",
+    description: "Default mailer provider for this tenant. Provider API keys still come from env or secret management.",
+    valueType: "string",
+    defaultValue: "noop",
+    envKeys: ["JANUSLY_MAILER_PROVIDER"],
+    allowedValues: ["resend", "sendgrid", "noop"],
+  },
+  {
+    key: "email.from",
+    category: "email",
+    description: "Default sender address for email.send when the workflow input omits from.",
+    valueType: "string",
+    defaultValue: "onboarding@resend.dev",
+    envKeys: ["JANUSLY_MAILER_FROM"],
+  },
+  {
+    key: "email.rateLimitPerMin",
+    category: "email",
+    description: "Per-org email.send limit per minute.",
+    valueType: "number",
+    defaultValue: 100,
+    envKeys: ["JANUSLY_EMAIL_RATE_LIMIT_PER_MIN"],
+    min: 1,
   },
   {
     key: "runs.requireSavedWorkflow",
@@ -315,6 +347,11 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       maxResponseBytes: readNumber(values, "http.maxResponseBytes"),
       maxRedirects: readNumber(values, "http.maxRedirects"),
     },
+    email: {
+      provider: readString(values, "email.provider"),
+      from: readString(values, "email.from"),
+      rateLimitPerMin: readNumber(values, "email.rateLimitPerMin"),
+    },
     runs: {
       requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
       subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
@@ -339,6 +376,9 @@ export function applyOrgConfigToEnv(
     JANUSLY_HTTP_TIMEOUT_MS: String(config.http.timeoutMs),
     JANUSLY_HTTP_MAX_RESPONSE_BYTES: String(config.http.maxResponseBytes),
     JANUSLY_HTTP_MAX_REDIRECTS: String(config.http.maxRedirects),
+    JANUSLY_MAILER_PROVIDER: config.email.provider,
+    JANUSLY_MAILER_FROM: config.email.from,
+    JANUSLY_EMAIL_RATE_LIMIT_PER_MIN: String(config.email.rateLimitPerMin),
     JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
     JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
   };
