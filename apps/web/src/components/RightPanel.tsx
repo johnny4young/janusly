@@ -583,6 +583,36 @@ function QuickConfigEditor({
     )
   }
 
+  if (type === 'parallel_fork') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <JsonConfigField
+          scope={nodeId}
+          label="Branches"
+          value={Array.isArray(config.branches) ? config.branches : []}
+          onChange={value => patch({ branches: value })}
+        />
+        <p className="helper-text">2-10 entries. Each branch is <code>{'{ "label": "name", "description"?: "what it computes" }'}</code>. Wire one outgoing edge per branch in the canvas; the matching <code>join</code> downstream merges results by label.</p>
+      </section>
+    )
+  }
+
+  if (type === 'join') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <JsonConfigField
+          scope={nodeId}
+          label="Branch sources"
+          value={asJsonObject(config.sources)}
+          onChange={value => patch({ sources: value })}
+        />
+        <p className="helper-text"><code>{'{ "<label>": "<predecessor_node_id>" }'}</code>. Output is <code>{'{ branches: { <label>: <predecessor.output> } }'}</code>. Every predecessor id must be a node that actually feeds this join.</p>
+      </section>
+    )
+  }
+
   return (
     <section className="quick-config">
       <div className="section-kicker">Quick setup</div>

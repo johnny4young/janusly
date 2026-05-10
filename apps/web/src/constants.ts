@@ -46,6 +46,8 @@ export const nodePresets: Record<string, JsonObject> = {
   },
   subworkflow: { workflowId: '' },
   wait_until: { duration: 'P1D' },
+  parallel_fork: { branches: [{ label: 'a' }, { label: 'b' }] },
+  join: { sources: { a: '', b: '' } },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -69,6 +71,8 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   multi_agent: { label: 'Agent team', helper: 'Coordinate multiple agents' },
   subworkflow: { label: 'Call workflow', helper: 'Run another saved workflow as a step' },
   wait_until: { label: 'Wait', helper: 'Pause the run for an ISO 8601 duration' },
+  parallel_fork: { label: 'Fan out', helper: 'Run named branches in parallel' },
+  join: { label: 'Merge branches', helper: 'Gather labelled outputs from a fan-out' },
 }
 
 /** Human label for a node type (falls back to the raw id with `_` → space). */
@@ -101,6 +105,16 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
   if (type === 'noop') return 'No setup needed'
   if (type === 'subworkflow') return readString(config.workflowId) ?? 'Pick a saved workflow'
   if (type === 'wait_until') return readString(config.duration) ?? 'Set an ISO 8601 duration'
+  if (type === 'parallel_fork') {
+    const branches = Array.isArray(config.branches) ? config.branches.length : 0
+    return branches > 0 ? `${branches} branch${branches === 1 ? '' : 'es'}` : 'Add at least 2 branches'
+  }
+  if (type === 'join') {
+    const sources = config.sources && typeof config.sources === 'object' && !Array.isArray(config.sources)
+      ? Object.keys(config.sources as Record<string, unknown>).length
+      : 0
+    return sources > 0 ? `Merging ${sources} branch${sources === 1 ? '' : 'es'}` : 'Map branches to predecessor nodes'
+  }
   return 'Review step settings'
 }
 

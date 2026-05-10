@@ -57,6 +57,8 @@ export const nodeTypeValues = [
   "noop",
   "subworkflow",
   "wait_until",
+  "parallel_fork",
+  "join",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

@@ -17,6 +17,7 @@
 
 import { WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
+import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { validateToolInput } from "./tool-registry";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
@@ -96,6 +97,28 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
       }
     }
     if (node.type === "multi_agent" && (!Array.isArray(node.config.agents) || node.config.agents.length === 0)) issues.push({ code: "multi_agent_missing_agents", message: "Multi-agent node requires at least one agent", nodeId: node.id });
+    if (node.type === "parallel_fork") {
+      try {
+        resolveParallelForkBranches(node.config);
+      } catch (err) {
+        issues.push({
+          code: "parallel_fork_invalid_branches",
+          message: err instanceof Error ? err.message : "parallel_fork node has invalid config.branches",
+          nodeId: node.id,
+        });
+      }
+    }
+    if (node.type === "join") {
+      try {
+        resolveJoinSources(node.config);
+      } catch (err) {
+        issues.push({
+          code: "join_invalid_sources",
+          message: err instanceof Error ? err.message : "join node has invalid config.sources",
+          nodeId: node.id,
+        });
+      }
+    }
     if (node.type === "router" || node.type === "router_llm") {
       // Router nodes feed `config.candidates` into the decision engine, which
       // indexes by `nodeId`. The runtime accepts a legacy `id` field for
