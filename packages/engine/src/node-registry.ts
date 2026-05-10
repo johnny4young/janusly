@@ -135,6 +135,19 @@ function withHttpToolDefaults(
   return next;
 }
 
+function dryRunToolSkipPayload(tool: string, input: unknown): Record<string, unknown> | null {
+  if (!isToolWriteSide(tool)) return null;
+  const inputObj = (input ?? {}) as Record<string, unknown>;
+  const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
+  const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
+  if (isHttpRead) return null;
+  return {
+    reason: "write-side tool skipped in validation mode",
+    tool,
+    method: tool === "http.request" ? method : undefined,
+  };
+}
+
 async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "agent") {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
@@ -187,6 +200,26 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
       return { memory: summarizedMemory, steps, finalAnswer: (plan as any).finalAnswer, reflection: lastReflection };
     }
 
+    const toolInput = withHttpToolDefaults(plan.tool, plan.input, orgConfig);
+    const dryRunSkip = ctx.dryRun ? dryRunToolSkipPayload(plan.tool, toolInput) : null;
+    if (dryRunSkip) {
+      const result = { tool: plan.tool, dryRun: true, skipped: true };
+      await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", {
+        ...dryRunSkip,
+        agent: agentConfig.name,
+        iteration: i,
+      });
+      await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.completed`, {
+        agent: agentConfig.name,
+        iteration: i,
+        tool: plan.tool,
+        result,
+      });
+      steps.push({ iteration: i, plan, result, reflection: lastReflection });
+      lastResult = result;
+      continue;
+    }
+
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.started`, {
       agent: agentConfig.name,
       iteration: i,
@@ -195,7 +228,18 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
     });
 
     const result = await withTimeout(
-      executeTool(plan.tool, withHttpToolDefaults(plan.tool, plan.input, orgConfig), ctx.context),
+      executeTool(
+        plan.tool,
+        toolInput,
+        ctx.context,
+        {
+          orgId: ctx.orgId,
+          runId: ctx.runId,
+          nodeId: ctx.nodeId,
+          workflowId: ctx.workflowId ?? undefined,
+          email: orgConfig.email,
+        },
+      ),
       agentConfig.timeoutMs,
       `${agentConfig.name ?? "agent"}.${plan.tool}`
     );
@@ -316,8 +360,11 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
+    const orgConfig = tool === "http.request" || tool === "email.send"
+      ? await getOrgConfigSnapshot(ctx.orgId)
+      : null;
     const toolInput = tool === "http.request"
-      ? withHttpToolDefaults(tool, mappedInput, await getOrgConfigSnapshot(ctx.orgId))
+      ? withHttpToolDefaults(tool, mappedInput, orgConfig!)
       : mappedInput;
 
     // In sandbox/validation mode, skip write-side tool invocations.
@@ -325,22 +372,20 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     // safe methods (GET / HEAD / OPTIONS) still execute so the validation
     // run can read state without mutating it; non-safe methods are
     // skipped to avoid double-charging external APIs.
-    if (ctx.dryRun && isToolWriteSide(tool)) {
-      const inputObj = (toolInput ?? {}) as Record<string, unknown>;
-      const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
-      const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
-      if (!isHttpRead) {
-        await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", {
-          reason: "write-side tool skipped in validation mode",
-          tool,
-          method: tool === "http.request" ? method : undefined,
-        });
-        return { status: "completed", output: { tool, dryRun: true, skipped: true } };
-      }
+    const dryRunSkip = ctx.dryRun ? dryRunToolSkipPayload(tool, toolInput) : null;
+    if (dryRunSkip) {
+      await appendEvent(ctx.runId, ctx.nodeId, "tool.dry_run.skipped", dryRunSkip);
+      return { status: "completed", output: { tool, dryRun: true, skipped: true } };
     }
 
     await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: toolInput });
-    const result = await executeTool(tool, toolInput, ctx.context);
+    const result = await executeTool(tool, toolInput, ctx.context, {
+      orgId: ctx.orgId,
+      runId: ctx.runId,
+      nodeId: ctx.nodeId,
+      workflowId: ctx.workflowId ?? undefined,
+      email: orgConfig?.email,
+    });
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };
   },
