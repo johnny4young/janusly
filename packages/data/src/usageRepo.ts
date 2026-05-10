@@ -24,6 +24,27 @@
 import { db, usageEvents } from "@janusly/db";
 import type { UsageRecord } from "@janusly/ai";
 
+/**
+ * Wire-shape for `email.send` usage rows. Mirrors
+ * `packages/engine/src/email-usage.ts:EmailUsageRecord` — the engine
+ * package can't be imported from `packages/data` without inverting
+ * the dependency graph, so the shape is duplicated here. Update both
+ * sites together if the row contract changes.
+ */
+type EmailUsageRecord = {
+  orgId: string;
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+  to: string;
+  from: string;
+  provider: "resend" | "sendgrid" | "noop";
+  providerMessageId?: string;
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+};
+
 export async function recordUsage(record: UsageRecord): Promise<void> {
   await db.insert(usageEvents).values({
     id: crypto.randomUUID(),
@@ -47,6 +68,39 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       workflowId: record.workflowId ?? null,
       mode: record.mode,
       aiError: record.aiError ?? null,
+    },
+  });
+}
+
+/**
+ * Sister writer for `email.send` tool calls. Same `usage_events` table
+ * (multi-tenant scope) but `metric: "email.sent"` and a different
+ * metadata shape — provider / providerMessageId / ok / error /
+ * recipient. The existing `getUsageBreakdown` aggregator picks these
+ * rows up automatically; the workflow-axis breakdown surfaces email
+ * cost per workflow without UI changes.
+ *
+ * Quantity is `1` (one email per row) — operators reading the flat
+ * summary see "12 email.sent" alongside the LLM token totals.
+ */
+export async function recordEmailUsage(record: EmailUsageRecord): Promise<void> {
+  await db.insert(usageEvents).values({
+    id: crypto.randomUUID(),
+    orgId: record.orgId,
+    userId: null,
+    runId: record.runId ?? null,
+    metric: "email.sent",
+    quantity: 1,
+    metadata: {
+      provider: record.provider,
+      to: record.to,
+      from: record.from,
+      providerMessageId: record.providerMessageId ?? null,
+      ok: record.ok,
+      error: record.error ?? null,
+      latencyMs: record.latencyMs,
+      nodeId: record.nodeId ?? null,
+      workflowId: record.workflowId ?? null,
     },
   });
 }

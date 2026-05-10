@@ -22,7 +22,7 @@
  * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
- * - `usage_events` — billing telemetry (one row per LLM call through the shared LLM recorder).
+ * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
  * - `credentials`, `installed_plugins` — secret references and plugin
  *   manifests.
  * - `audit_logs` — append-only mutation log (`audit()` redacts sensitive

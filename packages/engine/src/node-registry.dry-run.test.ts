@@ -26,13 +26,20 @@ vi.mock('@janusly/data/src/orgConfigRepo', () => ({
   getOrgConfigSnapshot: vi.fn().mockResolvedValue({
     ai: { provider: 'openai', model: 'gpt-4o-mini', rateLimitPerMin: 60 },
     http: { timeoutMs: 30_000, maxResponseBytes: 1_000_000, maxRedirects: 5 },
+    email: { provider: 'noop', from: 'sender@example.com', rateLimitPerMin: 100 },
     runs: {},
   }),
   applyOrgConfigToEnv: vi.fn(),
 }))
 
+vi.mock('./memory', () => ({
+  getRunMemory: vi.fn().mockResolvedValue([]),
+  summarizeMemory: vi.fn(() => []),
+}))
+
 import { fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
+import { setMailerForTests, type MailerProvider } from './mailer'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
@@ -50,6 +57,7 @@ const baseCtx: Omit<NodeContext, 'config'> = {
 beforeEach(() => {
   fetchHttpTargetMock.mockReset()
   appendEventMock.mockReset()
+  setMailerForTests(null)
 })
 
 describe('http node — dryRun gating', () => {
@@ -186,5 +194,36 @@ describe('tool node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ tool: 'text.uppercase', result: { value: 'HI' } })
+  })
+})
+
+describe('agent node — dryRun gating', () => {
+  it('skips explicit write-side tools in dryRun mode', async () => {
+    const send = vi.fn(async () => ({ ok: true, provider: 'resend' as const, providerMessageId: 'msg-1' }))
+    setMailerForTests({ name: 'resend', send: send as MailerProvider['send'] })
+
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: true,
+      config: {
+        maxSteps: 1,
+        tool: 'email.send',
+        input: { to: 'u@e.com', subject: 'Hi', text: 'Hello', from: 's@e.com' },
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toMatchObject({
+      finalResult: { tool: 'email.send', dryRun: true, skipped: true },
+    })
+    expect(send).not.toHaveBeenCalled()
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'agent',
+      'tool.dry_run.skipped',
+      expect.objectContaining({ tool: 'email.send' }),
+    )
   })
 })
