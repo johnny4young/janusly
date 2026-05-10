@@ -84,6 +84,46 @@ describe('validateWorkflow', () => {
     expect(codes.filter(c => c === 'transform_missing_mapping').length).toBe(2)
   })
 
+  it('rejects malformed parallel_fork and join config before runtime execution', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'only' }] } },
+        { id: 'merge', type: 'join', config: { sources: { a: 'fork' } } },
+      ],
+      edges: [{ from: 'fork', to: 'merge' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'parallel_fork_invalid_branches',
+      nodeId: 'fork',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'join_invalid_sources',
+      nodeId: 'merge',
+    }))
+  })
+
+  it('accepts valid parallel_fork and join config at the structural validation layer', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b' } } },
+      ],
+      edges: [
+        { from: 'fork', to: 'a' },
+        { from: 'fork', to: 'b' },
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+      ],
+    })
+
+    expect(result.issues.find(issue => issue.code === 'parallel_fork_invalid_branches')).toBeUndefined()
+    expect(result.issues.find(issue => issue.code === 'join_invalid_sources')).toBeUndefined()
+  })
+
   it('accepts ai/agent/transform nodes when their required fields are present', () => {
     const result = validateWorkflow({
       nodes: [

@@ -92,6 +92,9 @@ export function checkWorkflowReadiness(workflow: Workflow): ReadinessResult {
     checkExternalRetry(node, issues);
     checkRawSecretsInConfig(node, issues);
     checkSensitiveAction(node, workflow, sensitiveAncestorCache, issues);
+    checkParallelForkPair(node, workflow, issues);
+    checkParallelForkJoinSourceCoverage(node, workflow, issues);
+    checkJoinSourcesReachable(node, workflow, issues);
   }
 
   if (!hasDeclaredOutputs(workflow)) {
@@ -234,6 +237,149 @@ function hasApprovalAncestor(
   }
   cache.set(nodeId, false);
   return false;
+}
+
+function checkParallelForkPair(
+  node: WorkflowNode,
+  workflow: Workflow,
+  issues: ReadinessIssue[],
+) {
+  if (node.type !== "parallel_fork") return;
+  if (hasJoinDownstream(node.id, workflow.edges, workflow.nodes)) return;
+  issues.push({
+    code: "fork_without_join_pair",
+    severity: "warn",
+    message: `Parallel-fork node "${node.id}" has no \`join\` node downstream. The workflow can run, but branch outputs won't be merged into a single labelled record.`,
+    nodeId: node.id,
+    suggestion: "Add a `join` node downstream of every branch so the merged outputs are addressable as `{{context.<join>.output.branches.<label>}}`.",
+  });
+}
+
+function checkJoinSourcesReachable(
+  node: WorkflowNode,
+  workflow: Workflow,
+  issues: ReadinessIssue[],
+) {
+  if (node.type !== "join") return;
+  const sources = (node.config as { sources?: unknown }).sources;
+  if (!isObject(sources)) return; // executor-time validation will catch the malformed shape
+  const predecessors = collectAncestors(node.id, workflow.edges);
+  for (const [label, predecessorId] of Object.entries(sources)) {
+    if (typeof predecessorId !== "string" || predecessorId.length === 0) continue;
+    if (predecessors.has(predecessorId)) continue;
+    issues.push({
+      code: "join_sources_unreachable",
+      severity: "fail",
+      message: `Join node "${node.id}" references predecessor "${predecessorId}" for branch "${label}", but that node is not reachable as an upstream of this join.`,
+      nodeId: node.id,
+      suggestion: `Add an edge from "${predecessorId}" to "${node.id}" (or update the source to a node that is actually a predecessor).`,
+    });
+  }
+}
+
+function checkParallelForkJoinSourceCoverage(
+  node: WorkflowNode,
+  workflow: Workflow,
+  issues: ReadinessIssue[],
+) {
+  if (node.type !== "parallel_fork") return;
+  const labels = readParallelForkLabels(node.config);
+  if (labels.length === 0) return; // executor-time validation catches malformed branches
+
+  const downstreamJoins = collectDownstreamJoinNodes(node.id, workflow.edges, workflow.nodes);
+  if (downstreamJoins.length === 0) return; // `fork_without_join_pair` reports this as a warn
+
+  for (const join of downstreamJoins) {
+    const sources = (join.config as { sources?: unknown }).sources;
+    if (!isObject(sources)) continue;
+    const coversEveryLabel = labels.every((label) => typeof sources[label] === "string" && sources[label].trim().length > 0);
+    if (coversEveryLabel) return;
+  }
+
+  const bestJoin = downstreamJoins
+    .map((join) => {
+      const sources = (join.config as { sources?: unknown }).sources;
+      const sourceLabels = isObject(sources) ? new Set(Object.keys(sources)) : new Set<string>();
+      return { join, sourceLabels, coveredCount: labels.filter((label) => sourceLabels.has(label)).length };
+    })
+    .sort((a, b) => b.coveredCount - a.coveredCount)[0];
+  const missing = labels.filter((label) => !bestJoin?.sourceLabels.has(label));
+  issues.push({
+    code: "fork_join_missing_branch_sources",
+    severity: "fail",
+    message: `Parallel-fork node "${node.id}" declares branch label${labels.length === 1 ? "" : "s"} ${labels.map((label) => `"${label}"`).join(", ")}, but no downstream join maps every label in \`config.sources\`${bestJoin ? ` (closest join: "${bestJoin.join.id}", missing: ${missing.map((label) => `"${label}"`).join(", ") || "none"})` : ""}.`,
+    nodeId: node.id,
+    suggestion: "Update the paired `join.config.sources` so it includes every declared fork branch label, e.g. `{ a: '<a_terminal_node>', b: '<b_terminal_node>' }`.",
+  });
+}
+
+/** True when at least one downstream node from `nodeId` is of type `join`. */
+function hasJoinDownstream(
+  nodeId: string,
+  edges: WorkflowEdge[],
+  nodes: WorkflowNode[],
+): boolean {
+  const visited = new Set<string>();
+  const stack = edges.filter((edge) => edge.from === nodeId).map((edge) => edge.to);
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const downstream = nodes.find((n) => n.id === id);
+    if (downstream?.type === "join") return true;
+    for (const edge of edges) {
+      if (edge.from === id) stack.push(edge.to);
+    }
+  }
+  return false;
+}
+
+function collectDownstreamJoinNodes(
+  nodeId: string,
+  edges: WorkflowEdge[],
+  nodes: WorkflowNode[],
+): WorkflowNode[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const joins: WorkflowNode[] = [];
+  const visited = new Set<string>();
+  const stack = edges.filter((edge) => edge.from === nodeId).map((edge) => edge.to);
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const downstream = nodeById.get(id);
+    if (downstream?.type === "join") joins.push(downstream);
+    for (const edge of edges) {
+      if (edge.from === id) stack.push(edge.to);
+    }
+  }
+  return joins;
+}
+
+/** Collect every transitive ancestor (predecessor) of `nodeId` via the edge graph. */
+function collectAncestors(nodeId: string, edges: WorkflowEdge[]): Set<string> {
+  const visited = new Set<string>();
+  const stack = edges.filter((edge) => edge.to === nodeId).map((edge) => edge.from);
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    for (const edge of edges) {
+      if (edge.to === id) stack.push(edge.from);
+    }
+  }
+  return visited;
+}
+
+function readParallelForkLabels(config: unknown): string[] {
+  if (!isObject(config) || !Array.isArray(config.branches)) return [];
+  return config.branches
+    .map((branch) => {
+      if (!isObject(branch) || typeof branch.label !== "string") return null;
+      const label = branch.label.trim();
+      return label.length > 0 ? label : null;
+    })
+    .filter((label): label is string => label !== null);
 }
 
 function hasDeclaredOutputs(workflow: Workflow): boolean {

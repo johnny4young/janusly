@@ -183,4 +183,139 @@ describe('checkWorkflowReadiness', () => {
     expect(optional.status).toBe('pass')
     expect(optional.issues).toEqual([])
   })
+
+  it('warns when a parallel_fork has no join downstream', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [
+        { from: 'fork', to: 'a' },
+        { from: 'fork', to: 'b' },
+      ],
+      outputs: { ok: 'yes' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'fork_without_join_pair',
+      severity: 'warn',
+      nodeId: 'fork',
+    }))
+  })
+
+  it('does not warn when a parallel_fork is paired with a join transitively downstream', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b' } } },
+      ],
+      edges: [
+        { from: 'fork', to: 'a' },
+        { from: 'fork', to: 'b' },
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+      ],
+      outputs: { ok: '{{context.merge.output.branches.a}}' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues.find((issue) => issue.code === 'fork_without_join_pair')).toBeUndefined()
+  })
+
+  it('fails when no downstream join maps every branch declared by a parallel_fork', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'c', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b' } } },
+      ],
+      edges: [
+        { from: 'fork', to: 'a' },
+        { from: 'fork', to: 'b' },
+        { from: 'fork', to: 'c' },
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+        { from: 'c', to: 'merge' },
+      ],
+      outputs: { ok: '{{context.merge.output.branches.a}}' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'fork_join_missing_branch_sources',
+      severity: 'fail',
+      nodeId: 'fork',
+    }))
+    expect(result.status).toBe('fail')
+  })
+
+  it('accepts a downstream join that maps every branch declared by a parallel_fork', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'fork', type: 'parallel_fork', config: { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'c', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b', c: 'c' } } },
+      ],
+      edges: [
+        { from: 'fork', to: 'a' },
+        { from: 'fork', to: 'b' },
+        { from: 'fork', to: 'c' },
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+        { from: 'c', to: 'merge' },
+      ],
+      outputs: { ok: '{{context.merge.output.branches.a}}' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues.find((issue) => issue.code === 'fork_join_missing_branch_sources')).toBeUndefined()
+  })
+
+  it('fails when a join references a predecessor that is not actually upstream', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        // The third "branch" — `c` — is not wired with an edge to merge.
+        { id: 'c', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b', c: 'c' } } },
+      ],
+      edges: [
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+      ],
+      outputs: { ok: '{{context.merge.output.branches.a}}' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    const failures = result.issues.filter((issue) => issue.code === 'join_sources_unreachable')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({
+      severity: 'fail',
+      nodeId: 'merge',
+    })
+    expect(failures[0]?.message).toContain('"c"')
+    expect(result.status).toBe('fail')
+  })
+
+  it('does not fail join_sources_unreachable when every source is wired to the join', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+        { id: 'merge', type: 'join', config: { sources: { a: 'a', b: 'b' } } },
+      ],
+      edges: [
+        { from: 'a', to: 'merge' },
+        { from: 'b', to: 'merge' },
+      ],
+      outputs: { ok: '{{context.merge.output.branches.a}}' },
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues.find((issue) => issue.code === 'join_sources_unreachable')).toBeUndefined()
+  })
 })
