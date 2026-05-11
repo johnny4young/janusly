@@ -279,18 +279,32 @@ describe("handleScheduleTrigger", () => {
     errSpy.mockRestore();
   });
 
-  it("self-heals when the entry has been deleted between scheduler and worker (removes the stale BullMQ scheduler)", async () => {
+  it("self-heals when the entry has been deleted between scheduler and worker (removes the actual BullMQ scheduler)", async () => {
     getScheduleEntryByIdMock.mockResolvedValueOnce(null);
 
     await handleScheduleTrigger({
       scheduleEntryId: "ghost",
-      orgId: "default",
-      workflowVersionId: "v1",
-      nodeId: "trigger",
-    });
+      orgId: "spoofed-org",
+      workflowVersionId: "spoofed-version",
+      nodeId: "spoofed-node",
+    }, "schedule:default:v1:trigger");
 
     expect(startRunMock).not.toHaveBeenCalled();
     expect(removeJobSchedulerMock).toHaveBeenCalledWith("schedule:default:v1:trigger");
+  });
+
+  it("does not trust stale payload hints when BullMQ did not provide a scheduler id", async () => {
+    getScheduleEntryByIdMock.mockResolvedValueOnce(null);
+
+    await handleScheduleTrigger({
+      scheduleEntryId: "ghost",
+      orgId: "victim-org",
+      workflowVersionId: "victim-version",
+      nodeId: "victim-trigger",
+    });
+
+    expect(startRunMock).not.toHaveBeenCalled();
+    expect(removeJobSchedulerMock).not.toHaveBeenCalled();
   });
 
   it("removes the BullMQ scheduler and skips when the entry is disabled (using the row's orgId, not the payload's)", async () => {

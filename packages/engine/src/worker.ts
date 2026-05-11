@@ -113,7 +113,7 @@ export const worker = new Worker(
       return;
     }
     if (job.name === "schedule-trigger") {
-      await handleScheduleTrigger(job.data);
+      await handleScheduleTrigger(job.data, job.repeatJobKey);
       return;
     }
     const { runId, node, workflow } = validateJobData(job.data);
