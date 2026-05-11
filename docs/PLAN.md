@@ -24,7 +24,7 @@ What's still missing to be "the one":
 4. **Memory is still mostly "events of this run".** No vector store, no cross-run knowledge, no RAG. Agents can't learn that "this customer always wants X."
 5. **RL is a counter, not a full policy.** `routing_stats` tracks pulls and rewards and affects router scoring, but there is no Thompson-sampling / UCB / contextual-bandit policy across route, model, prompt, and retry choices.
 6. **Recovery is real but feedback learning is next.** Janusly now proposes patches, previews diffs, validates in sandbox, applies across clusters, and rolls back. It still needs operator feedback capture, calibrated confidence, A/B testing, and broader structural patches.
-7. **Trigger surface is still narrow.** Manual run, webhook, approval, and replay cover the MVP. Production workflows need cron, file events, email, calendar, message queue, and SaaS event subscriptions.
+7. **Trigger surface is still narrow.** Manual run, cron schedules, webhook, approval, and replay cover the MVP. Production workflows still need file events, email/calendar/message-queue triggers, and SaaS event subscriptions.
 8. **Distribution surface is thin.** HTTP API + local MCP are enough for development, but customers will want Node/Python SDKs, webhook receiver helpers, release bundles, and Terraform.
 
 The plan is structured so each item below is independently shippable and individually adds value, even if the next ones never happen.
@@ -43,7 +43,7 @@ The plan is structured so each item below is independently shippable and individ
 
 ### Weaknesses (pivot points)
 
-- **Workflow expressiveness ceiling.** Subworkflows, workflow inputs/outputs, loops, approvals, and sandbox replay exist, but scheduled triggers, event subscriptions, parallel fan-out ergonomics, and richer human forms are still thin.
+- **Workflow expressiveness ceiling.** Subworkflows, workflow inputs/outputs, loops, approvals, scheduled triggers, and sandbox replay exist, but event subscriptions and richer human forms are still thin.
 - **AI is provider-neutral in code but Anthropic-only in posture.** The abstraction exists and every surface has fallback, but production support currently depends on Anthropic structured-output behavior. Multi-provider verification is intentionally deferred.
 - **Tool input contracts are typed, but not yet provider-native.** The in-tree registry validates Zod input/output schemas and exposes AI Studio metadata, but those definitions are not yet wired into provider-native tool-call APIs or external MCP tools.
 - **Memory is event-log scrolling.** The agent loop reads `getRunMemory(runId)` which returns ordered run events. Useful, but it's not "knowledge."
@@ -311,6 +311,7 @@ When the LLM drafts a workflow, the system prompt now includes the live tool cat
 | `ai` | Single-shot prompt. | Add streaming output, citation back to context inputs, structured-output mode. |
 | `webhook` | Waits for external resume. | Add timeout-with-fallback, signed webhook payloads, replay protection. |
 | `approval` | Waits for human. | Add SLAs, reminder schedule, role-restricted approvers, mobile push. |
+| `schedule` | Cron trigger persisted through `schedule_entries` and BullMQ schedulers. | Add timezone presets, next-fire previews, and natural-language interval authoring. |
 | `noop` | Useful as start/end markers. | Keep. |
 
 ### 6.2 Refactor
@@ -324,7 +325,6 @@ When the LLM drafts a workflow, the system prompt now includes the live tool cat
 
 | Node | Why |
 | ---- | --- |
-| `schedule` | Cron-style recurring trigger. Today there's only manual run + webhook. |
 | `event_subscribe` | Subscribe to an internal event (run completed, DLQ entry created, audit log) — enables workflow-of-workflows. |
 | `subworkflow` | Call another workflow by id with input mapping. Reuse without duplication. |
 | `human_form` | Pause and collect structured input from a human (not just approve/reject). Maps to a generated React form in the UI. |

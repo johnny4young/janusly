@@ -312,22 +312,73 @@ export const auditLogs = pgTable(
 );
 
 /**
- * Operator → system feedback channel for the recovery loop.
+ * Cron-driven trigger entries for `schedule` nodes.
+ *
+ * One row per `(orgId, workflowVersionId, nodeId)` whose `schedule` node
+ * the operator authored. The companion BullMQ repeatable job (keyed by a
+ * deterministic id derived from the same triple) is the trigger; this row
+ * is the persistent source of truth so cold-starts and Redis losses can
+ * idempotently re-register the job.
+ *
+ * Multi-tenant scope: every row carries `org_id`; the unique index is
+ * `(org_id, workflow_version_id, node_id)` so concurrent saves of the same
+ * workflow version never duplicate. The secondary indexes support
+ * per-org enabled and per-workflow lookups; worker cold-start replay is
+ * the deliberate process-level scan of enabled rows across every org.
+ *
+ * `enabled` is the pause mechanism: re-saving the workflow with
+ * `schedule.config.enabled = false` flips this flag and removes the
+ * BullMQ job. `enabled = true` re-registers it.
+ *
+ * `lastRunAt` / `lastRunId` are bookkeeping for the operator (when did
+ * the schedule last fire? which run did it spawn?). They're not load-
+ * bearing for any trigger logic — the BullMQ repeatable-jobs metadata
+ * is the authoritative "next fire" time.
+ */
+export const scheduleEntries = pgTable(
+  "schedule_entries",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    workflowVersionId: text("workflow_version_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    cronExpression: text("cron_expression").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    lastRunId: text("last_run_id"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("schedule_entries_org_version_node_idx").on(
+      table.orgId,
+      table.workflowVersionId,
+      table.nodeId,
+    ),
+    index("schedule_entries_org_enabled_idx").on(table.orgId, table.enabled),
+    index("schedule_entries_org_workflow_idx").on(table.orgId, table.workflowId),
+  ],
+);
+
+/**
+ * Operator to system feedback channel for the recovery loop.
  *
  * Every time an operator acts on an AI-suggested patch in the Recovery
  * dialog (Apply / Cancel / Iterate), the dialog posts a row here. Future
  * patch suggestions for the SAME workflow read back an aggregated
  * summary of these decisions and slip it into the LLM prompt as soft
- * prior — so an approach that the operator has rejected multiple times
+ * prior, so an approach that the operator has rejected multiple times
  * for this workflow gets deprioritized in subsequent suggestions. This
  * is the labeled signal a future eval framework can train against.
  *
  * Multi-tenant scope: every row carries `org_id`; both indexes lead with
  * `org_id` so the read-side aggregation never scans across tenants.
  *
- * `comment` is operator free-text — sanitized through
- * `scrubSecretShapes` in the data repo at write time so a leaked-secret
- * in the comment becomes `[redacted]` before it lands.
+ * `comment` is operator free-text, sanitized through `scrubSecretShapes`
+ * in the data repo at write time so a leaked secret in the comment becomes
+ * `[redacted]` before it lands.
  */
 export const recoveryFeedback = pgTable(
   "recovery_feedback",

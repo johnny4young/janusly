@@ -36,6 +36,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db, workflowVersions, workflows } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
+import { syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 
 /**
  * Result of an attempted save. `kind: "conflict"` is non-throwing so
@@ -199,6 +200,23 @@ export async function saveWorkflowVersion(args: {
 
         return { nextVersion: computedVersion };
       });
+
+      // Reconcile cron-driven trigger entries OUTSIDE the save
+      // transaction. A failure here is logged but never undoes the
+      // save — the next save (or the worker's cold-start replay) will
+      // re-sync via the deterministic `schedule:<orgId>:<versionId>:<nodeId>`
+      // BullMQ scheduler id.
+      try {
+        await syncWorkflowSchedules({
+          orgId,
+          workflowId,
+          workflowVersionId: versionId,
+          nodes: parsedWorkflow.nodes,
+          createdBy: userId,
+        });
+      } catch (err) {
+        console.error("[workflows-save] schedule sync failed", { workflowId, versionId, err });
+      }
 
       return {
         kind: "ok",

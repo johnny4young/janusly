@@ -105,6 +105,7 @@ import {
 import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-rollback";
 import { saveWorkflowVersion } from "./workflows-save";
+import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
 import { isTerminalRunStatus, runOpenStatusValues, runTerminalStatusValues } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -150,7 +151,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
   "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
   "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
-  "SUPPORTED AI-GENERATION TYPES: only emit nodes of these 11 types: 'noop', 'http', 'transform', 'condition', 'ai', 'tool', 'agent', 'router', 'approval', 'multi_agent', 'loop'. The platform supports 5 more types (wait_until, webhook, agent_reflection, router_llm, subworkflow), but those are added by the operator in the Inspector after generation. If a prompt asks for one of those five, use 'noop' as a placeholder named after the requested step (e.g. id='wait_24h' type='noop', id='ext_webhook' type='noop'). Use 'multi_agent' when the prompt explicitly asks for a team/crew/group of agents working together; use 'agent' for a single autonomous step. Use 'approval' when the prompt mentions a human gate, sign-off, or confirmation step. Use 'loop' for batch / for-each iterations.",
+  "SUPPORTED AI-GENERATION TYPES: only emit nodes of these 11 types: 'noop', 'http', 'transform', 'condition', 'ai', 'tool', 'agent', 'router', 'approval', 'multi_agent', 'loop'. The platform supports 8 more operator-only types (wait_until, webhook, agent_reflection, router_llm, subworkflow, parallel_fork, join, schedule), but those are added by the operator in the Inspector after generation. If a prompt asks for one of those eight, use 'noop' as a placeholder named after the requested step (e.g. id='wait_24h' type='noop', id='ext_webhook' type='noop', id='schedule_daily' type='noop'). Use 'multi_agent' when the prompt explicitly asks for a team/crew/group of agents working together; use 'agent' for a single autonomous step. Use 'approval' when the prompt mentions a human gate, sign-off, or confirmation step. Use 'loop' for batch / for-each iterations.",
   "PLACEHOLDER RULE: when the user prompt mentions a branch name or step that has NO concrete action (e.g. 'fast_path', 'accurate_path', 'review', 'send_email') without specifying a URL, tool name, AI prompt, or backend action, use type 'noop' for that step. NEVER emit an 'http' node without a real URL or an 'ai' node without a prompt — the workflow will fail validation. Use 'http' only when the user explicitly gives a URL or describes calling a specific API. Use 'ai' only when the user wants the model to summarize, decide, or generate text. Use 'tool' only with a tool name from the list below.",
   "ROUTER RULE: every router/router_llm node MUST have at least one candidate, and every candidate's `nodeId` MUST match the `id` of another node in the same workflow. Add the target nodes (typically as 'noop' placeholders) before the router references them.",
   "Node types and required config:",
@@ -170,6 +171,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- router_llm: { candidates: Array<{nodeId: string}> } — same candidate identifier shape as router with scoring fields omitted; downstream steps can inspect the decision output from context",
   "- subworkflow: { workflowId: string, input?: { [key: string]: string } } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
   "- wait_until: { duration: string } (ISO 8601 duration; pauses the run until the deadline elapses, e.g. \"P3D\" = 3 days, \"PT2H30M\" = 2.5 hours. Output is empty {}.)",
+  "- schedule: { cronExpression: string, enabled?: boolean } (cron trigger registered by the operator after generation; use noop placeholders in AI output for scheduled starts.)",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
   "  - numbers, single/double-quoted strings, null",
@@ -606,6 +608,45 @@ export const routes: Route[] = [
         version: result.version,
         sourceVersion: result.sourceVersion,
       });
+    } },
+  // DELETE /workflows/:id — hard-deletes the workflow + every persisted
+  // version + every cron-driven schedule entry (and its BullMQ
+  // scheduler). Runs and audit rows stay; their `workflow_version_id`
+  // text column has no FK constraint, so orphan references are tolerated
+  // for history. Match excludes special POST-only subpaths so a future
+  // edit can't accidentally route `/workflows/save` here on the wrong
+  // method.
+  { method: "DELETE",
+    match: (url) => {
+      if (!url.startsWith("/workflows/")) return false;
+      const rest = url.slice("/workflows/".length).split("?")[0];
+      if (rest.length === 0 || rest.includes("/")) return false;
+      const reserved = new Set(["save", "rollback", "versions", "latest", "validate", "readiness", "health"]);
+      return !reserved.has(rest);
+    },
+    role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.pathname.slice("/workflows/".length);
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+
+      const existing = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+      if (!existing[0]) return sendJson(res, { error: "Workflow not found" }, 404);
+
+      // Schedule teardown fails open — a Redis blip shouldn't block a
+      // workflow delete from completing. The worker's cold-start replay
+      // won't re-register entries whose DB rows are gone, so a stuck
+      // BullMQ scheduler self-clears after the rows go away.
+      try {
+        await unregisterAllForWorkflow(auth.orgId, workflowId);
+      } catch (err) {
+        console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
+      }
+      await db.delete(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)));
+      await db.delete(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
+
+      await audit(auth.orgId, auth.userId, "workflow.deleted", "workflow", workflowId, {});
+      return sendJson(res, { workflowId, ok: true });
     } },
 
   // Plugins / credentials

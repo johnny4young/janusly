@@ -39,8 +39,24 @@ import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 import { handleWaitResume } from "./wait-until";
+import { handleScheduleTrigger, replayAllScheduleEntries } from "./schedule-scheduler";
 
 await assertMigrationsApplied();
+
+// Re-register every enabled schedule entry with BullMQ BEFORE the
+// worker starts pulling jobs. Idempotent via the deterministic
+// `schedule:<orgId>:<versionId>:<nodeId>` id, so this is safe across
+// multiple worker replicas and across Redis restarts. We await so a
+// crash mid-replay doesn't leave the worker happily processing
+// non-schedule jobs while the schedule registrations are partially
+// gone. Failures are logged-and-tolerated — `assertMigrationsApplied`
+// is the only fail-fast at boot.
+try {
+  const count = await replayAllScheduleEntries();
+  if (count > 0) console.log(`[schedule] replayed ${count} entries`);
+} catch (err) {
+  console.error("[schedule] replay failed", err);
+}
 
 // Register the usage_events writer once at boot. Every LLM call
 // from the `ai` node and `agent` planner fires it fire-and-forget.
@@ -94,6 +110,10 @@ export const worker = new Worker(
     // shape than regular execution jobs — dispatch on `job.name` first.
     if (job.name === "wait-resume") {
       await handleWaitResume(job.data);
+      return;
+    }
+    if (job.name === "schedule-trigger") {
+      await handleScheduleTrigger(job.data);
       return;
     }
     const { runId, node, workflow } = validateJobData(job.data);

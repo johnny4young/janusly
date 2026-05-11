@@ -18,6 +18,7 @@
 import { WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
+import { resolveScheduleConfig } from "./schedule";
 import { validateToolInput } from "./tool-registry";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
@@ -115,6 +116,17 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
         issues.push({
           code: "join_invalid_sources",
           message: err instanceof Error ? err.message : "join node has invalid config.sources",
+          nodeId: node.id,
+        });
+      }
+    }
+    if (node.type === "schedule") {
+      try {
+        resolveScheduleConfig(node.config);
+      } catch (err) {
+        issues.push({
+          code: "schedule_invalid_cron",
+          message: err instanceof Error ? err.message : "schedule node has invalid config",
           nodeId: node.id,
         });
       }
