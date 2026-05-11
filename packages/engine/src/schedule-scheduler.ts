@@ -37,7 +37,8 @@
  * - The BullMQ data payload carries `{ scheduleEntryId, orgId,
  *   workflowVersionId, nodeId }`. The handler reads `orgId` from the
  *   PERSISTED row (not the payload) so a spoofed payload can't trigger
- *   another tenant's workflow.
+ *   another tenant's workflow. Stale-scheduler cleanup uses BullMQ's
+ *   `repeatJobKey`, not payload hints.
  * - `enabled = false` removes the BullMQ scheduler; the row stays so the
  *   operator can re-enable by re-saving without re-typing the cron.
  * - `schedule.config.enabled = false` is the pause mechanism — re-save the
@@ -231,9 +232,10 @@ export async function replayAllScheduleEntries(): Promise<number> {
 /**
  * The payload carries `scheduleEntryId` plus the (versionId, nodeId)
  * triple. The handler ONLY reads `scheduleEntryId` to look up the
- * persisted row; the rest is used solely for stale-tick cleanup when
- * the row is missing. Multi-tenant scope is enforced via the row's
- * `orgId`, never the payload's.
+ * persisted row. Stale-tick cleanup uses BullMQ's `repeatJobKey`, which
+ * the worker passes separately from `job.data`; payload hints never
+ * choose which scheduler to remove. Multi-tenant scope is enforced via
+ * the row's `orgId`, never the payload's.
  */
 function parseScheduleTriggerPayload(data: unknown): { scheduleEntryId: string } | null {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
@@ -242,17 +244,8 @@ function parseScheduleTriggerPayload(data: unknown): { scheduleEntryId: string }
   return { scheduleEntryId: obj.scheduleEntryId };
 }
 
-function parseStalePayloadHints(data: unknown): { orgId: string; workflowVersionId: string; nodeId: string } | null {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
-  const obj = data as Record<string, unknown>;
-  if (
-    typeof obj.orgId !== "string" ||
-    typeof obj.workflowVersionId !== "string" ||
-    typeof obj.nodeId !== "string"
-  ) {
-    return null;
-  }
-  return { orgId: obj.orgId, workflowVersionId: obj.workflowVersionId, nodeId: obj.nodeId };
+function isScheduleJobId(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith(`${SCHEDULER_ID_PREFIX}:`);
 }
 
 /**
@@ -273,7 +266,7 @@ function parseStalePayloadHints(data: unknown): { orgId: string; workflowVersion
  * unique constraint on `(scheduleEntryId, triggeredAtMinute)` and is
  * tracked as a future tightening.
  */
-export async function handleScheduleTrigger(data: unknown): Promise<void> {
+export async function handleScheduleTrigger(data: unknown, repeatJobKey?: string): Promise<void> {
   const payload = parseScheduleTriggerPayload(data);
   if (!payload) {
     console.error("[schedule] invalid trigger payload", { data });
@@ -282,19 +275,12 @@ export async function handleScheduleTrigger(data: unknown): Promise<void> {
 
   const entry = await getScheduleEntryById(payload.scheduleEntryId);
   if (!entry) {
-    // Stale scheduler tick after a workflow delete. Best-effort
-    // cleanup so BullMQ doesn't keep firing into the void. The
-    // payload hints are advisory only — used to construct the BullMQ
-    // scheduler id for removal. No data is loaded based on them.
-    const hints = parseStalePayloadHints(data);
-    if (hints) {
-      await removeBullMqScheduler(
-        buildScheduleJobId({
-          orgId: hints.orgId,
-          workflowVersionId: hints.workflowVersionId,
-          nodeId: hints.nodeId,
-        }),
-      );
+    // Stale scheduler tick after a workflow delete. Best-effort cleanup
+    // so BullMQ doesn't keep firing into the void. Do not derive the
+    // scheduler id from job.data: a forged payload must not be able to
+    // unregister another tenant's scheduler.
+    if (isScheduleJobId(repeatJobKey)) {
+      await removeBullMqScheduler(repeatJobKey);
     }
     return;
   }
