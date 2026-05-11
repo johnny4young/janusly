@@ -58,7 +58,7 @@ describe("createApiClient", () => {
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
   }
 
-  it("sends dev headers when no service token is configured", async () => {
+  it("sends dev headers + the x-janusly-source: mcp tag on every request", async () => {
     installFetch({ body: { ok: true } });
     const callApi = createApiClient({
       apiUrl: "http://127.0.0.1:3001",
@@ -73,6 +73,7 @@ describe("createApiClient", () => {
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers["x-org-id"]).toBe("default");
     expect(headers["x-user-id"]).toBe("mcp-user");
+    expect(headers["x-janusly-source"]).toBe("mcp");
     expect(headers.authorization).toBeUndefined();
   });
 
