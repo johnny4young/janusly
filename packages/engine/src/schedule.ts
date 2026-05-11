@@ -25,7 +25,7 @@
  *   slipped through validation).
  */
 
-import { parseExpression } from "cron-parser";
+import cronParser from "cron-parser";
 import type { NodeExecutor } from "./node-registry";
 
 export type ScheduleConfig = {
@@ -49,7 +49,7 @@ export function validateCronExpression(cronExpression: unknown): { nextFireAt: s
     throw new Error(`schedule.cronExpression must be a 5-field cron expression, got: ${cronExpression}`);
   }
   try {
-    const interval = parseExpression(expression);
+    const interval = cronParser.parseExpression(expression);
     return { nextFireAt: interval.next().toISOString() };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);

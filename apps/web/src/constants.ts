@@ -26,6 +26,18 @@ export const nodePresets: Record<string, JsonObject> = {
   condition: { expression: 'true' },
   webhook: {},
   approval: { message: 'Please approve this workflow step.' },
+  human_form: {
+    title: 'Collect request details',
+    description: 'Ask an operator to provide the fields this workflow needs before continuing.',
+    schema: {
+      type: 'object',
+      properties: {
+        requester: { type: 'string', description: 'Who is this about?' },
+        reason: { type: 'string', description: 'What should the workflow know before continuing?' },
+      },
+      required: ['requester', 'reason'],
+    },
+  },
   ai: { prompt: 'Summarize the latest workflow result and suggest the next action.' },
   tool: { tool: 'text.uppercase', input: { value: 'hello' } },
   agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 },
@@ -62,6 +74,7 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   condition: { label: 'Branch rule', helper: 'Continue only when true' },
   webhook: { label: 'Wait for webhook', helper: 'Pause for an external event' },
   approval: { label: 'Ask approval', helper: 'Pause for a person' },
+  human_form: { label: 'Collect form', helper: 'Pause for structured input' },
   ai: { label: 'AI prompt', helper: 'Ask Janusly to summarize or decide' },
   tool: { label: 'Run a tool', helper: 'Use a registered backend action' },
   agent: { label: 'Agent', helper: 'Plan tool calls toward a goal' },
@@ -99,6 +112,7 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
     return agentCount ? `${agentCount} agents - ${goal}` : goal
   }
   if (type === 'approval') return compact(readString(config.message) ?? 'Add an approval message')
+  if (type === 'human_form') return compact(readString(config.title) ?? 'Add form fields')
   if (type === 'condition') return compact(readString(config.expression) ?? 'Add a branch rule')
   if (type === 'loop') return compact(readString(config.items) ?? 'Add list items')
   if (type === 'transform') return 'Map output fields'
@@ -132,7 +146,7 @@ export function formatStatusLabel(status: string) {
     pending: 'Ready',
     queued: 'Queued',
     running: 'Running',
-    waiting: 'Needs approval',
+    waiting: 'Waiting',
     skipped: 'Skipped',
     succeeded: 'Done',
     failed: 'Needs attention',

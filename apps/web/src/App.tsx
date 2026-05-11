@@ -452,6 +452,29 @@ export default function App() {
     }
   }, [addToast, loadStatus, runId])
 
+  const submitHumanForm = useCallback(async (nodeId: string, input: unknown, resumeToken: string) => {
+    if (!runId) return ['No active run is selected.']
+
+    try {
+      const result = await api('/resume', {
+        method: 'POST',
+        body: JSON.stringify({ runId, nodeId, input, resumeToken }),
+      }) as { errors?: string[] }
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        return result.errors
+      }
+      await loadStatus(runId)
+      bumpPlatformVersion()
+      await refreshPlatform()
+      addToast(`Form ${nodeId} submitted`, 'success')
+      return undefined
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Form submit failed'
+      addToast(message, 'error')
+      return [message]
+    }
+  }, [addToast, loadStatus, refreshPlatform, runId])
+
   const replayNode = useCallback(async (nodeId: string) => {
     if (!runId) return
 
@@ -668,6 +691,7 @@ export default function App() {
           onUpdateNodeType={updateSelectedNodeType}
           onUpdateEdgeCondition={updateEdgeCondition}
           onApproveNode={approveNode}
+          onSubmitHumanForm={submitHumanForm}
           onReplayNode={replayNode}
           onCancelActiveRun={cancelActiveRun}
           onReplayDeadLetter={replayDeadLetter}

@@ -182,6 +182,8 @@ Common issue codes:
 | `condition_invalid_expression` | Sandbox rejected the expression |
 | `loop_missing_items` | `loop` without `config.items` |
 | `multi_agent_missing_agents` | `multi_agent.config.agents` is empty |
+| `human_form_invalid_schema` | `human_form.config.schema` is missing or outside the supported JSON-schema subset |
+| `human_form_empty_schema` | `human_form.config.schema.properties` is empty |
 | `edge_invalid_from` / `edge_invalid_to` | Edge references unknown node id |
 | `edge_invalid_condition` | Edge condition expression invalid |
 | `cycle_detected` | DAG has a cycle |
