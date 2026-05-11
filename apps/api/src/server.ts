@@ -102,7 +102,7 @@ async function dispatchRequest(
 
     let auth: AuthContext;
     if (matched.skipAuth) {
-      auth = { orgId: "", userId: "", mode: "dev-headers" };
+      auth = { orgId: "", userId: "", mode: "dev-headers", source: "dev" };
     } else {
       auth = await requireAuth(req);
       if (matched.role) {

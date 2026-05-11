@@ -106,6 +106,7 @@ import { applyConfigPatchToWorkflow } from "./patch-workflow-merge";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "./workflows-rollback";
 import { saveWorkflowVersion } from "./workflows-save";
 import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
+import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "./mcp-consent";
 import { isTerminalRunStatus, runOpenStatusValues, runTerminalStatusValues } from "@janusly/shared/src/status";
 import {
   getDeadLetter,
@@ -560,6 +561,23 @@ export const routes: Route[] = [
     } },
   { method: "POST", match: "/workflows/save", role: "editor",
     handler: async ({ req, res, auth }) => {
+      // MCP-source mutations gate on the process-wide env AND the
+      // tenant's `mcp.writeConsent` flag. Both must be true; otherwise
+      // 403 with a stable code the MCP client can render. Per-tool rate
+      // limit fires for MCP-source traffic so a misbehaving client
+      // can't flood a tenant.
+      if (auth.source === "mcp") {
+        const consent = await isMcpWriteAllowed(auth.orgId);
+        if (!consent.allowed) {
+          return sendJson(res, { error: consent.message, code: `mcp_${consent.reason}` }, 403);
+        }
+        await enforceRateLimit(auth.orgId, {
+          name: mcpRateLimitBucket("workflows.save"),
+          windowMs: 60_000,
+          max: 60,
+        });
+      }
+
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
@@ -583,10 +601,14 @@ export const routes: Route[] = [
         }, 409);
       }
 
-      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", result.workflowId, {
+      const auditMetadata: Record<string, unknown> = {
         version: result.version,
         attempts: result.attempts,
-      });
+      };
+      if (auth.source === "mcp") {
+        Object.assign(auditMetadata, mcpAuditMetadata(auth));
+      }
+      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", result.workflowId, auditMetadata);
       return sendJson(res, {
         workflowId: result.workflowId,
         versionId: result.versionId,

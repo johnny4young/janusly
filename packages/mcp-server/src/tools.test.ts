@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
-import { dispatchTool, tools } from "./tools";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { dispatchTool, listTools, tools } from "./tools";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function makeMockCallApi() {
   const calls: string[] = [];
@@ -11,7 +15,7 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the eleven tools (9 read-only, 2 pre-flight POST, 0 writes)", () => {
+  it("exposes the eleven read-only tools by default (no write surface)", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "dlq.list",
@@ -26,6 +30,27 @@ describe("MCP tool catalog", () => {
       "workflows.validate",
       "workflows.versions",
     ]);
+  });
+
+  it("appends workflows.save to the catalog when JANUSLY_MCP_WRITES_ENABLED=true", () => {
+    const off = listTools({ JANUSLY_MCP_WRITES_ENABLED: "" });
+    expect(off.find((t) => t.name === "workflows.save")).toBeUndefined();
+
+    const on = listTools({ JANUSLY_MCP_WRITES_ENABLED: "true" });
+    const save = on.find((t) => t.name === "workflows.save");
+    expect(save).toBeDefined();
+    expect(save?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["workflow"],
+      properties: { dryRun: { type: "boolean" } },
+    });
+  });
+
+  it("treats any non-'true' env value as off when computing the catalog", () => {
+    for (const value of ["1", "yes", "TRUE", "on"]) {
+      const list = listTools({ JANUSLY_MCP_WRITES_ENABLED: value });
+      expect(list.find((t) => t.name === "workflows.save")).toBeUndefined();
+    }
   });
 
   it("declares JSON Schema input shapes (not Zod) on every tool", () => {
@@ -89,10 +114,41 @@ describe("dispatchTool", () => {
     await expect(dispatchTool(mock, "runs.get", {})).rejects.toThrow(/runId/);
   });
 
-  it("workflows.save is disabled and never calls the API", async () => {
+  it("workflows.save is rejected with a clear error when the env flag is off (default)", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
     const { mock } = makeMockCallApi();
     const workflow = { id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
-    await expect(dispatchTool(mock, "workflows.save", { workflow })).rejects.toThrow(/disabled.*consent policy/i);
+    await expect(dispatchTool(mock, "workflows.save", { workflow })).rejects.toThrow(/JANUSLY_MCP_WRITES_ENABLED/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("workflows.save POSTs to /workflows/save when env is on", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    const workflow = { dslVersion: "1.0", id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
+    await dispatchTool(mock, "workflows.save", { workflow });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/workflows/save");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(workflow);
+  });
+
+  it("workflows.save with dryRun: true routes to /validate instead of /workflows/save", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    const workflow = { dslVersion: "1.0", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
+    await dispatchTool(mock, "workflows.save", { workflow, dryRun: true });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/validate");
+    expect(init?.method).toBe("POST");
+    // Dispatcher reshapes the call result into { mode: "dry-run", validation }
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("workflows.save with env on still rejects when the workflow body is missing", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "workflows.save", {})).rejects.toThrow(/workflow.*object/);
     expect(mock).not.toHaveBeenCalled();
   });
 

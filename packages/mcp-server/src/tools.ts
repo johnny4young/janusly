@@ -19,13 +19,19 @@
  *   `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`,
  *   `runs.get`, `runs.list`, `dlq.list`), pre-flight checks
  *   (`workflows.validate` and `workflows.readiness` — POST but no side
- *   effects), and no writes. `workflows.save` stays unadvertised and
- *   rejected until the MCP write consent/audit policy lands. The MCP
- *   server itself still has zero DB access and writes no audit rows of
- *   its own.
+ *   effects), and a gated write surface (`workflows.save`). Write tools
+ *   are advertised ONLY when `JANUSLY_MCP_WRITES_ENABLED=true`. When the
+ *   env is off the tool is absent from `tools()` and a direct call is
+ *   rejected with a clear error. The API enforces a second gate
+ *   (per-tenant `mcp.writeConsent`) so flipping the env without tenant
+ *   opt-in still rejects at the wire.
  * - Don't add more write tools without an explicit product/security review
- *   matching the required posture: explicit consent, RBAC enforced upstream,
- *   audit row written by the API, and safe exposure to a remote MCP client.
+ *   matching the required posture: explicit consent (both env + tenant),
+ *   RBAC enforced upstream, audit row written by the API with
+ *   `metadata.source: "mcp"`, per-tool rate limit, and safe exposure to a
+ *   remote MCP client.
+ * - The MCP server itself still has zero DB access and writes no audit
+ *   rows of its own. All audit + scope enforcement lives on the API side.
  * - Errors thrown here are caught by the SDK's request-handler machinery
  *   and surfaced to the model as `{ isError: true, content: [...] }`.
  */
@@ -35,12 +41,46 @@ import type { CallApi } from "./api-client";
 
 const DLQ_STATUSES = ["open", "replayed", "resolved"] as const;
 
+/** True when the process-wide opt-in flag is on. */
+export function mcpWritesEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.JANUSLY_MCP_WRITES_ENABLED === "true";
+}
+
+/** Closed list of advertised write tools when env is on. Each entry is gated upstream by per-tenant `mcp.writeConsent`. */
+const WRITE_TOOLS: Tool[] = [
+  {
+    name: "workflows.save",
+    description:
+      "Save a workflow as a new version. Pass `dryRun: true` to route the request to `/validate` instead — same shape check, no persistence. Gated by `JANUSLY_MCP_WRITES_ENABLED` (process) and `mcp.writeConsent` (tenant); a tenant that hasn't consented gets a 403 with `code: 'mcp_tenant_disabled'`. Per-org rate-limited at 60/min on the API side.",
+    inputSchema: {
+      type: "object",
+      required: ["workflow"],
+      properties: {
+        workflow: {
+          type: "object",
+          description:
+            "Full workflow DAG: { dslVersion, nodes, edges, optional id/name/inputs/outputs/metadata }. Same shape `POST /workflows/save` accepts.",
+        },
+        dryRun: {
+          type: "boolean",
+          description:
+            "When true, route to /validate instead of /workflows/save. Returns `{ mode: 'dry-run', valid, issues }` without writing a new version.",
+        },
+      },
+    },
+  },
+];
+
 /**
- * Static tool catalog the MCP server advertises. Add a new entry here when
- * exposing another read-only API surface to MCP clients; pair it with a new
- * `case` arm in `runOne`.
+ * Tool catalog the MCP server advertises. The read-only surface is always
+ * present; write tools are appended only when `JANUSLY_MCP_WRITES_ENABLED=true`.
+ *
+ * `tools` (default export) is computed once at module load — matches how
+ * the existing tests + boot path consume it. `listTools(env)` is a pure
+ * variant for tests that want to vary the env per-case without re-loading
+ * the module.
  */
-export const tools: Tool[] = [
+const READ_TOOLS: Tool[] = [
   {
     name: "workflows.list",
     description:
@@ -212,6 +252,13 @@ export const tools: Tool[] = [
   },
 ];
 
+/** Pure variant that lets tests vary the env per-case. */
+export function listTools(env: NodeJS.ProcessEnv = process.env): Tool[] {
+  return mcpWritesEnabled(env) ? [...READ_TOOLS, ...WRITE_TOOLS] : READ_TOOLS;
+}
+
+export const tools: Tool[] = listTools();
+
 /**
  * Dispatch one MCP tool call by name to its underlying API request, returning
  * the response wrapped in the standard MCP `text` content block. Errors
@@ -318,7 +365,23 @@ async function runOne(
       return callApi(query ? `/dlq?${query}` : "/dlq");
     }
     case "workflows.save": {
-      throw new Error("workflows.save is disabled until the MCP write consent policy is implemented");
+      if (!mcpWritesEnabled()) {
+        throw new Error("workflows.save is disabled (set JANUSLY_MCP_WRITES_ENABLED=true to advertise)");
+      }
+      if (!isObject(args.workflow)) {
+        throw new Error("workflows.save requires `workflow` (object)");
+      }
+      if (args.dryRun === true) {
+        const validation = await callApi("/validate", {
+          method: "POST",
+          body: JSON.stringify(args.workflow),
+        });
+        return { mode: "dry-run", validation };
+      }
+      return callApi("/workflows/save", {
+        method: "POST",
+        body: JSON.stringify(args.workflow),
+      });
     }
     default:
       throw new Error(`Unknown MCP tool: ${name}`);

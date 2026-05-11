@@ -1,6 +1,6 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes nine read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`) plus two POST pre-flight checks with no side effects (`workflows.validate`, `workflows.readiness`). All tools proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes eleven read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `workflows.validate`, `workflows.readiness`) plus a gated write surface (`workflows.save`) advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API.
 
 ## What is MCP and why ship a server?
 
@@ -30,7 +30,7 @@ The MCP server is intentionally **not** a second consumer of the database. Every
 - **Auth** — dev headers (`x-org-id` / `x-user-id`) when Supabase is unset and `NODE_ENV !== "production"`, or service-token mode (`Authorization: Bearer <API_SERVICE_TOKEN>`).
 - **Multi-tenant scope** — every Drizzle query carries `eq(<table>.orgId, auth.orgId)`.
 - **Rate limiting** — `apps/api/src/rate-limit.ts` gates AI surfaces; MCP tools inherit API-side controls because the server never bypasses the HTTP layer.
-- **Audit logs** — read tools and `workflows.validate` have no side effects. MCP write tools stay unavailable until the explicit consent/audit policy lands.
+- **Audit logs** — read tools and `workflows.validate` / `workflows.readiness` have no side effects. Accepted write tools (currently `workflows.save`) write an audit row through the API tagged `metadata.source: "mcp"` plus an `actor` block (`userId`, `mode`, and `serviceTokenSuffix` when service-token auth was used).
 
 The proxy choice is the most important architectural decision. It means:
 
@@ -60,9 +60,14 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `workflows.validate`  | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
 | `workflows.readiness` | `POST /workflows/readiness`                                 | Pre-flight readiness check (safety / rollback / approvals / secrets).   |
 
-`workflows.save` is intentionally not advertised and direct calls are rejected until the MCP write consent policy exists. Save workflows through the Janusly UI/API for now.
+`workflows.save` is the first gated write tool. It is advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in the MCP server's environment. The API process must also see the same env flag before it accepts the write, and the route additionally requires `org_configs.mcp.writeConsent = true` for the calling org — both gates must pass or the API returns HTTP 403 with `code: "mcp_process_disabled"` or `code: "mcp_tenant_disabled"`. The tool accepts an optional `dryRun: true` argument that routes the call to `POST /validate` (no persistence) so an MCP client can preview without writing.
 
-The two POST tools (`workflows.validate` and `workflows.readiness`) take a workflow body and return a verdict; neither writes to the database.
+| MCP tool          | API endpoint                    | Notes                                                              |
+| ----------------- | ------------------------------- | ------------------------------------------------------------------ |
+| `workflows.save`  | `POST /workflows/save`          | Gated by env + tenant flag; rate-limited at 60/min/org.            |
+| (with `dryRun`)   | `POST /validate`                | Preview only; never persists.                                      |
+
+The pre-flight POST tools (`workflows.validate` and `workflows.readiness`) take a workflow body and return a verdict; neither writes to the database.
 
 Every tool returns a single MCP `text` content block carrying the API response JSON-stringified. That's the documented MCP convention for "data-shaped" results; the AI client reads it as text and reasons over it. Future tools could surface structured `resource` content blocks if the UX warrants.
 
@@ -142,4 +147,13 @@ packages/mcp-server/
 3. Add a unit test to `tools.test.ts` asserting the URL/headers shape with a `vi.fn` `callApi`.
 4. Bump the package version if anything is downstream-visible.
 
-Write tools must stay unavailable until the MCP write consent policy exists. Once enabled, they must go through the API, keep RBAC at the route layer, and rely on API-side audit rows. Do not add destructive tools directly in this package.
+Write tools must go through the policy in `apps/api/src/mcp-consent.ts`. The route handler runs `isMcpWriteAllowed(auth.orgId)` (env + tenant gate), enforces a `mcp.<actionKey>` rate-limit bucket via `enforceRateLimit`, and merges `mcpAuditMetadata(auth)` into the audit row. Add a new write tool by (1) appending to `WRITE_TOOLS` in `src/tools.ts`, (2) wiring the API route through those three helpers, (3) extending the tests in `tools.test.ts` and `apps/api/src/mcp-consent.test.ts`. Do not add destructive tools without all three steps.
+
+## Configuring MCP writes
+
+Two flags must both be true:
+
+1. **Process-wide:** set `JANUSLY_MCP_WRITES_ENABLED=true` in both the API and MCP server environments (the same root `.env` covers both in local dev; remote MCP deployments need the value on both processes). Default is off; an unset value, `"false"`, or any non-`"true"` string keeps writes disabled.
+2. **Per tenant:** set `org_configs.mcp.writeConsent = true` for the calling org via `POST /org/config` with `{ key: "mcp.writeConsent", value: true }`. Each org opts in independently.
+
+Both flags read together. Either being false returns HTTP 403 to the MCP client with a stable `code` field so the model can render a clear message. Forensics: every accepted MCP write writes a row to `audit_logs` with `metadata.source: "mcp"` plus an `actor` block carrying the userId, auth mode, and the last 4 chars of the service token when service-token auth was used.

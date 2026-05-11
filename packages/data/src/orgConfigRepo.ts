@@ -65,9 +65,12 @@ export type OrgConfigSnapshot = {
     requireSavedWorkflow: boolean;
     subworkflowMaxDepth: number;
   };
+  mcp: {
+    writeConsent: boolean;
+  };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs"] as const;
+const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp"] as const;
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -204,6 +207,13 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 5,
     envKeys: ["JANUSLY_MAX_SUBWORKFLOW_DEPTH"],
     min: 1,
+  },
+  {
+    key: "mcp.writeConsent",
+    category: "mcp",
+    description: "Allow MCP write tools (workflows.save, etc.) to mutate this organization. Process-wide JANUSLY_MCP_WRITES_ENABLED must also be true. NO env fallback by design — each tenant must opt in explicitly via the admin API.",
+    valueType: "boolean",
+    defaultValue: false,
   },
 ] as const satisfies readonly OrgConfigDefinition[];
 
@@ -356,6 +366,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
       subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
     },
+    mcp: {
+      writeConsent: readBoolean(values, "mcp.writeConsent"),
+    },
   };
 }
 
@@ -381,6 +394,7 @@ export function applyOrgConfigToEnv(
     JANUSLY_EMAIL_RATE_LIMIT_PER_MIN: String(config.email.rateLimitPerMin),
     JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
     JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
+    // `mcp.writeConsent` has no env overlay by design — see the catalog definition.
   };
 }
 
