@@ -77,6 +77,22 @@ const APPROACH_LABEL_DISPLAY: Record<PatchApproachLabel, string> = {
   other: 'Other',
 }
 
+function suggestionTabKey(tab: SuggestionTab): string {
+  const nodeFingerprint = tab.workflow.nodes.map((node) => `${node.id}:${node.type}`).join(',')
+  const edgeFingerprint = tab.workflow.edges
+    .map((edge) => `${edge.from}->${edge.to}:${edge.condition ?? ''}`)
+    .join(',')
+
+  return [
+    tab.workflow.id ?? tab.workflow.name ?? 'workflow',
+    tab.approachLabel,
+    tab.confidence,
+    nodeFingerprint,
+    edgeFingerprint,
+    tab.rationale,
+  ].join('|')
+}
+
 type ClusterApplyError = {
   deadLetterId: string
   error: string
@@ -812,7 +828,7 @@ function ReviewBody({
         <div className="we-recovery-tabs" role="tablist" aria-label="Alternative suggestions">
           {tabs.map((tab, index) => (
             <button
-              key={index}
+              key={suggestionTabKey(tab)}
               type="button"
               role="tab"
               id={`we-recovery-tab-${index}`}

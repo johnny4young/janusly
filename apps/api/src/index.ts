@@ -30,7 +30,6 @@
  *   AI mutations write audit on success AND on fallback.
  */
 
-import http from "http";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
@@ -77,8 +76,7 @@ import { recordEmailUsage, recordUsage } from "@janusly/data/src/usageRepo";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
-import { requireAuth, type AuthContext } from "./auth";
-import { isRole, requireRole } from "./permissions";
+import { isRole } from "./permissions";
 import { workflowTemplates } from "./templates";
 import { db } from "@janusly/db";
 import {
@@ -122,14 +120,18 @@ import {
   readJson,
   sendEvent,
   sendJson,
-  type CorsAwareResponse,
 } from "./http";
 import { enforceRateLimit } from "./rate-limit";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "./run-pagination";
-import { matchesRoute, type Route } from "./routes";
+import { type Route } from "./routes";
+import { createApiServer } from "./server";
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_JSON_BODY_BYTES = Number(process.env.API_MAX_JSON_BODY_BYTES || 1_048_576);
+const API_REQUEST_TIMEOUT_MS = readPositiveIntegerEnv("API_REQUEST_TIMEOUT_MS", 60_000);
+const API_KEEP_ALIVE_TIMEOUT_MS = readPositiveIntegerEnv("API_KEEP_ALIVE_TIMEOUT_MS", 5_000);
+const API_HEADERS_TIMEOUT_MS = readPositiveIntegerEnv("API_HEADERS_TIMEOUT_MS", 65_000);
+const API_SHUTDOWN_GRACE_MS = readPositiveIntegerEnv("API_SHUTDOWN_GRACE_MS", 10_000);
 const AUDIT_PAGE_SIZE = 100;
 const RUN_EVENTS_DEFAULT_LIMIT = 200;
 const RUN_EVENTS_MAX_LIMIT = 500;
@@ -138,6 +140,15 @@ const OPEN_RUN_STATUS_SET = new Set<string>(runOpenStatusValues);
 const FAILED_RUN_STATUS_SET = new Set<string>(runTerminalStatusValues.filter((status) => status !== "succeeded"));
 
 const dlqReplay = new DLQReplayAdapter();
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.trunc(parsed);
+}
 
 /**
  * System prompt for `/ai/generate-workflow`. Joined with `"\n"` so the
@@ -414,8 +425,8 @@ function mergeReadiness(base: ReadinessResult, extra: ReadinessIssue[]): Readine
 
 /**
  * Route registry. New routes plug in via `routes.push({...})` or
- * by appending to this literal — the dispatcher (`http.createServer` below)
- * stays closed for modification. First-match-wins; preserve ordering when
+ * by appending to this literal. The dispatcher lives in `server.ts` and stays
+ * closed for modification. First-match-wins; preserve ordering when
  * adding routes that overlap (e.g. `/runs` prefix vs `/run?` exact).
  *
  * Every route's `handler` runs AFTER `requireAuth` + (optionally) `requireRole`
@@ -2107,39 +2118,13 @@ export const routes: Route[] = [
     } },
 ];
 
-const server = http.createServer(async (req, res) => {
-  (res as CorsAwareResponse).requestOrigin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
-
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, corsHeaders(res));
-    return res.end();
-  }
-
-  try {
-    const url = req.url ?? "";
-    const matched = routes.find((route) => route.method === req.method && matchesRoute(route.match, url));
-
-    if (!matched) {
-      return sendJson(res, { error: "Not found" }, 404);
-    }
-
-    let auth: AuthContext;
-    if (matched.skipAuth) {
-      // Only `/health` opts out; its handler doesn't read `auth`.
-      auth = undefined as unknown as AuthContext;
-    } else {
-      auth = await requireAuth(req);
-      if (matched.role) {
-        await requireRole(auth.orgId, auth.userId, matched.role, auth.mode);
-      }
-    }
-
-    await matched.handler({ req, res: res as CorsAwareResponse, auth });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    const statusCode = err && typeof err === "object" && "statusCode" in err ? Number((err as { statusCode?: number }).statusCode) : 500;
-    return sendJson(res, { error: message }, statusCode || 500);
-  }
+const server = createApiServer({
+  routes,
+  timeouts: {
+    requestTimeoutMs: API_REQUEST_TIMEOUT_MS,
+    keepAliveTimeoutMs: API_KEEP_ALIVE_TIMEOUT_MS,
+    headersTimeoutMs: API_HEADERS_TIMEOUT_MS,
+  },
 });
 
 await assertMigrationsApplied();
@@ -2164,5 +2149,42 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 // "email.sent"`, surfacing in the existing breakdown UI without
 // changes.
 setEmailUsageRecorder(recordEmailUsage);
+
+let shutdownStarted = false;
+
+async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  console.log(`[api] received ${signal}; draining HTTP connections`);
+  const forceCloseTimer = setTimeout(() => {
+    console.warn("[api] graceful shutdown timed out; closing active connections");
+    server.closeAllConnections();
+  }, API_SHUTDOWN_GRACE_MS);
+  forceCloseTimer.unref();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    clearTimeout(forceCloseTimer);
+    console.log("[api] HTTP server stopped");
+    process.exit(0);
+  } catch (err) {
+    clearTimeout(forceCloseTimer);
+    console.error("[api] HTTP shutdown failed", err);
+    process.exit(1);
+  }
+}
+
+process.once("SIGTERM", (signal) => {
+  void shutdownApi(signal);
+});
+process.once("SIGINT", (signal) => {
+  void shutdownApi(signal);
+});
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));

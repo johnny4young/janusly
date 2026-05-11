@@ -23,15 +23,25 @@
 
 import { getSecret } from "./secrets";
 
+export type TemplateScope = Record<string, unknown>;
+
+function isTemplateRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPathContainer(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 /** Walk a dotted path through `source`. Returns `undefined` on any null link. */
-export function getByPath(source: any, path: string) {
-  return path.split('.').reduce((acc, key) => {
-    if (acc == null) return undefined;
+export function getByPath(source: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((acc, key) => {
+    if (!isPathContainer(acc)) return undefined;
     return acc[key];
   }, source);
 }
 
-function renderTemplateInternal(value: any, scope: Record<string, any>, redactionList: Set<string>): any {
+function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionList: Set<string>): unknown {
   if (typeof value === 'string') {
     return value.replace(/{{\s*([^}]+)\s*}}/g, (_, rawPath) => {
       const expr = String(rawPath).trim();
@@ -67,7 +77,7 @@ function renderTemplateInternal(value: any, scope: Record<string, any>, redactio
     return value.map((item) => renderTemplateInternal(item, scope, redactionList));
   }
 
-  if (typeof value === 'object' && value !== null) {
+  if (isTemplateRecord(value)) {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplateInternal(item, scope, redactionList)]));
   }
 
@@ -75,8 +85,8 @@ function renderTemplateInternal(value: any, scope: Record<string, any>, redactio
 }
 
 /** Render a value's template strings without tracking redactions (no secrets in scope). */
-export function renderTemplate(value: any, scope: Record<string, any>): any {
-  return renderTemplateInternal(value, scope, new Set());
+export function renderTemplate<T>(value: T, scope: TemplateScope): T {
+  return renderTemplateInternal(value, scope, new Set()) as T;
 }
 
 /**
@@ -86,9 +96,9 @@ export function renderTemplate(value: any, scope: Record<string, any>): any {
  * executor result or failure is persisted.
  */
 export function renderTemplateWithRedactions(
-  value: any,
-  scope: Record<string, any>,
-): { rendered: any; redactedValues: string[] } {
+  value: unknown,
+  scope: TemplateScope,
+): { rendered: unknown; redactedValues: string[] } {
   const list = new Set<string>();
   const rendered = renderTemplateInternal(value, scope, list);
   return { rendered, redactedValues: Array.from(list) };
@@ -99,21 +109,21 @@ export function renderTemplateWithRedactions(
  * resolved secret/env values) with the literal `"[redacted]"`. Applied to
  * executor outputs and `waiting` metadata before persistence.
  */
-export function redactValues(value: any, redactedValues: string[]): any {
+export function redactValues<T>(value: T, redactedValues: string[]): T {
   if (redactedValues.length === 0) return value;
   if (typeof value === 'string') {
-    let next = value;
+    let next: string = value;
     for (const secret of redactedValues) {
       if (!secret) continue;
       next = next.split(secret).join('[redacted]');
     }
-    return next;
+    return next as T;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redactValues(item, redactedValues));
+    return value.map((item) => redactValues(item, redactedValues)) as T;
   }
-  if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValues(item, redactedValues)]));
+  if (isTemplateRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValues(item, redactedValues)])) as T;
   }
   return value;
 }
@@ -143,6 +153,6 @@ export function redactError(error: unknown, redactedValues: string[]): unknown {
 }
 
 /** Render a mapping object/string against `scope`. Used by `transform` / `loop` / tool inputs. */
-export function mapInput(mapping: any, scope: Record<string, any>) {
-  return renderTemplate(mapping ?? {}, scope);
+export function mapInput<T>(mapping: T | null | undefined, scope: TemplateScope): T | Record<string, never> {
+  return renderTemplate((mapping ?? {}) as T | Record<string, never>, scope);
 }
