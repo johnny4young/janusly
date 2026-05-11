@@ -81,6 +81,10 @@
   --we-surface-2: var(--color-we-surface-2);
   --we-surface-3: var(--color-we-surface-muted);
   --we-surface-muted: var(--color-we-surface-muted);
+  --we-surface-overlay: color-mix(in srgb, var(--we-surface) 92%, transparent);
+  --we-surface-panel: color-mix(in srgb, var(--we-surface) 70%, transparent);
+  --we-surface-glass: color-mix(in srgb, var(--we-surface) 84%, transparent);
+  --we-surface-node-summary: color-mix(in srgb, var(--we-surface) 72%, transparent);
   --we-line: var(--color-we-line);
   --we-line-strong: var(--color-we-line-strong);
   --we-grid: color-mix(in srgb, var(--we-primary) 8%, transparent);
@@ -93,12 +97,31 @@
   --we-faint: var(--color-we-faint);
   --we-success: var(--color-we-success);
   --we-success-soft: var(--color-we-success-soft);
+  --we-success-border-25: color-mix(in srgb, var(--we-success) 25%, transparent);
+  --we-success-border-30: color-mix(in srgb, var(--we-success) 30%, transparent);
+  --we-success-border-35: color-mix(in srgb, var(--we-success) 35%, transparent);
+  --we-success-border-40: color-mix(in srgb, var(--we-success) 40%, transparent);
   --we-warning: var(--color-we-warning);
   --we-warning-soft: var(--color-we-warning-soft);
+  --we-warning-border-25: color-mix(in srgb, var(--we-warning) 25%, transparent);
+  --we-warning-border-30: color-mix(in srgb, var(--we-warning) 30%, transparent);
+  --we-warning-border-35: color-mix(in srgb, var(--we-warning) 35%, transparent);
   --we-danger: var(--color-we-danger);
   --we-danger-soft: var(--color-we-danger-soft);
+  --we-danger-border-25: color-mix(in srgb, var(--we-danger) 25%, transparent);
+  --we-danger-border-30: color-mix(in srgb, var(--we-danger) 30%, transparent);
+  --we-danger-border-40: color-mix(in srgb, var(--we-danger) 40%, transparent);
   --we-info: var(--color-we-info);
   --we-info-soft: var(--color-we-info-soft);
+  --we-info-border-30: color-mix(in srgb, var(--we-info) 30%, transparent);
+  --we-shadow-ink-04: color-mix(in srgb, var(--we-ink) 4%, transparent);
+  --we-shadow-ink-14: color-mix(in srgb, var(--we-ink) 14%, transparent);
+  --we-shadow-ink-18: color-mix(in srgb, var(--we-ink) 18%, transparent);
+  --we-shadow-ink-20: color-mix(in srgb, var(--we-ink) 20%, transparent);
+  --we-shadow-ink-25: color-mix(in srgb, var(--we-ink) 25%, transparent);
+  --we-shadow-ink-28: color-mix(in srgb, var(--we-ink) 28%, transparent);
+  --we-shadow-ink-35: color-mix(in srgb, var(--we-ink) 35%, transparent);
+  --we-shadow-ink-45: color-mix(in srgb, var(--we-ink) 45%, transparent);
 }
 
 /* ==========================================================================
@@ -150,7 +173,7 @@ a { color: var(--we-primary); }
   justify-content: space-between;
   gap: 16px;
   border-bottom: 1px solid var(--we-line);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--we-surface-overlay);
   padding: 0 18px;
   backdrop-filter: blur(12px);
   z-index: 5;
@@ -204,7 +227,7 @@ a { color: var(--we-primary); }
 .workspace-panel {
   min-height: 0;
   overflow: auto;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--we-surface-panel);
 }
 
 .workspace-sidebar { border-right: 1px solid var(--we-line); }
@@ -235,7 +258,7 @@ a { color: var(--we-primary); }
   border: 1px solid var(--we-line);
   border-radius: 8px;
   background: var(--we-surface);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
 .sidebar-section { padding: 14px; }
@@ -588,10 +611,10 @@ a { color: var(--we-primary); }
 
 .canvas-toolbar {
   align-items: center;
-  background: rgba(255, 255, 255, 0.84);
+  background: var(--we-surface-glass);
   border: 1px solid var(--we-line);
   border-radius: 8px;
-  box-shadow: 0 10px 28px -18px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -932,10 +955,10 @@ a { color: var(--we-primary); }
   text-transform: uppercase;
 }
 
-.status-pill[data-status="succeeded"] { color: var(--we-success); border-color: rgba(16, 185, 129, 0.3); background: var(--we-success-soft); }
-.status-pill[data-status="failed"] { color: var(--we-danger); border-color: rgba(239, 68, 68, 0.3); background: var(--we-danger-soft); }
-.status-pill[data-status="waiting"] { color: var(--we-warning); border-color: rgba(245, 158, 11, 0.3); background: var(--we-warning-soft); }
-.status-pill[data-status="running"] { color: var(--we-info); border-color: rgba(59, 130, 246, 0.3); background: var(--we-info-soft); }
+.status-pill[data-status="succeeded"] { color: var(--we-success); border-color: var(--we-success-border-30); background: var(--we-success-soft); }
+.status-pill[data-status="failed"] { color: var(--we-danger); border-color: var(--we-danger-border-30); background: var(--we-danger-soft); }
+.status-pill[data-status="waiting"] { color: var(--we-warning); border-color: var(--we-warning-border-30); background: var(--we-warning-soft); }
+.status-pill[data-status="running"] { color: var(--we-info); border-color: var(--we-info-border-30); background: var(--we-info-soft); }
 
 .mode-pill {
   align-items: center;
@@ -986,7 +1009,7 @@ a { color: var(--we-primary); }
   padding: 16px;
   background:
     linear-gradient(135deg, var(--we-surface) 0%, var(--we-primary-soft) 54%, var(--we-accent-soft) 100%);
-  box-shadow: 0 12px 30px -24px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 12px 30px -24px var(--we-shadow-ink-35);
 }
 
 .copilot-hero h2 {
@@ -1092,7 +1115,7 @@ a { color: var(--we-primary); }
 }
 
 .issue-error {
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border: 1px solid var(--we-danger-border-25);
   background: var(--we-danger-soft);
   color: var(--we-danger);
 }
@@ -1152,7 +1175,7 @@ a { color: var(--we-primary); }
   border: 1px solid var(--we-line);
   border-radius: 8px;
   background: var(--we-surface);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 18px 40px var(--we-shadow-ink-14);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -1183,7 +1206,7 @@ a { color: var(--we-primary); }
   border: 1px solid var(--we-line);
   border-radius: 14px;
   background: var(--we-surface);
-  box-shadow: 0 30px 60px -30px rgba(15, 23, 42, 0.25);
+  box-shadow: 0 30px 60px -30px var(--we-shadow-ink-25);
   padding: 22px;
   display: flex;
   flex-direction: column;
@@ -1233,7 +1256,7 @@ a { color: var(--we-primary); }
   background: var(--we-surface);
   border: 1.5px solid var(--we-line-strong);
   border-radius: 8px;
-  box-shadow: 0 18px 34px -26px rgba(15, 23, 42, 0.45);
+  box-shadow: 0 18px 34px -26px var(--we-shadow-ink-45);
   min-width: 238px;
   padding: 11px;
   position: relative;
@@ -1295,7 +1318,7 @@ a { color: var(--we-primary); }
 }
 
 .workflow-node-summary {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--we-surface-node-summary);
   border: 1px solid var(--we-line);
   border-radius: 7px;
   color: var(--we-ink-soft);
@@ -1322,7 +1345,7 @@ a { color: var(--we-primary); }
 .react-flow__controls {
   border: 1px solid var(--we-line-strong);
   border-radius: 8px;
-  box-shadow: 0 6px 20px -8px rgba(15, 23, 42, 0.2);
+  box-shadow: 0 6px 20px -8px var(--we-shadow-ink-20);
   overflow: hidden;
 }
 
@@ -1369,15 +1392,15 @@ a { color: var(--we-primary); }
   padding: 12px 14px;
   font-size: 13px;
   text-align: left;
-  box-shadow: 0 14px 36px -16px rgba(15, 23, 42, 0.28);
+  box-shadow: 0 14px 36px -16px var(--we-shadow-ink-28);
   cursor: pointer;
   transition: transform 140ms ease, border-color 140ms ease;
 }
 
 .toast:hover { transform: translateY(-1px); }
 
-.toast-success { border-color: rgba(16, 185, 129, 0.4); background: var(--we-success-soft); color: var(--we-success); }
-.toast-error { border-color: rgba(239, 68, 68, 0.4); background: var(--we-danger-soft); color: var(--we-danger); }
+.toast-success { border-color: var(--we-success-border-40); background: var(--we-success-soft); color: var(--we-success); }
+.toast-error { border-color: var(--we-danger-border-40); background: var(--we-danger-soft); color: var(--we-danger); }
 .toast-info { border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); background: var(--we-primary-soft); color: var(--we-primary-strong); }
 
 /* ==========================================================================
@@ -1451,11 +1474,11 @@ a { color: var(--we-primary); }
   background: var(--we-faint);
 }
 
-.timeline-card[data-tone="success"] { background: var(--we-success-soft); border-color: rgba(16, 185, 129, 0.3); }
+.timeline-card[data-tone="success"] { background: var(--we-success-soft); border-color: var(--we-success-border-30); }
 .timeline-card[data-tone="success"]::before { background: var(--we-success); }
-.timeline-card[data-tone="warning"] { background: var(--we-warning-soft); border-color: rgba(245, 158, 11, 0.3); }
+.timeline-card[data-tone="warning"] { background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
 .timeline-card[data-tone="warning"]::before { background: var(--we-warning); }
-.timeline-card[data-tone="error"] { background: var(--we-danger-soft); border-color: rgba(239, 68, 68, 0.3); }
+.timeline-card[data-tone="error"] { background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
 .timeline-card[data-tone="error"]::before { background: var(--we-danger); }
 .timeline-card[data-tone="info"]::before { background: var(--we-primary); }
 
@@ -1671,19 +1694,19 @@ a { color: var(--we-primary); }
 
 .we-readiness-badge--pass .we-readiness-badge__summary {
   color: var(--we-success);
-  border-color: rgba(16, 185, 129, 0.35);
+  border-color: var(--we-success-border-35);
   background: var(--we-success-soft);
 }
 
 .we-readiness-badge--warn .we-readiness-badge__summary {
   color: var(--we-warning);
-  border-color: rgba(245, 158, 11, 0.35);
+  border-color: var(--we-warning-border-35);
   background: var(--we-warning-soft);
 }
 
 .we-readiness-badge--fail .we-readiness-badge__summary {
   color: var(--we-danger);
-  border-color: rgba(239, 68, 68, 0.4);
+  border-color: var(--we-danger-border-40);
   background: var(--we-danger-soft);
 }
 
@@ -1727,7 +1750,7 @@ a { color: var(--we-primary); }
   background: var(--we-surface-1);
   border: 1px solid var(--we-line-strong);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 8px 24px var(--we-shadow-ink-18);
 }
 
 .we-readiness-issue {
@@ -1741,17 +1764,17 @@ a { color: var(--we-primary); }
 
 .we-readiness-issue--fail {
   background: var(--we-danger-soft);
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border: 1px solid var(--we-danger-border-25);
 }
 
 .we-readiness-issue--warn {
   background: var(--we-warning-soft);
-  border: 1px solid rgba(245, 158, 11, 0.25);
+  border: 1px solid var(--we-warning-border-25);
 }
 
 .we-readiness-issue--pass {
   background: var(--we-success-soft);
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  border: 1px solid var(--we-success-border-25);
 }
 
 .we-readiness-issue__code {

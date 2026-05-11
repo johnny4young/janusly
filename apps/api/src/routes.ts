@@ -1,12 +1,12 @@
 /**
- * Route registry types for `apps/api/src/index.ts`.
+ * Route registry types for `apps/api/src/server.ts`.
  *
- * The api server is a plain `http.createServer` callback that dispatches each
- * request against the `routes: Route[]` array exported from `index.ts`. New
- * routes plug in via `routes.push({...})` (or by appending to the literal at
- * source); the dispatcher loop in `index.ts` is closed for modification.
+ * The api server dispatches each request against the `routes: Route[]` array
+ * exported from `index.ts`. New routes plug in via `routes.push({...})` (or by
+ * appending to the literal at source); the dispatcher loop in `server.ts` is
+ * closed for modification.
  *
- * Used by `apps/api/src/index.ts` (the dispatcher) and by every feature that
+ * Used by `apps/api/src/server.ts` (the dispatcher) and by every feature that
  * adds an HTTP route.
  *
  * Invariants:

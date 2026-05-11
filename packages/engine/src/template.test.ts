@@ -13,6 +13,10 @@ describe('getByPath', () => {
   it('handles null sources without throwing', () => {
     expect(getByPath(null, 'a.b')).toBeUndefined()
   })
+
+  it('reads numeric array segments', () => {
+    expect(getByPath({ items: [{ id: 'first' }] }, 'items.0.id')).toBe('first')
+  })
 })
 
 describe('renderTemplate', () => {
