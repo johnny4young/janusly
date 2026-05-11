@@ -46,6 +46,7 @@ describe('WorkflowSchema', () => {
   it('keeps the published list of types as a stable contract', () => {
     expect(nodeTypeValues).toContain('multi_agent')
     expect(nodeTypeValues).toContain('approval')
+    expect(nodeTypeValues).toContain('human_form')
     expect(nodeTypeValues).toContain('noop')
     expect(nodeTypeValues).toContain('http')
     expect(nodeTypeValues).toContain('tool')

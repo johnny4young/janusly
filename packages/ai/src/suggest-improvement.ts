@@ -167,7 +167,7 @@ Rules per suggestion:
 - DO NOT include any literal secret values verbatim. Always use template references for tokens / passwords / keys.
 - DO NOT remove a node the operator has clearly built up around (multi-edge inbound or outbound). When in doubt, keep the node and tweak its config.
 - Suggestions should be DISTINCT. If you can only justify one approach, return one — don't repeat the same fix with different wording.
-- DO NOT invent new node types. The valid set is the input's discriminated union — every node you emit must have a \`type\` field that matches one of the existing types in the input or one of: \`http\`, \`tool\`, \`agent\`, \`ai\`, \`transform\`, \`condition\`, \`router\`, \`approval\`, \`multi_agent\`, \`loop\`, \`noop\`.
+- DO NOT invent new node types. The valid set is the input's discriminated union — every node you emit must have a \`type\` field that matches one of the existing types in the input or one of: \`http\`, \`tool\`, \`agent\`, \`ai\`, \`transform\`, \`condition\`, \`router\`, \`approval\`, \`human_form\`, \`loop\`, \`noop\`.
 - When \`focus\` is provided, prioritise that axis but feel free to add a second suggestion on a different axis if the focus alone wouldn't be the highest-impact change.`;
 
 /**

@@ -39,6 +39,7 @@ vi.mock('./memory', () => ({
 
 import { fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
+import { verifyResumeToken } from './secrets'
 import { setMailerForTests, type MailerProvider } from './mailer'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
@@ -194,6 +195,55 @@ describe('tool node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ tool: 'text.uppercase', result: { value: 'HI' } })
+  })
+})
+
+describe('human_form node — waiting metadata', () => {
+  it('pauses with a signed resume token and a serializable form schema', async () => {
+    const result = await nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: {
+        title: 'PTO request',
+        description: 'Collect manager review details.',
+        schema: {
+          type: 'object',
+          properties: {
+            requester: { type: 'string', description: 'Employee name' },
+            days: { type: 'number' },
+          },
+          required: ['requester', 'days'],
+        },
+      },
+    })
+
+    expect(result.status).toBe('waiting')
+    if (result.status !== 'waiting') return
+    expect(result.reason).toBe('Waiting for form submission')
+    expect(result.metadata).toMatchObject({
+      kind: 'human_form',
+      title: 'PTO request',
+      description: 'Collect manager review details.',
+      schema: {
+        type: 'object',
+        properties: {
+          requester: { type: 'string', description: 'Employee name' },
+          days: { type: 'number' },
+        },
+        required: ['requester', 'days'],
+      },
+    })
+    const token = result.metadata?.resumeToken
+    expect(typeof token).toBe('string')
+    verifyResumeToken(String(token), { orgId: 'org-1', runId: 'run-1', nodeId: 'collect', purpose: 'human_form' })
+  })
+
+  it('rejects invalid schemas instead of parking an unusable form', async () => {
+    await expect(nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: { schema: { type: 'object', properties: { bad: { type: 'date' } } } },
+    })).rejects.toThrow()
   })
 })
 

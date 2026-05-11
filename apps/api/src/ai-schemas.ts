@@ -135,16 +135,23 @@ const AiApprovalNode = z.object({
   }),
 });
 
-const AiMultiAgentNode = z.object({
+const AiHumanFormFieldSchema = z.object({
+  type: z.enum(["string", "number", "boolean"]),
+  description: z.string().optional(),
+  enum: z.array(z.string()).optional(),
+});
+
+const AiHumanFormNode = z.object({
   id: z.string().min(1),
-  type: z.literal("multi_agent"),
+  type: z.literal("human_form"),
   config: z.object({
-    goal: z.string().min(1),
-    agents: z.array(z.object({
-      name: z.string().min(1),
-      role: z.string().min(1),
-      goal: z.string().min(1),
-    })).min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    schema: z.object({
+      type: z.literal("object"),
+      properties: z.record(z.string(), AiHumanFormFieldSchema),
+      required: z.array(z.string()).optional(),
+    }),
   }),
 });
 
@@ -156,18 +163,19 @@ const AiLoopNode = z.object({
   }),
 });
 
-// AI generation emits 11 of the engine's 19 node types. Anthropic's
+// AI generation emits 11 of the engine's 20 node types. Anthropic's
 // structured-output grammar compiler caps schema size — empirically the
 // limit is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
 // `claude-opus-4-7` (all three accept up to 11 branches with the full
 // envelope below; 12+ rejects with "The compiled grammar is too large").
-// The remaining 8 (`wait_until`, `webhook`, `agent_reflection`,
-// `router_llm`, `subworkflow`, `parallel_fork`, `join`, `schedule`) stay operator-only
-// — AI emits a `noop` placeholder named after the requested step (e.g.
-// `fork_lead_enrichment`, `join_branches`, `wait_24h`) and the operator
-// promotes it in the Inspector via the type `<select>`. The engine's
+// The remaining 9 (`multi_agent`, `wait_until`, `webhook`,
+// `agent_reflection`, `router_llm`, `subworkflow`, `parallel_fork`, `join`,
+// `schedule`) stay operator-only — AI emits a `noop` placeholder named after
+// the requested step (e.g. `crew_review`, `fork_lead_enrichment`,
+// `join_branches`, `wait_24h`) and the operator promotes it in the Inspector
+// via the type `<select>`. The engine's
 // strict `WorkflowSchema` (used by /save, /start, /validate) still accepts
-// all 19, so once a workflow leaves AI generation it has full
+// all 20, so once a workflow leaves AI generation it has full
 // expressiveness.
 //
 // CROSS-PROVIDER NOTE: this `discriminatedUnion` compiles to JSON Schema
@@ -193,7 +201,7 @@ const AiNodeSchema = z.discriminatedUnion("type", [
   AiAgentNode,
   AiRouterNode,
   AiApprovalNode,
-  AiMultiAgentNode,
+  AiHumanFormNode,
   AiLoopNode,
 ]);
 
@@ -256,8 +264,8 @@ export const AiGenerationWorkflowSchema = z.object({
  *     value }>` patch form for the tool's flat string-keyed input map.
  *   - `AiPatchAgentConfigEnvelope` — `goal` / `retry` / `timeoutMs`.
  *   - `AiPatchGenericConfigEnvelope` — `patchedConfig: Record<string,
- *     unknown>` for the other 8 node types (transform/condition/ai/
- *     router/approval/multi_agent/loop/noop). This keeps local Zod parsing
+ *     unknown>` for fallback node types such as multi_agent, human_form,
+ *     and noop. This keeps local Zod parsing
  *     flexible, but provider strict-mode compatibility for those node types
  *     should move to concrete envelopes.
  *
@@ -498,7 +506,7 @@ export const AiPatchLoopConfigEnvelope = z.object({
 });
 
 /**
- * Envelope for every other node type (multi_agent, noop, and any
+ * Envelope for every other node type (multi_agent, human_form, noop, and any
  * unrecognised future types). The patched config is an open record —
  * the system prompt narrates valid fields per type, and the route's
  * post-validation chain catches structurally-invalid output.
@@ -536,11 +544,10 @@ export type PatchEnvelopeChoice = {
 };
 
 /**
- * Pick the patch envelope for a failing-node type. The dispatcher
- * routes 9 of the 11 supported node types to concrete envelopes; the
- * remaining 2 (`multi_agent` — agents-array shape too complex for v1;
- * `noop` — no actionable config) plus any unrecognised future types
- * fall through to the open generic envelope.
+ * Pick the patch envelope for a failing-node type. Node types with compact,
+ * stable config patches route to concrete envelopes; structurally broad
+ * types (`multi_agent`, `human_form`, `noop`) plus any unrecognised future
+ * types fall through to the open generic envelope.
  */
 export function patchEnvelopeForNodeType(nodeType: string): PatchEnvelopeChoice {
   switch (nodeType) {

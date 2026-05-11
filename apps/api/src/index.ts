@@ -21,11 +21,13 @@
  *   200/500 with a composite cursor.
  * - Rate limiter: AI surfaces gate on Redis-backed `enforceRateLimit`
  *   (fails open with `[rate-limit]` warn on Redis errors).
- * - `/ai/generate-workflow` calls `llm.generateObject({ schema: WorkflowSchema })`
- *   so the model returns a typed workflow directly. The post-Zod
- *   `sanitizeAiWorkflow` step still filters edge `condition` strings and
- *   `condition`-node expressions through `validateExpression` — keep it,
- *   since Zod's `z.string()` is looser than the engine's grammar.
+ * - `/ai/generate-workflow` calls `llm.generateObject({ schema:
+ *   AiGenerationWorkflowSchema })` so the model returns one of the
+ *   Anthropic-safe node shapes directly. The post-Zod `sanitizeAiWorkflow`
+ *   step still filters edge `condition` strings and `condition`-node
+ *   expressions through `validateExpression`, then runs the full engine
+ *   workflow validator — keep it, since Zod's `z.string()` is looser than
+ *   the engine's grammar.
  * - Audit logs: every mutation writes a row with a stable `action` string;
  *   AI mutations write audit on success AND on fallback.
  */
@@ -33,7 +35,7 @@
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { startRun } from "@janusly/engine/src/start-run";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
-import { resumeRun } from "@janusly/engine/src/resume-run";
+import { ResumeRunConflictError, resumeRun } from "@janusly/engine/src/resume-run";
 import { cancelRun } from "@janusly/engine/src/persistence";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { validateExpression } from "@janusly/engine/src/expression";
@@ -162,27 +164,22 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "You generate Janusly workflow DAGs as JSON. Output only the JSON object — no prose.",
   "Shape: {dslVersion:'1.0',id,name,nodes:[{id,type,config}],edges:[{from,to,condition?}]}.",
   "Use snake_case ids (start, fetch, decide). Node `id`s must be unique. Every edge `from`/`to` must reference a node `id`.",
-  "SUPPORTED AI-GENERATION TYPES: only emit nodes of these 11 types: 'noop', 'http', 'transform', 'condition', 'ai', 'tool', 'agent', 'router', 'approval', 'multi_agent', 'loop'. The platform supports 8 more operator-only types (wait_until, webhook, agent_reflection, router_llm, subworkflow, parallel_fork, join, schedule), but those are added by the operator in the Inspector after generation. If a prompt asks for one of those eight, use 'noop' as a placeholder named after the requested step (e.g. id='wait_24h' type='noop', id='ext_webhook' type='noop', id='schedule_daily' type='noop'). Use 'multi_agent' when the prompt explicitly asks for a team/crew/group of agents working together; use 'agent' for a single autonomous step. Use 'approval' when the prompt mentions a human gate, sign-off, or confirmation step. Use 'loop' for batch / for-each iterations.",
+  "SUPPORTED AI-GENERATION TYPES: only emit nodes of these 11 types: 'noop', 'http', 'transform', 'condition', 'ai', 'tool', 'agent', 'router', 'approval', 'human_form', 'loop'. The platform supports 9 more operator-only types (multi_agent, wait_until, webhook, agent_reflection, router_llm, subworkflow, parallel_fork, join, schedule), but those are added by the operator in the Inspector after generation. If a prompt asks for one of those nine, use 'noop' as a placeholder named after the requested step (e.g. id='crew_review' type='noop', id='wait_24h' type='noop', id='ext_webhook' type='noop', id='schedule_daily' type='noop'). Use 'agent' for a single autonomous step; use noop placeholders for teams/crews/groups that need multi_agent promotion. Use 'approval' when the prompt asks for a yes/no human gate. Use 'human_form' when the prompt asks a person to provide structured data, fill a request, confirm fields, or complete a review form. Use 'loop' for batch / for-each iterations.",
   "PLACEHOLDER RULE: when the user prompt mentions a branch name or step that has NO concrete action (e.g. 'fast_path', 'accurate_path', 'review', 'send_email') without specifying a URL, tool name, AI prompt, or backend action, use type 'noop' for that step. NEVER emit an 'http' node without a real URL or an 'ai' node without a prompt — the workflow will fail validation. Use 'http' only when the user explicitly gives a URL or describes calling a specific API. Use 'ai' only when the user wants the model to summarize, decide, or generate text. Use 'tool' only with a tool name from the list below.",
   "ROUTER RULE: every router/router_llm node MUST have at least one candidate, and every candidate's `nodeId` MUST match the `id` of another node in the same workflow. Add the target nodes (typically as 'noop' placeholders) before the router references them.",
-  "Node types and required config:",
+  "Supported node types and required config:",
   "- http: { url:string, method?:'GET'|'POST'|... } — runtime defaults: timeoutMs 30000, maxResponseBytes 1MB, maxRedirects 5. Retry, timeout, and bounds adjustments are added by the operator in the Inspector after generation; do not include them in the JSON you emit.",
   "- noop: {} (good for explicit start/end markers)",
   "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
   "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
-  "- webhook: {} (waits for external resume)",
-  "- approval: { message?: string } (waits for human approval)",
+  "- approval: { message?: string } (waits for a yes/no human approval)",
+  "- human_form: { title?: string, description?: string, schema: { type:'object', properties:{ [fieldName]: { type:'string'|'number'|'boolean', description?:string, enum?: string[] } }, required?: string[] } } (waits for a human to submit structured fields; use for PTO requests, access reviews, intake forms, and manager confirmations)",
   "- ai: { prompt: string, model?: string }",
   "- tool: { tool: 'http.request'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid', input?: { [key: string]: string } } — the input is a flat string-keyed map of template values. Tools needing richer inputs (csv rows, nested config) are filled by the operator after generation.",
   "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
-  "- multi_agent: { goal: string, mode?: 'sequential'|'parallel', agents: Array<{name,role,goal,persona?}>, reflection?: boolean }",
-  "- agent_reflection: { input?: string } — typically a template referencing a prior agent's output, e.g. \"{{context.agent.output}}\".",
   "- loop: { items: string | string[], mapping?: { [key: string]: string } } — `items` is either a comma-separated template string or a string array; `mapping` is a flat string-keyed map of templates per item.",
   "- router: { candidates: Array<{nodeId: string, avgCost?: number, avgLatencyMs?: number, successRate?: number}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' } — `nodeId` must reference an existing node id; scoring fields are optional and the runtime seeds them from prior runs when stats are available",
-  "- router_llm: { candidates: Array<{nodeId: string}> } — same candidate identifier shape as router with scoring fields omitted; downstream steps can inspect the decision output from context",
-  "- subworkflow: { workflowId: string, input?: { [key: string]: string } } (calls another saved workflow; child outputs become this node's output. Multi-tenant: child must be in the same org. Recursion guard: depth limit JANUSLY_MAX_SUBWORKFLOW_DEPTH, default 5.)",
-  "- wait_until: { duration: string } (ISO 8601 duration; pauses the run until the deadline elapses, e.g. \"P3D\" = 3 days, \"PT2H30M\" = 2.5 hours. Output is empty {}.)",
-  "- schedule: { cronExpression: string, enabled?: boolean } (cron trigger registered by the operator after generation; use noop placeholders in AI output for scheduled starts.)",
+  "Operator-only node types are not valid AI-generation output. Use noop placeholders for multi_agent, webhook, wait_until, subworkflow, router_llm, agent_reflection, parallel_fork, join, and schedule requests.",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
   "  - numbers, single/double-quoted strings, null",
@@ -256,13 +253,13 @@ async function aiStatus(orgId: string) {
 
 /**
  * Post-Zod sanitization for `/ai/generate-workflow`. The LLM-emitted
- * workflow has already been validated against `WorkflowSchema` by the AI SDK's
- * structured-output path; this step only filters edge `condition` strings and
+ * workflow has already been validated against the AI generation subset by the
+ * SDK's structured-output path; this step filters edge `condition` strings and
  * `condition`-node expressions through `validateExpression` (Janusly's limited
- * grammar). Without this, valid-shaped-but-grammar-invalid expressions would
- * crash at runtime instead of being silently dropped or normalised. The
- * `looseAiWorkflow` shape-coercer is intentionally not used now that the
- * route calls `generateObject({ schema: WorkflowSchema })`.
+ * grammar), then runs the full engine `validateWorkflow` gate. Without this,
+ * valid-shaped-but-runtime-invalid output would crash at execution time instead
+ * of degrading to fallback. The `looseAiWorkflow` shape-coercer is intentionally
+ * not used now that the route calls `generateObject`.
  */
 function sanitizeAiWorkflow(workflow: Workflow): Workflow {
   const sanitizedEdges = workflow.edges.map((edge) => {
@@ -296,6 +293,7 @@ const stepLabels: Record<string, string> = {
   condition: "Branch rule",
   webhook: "Wait for webhook",
   approval: "Ask approval",
+  human_form: "Collect form",
   ai: "AI prompt",
   tool: "Run a tool",
   agent: "Agent",
@@ -1067,12 +1065,13 @@ export const routes: Route[] = [
         });
       }
       try {
-        // Schema-aware generation. The AI SDK plumbs `WorkflowSchema`
-        // through each provider's structured-output capability and validates
-        // the response. The shape-coercing `looseAiWorkflow` pre-pass that
-        // existed before this is gone — schema enforcement is now real.
-        // Failures (LLM emits non-conformant JSON) throw inside the SDK and
-        // flow through the existing try/catch into the fallback contract.
+        // Schema-aware generation. The AI SDK plumbs the slim
+        // `AiGenerationWorkflowSchema` through each provider's
+        // structured-output capability and validates the response. The
+        // shape-coercing `looseAiWorkflow` pre-pass that existed before this
+        // is gone — schema enforcement is now real. Failures (LLM emits
+        // non-conformant JSON) throw inside the SDK and flow through the
+        // existing try/catch into the fallback contract.
         const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
           schema: AiGenerationWorkflowSchema,
           schemaName: "JanuslyWorkflow",
@@ -1824,13 +1823,32 @@ export const routes: Route[] = [
     } },
   { method: "POST", match: "/resume", role: "editor",
     handler: async ({ req, res, auth }) => {
-      const { runId, nodeId } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const { runId, nodeId, input, resumeToken } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
-      const result = await resumeRun(runId, nodeId);
-      await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
-      return sendJson(res, result);
+      try {
+        const result = await resumeRun(runId, nodeId, {
+          input,
+          resumeToken: typeof resumeToken === "string" ? resumeToken : undefined,
+        });
+        await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
+        return sendJson(res, result);
+      } catch (err) {
+        if (err instanceof WorkflowInputValidationError) {
+          return sendJson(res, { error: "Input validation failed", errors: err.errors }, 400);
+        }
+        if (err instanceof ResumeRunConflictError) {
+          return sendJson(res, { error: err.message }, 409);
+        }
+        if (err instanceof Error && err.message === "resumeToken is required") {
+          return sendJson(res, { error: err.message }, 400);
+        }
+        if (err instanceof Error && err.message === "Invalid resume token") {
+          return sendJson(res, { error: "Invalid resume token" }, 403);
+        }
+        throw err;
+      }
     } },
   // Cancel an in-flight run. Mirrors `/resume`'s shape; `cancelRun`
   // (engine helper) flips run + non-running nodes to "cancelled" and emits a

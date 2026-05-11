@@ -54,6 +54,7 @@ export const nodeTypeValues = [
   "ai",
   "webhook",
   "approval",
+  "human_form",
   "noop",
   "subworkflow",
   "wait_until",

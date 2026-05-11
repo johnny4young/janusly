@@ -105,4 +105,20 @@ describe('<RunInputDialog />', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(screen.getByText(/must be valid JSON/i)).toBeInTheDocument()
   })
+
+  it('supports custom schema-dialog copy for reused form surfaces', () => {
+    render(<RunInputDialog {...makeProps({
+      kicker: 'Form step',
+      title: 'Complete review',
+      description: 'Fill the requested fields.',
+      submitLabel: 'Submit form',
+      closeLabel: 'Close form',
+    })} />)
+
+    expect(screen.getByText('Form step')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Complete review' })).toBeInTheDocument()
+    expect(screen.getByText('Fill the requested fields.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Submit form/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Close form/i })).toBeInTheDocument()
+  })
 })

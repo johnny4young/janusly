@@ -15,7 +15,7 @@
  *   breaks the UI without a TypeScript error.
  */
 
-import { WorkflowSchema, nodeTypeValues } from "@janusly/shared";
+import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
@@ -98,6 +98,14 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
       }
     }
     if (node.type === "multi_agent" && (!Array.isArray(node.config.agents) || node.config.agents.length === 0)) issues.push({ code: "multi_agent_missing_agents", message: "Multi-agent node requires at least one agent", nodeId: node.id });
+    if (node.type === "human_form") {
+      const schema = WorkflowInputSchema.safeParse(node.config.schema);
+      if (!schema.success) {
+        issues.push({ code: "human_form_invalid_schema", message: "Human form node requires a valid config.schema", nodeId: node.id });
+      } else if (schema.data.type === "object" && (!schema.data.properties || Object.keys(schema.data.properties).length === 0)) {
+        issues.push({ code: "human_form_empty_schema", message: "Human form node requires at least one field in config.schema.properties", nodeId: node.id });
+      }
+    }
     if (node.type === "parallel_fork") {
       try {
         resolveParallelForkBranches(node.config);

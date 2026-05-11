@@ -30,6 +30,18 @@ type RunInputDialogProps = {
   inputs: WorkflowInputSchemaShape
   /** Run-friendly workflow name to anchor the header. */
   workflowName?: string
+  /** Optional header kicker for reuse by other schema-driven operator forms. */
+  kicker?: string
+  /** Optional title override. Defaults to `workflowName` or "Start workflow". */
+  title?: string
+  /** Optional description override. */
+  description?: string
+  /** Submit button copy. */
+  submitLabel?: string
+  /** Submit button copy while `submitting` is true. */
+  submittingLabel?: string
+  /** Accessible label for the close button. */
+  closeLabel?: string
   /** JSONPath-style errors echoed from `POST /start` (e.g. `"$.invoiceId is required"`). */
   serverErrors?: string[]
   /** Disables the submit button while the run-start request is in flight. */
@@ -52,6 +64,12 @@ const DESCRIPTION =
 export function RunInputDialog({
   inputs,
   workflowName,
+  kicker = 'Run input',
+  title,
+  description = DESCRIPTION,
+  submitLabel = 'Run workflow',
+  submittingLabel = 'Starting…',
+  closeLabel = 'Close run input',
   serverErrors,
   submitting = false,
   onSubmit,
@@ -75,14 +93,18 @@ export function RunInputDialog({
     firstFieldRef.current?.focus()
   }, [])
 
-  // ESC closes — common modal expectation.
+  // ESC closes — common modal expectation. Suppress while a submit is in
+  // flight so the operator can't unmount the dialog before the POST
+  // resolves: the parent's error-handling path (e.g. RightPanel surfacing
+  // human_form field errors) needs the dialog mounted to receive the
+  // response.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCancel()
+      if (event.key === 'Escape' && !submitting) onCancel()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onCancel])
+  }, [onCancel, submitting])
 
   const handleSubmit = useCallback(
     async (event: React.FormEvent) => {
@@ -112,8 +134,17 @@ export function RunInputDialog({
 
   const errors: ErrorMap = { ...mappedServerErrors, ...localErrors }
 
+  // Cancel paths (backdrop click, close button, ESC) must no-op while a
+  // submit is in flight. Without this guard the parent can unmount the
+  // dialog before the POST resolves, dropping the server's field-error
+  // response on the floor and leaving the run paused.
+  const handleCancel = useCallback(() => {
+    if (submitting) return
+    onCancel()
+  }, [submitting, onCancel])
+
   return (
-    <div className="run-input-backdrop" onClick={onCancel}>
+    <div className="run-input-backdrop" onClick={handleCancel}>
       <div
         className="run-input-dialog"
         role="dialog"
@@ -126,15 +157,16 @@ export function RunInputDialog({
             <Workflow size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">Run input</div>
-            <h2 id="run-input-title">{workflowName?.trim() ? workflowName : 'Start workflow'}</h2>
-            <p className="helper-text">{DESCRIPTION}</p>
+            <div className="section-kicker">{kicker}</div>
+            <h2 id="run-input-title">{title?.trim() || workflowName?.trim() || 'Start workflow'}</h2>
+            <p className="helper-text">{description}</p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
-            onClick={onCancel}
-            aria-label="Close run input"
+            onClick={handleCancel}
+            aria-label={closeLabel}
+            disabled={submitting}
           >
             <X size={16} aria-hidden="true" />
           </button>
@@ -175,7 +207,7 @@ export function RunInputDialog({
           )}
 
           <footer className="run-input-dialog__footer">
-            <button type="button" className="command-button" onClick={onCancel} disabled={submitting}>
+            <button type="button" className="command-button" onClick={handleCancel} disabled={submitting}>
               Cancel
             </button>
             <button
@@ -184,7 +216,7 @@ export function RunInputDialog({
               disabled={submitting}
             >
               <Play size={14} aria-hidden="true" />
-              <span>{submitting ? 'Starting…' : 'Run workflow'}</span>
+              <span>{submitting ? submittingLabel : submitLabel}</span>
             </button>
           </footer>
         </form>

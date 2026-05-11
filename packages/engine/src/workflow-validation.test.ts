@@ -84,6 +84,40 @@ describe('validateWorkflow', () => {
     expect(codes.filter(c => c === 'transform_missing_mapping').length).toBe(2)
   })
 
+  it('validates human_form schema before runtime execution', () => {
+    const invalid = validateWorkflow({
+      nodes: [
+        { id: 'form_missing', type: 'human_form', config: {} },
+        { id: 'form_empty', type: 'human_form', config: { schema: { type: 'object', properties: {} } } },
+      ],
+      edges: [],
+    })
+
+    expect(invalid.valid).toBe(false)
+    expect(invalid.issues).toContainEqual(expect.objectContaining({ code: 'human_form_invalid_schema', nodeId: 'form_missing' }))
+    expect(invalid.issues).toContainEqual(expect.objectContaining({ code: 'human_form_empty_schema', nodeId: 'form_empty' }))
+
+    const valid = validateWorkflow({
+      nodes: [{
+        id: 'collect',
+        type: 'human_form',
+        config: {
+          schema: {
+            type: 'object',
+            properties: {
+              requester: { type: 'string' },
+              days: { type: 'number' },
+            },
+            required: ['requester'],
+          },
+        },
+      }],
+      edges: [],
+    })
+
+    expect(valid).toEqual({ valid: true, issues: [] })
+  })
+
   it('rejects malformed parallel_fork and join config before runtime execution', () => {
     const result = validateWorkflow({
       nodes: [

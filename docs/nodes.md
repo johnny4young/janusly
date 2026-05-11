@@ -222,6 +222,32 @@ Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI s
 
 **Output (on resume):** the run continues; node `succeeded`.
 
+## `human_form`
+
+Pauses the run and asks an operator for structured input. The node config carries a small JSON-schema subset; the web renders it as a form, validates submitted values, and resumes the run with the parsed form body as this node's output.
+
+```jsonc
+{
+  "id": "pto_request",
+  "type": "human_form",
+  "config": {
+    "title": "PTO request",
+    "description": "Collect the manager-visible request details.",
+    "schema": {
+      "type": "object",
+      "required": ["employee", "days"],
+      "properties": {
+        "employee": { "type": "string", "description": "Employee name" },
+        "days": { "type": "number", "description": "Requested days" },
+        "urgent": { "type": "boolean", "description": "Needs same-day review" }
+      }
+    }
+  }
+}
+```
+
+**Output (on resume):** the submitted object, for example `{ employee: "Ana", days: 3, urgent: false }`.
+
 ---
 
 ## Edge conditions

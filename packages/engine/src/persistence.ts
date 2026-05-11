@@ -223,6 +223,15 @@ export async function markNodeSucceeded(runId: string, nodeId: string, output?: 
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
+/** Conditionally complete a paused node. Returns false when it was already resumed/cancelled/failed. */
+export async function markWaitingNodeSucceeded(runId: string, nodeId: string, output?: any): Promise<boolean> {
+  const completed = await db.update(runNodes)
+    .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId), eq(runNodes.status, "waiting")))
+    .returning({ id: runNodes.id });
+  return completed.length > 0;
+}
+
 /** Mark a node failed with the serialized error in `error_json`. Terminal. */
 export async function markNodeFailed(runId: string, nodeId: string, error: any) {
   await db.update(runNodes)

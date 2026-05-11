@@ -26,7 +26,15 @@ describe('api', () => {
     })
   })
 
-  it('throws field-error-shaped 400 responses outside /start', async () => {
+  it('returns /resume field validation envelopes so human forms can map errors', async () => {
+    mockJsonResponse(400, { errors: ['$.requester is required'] })
+
+    await expect(api('/resume', { method: 'POST' })).resolves.toEqual({
+      errors: ['$.requester is required'],
+    })
+  })
+
+  it('throws field-error-shaped 400 responses outside /start and /resume', async () => {
     mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
 
     await expect(api('/validate', { method: 'POST' })).rejects.toThrow('Request failed with 400')

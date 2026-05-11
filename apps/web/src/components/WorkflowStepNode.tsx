@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { Activity, Boxes, Bot, CheckCircle2, GitBranch, Layers3, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, Bot, CheckCircle2, ClipboardList, GitBranch, Layers3, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { formatStatusLabel, getNodeConfigSummary, getNodeHelper, getNodeLabel } from '../constants'
@@ -21,6 +21,7 @@ const nodeIcons: Record<string, React.ReactNode> = {
   condition: <CheckCircle2 size={15} />,
   webhook: <Activity size={15} />,
   approval: <Users size={15} />,
+  human_form: <ClipboardList size={15} />,
   ai: <Sparkles size={15} />,
   tool: <Boxes size={15} />,
   agent: <Bot size={15} />,
