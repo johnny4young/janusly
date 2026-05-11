@@ -75,4 +75,24 @@ describe('node-type catalogue', () => {
       expect(getNodeConfigSummary('schedule', { cronExpression: '' })).toBe('Set a cron expression')
     })
   })
+
+  describe('human_form node type', () => {
+    it('declares a usable default form preset', () => {
+      expect(nodeTypes).toContain('human_form')
+      expect(nodePresets.human_form).toMatchObject({
+        title: 'Collect request details',
+        schema: {
+          type: 'object',
+          required: ['requester', 'reason'],
+        },
+      })
+    })
+
+    it('exposes display label, helper, and summary', () => {
+      expect(getNodeLabel('human_form')).toBe('Collect form')
+      expect(getNodeHelper('human_form')).toBe('Pause for structured input')
+      expect(getNodeConfigSummary('human_form', { title: 'Access review' })).toBe('Access review')
+      expect(getNodeConfigSummary('human_form', {})).toBe('Add form fields')
+    })
+  })
 })

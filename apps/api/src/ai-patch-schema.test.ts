@@ -516,12 +516,14 @@ describe("patchEnvelopeForNodeType — dispatch", () => {
     }
   });
 
-  it("falls back to the generic envelope for multi_agent / noop / unknown types", () => {
+  it("falls back to the generic envelope for multi_agent / human_form / noop / unknown types", () => {
     // multi_agent stays on generic — agents-array shape too complex for v1.
+    // human_form stays on generic — its nested form schema is better
+    // edited directly by the operator than patched through a compact envelope.
     // noop stays on generic — no actionable runtime config (always falls back).
     // Unknown types pass through to generic so the patch path stays open
     // for future node types without a code change.
-    for (const type of ["multi_agent", "noop", "unknown_type"]) {
+    for (const type of ["multi_agent", "human_form", "noop", "unknown_type"]) {
       const choice = patchEnvelopeForNodeType(type);
       expect(choice.kind, `for type=${type}`).toBe("generic");
       expect(choice.schema).toBe(AiPatchGenericConfigEnvelope);
@@ -529,13 +531,51 @@ describe("patchEnvelopeForNodeType — dispatch", () => {
   });
 });
 
-describe("AiGenerationWorkflowSchema — generation route stays untouched", () => {
+describe("AiGenerationWorkflowSchema — selected 11-node grammar", () => {
   it("still parses a basic AI-generated workflow shape", () => {
     const parsed = AiGenerationWorkflowSchema.safeParse({
       nodes: [{ id: "fetch", type: "http", config: { url: "https://x" } }],
       edges: [],
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("accepts human_form in the generation grammar", () => {
+    const parsed = AiGenerationWorkflowSchema.safeParse({
+      nodes: [{
+        id: "collect_pto",
+        type: "human_form",
+        config: {
+          title: "PTO request",
+          schema: {
+            type: "object",
+            properties: {
+              requester: { type: "string", description: "Employee name" },
+              days: { type: "number" },
+              managerApproved: { type: "boolean" },
+            },
+            required: ["requester", "days"],
+          },
+        },
+      }],
+      edges: [],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("keeps multi_agent out of the 11-branch generation grammar", () => {
+    const parsed = AiGenerationWorkflowSchema.safeParse({
+      nodes: [{
+        id: "crew",
+        type: "multi_agent",
+        config: {
+          goal: "Review the request",
+          agents: [{ name: "a", role: "analyst", goal: "analyze" }],
+        },
+      }],
+      edges: [],
+    });
+    expect(parsed.success).toBe(false);
   });
 });
 

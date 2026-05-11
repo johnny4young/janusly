@@ -19,7 +19,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
@@ -28,6 +28,7 @@ import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { OperationsPanel } from './OperationsPanel'
+import { HumanFormDialog } from './HumanFormDialog'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { api } from '../api'
@@ -65,6 +66,7 @@ type RightPanelProps = {
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
   onApproveNode: (nodeId: string) => void
+  onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | void> | string[] | void
   onReplayNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string) => void
@@ -139,6 +141,7 @@ export function RightPanel(props: RightPanelProps) {
       onOpenRun={props.onOpenRun}
       onRefreshPlatform={props.onRefreshPlatform}
       onApproveNode={props.onApproveNode}
+      onSubmitHumanForm={props.onSubmitHumanForm}
       onReplayNode={props.onReplayNode}
       onCancelActiveRun={props.onCancelActiveRun}
       onReplayDeadLetter={props.onReplayDeadLetter}
@@ -522,6 +525,18 @@ function QuickConfigEditor({
       <section className="quick-config">
         <div className="section-kicker">Quick setup</div>
         <TextareaConfigField scope={nodeId} label="Approval message" value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
+      </section>
+    )
+  }
+
+  if (type === 'human_form') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField scope={nodeId} label="Form title" value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
+        <TextareaConfigField scope={nodeId} label="Operator instructions" value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
+        <JsonConfigField scope={nodeId} label="Fields schema" value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
+        <p className="helper-text">Use an object schema with simple string, number, or boolean fields. Required fields block submit until filled.</p>
       </section>
     )
   }
@@ -1069,6 +1084,44 @@ export function UsageSummaryCard({
   )
 }
 
+type HumanFormWaiting = {
+  title?: string
+  description?: string
+  schema: WorkflowInputSchemaShape
+  resumeToken: string
+}
+
+function readHumanFormWaiting(node: RunNode): HumanFormWaiting | null {
+  const waiting = node.stateJson?.waiting
+  if (!waiting || typeof waiting !== 'object' || Array.isArray(waiting)) return null
+  const data = waiting as Record<string, unknown>
+  if (data.kind !== 'human_form') return null
+  if (typeof data.resumeToken !== 'string' || !data.resumeToken) return null
+  if (!isWorkflowInputSchemaShape(data.schema)) return null
+  return {
+    title: typeof data.title === 'string' ? data.title : undefined,
+    description: typeof data.description === 'string' ? data.description : undefined,
+    schema: data.schema,
+    resumeToken: data.resumeToken,
+  }
+}
+
+function isWorkflowInputSchemaShape(value: unknown): value is WorkflowInputSchemaShape {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const schema = value as Record<string, unknown>
+  if (!['string', 'number', 'boolean', 'object', 'array'].includes(String(schema.type))) return false
+  if (schema.properties !== undefined) {
+    if (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties)) return false
+    for (const child of Object.values(schema.properties as Record<string, unknown>)) {
+      if (!isWorkflowInputSchemaShape(child)) return false
+    }
+  }
+  if (schema.items !== undefined && !isWorkflowInputSchemaShape(schema.items)) return false
+  if (schema.required !== undefined && (!Array.isArray(schema.required) || !schema.required.every(item => typeof item === 'string'))) return false
+  if (schema.enum !== undefined && !Array.isArray(schema.enum)) return false
+  return true
+}
+
 function RunsPanel({
   runs,
   usage,
@@ -1078,16 +1131,24 @@ function RunsPanel({
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
+  onSubmitHumanForm,
   onReplayNode,
   onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
-}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onReplayNode' | 'onCancelActiveRun' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
+}: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onSubmitHumanForm' | 'onReplayNode' | 'onCancelActiveRun' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
   const activeRuns = runs.filter(run => run.status === 'running' || run.status === 'queued').length
   const failedRuns = runs.filter(run => run.status === 'failed').length
+  const [activeHumanFormNodeId, setActiveHumanFormNodeId] = useState<string | null>(null)
+  const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
+  const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
+  const activeHumanFormNode = activeHumanFormNodeId
+    ? waitingNodes.find(node => node.nodeId === activeHumanFormNodeId) ?? null
+    : null
+  const activeHumanForm = activeHumanFormNode ? readHumanFormWaiting(activeHumanFormNode) : null
 
   // Cancellable when the active run is in a non-terminal status.
   const activeRun = activeRunId ? runs.find(run => run.id === activeRunId) : null
@@ -1138,15 +1199,60 @@ function RunsPanel({
       {waitingNodes.length > 0 && (
         <section className="panel-card action-card">
           <div>
-            <strong>Needs approval</strong>
-            <p className="helper-text">Resume paused approval steps from here.</p>
+            <strong>Paused steps</strong>
+            <p className="helper-text">Continue steps that are waiting for a person, form, webhook, or timer.</p>
           </div>
-          {waitingNodes.map(node => (
-            <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
-              Approve {node.nodeId}
-            </button>
-          ))}
+          {waitingNodes.map(node => {
+            const form = readHumanFormWaiting(node)
+            if (form) {
+              return (
+                <button
+                  key={node.nodeId}
+                  className="small-command small-command--primary"
+                  onClick={() => {
+                    setHumanFormErrors([])
+                    setActiveHumanFormNodeId(node.nodeId)
+                  }}
+                >
+                  Fill form {node.nodeId}
+                </button>
+              )
+            }
+            return (
+              <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
+                Resume {node.nodeId}
+              </button>
+            )
+          })}
         </section>
+      )}
+
+      {activeHumanFormNode && activeHumanForm && (
+        <HumanFormDialog
+          title={activeHumanForm.title}
+          description={activeHumanForm.description}
+          schema={activeHumanForm.schema}
+          serverErrors={humanFormErrors}
+          submitting={humanFormSubmitting}
+          onCancel={() => {
+            setActiveHumanFormNodeId(null)
+            setHumanFormErrors([])
+          }}
+          onSubmit={async (input) => {
+            setHumanFormSubmitting(true)
+            setHumanFormErrors([])
+            try {
+              const result = await onSubmitHumanForm(activeHumanFormNode.nodeId, input, activeHumanForm.resumeToken)
+              if (Array.isArray(result) && result.length > 0) {
+                setHumanFormErrors(result)
+                return
+              }
+              setActiveHumanFormNodeId(null)
+            } finally {
+              setHumanFormSubmitting(false)
+            }
+          }}
+        />
       )}
 
       {failedNodes.length > 0 && (

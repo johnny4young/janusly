@@ -21,7 +21,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
  * Make an authenticated request to the API; resolves the parsed body or
  * throws on non-2xx.
  *
- * Exception: `POST /start` 400 responses whose body matches
+ * Exception: `POST /start` and `POST /resume` 400 responses whose body matches
  * `{ errors: string[] }` are resolved (not thrown) and returned as-is.
  * This is the field-level validation envelope the API emits when a workflow
  * declares typed `inputs` and the payload doesn't satisfy them — the
@@ -48,7 +48,7 @@ export async function api(path: string, options: RequestInit = {}) {
   const payload = await res.json().catch(() => ({}))
 
   if (!res.ok) {
-    if (path === '/start' && res.status === 400 && isFieldErrorEnvelope(payload)) {
+    if ((path === '/start' || path === '/resume') && res.status === 400 && isFieldErrorEnvelope(payload)) {
       return payload
     }
     const message = typeof payload?.error === 'string' ? payload.error : `Request failed with ${res.status}`

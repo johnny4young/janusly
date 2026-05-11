@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, Database, Gauge, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, ClipboardList, Database, Gauge, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { nodeTypes, nodeUi } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 
@@ -33,6 +33,7 @@ const nodeIcons: Record<string, React.ReactNode> = {
   condition: <CheckCircle2 size={15} />,
   webhook: <Activity size={15} />,
   approval: <Users size={15} />,
+  human_form: <ClipboardList size={15} />,
   ai: <Sparkles size={15} />,
   tool: <Boxes size={15} />,
   agent: <Users size={15} />,

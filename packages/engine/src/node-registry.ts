@@ -28,6 +28,7 @@
 
 import { loadRootEnv } from "@janusly/db";
 import { createLlmClient, resolveLlmConfig, type LlmClient } from "@janusly/ai";
+import { WorkflowInputSchema } from "@janusly/shared";
 import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
@@ -45,6 +46,7 @@ import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
+import { signResumeToken } from "./secrets";
 
 loadRootEnv();
 
@@ -547,6 +549,26 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
 
   webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
   approval: async (ctx) => ({ status: "waiting", reason: "Waiting for human approval", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
+  human_form: async (ctx) => {
+    const schema = WorkflowInputSchema.parse(ctx.config.schema);
+    const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
+      ? ctx.config.title.trim()
+      : "Human input required";
+    const description = typeof ctx.config.description === "string" && ctx.config.description.trim()
+      ? ctx.config.description.trim()
+      : undefined;
+    return {
+      status: "waiting",
+      reason: "Waiting for form submission",
+      metadata: {
+        kind: "human_form",
+        title,
+        description,
+        schema,
+        resumeToken: signResumeToken({ orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" }),
+      },
+    };
+  },
   noop: async () => ({ status: "completed" }),
 
   // Subworkflow node — async pause-and-resume against a child run.

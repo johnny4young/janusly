@@ -24,6 +24,7 @@ secret values stay env-only.
 | `JANUSLY_REQUIRE_EVAL_COVERAGE` | `false` | `packages/engine/src/workflow-readiness.ts` | Opt-in addition to the readiness gate that warns when a workflow has no associated eval. Off by default so clean MVP workflows can reach `status: "pass"` without eval tracking. |
 | `WORKER_CONCURRENCY` | `10` | `packages/engine/src/worker.ts` | BullMQ worker concurrency. |
 | `JANUSLY_MAX_SUBWORKFLOW_DEPTH` | `5` | `packages/engine/src/subworkflow.ts` | Maximum nested subworkflow depth. |
+| `JANUSLY_RESUME_TOKEN_SECRET` | unset in dev; required in production | `packages/engine/src/secrets.ts` | HMAC signing secret for `human_form` resume tokens. Dev mode uses a local fallback; production fails closed without this dedicated secret. Do not reuse `JANUSLY_API_SERVICE_TOKEN` for resume-token signing. |
 | `JANUSLY_PERSIST_MAX_BYTES` | `262144` (256 KiB) | `packages/engine/src/safe-persist.ts` | Default size cap for jsonb writes through the safe-persist chokepoint. Over-cap payloads are replaced with a `{ __truncated: true, ... }` sentinel. |
 
 `docker-compose.yml` also sets Postgres container-internal values
