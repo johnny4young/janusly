@@ -613,6 +613,31 @@ function QuickConfigEditor({
     )
   }
 
+  if (type === 'schedule') {
+    const enabled = config.enabled !== false
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">Quick setup</div>
+        <TextConfigField
+          scope={nodeId}
+          label="Cron expression"
+          value={readConfigString(config, 'cronExpression')}
+          onChange={value => patch({ cronExpression: value })}
+        />
+        <div className="config-field-row">
+          <label className="field-label" htmlFor={fieldId(nodeId, 'Enabled')}>Enabled</label>
+          <input
+            id={fieldId(nodeId, 'Enabled')}
+            type="checkbox"
+            checked={enabled}
+            onChange={event => patch({ enabled: event.target.checked })}
+          />
+        </div>
+        <p className="helper-text">5-field cron (minute hour day-of-month month day-of-week). Examples: <code>0 9 * * *</code> (daily 9am), <code>*/5 * * * *</code> (every 5 min), <code>0 0 * * 1</code> (Mondays). Uncheck Enabled to pause without losing the schedule.</p>
+      </section>
+    )
+  }
+
   return (
     <section className="quick-config">
       <div className="section-kicker">Quick setup</div>

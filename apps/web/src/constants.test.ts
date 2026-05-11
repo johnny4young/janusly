@@ -52,4 +52,27 @@ describe('node-type catalogue', () => {
       expect(getNodeConfigSummary('join', { sources: ['a', 'b'] })).toBe('Map branches to predecessor nodes')
     })
   })
+
+  describe('schedule node type', () => {
+    it('declares schedule in the preset map and ordered list', () => {
+      expect(nodePresets.schedule).toEqual({ cronExpression: '0 9 * * *', enabled: true })
+      expect(nodeTypes).toContain('schedule')
+    })
+
+    it('exposes display label + helper', () => {
+      expect(getNodeLabel('schedule')).toBe('Schedule')
+      expect(getNodeHelper('schedule')).toBe('Trigger this workflow on a cron schedule')
+    })
+
+    it('summarises schedule by cron expression and paused flag', () => {
+      expect(getNodeConfigSummary('schedule', { cronExpression: '0 9 * * *', enabled: true })).toBe('0 9 * * *')
+      expect(getNodeConfigSummary('schedule', { cronExpression: '*/5 * * * *', enabled: false }))
+        .toBe('*/5 * * * * (paused)')
+    })
+
+    it('prompts the operator when cron is missing', () => {
+      expect(getNodeConfigSummary('schedule', {})).toBe('Set a cron expression')
+      expect(getNodeConfigSummary('schedule', { cronExpression: '' })).toBe('Set a cron expression')
+    })
+  })
 })

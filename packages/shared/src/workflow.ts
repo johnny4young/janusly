@@ -59,6 +59,7 @@ export const nodeTypeValues = [
   "wait_until",
   "parallel_fork",
   "join",
+  "schedule",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

@@ -124,6 +124,48 @@ describe('validateWorkflow', () => {
     expect(result.issues.find(issue => issue.code === 'join_invalid_sources')).toBeUndefined()
   })
 
+  it('rejects schedule nodes with a missing or malformed cron expression', () => {
+    const missing = validateWorkflow({
+      nodes: [{ id: 'trigger', type: 'schedule', config: {} }],
+      edges: [],
+    })
+    expect(missing.valid).toBe(false)
+    expect(missing.issues).toContainEqual(expect.objectContaining({
+      code: 'schedule_invalid_cron',
+      nodeId: 'trigger',
+    }))
+
+    const malformed = validateWorkflow({
+      nodes: [{ id: 'trigger', type: 'schedule', config: { cronExpression: 'wat' } }],
+      edges: [],
+    })
+    expect(malformed.valid).toBe(false)
+    expect(malformed.issues).toContainEqual(expect.objectContaining({
+      code: 'schedule_invalid_cron',
+      nodeId: 'trigger',
+    }))
+
+    const badEnabled = validateWorkflow({
+      nodes: [{ id: 'trigger', type: 'schedule', config: { cronExpression: '0 9 * * *', enabled: 'yes' } }],
+      edges: [],
+    })
+    expect(badEnabled.issues).toContainEqual(expect.objectContaining({
+      code: 'schedule_invalid_cron',
+      nodeId: 'trigger',
+    }))
+  })
+
+  it('accepts schedule nodes with a valid cron expression', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'trigger', type: 'schedule', config: { cronExpression: '*/5 * * * *', enabled: true } },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'trigger', to: 'next' }],
+    })
+    expect(result.issues.find(issue => issue.code === 'schedule_invalid_cron')).toBeUndefined()
+  })
+
   it('accepts ai/agent/transform nodes when their required fields are present', () => {
     const result = validateWorkflow({
       nodes: [

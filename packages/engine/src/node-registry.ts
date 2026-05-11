@@ -44,6 +44,7 @@ import { hasFailureSignal } from "./failure-signal";
 import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
+import { scheduleExecutor } from "./schedule";
 
 loadRootEnv();
 
@@ -567,4 +568,10 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // guard. The executors here only validate and shape outputs.
   parallel_fork: parallelForkExecutor,
   join: joinExecutor,
+
+  // schedule node — passthrough trigger. The cron firing is owned by a
+  // BullMQ scheduler registered by `schedule-scheduler.ts` on workflow
+  // save; the executor itself just succeeds with `triggeredAt` so
+  // downstream nodes have a stable output to read.
+  schedule: scheduleExecutor,
 };

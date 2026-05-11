@@ -156,18 +156,18 @@ const AiLoopNode = z.object({
   }),
 });
 
-// AI generation emits 11 of the engine's 18 node types. Anthropic's
+// AI generation emits 11 of the engine's 19 node types. Anthropic's
 // structured-output grammar compiler caps schema size — empirically the
 // limit is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
 // `claude-opus-4-7` (all three accept up to 11 branches with the full
 // envelope below; 12+ rejects with "The compiled grammar is too large").
-// The remaining 7 (`wait_until`, `webhook`, `agent_reflection`,
-// `router_llm`, `subworkflow`, `parallel_fork`, `join`) stay operator-only
+// The remaining 8 (`wait_until`, `webhook`, `agent_reflection`,
+// `router_llm`, `subworkflow`, `parallel_fork`, `join`, `schedule`) stay operator-only
 // — AI emits a `noop` placeholder named after the requested step (e.g.
 // `fork_lead_enrichment`, `join_branches`, `wait_24h`) and the operator
 // promotes it in the Inspector via the type `<select>`. The engine's
 // strict `WorkflowSchema` (used by /save, /start, /validate) still accepts
-// all 18, so once a workflow leaves AI generation it has full
+// all 19, so once a workflow leaves AI generation it has full
 // expressiveness.
 //
 // CROSS-PROVIDER NOTE: this `discriminatedUnion` compiles to JSON Schema

@@ -99,6 +99,14 @@ function makeTx(currentAttempt: number) {
   }
 }
 
+// `saveWorkflowVersion` now calls `syncWorkflowSchedules` from the
+// engine's schedule-scheduler module on a successful save. Mocking that
+// here keeps these unit tests from pulling in BullMQ + ioredis (which
+// would error on missing REDIS_URL in the test runner).
+vi.mock('@janusly/engine/src/schedule-scheduler', () => ({
+  syncWorkflowSchedules: vi.fn(async () => undefined),
+}))
+
 vi.mock('@janusly/db', () => ({
   db: {
     transaction: async <T>(fn: (tx: ReturnType<typeof makeTx>) => Promise<T>) => {
