@@ -132,6 +132,20 @@ Returns all versions of a workflow (newest first).
 
 Returns the most recent version, or `null` if none exists.
 
+### `DELETE /workflows/:id`
+
+Hard-deletes the workflow and every saved version for the caller's org. Requires `editor` role. Cron-driven `schedule` entries and their BullMQ schedulers are removed before the workflow rows are deleted. Historical runs and audit rows keep their orphaned `workflow_version_id` text references.
+
+**Response 200**
+```json
+{ "workflowId": "etl-daily", "ok": true }
+```
+
+**Response 404**
+```json
+{ "error": "Workflow not found" }
+```
+
 ---
 
 ## Validate

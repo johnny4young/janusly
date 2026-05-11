@@ -48,6 +48,7 @@ export const nodePresets: Record<string, JsonObject> = {
   wait_until: { duration: 'P1D' },
   parallel_fork: { branches: [{ label: 'a' }, { label: 'b' }] },
   join: { sources: { a: '', b: '' } },
+  schedule: { cronExpression: '0 9 * * *', enabled: true },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -73,6 +74,7 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   wait_until: { label: 'Wait', helper: 'Pause the run for an ISO 8601 duration' },
   parallel_fork: { label: 'Fan out', helper: 'Run named branches in parallel' },
   join: { label: 'Merge branches', helper: 'Gather labelled outputs from a fan-out' },
+  schedule: { label: 'Schedule', helper: 'Trigger this workflow on a cron schedule' },
 }
 
 /** Human label for a node type (falls back to the raw id with `_` → space). */
@@ -114,6 +116,11 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
       ? Object.keys(config.sources as Record<string, unknown>).length
       : 0
     return sources > 0 ? `Merging ${sources} branch${sources === 1 ? '' : 'es'}` : 'Map branches to predecessor nodes'
+  }
+  if (type === 'schedule') {
+    const cron = readString(config.cronExpression)
+    const enabled = config.enabled === false ? ' (paused)' : ''
+    return cron ? `${cron}${enabled}` : 'Set a cron expression'
   }
   return 'Review step settings'
 }
