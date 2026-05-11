@@ -14,7 +14,7 @@
  *   render the auth UI?" — don't introduce a parallel flag.
  */
 
-import { createClient, type Session, type User } from '@supabase/supabase-js'
+import { createClient, type AuthChangeEvent, type AuthResponse, type Session, type User } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -26,6 +26,11 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!)
   : null
+
+type SupabaseAuthClient = NonNullable<typeof supabase>['auth']
+type SignOutResponse = Awaited<ReturnType<SupabaseAuthClient['signOut']>>
+type SessionResponse = Awaited<ReturnType<SupabaseAuthClient['getSession']>>
+type AuthSubscriptionResponse = ReturnType<SupabaseAuthClient['onAuthStateChange']>
 
 /** Auth state the rest of the web reads. `userId` / `orgId` are the API request keys. */
 export type NormalizedAuth = {
@@ -42,6 +47,32 @@ const devAuth: NormalizedAuth = {
   orgId: 'default',
 }
 
+const devAuthResponse: AuthResponse = {
+  data: { user: null, session: null },
+  error: null,
+}
+
+const devSignOutResponse: SignOutResponse = {
+  error: null,
+}
+
+const devSessionResponse: SessionResponse = {
+  data: { session: null },
+  error: null,
+}
+
+function devAuthSubscription(): AuthSubscriptionResponse {
+  return {
+    data: {
+      subscription: {
+        id: 'dev-auth-state',
+        callback: (_event: AuthChangeEvent, _session: Session | null) => undefined,
+        unsubscribe: () => undefined,
+      },
+    },
+  }
+}
+
 /** Project a Supabase session onto `NormalizedAuth` (defaults `orgId` to `"default"`). */
 export function normalizeAuth(session: Session | null): NormalizedAuth {
   const user = session?.user ?? null
@@ -56,19 +87,19 @@ export function normalizeAuth(session: Session | null): NormalizedAuth {
 /** Auth methods used by Login / UserMenu / MembersPanel. Stubs to no-ops when Supabase isn't configured. */
 export const AuthProvider = {
   signIn: (email: string, password: string) => {
-    if (!supabase) return Promise.resolve({ data: { user: null, session: null }, error: null } as any)
+    if (!supabase) return Promise.resolve(devAuthResponse)
     return supabase.auth.signInWithPassword({ email, password })
   },
   signUp: (email: string, password: string) => {
-    if (!supabase) return Promise.resolve({ data: { user: null, session: null }, error: null } as any)
+    if (!supabase) return Promise.resolve(devAuthResponse)
     return supabase.auth.signUp({ email, password })
   },
   signOut: () => {
-    if (!supabase) return Promise.resolve({ error: null } as any)
+    if (!supabase) return Promise.resolve(devSignOutResponse)
     return supabase.auth.signOut()
   },
   getSession: async () => {
-    if (!supabase) return { data: { session: null }, error: null } as any
+    if (!supabase) return devSessionResponse
     return supabase.auth.getSession()
   },
   updateOrg: async (orgId: string) => {
@@ -83,7 +114,7 @@ export const AuthProvider = {
   onAuthStateChange: (callback: (auth: NormalizedAuth) => void) => {
     if (!supabase) {
       callback(devAuth)
-      return { data: { subscription: { unsubscribe: () => undefined } } } as any
+      return devAuthSubscription()
     }
     return supabase.auth.onAuthStateChange((_event, session) => callback(normalizeAuth(session)))
   },
