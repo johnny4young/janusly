@@ -46,6 +46,22 @@ export type AuthContext = {
   orgId: string;
   userId: string;
   mode: "supabase" | "dev-headers" | "service-token";
+  /**
+   * Caller surface label. `"web"` when a browser-issued Supabase JWT
+   * landed, `"mcp"` when an MCP client identified itself via the
+   * `x-janusly-source: mcp` header in service-token or dev-headers
+   * mode, `"service"` when service-token mode was used without that
+   * header, and `"dev"` when dev headers were used without it.
+   *
+   * Informational only — used for audit-row tagging and per-tool rate
+   * limit bucketing. NEVER use `source` as an authorization gate; it
+   * is set by the caller and is not tamper-proof. Real consent gates
+   * (`isMcpWriteAllowed`) check server-controlled state (env var +
+   * `org_configs.mcp.writeConsent`).
+   */
+  source: "web" | "mcp" | "service" | "dev";
+  /** Last 4 chars of the service token, when this request authenticated via service-token mode. Used for audit forensics. */
+  serviceTokenSuffix?: string;
 };
 
 function constantTimeBearerMatch(authHeader: string | undefined, expected: string) {
@@ -73,6 +89,7 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
         orgId: (data.user.user_metadata?.orgId as string | undefined) ?? "default",
         userId: data.user.id,
         mode: "supabase",
+        source: "web",
       };
     }
   }
@@ -80,10 +97,18 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
   const serviceToken = process.env.API_SERVICE_TOKEN;
 
   if (serviceToken && constantTimeBearerMatch(authHeader, serviceToken)) {
+    // `x-janusly-source: mcp` is the MCP client's self-declared label.
+    // Service-token and dev-header modes preserve it so MCP writes hit
+    // the consent / audit / rate-limit path. Supabase JWT requests ignore
+    // it so a browser request can't claim MCP source.
+    const declaredSource = (req.headers["x-janusly-source"] as string | undefined)?.toLowerCase();
+    const source: AuthContext["source"] = declaredSource === "mcp" ? "mcp" : "service";
     return {
       orgId: (req.headers["x-org-id"] as string) || "default",
       userId: (req.headers["x-user-id"] as string) || "service",
       mode: "service-token",
+      source,
+      serviceTokenSuffix: serviceToken.slice(-4),
     };
   }
 
@@ -94,7 +119,9 @@ export async function getAuth(req: http.IncomingMessage): Promise<AuthContext | 
 
   if (!orgId || !userId) return null;
 
-  return { orgId, userId, mode: "dev-headers" };
+  const declaredSource = (req.headers["x-janusly-source"] as string | undefined)?.toLowerCase();
+  const source: AuthContext["source"] = declaredSource === "mcp" ? "mcp" : "dev";
+  return { orgId, userId, mode: "dev-headers", source };
 }
 
 /** `getAuth` + throw a 401 on null. Every mutating route calls this first. */
