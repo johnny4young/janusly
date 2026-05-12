@@ -242,6 +242,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
           nodeId: ctx.nodeId,
           workflowId: ctx.workflowId ?? undefined,
           email: orgConfig.email,
+          integrations: orgConfig.integrations,
         },
       ),
       agentConfig.timeoutMs,
@@ -364,7 +365,14 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
-    const orgConfig = tool === "http.request" || tool === "email.send"
+    const tenantAwareTools = new Set([
+      "http.request",
+      "email.send",
+      "slack.post",
+      "github.create_issue",
+      "webhook.send",
+    ]);
+    const orgConfig = tenantAwareTools.has(tool)
       ? await getOrgConfigSnapshot(ctx.orgId)
       : null;
     const toolInput = tool === "http.request"
@@ -389,6 +397,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       nodeId: ctx.nodeId,
       workflowId: ctx.workflowId ?? undefined,
       email: orgConfig?.email,
+      integrations: orgConfig?.integrations,
     });
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };

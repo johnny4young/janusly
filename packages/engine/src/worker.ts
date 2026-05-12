@@ -29,8 +29,9 @@ import { Worker, UnrecoverableError } from "bullmq";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setUsageRecorder } from "@janusly/ai";
-import { recordEmailUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordIntegrationUsage, recordUsage } from "@janusly/data/src/usageRepo";
 import { setEmailUsageRecorder } from "./email-usage";
+import { setIntegrationUsageRecorder } from "./integration-usage";
 import { setEngineRateLimiter } from "./rate-limit";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
 import { connection } from "./queue";
@@ -66,6 +67,10 @@ setUsageRecorder(recordUsage);
 // from THIS worker (not the api), so the recorder MUST be registered
 // here for `usage_events` rows with `metric: "email.sent"` to land.
 setEmailUsageRecorder(recordEmailUsage);
+
+// Sister to the email recorder, for slack.post / github.create_issue /
+// webhook.send. Same usage_events chokepoint, distinct metric per tool.
+setIntegrationUsageRecorder(recordIntegrationUsage);
 
 // Inject the shared Redis-backed limiter into worker-side tool execution.
 // This is the enforcement point for `email.send`, because workflow tools run

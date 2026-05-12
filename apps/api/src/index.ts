@@ -74,9 +74,10 @@ import {
   listOrgConfig,
   upsertOrgConfig,
 } from "@janusly/data/src/orgConfigRepo";
-import { recordEmailUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordIntegrationUsage, recordUsage } from "@janusly/data/src/usageRepo";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
+import { setIntegrationUsageRecorder } from "@janusly/engine/src/integration-usage";
 import { replayDecision, type DecisionCandidate } from "@janusly/domain";
 import { isRole } from "./permissions";
 import { workflowTemplates } from "./templates";
@@ -176,7 +177,7 @@ const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- approval: { message?: string } (waits for a yes/no human approval)",
   "- human_form: { title?: string, description?: string, schema: { type:'object', properties:{ [fieldName]: { type:'string'|'number'|'boolean', description?:string, enum?: string[] } }, required?: string[] } } (waits for a human to submit structured fields; use for PTO requests, access reviews, intake forms, and manager confirmations)",
   "- ai: { prompt: string, model?: string }",
-  "- tool: { tool: 'http.request'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid', input?: { [key: string]: string } } — the input is a flat string-keyed map of template values. Tools needing richer inputs (csv rows, nested config) are filled by the operator after generation.",
+  "- tool: { tool: 'http.request'|'email.send'|'slack.post'|'github.create_issue'|'webhook.send'|'text.uppercase'|'text.lowercase'|'text.trim'|'text.replace'|'text.regex'|'json.pick'|'json.set'|'json.merge'|'json.jq'|'csv.parse'|'csv.stringify'|'csv.filter'|'time.now'|'time.parse'|'time.format'|'time.diff'|'time.add'|'crypto.sha256'|'crypto.hmac'|'crypto.uuid' } — emit the tool name only. The operator fills credential names, destinations, and richer inputs in the Inspector after generation.",
   "- agent: { goal: string, planner?: 'rules'|'openai', maxSteps?: number, value?: string }",
   "- loop: { items: string | string[], mapping?: { [key: string]: string } } — `items` is either a comma-separated template string or a string array; `mapping` is a flat string-keyed map of templates per item.",
   "- router: { candidates: Array<{nodeId: string, avgCost?: number, avgLatencyMs?: number, successRate?: number}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' } — `nodeId` must reference an existing node id; scoring fields are optional and the runtime seeds them from prior runs when stats are available",
@@ -334,7 +335,9 @@ function fallbackExplainWorkflow(workflow: unknown) {
 
 function fallbackWorkflowForPrompt(prompt: unknown) {
   const text = typeof prompt === "string" ? prompt.toLowerCase() : "";
-  const templateId = text.includes("approval") || text.includes("approve") || text.includes("aprob") || text.includes("human") || text.includes("risk")
+  const templateId = text.includes("incident") || text.includes("on-call") || text.includes("slack") || text.includes("github")
+    ? "incident-triage"
+    : text.includes("approval") || text.includes("approve") || text.includes("aprob") || text.includes("human") || text.includes("risk")
     ? "approval-gate"
     : text.includes("transform") || text.includes("map") || text.includes("tool") || text.includes("herramient") || text.includes("backend")
       ? "api-transform-tool"
@@ -2189,6 +2192,7 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 // "email.sent"`, surfacing in the existing breakdown UI without
 // changes.
 setEmailUsageRecorder(recordEmailUsage);
+setIntegrationUsageRecorder(recordIntegrationUsage);
 
 let shutdownStarted = false;
 
