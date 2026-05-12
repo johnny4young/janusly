@@ -28,4 +28,12 @@ describe("generate-workflow system prompt", () => {
     expect(runtimeSource).toContain('text.includes("github")');
     expect(runtimeSource).toContain('"incident-triage"');
   });
+
+  it("teaches the LLM the Pass-2 wait-intent id-prefix convention", () => {
+    expect(promptsSource).toContain("WAIT-INTENT NAMING");
+    expect(promptsSource).toContain("`wait_`");
+    expect(promptsSource).toContain("`sleep_`");
+    expect(promptsSource).toContain("auto-detects these by id prefix");
+    expect(promptsSource).toContain("EXAMPLE — wait-intent prompt");
+  });
 });

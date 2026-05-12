@@ -17,6 +17,7 @@
 
 import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
+import { parseIsoDuration } from "./iso-duration";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
 import { validateToolInput } from "./tool-registry";
@@ -84,6 +85,19 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
       }
     }
     if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+    if (node.type === "wait_until") {
+      const duration = typeof node.config.duration === "string" ? node.config.duration : "";
+      if (!duration) {
+        issues.push({ code: "wait_until_missing_duration", message: "Wait node requires config.duration", nodeId: node.id });
+      } else {
+        const delayMs = parseIsoDuration(duration);
+        if (delayMs === null) {
+          issues.push({ code: "wait_until_invalid_duration", message: "Wait node requires a valid ISO 8601 config.duration", nodeId: node.id });
+        } else if (delayMs <= 0) {
+          issues.push({ code: "wait_until_non_positive_duration", message: "Wait node duration must resolve to a positive number of milliseconds", nodeId: node.id });
+        }
+      }
+    }
     // Future AI generation strategies may produce looser node shapes,
     // and direct operator input can still submit malformed configs, so
     // this validator is the strict runtime gate for required fields on

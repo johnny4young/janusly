@@ -17,6 +17,17 @@ export * from "./runExplainer";
 export * from "./patch-workflow";
 export * from "./suggest-improvement";
 export {
+  promoteNoopPlaceholders,
+  type PromoteNoopInput,
+  type PromoteNoopResult,
+  type PromoteNoopContext,
+} from "./promote-noop";
+export {
+  AiWaitUntilConfigSchema,
+  WAIT_UNTIL_PROMOTE_SYSTEM_PROMPT,
+  type AiWaitUntilConfig,
+} from "./promoted-schemas";
+export {
   createLlmClient,
   getLlmClient,
   resolveLlmConfig,

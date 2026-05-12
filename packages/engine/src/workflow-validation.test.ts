@@ -189,6 +189,43 @@ describe('validateWorkflow', () => {
     }))
   })
 
+  it('rejects wait_until nodes with missing, malformed, or non-positive duration', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'wait_missing', type: 'wait_until', config: {} },
+        { id: 'wait_words', type: 'wait_until', config: { duration: '3 days' } },
+        { id: 'wait_zero', type: 'wait_until', config: { duration: 'PT0S' } },
+      ],
+      edges: [],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_missing_duration',
+      nodeId: 'wait_missing',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_invalid_duration',
+      nodeId: 'wait_words',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_non_positive_duration',
+      nodeId: 'wait_zero',
+    }))
+  })
+
+  it('accepts wait_until nodes with a positive ISO 8601 duration', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'wait', type: 'wait_until', config: { duration: 'P3D' } },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'wait', to: 'next' }],
+    })
+
+    expect(result.issues.find(issue => issue.code.startsWith('wait_until_'))).toBeUndefined()
+  })
+
   it('accepts schedule nodes with a valid cron expression', () => {
     const result = validateWorkflow({
       nodes: [
