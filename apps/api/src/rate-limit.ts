@@ -6,8 +6,8 @@
  * over-limit window. The DI seam (`createRateLimiter(client)`) lets tests
  * inject a fake without opening a real Redis connection.
  *
- * Used by `apps/api/src/index.ts` `/ai/*` routes (per-org limits) and any
- * other surface that wants to gate by org / user.
+ * Used by `apps/api/src/routes/ai-routes.ts` `/ai/*` routes, `apps/api/src/index.ts`
+ * engine DI wiring, and any other surface that wants to gate by org / user.
  *
  * Invariants:
  * - **Fail open** on Redis errors (AGENTS.md). Don't change to fail-closed

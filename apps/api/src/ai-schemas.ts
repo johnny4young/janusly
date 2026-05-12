@@ -1,5 +1,5 @@
 /**
- * Structured-output Zod schemas for the AI surfaces in `apps/api/src/index.ts`.
+ * Structured-output Zod schemas for the AI surfaces in `apps/api/src/routes/ai-routes.ts`.
  *
  * Two surfaces, two strategies:
  *
@@ -29,7 +29,7 @@
  * time, so it can dispatch to a single concrete schema per call.
  *
  * Used by:
- *   - `apps/api/src/index.ts` — `/ai/generate-workflow` and
+ *   - `apps/api/src/routes/ai-routes.ts` — `/ai/generate-workflow` and
  *     `/ai/patch-workflow` route handlers.
  *   - `apps/api/src/ai-patch-schema.test.ts` — pins per-envelope parse
  *     behavior and the dispatcher.
@@ -45,7 +45,7 @@
  *     for nullable fields when each branch is otherwise valid.
  *
  * Output is re-validated by the engine's strict `WorkflowSchema` and
- * passed through `sanitizeAiWorkflow` in `apps/api/src/index.ts` before
+ * passed through `sanitizeAiWorkflow` in `apps/api/src/ai-runtime.ts` before
  * reaching the operator. Engine `NodeSchema.config` is `Record<string,
  * unknown>`, so retry and bounds fields pass through verbatim.
  *

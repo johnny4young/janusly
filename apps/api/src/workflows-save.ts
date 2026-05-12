@@ -28,7 +28,7 @@
  * Multi-tenant scope: every query inside the transaction filters by
  * both `orgId` and `workflowId`, mirroring the inline handler exactly.
  *
- * Used by `apps/api/src/index.ts:POST /workflows/save`. Sister to
+ * Used by `apps/api/src/routes/workflows-routes.ts:POST /workflows/save`. Sister to
  * `rollbackWorkflowToVersion` in `workflows-rollback.ts` which uses
  * the same single-transaction pattern but for rollbacks.
  */

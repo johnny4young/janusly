@@ -10,7 +10,7 @@
  * error, but uncapped a noisy workflow's history could blow past that.
  *
  * Used by:
- * - `apps/api/src/index.ts:POST /ai/patch-workflow` — the route calls
+ * - `apps/api/src/routes/ai-routes.ts:POST /ai/patch-workflow` — the route calls
  *   `summarizePastFeedback` then passes the result through this helper
  *   before threading the string into `extraContext.pastFeedbackSummary`.
  *

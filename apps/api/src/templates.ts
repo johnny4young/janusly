@@ -4,7 +4,7 @@
  * `GET /templates`; the evals harness uses the `id`s as deterministic
  * fallback templates when no LLM key is configured.
  *
- * Used by `apps/api/src/index.ts` `GET /templates` and indirectly by the
+ * Used by `apps/api/src/routes/templates-routes.ts` `GET /templates` and indirectly by the
  * `/ai/generate-workflow` fallback path (matches an `id` from this catalog
  * when the LLM is unavailable).
  *
