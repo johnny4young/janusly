@@ -7,10 +7,11 @@
  */
 
 import React, { useMemo, useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { FlaskConical, Sparkles } from 'lucide-react'
 import { formatStatusLabel } from '../constants'
 import { FailureClustersCard } from './FailureClustersCard'
 import { RecoveryDialog } from './RecoveryDialog'
+import { ReplayLabDialog } from './ReplayLabDialog'
 
 /** Web-side `dead_letters` row shape (matches the API's response). */
 export type DeadLetter = {
@@ -47,6 +48,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
   const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
+  const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     if (status === 'all') return deadLetters
@@ -122,6 +124,13 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
             <button className="small-command" disabled={selected.status === 'resolved'} onClick={() => onResolve(selected.id)}>
               Resolve
             </button>
+            <button
+              className="small-command"
+              onClick={() => setLabSourceRunId(selected.runId)}
+              data-testid="dlq-replay-in-lab"
+            >
+              <FlaskConical size={12} aria-hidden="true" /> Replay in Lab
+            </button>
           </div>
 
           <DetailBlock title="Error details" value={selected.errorJson} />
@@ -135,6 +144,12 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         <RecoveryDialog
           dlq={recoveryDeadLetter}
           onClose={() => setRecoveryDeadLetter(null)}
+        />
+      )}
+      {labSourceRunId && (
+        <ReplayLabDialog
+          sourceRun={{ id: labSourceRunId, status: 'failed' }}
+          onClose={() => setLabSourceRunId(null)}
         />
       )}
     </>
