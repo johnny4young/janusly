@@ -127,6 +127,55 @@ type IntegrationUsageRecord = {
 };
 
 /**
+ * Wire-shape for `pdf.generate` usage rows. Mirrors
+ * `packages/engine/src/pdf-usage.ts:PdfUsageRecord` — the engine package
+ * can't be imported from `packages/data` without inverting the dependency
+ * graph, so the shape is duplicated here. Update both sites together if
+ * the row contract changes.
+ */
+type PdfUsageRecord = {
+  orgId: string;
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+  provider: "s3" | "local" | "noop";
+  key?: string;
+  contentLength: number;
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+};
+
+/**
+ * Sister writer for `pdf.generate` tool calls. Same `usage_events` table
+ * (multi-tenant scope) with `metric: "pdf.generated"` — operators see
+ * "12 pdf.generated" alongside email + tool + LLM totals on the
+ * existing `GET /billing/usage` dashboard. Quantity is the produced
+ * PDF's byte length so the operator can size storage/cost off the same
+ * row.
+ */
+export async function recordPdfUsage(record: PdfUsageRecord): Promise<void> {
+  await db.insert(usageEvents).values({
+    id: crypto.randomUUID(),
+    orgId: record.orgId,
+    userId: null,
+    runId: record.runId ?? null,
+    metric: "pdf.generated",
+    quantity: record.contentLength,
+    metadata: {
+      provider: record.provider,
+      key: record.key ?? null,
+      ok: record.ok,
+      error: record.error ?? null,
+      contentLength: record.contentLength,
+      latencyMs: record.latencyMs,
+      nodeId: record.nodeId ?? null,
+      workflowId: record.workflowId ?? null,
+    },
+  });
+}
+
+/**
  * Sister writer for integration tools. Same `usage_events` table
  * (multi-tenant scope) with `metric: "tool.<name>"` — operators see
  * "12 tool.slack.post" alongside the email + LLM totals on the existing

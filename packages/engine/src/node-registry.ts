@@ -243,6 +243,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
           workflowId: ctx.workflowId ?? undefined,
           email: orgConfig.email,
           integrations: orgConfig.integrations,
+          objectstore: orgConfig.objectstore,
         },
       ),
       agentConfig.timeoutMs,
@@ -398,6 +399,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       workflowId: ctx.workflowId ?? undefined,
       email: orgConfig?.email,
       integrations: orgConfig?.integrations,
+      objectstore: orgConfig?.objectstore,
     });
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };

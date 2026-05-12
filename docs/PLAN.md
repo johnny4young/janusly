@@ -438,7 +438,7 @@ The native tool catalog is the bridge between LLM-drafted workflows and useful b
 **Layer 2: stateful primitives** (need org-level config).
 - `email.send` (Resend / SES / Mailgun adapters).
 - `sms.send` (Twilio).
-- `pdf.generate` (Puppeteer pool).
+- `pdf.generate` (Markdown-to-PDF via `pdfkit`; HTML fidelity later if a concrete use case needs Chromium or a hosted renderer).
 - `image.transform` (Sharp).
 - `db.query.read` and `db.query.write` (separate to keep audit clear).
 - `vector.search` / `vector.upsert` (§7.1).
