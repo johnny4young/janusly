@@ -11,4 +11,17 @@ describe("generate-workflow system prompt", () => {
     expect(indexSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
     expect(indexSource).not.toContain("'approval', 'multi_agent', 'loop'");
   });
+
+  it("keeps AI generation aware of revenue-grade integration tools without expanding the node-type grammar", () => {
+    expect(indexSource).toContain("'email.send'|'slack.post'|'github.create_issue'|'webhook.send'");
+    expect(indexSource).toContain("emit the tool name only");
+    expect(indexSource).toContain("The operator fills credential names, destinations, and richer inputs");
+  });
+
+  it("routes incident, Slack, and GitHub prompts to the incident-triage fallback template", () => {
+    expect(indexSource).toContain('text.includes("incident")');
+    expect(indexSource).toContain('text.includes("slack")');
+    expect(indexSource).toContain('text.includes("github")');
+    expect(indexSource).toContain('"incident-triage"');
+  });
 });

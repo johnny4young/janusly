@@ -187,7 +187,7 @@ async function resolveAndPin(hostname: string): Promise<{
   // hand it to the connect step without ever consulting DNS again.
   const pinned = addresses[0];
 
-  const pinnedLookup: PinnedLookup = (_hostname, _options, callback) => {
+  const pinnedLookup: PinnedLookup = (_hostname, options, callback) => {
     if (isPrivateAddress(pinned.address)) {
       // Defence in depth: should never trip given the assertion above, but
       // if a future change widens the public-IP check, the connect still
@@ -196,6 +196,23 @@ async function resolveAndPin(hostname: string): Promise<{
         `Pinned HTTP target IP is private and blocked: ${pinned.address}`,
       ) as NodeJS.ErrnoException;
       callback(err, "", pinned.family);
+      return;
+    }
+    // Node's dns.lookup callback contract: when `options.all === true`, the
+    // callback receives `(err, addresses: { address, family }[])`; otherwise
+    // it receives `(err, address: string, family: number)`. Undici 8.x calls
+    // this hook with `{ all: true }`, so the scalar form fed back an
+    // `address` string undici then tried to treat as an array, surfacing as
+    // `Invalid IP address: undefined`. Honor both shapes explicitly.
+    if ((options as { all?: boolean } | undefined)?.all) {
+      // LookupFunction's narrow scalar callback signature doesn't expose
+      // the array overload, but Node's net.LookupFunction accepts it and
+      // undici relies on it. Cast to a permissive variant for the call —
+      // the runtime contract is what undici inspects.
+      (callback as unknown as (err: NodeJS.ErrnoException | null, addresses: { address: string; family: 4 | 6 }[]) => void)(
+        null,
+        [{ address: pinned.address, family: pinned.family }],
+      );
       return;
     }
     callback(null, pinned.address, pinned.family);

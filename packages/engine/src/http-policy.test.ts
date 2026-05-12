@@ -92,6 +92,33 @@ describe("HTTP target policy", () => {
     // would-be second lookup that the rebinding attack relies on.
     expect(lookupMock).toHaveBeenCalledTimes(1);
   });
+
+  it("honors the dns.lookup all:true callback shape used by undici", async () => {
+    vi.stubEnv("ALLOW_PRIVATE_HTTP_TARGETS", "false");
+    lookupMock.mockResolvedValueOnce([{ address: "203.0.113.11", family: 4 }] as never);
+
+    const { pinnedLookup } = await __testInternals.resolveAndPin("all-mode.example.com");
+    const allModeLookup = pinnedLookup as unknown as (
+      hostname: string,
+      options: { all: true },
+      callback: (err: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: number }>) => void,
+    ) => void;
+
+    const result = await new Promise<{
+      err: Error | null;
+      addresses: Array<{ address: string; family: number }>;
+    }>((resolve) => {
+      allModeLookup("all-mode.example.com", { all: true }, (err, addresses) => {
+        resolve({ err, addresses });
+      });
+    });
+
+    expect(result).toEqual({
+      err: null,
+      addresses: [{ address: "203.0.113.11", family: 4 }],
+    });
+    expect(lookupMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

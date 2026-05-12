@@ -104,3 +104,56 @@ export async function recordEmailUsage(record: EmailUsageRecord): Promise<void> 
     },
   });
 }
+
+/**
+ * Wire-shape for integration-tool usage rows (Slack post, GitHub issue,
+ * signed webhook, etc.). Mirrors
+ * `packages/engine/src/integration-usage.ts:IntegrationUsageRecord` — the
+ * engine package can't be imported from `packages/data` without inverting
+ * the dependency graph, so the shape is duplicated here. Update both
+ * sites together if the row contract changes.
+ */
+type IntegrationUsageRecord = {
+  orgId: string;
+  tool: string;
+  credentialName: string;
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  latencyMs: number;
+};
+
+/**
+ * Sister writer for integration tools. Same `usage_events` table
+ * (multi-tenant scope) with `metric: "tool.<name>"` — operators see
+ * "12 tool.slack.post" alongside the email + LLM totals on the existing
+ * `GET /billing/usage` dashboard. Quantity is `1` per call (one tool
+ * invocation per row).
+ *
+ * The credentialName field is the operator-friendly name (e.g.
+ * "incidents-slack"), NOT the secret-ref env-var name. Never persist the
+ * secret-ref through this path.
+ */
+export async function recordIntegrationUsage(record: IntegrationUsageRecord): Promise<void> {
+  await db.insert(usageEvents).values({
+    id: crypto.randomUUID(),
+    orgId: record.orgId,
+    userId: null,
+    runId: record.runId ?? null,
+    metric: `tool.${record.tool}`,
+    quantity: 1,
+    metadata: {
+      tool: record.tool,
+      credentialName: record.credentialName,
+      ok: record.ok,
+      statusCode: record.statusCode ?? null,
+      error: record.error ?? null,
+      latencyMs: record.latencyMs,
+      nodeId: record.nodeId ?? null,
+      workflowId: record.workflowId ?? null,
+    },
+  });
+}
