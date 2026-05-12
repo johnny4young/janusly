@@ -32,6 +32,7 @@ export const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "- loop: { items: string | string[], mapping?: { [key: string]: string } } — `items` is either a comma-separated template string or a string array; `mapping` is a flat string-keyed map of templates per item.",
   "- router: { candidates: Array<{nodeId: string, avgCost?: number, avgLatencyMs?: number, successRate?: number}>, strategy?: 'cheapest'|'fastest'|'balanced'|'auto' } — `nodeId` must reference an existing node id; scoring fields are optional and the runtime seeds them from prior runs when stats are available",
   "Operator-only node types are not valid AI-generation output. Use noop placeholders for multi_agent, webhook, wait_until, subworkflow, router_llm, agent_reflection, parallel_fork, join, and schedule requests.",
+  "WAIT-INTENT NAMING: when a noop placeholder represents a wait-for-time intent (the user prompt mentioned a duration, a delay, sleeping for N hours/days, waiting until a specific time, or any other time-bounded pause), give that noop an id that starts with `wait_`, `sleep_`, `pause_`, or `delay_` (e.g. id='wait_3_days', id='sleep_12h', id='pause_30m', id='delay_until_morning'). The platform auto-detects these by id prefix and promotes them into real wait_until nodes with a typed ISO 8601 duration. The `config` for these noops stays empty `{}` — you don't need to extract or format the duration; the platform parses it from the operator's original prompt.",
   "edges[].condition grammar (optional, leave it out unless you really need branching):",
   "  - boolean literals: true / false",
   "  - numbers, single/double-quoted strings, null",
@@ -43,6 +44,8 @@ export const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "Pick 2–6 nodes for most prompts. Prefer the simplest valid DAG.",
   "EXAMPLE — abstract router prompt (\"smart router that picks between fast_path and accurate_path\"):",
   '{"dslVersion":"1.0","id":"smart_router_demo","name":"Smart Router Demo","nodes":[{"id":"start","type":"noop","config":{}},{"id":"pick","type":"router","config":{"candidates":[{"nodeId":"fast_path"},{"nodeId":"accurate_path"}],"strategy":"auto"}},{"id":"fast_path","type":"noop","config":{}},{"id":"accurate_path","type":"noop","config":{}}],"edges":[{"from":"start","to":"pick"}]}',
+  "EXAMPLE — wait-intent prompt (\"wait 3 days then call https://example.com/webhook\"). The noop id starts with `wait_` so the platform's Pass-2 promotion turns it into a real wait_until node — no special config needed:",
+  '{"dslVersion":"1.0","id":"wait_then_call","name":"Wait then call webhook","nodes":[{"id":"start","type":"noop","config":{}},{"id":"wait_3_days","type":"noop","config":{}},{"id":"call_webhook","type":"http","config":{"url":"https://example.com/webhook","method":"POST"}}],"edges":[{"from":"start","to":"wait_3_days"},{"from":"wait_3_days","to":"call_webhook"}]}',
 ].join("\n");
 
 export const REVIEW_WORKFLOW_SYSTEM_PROMPT = [

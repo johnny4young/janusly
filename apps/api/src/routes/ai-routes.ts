@@ -15,7 +15,7 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { explainRun, RUN_EVENT_PROMPT_CAP, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
+import { explainRun, promoteNoopPlaceholders, RUN_EVENT_PROMPT_CAP, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
 import { summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { db, runEvents, runs, workflowVersions } from "@janusly/db";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
@@ -78,8 +78,30 @@ export const aiRoutes: Route[] = [
         // so the inferred AI shape structurally satisfies `Workflow`. The
         // post-validation `sanitizeAiWorkflow` re-parses through
         // `WorkflowSchema` so a bad cast can never reach persistence.
-        const workflow = sanitizeAiWorkflow(result.object as unknown as Workflow);
-        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: result.model, provider: result.provider });
+        const pass1Workflow = result.object as unknown as Workflow;
+
+        // Pass 2: promote any noop placeholder whose id matches a
+        // recognised wait-intent prefix into a typed operator-only node.
+        // Per-noop failures degrade
+        // silently inside the promoter so the workflow is always
+        // returned intact. A catastrophic throw here would cascade to
+        // the existing fallback envelope below.
+        const promotion = await promoteNoopPlaceholders({
+          llm,
+          workflow: pass1Workflow,
+          originalPrompt: promptText,
+          context: { orgId: auth.orgId, userId: auth.userId },
+          modelHint: modelOverride,
+        });
+
+        const workflow = sanitizeAiWorkflow(promotion.workflow);
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, {
+          mode: "ai",
+          model: result.model,
+          provider: result.provider,
+          promotionAttempts: promotion.promotionAttempts,
+          promotionsSucceeded: promotion.promotionsSucceeded,
+        });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
