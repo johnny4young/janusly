@@ -1,11 +1,11 @@
 /**
- * Small request/response helpers for `apps/api/src/index.ts` — the project
+ * Small request/response helpers for the API route modules — the project
  * intentionally uses Node's `http.createServer` directly (no Express /
  * Fastify) so this file owns the few primitives every route needs:
  * status-bearing errors, body-size-capped JSON read, JSON / SSE writers,
  * and CORS headers.
  *
- * Used by every route in `apps/api/src/index.ts`.
+ * Used by every route module under `apps/api/src/routes/*` and the dispatcher in `apps/api/src/server.ts`.
  *
  * Invariants:
  * - `readJson` enforces `API_MAX_JSON_BODY_BYTES` and rejects 413 when
@@ -16,7 +16,7 @@
 
 import http from "http";
 
-/** `Error` carrying an HTTP status. `index.ts` reads `statusCode` to map throws to responses. */
+/** `Error` carrying an HTTP status. `server.ts` reads `statusCode` to map throws to responses. */
 export type HttpError = Error & { statusCode?: number };
 
 /** Build an `HttpError` with a fixed status. The route handler's catch maps it to the response. */

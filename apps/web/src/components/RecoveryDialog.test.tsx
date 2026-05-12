@@ -139,8 +139,13 @@ describe('<RecoveryDialog />', () => {
     // Delta card mounts after replay with the saved version + DLQ's
     // failure signature threaded in. The card calls /workflows/health/delta
     // and surfaces the run-status counter even when hasEnoughData=false.
-    const deltaCall = calls.find((path) => typeof path === 'string' && path.startsWith('/workflows/health/delta'))
-    expect(deltaCall).toBeTruthy()
+    let deltaCall: unknown
+    await waitFor(() => {
+      deltaCall = vi.mocked(api).mock.calls
+        .map((call) => call[0])
+        .find((path) => typeof path === 'string' && path.startsWith('/workflows/health/delta'))
+      expect(deltaCall).toBeTruthy()
+    })
     if (typeof deltaCall === 'string') {
       const url = new URL(deltaCall, 'http://localhost')
       expect(url.searchParams.get('workflowId')).toBe('wf')

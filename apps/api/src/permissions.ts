@@ -1,11 +1,11 @@
 /**
- * Role gate for `apps/api/src/index.ts`. Reads `org_members` and rejects
+ * Role gate for `apps/api/src/server.ts`. Reads `org_members` and rejects
  * 403 when the caller's role is below the required level. The dev-headers
  * mode falls back to `admin` only when no `org_members` row exists, so
  * local development just works without seeding; production (Supabase /
  * service-token) never auto-grants admin.
  *
- * Used by every mutating route in `apps/api/src/index.ts`
+ * Used by the central route dispatcher in `apps/api/src/server.ts`
  * (`requireRole(auth.orgId, auth.userId, 'editor', auth.mode)` style).
  *
  * Invariants:

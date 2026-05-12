@@ -9,7 +9,7 @@
  *      when Supabase is unset and `NODE_ENV !== "production"`. Production
  *      requires explicit `ALLOW_DEV_AUTH_HEADERS=true` or boot fails.
  *
- * Used by `apps/api/src/index.ts` (every route's `requireAuth(req)` call).
+ * Used by `apps/api/src/server.ts` (the central route dispatcher's `requireAuth(req)` call).
  *
  * Invariants:
  * - Service-token compare uses `timingSafeEqual` (don't replace with `===`).

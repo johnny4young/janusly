@@ -1,0 +1,617 @@
+/**
+ * AI mutation surfaces. Every route follows the AI-fallback contract:
+ * wrap the LLM call in try/catch, degrade to `{ mode: "fallback",
+ * aiError, ... }` with deterministic content on any failure (quota,
+ * rate, network, bad output, missing API key for an override).
+ *
+ * Audit invariant: every AI mutation writes an `audit_logs` row on
+ * AI-mode AND fallback. Per the AGENTS.md AI-mutation contract,
+ * `/ai/review-workflow`, `/ai/patch-workflow`, and
+ * `/ai/suggest-improvement` audit on both paths;
+ * `/ai/generate-workflow` and `/ai/explain-workflow` audit on AI-mode
+ * success only.
+ */
+
+import { and, asc, desc, eq } from "drizzle-orm";
+import { z } from "zod";
+
+import { explainRun, RUN_EVENT_PROMPT_CAP, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
+import { summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
+import { db, runEvents, runs, workflowVersions } from "@janusly/db";
+import { safePersistPayload } from "@janusly/engine/src/safe-persist";
+import { listTools } from "@janusly/engine/src/tool-registry";
+import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
+import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+
+import { composeFeedbackHint } from "../ai-patch-feedback";
+import { GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
+import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
+import { AiGenerationWorkflowSchema, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema } from "../ai-schemas";
+import { audit } from "../audit";
+import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { getDeadLetter } from "../dlq";
+import { asRecord, readJson, sendJson } from "../http";
+import { applyConfigPatchToWorkflow } from "../patch-workflow-merge";
+import { enforceRateLimit } from "../rate-limit";
+import type { Route } from "../routes";
+
+export const aiRoutes: Route[] = [
+  // AI helpers
+  { method: "GET", match: "/ai/health",
+    handler: async ({ res, auth }) => sendJson(res, await aiStatus(auth.orgId)) },
+  { method: "POST", match: "/ai/generate-workflow",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const promptText = typeof body.prompt === "string" ? body.prompt : "";
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      if (promptText.length > orgConfig.ai.promptMaxChars) {
+        return sendJson(res, { error: `prompt exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
+      }
+      const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
+      if (!llm) {
+        return sendJson(res, {
+          mode: "fallback",
+          ...(fallbackWorkflow ?? {}),
+        });
+      }
+      try {
+        // Schema-aware generation. The AI SDK plumbs the slim
+        // `AiGenerationWorkflowSchema` through each provider's
+        // structured-output capability and validates the response. The
+        // shape-coercing `looseAiWorkflow` pre-pass that existed before this
+        // is gone — schema enforcement is now real. Failures (LLM emits
+        // non-conformant JSON) throw inside the SDK and flow through the
+        // existing try/catch into the fallback contract.
+        const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
+          schema: AiGenerationWorkflowSchema,
+          schemaName: "JanuslyWorkflow",
+          schemaDescription: "Workflow DAG for /ai/generate-workflow.",
+          system: GENERATE_WORKFLOW_SYSTEM_PROMPT,
+          prompt: promptText,
+          modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId },
+        });
+        // Cast: the AI-side discriminated-union node configs are strict
+        // subsets of the engine's loose `config: Record<string, unknown>`,
+        // so the inferred AI shape structurally satisfies `Workflow`. The
+        // post-validation `sanitizeAiWorkflow` re-parses through
+        // `WorkflowSchema` so a bad cast can never reach persistence.
+        const workflow = sanitizeAiWorkflow(result.object as unknown as Workflow);
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, { mode: "ai", model: result.model, provider: result.provider });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", fallbackWorkflow?.id, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          ...(fallbackWorkflow ?? {}),
+        });
+      }
+    } },
+  { method: "POST", match: "/ai/explain-workflow",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const { workflow } = body;
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      if (!llm) {
+        return sendJson(res, {
+          mode: "fallback",
+          explanation: fallbackExplainWorkflow(workflow),
+        });
+      }
+      try {
+        const explainWorkflowId = (workflow && typeof workflow === "object" && "id" in workflow && typeof (workflow as { id?: unknown }).id === "string")
+          ? (workflow as { id: string }).id
+          : undefined;
+        const result = await llm.generateText({
+          prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+          modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
+        });
+        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, explanation: result.text });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI request failed";
+        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          explanation: fallbackExplainWorkflow(workflow),
+        });
+      }
+    } },
+
+  // AI second-pass workflow review. Sister to the deterministic readiness
+  // gate at /workflows/readiness — this calls the LLM with a structured-
+  // output schema to surface semantic issues rules can't see (ambiguous
+  // prompts, PII risk, malformed-but-shape-valid tool inputs). Falls back
+  // to the deterministic readiness check when LLM is unavailable so the
+  // route always returns useful findings — `mode: "fallback"` flags the
+  // source per the AGENTS.md AI-fallback contract.
+  { method: "POST", match: "/ai/review-workflow",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const parsed = WorkflowSchema.safeParse(candidate);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((issue) => ({
+          code: "invalid_workflow_shape",
+          severity: "fail" as const,
+          message: `${issue.path.join(".") || "workflow"}: ${issue.message}`,
+          rationale: "The workflow JSON failed structural validation before review could run.",
+          suggestion: "Fix the schema-level errors and re-submit.",
+        }));
+        // Audit even shape-invalid fallbacks — every AI mutation surface
+        // must record success AND fallback per the AGENTS.md AI-fallback
+        // contract. Without this, "shape invalid" requests leave no
+        // operator audit trail.
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", undefined, { mode: "fallback", reason: "invalid_workflow_shape" });
+        return sendJson(res, { mode: "fallback", aiError: "Workflow shape invalid", review: { status: "fail", issues } });
+      }
+
+      const workflow = parsed.data;
+      if (!llm) {
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", reason: "no_llm_configured" });
+        return sendJson(res, {
+          mode: "fallback",
+          review: buildReviewFallback(workflow),
+        });
+      }
+
+      try {
+        const result = await llm.generateObject<ReviewFindings>({
+          schema: ReviewFindingsSchema,
+          schemaName: "JanuslyWorkflowReview",
+          schemaDescription: "Production-readiness review of a Janusly workflow DAG.",
+          system: REVIEW_WORKFLOW_SYSTEM_PROMPT,
+          prompt: JSON.stringify(workflow),
+          modelHint: modelOverride,
+          context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
+        });
+        const review = mergeReviewFindings(
+          sanitizeAiReview(result.object as ReviewFindings, workflow),
+          buildReviewFallback(workflow),
+        );
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, {
+          mode: "ai",
+          model: result.model,
+          provider: result.provider,
+          totalIssues: review.issues.length,
+          blockingCount: review.issues.filter((issue) => issue.severity === "fail").length,
+        });
+        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, review });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "AI review failed";
+        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", error: message });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: message,
+          review: buildReviewFallback(workflow),
+        });
+      }
+    } },
+
+  // Failure recovery — suggest workflow patches for a failing DLQ entry.
+  // Dispatches to a per-failing-node-type envelope schema that wraps
+  // 1-3 config-only suggestions. Each envelope stays a single non-union
+  // shape so the LLM call works against both Anthropic (compiled-grammar
+  // cap) and OpenAI (strict-mode `oneOf` ban). The route composes each
+  // suggested workflow server-side by merging into the original snapshot,
+  // then re-validates through the same `WorkflowSchema.safeParse` +
+  // `sanitizeAiWorkflow` chain `/ai/generate-workflow` uses. Audits both
+  // AI-mode and fallback paths per the AGENTS.md AI-mutation contract.
+  { method: "POST", match: "/ai/patch-workflow", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
+      if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+
+      // Multi-tenant gate via the existing repo helper.
+      const dlq = await getDeadLetter(auth.orgId, deadLetterId);
+      if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
+
+      // Recent events around the failure for run context. Multi-tenant
+      // scope flows through runs.orgId on the run row.
+      const run = await db.select().from(runs).where(eq(runs.id, dlq.runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) {
+        return sendJson(res, { error: "Run not found" }, 404);
+      }
+      const events = (await db
+        .select({
+          type: runEvents.type,
+          nodeId: runEvents.nodeId,
+          payload: runEvents.payload,
+          createdAt: runEvents.createdAt,
+        })
+        .from(runEvents)
+        .where(eq(runEvents.runId, dlq.runId))
+        .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
+        .limit(RUN_EVENT_PROMPT_CAP)).reverse();
+
+      // Pick the per-type envelope based on the failing node's type.
+      // The typed envelopes wrap a `suggestions` array of 1-3 items —
+      // single repeated shape, no full-workflow union — so the compiled
+      // grammar stays small for Anthropic and the JSON Schema has no
+      // `oneOf` keyword (works for OpenAI strict mode too).
+      const failingNode = NodeSchema.safeParse(dlq.nodeJson);
+      const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
+      const envelope = patchEnvelopeForNodeType(failingNodeType);
+
+      // Tool-typed failures benefit from per-tool field-name hints —
+      // the LLM otherwise has to infer required input field names from
+      // a possibly-misleading runtime error message. The tool registry's
+      // `listTools()` already produces the operator-facing description
+      // (`required` / `optional` / `inputExample`); pluck the entry for
+      // the failing node's tool and pass it through `extraContext`.
+      // Returns undefined for non-tool failures, unknown tools, or
+      // failing nodes without a `config.tool` string — the helper
+      // omits the field in those cases.
+      const toolInputContract = (() => {
+        if (envelope.kind !== "tool") return undefined;
+        const failingNodeJson = dlq.nodeJson as { config?: { tool?: unknown } } | null;
+        const toolName = typeof failingNodeJson?.config?.tool === "string" ? failingNodeJson.config.tool : null;
+        if (!toolName) return undefined;
+        const entry = listTools().find((tool) => tool.name === toolName);
+        if (!entry) return undefined;
+        return {
+          name: entry.name,
+          description: entry.description,
+          required: entry.required,
+          optional: entry.optional ?? [],
+          inputExample: entry.inputExample,
+        };
+      })();
+
+      // Past-feedback enrichment — the operator → system half of the
+      // recovery loop. If the failing workflow has a saved id, look up
+      // the operator's recent accept/reject decisions for it and slip
+      // a one-line summary into the prompt as soft prior, so the LLM
+      // can deprioritize approaches the operator has already rejected.
+      // Returns "" for first-time recoveries (no rows match) — the
+      // prompt then has the same shape it had pre-enrichment.
+      const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
+      const failingWorkflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
+      const pastFeedbackSummary = failingWorkflowId
+        ? composeFeedbackHint(await summarizePastFeedback(auth.orgId, failingWorkflowId))
+        : "";
+
+      const extraContext: Record<string, unknown> = {
+        ...(toolInputContract ? { toolInputContract } : {}),
+        ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
+      };
+
+      const helperResult: PatchSuggestion = await suggestWorkflowPatch({
+        llm,
+        envelopeSchema: envelope.schema,
+        workflow: dlq.workflowJson,
+        failedNodeId: dlq.nodeId,
+        errorJson: safePersistPayload(dlq.errorJson ?? null),
+        extraContext: Object.keys(extraContext).length > 0 ? extraContext : undefined,
+        context: { orgId: auth.orgId, userId: auth.userId, workflowId: failingWorkflowId ?? undefined },
+        // Pass every event payload through the persistence chokepoint
+        // before it leaves the API boundary. `safe-persist` was applied at
+        // write time which key-redacted known sensitive keys, but free-form
+        // value content (e.g. an `http` node's response body) survives
+        // verbatim — a re-application here scrubs any nested
+        // sensitive-keyed fields that landed inside an inner object since
+        // the original write. Defense in depth: never ship the prompt to a
+        // remote LLM with un-scrubbed payloads.
+        runEvents: events.map((event) => ({
+          type: event.type,
+          nodeId: event.nodeId ?? null,
+          payload: safePersistPayload(event.payload ?? null),
+          createdAt: event.createdAt ?? null,
+        })),
+      });
+
+      // Fan-out merge: each helper-emitted suggestion goes through the
+      // strict `WorkflowSchema` + `sanitizeAiWorkflow` chain that the
+      // single-suggestion path used. Suggestions that fail validation
+      // are dropped without breaking the rest of the batch. Survivors
+      // are sorted by confidence desc so the dialog's default tab is
+      // the model's most-confident pick.
+      type ValidatedSuggestion = {
+        workflow: Workflow;
+        rationale: string;
+        approachLabel: string;
+        confidence: number;
+      };
+      let response: {
+        mode: "ai" | "fallback";
+        suggestedWorkflow: Workflow | unknown;
+        rationale: string;
+        suggestions: ValidatedSuggestion[];
+        model?: string;
+        provider?: string;
+        aiError?: string;
+      };
+
+      if (helperResult.mode === "ai") {
+        const originalParsed = WorkflowSchema.safeParse(dlq.workflowJson);
+        const validated: ValidatedSuggestion[] = [];
+        if (originalParsed.success) {
+          for (const item of helperResult.suggestions) {
+            try {
+              const merged = applyConfigPatchToWorkflow(originalParsed.data, dlq.nodeId, item.patchedConfig);
+              const sanitized = sanitizeAiWorkflow(merged);
+              validated.push({
+                workflow: sanitized,
+                rationale: item.rationale,
+                approachLabel: item.approachLabel,
+                confidence: item.confidence,
+              });
+            } catch {
+              // Drop this suggestion; keep going. If none survive, the
+              // empty-list branch below degrades to fallback.
+            }
+          }
+          validated.sort((a, b) => b.confidence - a.confidence);
+        }
+
+        if (validated.length > 0) {
+          const top = validated[0]!;
+          response = {
+            mode: "ai",
+            // Back-compat: legacy callers reading these top-level fields
+            // see the highest-confidence suggestion's content. The new UI
+            // reads the `suggestions` array directly.
+            suggestedWorkflow: top.workflow,
+            rationale: top.rationale,
+            suggestions: validated,
+            model: helperResult.model,
+            provider: helperResult.provider,
+          };
+        } else {
+          // No suggestion survived validation — degrade to fallback.
+          const reason = originalParsed.success
+            ? "All AI suggestions failed validation."
+            : `Original workflow failed strict schema: ${originalParsed.error.issues[0]?.message ?? "unknown"}`;
+          response = {
+            mode: "fallback",
+            suggestedWorkflow: dlq.workflowJson,
+            rationale: `AI returned suggestions that could not be applied safely. The original workflow is unchanged. Reason: ${reason}`,
+            suggestions: [{
+              workflow: dlq.workflowJson as Workflow,
+              rationale: `AI returned suggestions that could not be applied safely. ${reason}`,
+              approachLabel: "other",
+              confidence: 0,
+            }],
+            model: helperResult.model,
+            provider: helperResult.provider,
+            aiError: helperResult.aiError ?? "no_valid_suggestions",
+          };
+        }
+      } else {
+        const fallbackItem = helperResult.suggestions[0]!;
+        response = {
+          mode: "fallback",
+          suggestedWorkflow: dlq.workflowJson,
+          rationale: fallbackItem.rationale,
+          suggestions: [{
+            workflow: dlq.workflowJson as Workflow,
+            rationale: fallbackItem.rationale,
+            approachLabel: fallbackItem.approachLabel,
+            confidence: fallbackItem.confidence,
+          }],
+          model: helperResult.model,
+          provider: helperResult.provider,
+          aiError: helperResult.aiError,
+        };
+      }
+
+      await audit(auth.orgId, auth.userId, "ai.workflow.patch_suggested", "dlq", deadLetterId, {
+        mode: response.mode,
+        model: response.model,
+        provider: response.provider,
+        aiError: response.aiError,
+        envelopeKind: envelope.kind,
+        suggestionsCount: response.suggestions.length,
+        topApproachLabel: response.suggestions[0]?.approachLabel,
+      });
+
+      return sendJson(res, response);
+    } },
+
+  // Authoring assistant — suggest 1-3 high-impact improvements to a
+  // workflow snapshot the operator is currently reviewing in the
+  // Compare panel. Sister to /ai/patch-workflow but operates without a
+  // failing-node id and emits FULL workflow snapshots (the diff renderer
+  // already handles add/remove/changed rows). The route validates each
+  // suggestion through the same `WorkflowSchema.safeParse` +
+  // `sanitizeAiWorkflow` chain `/ai/generate-workflow` uses, drops
+  // invalid suggestions, sorts survivors by confidence desc, and
+  // degrades to fallback when none survive. Audits both AI-mode and
+  // fallback paths per the AGENTS.md AI-mutation contract. Read-only
+  // by design — the route never mutates workflows; the operator applies
+  // a chosen suggestion through the existing /workflows/save flow.
+  { method: "POST", match: "/ai/suggest-improvement", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
+      const focus = typeof body.focus === "string" ? body.focus : undefined;
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+
+      const parsed = WorkflowSchema.safeParse(candidate);
+      if (!parsed.success) {
+        await audit(auth.orgId, auth.userId, "ai.workflow.improvement_suggested", "ai", undefined, {
+          mode: "fallback",
+          reason: "invalid_workflow_shape",
+        });
+        return sendJson(res, {
+          mode: "fallback",
+          aiError: "Workflow shape invalid",
+          suggestions: [],
+          rationale: `Workflow failed structural validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+        });
+      }
+
+      const workflow = parsed.data;
+      const helperResult: SuggestImprovementResult = await suggestWorkflowImprovement({
+        llm,
+        envelopeSchema: AiSuggestImprovementEnvelope,
+        workflow,
+        focus,
+        model: modelOverride,
+        context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
+      });
+
+      // Fan-out validation: each suggestion's `patchedWorkflowJson` must
+      // pass the engine's strict schema and the AI sanitisation chain.
+      // Suggestions that fail validation are dropped without breaking
+      // the rest of the batch. Survivors are sorted by confidence desc
+      // so the dialog's default chip is the model's most-confident pick.
+      type ValidatedSuggestion = {
+        workflow: Workflow;
+        rationale: string;
+        approachLabel: string;
+        confidence: number;
+      };
+      let response: {
+        mode: "ai" | "fallback";
+        suggestedWorkflow: Workflow | unknown;
+        rationale: string;
+        suggestions: ValidatedSuggestion[];
+        model?: string;
+        provider?: string;
+        aiError?: string;
+      };
+
+      if (helperResult.mode === "ai") {
+        const validated: ValidatedSuggestion[] = [];
+        for (const item of helperResult.suggestions) {
+          try {
+            // The LLM emits the workflow as a JSON-stringified blob to
+            // keep the structured-output schema small enough for
+            // Anthropic's compiled-grammar cap; parse + validate +
+            // sanitise here. JSON.parse, WorkflowSchema.safeParse, and
+            // sanitizeAiWorkflow are all in the try/catch — any failure
+            // drops THIS suggestion without breaking the loop.
+            const parsedWorkflow = JSON.parse(item.patchedWorkflowJson);
+            const reparsed = WorkflowSchema.safeParse(parsedWorkflow);
+            if (!reparsed.success) continue;
+            const sanitized = sanitizeAiWorkflow(reparsed.data);
+            validated.push({
+              workflow: sanitized,
+              rationale: item.rationale,
+              approachLabel: item.approachLabel,
+              confidence: item.confidence,
+            });
+          } catch {
+            // Drop this suggestion; keep going. If none survive, the
+            // empty-list branch below degrades to fallback.
+          }
+        }
+        validated.sort((a, b) => b.confidence - a.confidence);
+
+        if (validated.length > 0) {
+          const top = validated[0]!;
+          response = {
+            mode: "ai",
+            // Back-compat: legacy callers reading these top-level
+            // fields see the highest-confidence suggestion. The new UI
+            // reads the `suggestions` array directly.
+            suggestedWorkflow: top.workflow,
+            rationale: top.rationale,
+            suggestions: validated,
+            model: helperResult.model,
+            provider: helperResult.provider,
+          };
+        } else {
+          response = {
+            mode: "fallback",
+            suggestedWorkflow: workflow,
+            rationale: "AI returned suggestions that could not be applied safely. The original workflow is unchanged.",
+            suggestions: [{
+              workflow,
+              rationale: "AI returned suggestions that could not be applied safely. The original workflow is unchanged.",
+              approachLabel: "other",
+              confidence: 0,
+            }],
+            model: helperResult.model,
+            provider: helperResult.provider,
+            aiError: helperResult.aiError ?? "no_valid_suggestions",
+          };
+        }
+      } else {
+        const fallbackItem = helperResult.suggestions[0]!;
+        response = {
+          mode: "fallback",
+          suggestedWorkflow: workflow,
+          rationale: fallbackItem.rationale,
+          suggestions: [{
+            workflow,
+            rationale: fallbackItem.rationale,
+            approachLabel: fallbackItem.approachLabel,
+            confidence: fallbackItem.confidence,
+          }],
+          model: helperResult.model,
+          provider: helperResult.provider,
+          aiError: helperResult.aiError,
+        };
+      }
+
+      await audit(auth.orgId, auth.userId, "ai.workflow.improvement_suggested", "ai", workflow.id, {
+        mode: response.mode,
+        model: response.model,
+        provider: response.provider,
+        aiError: response.aiError,
+        suggestionsCount: response.suggestions.length,
+        topApproachLabel: response.suggestions[0]?.approachLabel,
+        focusProvided: typeof focus === "string" && focus.trim().length > 0,
+      });
+
+      return sendJson(res, response);
+    } },
+
+  { method: "POST", match: "/ai/explain-run",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
+      const questionText = typeof question === "string" ? question : undefined;
+      if (questionText && questionText.length > orgConfig.ai.promptMaxChars) {
+        return sendJson(res, { error: `question exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
+      }
+
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
+
+      // Resolve the workflow id via the same join `getRunMetadata` uses
+      // so the recorder can attribute usage rows to the workflow. The
+      // join is multi-tenant scoped via the prior `run[0].orgId` check.
+      const versionRow = await db
+        .select({ workflowId: workflowVersions.workflowId })
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.id, run[0].workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
+      const explainRunWorkflowId = versionRow[0]?.workflowId ?? undefined;
+
+      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
+      const result = await explainRun({
+        llm,
+        run: run[0],
+        events,
+        question: questionText,
+        context: { orgId: auth.orgId, userId: auth.userId, runId, workflowId: explainRunWorkflowId },
+      });
+      await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
+        mode: result.mode,
+        model: result.model,
+        provider: result.provider,
+        aiError: result.aiError,
+      });
+      return sendJson(res, result);
+    } },
+];

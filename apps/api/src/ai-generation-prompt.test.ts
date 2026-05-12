@@ -1,27 +1,31 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const indexSource = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+// The original test read `./index.ts` as a string. After the route-registry
+// split, the prompts live in `ai-prompts.ts` and the fallback router in
+// `ai-runtime.ts`; assertions point at those files instead.
+const promptsSource = readFileSync(new URL("./ai-prompts.ts", import.meta.url), "utf8");
+const runtimeSource = readFileSync(new URL("./ai-runtime.ts", import.meta.url), "utf8");
 
 describe("generate-workflow system prompt", () => {
   it("documents the current 11-node Anthropic grammar selection", () => {
-    expect(indexSource).toContain("'approval', 'human_form', 'loop'");
-    expect(indexSource).toContain("The platform supports 9 more operator-only types (multi_agent");
-    expect(indexSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
-    expect(indexSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
-    expect(indexSource).not.toContain("'approval', 'multi_agent', 'loop'");
+    expect(promptsSource).toContain("'approval', 'human_form', 'loop'");
+    expect(promptsSource).toContain("The platform supports 9 more operator-only types (multi_agent");
+    expect(promptsSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
+    expect(promptsSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
+    expect(promptsSource).not.toContain("'approval', 'multi_agent', 'loop'");
   });
 
   it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {
-    expect(indexSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
-    expect(indexSource).toContain("emit the tool name only");
-    expect(indexSource).toContain("The operator fills credential names, destinations, and richer inputs");
+    expect(promptsSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
+    expect(promptsSource).toContain("emit the tool name only");
+    expect(promptsSource).toContain("The operator fills credential names, destinations, and richer inputs");
   });
 
   it("routes incident, Slack, and GitHub prompts to the incident-triage fallback template", () => {
-    expect(indexSource).toContain('text.includes("incident")');
-    expect(indexSource).toContain('text.includes("slack")');
-    expect(indexSource).toContain('text.includes("github")');
-    expect(indexSource).toContain('"incident-triage"');
+    expect(runtimeSource).toContain('text.includes("incident")');
+    expect(runtimeSource).toContain('text.includes("slack")');
+    expect(runtimeSource).toContain('text.includes("github")');
+    expect(runtimeSource).toContain('"incident-triage"');
   });
 });

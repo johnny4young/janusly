@@ -26,7 +26,7 @@
  * change. The `actor` block carries the service-token suffix for
  * forensics (matches the same suffix the auth layer captured).
  *
- * Used by: `apps/api/src/index.ts` MCP-write routes (currently
+ * Used by: `apps/api/src/routes/workflows-routes.ts` MCP-write routes (currently
  * `POST /workflows/save`).
  *
  * Invariants:
