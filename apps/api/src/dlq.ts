@@ -3,7 +3,7 @@
  * the DLQ is multi-tenant. `markDeadLetterReplayed` is the chokepoint
  * called after `DLQReplayAdapter` re-enqueues the failed node.
  *
- * Used by `apps/api/src/index.ts` `/dlq/*` routes.
+ * Used by `apps/api/src/routes/dlq-routes.ts` `/dlq/*` routes.
  *
  * Invariants:
  * - Multi-tenant scope: `eq(deadLetters.orgId, orgId)` on every query.

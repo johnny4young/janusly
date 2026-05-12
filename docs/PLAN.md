@@ -287,7 +287,7 @@ When the LLM drafts a workflow, the system prompt now includes the live tool cat
 #### Roadmap
 
 1. Add `mcp_tool` node executor in `packages/engine/src/node-registry.ts`. Use `@modelcontextprotocol/sdk/client/index.js`.
-2. Add `mcp_connections` table + repo + API CRUD in `apps/api/src/index.ts`.
+2. Add `mcp_connections` table + repo + API route module under `apps/api/src/routes/`.
 3. Add Connections UI alongside the Credentials view.
 4. Pre-package three connections that "just work": GitHub MCP, Slack MCP, Filesystem MCP.
 5. Ship a "tool discovery" UX: connect once → workflow author sees all tools.

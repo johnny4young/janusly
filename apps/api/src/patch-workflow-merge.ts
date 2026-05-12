@@ -2,7 +2,7 @@
  * Pure merge helper for `/ai/patch-workflow`.
  *
  * Used by:
- *   - `apps/api/src/index.ts` — composes the route's full workflow response
+ *   - `apps/api/src/routes/ai-routes.ts` — composes the route's full workflow response
  *     from the LLM's config-only patch envelope.
  *   - `apps/api/src/patch-workflow-merge.test.ts` — pins no-op guards.
  *

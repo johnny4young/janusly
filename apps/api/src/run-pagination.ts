@@ -4,7 +4,7 @@
  * `createdAt` (e.g. inserts within one transaction) tie-break on `id` so
  * pagination always advances and never skips peers.
  *
- * Used by `apps/api/src/index.ts` `/run` and `/status` route handlers.
+ * Used by `apps/api/src/routes/runs-routes.ts` `/run` and `/status` route handlers.
  *
  * Invariants:
  * - The query orders by `(createdAt DESC, id DESC)` and the cursor parser
