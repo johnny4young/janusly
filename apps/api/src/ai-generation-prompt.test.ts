@@ -12,8 +12,8 @@ describe("generate-workflow system prompt", () => {
     expect(indexSource).not.toContain("'approval', 'multi_agent', 'loop'");
   });
 
-  it("keeps AI generation aware of revenue-grade integration tools without expanding the node-type grammar", () => {
-    expect(indexSource).toContain("'email.send'|'slack.post'|'github.create_issue'|'webhook.send'");
+  it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {
+    expect(indexSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
     expect(indexSource).toContain("emit the tool name only");
     expect(indexSource).toContain("The operator fills credential names, destinations, and richer inputs");
   });
