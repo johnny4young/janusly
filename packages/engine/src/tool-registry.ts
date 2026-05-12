@@ -36,6 +36,7 @@ import { evaluateJsonJq, parseJsonJqQuery } from "./json-jq";
 import { getMailer } from "./mailer";
 import { getEngineRateLimiter } from "./rate-limit";
 import { getEmailUsageRecorder } from "./email-usage";
+import { githubCreateIssueTool, slackPostTool, webhookSendTool } from "./integration-tools";
 
 /**
  * Public-facing tool metadata returned by `listTools()` for the AI Studio.
@@ -75,6 +76,17 @@ export type ToolExecutionContext = {
     provider?: string;
     from?: string;
     rateLimitPerMin?: number;
+  };
+  /**
+   * Per-tenant overrides for integration tool rate limits. Tools read
+   * their relevant slice (`integrations.slack.rateLimitPerMin` etc.)
+   * with an env-fallback when this is unset, so unit tests can exercise
+   * the tool without threading the full snapshot.
+   */
+  integrations?: {
+    slack?: { rateLimitPerMin?: number };
+    github?: { rateLimitPerMin?: number };
+    webhook?: { rateLimitPerMin?: number };
   };
 };
 
@@ -551,6 +563,9 @@ const tools = {
       return { statusCode: result.statusCode, ok: result.ok, body: result.body };
     },
   }),
+  "slack.post": defineTool(slackPostTool),
+  "github.create_issue": defineTool(githubCreateIssueTool),
+  "webhook.send": defineTool(webhookSendTool),
   "text.uppercase": defineTool({
     name: "text.uppercase",
     description: "Convert text to uppercase.",

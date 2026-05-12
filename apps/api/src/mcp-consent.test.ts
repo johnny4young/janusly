@@ -17,6 +17,7 @@ function snapshotWithConsent(consent: boolean) {
     email: {} as never,
     runs: {} as never,
     mcp: { writeConsent: consent },
+    integrations: {} as never,
   } as Awaited<ReturnType<typeof getOrgConfigSnapshot>>;
 }
 

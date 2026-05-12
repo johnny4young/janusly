@@ -68,9 +68,20 @@ export type OrgConfigSnapshot = {
   mcp: {
     writeConsent: boolean;
   };
+  integrations: {
+    slack: {
+      rateLimitPerMin: number;
+    };
+    github: {
+      rateLimitPerMin: number;
+    };
+    webhook: {
+      rateLimitPerMin: number;
+    };
+  };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp"] as const;
+const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations"] as const;
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -214,6 +225,33 @@ export const ORG_CONFIG_DEFINITIONS = [
     description: "Allow MCP write tools (workflows.save, etc.) to mutate this organization. Process-wide JANUSLY_MCP_WRITES_ENABLED must also be true. NO env fallback by design — each tenant must opt in explicitly via the admin API.",
     valueType: "boolean",
     defaultValue: false,
+  },
+  {
+    key: "slack.rateLimitPerMin",
+    category: "integrations",
+    description: "Per-org slack.post tool calls per minute.",
+    valueType: "number",
+    defaultValue: 60,
+    envKeys: ["JANUSLY_SLACK_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
+    key: "github.rateLimitPerMin",
+    category: "integrations",
+    description: "Per-org github.create_issue tool calls per minute.",
+    valueType: "number",
+    defaultValue: 60,
+    envKeys: ["JANUSLY_GITHUB_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
+    key: "webhook.rateLimitPerMin",
+    category: "integrations",
+    description: "Per-org webhook.send tool calls per minute.",
+    valueType: "number",
+    defaultValue: 120,
+    envKeys: ["JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN"],
+    min: 1,
   },
 ] as const satisfies readonly OrgConfigDefinition[];
 
@@ -369,6 +407,17 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     mcp: {
       writeConsent: readBoolean(values, "mcp.writeConsent"),
     },
+    integrations: {
+      slack: {
+        rateLimitPerMin: readNumber(values, "slack.rateLimitPerMin"),
+      },
+      github: {
+        rateLimitPerMin: readNumber(values, "github.rateLimitPerMin"),
+      },
+      webhook: {
+        rateLimitPerMin: readNumber(values, "webhook.rateLimitPerMin"),
+      },
+    },
   };
 }
 
@@ -395,6 +444,9 @@ export function applyOrgConfigToEnv(
     JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
     JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
     // `mcp.writeConsent` has no env overlay by design — see the catalog definition.
+    JANUSLY_SLACK_RATE_LIMIT_PER_MIN: String(config.integrations.slack.rateLimitPerMin),
+    JANUSLY_GITHUB_RATE_LIMIT_PER_MIN: String(config.integrations.github.rateLimitPerMin),
+    JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN: String(config.integrations.webhook.rateLimitPerMin),
   };
 }
 
