@@ -78,10 +78,16 @@ export type OrgConfigSnapshot = {
     webhook: {
       rateLimitPerMin: number;
     };
+    pdf: {
+      rateLimitPerMin: number;
+    };
+  };
+  objectstore: {
+    provider: string;
   };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations"] as const;
+const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations", "objectstore"] as const;
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -253,6 +259,24 @@ export const ORG_CONFIG_DEFINITIONS = [
     envKeys: ["JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN"],
     min: 1,
   },
+  {
+    key: "pdf.rateLimitPerMin",
+    category: "integrations",
+    description: "Per-org pdf.generate tool calls per minute.",
+    valueType: "number",
+    defaultValue: 30,
+    envKeys: ["JANUSLY_PDF_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
+    key: "objectstore.provider",
+    category: "objectstore",
+    description: "Object-store backend used by pdf.generate. Provider credentials still come from env.",
+    valueType: "string",
+    defaultValue: "noop",
+    envKeys: ["JANUSLY_OBJECT_STORE_PROVIDER"],
+    allowedValues: ["s3", "local", "noop"],
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -417,6 +441,12 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       webhook: {
         rateLimitPerMin: readNumber(values, "webhook.rateLimitPerMin"),
       },
+      pdf: {
+        rateLimitPerMin: readNumber(values, "pdf.rateLimitPerMin"),
+      },
+    },
+    objectstore: {
+      provider: readString(values, "objectstore.provider"),
     },
   };
 }
@@ -447,6 +477,8 @@ export function applyOrgConfigToEnv(
     JANUSLY_SLACK_RATE_LIMIT_PER_MIN: String(config.integrations.slack.rateLimitPerMin),
     JANUSLY_GITHUB_RATE_LIMIT_PER_MIN: String(config.integrations.github.rateLimitPerMin),
     JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN: String(config.integrations.webhook.rateLimitPerMin),
+    JANUSLY_PDF_RATE_LIMIT_PER_MIN: String(config.integrations.pdf.rateLimitPerMin),
+    JANUSLY_OBJECT_STORE_PROVIDER: config.objectstore.provider,
   };
 }
 
