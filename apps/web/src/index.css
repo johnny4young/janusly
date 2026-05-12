@@ -3071,3 +3071,227 @@ a { color: var(--we-primary); }
   display: flex;
   gap: 8px;
 }
+
+/* ----------------- Replay Lab dialog + comparison view ------------------ */
+
+.we-replay-lab-dialog {
+  max-width: 720px;
+}
+
+.we-replay-lab-source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-replay-lab-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.we-replay-lab-source-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.we-replay-lab-source-grid dt {
+  font-size: 11px;
+  color: var(--we-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.we-replay-lab-source-grid dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--we-text-1);
+}
+
+.we-replay-lab-id {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--we-text-2);
+}
+
+.we-replay-lab-progress,
+.we-replay-lab-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-replay-lab-history-button {
+  align-self: flex-end;
+  margin-top: 4px;
+}
+
+.we-run-history-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.we-run-history-card .list-card-row {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.we-run-history-card .list-card-row:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.we-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-comparison-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+  border: 1px dashed var(--we-line);
+  border-radius: 8px;
+}
+
+.we-comparison-summary {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  font-size: 12px;
+  color: var(--we-text-1);
+}
+
+.we-comparison-summary__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.we-comparison-summary__line strong {
+  color: var(--we-text-1);
+}
+
+.we-comparison-delta {
+  color: var(--we-text-2);
+  margin-left: 4px;
+}
+
+.we-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.we-comparison-table thead th {
+  text-align: left;
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.we-comparison-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--we-line);
+  vertical-align: middle;
+}
+
+.we-comparison-cell-node {
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--we-text-1);
+}
+
+.we-comparison-cell-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--we-text-1);
+}
+
+.we-comparison-row--equal td {
+  background: transparent;
+}
+
+.we-comparison-row--changed td {
+  background: var(--we-warning-soft);
+}
+
+.we-comparison-row--only-base td,
+.we-comparison-row--only-replay td {
+  background: var(--we-surface-muted);
+}
+
+.we-comparison-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--we-line);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.we-comparison-pill--success {
+  color: var(--we-success);
+  border-color: var(--we-success-border-30);
+  background: var(--we-success-soft);
+}
+
+.we-comparison-pill--danger {
+  color: var(--we-danger);
+  border-color: var(--we-danger-border-30);
+  background: var(--we-danger-soft);
+}
+
+.we-comparison-pill--warn {
+  color: var(--we-warning);
+  border-color: var(--we-warning-border-30);
+  background: var(--we-warning-soft);
+}
+
+.we-comparison-pill--neutral {
+  color: var(--we-text-2);
+  background: var(--we-surface-2);
+}
+
+.we-comparison-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.we-comparison-chip--equal {
+  background: var(--we-success-soft);
+  color: var(--we-success);
+}
+
+.we-comparison-chip--changed {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+}
+
+.we-comparison-chip--only-base,
+.we-comparison-chip--only-replay {
+  background: var(--we-surface-2);
+  color: var(--we-text-2);
+}

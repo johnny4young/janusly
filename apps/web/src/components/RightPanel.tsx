@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Activity, Boxes, CheckCircle2, Database, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, CheckCircle2, Database, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
@@ -29,6 +29,7 @@ import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { OperationsPanel } from './OperationsPanel'
 import { HumanFormDialog } from './HumanFormDialog'
+import { ReplayLabDialog } from './ReplayLabDialog'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { api } from '../api'
@@ -1145,6 +1146,11 @@ function RunsPanel({
   const [activeHumanFormNodeId, setActiveHumanFormNodeId] = useState<string | null>(null)
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
   const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
+  // Replay Lab source — set when the operator clicks "Open in Lab" from
+  // the active-run card or a history row. The dialog mounts overlay-style
+  // while non-null and the source run id stays around as state until the
+  // operator dismisses the dialog.
+  const [labSourceRun, setLabSourceRun] = useState<RunSummary | null>(null)
   const activeHumanFormNode = activeHumanFormNodeId
     ? waitingNodes.find(node => node.nodeId === activeHumanFormNodeId) ?? null
     : null
@@ -1169,14 +1175,26 @@ function RunsPanel({
         <section className="panel-card">
           <div className="split-row">
             <strong>Active run</strong>
-            <button
-              type="button"
-              className="small-command"
-              onClick={() => onCancelActiveRun?.()}
-              disabled={!isActiveRunCancellable}
-            >
-              Cancel run
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => setLabSourceRun(activeRun)}
+                  data-testid="active-run-replay-in-lab"
+                >
+                  <FlaskConical size={12} aria-hidden="true" /> Open in Lab
+                </button>
+              )}
+              <button
+                type="button"
+                className="small-command"
+                onClick={() => onCancelActiveRun?.()}
+                disabled={!isActiveRunCancellable}
+              >
+                Cancel run
+              </button>
+            </div>
           </div>
           <p className="helper-text">
             {activeRun
@@ -1281,17 +1299,45 @@ function RunsPanel({
       <div className="panel-list">
         <div className="section-kicker">History</div>
         {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title="No runs yet" body="Press Run to execute the current flow and inspect the result here." />}
-        {runs.map(run => (
-          <button key={run.id} className="list-card list-card-button" onClick={() => onOpenRun(run.id)}>
-            <div className="split-row" style={{ width: '100%' }}>
-              <strong>{run.id.slice(0, 8)}…</strong>
-              <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
+        {runs.map(run => {
+          const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
+          return (
+            <div key={run.id} className="list-card we-run-history-card" role="group">
+              <button type="button" className="list-card-row" onClick={() => onOpenRun(run.id)}>
+                <div className="split-row" style={{ width: '100%' }}>
+                  <strong>{run.id.slice(0, 8)}…</strong>
+                  <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
+                </div>
+                <span>{run.createdAt ? new Date(run.createdAt).toLocaleString() : 'run'}</span>
+                <span className="list-card-action">Open run timeline</span>
+              </button>
+              {showLabAction && (
+                <button
+                  type="button"
+                  className="small-command we-replay-lab-history-button"
+                  onClick={() => setLabSourceRun(run)}
+                  data-testid={`history-replay-in-lab-${run.id}`}
+                  aria-label={`Replay run ${run.id} in lab`}
+                >
+                  <FlaskConical size={12} aria-hidden="true" /> Lab
+                </button>
+              )}
             </div>
-            <span>{run.createdAt ? new Date(run.createdAt).toLocaleString() : 'run'}</span>
-            <span className="list-card-action">Open run timeline</span>
-          </button>
-        ))}
+          )
+        })}
       </div>
+
+      {labSourceRun && (
+        <ReplayLabDialog
+          sourceRun={{
+            id: labSourceRun.id,
+            status: labSourceRun.status,
+            workflowVersionId: labSourceRun.workflowVersionId,
+            createdAt: labSourceRun.createdAt ?? null,
+          }}
+          onClose={() => setLabSourceRun(null)}
+        />
+      )}
     </PanelChrome>
   )
 }

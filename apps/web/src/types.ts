@@ -40,6 +40,12 @@ export type RunSummary = {
   createdAt?: string
   /** Projected workflow output. Populated only when the run reached `succeeded` AND the workflow declared `outputs`. */
   outputJson?: JsonObject | null
+  /**
+   * Replay-mode tag. `null` (or absent) for production runs; `"validation"`
+   * for sandbox runs created by the recovery dialog or the Replay Lab.
+   * Drives whether the "Open in Lab" button surfaces (no nested labs).
+   */
+  replayMode?: string | null
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }

@@ -15,31 +15,36 @@
 import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import { getRunComparison } from "@janusly/data/src/runComparisonRepo";
 import { db, runEvents, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { replayDecision } from "@janusly/domain";
+import { replayRunAsValidation } from "@janusly/engine/src/adapters/replay-lab";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { cancelRun } from "@janusly/engine/src/persistence";
 import { ResumeRunConflictError, resumeRun } from "@janusly/engine/src/resume-run";
 import { startRun } from "@janusly/engine/src/start-run";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { WorkflowSchema } from "@janusly/shared";
+import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 
-import { decisionCandidatesFromPayload } from "../ai-runtime";
+import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { asRecord, corsHeaders, readJson, sendEvent, sendJson } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
+import { enforceRateLimit } from "../rate-limit";
 import { checkRollbackAvailability, mergeReadiness } from "../readiness-helpers";
 import type { Route } from "../routes";
 
 export const runsRoutes: Route[] = [
   // Runs — list + reads
-  // NOTE: `/runs` prefix excludes `/run?` so the next entry can claim it.
+  // NOTE: `/runs` prefix excludes `/run?` so the GET `/run?…` entry below
+  // can claim it, and excludes `/runs/compare` so the Replay Lab compare
+  // route below can claim it (both are first-match-wins).
   // Optional `?workflowId=<id>` filter joins through `workflow_versions` so
   // the caller can scope the listing to one workflow's runs.
-  { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?"),
+  { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?") && !url.startsWith("/runs/compare"),
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
@@ -284,6 +289,134 @@ export const runsRoutes: Route[] = [
       await cancelRun(runId, reason);
       await audit(auth.orgId, auth.userId, "run.cancelled", "run", runId, { reason });
       return sendJson(res, { runId, status: "cancelled" });
+    } },
+
+  // Replay Lab — standalone sandbox replay. Creates a fresh validation
+  // run from ANY source run (not just a DLQ entry) and re-executes the
+  // workflow from root nodes. The source run's workflow snapshot is
+  // pulled from `workflow_versions.dagJson` (saved workflow) or from
+  // `runs.inputJson.workflow` (ad-hoc fallback); an optional caller
+  // `suggestedWorkflow` overrides the snapshot and is validated through
+  // the same `WorkflowSchema` + `sanitizeAiWorkflow` chain `/dlq/validate-fix`
+  // uses. The new run carries `replayMode = "validation"` so the engine's
+  // dryRun gating, write-side skips, and rollup exclusions apply
+  // automatically; the audit row distinguishes the lab intent from the
+  // recovery-dialog intent (`replay_lab.started` vs
+  // `recovery.validation_started`).
+  { method: "POST", match: "/runs/replay-lab", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+
+      const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;
+      if (!sourceRunId) return sendJson(res, { error: "sourceRunId is required" }, 400);
+
+      // Org-scope the source run and reject cross-org / unknown ids with
+      // an identical 404 envelope — no enumeration leak.
+      const sourceRows = await db.select().from(runs).where(and(eq(runs.id, sourceRunId), eq(runs.orgId, auth.orgId)));
+      const sourceRun = sourceRows[0];
+      if (!sourceRun) return sendJson(res, { error: "Source run not found" }, 404);
+
+      // No nested labs — a sandbox run is itself a validation run; replaying
+      // it would just create a sibling sandbox with the same snapshot.
+      if (sourceRun.replayMode) {
+        return sendJson(res, { error: "Source run is itself a sandbox run; cannot start a nested lab" }, 400);
+      }
+
+      // Resolve the workflow snapshot. Precedence: caller-supplied patch >
+      // saved workflow_versions.dagJson > ad-hoc runs.inputJson.workflow.
+      let workflow: Workflow;
+      const hasPatch = body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null;
+      if (hasPatch) {
+        if (typeof body.suggestedWorkflow !== "object") {
+          return sendJson(res, { error: "suggestedWorkflow must be an object" }, 400);
+        }
+        const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
+        if (!parsed.success) {
+          return sendJson(res, {
+            error: `suggestedWorkflow failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+          }, 400);
+        }
+        try {
+          workflow = sanitizeAiWorkflow(parsed.data);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          return sendJson(res, { error: `suggestedWorkflow sanitize failed: ${reason}` }, 400);
+        }
+      } else {
+        // No patch — load the source's own workflow snapshot. Try the saved
+        // version first (most common), fall back to the ad-hoc inputJson.
+        const versionRows = await db
+          .select()
+          .from(workflowVersions)
+          .where(and(eq(workflowVersions.id, sourceRun.workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
+        const version = versionRows[0];
+        let snapshot: unknown = version?.dagJson;
+        if (!snapshot) {
+          const input = sourceRun.inputJson as Record<string, unknown> | null;
+          snapshot = input && typeof input === "object" ? input.workflow : null;
+        }
+        if (!snapshot) {
+          return sendJson(res, {
+            error: "Source run has no workflow snapshot available; supply suggestedWorkflow",
+          }, 400);
+        }
+        const parsed = WorkflowSchema.safeParse(snapshot);
+        if (!parsed.success) {
+          return sendJson(res, {
+            error: `Source run snapshot failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+          }, 400);
+        }
+        workflow = parsed.data;
+      }
+
+      // Propagate trigger-time input from the source run so workflows
+      // that reference `{{input.*}}` behave identically in the sandbox.
+      // `startRun` writes `inputJson: { workflow, input }` — read the
+      // same key here. Falls back to `{}` for ad-hoc runs whose
+      // inputJson predates the input field.
+      const sourceInputJson = sourceRun.inputJson as Record<string, unknown> | null;
+      const triggerInput = sourceInputJson && typeof sourceInputJson === "object"
+        ? sourceInputJson.input
+        : undefined;
+
+      const { runId: replayRunId } = await replayRunAsValidation({
+        orgId: auth.orgId,
+        sourceRunId,
+        workflow,
+        input: triggerInput,
+        createdBy: auth.userId,
+        hasPatch,
+      });
+
+      await audit(auth.orgId, auth.userId, "replay_lab.started", "run", sourceRunId, {
+        replayRunId,
+        hasPatch,
+      });
+
+      return sendJson(res, { runId: replayRunId });
+    } },
+  // Run comparison — per-node bundle the Replay Lab's comparison view
+  // consumes. Both runs are org-scoped via `getRunComparison`; either
+  // run missing or not owned by `auth.orgId` returns the same 404
+  // envelope (no enumeration leak).
+  { method: "GET", match: (url) => url.startsWith("/runs/compare"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const baseRunId = url.searchParams.get("baseRunId");
+      const replayRunId = url.searchParams.get("replayRunId");
+      if (!baseRunId || !replayRunId) {
+        return sendJson(res, { error: "baseRunId and replayRunId are required" }, 400);
+      }
+      const result = await getRunComparison({ orgId: auth.orgId, baseRunId, replayRunId });
+      if ("error" in result) {
+        const message = result.error === "base_run_not_found"
+          ? "Base run not found"
+          : "Replay run not found";
+        return sendJson(res, { error: message }, 404);
+      }
+      return sendJson(res, result);
     } },
 
   // Causal replay
