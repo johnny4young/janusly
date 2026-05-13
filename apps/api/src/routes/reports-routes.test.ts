@@ -7,6 +7,8 @@ const {
   sendJsonMock,
   resWriteHeadMock,
   resEndMock,
+  executeToolMock,
+  enforceRateLimitMock,
 } = vi.hoisted(() => ({
   auditMock: vi.fn(),
   buildRunExplainReportMock: vi.fn(),
@@ -14,6 +16,8 @@ const {
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
   resWriteHeadMock: vi.fn(),
   resEndMock: vi.fn(),
+  executeToolMock: vi.fn(),
+  enforceRateLimitMock: vi.fn(),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -72,7 +76,15 @@ vi.mock("@janusly/engine/src/run-explain-report", () => ({
   buildRunExplainReport: buildRunExplainReportMock,
 }));
 
+vi.mock("@janusly/engine/src/tool-registry", () => ({
+  executeTool: executeToolMock,
+}));
+
 vi.mock("../audit", () => ({ audit: auditMock }));
+
+vi.mock("../rate-limit", () => ({
+  enforceRateLimit: enforceRateLimitMock,
+}));
 
 vi.mock("../http", async (importOriginal) => {
   const original = await importOriginal<typeof import("../http")>();
@@ -101,6 +113,33 @@ function makeRes() {
 
 function reportsRoute() {
   return reportsRoutes[0]!;
+}
+
+function deliverRoute() {
+  return reportsRoutes[1]!;
+}
+
+/** Build a Node-`http`-shaped request that yields a JSON body via the
+ *  same `data` / `end` events the `readJson` helper subscribes to. */
+function makeJsonRequest(body: unknown) {
+  let handlers: Record<string, ((chunk?: unknown) => void)[]> = { data: [], end: [], error: [] };
+  const req = {
+    url: "/reports/run-explain/deliver",
+    on(event: string, handler: (chunk?: unknown) => void) {
+      if (!handlers[event]) handlers[event] = [];
+      handlers[event].push(handler);
+      return req;
+    },
+    destroy() {},
+  };
+  // readJson awaits the promise so we need to fire the events on the
+  // next tick after the listener subscribes.
+  queueMicrotask(() => {
+    const json = JSON.stringify(body);
+    handlers.data.forEach((handler) => handler(json));
+    handlers.end.forEach((handler) => handler());
+  });
+  return req;
 }
 
 const baseReport = {
@@ -132,6 +171,8 @@ beforeEach(() => {
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
   resEndMock.mockReset();
+  executeToolMock.mockReset();
+  enforceRateLimitMock.mockReset();
   buildRunExplainReportMock.mockReturnValue(baseReport);
 });
 
@@ -363,5 +404,422 @@ describe("/reports/run-explain — rejection paths", () => {
     );
     expect(buildRunExplainReportMock).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// POST /reports/run-explain/deliver — route through the integration-tool
+// chokepoint. Asserts each of the three destinations + every failure mode
+// (multi-tenant gate, malformed body, missing credential, rate-limit on
+// outer + inner buckets, audit-on-both-paths posture).
+// ─────────────────────────────────────────────────────────────────────────
+
+const DEFAULT_INPUT_JSON = { workflow: { name: "Billing flow", id: "wf_billing" } };
+
+function stageReportLoad(run: { id: string; status: string; inputJson?: unknown }) {
+  // `Object.hasOwn(run, "inputJson")` distinguishes "caller wanted null"
+  // from "caller didn't set it" so a test exercising the ad-hoc-workflow
+  // fallback path can pass `inputJson: null` explicitly.
+  const inputJson = Object.prototype.hasOwnProperty.call(run, "inputJson") ? run.inputJson : DEFAULT_INPUT_JSON;
+  selectRowsBox.rows = [
+    [{
+      id: run.id,
+      orgId: "org-1",
+      status: run.status,
+      createdAt: new Date("2026-05-12T14:55:00Z"),
+      inputJson,
+    }],
+    [], // runNodes
+    [], // runEvents
+    [], // auditLogs
+  ];
+}
+
+describe("/reports/run-explain/deliver — happy paths", () => {
+  it("delivers to slack via the slack.post tool with a truncated header+summary body", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({ ok: true, statusCode: 200, latencyMs: 12 });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(executeToolMock).toHaveBeenCalledTimes(1);
+    const [toolName, toolInput, ctxArg, execCtx] = executeToolMock.mock.calls[0]!;
+    expect(toolName).toBe("slack.post");
+    expect(toolInput).toMatchObject({ credential: "ops-channel" });
+    expect(typeof (toolInput as { text?: string }).text).toBe("string");
+    expect((toolInput as { text: string }).text).toContain("Janusly run explain");
+    expect((toolInput as { text: string }).text).toContain("Billing flow");
+    expect(ctxArg).toEqual({});
+    expect(execCtx).toMatchObject({ orgId: "org-1", runId: "run_abc" });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ok: true, destination: "slack", statusCode: 200, latencyMs: 12 }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.run_explain.delivered",
+      "run",
+      "run_abc",
+      expect.objectContaining({
+        destination: "slack",
+        format: "markdown",
+        ok: true,
+        statusCode: 200,
+        runId: "run_abc",
+        workflowId: "wf_billing",
+        workflowName: "Billing flow",
+        runStatus: "failed",
+        credentialName: "ops-channel",
+      }),
+    );
+  });
+
+  it("delivers to github via github.create_issue and surfaces the issue URL as deliveryId", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({
+      ok: true,
+      statusCode: 201,
+      latencyMs: 35,
+      issueNumber: 7,
+      url: "https://github.com/janusly/demo/issues/7",
+    });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "github", credentialName: "bot-github", owner: "janusly", repo: "demo", labels: ["incident"] },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    const [toolName, toolInput] = executeToolMock.mock.calls[0]!;
+    expect(toolName).toBe("github.create_issue");
+    expect(toolInput).toMatchObject({
+      credential: "bot-github",
+      owner: "janusly",
+      repo: "demo",
+      labels: ["incident"],
+      body: baseReport.markdown,
+    });
+    expect(typeof (toolInput as { title?: string }).title).toBe("string");
+    expect((toolInput as { title: string }).title).toContain("Billing flow");
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        ok: true,
+        destination: "github",
+        statusCode: 201,
+        deliveryId: "https://github.com/janusly/demo/issues/7",
+      }),
+    );
+  });
+
+  it("delivers to webhook via webhook.send with the JSON envelope as payload", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({ ok: true, statusCode: 202, latencyMs: 18 });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "webhook", credentialName: "partner-secret", url: "https://partner.example.com/hooks/janusly" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    const [toolName, toolInput] = executeToolMock.mock.calls[0]!;
+    expect(toolName).toBe("webhook.send");
+    expect(toolInput).toMatchObject({
+      credential: "partner-secret",
+      url: "https://partner.example.com/hooks/janusly",
+      payload: baseReport.json,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ok: true, destination: "webhook", statusCode: 202 }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.run_explain.delivered",
+      "run",
+      "run_abc",
+      expect.objectContaining({ destination: "webhook", format: "json", ok: true }),
+    );
+  });
+
+  it("falls back to the (ad-hoc workflow) label when the run has no saved workflow name", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed", inputJson: null });
+    executeToolMock.mockResolvedValueOnce({ ok: true, statusCode: 200, latencyMs: 10 });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    const [, toolInput] = executeToolMock.mock.calls[0]!;
+    expect((toolInput as { text: string }).text).toContain("(ad-hoc workflow)");
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.run_explain.delivered",
+      "run",
+      "run_abc",
+      expect.objectContaining({ workflowName: null, workflowId: null }),
+    );
+  });
+
+  it("truncates slack text and appends an ellipsis when the body would exceed the per-block cap", async () => {
+    // Build a synthetic report whose nextAction alone pushes the body
+    // well past the 2500-char Slack cap; the route should truncate and
+    // tail with the ellipsis sentinel.
+    const oversized = "X".repeat(5000);
+    const bigReport = {
+      markdown: "# Big report",
+      json: {
+        ...baseReport.json,
+        nextAction: oversized,
+      },
+    };
+    buildRunExplainReportMock.mockReturnValueOnce(bigReport);
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({ ok: true, statusCode: 200, latencyMs: 10 });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    const [, toolInput] = executeToolMock.mock.calls[0]!;
+    const text = (toolInput as { text: string }).text;
+    // Hard cap below Slack's 3000-char per-block limit.
+    expect(text.length).toBeLessThanOrEqual(2500);
+    expect(text.endsWith("…")).toBe(true);
+  });
+});
+
+describe("/reports/run-explain/deliver — rejection + failure paths", () => {
+  it("rejects malformed slack body (missing credentialName) with 400 and no audit row", async () => {
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("Invalid request") }),
+      400,
+    );
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects github body missing owner / repo with 400", async () => {
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "github", credentialName: "bot" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("owner") }),
+      400,
+    );
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects webhook body missing url with 400", async () => {
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "webhook", credentialName: "partner" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("url") }),
+      400,
+    );
+    expect(executeToolMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 (no enumeration leak) when the run is missing or cross-org", async () => {
+    // Empty rows from the org-scoped runs query — same envelope for
+    // missing-id and cross-org.
+    selectRowsBox.rows = [[]];
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "other-org-run",
+        destination: { kind: "slack", credentialName: "ops" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { error: "Run not found" },
+      404,
+    );
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates the generic missing-credential error (no env-var leak) and audits with ok:false", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({
+      ok: false,
+      error: "credential secret missing for ops-channel",
+      latencyMs: 2,
+    });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        ok: false,
+        destination: "slack",
+        error: "credential secret missing for ops-channel",
+      }),
+    );
+    // Audit row written even on the failure path; env-var name not present.
+    const auditMetadata = auditMock.mock.calls[0]![5];
+    expect(auditMetadata).toMatchObject({ ok: false, error: "credential secret missing for ops-channel" });
+    // Sanity check: the credentialName surfaced is the operator-supplied identifier,
+    // not the env-var (which would have been e.g. SLACK_OPS_WEBHOOK_URL).
+    expect(JSON.stringify(auditMetadata)).not.toMatch(/SLACK_.*_WEBHOOK_URL/);
+  });
+
+  it("returns 429 + writes an audit row when the outer reports.deliver bucket is exhausted", async () => {
+    const rateError = Object.assign(new Error("Rate limit exceeded for reports.deliver. Retry in 30s."), { statusCode: 429 });
+    enforceRateLimitMock.mockRejectedValueOnce(rateError);
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("Rate limit exceeded") }),
+      429,
+    );
+    expect(executeToolMock).not.toHaveBeenCalled();
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.run_explain.delivered",
+      "run",
+      "run_abc",
+      expect.objectContaining({ ok: false, error: "rate_limit_exceeded", destination: "slack", format: "markdown" }),
+    );
+  });
+
+  it("surfaces inner per-tool rate-limit rejections as { ok: false } with an audit row", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockResolvedValueOnce({
+      ok: false,
+      error: "Rate limit exceeded for tool.slack.post. Retry in 60s.",
+      latencyMs: 1,
+    });
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ok: false, destination: "slack" }),
+    );
+    const auditMetadata = auditMock.mock.calls[0]![5];
+    expect(auditMetadata).toMatchObject({ ok: false, destination: "slack" });
+    expect((auditMetadata as { error: string }).error).toContain("Rate limit exceeded");
+  });
+
+  it("does not throw when executeTool throws — surfaces { ok: false } and writes the audit row", async () => {
+    stageReportLoad({ id: "run_abc", status: "failed" });
+    executeToolMock.mockRejectedValueOnce(new Error("synthetic network blip"));
+
+    await deliverRoute().handler({
+      req: makeJsonRequest({
+        runId: "run_abc",
+        destination: { kind: "slack", credentialName: "ops-channel" },
+      }) as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ok: false, destination: "slack" }),
+    );
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.run_explain.delivered",
+      "run",
+      "run_abc",
+      expect.objectContaining({ ok: false, destination: "slack" }),
+    );
+  });
+});
+
+describe("/reports/run-explain/deliver — route shape", () => {
+  it("declares editor role + POST method on /reports/run-explain/deliver", () => {
+    const route = deliverRoute();
+    expect(route.method).toBe("POST");
+    expect(route.role).toBe("editor");
+    // Match shape — exact string per the registry pattern, not a predicate.
+    expect(route.match).toBe("/reports/run-explain/deliver");
   });
 });

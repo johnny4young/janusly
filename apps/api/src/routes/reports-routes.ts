@@ -11,13 +11,16 @@
  */
 
 import { and, asc, desc, eq, or, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { auditLogs, db, runEvents, runNodes, runs } from "@janusly/db";
-import { buildRunExplainReport } from "@janusly/engine/src/run-explain-report";
+import { buildRunExplainReport, type RunExplainReport } from "@janusly/engine/src/run-explain-report";
+import { executeTool } from "@janusly/engine/src/tool-registry";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
 import { audit } from "../audit";
-import { corsHeaders, sendJson } from "../http";
+import { corsHeaders, readJson, sendJson } from "../http";
+import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
 /**
@@ -92,6 +95,325 @@ function contentDispositionAttachment(ascii: string, utf8: string): string {
   // strictly required but are still safe to encode).
   const encoded = encodeURIComponent(utf8);
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * Body schema for `POST /reports/run-explain/deliver`. The shape stays a
+ * single non-union object (no discriminated union) so the Zod parse remains
+ * one pass and the dispatcher's TypeScript handling is uniform. Per-`kind`
+ * required-fields are enforced via `superRefine`; the integration tool's
+ * own input schema is the final gate.
+ *
+ * `credentialName` is the operator-visible credential identifier (e.g.
+ * "ops-channel"), NOT the env-var that backs the secret. The env-var name
+ * never appears in this route's request, response, or audit metadata.
+ */
+const deliverRequestSchema = z
+  .object({
+    runId: z.string().min(1),
+    destination: z.object({
+      kind: z.enum(["slack", "github", "webhook"]),
+      credentialName: z.string().min(1),
+      // GitHub-only fields.
+      owner: z.string().min(1).optional(),
+      repo: z.string().min(1).optional(),
+      labels: z.array(z.string().min(1)).max(10).optional(),
+      // Webhook-only field.
+      url: z.string().url().optional(),
+    }),
+  })
+  .superRefine((value, ctx) => {
+    const dest = value.destination;
+    if (dest.kind === "github") {
+      if (!dest.owner) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "owner"], message: "owner is required for github destination" });
+      }
+      if (!dest.repo) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "repo"], message: "repo is required for github destination" });
+      }
+    }
+    if (dest.kind === "webhook") {
+      if (!dest.url) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "url"], message: "url is required for webhook destination" });
+      }
+    }
+  });
+
+/** Cap below Slack's per-block 3000-char limit; leaves headroom for the header + footer. */
+const SLACK_TEXT_MAX = 2500;
+/** Outer route-level rate-limit bucket. Inner per-tool bucket (`tool.<name>`) is enforced inside the chokepoint. */
+const REPORTS_DELIVER_RATE_LIMIT_BUCKET = "reports.deliver";
+/** Outer-bucket default — 60/min/org. Matches the `"ai"` route family default. */
+const REPORTS_DELIVER_RATE_LIMIT_PER_MIN = 60;
+/** Window length matches the limiter's standard 60s rolling window. */
+const REPORTS_DELIVER_RATE_LIMIT_WINDOW_MS = 60_000;
+
+/**
+ * Build the Slack-bound text body from the report's structured JSON.
+ * The structured JSON is the source of truth here (not the Markdown
+ * rendering) so the helper stays predictable for tests and surfaces the
+ * highest-signal fields first.
+ *
+ * Layout:
+ *   *Janusly run explain: <name> – <status> – <short_id>*
+ *   Root cause: <signature> (<category>)
+ *   Failed node: <nodeId> — <errorSummary>
+ *   Next action: <nextAction>
+ *   Full report: <app-url>/reports/run-explain?runId=<runId>   (only when JANUSLY_PUBLIC_APP_URL is set)
+ *
+ * Truncated to `SLACK_TEXT_MAX` chars and trailing-ellipsised when over cap.
+ */
+function buildSlackText(args: {
+  report: RunExplainReport;
+  workflowName: string | null;
+  runId: string;
+}): string {
+  const { report, workflowName, runId } = args;
+  const shortId = runId.slice(0, 8);
+  const displayName = workflowName ?? "(ad-hoc workflow)";
+  const headerLine = `*Janusly run explain: ${displayName} – ${report.json.summary.status} – ${shortId}*`;
+
+  const lines: string[] = [headerLine];
+
+  if (report.json.rootCause) {
+    lines.push(`Root cause: ${report.json.rootCause.signature} (${report.json.rootCause.category})`);
+  }
+  if (report.json.failedNode) {
+    lines.push(`Failed node: ${report.json.failedNode.nodeId} — ${report.json.failedNode.errorSummary}`);
+  }
+  if (report.json.nextAction) {
+    lines.push(`Next action: ${report.json.nextAction}`);
+  }
+
+  const publicBase = process.env.JANUSLY_PUBLIC_APP_URL;
+  if (publicBase && publicBase.trim().length > 0) {
+    const trimmed = publicBase.replace(/\/$/, "");
+    lines.push(`Full report: ${trimmed}/reports/run-explain?runId=${encodeURIComponent(runId)}`);
+  }
+
+  const body = lines.join("\n");
+  if (body.length <= SLACK_TEXT_MAX) return body;
+  // The header line is always preserved; truncate the body and append an
+  // ellipsis so receivers see a clear signal that content was cut.
+  return `${body.slice(0, SLACK_TEXT_MAX - 1)}…`;
+}
+
+/** Build the GitHub issue title — `<name> – <status> (<short_id>)`. Falls back to `(ad-hoc workflow)` when unsaved. */
+function buildGitHubTitle(args: {
+  workflowName: string | null;
+  runStatus: string;
+  runId: string;
+}): string {
+  const shortId = args.runId.slice(0, 8);
+  const displayName = args.workflowName ?? "(ad-hoc workflow)";
+  return `Janusly run explain: ${displayName} – ${args.runStatus} (${shortId})`;
+}
+
+type DeliveryOutcome = {
+  ok: boolean;
+  statusCode?: number;
+  error?: string;
+  latencyMs: number;
+  deliveryId?: string;
+};
+
+/**
+ * Translate the report into the destination tool's input shape and call
+ * `executeTool`. The chokepoint enforces credential resolution, per-tool
+ * rate-limit, usage events, and SSRF/body-cap/timeout guards via
+ * `fetchHttpTarget`. The dispatcher itself never throws on runtime
+ * failure (missing credential, non-2xx, network blip) — it returns
+ * `{ ok: false, error, ... }` so the route can audit and respond
+ * uniformly.
+ *
+ * dryRun posture: writeSide tools normally honour `executionContext.dryRun`
+ * to skip the upstream call from a `replayMode="validation"` workflow run.
+ * This route runs outside a workflow run, so the runtime dryRun gate isn't
+ * applicable here; the rate-limit + credential + audit gates are the
+ * right safeguards at this layer.
+ */
+async function dispatchDelivery(args: {
+  orgId: string;
+  runId: string;
+  destination: z.infer<typeof deliverRequestSchema>["destination"];
+  report: RunExplainReport;
+  workflowName: string | null;
+}): Promise<DeliveryOutcome> {
+  const { orgId, runId, destination, report, workflowName } = args;
+  const ctx = {
+    orgId,
+    // Pass the source runId for traceability in usage_events. The
+    // integration tool's recorder writes runId verbatim; nodeId /
+    // workflowId stay unset (this is a route-level call, not a
+    // workflow-node execution).
+    runId,
+  };
+
+  try {
+    if (destination.kind === "slack") {
+      const text = buildSlackText({ report, workflowName, runId });
+      const result = await executeTool(
+        "slack.post",
+        { credential: destination.credentialName, text },
+        {},
+        ctx,
+      );
+      return normalizeDeliveryResult(result);
+    }
+
+    if (destination.kind === "github") {
+      const result = await executeTool(
+        "github.create_issue",
+        {
+          credential: destination.credentialName,
+          owner: destination.owner!,
+          repo: destination.repo!,
+          title: buildGitHubTitle({ workflowName, runStatus: report.json.summary.status, runId }),
+          body: report.markdown,
+          ...(destination.labels && destination.labels.length > 0 ? { labels: destination.labels } : {}),
+        },
+        {},
+        ctx,
+      );
+      const issueUrl = typeof result.url === "string" ? result.url : undefined;
+      return { ...normalizeDeliveryResult(result), deliveryId: issueUrl };
+    }
+
+    // webhook
+    const result = await executeTool(
+      "webhook.send",
+      {
+        credential: destination.credentialName,
+        url: destination.url!,
+        // The structured JSON envelope is the most useful shape for an
+        // automated webhook receiver. The exact serialised body is what
+        // the tool's HMAC-SHA256 path signs — the receiver verifies with
+        // the same shared secret.
+        payload: report.json as Record<string, unknown>,
+      },
+      {},
+      ctx,
+    );
+    return normalizeDeliveryResult(result);
+  } catch (err) {
+    // executeTool throws on (a) unknown tool name or (b) zod input/output
+    // validation failure. Neither is reachable in practice given the route
+    // gates inputs upfront, but the route mirrors the tool contract by
+    // never propagating throws — convert to a `{ ok: false }` envelope so
+    // the outer audit row still gets written.
+    const message = err instanceof Error ? err.message : "delivery failed";
+    return { ok: false, error: message, latencyMs: 0 };
+  }
+}
+
+function normalizeDeliveryResult(result: Record<string, unknown>): DeliveryOutcome {
+  return {
+    ok: result.ok === true,
+    statusCode: typeof result.statusCode === "number" ? result.statusCode : undefined,
+    error: typeof result.error === "string" ? result.error : undefined,
+    latencyMs: typeof result.latencyMs === "number" ? result.latencyMs : 0,
+  };
+}
+
+/**
+ * Read the saved run snapshot + its rendered report. Same data flow as the
+ * GET route — multi-tenant gate on the run lookup, recovery-audit join,
+ * builder invocation. Returns `null` when the run doesn't belong to
+ * `orgId` so the route can 404 uniformly without an enumeration leak.
+ */
+type LoadedRunReport = {
+  /** Run-level fields the POST handler needs for audit metadata. */
+  runStatus: string;
+  runInputJson: unknown;
+  report: RunExplainReport;
+  workflowName: string | null;
+  recoveryAuditFound: boolean;
+};
+
+async function loadRunReport(args: {
+  orgId: string;
+  runId: string;
+}): Promise<LoadedRunReport | null> {
+  const { orgId, runId } = args;
+  const runRows = await db
+    .select()
+    .from(runs)
+    .where(and(eq(runs.id, runId), eq(runs.orgId, orgId)));
+  const run = runRows[0];
+  if (!run) return null;
+
+  const nodes = await db
+    .select()
+    .from(runNodes)
+    .where(eq(runNodes.runId, runId))
+    .orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+
+  const events = await db
+    .select()
+    .from(runEvents)
+    .where(eq(runEvents.runId, runId))
+    .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
+    .limit(200);
+
+  const auditRows = await db
+    .select()
+    .from(auditLogs)
+    .where(and(
+      eq(auditLogs.orgId, orgId),
+      eq(auditLogs.action, "ai.workflow.patch_suggested"),
+      or(
+        sql`${auditLogs.metadata} ->> 'runId' = ${runId}`,
+        eq(auditLogs.targetId, runId),
+      ),
+    ))
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(1);
+  const matchingAudit = auditRows[0] ?? null;
+
+  const report = buildRunExplainReport({
+    run: {
+      id: run.id,
+      status: run.status,
+      workflowVersionId: run.workflowVersionId,
+      parentRunId: run.parentRunId,
+      replayMode: run.replayMode,
+      createdAt: run.createdAt,
+      inputJson: run.inputJson,
+      outputJson: run.outputJson,
+    },
+    runNodes: nodes.map((node) => ({
+      nodeId: node.nodeId,
+      status: node.status,
+      attempts: node.attempts,
+      startedAt: node.startedAt,
+      finishedAt: node.finishedAt,
+      stateJson: node.stateJson,
+      errorJson: node.errorJson,
+    })),
+    runEvents: events.map((event) => ({
+      id: event.id,
+      nodeId: event.nodeId,
+      type: event.type,
+      createdAt: event.createdAt,
+      payload: event.payload,
+    })),
+    recoveryAudit: matchingAudit
+      ? {
+          createdAt: matchingAudit.createdAt,
+          metadata: matchingAudit.metadata as Record<string, unknown>,
+        }
+      : null,
+  });
+
+  const inputJson = run.inputJson as { workflow?: { name?: unknown; id?: unknown } } | null;
+  const workflowName = typeof inputJson?.workflow?.name === "string" ? inputJson.workflow.name : null;
+  return {
+    runStatus: run.status,
+    runInputJson: run.inputJson,
+    report,
+    workflowName,
+    recoveryAuditFound: matchingAudit !== null,
+  };
 }
 
 export const reportsRoutes: Route[] = [
@@ -241,5 +563,129 @@ export const reportsRoutes: Route[] = [
         ...corsHeaders(res),
       });
       res.end(report.markdown);
+    } },
+  // POST /reports/run-explain/deliver
+  // Body: { runId, destination: { kind, credentialName, ...kind-specific } }
+  // Routes the existing run-explain report through the integration-tool
+  // chokepoint (`slack.post` / `github.create_issue` / `webhook.send`).
+  // Reuses every existing platform invariant — credential resolution,
+  // org-scoped credential lookup, per-tool rate-limit, usage events,
+  // SSRF / body-cap / timeout guards via `fetchHttpTarget`. The route's
+  // own `"reports.deliver"` bucket is an additional outer gate
+  // (default 60/min/org).
+  //
+  // Returns `{ ok, destination, statusCode?, error?, latencyMs, deliveryId? }`.
+  // Failures (missing credential, rate-limit reject, upstream non-2xx,
+  // network blip) NEVER throw — they return `{ ok: false, error, ... }`.
+  // Generic `"credential secret missing for <credentialName>"` errors
+  // from the tool chokepoint are propagated verbatim; the env-var name
+  // is NEVER echoed.
+  //
+  // Audit row `report.run_explain.delivered` is written on BOTH success
+  // AND failure (matches the AI-mutation audit posture).
+  { method: "POST", match: "/reports/run-explain/deliver", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const rawBody = await readJson(req, 64_000);
+      const parsed = deliverRequestSchema.safeParse(rawBody);
+      if (!parsed.success) {
+        const firstIssue = parsed.error.issues[0];
+        const path = firstIssue?.path.join(".") ?? "body";
+        const message = firstIssue?.message ?? "invalid body";
+        return sendJson(res, { error: `Invalid request: ${path}: ${message}` }, 400);
+      }
+
+      const { runId, destination } = parsed.data;
+
+      // Common audit metadata shape used for every terminal path. The
+      // `credentialName` field is the operator-supplied identifier
+      // (e.g. "ops-channel") — NOT the env-var that backs the secret.
+      // safePersistPayload (called inside `audit`) catches anything
+      // secret-shaped, but the route never threads the env-var name
+      // into the metadata in the first place.
+      type AuditFields = {
+        destination: "slack" | "github" | "webhook";
+        format: "markdown" | "json";
+        ok: boolean;
+        statusCode?: number;
+        error?: string;
+        latencyMs: number;
+        runId: string;
+        workflowId: string | null;
+        workflowName: string | null;
+        runStatus: string | null;
+        credentialName: string;
+      };
+
+      const writeAuditRow = async (fields: AuditFields): Promise<void> => {
+        await audit(auth.orgId, auth.userId, "report.run_explain.delivered", "run", runId, fields);
+      };
+      const auditFormat = destination.kind === "webhook" ? "json" : "markdown";
+
+      // Outer rate-limit. Throws a status-bearing 429 on exceed; the
+      // dispatcher catches HttpError, but we want to write the audit
+      // row first so the bucket exercise is recorded.
+      try {
+        await enforceRateLimit(auth.orgId, {
+          name: REPORTS_DELIVER_RATE_LIMIT_BUCKET,
+          windowMs: REPORTS_DELIVER_RATE_LIMIT_WINDOW_MS,
+          max: REPORTS_DELIVER_RATE_LIMIT_PER_MIN,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "rate limit exceeded";
+        await writeAuditRow({
+          destination: destination.kind,
+          format: auditFormat,
+          ok: false,
+          error: "rate_limit_exceeded",
+          latencyMs: 0,
+          runId,
+          workflowId: null,
+          workflowName: null,
+          runStatus: null,
+          credentialName: destination.credentialName,
+        });
+        return sendJson(res, { error: message }, 429);
+      }
+
+      // Multi-tenant gate. A run that isn't owned by `auth.orgId`
+      // returns the same 404 as a missing id — no enumeration distinction.
+      const loaded = await loadRunReport({ orgId: auth.orgId, runId });
+      if (!loaded) {
+        return sendJson(res, { error: "Run not found" }, 404);
+      }
+
+      const inputJson = loaded.runInputJson as { workflow?: { id?: unknown } } | null;
+      const workflowId = typeof inputJson?.workflow?.id === "string" ? inputJson.workflow.id : null;
+
+      const outcome = await dispatchDelivery({
+        orgId: auth.orgId,
+        runId,
+        destination,
+        report: loaded.report,
+        workflowName: loaded.workflowName,
+      });
+
+      await writeAuditRow({
+        destination: destination.kind,
+        format: auditFormat,
+        ok: outcome.ok,
+        statusCode: outcome.statusCode,
+        error: outcome.error,
+        latencyMs: outcome.latencyMs,
+        runId,
+        workflowId,
+        workflowName: loaded.workflowName,
+        runStatus: loaded.runStatus,
+        credentialName: destination.credentialName,
+      });
+
+      return sendJson(res, {
+        ok: outcome.ok,
+        destination: destination.kind,
+        statusCode: outcome.statusCode,
+        error: outcome.error,
+        latencyMs: outcome.latencyMs,
+        deliveryId: outcome.deliveryId,
+      });
     } },
 ];
