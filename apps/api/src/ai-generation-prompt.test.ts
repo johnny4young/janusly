@@ -36,4 +36,17 @@ describe("generate-workflow system prompt", () => {
     expect(promptsSource).toContain("auto-detects these by id prefix");
     expect(promptsSource).toContain("EXAMPLE — wait-intent prompt");
   });
+
+  it("teaches the LLM the Pass-2 schedule-intent id-prefix convention", () => {
+    expect(promptsSource).toContain("SCHEDULE-INTENT NAMING");
+    expect(promptsSource).toContain("`schedule_`");
+    expect(promptsSource).toContain("`cron_`");
+    expect(promptsSource).toContain("`every_`");
+    expect(promptsSource).toContain("typed 5-field cron expression");
+    expect(promptsSource).toContain("EXAMPLE — schedule-intent prompt");
+    // Guard against false-positive expansion: the prompt should
+    // explicitly call out "schedule a meeting" style on-demand intents
+    // so the LLM doesn't tag them as cron.
+    expect(promptsSource).toContain("schedule a meeting");
+  });
 });
