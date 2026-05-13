@@ -41,6 +41,8 @@ import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { setIntegrationUsageRecorder } from "@janusly/engine/src/integration-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
+import { setBudgetChecker } from "@janusly/engine/src/budget";
+import { productionBudgetChecker } from "@janusly/data/src/budgetRepo";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -132,6 +134,15 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 setEmailUsageRecorder(recordEmailUsage);
 setIntegrationUsageRecorder(recordIntegrationUsage);
 setPdfUsageRecorder(recordPdfUsage);
+
+// Wire the production AI cost budget checker. Every LLM call site
+// (6 /ai/* routes + 3 engine paths) gates through this checker before
+// firing. Fail-soft posture: the checker (and the chokepoint wrapper)
+// return allowed=true / no-limit on any internal error so a Redis or DB
+// blip never breaks AI Studio. Documented in AGENTS.md alongside the
+// rate-limit fail-open invariant.
+setBudgetChecker(productionBudgetChecker);
+console.log("[budget] checker registered (api)");
 
 let shutdownStarted = false;
 
