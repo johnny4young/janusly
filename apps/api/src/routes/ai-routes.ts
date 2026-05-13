@@ -102,6 +102,11 @@ export const aiRoutes: Route[] = [
           provider: result.provider,
           promotionAttempts: promotion.promotionAttempts,
           promotionsSucceeded: promotion.promotionsSucceeded,
+          // Per-family breakdown of the same totals — operators read
+          // this to see which intent families the LLM exercised. Wait
+          // and schedule are the only wired families today; future
+          // families add a new key here without breaking existing readers.
+          promotionsByFamily: promotion.promotionsByFamily,
         });
         return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
       } catch (err) {

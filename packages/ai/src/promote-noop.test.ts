@@ -297,3 +297,245 @@ describe("promoteNoopPlaceholders — context + Pass-2 prompt plumbing", () => {
     expect(call.prompt).toContain("wait_1d");
   });
 });
+
+function cronResult(cronExpression: string): LlmGenerateObjectResult<{ cronExpression: string }> {
+  return {
+    object: { cronExpression },
+    provider: "anthropic",
+    model: "claude-haiku-4-5-20251001",
+    latencyMs: 14,
+  };
+}
+
+describe("promoteNoopPlaceholders — schedule happy path", () => {
+  it("flips a schedule-prefixed noop into a typed schedule node with a 5-field cron", async () => {
+    const llm = makeLlm(cronResult("0 9 * * 1-5"));
+    const input = workflow([
+      { id: "schedule_weekdays_9am", type: "noop", config: {} },
+      { id: "fetch", type: "http", config: { url: "https://example.com" } },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "every weekday at 9am, fetch https://example.com/data",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(1);
+    expect(result.promotionsByFamily).toEqual({
+      wait_until: { attempts: 0, succeeded: 0 },
+      schedule: { attempts: 1, succeeded: 1 },
+    });
+
+    const promoted = result.workflow.nodes.find((n) => n.id === "schedule_weekdays_9am");
+    expect(promoted?.type).toBe("schedule");
+    expect((promoted?.config as { cronExpression: string }).cronExpression).toBe("0 9 * * 1-5");
+  });
+
+  it("recognises every documented schedule-intent prefix (case-insensitive)", async () => {
+    const llm = makeLlm(
+      cronResult("0 9 * * 1-5"),
+      cronResult("0 0 * * *"),
+      cronResult("0 9 * * 1"),
+      cronResult("*/15 * * * *"),
+    );
+    const input = workflow([
+      { id: "Schedule_weekdays", type: "noop", config: {} },
+      { id: "cron_morning", type: "noop", config: {} },
+      { id: "every-monday-9am", type: "noop", config: {} },
+      { id: "hourly_poll", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "weekdays 9am, daily, every monday at 9am, every hour",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(4);
+    expect(result.promotionsSucceeded).toBe(4);
+    expect(result.promotionsByFamily.schedule).toEqual({ attempts: 4, succeeded: 4 });
+    expect(result.workflow.nodes.every((n) => n.type === "schedule")).toBe(true);
+  });
+
+  it("rejects @daily-style cron aliases because the engine requires five fields", async () => {
+    const llm = makeLlm(cronResult("@daily"));
+    const input = workflow([
+      { id: "daily_digest", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "daily digest run",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+    expect(result.promotionsByFamily.schedule).toEqual({ attempts: 1, succeeded: 0 });
+  });
+});
+
+describe("promoteNoopPlaceholders — schedule rejection paths", () => {
+  it("keeps the noop unpromoted when the LLM emits a non-cron string (regex rejects)", async () => {
+    // The LLM ignored the system prompt's reject-with-invalid guidance
+    // and emitted natural language. The route-side regex pre-filter
+    // catches this before downstream code sees a malformed cron.
+    const llm = makeLlm(cronResult("monday morning"));
+    const input = workflow([
+      { id: "schedule_review", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "operator wants to schedule a review meeting later",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+    expect(result.promotionsByFamily.schedule).toEqual({ attempts: 1, succeeded: 0 });
+  });
+
+  it("keeps the noop unpromoted when cron fields are outside engine bounds", async () => {
+    const llm = makeLlm(cronResult("99 99 * * *"));
+    const input = workflow([
+      { id: "schedule_bad_bounds", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "run this every day",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("keeps the noop unpromoted when LLM emits an empty cron string", async () => {
+    const llm = makeLlm(cronResult(""));
+    const input = workflow([
+      { id: "schedule_unclear", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "vague schedule",
+      context: baseContext,
+    });
+
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("does NOT match mid-string `schedule` (e.g. `analyze_schedule_data`)", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "analyze_schedule_data", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "analyze the team's schedule data",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(0);
+    expect(vi.mocked(llm.generateObject)).not.toHaveBeenCalled();
+  });
+});
+
+describe("promoteNoopPlaceholders — multi-family co-existence", () => {
+  it("promotes one wait + one schedule noop independently and tracks per-family counts", async () => {
+    const llm = makeLlm(
+      // Order matches node-discovery order in the loop.
+      durationResult("P3D"),
+      cronResult("0 9 * * 1-5"),
+    );
+    const input = workflow([
+      { id: "wait_3_days", type: "noop", config: {} },
+      { id: "schedule_weekdays_9am", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "wait 3 days, then every weekday at 9am fetch data",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(2);
+    expect(result.promotionsSucceeded).toBe(2);
+    expect(result.promotionsByFamily).toEqual({
+      wait_until: { attempts: 1, succeeded: 1 },
+      schedule: { attempts: 1, succeeded: 1 },
+    });
+
+    const wait = result.workflow.nodes.find((n) => n.id === "wait_3_days");
+    const schedule = result.workflow.nodes.find((n) => n.id === "schedule_weekdays_9am");
+    expect(wait?.type).toBe("wait_until");
+    expect(schedule?.type).toBe("schedule");
+  });
+
+  it("isolates per-family failure: one schedule fails, sibling wait still promotes", async () => {
+    const llm = makeLlm(
+      new Error("provider timeout on the schedule promote"),
+      durationResult("PT12H"),
+    );
+    const input = workflow([
+      { id: "schedule_flaky", type: "noop", config: {} },
+      { id: "sleep_12h", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "schedule something flaky, sleep 12 hours",
+      context: baseContext,
+    });
+
+    expect(result.promotionAttempts).toBe(2);
+    expect(result.promotionsSucceeded).toBe(1);
+    expect(result.promotionsByFamily).toEqual({
+      wait_until: { attempts: 1, succeeded: 1 },
+      schedule: { attempts: 1, succeeded: 0 },
+    });
+
+    const flakySchedule = result.workflow.nodes.find((n) => n.id === "schedule_flaky");
+    const sleep = result.workflow.nodes.find((n) => n.id === "sleep_12h");
+    expect(flakySchedule?.type).toBe("noop"); // Unpromoted.
+    expect(sleep?.type).toBe("wait_until");
+  });
+
+  it("populates promotionsByFamily zeros when no node matches any family", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "start", type: "noop", config: {} },
+      { id: "fetch", type: "http", config: { url: "https://example.com" } },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "fetch the api",
+      context: baseContext,
+    });
+
+    expect(result.promotionsByFamily).toEqual({
+      wait_until: { attempts: 0, succeeded: 0 },
+      schedule: { attempts: 0, succeeded: 0 },
+    });
+  });
+});

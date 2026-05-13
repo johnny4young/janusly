@@ -40,8 +40,13 @@
 import { parseIsoDuration, type Workflow, type WorkflowNode } from "@janusly/shared";
 import type { LlmClient, LlmGenerateObjectInput } from "./llm-client";
 import {
+  AiScheduleConfigSchema,
   AiWaitUntilConfigSchema,
+  CRON_EXPRESSION_PATTERN,
+  SCHEDULE_PROMOTE_SYSTEM_PROMPT,
   WAIT_UNTIL_PROMOTE_SYSTEM_PROMPT,
+  isEngineCompatibleCronExpression,
+  type AiScheduleConfig,
   type AiWaitUntilConfig,
 } from "./promoted-schemas";
 
@@ -52,6 +57,11 @@ import {
 // chokepoint so the rest of the helper stays type-clean.
 const WAIT_UNTIL_SCHEMA: LlmGenerateObjectInput<AiWaitUntilConfig>["schema"] =
   AiWaitUntilConfigSchema as unknown as LlmGenerateObjectInput<AiWaitUntilConfig>["schema"];
+const SCHEDULE_SCHEMA: LlmGenerateObjectInput<AiScheduleConfig>["schema"] =
+  AiScheduleConfigSchema as unknown as LlmGenerateObjectInput<AiScheduleConfig>["schema"];
+
+/** Closed enum of promotion target node types. Adding one means a new family entry + a new dispatcher branch. */
+export type PromoteTarget = "wait_until" | "schedule";
 
 /** Telemetry context plumbed into each Pass-2 LLM call. Mirrors `LlmGenerateObjectInput.context`. */
 export type PromoteNoopContext = {
@@ -81,33 +91,64 @@ export type PromoteNoopInput = {
   modelHint?: string;
 };
 
+/** Per-family promotion counters. Used by the route audit to surface
+ *  which intent families the LLM tagged and how many actually landed. */
+export type PromotionFamilyCounts = { attempts: number; succeeded: number };
+export type PromotionsByFamily = Record<PromoteTarget, PromotionFamilyCounts>;
+
 /** Outcome envelope returned to the route. */
 export type PromoteNoopResult = {
   /** Workflow with any successfully-promoted noops flipped to typed nodes. */
   workflow: Workflow;
-  /** Count of noops whose id matched a known promotion prefix. */
+  /** Count of noops whose id matched ANY known promotion prefix (sum across families). */
   promotionAttempts: number;
   /** Subset of attempts whose Pass-2 LLM call returned schema-valid config. */
   promotionsSucceeded: number;
+  /**
+   * Per-family breakdown of the same totals — keys are the promotion
+   * target node types (`wait_until`, `schedule`, …). Operators read
+   * this from `audit_logs.metadata.promotionsByFamily` to see which
+   * intent families the model actually exercised.
+   */
+  promotionsByFamily: PromotionsByFamily;
 };
 
 /**
- * Closed list of id prefixes that mark a noop as a wait-intent
- * placeholder. The Pass-1 system prompt instructs the LLM to use these
- * conventions explicitly; the matcher is case-insensitive and accepts
- * any non-alphanumeric separator directly after the prefix, so
- * `wait_3_days` and `wait-30-min` surface while unrelated ids such as
- * `waiting_room` or `sleepy_customer` do not.
+ * Closed list of promotion families. Each entry pairs an id-prefix
+ * set with a typed target node type. The Pass-1 system prompt teaches
+ * the LLM the conventions explicitly; this matcher is case-insensitive
+ * and accepts any non-alphanumeric separator directly after the
+ * prefix, so `wait_3_days`, `wait-30-min`, `schedule_daily`, and
+ * `every_monday` all surface while unrelated ids such as
+ * `waiting_room`, `sleepy_customer`, or `analyze_wait_time` do not.
+ *
+ * Adding a new family is one new entry here plus a `case` in the
+ * promoter dispatcher inside `promoteNoopPlaceholders`.
  */
-const WAIT_ID_PREFIXES = ["wait", "sleep", "pause", "delay"];
+export const PROMOTE_FAMILIES: ReadonlyArray<{ prefixes: readonly string[]; target: PromoteTarget }> = [
+  {
+    target: "wait_until",
+    prefixes: ["wait", "sleep", "pause", "delay"],
+  },
+  {
+    target: "schedule",
+    // `schedule_*`, `cron_*`, and natural cadence words operators commonly
+    // use as placeholder ids when describing a recurring step.
+    prefixes: ["schedule", "cron", "every", "daily", "weekly", "monthly", "hourly"],
+  },
+];
 
-function readPromoteTarget(node: WorkflowNode): "wait_until" | null {
+const PROMOTE_TARGETS: ReadonlyArray<PromoteTarget> = ["wait_until", "schedule"];
+
+function readPromoteTarget(node: WorkflowNode): PromoteTarget | null {
   if (node.type !== "noop") return null;
   const id = node.id.toLowerCase();
-  for (const prefix of WAIT_ID_PREFIXES) {
-    if (id === prefix) return "wait_until";
-    // Match `prefix_*`, `prefix-*`, or any non-alphanumeric separator.
-    if (id.startsWith(prefix) && /[^a-z0-9]/.test(id.charAt(prefix.length))) return "wait_until";
+  for (const family of PROMOTE_FAMILIES) {
+    for (const prefix of family.prefixes) {
+      if (id === prefix) return family.target;
+      // Match `prefix_*`, `prefix-*`, or any non-alphanumeric separator.
+      if (id.startsWith(prefix) && /[^a-z0-9]/.test(id.charAt(prefix.length))) return family.target;
+    }
   }
   return null;
 }
@@ -163,8 +204,53 @@ async function promoteToWaitUntil(
 }
 
 /**
+ * Pass-2 promoter for `schedule`. Calls the LLM with the operator's
+ * full original prompt and the noop's id, asks it to extract a
+ * standard 5-field cron expression, and returns the typed config or
+ * `null` when the model fails or rejects. v1 mirrors `promoteToWaitUntil`
+ * exactly — single LLM call, schema-validated output, silent degrade.
+ */
+async function promoteToSchedule(
+  llm: LlmClient,
+  node: WorkflowNode,
+  originalPrompt: string,
+  context: PromoteNoopContext,
+  modelHint: string | undefined,
+): Promise<{ cronExpression: string } | null> {
+  if (originalPrompt.length === 0) return null;
+
+  const userPrompt = [
+    `Operator's full prompt: ${originalPrompt}`,
+    `Target placeholder id: ${node.id}`,
+    `Extract the standard 5-field cron expression this placeholder represents.`,
+  ].join("\n");
+
+  try {
+    const result = await llm.generateObject<AiScheduleConfig>({
+      schema: SCHEDULE_SCHEMA,
+      system: SCHEDULE_PROMOTE_SYSTEM_PROMPT,
+      prompt: userPrompt,
+      schemaName: "ScheduleConfig",
+      schemaDescription: "Standard 5-field cron expression for a schedule node.",
+      context,
+      modelHint,
+    });
+    const cronExpression = result.object?.cronExpression?.trim?.() ?? "";
+    // Defense in depth: keep malformed cron output local to this
+    // placeholder so `sanitizeAiWorkflow` does not have to downgrade
+    // the entire generation response to fallback.
+    if (cronExpression.length === 0) return null;
+    if (!CRON_EXPRESSION_PATTERN.test(cronExpression)) return null;
+    if (!isEngineCompatibleCronExpression(cronExpression)) return null;
+    return { cronExpression };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Walk the workflow's nodes and promote each one whose id matches a
- * known wait-intent prefix. Returns a new workflow object with promoted
+ * known intent prefix. Returns a new workflow object with promoted
  * nodes replaced; the original input is not mutated. Edges and
  * workflow-level fields pass through unchanged — promotion changes the
  * node's `type` and `config` only.
@@ -175,6 +261,10 @@ export async function promoteNoopPlaceholders(
   const { llm, workflow, originalPrompt, context, modelHint } = input;
   let promotionAttempts = 0;
   let promotionsSucceeded = 0;
+  const promotionsByFamily: PromotionsByFamily = {
+    wait_until: { attempts: 0, succeeded: 0 },
+    schedule: { attempts: 0, succeeded: 0 },
+  };
 
   const promotedNodes: WorkflowNode[] = [];
   for (const node of workflow.nodes) {
@@ -185,13 +275,27 @@ export async function promoteNoopPlaceholders(
     }
 
     promotionAttempts += 1;
+    promotionsByFamily[target].attempts += 1;
     if (target === "wait_until") {
       const promotedConfig = await promoteToWaitUntil(llm, node, originalPrompt, context, modelHint);
       if (promotedConfig) {
         promotionsSucceeded += 1;
+        promotionsByFamily.wait_until.succeeded += 1;
         promotedNodes.push({
           ...node,
           type: "wait_until",
+          config: promotedConfig,
+        });
+        continue;
+      }
+    } else if (target === "schedule") {
+      const promotedConfig = await promoteToSchedule(llm, node, originalPrompt, context, modelHint);
+      if (promotedConfig) {
+        promotionsSucceeded += 1;
+        promotionsByFamily.schedule.succeeded += 1;
+        promotedNodes.push({
+          ...node,
+          type: "schedule",
           config: promotedConfig,
         });
         continue;
@@ -206,5 +310,11 @@ export async function promoteNoopPlaceholders(
     workflow: { ...workflow, nodes: promotedNodes },
     promotionAttempts,
     promotionsSucceeded,
+    promotionsByFamily,
   };
 }
+
+// `PROMOTE_TARGETS` is the closed set of family keys mirrored in
+// `promotionsByFamily`. Exported for tests + audit-row readers that
+// want to iterate without hard-coding the names.
+export { PROMOTE_TARGETS };
