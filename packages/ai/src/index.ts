@@ -23,8 +23,12 @@ export {
   type PromoteNoopContext,
 } from "./promote-noop";
 export {
+  AiScheduleConfigSchema,
   AiWaitUntilConfigSchema,
+  CRON_EXPRESSION_PATTERN,
+  SCHEDULE_PROMOTE_SYSTEM_PROMPT,
   WAIT_UNTIL_PROMOTE_SYSTEM_PROMPT,
+  type AiScheduleConfig,
   type AiWaitUntilConfig,
 } from "./promoted-schemas";
 export {
