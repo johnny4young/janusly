@@ -3296,3 +3296,120 @@ a { color: var(--we-primary); }
   background: var(--we-surface-2);
   color: var(--we-text-2);
 }
+
+/* ----------------- Report delivery dialog ------------------ */
+
+.we-report-delivery-dialog {
+  max-width: 640px;
+}
+
+.we-run-history-send-button {
+  align-self: flex-end;
+  margin-top: 4px;
+}
+
+.we-report-delivery-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-report-delivery-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.we-report-delivery-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-1);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.we-report-delivery-option:hover {
+  border-color: var(--we-primary);
+}
+
+.we-report-delivery-option.is-active {
+  border-color: var(--we-primary);
+  background: var(--we-primary-soft);
+}
+
+.we-report-delivery-option input[type="radio"] {
+  accent-color: var(--we-primary);
+}
+
+.we-report-delivery-option span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--we-text-1);
+}
+
+.we-report-delivery-option small {
+  font-size: 11px;
+  color: var(--we-text-2);
+  line-height: 1.4;
+}
+
+.we-report-delivery-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.we-report-delivery-fields .we-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-report-delivery-fields .we-field span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.we-report-delivery-fields .we-field input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-1);
+  font-size: 13px;
+  color: var(--we-text-1);
+}
+
+.we-report-delivery-fields .we-field small {
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-report-delivery-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.run-input-form-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--we-success-soft);
+  border: 1px solid color-mix(in srgb, var(--we-success) 25%, transparent);
+  color: var(--we-success);
+  font-size: 12px;
+  line-height: 1.4;
+}
