@@ -199,7 +199,7 @@ function checkSensitiveAction(
   });
 }
 
-function isSensitiveAction(node: WorkflowNode): boolean {
+export function isSensitiveAction(node: WorkflowNode): boolean {
   if (node.type === "http") {
     const method = String((node.config as { method?: unknown }).method ?? "GET").toUpperCase();
     return SENSITIVE_HTTP_METHODS.has(method);
@@ -213,7 +213,7 @@ function isSensitiveAction(node: WorkflowNode): boolean {
   return false;
 }
 
-function hasApprovalAncestor(
+export function hasApprovalAncestor(
   nodeId: string,
   edges: WorkflowEdge[],
   nodes: WorkflowNode[],

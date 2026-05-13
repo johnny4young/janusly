@@ -440,7 +440,7 @@ The native tool catalog is the bridge between LLM-drafted workflows and useful b
 - `sms.send` (Twilio).
 - `pdf.generate` (Markdown-to-PDF via `pdfkit`; HTML fidelity later if a concrete use case needs Chromium or a hosted renderer).
 - `image.transform` (Sharp).
-- `db.query.read` and `db.query.write` (separate to keep audit clear).
+- `db.query.read` and `db.query.write` (separate to keep audit clear; gated until concrete customer pull and schema discovery).
 - `vector.search` / `vector.upsert` (§7.1).
 - `embedding.create`.
 
@@ -620,7 +620,7 @@ Definition of done: a developer runs the Anthropic-supported AI path end-to-end,
 Goal: workflows can do real business work.
 
 - Add `schedule`, `subworkflow`, `human_form`, `parallel_fork`, `wait_until` node types.
-- Add tool catalog Layer 1 (text, json, csv, time, crypto) + Layer 2 essentials (`email.send`, `pdf.generate`, `db.query.*`).
+- Add tool catalog Layer 1 (text, json, csv, time, crypto) + Layer 2 essentials (`email.send`, `pdf.generate`); keep generic `db.query.*` gated until concrete customer pull.
 - Workflow inputs schema + outputs mapping.
 - Diff UX: "what changed in v4 vs v3" + AI patch preview before apply.
 - MCP server validation pre-flight (`workflows.validate`); write tools wait for the MCP consent/audit policy.
@@ -839,7 +839,7 @@ The market-facing product should concentrate around seven distinctive surfaces:
 6. **Run Explain Report** — exportable root-cause and recovery report for Slack/Linear/GitHub.
 7. **MCP operator experience** — inspect and operate Janusly from chat with dry-run/consent guardrails.
 
-These become tickets ENG-058..ENG-073 in the roadmap.
+The original surfaces are tracked by ENG-058..ENG-073 in the roadmap. The market/auth readiness extension is tracked by ENG-091..ENG-101.
 
 ### 16.3 ICP and sales motion
 
@@ -868,16 +868,21 @@ Each template should include sample input, required credentials, expected output
 
 ### 16.5 Minimum integration set
 
-Do not chase hundreds of integrations. Ship the few that make demos and early customers real:
+Do not chase hundreds of integrations. Keep the list split between demo-ready core tools and gated candidates.
+
+Demo-ready core:
 
 - `slack.post`
 - `email.send`
 - `github.create_issue`
 - `linear.create_issue`
-- `db.query.read`
 - `webhook.signed`
-- Stripe payment/refund/retry primitive when credentials are available
 - `json.merge`, `json.diff`, `time.now`, `time.format`
+
+Gated until concrete customer pull:
+
+- Generic `db.query.*` / `db.query.read`.
+- Stripe payment/refund/retry primitives.
 
 ### 16.6 Landing page structure
 
@@ -937,3 +942,33 @@ The primary business metric should be:
 Marketing copy should say:
 
 > “Cut workflow recovery time from hours to minutes.”
+
+### 16.9 Market and Enterprise Readiness Strategy
+
+Janusly's near-term roadmap should consolidate three fronts into one product story: recovery/MTTR as the wedge, commercial demos as proof, and enterprise auth as the minimum trust layer for B2B buying.
+
+| Track | Decision | Why it matters |
+| --- | --- | --- |
+| Positioning | **AI workflows that explain, recover, and safely evolve.** | This keeps Janusly out of the commodity "automation builder" category and anchors the product around operating workflows after they fail. |
+| North-star metric | **Mean Time To Recovery for failed automations.** | MTTR makes the value measurable in demos, private beta, and production accounts. |
+| Initial market | B2B startups with ops workflows, engineering/support teams, and AI builders/agencies. | These buyers feel workflow failures directly and can evaluate Janusly on recovery speed, auditability, and operational control. |
+| Auth strategy | Keep Supabase, dev headers, and service-token modes as the current base; add WorkOS as an enterprise add-on for SAML/OIDC SSO, SCIM, Admin Portal, and enforced SSO. | This avoids a premature auth rewrite while adding the identity features enterprise buyers expect. |
+| Authorization model | Janusly remains the source of truth for `org_members`, roles/permissions, audit logs, and tenant scope. | Identity providers authenticate users; Janusly decides what each user can do inside an org. |
+
+Product defaults for this strategy:
+
+- Do not replace Supabase in the short term. WorkOS is enterprise identity plumbing, not a wholesale auth rewrite.
+- Do not build SAML/OIDC/SCIM directly in v1; use WorkOS for those protocols and keep Janusly focused on workflow operations.
+- Keep `/ai/generate-workflow` capped at the current 11 direct Anthropic grammar node types: `noop`, `http`, `transform`, `condition`, `ai`, `tool`, `agent`, `router`, `approval`, `human_form`, and `loop`.
+- Keep advanced/operator-only node types on the placeholder-promotion path. Selectively add Pass-2 promotion only when the schema stays provider-strict and the generated workflow quality improves.
+- Raise the practical priority of canonical demos: failed workflow recovery, refund triage, and incident triage. These demos should show the Recovery Queue, explanation, patch, diff, replay, health, audit, and MTTR story.
+- Keep broad integration bets such as generic `db.query.*` and Stripe primitives gated until there is concrete customer pull. The commercial wedge is recovery and operational trust, not a large catalog.
+
+Roadmap implications:
+
+- ENG-091 makes Recovery Cockpit the product home so operators start from failures, health, MTTR, and recommended actions.
+- ENG-092 adds AI cost governance so enterprise buyers can operate LLM-heavy workflows with budget limits and spend visibility.
+- ENG-093 validates the wedge with design partners and real workflows before the product over-invests in broad platform scope.
+- ENG-094 extends MCP from "Janusly as a server" toward "safe external MCP tools as workflow steps" without opening arbitrary execution.
+- ENG-095 packages the market narrative against Zapier, Make, n8n, Workato, Pipedream, Relay, and Gumloop.
+- ENG-096..ENG-101 add the enterprise-auth path: shared `AuthContext`, hardened membership resolution, WorkOS SSO, SCIM, org auth policies, and fine-grained permissions.

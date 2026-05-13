@@ -145,6 +145,14 @@ export type SuggestWorkflowPatchInput = {
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
   /**
+   * Optional system-prompt override. The default `SYSTEM_PROMPT`
+   * narrates the config-only patch contract. The route passes
+   * `STRUCTURAL_PATCH_SYSTEM_PROMPT` when it dispatches to the
+   * structural envelope so the LLM produces node-graph patches
+   * (e.g. inserting an approval node) instead of config tweaks.
+   */
+  systemPromptOverride?: string;
+  /**
    * Telemetry context forwarded to `LlmClient.generateObject`. The
    * route owns this and threads `orgId` (always) and `workflowId`
    * (resolved from `dlq.workflowJson.id`) so the recorder can write
@@ -214,6 +222,33 @@ Rules per suggestion:
 - If you cannot find any sensible fix from the error and run events, return ONE suggestion with empty \`patchedConfig: {}\`, \`approachLabel: "other"\`, \`confidence: 0\`, and explain in the rationale what the operator needs to inspect manually.`;
 
 /**
+ * Structural-patch system prompt. Used when the route dispatches to a
+ * structural envelope (e.g. inserting an approval node upstream of a
+ * write-side action). The output shape differs from the config-only
+ * envelope — instead of `patchedConfig`, suggestions describe a
+ * node-graph change (`action`, `approvalNodeId`, `approvalMessage`,
+ * `insertBeforeNodeId`).
+ */
+export const STRUCTURAL_PATCH_SYSTEM_PROMPT = `You are Janusly's failure-recovery agent. You are given a workflow that just failed, the id of the failing node (a write-side action with no human-approval gate upstream), the error envelope, and recent run events.
+
+The fix is STRUCTURAL: insert a new \`approval\` node BEFORE the failing node so a human reviews the action before it fires. You cannot change the failing node's config — only add the approval upstream.
+
+Produce up to 3 ALTERNATIVE structural patches. The operator sees them as tabs and picks one.
+
+Each suggestion has these fields:
+- \`action\`: must be the literal "insert_approval_upstream".
+- \`approvalNodeId\`: snake_case id for the new approval node. Pick a name that signals what is being approved (e.g. \`approve_charge\`, \`approve_send_email\`, \`approve_delete\`). Must NOT collide with any existing node id in the workflow.
+- \`approvalMessage\`: plain operator-facing message rendered in the approval dialog. Keep it short and clear (one sentence). You may reference upstream context via templates like \`{{context.intent.output.amount}}\` — the engine resolves templates at run time. NEVER inline raw values from the workflow into the message; use templates.
+- \`insertBeforeNodeId\`: the id of the existing failing node (must match the failedNodeId you were given).
+- \`rationale\`: one or two sentences explaining why this approval is the right fix and what the operator should look for when reviewing.
+- \`approachLabel\`: must be the literal "add_approval".
+- \`confidence\`: integer 0-100 reflecting how clear the write-side intent is from the workflow and error.
+
+If the alternatives differ, vary the approvalMessage phrasing or the approvalNodeId — for example one suggestion might propose a strict gate ("Approve this charge of {{context.intent.output.amount}}?") and another a lighter touch ("Confirm before charging the customer").
+
+If you cannot propose a sensible approval (e.g. the operator's intent is genuinely ambiguous), return ONE suggestion with the canonical fields populated, \`confidence: 0\`, and explain in the rationale what the operator should inspect manually. Never throw — the platform expects exactly 1-3 suggestions.`;
+
+/**
  * Propose a workflow patch for a failed run. Never throws — every
  * failure path returns a `mode: "fallback"` response with the original
  * workflow and a rationale.
@@ -221,7 +256,7 @@ Rules per suggestion:
 export async function suggestWorkflowPatch(
   input: SuggestWorkflowPatchInput,
 ): Promise<PatchSuggestion> {
-  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context } = input;
+  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context, systemPromptOverride } = input;
 
   if (!llm) {
     return {
@@ -265,7 +300,7 @@ export async function suggestWorkflowPatch(
       schema: envelopeSchema,
       schemaName: "JanuslyWorkflowPatch",
       schemaDescription: "1-3 alternative config patches for the failing node, ordered most-likely-fix first.",
-      system: SYSTEM_PROMPT,
+      system: systemPromptOverride ?? SYSTEM_PROMPT,
       prompt: promptBody,
       modelHint: model,
       context,

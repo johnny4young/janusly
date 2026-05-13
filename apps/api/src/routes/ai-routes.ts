@@ -15,23 +15,24 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { explainRun, promoteNoopPlaceholders, RUN_EVENT_PROMPT_CAP, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
+import { explainRun, promoteNoopPlaceholders, RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
 import { summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { db, runEvents, runs, workflowVersions } from "@janusly/db";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
+import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/workflow-readiness";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
-import { AiGenerationWorkflowSchema, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema } from "../ai-schemas";
+import { AiGenerationWorkflowSchema, AiPatchStructuralEnvelope, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendJson } from "../http";
-import { applyConfigPatchToWorkflow } from "../patch-workflow-merge";
+import { applyConfigPatchToWorkflow, applyStructuralPatchToWorkflow } from "../patch-workflow-merge";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
@@ -267,7 +268,33 @@ export const aiRoutes: Route[] = [
       // `oneOf` keyword (works for OpenAI strict mode too).
       const failingNode = NodeSchema.safeParse(dlq.nodeJson);
       const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
-      const envelope = patchEnvelopeForNodeType(failingNodeType);
+      const configEnvelope = patchEnvelopeForNodeType(failingNodeType);
+
+      // Structural-patch dispatch: when the failing node is a write-side
+      // HTTP call with no human-approval ancestor in the upstream DAG,
+      // route to the structural envelope so the LLM proposes a node-graph
+      // patch (insert an approval upstream) instead of a config tweak.
+      // Reuses the same `isSensitiveAction` + `hasApprovalAncestor` rule
+      // that drives the readiness check, so dispatch is consistent with
+      // what the operator sees flagged on the Production Readiness badge.
+      // v1 narrows to HTTP only — tool write-side failures stay on the
+      // config envelope until a future ticket extends the dispatcher.
+      const parsedWorkflowForDispatch = WorkflowSchema.safeParse(dlq.workflowJson);
+      const useStructural =
+        failingNode.success
+        && failingNode.data.type === "http"
+        && isSensitiveAction(failingNode.data)
+        && parsedWorkflowForDispatch.success
+        && !hasApprovalAncestor(
+          dlq.nodeId,
+          parsedWorkflowForDispatch.data.edges,
+          parsedWorkflowForDispatch.data.nodes,
+          new Map(),
+        );
+
+      const envelope = useStructural
+        ? { schema: AiPatchStructuralEnvelope, kind: "structural" as const }
+        : configEnvelope;
 
       // Tool-typed failures benefit from per-tool field-name hints —
       // the LLM otherwise has to infer required input field names from
@@ -312,14 +339,31 @@ export const aiRoutes: Route[] = [
         ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
       };
 
+      // Cast: the structural envelope's `suggestions` items have a
+      // different shape than the config-shape `PatchEnvelopeSchemaResult`
+      // the helper's TS signature expects. The runtime contract is the
+      // same — `{ suggestions: Array<...> }` — and the route's per-
+      // suggestion merger handles the actual field shapes downstream.
+      // Cast through `any` because the helper's input type is a single
+      // FlexibleSchema and our envelope union mixes two incompatible
+      // item shapes.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const envelopeSchemaAny: any = envelope.schema;
+
       const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
-        envelopeSchema: envelope.schema,
+        envelopeSchema: envelopeSchemaAny,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
         errorJson: safePersistPayload(dlq.errorJson ?? null),
         extraContext: Object.keys(extraContext).length > 0 ? extraContext : undefined,
         context: { orgId: auth.orgId, userId: auth.userId, workflowId: failingWorkflowId ?? undefined },
+        // Structural envelope changes the LLM's output shape — it emits
+        // `action`/`approvalNodeId`/`approvalMessage`/`insertBeforeNodeId`
+        // instead of `patchedConfig`. The helper stays schema-agnostic and
+        // just hands the suggestions back verbatim; the route applies the
+        // right merger downstream based on `useStructural`.
+        systemPromptOverride: useStructural ? STRUCTURAL_PATCH_SYSTEM_PROMPT : undefined,
         // Pass every event payload through the persistence chokepoint
         // before it leaves the API boundary. `safe-persist` was applied at
         // write time which key-redacted known sensitive keys, but free-form
@@ -362,15 +406,31 @@ export const aiRoutes: Route[] = [
         const originalParsed = WorkflowSchema.safeParse(dlq.workflowJson);
         const validated: ValidatedSuggestion[] = [];
         if (originalParsed.success) {
-          for (const item of helperResult.suggestions) {
+          for (const rawItem of helperResult.suggestions) {
             try {
-              const merged = applyConfigPatchToWorkflow(originalParsed.data, dlq.nodeId, item.patchedConfig);
+              let merged: Workflow;
+              if (useStructural) {
+                // Cast: the helper's TS return type is the config-only
+                // `PatchSuggestionItem`, but the structural envelope's
+                // schema validated a different shape at parse time. The
+                // applier validates the runtime fields itself and throws
+                // if anything is missing — which the catch below drops.
+                const structuralItem = rawItem as unknown as AiPatchStructuralSuggestion;
+                merged = applyStructuralPatchToWorkflow(originalParsed.data, {
+                  action: structuralItem.action,
+                  approvalNodeId: structuralItem.approvalNodeId,
+                  approvalMessage: structuralItem.approvalMessage,
+                  insertBeforeNodeId: structuralItem.insertBeforeNodeId,
+                }, dlq.nodeId);
+              } else {
+                merged = applyConfigPatchToWorkflow(originalParsed.data, dlq.nodeId, rawItem.patchedConfig);
+              }
               const sanitized = sanitizeAiWorkflow(merged);
               validated.push({
                 workflow: sanitized,
-                rationale: item.rationale,
-                approachLabel: item.approachLabel,
-                confidence: item.confidence,
+                rationale: rawItem.rationale,
+                approachLabel: rawItem.approachLabel,
+                confidence: rawItem.confidence,
               });
             } catch {
               // Drop this suggestion; keep going. If none survive, the
@@ -437,6 +497,10 @@ export const aiRoutes: Route[] = [
         provider: response.provider,
         aiError: response.aiError,
         envelopeKind: envelope.kind,
+        // patchStyle distinguishes structural (node-graph patches like
+        // inserting an approval upstream) from config_only (single-node
+        // field changes). Existing audit readers ignore the new field.
+        patchStyle: useStructural ? "structural" : "config_only",
         suggestionsCount: response.suggestions.length,
         topApproachLabel: response.suggestions[0]?.approachLabel,
       });
