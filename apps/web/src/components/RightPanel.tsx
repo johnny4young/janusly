@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Activity, Boxes, CheckCircle2, Database, Download, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, CheckCircle2, Database, Download, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, Send, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
@@ -30,6 +30,7 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 import { OperationsPanel } from './OperationsPanel'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
+import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { api, downloadFromApi } from '../api'
@@ -1152,6 +1153,9 @@ function RunsPanel({
   // while non-null and the source run id stays around as state until the
   // operator dismisses the dialog.
   const [labSourceRun, setLabSourceRun] = useState<RunSummary | null>(null)
+  // Report-delivery source — set when the operator clicks "Send" next
+  // to the Export action. Dialog mounts overlay-style while non-null.
+  const [deliveryRun, setDeliveryRun] = useState<RunSummary | null>(null)
   const activeHumanFormNode = activeHumanFormNodeId
     ? waitingNodes.find(node => node.nodeId === activeHumanFormNodeId) ?? null
     : null
@@ -1340,6 +1344,15 @@ function RunsPanel({
               >
                 <Download size={12} aria-hidden="true" /> Export
               </button>
+              <button
+                type="button"
+                className="small-command we-run-history-send-button"
+                onClick={() => setDeliveryRun(run)}
+                data-testid={`history-send-${run.id}`}
+                aria-label={`Send run explain report for ${run.id}`}
+              >
+                <Send size={12} aria-hidden="true" /> Send
+              </button>
             </div>
           )
         })}
@@ -1354,6 +1367,16 @@ function RunsPanel({
             createdAt: labSourceRun.createdAt ?? null,
           }}
           onClose={() => setLabSourceRun(null)}
+        />
+      )}
+
+      {deliveryRun && (
+        <ReportDeliveryDialog
+          sourceRun={{
+            id: deliveryRun.id,
+            status: deliveryRun.status,
+          }}
+          onClose={() => setDeliveryRun(null)}
         />
       )}
     </PanelChrome>
