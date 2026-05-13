@@ -148,7 +148,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   events: [],
   eventsCursor: null,
   eventsHasMore: false,
-  activeTab: 'copilot',
+  // The Recovery Center is the authenticated landing page. The operator's
+  // most frequent job is triaging failed runs / pending approvals / cluster
+  // recovery — surfacing those tiles first beats opening the canvas blind.
+  // The builder is one click away via the Workspace-views sidebar.
+  activeTab: 'home',
   streamStatus: 'idle',
   toasts: [],
   platformVersion: 0,

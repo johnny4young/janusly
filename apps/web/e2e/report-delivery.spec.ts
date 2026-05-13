@@ -7,11 +7,13 @@ test('run history opens report delivery dialog and surfaces a credential error',
 
   await page.goto('/')
   await expect(page.getByText('dev-user')).toBeVisible()
-  await expect(page.locator('.workspace-main .workflow-node').first()).toBeVisible()
+  await expect(page.locator('.we-recovery-center-hero .section-kicker', { hasText: 'Recovery Center' })).toBeVisible()
 
   await page.getByRole('button', { name: 'New', exact: true }).click()
+  await expect(page.getByText('Describe the outcome. Janusly builds the flow.')).toBeVisible()
   await page.getByLabel('Name').fill(workflowName)
   await page.getByRole('button', { name: /Do nothing/i }).click()
+  await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' })).toBeVisible()
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
