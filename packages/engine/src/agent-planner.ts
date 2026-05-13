@@ -22,6 +22,7 @@
 
 import { loadRootEnv } from "@janusly/db";
 import { getLlmClient, type LlmClient } from "@janusly/ai";
+import { checkBudget } from "./budget";
 
 loadRootEnv();
 
@@ -124,6 +125,27 @@ export async function planAgentToolWithLLM(
 
   if (!llm) {
     return planAgentTool(config, context);
+  }
+
+  // Budget chokepoint. On a block the planner returns a terminate decision
+  // with the budget reason so the agent loop stops cleanly instead of
+  // re-firing the LLM. Mirrors the AI-fallback contract on the engine
+  // ai-node — the run keeps moving.
+  if (telemetryContext?.orgId) {
+    const budget = await checkBudget({
+      orgId: telemetryContext.orgId,
+      workflowId: telemetryContext.workflowId ?? null,
+    });
+    if (!budget.allowed) {
+      return {
+        tool: "done",
+        input: {},
+        reason: `Budget exceeded — agent terminated (spent $${budget.monthlyUsdSpent.toFixed(2)} of $${(budget.monthlyUsdLimit ?? 0).toFixed(2)}).`,
+        done: true,
+        finalAnswer: "Agent terminated: AI cost budget exceeded.",
+        aiError: "budget_exceeded",
+      };
+    }
   }
 
   const goal = config.goal ?? "Choose the best tool for this workflow step.";

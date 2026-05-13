@@ -27,6 +27,7 @@ beforeEach(() => {
       streamStatus: 'idle',
       toasts: [],
       platformVersion: 0,
+      budgetBlocked: null,
     },
     true,
   )
@@ -161,6 +162,18 @@ describe('useWorkflowStore', () => {
     useWorkflowStore.getState().bumpPlatformVersion()
     useWorkflowStore.getState().bumpPlatformVersion()
     expect(useWorkflowStore.getState().platformVersion).toBe(2)
+  })
+
+  it('stores and clears the latest budget block envelope', () => {
+    useWorkflowStore.getState().setBudgetBlocked({
+      monthlyUsdSpent: 12,
+      monthlyUsdLimit: 10,
+      exceededAt: 'org',
+      policy: 'block',
+    })
+    expect(useWorkflowStore.getState().budgetBlocked?.monthlyUsdSpent).toBe(12)
+    useWorkflowStore.getState().clearBudgetBlocked()
+    expect(useWorkflowStore.getState().budgetBlocked).toBeNull()
   })
 
   it('resetRun clears runId, run nodes, events, pagination, and stream status', () => {

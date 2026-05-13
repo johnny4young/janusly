@@ -49,8 +49,8 @@ The plan is structured so each item below is independently shippable and individ
 - **Memory is event-log scrolling.** The agent loop reads `getRunMemory(runId)` which returns ordered run events. Useful, but it's not "knowledge."
 - **The reinforcement layer doesn't influence model choice, prompt template, or retry strategy** — only `router` node candidate selection. Model routing should be RL-driven too: cheaper model for low-stakes, premium for high-stakes.
 - **One template format.** No notion of parameterized templates ("Slack alert → fill in {channel}"), no template marketplace, no per-org template forks.
-- **Some distributed posture is fixed, broader SaaS controls are not.** Rate limiting is Redis-backed and migrations are enforced at boot, but per-org plan limits, quotas, and billing UX are still placeholders.
-- **Cost telemetry exists, but cost governance does not.** Every LLM call writes `usage_events` with provider/model/tokens/cost where known; the admin-facing spend controls, budget alerts, and per-plan limits are still future work.
+- **Some distributed posture is fixed, broader SaaS controls are still thin.** Rate limiting is Redis-backed, migrations are enforced at boot, and ENG-092 added AI budget guardrails; broader plan packaging, quota tiers, and payment/billing UX are still placeholders.
+- **Cost governance exists for AI, but not yet for plans.** Every LLM call writes `usage_events` with provider/model/tokens/cost where known, and admins can configure org/workflow AI budgets. Per-plan limits and customer-facing billing workflows remain future work.
 - **No SDK.** All integration today is via the HTTP API. Customers will want a Node/Python SDK, a webhook receiver helper, and Terraform.
 
 ---
@@ -148,9 +148,9 @@ Provider/model selection now resolves through:
 
 Resolution order: node config -> org config -> env defaults.
 
-#### Phase E — Cost/usage capture
+#### Phase E — Cost/usage capture and AI budget guardrails
 
-Every LLM call writes one `usage_events` row with `metric: "llm.completion"`, token counts, latency, model/provider, optional node/run context, and best-effort cost. Cost governance, budgets, and billing dashboards remain product work.
+Every LLM call writes one `usage_events` row with `metric: "llm.completion"`, token counts, latency, model/provider, optional node/run context, and best-effort cost. ENG-092 adds the first governance layer: org/workflow AI budgets, warn/block policy, API and engine budget gates, Recovery Center visibility, and a 402 banner for blocked AI calls. Broader pricing plans, invoices, and payment-provider UX remain product work.
 
 #### Migration risk register
 

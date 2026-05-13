@@ -14,6 +14,7 @@
  */
 
 import { supabase } from './auth'
+import { useWorkflowStore } from './store'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 
@@ -50,6 +51,18 @@ export async function api(path: string, options: RequestInit = {}) {
   if (!res.ok) {
     if ((path === '/start' || path === '/resume') && res.status === 400 && isFieldErrorEnvelope(payload)) {
       return payload
+    }
+    // AI cost budget block — surface the envelope in the store so the
+    // top-of-canvas BudgetBlockedBanner can render. We still throw so the
+    // calling code's error-handling path runs; the banner is an additive
+    // signal alongside the toast / inline error.
+    if (res.status === 402 && payload && typeof payload === 'object' && 'budget' in payload) {
+      try {
+        const setter = useWorkflowStore.getState().setBudgetBlocked
+        setter((payload as { budget?: unknown }).budget as Parameters<typeof setter>[0])
+      } catch {
+        // Non-fatal — the throw below still surfaces the original 402.
+      }
     }
     const message = typeof payload?.error === 'string' ? payload.error : `Request failed with ${res.status}`
     throw new Error(message)
