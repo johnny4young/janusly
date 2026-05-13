@@ -32,6 +32,7 @@ export type OrgConfigDefinition = {
   envKeys?: readonly string[];
   allowedValues?: readonly string[];
   min?: number;
+  max?: number;
 };
 
 export type OrgConfigEntry = OrgConfigDefinition & {
@@ -154,6 +155,34 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 30,
     envKeys: ["AI_RATE_LIMIT_PER_MIN"],
     min: 1,
+  },
+  {
+    key: "ai.budgetMonthlyUsd",
+    category: "ai",
+    description: "Monthly USD ceiling for org-wide AI spend. 0 disables the gate (no budget).",
+    valueType: "number",
+    defaultValue: 0,
+    envKeys: ["JANUSLY_AI_BUDGET_MONTHLY_USD"],
+    min: 0,
+  },
+  {
+    key: "ai.budgetWarnPercent",
+    category: "ai",
+    description: "Percent of the monthly budget at which the operator gets a billing.budget.warned audit row + Recovery Center banner.",
+    valueType: "number",
+    defaultValue: 80,
+    envKeys: ["JANUSLY_AI_BUDGET_WARN_PERCENT"],
+    min: 0,
+    max: 100,
+  },
+  {
+    key: "ai.budgetExceededPolicy",
+    category: "ai",
+    description: "What happens when the monthly budget is exceeded. 'warn' proceeds + audits + toasts; 'block' returns HTTP 402 / mode=fallback.",
+    valueType: "string",
+    defaultValue: "warn",
+    envKeys: ["JANUSLY_AI_BUDGET_EXCEEDED_POLICY"],
+    allowedValues: ["warn", "block"],
   },
   {
     key: "http.timeoutMs",
@@ -346,6 +375,9 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
     const normalized = Math.floor(value);
     if (definition.min !== undefined && normalized < definition.min) {
       throw new Error(`${definition.key} must be >= ${definition.min}`);
+    }
+    if (definition.max !== undefined && normalized > definition.max) {
+      throw new Error(`${definition.key} must be <= ${definition.max}`);
     }
     return normalized;
   }

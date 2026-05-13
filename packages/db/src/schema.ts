@@ -402,3 +402,34 @@ export const recoveryFeedback = pgTable(
     index("recovery_feedback_org_dlq_idx").on(table.orgId, table.deadLetterId),
   ],
 );
+
+/**
+ * Per-workflow AI budget overrides.
+ *
+ * Each row caps monthly USD spend for a single workflow within an org. The
+ * org-level budget lives in `org_configs.ai.budgetMonthlyUsd`; a row here is
+ * a tighter (or looser) override that wins for that workflow only.
+ *
+ * Multi-tenant scope: every read carries `eq(workflowBudgets.orgId, orgId)`.
+ * Unique on `(orgId, workflowId)` so the upsert path is straightforward.
+ *
+ * Fail-soft: every read in the budget chokepoint is wrapped — a DB error
+ * here returns "no budget" (allowed=true) rather than blocking the run.
+ */
+export const workflowBudgets = pgTable(
+  "workflow_budgets",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    monthlyUsd: real("monthly_usd").notNull(),
+    warnPercent: integer("warn_percent").notNull().default(80),
+    policy: text("policy").notNull().default("warn"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workflow_budgets_org_workflow_idx").on(table.orgId, table.workflowId),
+  ],
+);

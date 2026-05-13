@@ -43,17 +43,18 @@ PHASE 1:
 2. Pick a ticket from §3b (or honor the user-named ENG-NNN).
 3. Read the ticket row, the touched code paths, and the relevant `docs/PLAN.md` section if any.
 4. Write the plan to chat AND to `~/.claude/plans/<slug>.md` (the file the Plan UI reads).
-5. Call ExitPlanMode. The UI shows Accept/Reject. Stop.
+5. **Before calling ExitPlanMode, end the chat message with the Spanish line `¿Explícame el ticket? No lo entiendo.` on its own line.** This is a permanent convention requested by the user — it gives them a one-tap prompt to ask for a plain-language explanation of the ticket before approving the plan. Apply this to every ticket proposal, in both fresh proposals and re-plans after textual rejection feedback.
+6. Call ExitPlanMode. The UI shows Accept/Reject. Stop.
 
 After Accept (or after textual feedback on Reject), PHASE 2:
 
-6. First line: `Executing ENG-NNN — <one-liner>`.
-7. Implement the ticket: code + tests + doc-sync + collateral fixes, all in one cohesive working tree.
-8. Doc-sync: flip Status in `docs/ROADMAP.md` §3b, update `docs/PLAN.md` only if a claim drifted, touch AGENTS.md only when an invariant changed, touch README.md only for descriptive facts.
-9. Run gates: `bash .claude/skills/janus-ship/scripts/run-gates.sh` (add `--e2e` when user-facing). The script runs `pnpm build` + `pnpm test` (+ optional `pnpm test:e2e`), captures PASS/FAIL with timing, and tails the failing log when something breaks. Then run `typescript-react-reviewer` + `node` review skills in parallel on the unstaged diff.
-10. Bring Compose down if it was started during the work.
-11. `git add <explicit paths>` — ticket files + doc-sync + collaterals only.
-12. Print the final report and the Conventional Commits suggestion.
+7. First line: `Executing ENG-NNN — <one-liner>`.
+8. Implement the ticket: code + tests + doc-sync + collateral fixes, all in one cohesive working tree.
+9. Doc-sync: flip Status in `docs/ROADMAP.md` §3b, update `docs/PLAN.md` only if a claim drifted, touch AGENTS.md only when an invariant changed, touch README.md only for descriptive facts.
+10. Run gates: `bash .claude/skills/janus-ship/scripts/run-gates.sh` (add `--e2e` when user-facing). The script runs `pnpm build` + `pnpm test` (+ optional `pnpm test:e2e`), captures PASS/FAIL with timing, and tails the failing log when something breaks. Then run `typescript-react-reviewer` + `node` review skills in parallel on the unstaged diff.
+11. Bring Compose down if it was started during the work.
+12. `git add <explicit paths>` — ticket files + doc-sync + collaterals only.
+13. Print the final report and the Conventional Commits suggestion.
 
 For the full step-by-step of each phase, see [`references/phase-1-plan.md`](references/phase-1-plan.md) and [`references/phase-2-execute.md`](references/phase-2-execute.md).
 
