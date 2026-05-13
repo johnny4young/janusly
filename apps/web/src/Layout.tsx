@@ -18,10 +18,15 @@ import { ToastRenderer } from './components/ToastRenderer'
 export function Layout({ sidebar, main, panel, header, overlay }: {
   sidebar: React.ReactNode
   main: React.ReactNode
-  panel: React.ReactNode
+  /** When `null` / `undefined` / `false`, the right panel is hidden and
+   *  the main area expands across its column. The Recovery Center relies
+   *  on this to feel like a true hero landing page instead of a sidebar
+   *  fragment. */
+  panel: React.ReactNode | null
   header?: React.ReactNode
   overlay?: React.ReactNode
 }) {
+  const hasPanel = panel !== null && panel !== undefined && panel !== false
   return (
     <div className="app-shell">
       {header && (
@@ -30,7 +35,7 @@ export function Layout({ sidebar, main, panel, header, overlay }: {
         </header>
       )}
 
-      <div className="workspace-grid">
+      <div className={hasPanel ? "workspace-grid" : "workspace-grid workspace-grid--no-panel"}>
         <div className="workspace-sidebar">
           {sidebar}
         </div>
@@ -39,9 +44,11 @@ export function Layout({ sidebar, main, panel, header, overlay }: {
           {main}
         </main>
 
-        <aside className="workspace-panel">
-          {panel}
-        </aside>
+        {hasPanel && (
+          <aside className="workspace-panel">
+            {panel}
+          </aside>
+        )}
       </div>
 
       {overlay}

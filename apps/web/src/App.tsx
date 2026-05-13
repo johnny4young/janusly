@@ -25,6 +25,7 @@ import { MarkerType } from '@xyflow/react'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
+import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
@@ -616,8 +617,10 @@ export default function App() {
               <span>{currentWorkflowName} · {orgId ?? 'default'}</span>
             </div>
           </div>
-          <WorkflowReadinessBadge />
-          <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
+          <div className="top-bar-status" aria-label="Workflow status">
+            <WorkflowReadinessBadge />
+            <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
+          </div>
           <UserMenu />
         </>
       }
@@ -640,23 +643,36 @@ export default function App() {
         />
       }
       main={
-        <WorkflowCanvas
-          nodes={visibleNodes}
-          edges={visibleEdges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={connect}
-          onNodeClick={(_, node) => {
-            selectNode(node.id)
-            setActiveTab('inspector')
-          }}
-          onEdgeClick={(_, edge) => {
-            selectEdge(edge.id)
-            setActiveTab('inspector')
-          }}
-        />
+        activeTab === 'home' ? (
+          <RecoveryCenterPanel
+            runs={runs}
+            runNodes={runNodes}
+            deadLetters={deadLetters}
+            activeRunId={runId}
+            onOpenTab={setActiveTab}
+            onOpenRun={openRun}
+            onApproveNode={approveNode}
+            onSubmitHumanForm={submitHumanForm}
+          />
+        ) : (
+          <WorkflowCanvas
+            nodes={visibleNodes}
+            edges={visibleEdges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={connect}
+            onNodeClick={(_, node) => {
+              selectNode(node.id)
+              setActiveTab('inspector')
+            }}
+            onEdgeClick={(_, edge) => {
+              selectEdge(edge.id)
+              setActiveTab('inspector')
+            }}
+          />
+        )
       }
-      panel={
+      panel={activeTab === 'home' ? null : (
         <RightPanel
           tab={activeTab}
           events={events}
@@ -701,7 +717,7 @@ export default function App() {
           onReviewWorkflow={reviewWorkflow}
           onOpenTab={setActiveTab}
         />
-      }
+      )}
       overlay={
         runInputOpen && currentWorkflowInputs ? (
           <RunInputDialog

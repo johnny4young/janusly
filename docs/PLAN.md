@@ -966,7 +966,7 @@ Product defaults for this strategy:
 
 Roadmap implications:
 
-- ENG-091 makes Recovery Cockpit the product home so operators start from failures, health, MTTR, and recommended actions.
+- ENG-091 makes Recovery Center the product home so operators start from failures, health, MTTR, and recommended actions.
 - ENG-092 adds AI cost governance so enterprise buyers can operate LLM-heavy workflows with budget limits and spend visibility.
 - ENG-093 validates the wedge with design partners and real workflows before the product over-invests in broad platform scope.
 - ENG-094 extends MCP from "Janusly as a server" toward "safe external MCP tools as workflow steps" without opening arbitrary execution.

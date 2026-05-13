@@ -84,7 +84,10 @@ type RightPanelProps = {
   onOpenTab: (tab: ActiveTab) => void
 }
 
-/** Tab-aware right-side panel router — picks the inner panel component for the active tab. */
+/** Tab-aware right-side panel router — picks the inner panel component for
+ *  the active tab. The 'home' tab is intentionally handled by `App.tsx`
+ *  at the layout level (panel slot is null, Recovery Center goes in the main area
+ *  so it has hero-page real estate); this dispatcher never receives it. */
 export function RightPanel(props: RightPanelProps) {
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
