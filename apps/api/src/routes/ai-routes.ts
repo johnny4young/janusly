@@ -503,6 +503,11 @@ export const aiRoutes: Route[] = [
         patchStyle: useStructural ? "structural" : "config_only",
         suggestionsCount: response.suggestions.length,
         topApproachLabel: response.suggestions[0]?.approachLabel,
+        // `runId` is set so report exports can auto-discover the most
+        // recent patch suggestion for a given run by metadata lookup.
+        // The audit row's `targetId` is the dlq id (already populated
+        // above), so adding `runId` to metadata is the cross-reference.
+        runId: dlq.runId,
       });
 
       return sendJson(res, response);

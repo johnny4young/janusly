@@ -157,4 +157,9 @@ describe("normalizeErrorSignature — unknown fallback + secret-shape scrub", ()
   it("scrubSecretShapes is exported for direct use", () => {
     expect(scrubSecretShapes("hello sk-aaaaaaaaaaaaaaaaaaaa world")).toBe("hello [redacted] world");
   });
+
+  it("scrubs token shapes when they are adjacent to underscores or punctuation", () => {
+    const token = "ghp_abcdefghijklmnopqrstuv";
+    expect(scrubSecretShapes(`notify_${token}.failed`)).toBe("notify_[redacted].failed");
+  });
 });

@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Activity, Boxes, CheckCircle2, Database, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, CheckCircle2, Database, Download, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
@@ -32,7 +32,7 @@ import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
-import { api } from '../api'
+import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 
 type RightPanelProps = {
@@ -1146,6 +1146,7 @@ function RunsPanel({
   const [activeHumanFormNodeId, setActiveHumanFormNodeId] = useState<string | null>(null)
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
   const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
+  const addToast = useWorkflowStore(state => state.addToast)
   // Replay Lab source — set when the operator clicks "Open in Lab" from
   // the active-run card or a history row. The dialog mounts overlay-style
   // while non-null and the source run id stays around as state until the
@@ -1322,6 +1323,23 @@ function RunsPanel({
                   <FlaskConical size={12} aria-hidden="true" /> Lab
                 </button>
               )}
+              <button
+                type="button"
+                className="small-command we-run-history-export-button"
+                onClick={async () => {
+                  try {
+                    await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
+                    addToast('Run explain report downloaded', 'success')
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : 'Failed to export report'
+                    addToast(message, 'error')
+                  }
+                }}
+                data-testid={`history-export-${run.id}`}
+                aria-label={`Export run explain report for ${run.id}`}
+              >
+                <Download size={12} aria-hidden="true" /> Export
+              </button>
             </div>
           )
         })}

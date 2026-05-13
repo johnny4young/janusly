@@ -66,3 +66,76 @@ function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
     (value as { errors: unknown[] }).errors.every((entry) => typeof entry === 'string')
   )
 }
+
+/**
+ * Download a file from the API using the same auth resolution as
+ * `api()`. The API's `Content-Disposition: attachment; filename=...`
+ * header carries the suggested filename; if the caller passes
+ * `filename`, it overrides that. The Blob + anchor click pattern
+ * sidesteps the browser's "open in tab" default for text MIME types.
+ */
+export async function downloadFromApi(path: string, filename?: string): Promise<void> {
+  const session = supabase ? await supabase.auth.getSession() : { data: { session: null } }
+  const token = session.data.session?.access_token
+
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!token ? { 'x-org-id': 'default', 'x-user-id': 'dev-user' } : {}),
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}${path}`, { headers })
+  } catch {
+    throw new Error('Janusly API is offline. Start the API and refresh this view.')
+  }
+
+  if (!res.ok) {
+    let errorMessage = `Download failed with ${res.status}`
+    try {
+      const payload = await res.json()
+      if (typeof payload?.error === 'string') errorMessage = payload.error
+    } catch {
+      // Not JSON — keep the generic message.
+    }
+    throw new Error(errorMessage)
+  }
+
+  const blob = await res.blob()
+
+  // Prefer caller-supplied filename. Otherwise read from
+  // Content-Disposition: prefer the RFC 5987 `filename*=UTF-8''<encoded>`
+  // form (carries non-ASCII names safely), fall back to the plain
+  // `filename="..."` ASCII variant. The server's `Access-Control-Expose-Headers`
+  // setting is what makes this header readable from JS — without it
+  // the browser hides cross-origin response headers and this helper
+  // falls through to the generic 'download.bin' name.
+  let resolvedFilename = filename
+  if (!resolvedFilename) {
+    const disposition = res.headers.get('Content-Disposition') ?? ''
+    const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+    if (utf8Match?.[1]) {
+      try {
+        resolvedFilename = decodeURIComponent(utf8Match[1])
+      } catch {
+        resolvedFilename = utf8Match[1]
+      }
+    } else {
+      const asciiMatch = /filename="([^"]+)"/.exec(disposition)
+      resolvedFilename = asciiMatch?.[1]
+    }
+    if (!resolvedFilename) resolvedFilename = 'download.bin'
+  }
+
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = resolvedFilename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+  }
+}

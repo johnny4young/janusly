@@ -83,12 +83,12 @@ export const FALLBACK_SIGNATURE_MAX_LENGTH = 80;
  * never widen an existing pattern without thinking about false positives.
  */
 export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
-  /\bsk-[A-Za-z0-9]{20,}\b/g, // OpenAI / Anthropic / similar prefix
-  /\bghp_[A-Za-z0-9]{20,}\b/g, // GitHub personal access token
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, // Slack tokens
-  /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
-  /\bBearer\s+[A-Za-z0-9_\-.]{16,}\b/gi, // Authorization header value
-  /\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/g, // JWT (3-segment base64url)
+  /(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g, // OpenAI / Anthropic / similar prefix
+  /(^|[^A-Za-z0-9])(ghp_[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g, // GitHub personal access token
+  /(^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})(?=$|[^A-Za-z0-9])/g, // Slack tokens
+  /(^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})(?=$|[^A-Za-z0-9])/g, // AWS access key id
+  /(^|[^A-Za-z0-9])(Bearer\s+[A-Za-z0-9_\-.]{16,})(?=$|[^A-Za-z0-9])/gi, // Authorization header value
+  /(^|[^A-Za-z0-9])(eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})(?=$|[^A-Za-z0-9])/g, // JWT (3-segment base64url)
 ];
 
 /**
@@ -99,7 +99,7 @@ export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
 export function scrubSecretShapes(input: string): string {
   let output = input;
   for (const pattern of SECRET_VALUE_PATTERNS) {
-    output = output.replace(pattern, "[redacted]");
+    output = output.replace(pattern, (_match, prefix: string) => `${prefix}[redacted]`);
   }
   return output;
 }

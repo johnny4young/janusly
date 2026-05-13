@@ -3124,7 +3124,8 @@ a { color: var(--we-primary); }
   gap: 8px;
 }
 
-.we-replay-lab-history-button {
+.we-replay-lab-history-button,
+.we-run-history-export-button {
   align-self: flex-end;
   margin-top: 4px;
 }
