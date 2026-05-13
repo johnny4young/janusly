@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { LlmClient, LlmGenerateObjectInput, LlmGenerateObjectResult } from "./llm-client";
-import { RUN_EVENT_PROMPT_CAP, suggestWorkflowPatch, type PatchEnvelopeSchemaResult } from "./patch-workflow";
+import { RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowPatch, type PatchEnvelopeSchemaResult } from "./patch-workflow";
 
 // The runtime Zod object — used by the helper at call time. Mirrors
 // the per-failing-node-type envelope shape the route picks (a single
@@ -352,5 +352,67 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).not.toContain(githubToken);
     expect(callArg.prompt).not.toContain(slackToken);
     expect(callArg.prompt).toContain("[redacted]");
+  });
+});
+
+describe("suggestWorkflowPatch — structural system prompt override", () => {
+  it("ships STRUCTURAL_PATCH_SYSTEM_PROMPT when systemPromptOverride is set", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: { suggestions: [{
+        action: "insert_approval_upstream",
+        approvalNodeId: "approve_x",
+        approvalMessage: "Approve?",
+        insertBeforeNodeId: "fetch",
+        rationale: "Write-side action needs approval.",
+        approachLabel: "add_approval",
+        confidence: 80,
+      }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    const llm = { generateText: vi.fn(), generateObject } as unknown as LlmClient;
+
+    await suggestWorkflowPatch({
+      llm,
+      envelopeSchema,
+      ...baseInput,
+      systemPromptOverride: STRUCTURAL_PATCH_SYSTEM_PROMPT,
+    });
+
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).toBe(STRUCTURAL_PATCH_SYSTEM_PROMPT);
+    // The structural prompt teaches the LLM the specific output shape.
+    expect(callArg.system).toContain("STRUCTURAL");
+    expect(callArg.system).toContain("insert_approval_upstream");
+    expect(callArg.system).toContain("approvalNodeId");
+    expect(callArg.system).toContain("approvalMessage");
+    expect(callArg.system).toContain("insertBeforeNodeId");
+    expect(callArg.system).toContain("approachLabel");
+    expect(callArg.system).toContain("add_approval");
+  });
+
+  it("falls back to the default config-only SYSTEM_PROMPT when no override is set", async () => {
+    const generateObject = vi.fn(async () => ({
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    const llm = { generateText: vi.fn(), generateObject } as unknown as LlmClient;
+
+    await suggestWorkflowPatch({
+      llm,
+      envelopeSchema,
+      ...baseInput,
+    });
+
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    // Default prompt narrates the config-only contract.
+    expect(callArg.system).toContain("up to 3 ALTERNATIVE config patches");
+    // And does NOT contain the structural-specific language.
+    expect(callArg.system).not.toContain("insert_approval_upstream");
   });
 });

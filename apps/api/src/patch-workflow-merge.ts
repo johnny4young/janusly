@@ -17,7 +17,7 @@
  * - Reject no-op patches so Recovery doesn't present AI mode with no diff.
  */
 
-import type { Workflow } from "@janusly/shared";
+import type { Workflow, WorkflowEdge, WorkflowNode } from "@janusly/shared";
 
 /** A `{ name, value }` pair as the LLM emits it for the `headers` / `input` array patch shape. */
 type PairItem = { name: string; value: string | null };
@@ -148,5 +148,87 @@ export function applyConfigPatchToWorkflow(
         ? { ...node, config: { ...(node.config ?? {}), ...patchedConfig } }
         : node,
     ),
+  };
+}
+
+/**
+ * Structural patch input — emits node-graph changes instead of a
+ * single-node config patch. v1 only wires `insert_approval_upstream`;
+ * future structural fixes add an `action` literal and a new branch
+ * in `applyStructuralPatchToWorkflow`.
+ */
+export type StructuralPatchInput =
+  | {
+      action: "insert_approval_upstream";
+      approvalNodeId: string;
+      approvalMessage: string;
+      insertBeforeNodeId: string;
+    };
+
+/**
+ * Compose the full workflow suggestion from a structural patch
+ * envelope. For `insert_approval_upstream`: validate the target node
+ * exists, reject collisions with existing node ids, insert a new
+ * `approval` node, and rewrite every edge whose `to` is the target so
+ * it routes through the new approval. The new approval's only outgoing
+ * edge points at the original target — operators reading the diff see
+ * a single new node inserted in front of the failing one.
+ *
+ * Pure function — same shape as `applyConfigPatchToWorkflow`. Throws
+ * descriptively on a collision or missing target so the route's
+ * per-suggestion validation drops the offending suggestion.
+ */
+export function applyStructuralPatchToWorkflow(
+  workflow: Workflow,
+  patch: StructuralPatchInput,
+  expectedInsertBeforeNodeId?: string,
+): Workflow {
+  if (patch.action !== "insert_approval_upstream") {
+    // Exhaustiveness guard. v1 only wires the one action; the schema
+    // pins it via z.literal so this branch is defensive.
+    throw new Error(`Unknown structural patch action: ${(patch as { action?: string }).action ?? "<missing>"}`);
+  }
+
+  const { approvalNodeId, approvalMessage, insertBeforeNodeId } = patch;
+  if (expectedInsertBeforeNodeId && insertBeforeNodeId !== expectedInsertBeforeNodeId) {
+    throw new Error(`Structural patch target "${insertBeforeNodeId}" does not match failing node "${expectedInsertBeforeNodeId}"`);
+  }
+
+  const target = workflow.nodes.find((node) => node.id === insertBeforeNodeId);
+  if (!target) {
+    throw new Error(`Structural patch target "${insertBeforeNodeId}" does not exist in the workflow`);
+  }
+
+  if (workflow.nodes.some((node) => node.id === approvalNodeId)) {
+    throw new Error(`Structural patch approval node id "${approvalNodeId}" collides with an existing node`);
+  }
+
+  const newApprovalNode: WorkflowNode = {
+    id: approvalNodeId,
+    type: "approval",
+    config: { message: approvalMessage },
+  };
+
+  // Rewire every edge `to === insertBeforeNodeId` so the upstream
+  // predecessors now flow into the approval first. Edges with no
+  // matching `to` pass through untouched. Outgoing edges from the
+  // target also pass through untouched — the approval is inserted
+  // strictly between predecessors and the target.
+  const rewiredEdges: WorkflowEdge[] = workflow.edges.map((edge) => {
+    if (edge.to === insertBeforeNodeId) {
+      return { ...edge, to: approvalNodeId };
+    }
+    return edge;
+  });
+
+  // Add the approval -> target edge. No `condition` so the approval
+  // gates the target unconditionally; the engine's approval-waiting
+  // semantics handle the human-gate flow.
+  rewiredEdges.push({ from: approvalNodeId, to: insertBeforeNodeId });
+
+  return {
+    ...workflow,
+    nodes: [...workflow.nodes, newApprovalNode],
+    edges: rewiredEdges,
   };
 }

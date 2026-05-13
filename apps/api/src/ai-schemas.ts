@@ -515,6 +515,43 @@ export const AiPatchGenericConfigEnvelope = z.object({
   suggestions: suggestionsArraySchema(AiPatchGenericConfig),
 });
 
+/**
+ * Structural patch envelope — emits node-graph changes instead of a
+ * single-node config patch. Single non-union object shape (no `oneOf`,
+ * no `propertyNames`, no open `additionalProperties`) so both Anthropic
+ * compiled-grammar and OpenAI strict mode accept it. The `action`
+ * literal is the extensibility hook: today only `insert_approval_upstream`
+ * is wired; future structural fixes (split_for_retry, insert_error_handler)
+ * add a new literal value and a new applier case without changing this
+ * envelope's outer shape.
+ */
+const AiPatchStructuralSuggestionItem = z.object({
+  action: z.literal("insert_approval_upstream"),
+  // New approval node id. Operator-friendly snake_case names like
+  // `approve_charge` or `approve_send` are encouraged by the system
+  // prompt. The applier rejects collisions with existing node ids.
+  approvalNodeId: z.string().min(1),
+  // Plain operator-facing message rendered in the approval dialog.
+  // Can reference upstream context via templates (`{{context.fetch.output.amount}}`)
+  // — the engine resolves templates at run time; the message is not
+  // executed code.
+  approvalMessage: z.string().min(1),
+  // Existing node id the approval gets inserted in front of. The
+  // applier rewrites every edge `to === insertBeforeNodeId` to point
+  // at the new approval and adds one outgoing edge from the approval
+  // to the existing target.
+  insertBeforeNodeId: z.string().min(1),
+  rationale: z.string().min(1),
+  approachLabel: z.literal("add_approval"),
+  confidence: z.number().int().min(0).max(100),
+});
+
+export const AiPatchStructuralEnvelope = z.object({
+  suggestions: z.array(AiPatchStructuralSuggestionItem).min(1).max(PATCH_MAX_SUGGESTIONS),
+});
+
+export type AiPatchStructuralSuggestion = z.infer<typeof AiPatchStructuralSuggestionItem>;
+
 /** Discriminator returned alongside the schema so callers can branch on the parsed shape. */
 export type PatchEnvelopeKind =
   | "http"
@@ -526,7 +563,8 @@ export type PatchEnvelopeKind =
   | "router"
   | "approval"
   | "loop"
-  | "generic";
+  | "generic"
+  | "structural";
 
 export type PatchEnvelopeChoice = {
   schema:
@@ -539,7 +577,8 @@ export type PatchEnvelopeChoice = {
     | typeof AiPatchRouterConfigEnvelope
     | typeof AiPatchApprovalConfigEnvelope
     | typeof AiPatchLoopConfigEnvelope
-    | typeof AiPatchGenericConfigEnvelope;
+    | typeof AiPatchGenericConfigEnvelope
+    | typeof AiPatchStructuralEnvelope;
   kind: PatchEnvelopeKind;
 };
 
