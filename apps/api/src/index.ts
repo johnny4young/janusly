@@ -65,6 +65,7 @@ import { membersRoutes } from "./routes/members-routes";
 import { orgRoutes } from "./routes/org-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
+import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
 import { templatesRoutes } from "./routes/templates-routes";
 import { toolsRoutes } from "./routes/tools-routes";
@@ -91,6 +92,7 @@ export const routes: Route[] = [
   ...credentialsRoutes,
   ...auditRoutes,
   ...recoveryRoutes,
+  ...reportsRoutes,
   ...aiRoutes,
   ...runsRoutes,
   ...dlqRoutes,

@@ -7,8 +7,10 @@
  */
 
 import React, { useMemo, useState } from 'react'
-import { FlaskConical, Sparkles } from 'lucide-react'
+import { Download, FlaskConical, Sparkles } from 'lucide-react'
+import { downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
+import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 import { RecoveryDialog } from './RecoveryDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
@@ -49,6 +51,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
   const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
+  const addToast = useWorkflowStore((state) => state.addToast)
 
   const filtered = useMemo(() => {
     if (status === 'all') return deadLetters
@@ -130,6 +133,22 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
               data-testid="dlq-replay-in-lab"
             >
               <FlaskConical size={12} aria-hidden="true" /> Replay in Lab
+            </button>
+            <button
+              className="small-command"
+              onClick={async () => {
+                try {
+                  await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(selected.runId)}`)
+                  addToast('Run explain report downloaded', 'success')
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : 'Failed to export report'
+                  addToast(message, 'error')
+                }
+              }}
+              data-testid="dlq-export-run-explain"
+              aria-label={`Export run explain report for ${selected.runId}`}
+            >
+              <Download size={12} aria-hidden="true" /> Export
             </button>
           </div>
 
