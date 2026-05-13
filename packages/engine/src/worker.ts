@@ -34,6 +34,8 @@ import { setEmailUsageRecorder } from "./email-usage";
 import { setIntegrationUsageRecorder } from "./integration-usage";
 import { setPdfUsageRecorder } from "./pdf-usage";
 import { setEngineRateLimiter } from "./rate-limit";
+import { setBudgetChecker } from "./budget";
+import { productionBudgetChecker } from "@janusly/data/src/budgetRepo";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
@@ -83,6 +85,13 @@ setPdfUsageRecorder(recordPdfUsage);
 setEngineRateLimiter(async (bucket, orgId, options) => {
   await enforceWorkerRateLimit(orgId, { name: bucket, windowMs: options.windowMs, max: options.max });
 });
+
+// Wire the production AI cost budget checker for engine-side LLM call
+// sites (the `ai` node executor + the `agent` planner). Block paths
+// degrade to `{ mode: "fallback", aiError: "budget_exceeded" }` so the
+// AI fallback contract is preserved. Fail-soft on internal errors.
+setBudgetChecker(productionBudgetChecker);
+console.log("[budget] checker registered (worker)");
 
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),

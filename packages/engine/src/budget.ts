@@ -34,47 +34,23 @@
  *   break the call. Callers wrap audit writes in try/catch.
  */
 
-export type BudgetPolicy = "warn" | "block";
+// Type-only re-exports from @janusly/shared so engine consumers can keep
+// the existing import paths (`@janusly/engine/src/budget`) while the
+// canonical contract lives in the shared package — see the file comment
+// in `packages/shared/src/budget-types.ts` for the dep-graph rationale.
+export type {
+  BudgetPolicy,
+  BudgetCheckScope,
+  BudgetCheckResult,
+  CheckBudgetInput,
+  BudgetChecker,
+} from "@janusly/shared/src/budget-types";
 
-export type BudgetCheckScope = "org" | "workflow";
-
-/** Envelope returned by every `checkBudget` call. */
-export type BudgetCheckResult = {
-  /** True when the call may proceed. False only when policy === "block" AND
-   *  the spent amount has crossed the monthly limit. */
-  allowed: boolean;
-  /** Sum of `usage_events.metadata.costUsd` in the current calendar month,
-   *  scoped to the resolved budget (workflow if a per-workflow row exists,
-   *  else org). 0 when nothing has been spent. */
-  monthlyUsdSpent: number;
-  /** USD cap for the resolved scope. `null` when no budget is configured
-   *  at either the org or workflow level — `allowed` stays true. */
-  monthlyUsdLimit: number | null;
-  /** Resolved policy. Workflow row's policy wins over org config; defaults
-   *  to "warn" when neither is set. */
-  policy: BudgetPolicy;
-  /** Warning threshold as a percent of `monthlyUsdLimit` (0-100). */
-  warningPercent: number;
-  /** True when `monthlyUsdSpent >= monthlyUsdLimit * warningPercent / 100`. */
-  warningThresholdCrossed: boolean;
-  /** Which scope the budget was resolved at. `null` when no budget set. */
-  exceededAt: BudgetCheckScope | null;
-  /** Resolved scope of the active budget. Useful for the API envelope so the
-   *  web can render "workflow X is over its $10 budget" vs "org over $100". */
-  resolvedScope: BudgetCheckScope | null;
-};
-
-export type CheckBudgetInput = {
-  orgId: string;
-  workflowId?: string | null;
-  /** Optional predicted cost in USD. Future tickets may use this to gate
-   *  preemptively (block if `spent + predicted > limit`); v1 ignores it and
-   *  gates on `spent >= limit` only. Kept on the surface so callers can
-   *  start threading it through now. */
-  predictedCostUsd?: number;
-};
-
-export type BudgetChecker = (input: CheckBudgetInput) => Promise<BudgetCheckResult>;
+import type {
+  BudgetChecker,
+  BudgetCheckResult,
+  CheckBudgetInput,
+} from "@janusly/shared/src/budget-types";
 
 const FAIL_SOFT_RESULT: BudgetCheckResult = {
   allowed: true,
