@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, ClipboardList, Database, Gauge, GitBranch, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, Bot, CheckCircle2, ChevronRight, ClipboardList, Database, Gauge, GitBranch, Home, KeyRound, Layers3, Play, Save, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { nodeTypes, nodeUi } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 
@@ -42,6 +42,7 @@ const nodeIcons: Record<string, React.ReactNode> = {
 }
 
 const navItems: Array<{ tab: ActiveTab; label: string; helper: string; icon: React.ReactNode }> = [
+  { tab: 'home', label: 'Home', helper: 'Recovery Center', icon: <Home size={15} /> },
   { tab: 'copilot', label: 'AI Studio', helper: 'Draft and explain', icon: <Sparkles size={15} /> },
   { tab: 'workflows', label: 'Flows', helper: 'Saved versions', icon: <Database size={15} /> },
   { tab: 'multiAgent', label: 'Multi-agent timeline', helper: 'Agent events', icon: <Layers3 size={15} /> },

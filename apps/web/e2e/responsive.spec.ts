@@ -18,6 +18,7 @@ test('mobile workspace remains usable without horizontal overflow', async ({ pag
 test('mobile node setup can be reached from the canvas', async ({ page }) => {
   await page.goto('/')
 
+  await page.getByRole('button', { name: 'AI Studio', exact: true }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Call an API' }).click()
 
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()
