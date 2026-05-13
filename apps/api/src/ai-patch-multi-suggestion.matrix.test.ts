@@ -214,6 +214,13 @@ function suggestionsForFixture(fixture: typeof RECOVERY_MATRIX_FIXTURES[number])
     }
   }
 
+  // `envelope.kind` is `PatchEnvelopeKind` (includes "structural"), but
+  // `patchEnvelopeForNodeType` never returns "structural" — that envelope
+  // is route-level only. Narrow at the boundary so `ENVELOPE_BY_KIND`
+  // indexing stays type-safe.
+  if (envelope.kind === "structural") {
+    throw new Error(`patchEnvelopeForNodeType should never return "structural"; saw it for nodeType=${nodeType}`);
+  }
   return {
     envelopeKind: envelope.kind,
     parsed: {
