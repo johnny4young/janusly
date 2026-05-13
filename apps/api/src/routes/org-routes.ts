@@ -14,6 +14,12 @@ import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
 
+const AI_BUDGET_CONFIG_KEYS = new Set([
+  "ai.budgetMonthlyUsd",
+  "ai.budgetWarnPercent",
+  "ai.budgetExceededPolicy",
+]);
+
 export const orgRoutes: Route[] = [
   { method: "GET", match: "/org/config",
     handler: async ({ res, auth }) => sendJson(res, { config: await listOrgConfig(auth.orgId) }) },
@@ -27,6 +33,17 @@ export const orgRoutes: Route[] = [
       try {
         const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
         await audit(auth.orgId, auth.userId, "org.config.updated", "org_config", key, { key, value: entry.value });
+        if (AI_BUDGET_CONFIG_KEYS.has(key)) {
+          try {
+            await audit(auth.orgId, auth.userId, "billing.budget.configured", "org_config", key, {
+              scope: "org",
+              key,
+              value: entry.value,
+            });
+          } catch (err) {
+            console.warn("[org-config] budget audit write failed", err);
+          }
+        }
         return sendJson(res, entry);
       } catch (error) {
         return sendJson(res, { error: error instanceof Error ? error.message : "Invalid org config" }, 400);

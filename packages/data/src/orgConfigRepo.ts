@@ -33,6 +33,11 @@ export type OrgConfigDefinition = {
   allowedValues?: readonly string[];
   min?: number;
   max?: number;
+  /** When `true`, the normalizer keeps the fractional part on `number`
+   *  values (USD budgets need cents). Defaults to floor-to-integer so
+   *  pre-existing integer keys (rate limits, byte caps, etc.) keep their
+   *  existing behaviour. */
+  fractional?: boolean;
 };
 
 export type OrgConfigEntry = OrgConfigDefinition & {
@@ -164,6 +169,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 0,
     envKeys: ["JANUSLY_AI_BUDGET_MONTHLY_USD"],
     min: 0,
+    fractional: true,
   },
   {
     key: "ai.budgetWarnPercent",
@@ -372,7 +378,10 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
 
   if (definition.valueType === "number") {
     if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${definition.key} must be a finite number`);
-    const normalized = Math.floor(value);
+    // Integer-valued keys (rate limits, byte caps) floor; fractional keys
+    // (USD budgets) keep the cents. Default to integer to preserve the
+    // existing behaviour of every pre-budget config key.
+    const normalized = definition.fractional ? value : Math.floor(value);
     if (definition.min !== undefined && normalized < definition.min) {
       throw new Error(`${definition.key} must be >= ${definition.min}`);
     }

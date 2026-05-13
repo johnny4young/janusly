@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   ArrowRight,
   ChevronRight,
+  Coins,
   Compass,
   Gauge,
   Inbox,
@@ -645,6 +646,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             actions={recommendedActions}
             onOpenTab={props.onOpenTab}
           />
+          <BudgetTile onOpenTab={props.onOpenTab} />
         </div>
       )}
 
@@ -928,6 +930,109 @@ function RecommendedActionsTile({
           </li>
         ))}
       </ol>
+    </RecoveryCenterTile>
+  )
+}
+
+type BudgetEnvelope = {
+  allowed?: boolean
+  monthlyUsdSpent?: number
+  monthlyUsdLimit?: number | null
+  policy?: 'warn' | 'block'
+  warningPercent?: number
+  warningThresholdCrossed?: boolean
+  exceededAt?: 'org' | 'workflow' | null
+  resolvedScope?: 'org' | 'workflow' | null
+}
+
+function budgetBand(envelope: BudgetEnvelope | null): 'cobalt' | 'cyan' | 'success' | 'warning' | 'danger' {
+  if (!envelope || envelope.monthlyUsdLimit == null || envelope.monthlyUsdLimit === 0) return 'cyan'
+  const ratio = (envelope.monthlyUsdSpent ?? 0) / envelope.monthlyUsdLimit
+  if (ratio >= 1) return 'danger'
+  if (ratio >= (envelope.warningPercent ?? 80) / 100) return 'warning'
+  return 'cobalt'
+}
+
+function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
+  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const [envelope, setEnvelope] = useState<BudgetEnvelope | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api('/billing/budget')
+      .then((payload) => {
+        if (cancelled) return
+        setEnvelope(payload as BudgetEnvelope)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : 'Budget unavailable')
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [platformVersion])
+
+  const band = budgetBand(envelope)
+  const tileSeverity: 'cobalt' | 'cyan' | 'success' | 'warning' | 'danger' = band === 'danger' ? 'danger' : band === 'warning' ? 'warning' : band === 'success' ? 'success' : band === 'cyan' ? 'cyan' : 'cobalt'
+  const limit = envelope?.monthlyUsdLimit ?? null
+  const spent = envelope?.monthlyUsdSpent ?? 0
+  const hasBudget = limit !== null && limit > 0
+  const ratio = hasBudget ? Math.min(1, spent / (limit ?? 1)) : 0
+  const formatMoney = (value: number) => `$${value.toFixed(2)}`
+
+  return (
+    <RecoveryCenterTile
+      title="AI budget"
+      kicker={hasBudget ? `${(ratio * 100).toFixed(0)}% used` : 'Not configured'}
+      severity={tileSeverity}
+      icon={<Coins size={18} aria-hidden="true" />}
+      testId="recovery-center-tile-budget"
+      footer={(
+        <button
+          type="button"
+          className="we-recovery-center-tile__link"
+          onClick={() => onOpenTab('operations')}
+          data-testid="recovery-center-budget-open-settings"
+        >
+          {hasBudget ? 'Open settings' : 'Set a budget'} <ChevronRight size={14} aria-hidden="true" />
+        </button>
+      )}
+    >
+      {loading && <p className="we-recovery-center-tile__empty">Loading budget…</p>}
+      {error && (
+        <p className="we-recovery-center-tile__empty" role="status">Budget unavailable — {error}.</p>
+      )}
+      {!loading && !error && !hasBudget && (
+        <p className="we-recovery-center-tile__empty">
+          No monthly budget configured. Set one in Operations to surface MTD spend and gate runaway AI spend.
+        </p>
+      )}
+      {!loading && !error && hasBudget && (
+        <div className="we-recovery-center-budget" data-testid="recovery-center-budget-bar" data-band={band}>
+          <div className="we-recovery-center-budget__row">
+            <span className="we-recovery-center-budget__label">MTD spend</span>
+            <span className="we-recovery-center-budget__value">{formatMoney(spent)} / {formatMoney(limit ?? 0)}</span>
+          </div>
+          <div className="we-recovery-center-budget__bar" role="presentation" aria-hidden="true">
+            <span className="we-recovery-center-budget__bar-rail" />
+            <span
+              className={`we-recovery-center-budget__bar-fill we-recovery-center-budget__bar-fill--${band}`}
+              style={{ width: `${Math.max(2, ratio * 100)}%` }}
+            />
+          </div>
+          <div className="we-recovery-center-budget__meta">
+            <span>Policy: <code>{envelope?.policy ?? 'warn'}</code></span>
+            {envelope?.warningThresholdCrossed && (
+              <span className="we-recovery-center-budget__pill" data-severity={band}>over warning</span>
+            )}
+          </div>
+        </div>
+      )}
     </RecoveryCenterTile>
   )
 }

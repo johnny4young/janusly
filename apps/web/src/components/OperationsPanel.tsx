@@ -16,6 +16,7 @@ import { CheckCircle2, Clock, DollarSign, Gauge, RefreshCw, Users, Zap } from 'l
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
+import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -157,6 +158,8 @@ export function OperationsPanel() {
           )}
 
           <FailureClustersCard />
+
+          <BudgetSettingsPanel />
         </>
       )}
     </div>

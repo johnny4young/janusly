@@ -9,6 +9,8 @@
  * stays intact.
  */
 
+import { and, eq } from "drizzle-orm";
+
 import {
   DEFAULT_USAGE_WINDOW_DAYS,
   getUsageBreakdown,
@@ -16,8 +18,17 @@ import {
   isUsageBreakdownDimension,
   type UsageBreakdownDimension,
 } from "@janusly/engine/src/billing";
+import { checkBudget } from "@janusly/engine/src/budget";
+import {
+  getWorkflowBudget,
+  upsertWorkflowBudget,
+  type WorkflowBudgetPolicy,
+} from "@janusly/data/src/workflowBudgetsRepo";
+import { db, workflows } from "@janusly/db";
 
-import { sendJson } from "../http";
+import { audit } from "../audit";
+import { asRecord, readJson, sendJson } from "../http";
+import { MAX_JSON_BODY_BYTES } from "../api-config";
 import type { Route } from "../routes";
 
 export const billingRoutes: Route[] = [
@@ -39,5 +50,80 @@ export const billingRoutes: Route[] = [
       }
       const breakdown = await getUsageBreakdown(auth.orgId, dimensions);
       return sendJson(res, { summary, breakdown, windowDays: DEFAULT_USAGE_WINDOW_DAYS });
+    } },
+
+  // GET /billing/budget?workflowId=<id>
+  // Returns the current BudgetCheckResult envelope so the Recovery Center
+  // Budget tile + Operations bar can render spend / limit / severity band.
+  // Cheap read — no LLM call. Reused on every platformVersion tick.
+  { method: "GET", match: (url) => url === "/billing/budget" || url.startsWith("/billing/budget?"),
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.searchParams.get("workflowId") ?? undefined;
+      const envelope = await checkBudget({ orgId: auth.orgId, workflowId });
+      return sendJson(res, envelope);
+    } },
+
+  // POST /workflows/:id/budget
+  // Admin route. Upserts the per-workflow override (monthlyUsd / warnPercent
+  // / policy). Multi-tenant scope is enforced by validating the workflow
+  // belongs to auth.orgId before the upsert. Audits every change as
+  // `billing.budget.configured` with `{ scope: "workflow", before, after }`.
+  { method: "POST", match: (url) => /^\/workflows\/[^/]+\/budget$/.test(url), role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const match = url.pathname.match(/^\/workflows\/([^/]+)\/budget$/);
+      const workflowId = match?.[1];
+      if (!workflowId) return sendJson(res, { error: "workflowId path segment is required" }, 400);
+
+      const workflowRow = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .limit(1);
+      if (workflowRow.length === 0) {
+        return sendJson(res, { error: "Workflow not found" }, 404);
+      }
+
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const monthlyUsd = typeof body.monthlyUsd === "number" ? body.monthlyUsd : null;
+      if (monthlyUsd === null || !Number.isFinite(monthlyUsd) || monthlyUsd < 0) {
+        return sendJson(res, { error: "monthlyUsd must be a finite number >= 0" }, 400);
+      }
+      const warnPercentRaw = body.warnPercent;
+      const warnPercent = typeof warnPercentRaw === "number" && Number.isFinite(warnPercentRaw)
+        ? warnPercentRaw
+        : undefined;
+      if (warnPercent !== undefined && (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100)) {
+        return sendJson(res, { error: "warnPercent must be an integer between 0 and 100" }, 400);
+      }
+      const policyRaw = body.policy;
+      const policy: WorkflowBudgetPolicy | undefined = policyRaw === "warn" || policyRaw === "block"
+        ? policyRaw
+        : undefined;
+      if (policyRaw !== undefined && policy === undefined) {
+        return sendJson(res, { error: "policy must be 'warn' or 'block'" }, 400);
+      }
+
+      const before = await getWorkflowBudget(auth.orgId, workflowId);
+      const row = await upsertWorkflowBudget({
+        orgId: auth.orgId,
+        workflowId,
+        monthlyUsd,
+        warnPercent,
+        policy,
+        updatedBy: auth.userId,
+      });
+
+      await audit(auth.orgId, auth.userId, "billing.budget.configured", "workflow", workflowId, {
+        scope: "workflow",
+        workflowId,
+        before: before
+          ? { monthlyUsd: before.monthlyUsd, warnPercent: before.warnPercent, policy: before.policy }
+          : null,
+        after: { monthlyUsd: row.monthlyUsd, warnPercent: row.warnPercent, policy: row.policy },
+      });
+
+      return sendJson(res, row);
     } },
 ];

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
+import { useWorkflowStore } from './store'
 
 vi.mock('./auth', () => ({ supabase: null }))
 
@@ -16,6 +17,7 @@ describe('api', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    useWorkflowStore.getState().clearBudgetBlocked()
   })
 
   it('returns /start field validation envelopes so the run input form can map errors', async () => {
@@ -38,5 +40,22 @@ describe('api', () => {
     mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
 
     await expect(api('/validate', { method: 'POST' })).rejects.toThrow('Request failed with 400')
+  })
+
+  it('stores the budget envelope on AI 402 responses before throwing', async () => {
+    const budget = {
+      allowed: false,
+      monthlyUsdSpent: 12,
+      monthlyUsdLimit: 10,
+      policy: 'block',
+      warningPercent: 80,
+      warningThresholdCrossed: true,
+      exceededAt: 'org',
+      resolvedScope: 'org',
+    }
+    mockJsonResponse(402, { error: 'budget_exceeded', budget })
+
+    await expect(api('/ai/generate-workflow', { method: 'POST' })).rejects.toThrow('budget_exceeded')
+    expect(useWorkflowStore.getState().budgetBlocked).toEqual(budget)
   })
 })

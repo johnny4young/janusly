@@ -26,6 +26,7 @@ import { BuilderSidebar } from './components/BuilderSidebar'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
+import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
@@ -719,16 +720,19 @@ export default function App() {
         />
       )}
       overlay={
-        runInputOpen && currentWorkflowInputs ? (
-          <RunInputDialog
-            inputs={currentWorkflowInputs}
-            workflowName={currentWorkflowName}
-            serverErrors={runInputServerErrors}
-            submitting={runInputSubmitting}
-            onSubmit={submitRunInput}
-            onCancel={() => setRunInputOpen(false)}
-          />
-        ) : undefined
+        <>
+          <BudgetBlockedBanner onOpenTab={setActiveTab} />
+          {runInputOpen && currentWorkflowInputs ? (
+            <RunInputDialog
+              inputs={currentWorkflowInputs}
+              workflowName={currentWorkflowName}
+              serverErrors={runInputServerErrors}
+              submitting={runInputSubmitting}
+              onSubmit={submitRunInput}
+              onCancel={() => setRunInputOpen(false)}
+            />
+          ) : null}
+        </>
       }
     />
   )

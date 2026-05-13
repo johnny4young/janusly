@@ -42,6 +42,7 @@ import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
 import { fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
+import { checkBudget } from "./budget";
 import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
@@ -514,6 +515,37 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           prompt: previewText(prompt),
           response: fallbackAiResponse(String(prompt), ctx.context),
           contextKeys: Object.keys(ctx.context),
+        },
+      };
+    }
+
+    // Budget chokepoint. The block path degrades to mode:"fallback" with
+    // aiError:"budget_exceeded" so the workflow run continues to the next
+    // node via the existing AI-fallback path. AGENTS.md AI-fallback
+    // contract holds.
+    const budget = ctx.orgId
+      ? await checkBudget({ orgId: ctx.orgId, workflowId: ctx.workflowId ?? null })
+      : null;
+    if (budget && !budget.allowed) {
+      await appendEvent(ctx.runId, ctx.nodeId, "ai.budget_exceeded", {
+        scope: budget.resolvedScope,
+        monthlyUsdSpent: budget.monthlyUsdSpent,
+        monthlyUsdLimit: budget.monthlyUsdLimit,
+      });
+      return {
+        status: "completed",
+        output: {
+          mode: "fallback",
+          modelHint,
+          prompt: previewText(prompt),
+          aiError: "budget_exceeded",
+          response: fallbackAiResponse(String(prompt), ctx.context),
+          budget: {
+            monthlyUsdSpent: budget.monthlyUsdSpent,
+            monthlyUsdLimit: budget.monthlyUsdLimit,
+            policy: budget.policy,
+            exceededAt: budget.exceededAt,
+          },
         },
       };
     }

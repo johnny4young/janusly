@@ -11,7 +11,7 @@
  * Used by:
  * - `packages/data/src/budgetRepo.ts` (production wiring of the budget
  *   chokepoint DI seam).
- * - `apps/api/src/routes/billing-routes.ts` (admin PUT route).
+ * - `apps/api/src/routes/billing-routes.ts` (admin budget route).
  */
 
 import { and, eq } from "drizzle-orm";
