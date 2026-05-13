@@ -18,6 +18,17 @@ import React, { useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
+import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
+
+// Action-specific assumed token budgets used by the predicted-spend label.
+// Real spend varies; these are order-of-magnitude indicators chosen from
+// typical run sizes against `anthropic/claude-haiku-4-5-20251001`. Future
+// tickets can refine these with measured medians from `usage_events`.
+const ASSUMED_TOKEN_BUDGETS: Record<'generate' | 'explain' | 'review', { input: number; output: number }> = {
+  generate: { input: 4_000, output: 2_000 },
+  explain: { input: 2_000, output: 1_000 },
+  review: { input: 4_000, output: 1_500 },
+}
 
 type ReviewSeverity = 'info' | 'warn' | 'fail'
 
@@ -274,14 +285,17 @@ export function AiCopilotPanel({
           <button className="command-button command-button-primary" disabled={loading === 'generate' || !prompt.trim()} onClick={generate}>
             <Sparkles size={16} aria-hidden="true" />
             <span>{loading === 'generate' ? 'Drafting…' : 'Draft flow'}</span>
+            <CostEstimateChip action="generate" model={health?.model} />
           </button>
           <button className="command-button" disabled={loading === 'explain'} onClick={explain}>
             <CheckCircle2 size={16} aria-hidden="true" />
             <span>{loading === 'explain' ? 'Explaining…' : 'Explain this flow'}</span>
+            <CostEstimateChip action="explain" model={health?.model} />
           </button>
           <button className="command-button" disabled={loading === 'review'} onClick={review}>
             <ShieldCheck size={16} aria-hidden="true" />
             <span>{loading === 'review' ? 'Reviewing…' : 'Review this flow'}</span>
+            <CostEstimateChip action="review" model={health?.model} />
           </button>
         </div>
       </section>
@@ -386,5 +400,29 @@ export function AiCopilotPanel({
         </button>
       </section>
     </div>
+  )
+}
+
+/**
+ * Small inline label next to AI Studio primary CTAs that surfaces the
+ * predicted USD cost for the action. Uses the zero-dep pricing helper
+ * in `@janusly/shared/src/llm-pricing` so there's no API round-trip.
+ *
+ * Honest UX: "(~$0.05)" is an order-of-magnitude indicator (assumed
+ * token budgets per action live in `ASSUMED_TOKEN_BUDGETS` at the top
+ * of this file). Real spend varies; the audit + Recovery Center Budget tile
+ * show the truth post-call.
+ */
+function CostEstimateChip({ action, model }: { action: 'generate' | 'explain' | 'review'; model?: string }) {
+  const label = useMemo(() => {
+    if (!model) return null
+    const budget = ASSUMED_TOKEN_BUDGETS[action]
+    const cost = estimatePromptCostUsd(model, budget.input, budget.output)
+    if (cost === null) return null
+    return formatEstimateLabel(cost)
+  }, [action, model])
+  if (!label) return null
+  return (
+    <small className="copilot-cost-chip" data-testid={`ai-cost-${action}`} aria-hidden="true">{label}</small>
   )
 }

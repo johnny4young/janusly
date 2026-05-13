@@ -222,6 +222,9 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -239,6 +242,9 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -253,6 +259,9 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return baseClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -283,6 +292,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -308,6 +320,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -325,6 +340,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -342,6 +360,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -360,6 +381,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -383,6 +407,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -401,6 +428,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
     render(<RecoveryCenterPanel
@@ -421,6 +451,12 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') throw new Error('Recovery metrics unavailable')
       if (path === '/dlq/clusters') return baseClusters
+      // The Budget tile (5th tile) reads /billing/budget on the same
+      // tick; stub a no-budget envelope so the test doesn't trip on an
+      // unmatched fetch.
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: null }
+      }
       throw new Error(`unexpected fetch: ${path}`)
     })
 
@@ -432,7 +468,13 @@ describe('<RecoveryCenterPanel /> — degraded metrics endpoint', () => {
     />)
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(/Metrics unavailable/i)
+      // Targeted match — the empty-budget tile also exposes role="status"
+      // text now that the budget tile is in the grid, so we filter by the
+      // unique "Metrics unavailable" copy instead of role-only.
+      const statuses = screen.getAllByRole('status')
+      const banner = statuses.find((node) => /Metrics unavailable/i.test(node.textContent ?? ''))
+      expect(banner).toBeDefined()
+      expect(banner).toHaveTextContent(/Metrics unavailable/i)
     })
     // The Recovery Center still renders the populated tiles even when metrics fail.
     expect(screen.getByTestId('recovery-center-tile-queue')).toBeInTheDocument()

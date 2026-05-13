@@ -37,8 +37,28 @@ describe('<OperationsPanel />', () => {
     useWorkflowStore.setState({ ...initialState, platformVersion: 0 }, true)
   })
 
+  // Dispatch helper — OperationsPanel mounts the FailureClustersCard
+  // and the BudgetSettingsPanel as children, each making their own
+  // api(...) calls on the same render tick. Order-of-effect is not
+  // guaranteed, so we stub by path rather than by order.
+  function stubApiByPath(handlers: Record<string, unknown | ((path: string, init?: RequestInit) => unknown)>) {
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      for (const key of Object.keys(handlers)) {
+        if (path === key || path.startsWith(`${key}?`)) {
+          const value = handlers[key]
+          if (typeof value === 'function') return (value as (path: string, init?: RequestInit) => unknown)(path, init)
+          return value as unknown
+        }
+      }
+      // Unmatched paths get a benign empty payload so child fetches
+      // (BudgetSettingsPanel's /org/config + /workflows) don't blow up
+      // the test assertions for OperationsPanel.
+      return Array.isArray(handlers["*"]) ? handlers["*"] : []
+    })
+  }
+
   it('renders the loading state while metrics are in flight', () => {
-    vi.mocked(api).mockReturnValueOnce(new Promise(() => undefined))
+    stubApiByPath({ '/recovery/metrics': new Promise(() => undefined) })
 
     render(<OperationsPanel />)
 
@@ -46,7 +66,7 @@ describe('<OperationsPanel />', () => {
   })
 
   it('renders metric cards, cost breakdown, and failure clusters on success', async () => {
-    vi.mocked(api).mockResolvedValueOnce(metricsPayload)
+    stubApiByPath({ '/recovery/metrics': metricsPayload })
 
     render(<OperationsPanel />)
 
@@ -58,7 +78,7 @@ describe('<OperationsPanel />', () => {
   })
 
   it('renders an error state when the metrics endpoint fails', async () => {
-    vi.mocked(api).mockRejectedValueOnce(new Error('service down'))
+    stubApiByPath({ '/recovery/metrics': Promise.reject(new Error('service down')) })
 
     render(<OperationsPanel />)
 

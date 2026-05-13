@@ -34,7 +34,14 @@ import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendJson } from "../http";
 import { applyConfigPatchToWorkflow, applyStructuralPatchToWorkflow } from "../patch-workflow-merge";
 import { enforceRateLimit } from "../rate-limit";
+import { attachBudgetEnvelope, budgetBlockedResponse, gateBudget, type GateBudgetOutcome } from "../budget-gate";
 import type { Route } from "../routes";
+
+function withBudgetWarning<T extends Record<string, unknown>>(response: T, budgetGate: GateBudgetOutcome): T {
+  return budgetGate.envelope.warningThresholdCrossed
+    ? attachBudgetEnvelope(response, budgetGate.envelope)
+    : response;
+}
 
 export const aiRoutes: Route[] = [
   // AI helpers
@@ -43,19 +50,23 @@ export const aiRoutes: Route[] = [
   { method: "POST", match: "/ai/generate-workflow",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const promptText = typeof body.prompt === "string" ? body.prompt : "";
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
       if (promptText.length > orgConfig.ai.promptMaxChars) {
         return sendJson(res, { error: `prompt exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
       }
+      // No workflowId yet — /ai/generate-workflow drafts a brand new flow.
+      // Only the org-level budget gate applies on this path.
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.workflow.generated" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!llm) {
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           ...(fallbackWorkflow ?? {}),
-        });
+        }, budgetGate));
       }
       try {
         // Schema-aware generation. The AI SDK plumbs the slim
@@ -108,29 +119,32 @@ export const aiRoutes: Route[] = [
           // families add a new key here without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
         });
-        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, ...workflow });
+        return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
         await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", fallbackWorkflow?.id, { mode: "fallback", error: message });
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
           ...(fallbackWorkflow ?? {}),
-        });
+        }, budgetGate));
       }
     } },
   { method: "POST", match: "/ai/explain-workflow",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const { workflow } = body;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const explainWorkflowIdEarly = workflow && typeof workflow === "object" && "id" in (workflow as object) && typeof (workflow as { id?: unknown }).id === "string" ? (workflow as { id: string }).id : undefined;
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowIdEarly, action: "ai.workflow.explained" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       if (!llm) {
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           explanation: fallbackExplainWorkflow(workflow),
-        });
+        }, budgetGate));
       }
       try {
         const explainWorkflowId = (workflow && typeof workflow === "object" && "id" in workflow && typeof (workflow as { id?: unknown }).id === "string")
@@ -142,15 +156,15 @@ export const aiRoutes: Route[] = [
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
         });
         await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
-        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, explanation: result.text });
+        return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, explanation: result.text }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
         await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "fallback", error: message });
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
           explanation: fallbackExplainWorkflow(workflow),
-        });
+        }, budgetGate));
       }
     } },
 
@@ -164,10 +178,13 @@ export const aiRoutes: Route[] = [
   { method: "POST", match: "/ai/review-workflow",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const reviewWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: reviewWorkflowIdEarly, action: "ai.workflow.reviewed" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const parsed = WorkflowSchema.safeParse(candidate);
       if (!parsed.success) {
         const issues = parsed.error.issues.map((issue) => ({
@@ -182,16 +199,16 @@ export const aiRoutes: Route[] = [
         // contract. Without this, "shape invalid" requests leave no
         // operator audit trail.
         await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", undefined, { mode: "fallback", reason: "invalid_workflow_shape" });
-        return sendJson(res, { mode: "fallback", aiError: "Workflow shape invalid", review: { status: "fail", issues } });
+        return sendJson(res, withBudgetWarning({ mode: "fallback", aiError: "Workflow shape invalid", review: { status: "fail", issues } }, budgetGate));
       }
 
       const workflow = parsed.data;
       if (!llm) {
         await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", reason: "no_llm_configured" });
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           review: buildReviewFallback(workflow),
-        });
+        }, budgetGate));
       }
 
       try {
@@ -215,15 +232,15 @@ export const aiRoutes: Route[] = [
           totalIssues: review.issues.length,
           blockingCount: review.issues.filter((issue) => issue.severity === "fail").length,
         });
-        return sendJson(res, { mode: "ai", model: result.model, provider: result.provider, review });
+        return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, review }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI review failed";
         await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", error: message });
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
           review: buildReviewFallback(workflow),
-        });
+        }, budgetGate));
       }
     } },
 
@@ -239,10 +256,16 @@ export const aiRoutes: Route[] = [
   { method: "POST", match: "/ai/patch-workflow", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
       if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+      // Org-level budget gate on recovery routes. The per-workflow gate
+      // would need the workflowId resolved from the DLQ's run, which we
+      // load below — gating after that load would let an over-budget org
+      // still spend on the load. Org-level here is the right cut.
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.workflow.patch_suggested" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
 
       // Multi-tenant gate via the existing repo helper.
       const dlq = await getDeadLetter(auth.orgId, deadLetterId);
@@ -515,7 +538,7 @@ export const aiRoutes: Route[] = [
         runId: dlq.runId,
       });
 
-      return sendJson(res, response);
+      return sendJson(res, withBudgetWarning(response, budgetGate));
     } },
 
   // Authoring assistant — suggest 1-3 high-impact improvements to a
@@ -533,11 +556,14 @@ export const aiRoutes: Route[] = [
   { method: "POST", match: "/ai/suggest-improvement", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
       const focus = typeof body.focus === "string" ? body.focus : undefined;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const suggestWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: suggestWorkflowIdEarly, action: "ai.workflow.improvement_suggested" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
 
       const parsed = WorkflowSchema.safeParse(candidate);
       if (!parsed.success) {
@@ -545,12 +571,12 @@ export const aiRoutes: Route[] = [
           mode: "fallback",
           reason: "invalid_workflow_shape",
         });
-        return sendJson(res, {
+        return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: "Workflow shape invalid",
           suggestions: [],
           rationale: `Workflow failed structural validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-        });
+        }, budgetGate));
       }
 
       const workflow = parsed.data;
@@ -668,19 +694,24 @@ export const aiRoutes: Route[] = [
         focusProvided: typeof focus === "string" && focus.trim().length > 0,
       });
 
-      return sendJson(res, response);
+      return sendJson(res, withBudgetWarning(response, budgetGate));
     } },
 
   { method: "POST", match: "/ai/explain-run",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
       const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
       const questionText = typeof question === "string" ? question : undefined;
       if (questionText && questionText.length > orgConfig.ai.promptMaxChars) {
         return sendJson(res, { error: `question exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
       }
+      // Org-level budget gate. The workflowId is on the run row we load
+      // below, but the run lookup itself is cheap and gating at org-level
+      // matches the recovery-path posture for /ai/patch-workflow.
+      const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.run.explained" });
+      if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
@@ -708,6 +739,6 @@ export const aiRoutes: Route[] = [
         provider: result.provider,
         aiError: result.aiError,
       });
-      return sendJson(res, result);
+      return sendJson(res, withBudgetWarning(result, budgetGate));
     } },
 ];

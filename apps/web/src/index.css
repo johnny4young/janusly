@@ -4167,3 +4167,288 @@ a { color: var(--we-primary); }
     transition: none !important;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* AI cost governance — Budget tile, Operations editor, 402 banner          */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+.we-recovery-center-budget {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.we-recovery-center-budget__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-center-budget__value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.we-recovery-center-budget__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--we-line) 50%, transparent);
+  overflow: hidden;
+}
+
+.we-recovery-center-budget__bar-rail {
+  position: absolute;
+  inset: 0;
+}
+
+.we-recovery-center-budget__bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 4px;
+  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease-out;
+}
+
+.we-recovery-center-budget__bar-fill--cobalt { background: var(--we-primary); }
+.we-recovery-center-budget__bar-fill--cyan { background: var(--we-accent); }
+.we-recovery-center-budget__bar-fill--success { background: var(--we-success); }
+.we-recovery-center-budget__bar-fill--warning { background: var(--we-warning); }
+.we-recovery-center-budget__bar-fill--danger { background: var(--we-danger); }
+
+.we-recovery-center-budget__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-center-budget__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+
+.we-recovery-center-budget__pill[data-severity="warning"] {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+}
+
+.we-recovery-center-budget__pill[data-severity="danger"] {
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+/* Budget settings (Operations) ----------------------------------------- */
+
+.we-budget-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.we-budget-settings__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.we-budget-settings__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+  flex-shrink: 0;
+}
+
+.we-budget-settings__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-1);
+}
+
+.we-budget-settings__fields legend {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--we-text-2);
+  padding: 0 8px;
+}
+
+.we-budget-settings__fields .we-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.we-budget-settings__fields .we-field span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--we-text-2);
+}
+
+.we-budget-settings__fields .we-field input,
+.we-budget-settings__fields .we-field select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-1);
+  color: var(--we-text-1);
+  font-size: 13px;
+}
+
+.we-budget-settings__fields .we-field small {
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-budget-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* AI Studio CTA cost chip --------------------------------------------- */
+
+.copilot-cost-chip {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--we-primary) 12%, transparent);
+  color: var(--we-primary);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.command-button-primary .copilot-cost-chip {
+  background: color-mix(in srgb, var(--we-surface-1) 24%, transparent);
+  color: var(--we-surface-1);
+}
+
+/* Budget blocked banner ----------------------------------------------- */
+
+.we-budget-banner {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--we-surface-1);
+  border: 1px solid color-mix(in srgb, var(--we-danger) 35%, transparent);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--we-danger) 12%, transparent);
+  animation: budget-banner-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.we-budget-banner__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+  flex-shrink: 0;
+}
+
+.we-budget-banner__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--we-text-1);
+  min-width: 0;
+}
+
+.we-budget-banner__copy strong {
+  color: var(--we-text-1);
+  font-weight: 600;
+}
+
+.we-budget-banner__copy span {
+  color: var(--we-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.we-budget-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.we-budget-banner__close {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+
+.we-budget-banner__close:hover {
+  background: color-mix(in srgb, var(--we-muted) 12%, transparent);
+}
+
+.we-budget-banner__close:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+@keyframes budget-banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (max-width: 760px) {
+  .we-budget-banner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px;
+  }
+  .we-budget-banner__actions {
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-recovery-center-budget__bar-fill,
+  .we-budget-banner {
+    transition: none !important;
+    animation: none !important;
+  }
+}

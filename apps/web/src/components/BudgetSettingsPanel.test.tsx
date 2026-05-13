@@ -1,0 +1,104 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '../api'
+import { useWorkflowStore } from '../store'
+import { BudgetSettingsPanel } from './BudgetSettingsPanel'
+
+vi.mock('../api', () => ({ api: vi.fn() }))
+
+const initialState = useWorkflowStore.getState()
+
+function mockBudgetApi() {
+  vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path === '/org/config' && init?.method === 'POST') {
+      return JSON.parse(String(init.body))
+    }
+    if (path === '/org/config') {
+      return {
+        config: [
+          { key: 'ai.budgetMonthlyUsd', value: 25.5, source: 'db' },
+          { key: 'ai.budgetWarnPercent', value: 75, source: 'db' },
+          { key: 'ai.budgetExceededPolicy', value: 'block', source: 'db' },
+        ],
+      }
+    }
+    if (path === '/workflows') return [{ id: 'wf_1', name: 'Refund triage' }]
+    if (path.startsWith('/billing/budget?workflowId=wf_1')) {
+      return {
+        allowed: true,
+        monthlyUsdSpent: 4,
+        monthlyUsdLimit: 7.5,
+        policy: 'block',
+        warningPercent: 70,
+        warningThresholdCrossed: false,
+        exceededAt: null,
+        resolvedScope: 'workflow',
+      }
+    }
+    if (path === '/workflows/wf_1/budget' && init?.method === 'POST') {
+      return { id: 'budget_1', workflowId: 'wf_1', monthlyUsd: 8, warnPercent: 70, policy: 'block' }
+    }
+    return []
+  })
+}
+
+describe('<BudgetSettingsPanel />', () => {
+  beforeEach(() => {
+    vi.mocked(api).mockReset()
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [], budgetBlocked: null }, true)
+  })
+
+  it('loads org budget values from the /org/config envelope', async () => {
+    mockBudgetApi()
+
+    render(<BudgetSettingsPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('budget-org-monthly')).toHaveValue(25.5)
+    })
+    expect(screen.getByTestId('budget-org-warn')).toHaveValue(75)
+    expect(screen.getByTestId('budget-org-policy')).toHaveValue('block')
+  })
+
+  it('loads an existing workflow override into all workflow fields', async () => {
+    mockBudgetApi()
+
+    render(<BudgetSettingsPanel />)
+
+    fireEvent.change(await screen.findByTestId('budget-workflow-select'), { target: { value: 'wf_1' } })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('budget-workflow-monthly')).toHaveValue(7.5)
+    })
+    expect(screen.getByTestId('budget-workflow-warn')).toHaveValue(70)
+    expect(screen.getByTestId('budget-workflow-policy')).toHaveValue('block')
+  })
+
+  it('saves org budget fields through the existing org config route and bumps platformVersion', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    const monthly = await screen.findByTestId('budget-org-monthly')
+    fireEvent.change(monthly, { target: { value: '33' } })
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/org/config', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ key: 'ai.budgetMonthlyUsd', value: 33 }),
+      }))
+    })
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
+
+  it('rejects fractional warning thresholds before saving', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    fireEvent.change(await screen.findByTestId('budget-org-warn'), { target: { value: '80.5' } })
+    fireEvent.click(screen.getByTestId('budget-org-save'))
+
+    await screen.findByText(/Warning threshold must be a whole number/i)
+    expect(api).not.toHaveBeenCalledWith('/org/config', expect.objectContaining({ method: 'POST' }))
+  })
+})
