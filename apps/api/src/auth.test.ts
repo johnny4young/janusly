@@ -46,6 +46,14 @@ vi.mock("@janusly/data/src/ssoConnectionsRepo", () => ({
   getSsoConnectionForOrg: (...args: unknown[]) => getSsoConnectionForOrg(...args),
 }));
 
+// Auth policy narrow-read mock. Returns "no policy set" defaults unless a
+// test overrides — keeps every existing test pass-through through the
+// centralized evaluator without changing assertions.
+const getAuthPolicyConfig = vi.fn();
+vi.mock("@janusly/data/src/orgConfigRepo", () => ({
+  getAuthPolicyConfig: (...args: unknown[]) => getAuthPolicyConfig(...args),
+}));
+
 vi.mock("./audit", () => ({
   audit: (...args: unknown[]) => auditMock(...args),
 }));
@@ -66,6 +74,7 @@ beforeEach(() => {
   acceptInvitation.mockReset();
   findVerifiedDomain.mockReset();
   getSsoConnectionForOrg.mockReset();
+  getAuthPolicyConfig.mockReset();
   auditMock.mockReset();
   // Default: repos return "no rows" so each test only overrides what it cares about.
   getMembershipForOrgUser.mockResolvedValue(null);
@@ -73,6 +82,11 @@ beforeEach(() => {
   findMemberByEmail.mockResolvedValue(null);
   findPendingInvitation.mockResolvedValue(null);
   findVerifiedDomain.mockResolvedValue(null);
+  getAuthPolicyConfig.mockResolvedValue({
+    allowedEmailDomains: [],
+    mfaRequired: false,
+    sessionTtlSeconds: 28800,
+  });
   getSsoConnectionForOrg.mockResolvedValue(null);
   auditMock.mockResolvedValue(undefined);
 });
@@ -615,6 +629,61 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     }));
     expect(auth?.mode).toBe("service-token");
     expect(auth?.orgId).toBe("org-sso");
+  });
+
+  it("auth.allowedEmailDomains policy rejects a Supabase principal whose email domain is outside the allow-list", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-bad", email: "bob@evil.com" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "default", userId: "user-bad", email: "bob@evil.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+    getAuthPolicyConfig.mockResolvedValueOnce({
+      allowedEmailDomains: ["acme.com"],
+      mfaRequired: false,
+      sessionTtlSeconds: 28800,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "default",
+    }));
+    // Policy rejection trumps the existing membership row.
+    expect(auth).toBeNull();
+    expect(auditMock).toHaveBeenCalledWith(
+      "default",
+      "user-bad",
+      "auth.policy.rejected",
+      "user",
+      "user-bad",
+      expect.objectContaining({
+        policyKey: "auth.allowedEmailDomains",
+        email: "bob@evil.com",
+      }),
+    );
+  });
+
+  it("auth.allowedEmailDomains policy lets in-list email pass through", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-ok", email: "alice@acme.com" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "default", userId: "user-ok", email: "alice@acme.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+    getAuthPolicyConfig.mockResolvedValueOnce({
+      allowedEmailDomains: ["acme.com"],
+      mfaRequired: false,
+      sessionTtlSeconds: 28800,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "default",
+    }));
+    expect(auth?.orgId).toBe("default");
+    expect(auth?.mode).toBe("supabase");
   });
 
   it("x-org-id header takes precedence over user_metadata.orgId for the scope hint", async () => {

@@ -53,6 +53,7 @@ import { findVerifiedDomain } from "@janusly/data/src/verifiedDomainsRepo";
 import { verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "./audit";
+import { evaluateAuthPolicy } from "./auth-policy";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -350,20 +351,22 @@ async function resolveJanuslyMembership(
 ): Promise<{ orgId: string; mode: AuthMode } | null> {
   const membership = await resolvePrincipalToOrg(principal);
   if (!membership) return null;
-  // Enforced-SSO check. When the target org has an active SSO row with
-  // `enforced_sso: true`, only `janusly-session` (the SSO-issued token)
-  // and `service-token` (infrastructure callers) are allowed through.
-  // `ALLOW_DEV_SSO_BYPASS=true` is the explicit dev escape hatch — the
-  // gate always fires when the flag is unset, including outside
-  // production, so a staging-on-prod misconfig fails closed instead of
-  // silently bypassing the gate.
-  if (membership.mode === "supabase" || membership.mode === "dev-headers") {
-    const sso = await getSsoConnectionForOrg(membership.orgId);
-    if (sso && sso.status === "active" && sso.enforcedSso) {
-      const devBypass = process.env.ALLOW_DEV_SSO_BYPASS === "true";
-      if (!devBypass) return null;
-    }
-  }
+  // Centralized policy evaluation. Runs enforced-SSO, allowed-email-domains,
+  // and MFA-marker checks behind a single auditable seam. Rejections are
+  // logged by the evaluator as `auth.policy.rejected` audit rows. The
+  // resolver only cares about the boolean allow/reject — the session-TTL
+  // field is consumed downstream by the SSO callback. We pass
+  // `ssoConnection: undefined` (not the result of a prefetch) so the
+  // evaluator handles the read via its own fail-soft `safeReadSsoConnection`
+  // helper — a DB blip on `sso_connections` cannot throw past this
+  // resolver boundary and 500 every authenticated request.
+  const decision = await evaluateAuthPolicy({
+    orgId: membership.orgId,
+    userId: principal.providerUserId,
+    mode: membership.mode,
+    email: principal.providerUserEmail,
+  });
+  if (!decision.allowed) return null;
   return membership;
 }
 

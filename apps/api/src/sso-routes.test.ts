@@ -37,6 +37,14 @@ vi.mock("@janusly/data/src/orgMembersRepo", () => ({
   upsertMembership: (...args: unknown[]) => upsertMembership(...args),
 }));
 
+// Auth policy narrow-read mock. Returns "no policy set" defaults unless a
+// test overrides — keeps the existing 9 SSO tests passing through the
+// new policy gate.
+const getAuthPolicyConfig = vi.fn();
+vi.mock("@janusly/data/src/orgConfigRepo", () => ({
+  getAuthPolicyConfig: (...args: unknown[]) => getAuthPolicyConfig(...args),
+}));
+
 vi.mock("./workos", async () => {
   const actual = await vi.importActual<typeof import("./workos")>("./workos");
   return {
@@ -75,6 +83,12 @@ beforeEach(() => {
     role: "viewer", invitedBy: null, createdAt: null,
   });
   auditMock.mockResolvedValue(undefined);
+  getAuthPolicyConfig.mockReset();
+  getAuthPolicyConfig.mockResolvedValue({
+    allowedEmailDomains: [],
+    mfaRequired: false,
+    sessionTtlSeconds: 28800,
+  });
   vi.stubEnv("NODE_ENV", "development");
   vi.stubEnv("SUPABASE_URL", "");
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
@@ -400,5 +414,92 @@ describe("/auth/sso/callback", () => {
     expect(upsertMembership).not.toHaveBeenCalled();
     expect(auditMock).toHaveBeenCalledWith("org-a", "sso", "auth.sso.callback_failed",
       "sso_connection", "sso-1", expect.objectContaining({ reason: "connection_id_mismatch" }));
+  });
+
+  it("rejects callback when allowed-domains policy blocks the profile email", async () => {
+    const state = await issueValidState("org-a");
+    consumeSsoNonce.mockResolvedValueOnce(true);
+    getSsoConnectionForOrg.mockResolvedValueOnce({
+      id: "sso-1", orgId: "org-a", provider: "workos",
+      providerConnectionId: "conn_test", status: "active", enforcedSso: false,
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+    exchangeCode.mockResolvedValueOnce({
+      id: "user-sso-1", email: "bob@partner.com",
+      firstName: null, lastName: null,
+      connectionId: "conn_test", organizationId: null,
+    });
+    getAuthPolicyConfig.mockResolvedValueOnce({
+      allowedEmailDomains: ["acme.com"],
+      mfaRequired: false,
+      sessionTtlSeconds: 28800,
+    });
+
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/auth/sso/callback");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq(`/auth/sso/callback?code=test_code&state=${encodeURIComponent(state)}`) as never,
+      res: res as never,
+      auth: { orgId: "", userId: "", mode: "dev-headers", source: "dev" },
+    });
+
+    expect(res.statusCode).toBe(403);
+    // No JIT upsert.
+    expect(upsertMembership).not.toHaveBeenCalled();
+    // SSO audit row carries policy reason.
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-a",
+      "user-sso-1",
+      "auth.sso.callback_failed",
+      "sso_connection",
+      "sso-1",
+      expect.objectContaining({ reason: "policy_rejected", policyKey: "auth.allowedEmailDomains" }),
+    );
+  });
+
+  it("issues session token with org-policy TTL when set", async () => {
+    const state = await issueValidState("org-a");
+    consumeSsoNonce.mockResolvedValueOnce(true);
+    getSsoConnectionForOrg.mockResolvedValueOnce({
+      id: "sso-1", orgId: "org-a", provider: "workos",
+      providerConnectionId: "conn_test", status: "active", enforcedSso: false,
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+    exchangeCode.mockResolvedValueOnce({
+      id: "user-sso-1", email: "alice@acme.com",
+      firstName: "Alice", lastName: null,
+      connectionId: "conn_test", organizationId: null,
+    });
+    // 30-minute org-level override.
+    getAuthPolicyConfig.mockResolvedValueOnce({
+      allowedEmailDomains: [],
+      mfaRequired: false,
+      sessionTtlSeconds: 1800,
+    });
+
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/auth/sso/callback");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq(`/auth/sso/callback?code=test_code&state=${encodeURIComponent(state)}`) as never,
+      res: res as never,
+      auth: { orgId: "", userId: "", mode: "dev-headers", source: "dev" },
+    });
+
+    expect(res.statusCode).toBe(302);
+    const target = res.getHeader("location") as string;
+    expect(target).toContain("#janusly_session=");
+    // Decode the session token from the redirect target and verify TTL.
+    const tokenMatch = target.match(/#janusly_session=([^&]+)$/);
+    expect(tokenMatch).not.toBeNull();
+    const token = decodeURIComponent(tokenMatch![1]);
+    const [, payloadB64] = token.split(".");
+    const envelope = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8")) as {
+      issuedAt: number;
+      expiresAt: number;
+    };
+    // TTL is the diff between expiresAt and issuedAt.
+    expect(envelope.expiresAt - envelope.issuedAt).toBe(1800);
   });
 });

@@ -18,7 +18,7 @@
  */
 
 import { db, orgConfigs } from "@janusly/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 export type OrgConfigValueType = "string" | "number" | "boolean";
 export type OrgConfigSource = "default" | "env" | "tenant";
@@ -38,6 +38,10 @@ export type OrgConfigDefinition = {
    *  pre-existing integer keys (rate limits, byte caps, etc.) keep their
    *  existing behaviour. */
   fractional?: boolean;
+  /** When `true`, the string normalizer accepts `""` (typically used by
+   *  list-shaped keys where empty means "no restriction"). Defaults
+   *  false so existing string keys still reject empty inputs. */
+  allowEmpty?: boolean;
 };
 
 export type OrgConfigEntry = OrgConfigDefinition & {
@@ -93,7 +97,7 @@ export type OrgConfigSnapshot = {
   };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations", "objectstore"] as const;
+const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations", "objectstore", "auth"] as const;
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -312,6 +316,33 @@ export const ORG_CONFIG_DEFINITIONS = [
     envKeys: ["JANUSLY_OBJECT_STORE_PROVIDER"],
     allowedValues: ["s3", "local", "noop"],
   },
+  {
+    key: "auth.allowedEmailDomains",
+    category: "auth",
+    description:
+      "Comma-separated list of email domains permitted to authenticate into this org (e.g. \"acme.com,partner.com\"). Empty = no restriction. The membership resolver rejects any principal whose email domain is not in the list. Applies to both Supabase JWT logins and post-callback SSO sessions — defense in depth against an IdP that surfaces users from unintended domains.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+  },
+  {
+    key: "auth.mfaRequired",
+    category: "auth",
+    description:
+      "Marker only — Janusly stores the requirement for policy visibility but does not block logins. Actual MFA enforcement happens at the identity provider (Okta, Azure AD, etc.). When set, the policy evaluator logs a server-side warning if the principal lacks a verifiable MFA hint.",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "auth.sessionTtlSeconds",
+    category: "auth",
+    description:
+      "Per-org override for the SSO session token TTL (in seconds). Range 300..86400 (5 minutes..24 hours). Default 28800 (8 hours). The SSO callback reads this at token issuance time; runtime session-token verification uses each token's own embedded expiry, so changing this only affects newly-minted sessions.",
+    valueType: "number",
+    defaultValue: 28800,
+    min: 300,
+    max: 86400,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -391,8 +422,15 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
     return normalized;
   }
 
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${definition.key} must be a non-empty string`);
+  if (typeof value !== "string") throw new Error(`${definition.key} must be a string`);
   const normalized = value.trim();
+  if (!normalized) {
+    // List-shaped keys (e.g. allowed-domain lists) opt-in to empty via
+    // `allowEmpty: true` — empty means "no restriction" for those keys.
+    // Existing string keys still reject empty inputs.
+    if (definition.allowEmpty) return "";
+    throw new Error(`${definition.key} must be a non-empty string`);
+  }
   if (FORBIDDEN_CONFIG_VALUE_PATTERN.test(normalized)) {
     throw new Error(`${definition.key} must not contain secret-like values`);
   }
@@ -490,6 +528,88 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       provider: readString(values, "objectstore.provider"),
     },
   };
+}
+
+/**
+ * Per-org authentication policy snapshot consumed by the auth resolver +
+ * SSO callback. Narrow read by design — the membership resolver runs on
+ * every authenticated request, so fetching the full 22-key snapshot
+ * there would double the per-request query budget.
+ *
+ * `allowedEmailDomains` is parsed from the comma-separated string
+ * (lowercased, trimmed, empty entries dropped). Empty list = no
+ * restriction.
+ */
+export type AuthPolicyConfig = {
+  allowedEmailDomains: string[];
+  mfaRequired: boolean;
+  sessionTtlSeconds: number;
+};
+
+const AUTH_POLICY_KEYS = [
+  "auth.allowedEmailDomains",
+  "auth.mfaRequired",
+  "auth.sessionTtlSeconds",
+] as const satisfies readonly OrgConfigKey[];
+
+function authPolicyDefault(): AuthPolicyConfig {
+  return {
+    allowedEmailDomains: [],
+    mfaRequired: ORG_CONFIG_DEFINITIONS.find((d) => d.key === "auth.mfaRequired")!
+      .defaultValue as boolean,
+    sessionTtlSeconds: ORG_CONFIG_DEFINITIONS.find(
+      (d) => d.key === "auth.sessionTtlSeconds",
+    )!.defaultValue as number,
+  };
+}
+
+function parseAllowedDomains(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length > 0);
+}
+
+/**
+ * Read just the `auth.*` policy keys for an org. Used by
+ * `apps/api/src/auth-policy.ts` on the hot path; do not extend this to
+ * read non-auth keys — keep the query scoped to ≤3 rows.
+ *
+ * Returns catalog defaults when the org has no row for a given key.
+ * Multi-tenant scope: every read carries `eq(orgConfigs.orgId, orgId)`.
+ */
+export async function getAuthPolicyConfig(orgId: string): Promise<AuthPolicyConfig> {
+  const policy = authPolicyDefault();
+  let rows: Array<typeof orgConfigs.$inferSelect> = [];
+  try {
+    rows = await db
+      .select()
+      .from(orgConfigs)
+      .where(and(eq(orgConfigs.orgId, orgId), inArray(orgConfigs.key, [...AUTH_POLICY_KEYS])));
+  } catch (err) {
+    console.warn(`[auth-policy] failed to read org_configs for ${orgId}; using defaults`, err);
+    return policy;
+  }
+  const byKey = new Map(rows.map((row) => [row.key, row.valueJson]));
+  for (const key of AUTH_POLICY_KEYS) {
+    const stored = byKey.get(key);
+    if (stored === undefined) continue;
+    if (key === "auth.allowedEmailDomains") {
+      if (typeof stored === "string") policy.allowedEmailDomains = parseAllowedDomains(stored);
+      continue;
+    }
+    if (key === "auth.mfaRequired") {
+      if (typeof stored === "boolean") policy.mfaRequired = stored;
+      continue;
+    }
+    if (key === "auth.sessionTtlSeconds") {
+      if (typeof stored === "number" && Number.isFinite(stored)) {
+        policy.sessionTtlSeconds = stored;
+      }
+      continue;
+    }
+  }
+  return policy;
 }
 
 /** Overlay tenant config onto process env names consumed by provider/runtime helpers. */
