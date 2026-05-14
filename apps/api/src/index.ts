@@ -65,6 +65,7 @@ import { dlqRoutes } from "./routes/dlq-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { membersRoutes } from "./routes/members-routes";
 import { orgRoutes } from "./routes/org-routes";
+import { rolesRoutes } from "./routes/roles-routes";
 import { scimRoutes } from "./routes/scim-routes";
 import { ssoRoutes } from "./routes/sso-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
@@ -93,6 +94,7 @@ export const routes: Route[] = [
   ...membersRoutes,
   ...ssoRoutes,
   ...scimRoutes,
+  ...rolesRoutes,
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,

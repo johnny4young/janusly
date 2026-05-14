@@ -6,8 +6,9 @@
  * Used by `RightPanel.tsx` (the `members` tab).
  *
  * Invariants:
- * - The role list `viewer | editor | admin` matches `apps/api/src/permissions.ts`.
- *   Don't drift one without the other.
+ * - The role list is dynamic — built-ins (`viewer`/`editor`/`admin`)
+ *   PLUS any custom roles defined for this org via the permission-
+ *   grants admin UI. Sourced from `GET /org/roles`.
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
@@ -16,11 +17,25 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 
-const roles: OrgRole[] = ['viewer', 'editor', 'admin']
-const roleCopy: Record<OrgRole, string> = {
+type OrgRoleEntry = {
+  name: string
+  isBuiltin: boolean
+  inheritsFrom: OrgRole
+  description: string | null
+}
+
+const BUILTIN_ROLE_COPY: Record<OrgRole, string> = {
   viewer: 'View runs and saved flows',
   editor: 'Build, save, and run flows',
   admin: 'Manage team, tools, and connections',
+}
+
+function describeRole(role: string, entry?: OrgRoleEntry): string {
+  if (entry && !entry.isBuiltin && entry.description) return entry.description
+  if (role === 'viewer' || role === 'editor' || role === 'admin') {
+    return BUILTIN_ROLE_COPY[role as OrgRole]
+  }
+  return entry ? `Custom role (inherits ${entry.inheritsFrom})` : 'Custom role'
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -28,9 +43,16 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 /** Render the members list with invite form + per-row role / remove controls. */
 export function MembersPanel() {
   const addToast = useWorkflowStore(state => state.addToast)
+  const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
+  const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [members, setMembers] = useState<OrgMember[]>([])
+  const [orgRoles, setOrgRoles] = useState<OrgRoleEntry[]>([
+    { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
+    { name: 'editor', isBuiltin: true, inheritsFrom: 'editor', description: null },
+    { name: 'admin', isBuiltin: true, inheritsFrom: 'admin', description: null },
+  ])
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<OrgRole>('viewer')
+  const [role, setRole] = useState<string>('viewer')
   const [pending, setPending] = useState(false)
 
   const load = useCallback(async () => {
@@ -43,6 +65,22 @@ export function MembersPanel() {
   }, [addToast])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    api('/org/roles')
+      .then((data) => {
+        if (cancelled) return
+        const rows = (data as { roles?: OrgRoleEntry[] })?.roles
+        if (Array.isArray(rows) && rows.length > 0) setOrgRoles(rows)
+      })
+      .catch(() => {
+        // Non-fatal: fall back to built-ins.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [platformVersion])
 
   const invite = async () => {
     const trimmed = email.trim()
@@ -59,6 +97,7 @@ export function MembersPanel() {
       })
       addToast(`Invited ${trimmed}`, 'success')
       setEmail('')
+      bumpPlatformVersion()
       await load()
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Invite failed', 'error')
@@ -67,13 +106,14 @@ export function MembersPanel() {
     }
   }
 
-  const updateRole = async (userId: string, nextRole: OrgRole) => {
+  const updateRole = async (userId: string, nextRole: string) => {
     try {
       await api('/members/role', {
         method: 'POST',
         body: JSON.stringify({ userId, role: nextRole }),
       })
       addToast('Role updated', 'success')
+      bumpPlatformVersion()
       await load()
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Update failed', 'error')
@@ -84,6 +124,7 @@ export function MembersPanel() {
     try {
       await api(`/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' })
       addToast('Member removed', 'success')
+      bumpPlatformVersion()
       await load()
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Remove failed', 'error')
@@ -114,12 +155,16 @@ export function MembersPanel() {
         <select
           id="member-role"
           value={role}
-          onChange={(event) => setRole(event.target.value as OrgRole)}
+          onChange={(event) => setRole(event.target.value)}
           className="text-field"
         >
-          {roles.map(option => <option key={option} value={option}>{option}</option>)}
+          {orgRoles.map(option => (
+            <option key={option.name} value={option.name}>
+              {option.name}{option.isBuiltin ? '' : ' (custom)'}
+            </option>
+          ))}
         </select>
-        <p className="helper-text">{roleCopy[role]}</p>
+        <p className="helper-text">{describeRole(role, orgRoles.find(r => r.name === role))}</p>
         <button onClick={invite} className="command-button command-button-primary" disabled={pending}>
           <UserPlus size={15} aria-hidden="true" />
           <span>{pending ? 'Inviting…' : 'Invite'}</span>
@@ -138,16 +183,20 @@ export function MembersPanel() {
         <div key={member.id} className="list-card member-row">
           <div>
             <strong>{member.email ?? member.userId}</strong>
-            <span>{roleCopy[member.role]}</span>
+            <span>{describeRole(member.role, orgRoles.find(r => r.name === member.role))}</span>
           </div>
           <div className="member-actions">
             <select
               className="text-field"
               value={member.role}
-              onChange={(event) => updateRole(member.userId, event.target.value as OrgRole)}
+              onChange={(event) => updateRole(member.userId, event.target.value)}
               aria-label={`Role for ${member.email ?? member.userId}`}
             >
-              {roles.map(option => <option key={option} value={option}>{option}</option>)}
+              {orgRoles.map(option => (
+                <option key={option.name} value={option.name}>
+                  {option.name}{option.isBuiltin ? '' : ' (custom)'}
+                </option>
+              ))}
             </select>
             <button
               type="button"

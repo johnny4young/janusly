@@ -23,7 +23,7 @@ const AI_BUDGET_CONFIG_KEYS = new Set([
 export const orgRoutes: Route[] = [
   { method: "GET", match: "/org/config",
     handler: async ({ res, auth }) => sendJson(res, { config: await listOrgConfig(auth.orgId) }) },
-  { method: "POST", match: "/org/config", role: "admin",
+  { method: "POST", match: "/org/config", role: "admin", permission: "org.config.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const key = typeof body.key === "string" ? body.key : "";

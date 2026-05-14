@@ -1,0 +1,140 @@
+/**
+ * Fine-grained permission catalog for organization role authorization.
+ *
+ * Each entry maps an explicit action (e.g. `dlq.replay`) to:
+ *   - a human-readable description (surfaced in the admin UI)
+ *   - the category it belongs to (UI grouping)
+ *   - the closed set of built-in roles that grant the permission by
+ *     default (`defaultRoles`).
+ *
+ * Per-org overrides live in `org_roles.grantedPermissions` (JSONB
+ * array of these keys). When no row exists for `(orgId, "editor")`
+ * with non-null `grantedPermissions`, the resolver falls back to the
+ * catalog defaults below.
+ *
+ * Adding a new permission means adding one entry to
+ * `PERMISSION_CATALOG` plus its default role assignment. Roles that
+ * existed at the time an org's override was saved DON'T automatically
+ * get the new permission — the admin must re-save to opt in. The
+ * admin UI surfaces a "X new permissions added since you last saved"
+ * pill on affected roles.
+ *
+ * Used by:
+ * - `apps/api/src/permissions.ts` (`getEffectivePermissions`,
+ *   `requirePermission`).
+ * - `apps/api/src/routes/roles-routes.ts` (catalog + roles CRUD).
+ * - `apps/web/src/components/PermissionGrantsPanel.tsx` (admin UI).
+ */
+
+import type { Role } from "./permissions";
+
+export type PermissionCategory =
+  | "workflows"
+  | "runs"
+  | "dlq"
+  | "recovery"
+  | "reports"
+  | "ai"
+  | "members"
+  | "org"
+  | "plugins";
+
+export type PermissionEntry = {
+  key: string;
+  category: PermissionCategory;
+  description: string;
+  defaultRoles: readonly Role[];
+};
+
+/**
+ * Closed catalog of permission keys. v1 ships 17 keys across 9
+ * categories. Mirrors the action categories exposed by the API surface
+ * today.
+ */
+export const PERMISSION_CATALOG = [
+  // workflows
+  { key: "workflows.read",       category: "workflows", description: "View workflows + versions + health",       defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "workflows.write",      category: "workflows", description: "Save / validate / rollback workflows",     defaultRoles: ["editor", "admin"] },
+  // runs
+  { key: "runs.read",            category: "runs",      description: "View runs and run history",                defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "runs.start",           category: "runs",      description: "Start runs via /start",                    defaultRoles: ["editor", "admin"] },
+  { key: "runs.cancel",          category: "runs",      description: "Cancel an in-flight run",                  defaultRoles: ["editor", "admin"] },
+  // dlq
+  { key: "dlq.read",             category: "dlq",       description: "View DLQ entries + clusters",              defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "dlq.replay",           category: "dlq",       description: "Replay a dead-lettered run/node",          defaultRoles: ["editor", "admin"] },
+  // recovery
+  { key: "recovery.read",        category: "recovery",  description: "View recovery metrics + delta",            defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "recovery.write",       category: "recovery",  description: "Submit recovery feedback",                 defaultRoles: ["editor", "admin"] },
+  // reports
+  { key: "reports.read",         category: "reports",   description: "Download run-explain reports",             defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "reports.deliver",      category: "reports",   description: "Deliver run-explain via Slack / GitHub / webhook", defaultRoles: ["editor", "admin"] },
+  // ai
+  { key: "ai.write",             category: "ai",        description: "Use AI generate / patch / suggest / explain", defaultRoles: ["editor", "admin"] },
+  // members
+  { key: "members.read",         category: "members",   description: "View members + invitations",               defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "members.write",        category: "members",   description: "Invite, remove, and change member roles",  defaultRoles: ["admin"] },
+  { key: "members.role_set",     category: "members",   description: "Change a member's role specifically",      defaultRoles: ["admin"] },
+  // org config / security
+  { key: "org.config.write",     category: "org",       description: "Edit org-level configuration (budget, auth policies, …)", defaultRoles: ["admin"] },
+  { key: "org.permissions.write",category: "org",       description: "Manage permission catalog overrides + custom roles", defaultRoles: ["admin"] },
+] as const satisfies readonly PermissionEntry[];
+
+export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];
+
+const PERMISSION_KEY_SET: ReadonlySet<string> = new Set(PERMISSION_CATALOG.map((e) => e.key));
+
+/**
+ * Type guard for runtime validation of permission-key strings (e.g.
+ * incoming admin requests, override JSONB blobs).
+ */
+export function isPermission(value: unknown): value is Permission {
+  return typeof value === "string" && PERMISSION_KEY_SET.has(value);
+}
+
+/**
+ * Default permission set per built-in role, derived once at module
+ * load from `PERMISSION_CATALOG`. The `ReadonlySet<Permission>` cast is
+ * the type-level guarantee against mutation — `Object.freeze` only
+ * freezes the wrapper object, not the inner `Set` instances. Don't
+ * call `.add()` / `.delete()` / `.clear()` on these from consumers;
+ * overrides construct new sets via `getEffectivePermissions`.
+ */
+export const DEFAULT_ROLE_PERMISSIONS: Readonly<Record<Role, ReadonlySet<Permission>>> = (() => {
+  const map: Record<Role, Set<Permission>> = { viewer: new Set(), editor: new Set(), admin: new Set() };
+  for (const entry of PERMISSION_CATALOG) {
+    for (const role of entry.defaultRoles) map[role].add(entry.key as Permission);
+  }
+  return Object.freeze({
+    viewer: map.viewer as ReadonlySet<Permission>,
+    editor: map.editor as ReadonlySet<Permission>,
+    admin: map.admin as ReadonlySet<Permission>,
+  });
+})();
+
+/**
+ * Permissions that the built-in `admin` role MUST always grant. The
+ * server forcibly re-includes these when an admin tries to save an
+ * override that excludes them — otherwise the admin would lock
+ * themselves out of the role-management surface itself.
+ *
+ * Custom roles with `inheritsFrom: "admin"` are NOT subject to this
+ * floor; an operator can create a narrower admin-rank role (e.g.
+ * `billing-admin` with only `org.config.write`) as long as the
+ * built-in `admin` role itself remains capable.
+ */
+export function mandatoryAdminPermissions(): readonly Permission[] {
+  return ["org.permissions.write", "members.write"];
+}
+
+/**
+ * Validate every key in an array against the catalog. Used by the
+ * roles repo at write time so a malformed override JSONB cannot land
+ * in the DB.
+ */
+export function assertPermissionsValid(permissions: readonly unknown[]): asserts permissions is readonly Permission[] {
+  for (const p of permissions) {
+    if (!isPermission(p)) {
+      throw new Error(`unknown permission key: ${String(p)}`);
+    }
+  }
+}

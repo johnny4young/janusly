@@ -233,7 +233,7 @@ export const dlqRoutes: Route[] = [
 
       return sendJson(res, { replayed, failed: errors.length, errors });
     } },
-  { method: "POST", match: "/dlq/replay", role: "editor",
+  { method: "POST", match: "/dlq/replay", role: "editor", permission: "dlq.replay",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
