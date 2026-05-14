@@ -292,6 +292,15 @@ When the LLM drafts a workflow, the system prompt now includes the live tool cat
 4. Pre-package three connections that "just work": GitHub MCP, Slack MCP, Filesystem MCP.
 5. Ship a "tool discovery" UX: connect once → workflow author sees all tools.
 
+### §5.2.0 Status Update (2026-05-14)
+
+**v1 shipped via ENG-094.** The `mcp_tool` node type, `mcp_connections` + `mcp_tool_descriptors` tables, transport-agnostic client (stdio + SSE), per-call executor with two-flag write consent + per-tool rate-limit + dry-run gate + audit + usage telemetry, and the admin `McpConnectionsPanel` + dedicated Inspector branch are all live. **Two intentional v1 deviations from the original §5.2 sketch:**
+
+- **HTTP transport deferred to v2.** SSE uses the same outbound target-policy validator up-front, while the SDK still owns the actual SSE fetch path. HTTP is redundant complexity for the few servers that ship it today.
+- **Tool catalog auto-population to the LLM is NOT in v1.** The system prompt in `apps/api/src/ai-prompts.ts` stays unchanged. Operators promote MCP tools to workflow steps manually via the Inspector — this avoids prompt injection from third-party tool descriptions reaching the LLM. A v2 `exposeToAi` per-connection opt-in (with description sanitisation) restores the original intent without the failure mode.
+
+Pre-packaged connections (GitHub / Slack / Filesystem) and the per-tool LLM exposure remain follow-ups under ENG-057.
+
 ---
 
 ## 6. Node catalog evolution

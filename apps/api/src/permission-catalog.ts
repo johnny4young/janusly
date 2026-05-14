@@ -37,7 +37,8 @@ export type PermissionCategory =
   | "ai"
   | "members"
   | "org"
-  | "plugins";
+  | "plugins"
+  | "mcp";
 
 export type PermissionEntry = {
   key: string;
@@ -47,7 +48,7 @@ export type PermissionEntry = {
 };
 
 /**
- * Closed catalog of permission keys. v1 ships 17 keys across 9
+ * Closed catalog of permission keys. v1 ships 19 keys across 10
  * categories. Mirrors the action categories exposed by the API surface
  * today.
  */
@@ -77,6 +78,9 @@ export const PERMISSION_CATALOG = [
   // org config / security
   { key: "org.config.write",     category: "org",       description: "Edit org-level configuration (budget, auth policies, …)", defaultRoles: ["admin"] },
   { key: "org.permissions.write",category: "org",       description: "Manage permission catalog overrides + custom roles", defaultRoles: ["admin"] },
+  // mcp client connections
+  { key: "mcp.connections.read", category: "mcp",       description: "View external MCP server connections + cached tool descriptors", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "mcp.connections.write",category: "mcp",       description: "Register / edit / delete external MCP server connections + enable per-tool descriptors", defaultRoles: ["admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];

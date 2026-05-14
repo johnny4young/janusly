@@ -77,6 +77,9 @@ export type OrgConfigSnapshot = {
   };
   mcp: {
     writeConsent: boolean;
+    clientWriteConsent: boolean;
+    clientRateLimitPerMin: number;
+    clientCommandAllowlist: string;
   };
   integrations: {
     slack: {
@@ -270,6 +273,31 @@ export const ORG_CONFIG_DEFINITIONS = [
     description: "Allow MCP write tools (workflows.save, etc.) to mutate this organization. Process-wide JANUSLY_MCP_WRITES_ENABLED must also be true. NO env fallback by design — each tenant must opt in explicitly via the admin API.",
     valueType: "boolean",
     defaultValue: false,
+  },
+  {
+    key: "mcp.clientWriteConsent",
+    category: "mcp",
+    description: "Allow Janusly's `mcp_tool` workflow steps to invoke write-side tools on external MCP servers. Process-wide JANUSLY_MCP_CLIENT_WRITES_ENABLED must also be true. NO env fallback by design — each tenant must opt in explicitly via the admin API.",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "mcp.clientRateLimitPerMin",
+    category: "mcp",
+    description: "Per-org rate limit for external `mcp_tool` invocations (per minute, applied as `mcp_client.<alias>.<toolName>` bucket).",
+    valueType: "number",
+    defaultValue: 60,
+    envKeys: ["JANUSLY_MCP_CLIENT_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
+    key: "mcp.clientCommandAllowlist",
+    category: "mcp",
+    description: "Comma-separated list of executable commands that stdio MCP connections in this org may spawn (e.g. \"node,uvx,npx\"). Empty = falls back to the process-wide JANUSLY_MCP_ALLOWED_COMMANDS env. The fail-closed posture means no stdio connection can be created unless at least one allowlist (env OR tenant) is non-empty.",
+    valueType: "string",
+    defaultValue: "",
+    envKeys: ["JANUSLY_MCP_ALLOWED_COMMANDS"],
+    allowEmpty: true,
   },
   {
     key: "slack.rateLimitPerMin",
@@ -509,6 +537,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     },
     mcp: {
       writeConsent: readBoolean(values, "mcp.writeConsent"),
+      clientWriteConsent: readBoolean(values, "mcp.clientWriteConsent"),
+      clientRateLimitPerMin: readNumber(values, "mcp.clientRateLimitPerMin"),
+      clientCommandAllowlist: readString(values, "mcp.clientCommandAllowlist"),
     },
     integrations: {
       slack: {
@@ -634,7 +665,9 @@ export function applyOrgConfigToEnv(
     JANUSLY_EMAIL_RATE_LIMIT_PER_MIN: String(config.email.rateLimitPerMin),
     JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
     JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
-    // `mcp.writeConsent` has no env overlay by design — see the catalog definition.
+    // `mcp.writeConsent` + `mcp.clientWriteConsent` have no env overlay by design — see the catalog definition.
+    JANUSLY_MCP_CLIENT_RATE_LIMIT_PER_MIN: String(config.mcp.clientRateLimitPerMin),
+    JANUSLY_MCP_ALLOWED_COMMANDS: config.mcp.clientCommandAllowlist,
     JANUSLY_SLACK_RATE_LIMIT_PER_MIN: String(config.integrations.slack.rateLimitPerMin),
     JANUSLY_GITHUB_RATE_LIMIT_PER_MIN: String(config.integrations.github.rateLimitPerMin),
     JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN: String(config.integrations.webhook.rateLimitPerMin),
