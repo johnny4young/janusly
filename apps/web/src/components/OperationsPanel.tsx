@@ -18,6 +18,7 @@ import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
+import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -163,6 +164,8 @@ export function OperationsPanel() {
           <BudgetSettingsPanel />
 
           <AuthPolicySettingsPanel />
+
+          <ScimDirectorySettingsPanel />
         </>
       )}
     </div>
