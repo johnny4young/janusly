@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
 import { useWorkflowStore } from './store'
 
-vi.mock('./auth', () => ({ supabase: null }))
+vi.mock('./auth', () => ({ supabase: null, getActiveOrg: () => 'default' }))
 
 function mockJsonResponse(status: number, payload: unknown) {
   vi.stubGlobal('fetch', vi.fn(async () => (

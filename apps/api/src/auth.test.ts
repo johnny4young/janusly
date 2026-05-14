@@ -8,6 +8,48 @@ vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({ auth: { getUser: supabaseGetUser } }),
 }));
 
+// Membership-resolver repo mocks. The resolver in `auth.ts` reads from
+// these four modules; tests configure their return values per case.
+const getMembershipForOrgUser = vi.fn();
+const listMembershipsForUser = vi.fn();
+const findMemberByEmail = vi.fn();
+const upsertMembership = vi.fn();
+const migrateMemberUserId = vi.fn();
+
+const findPendingInvitation = vi.fn();
+const acceptInvitation = vi.fn();
+
+const findVerifiedDomain = vi.fn();
+
+const getSsoConnectionForOrg = vi.fn();
+
+const auditMock = vi.fn();
+
+vi.mock("@janusly/data/src/orgMembersRepo", () => ({
+  getMembershipForOrgUser: (...args: unknown[]) => getMembershipForOrgUser(...args),
+  listMembershipsForUser: (...args: unknown[]) => listMembershipsForUser(...args),
+  findMemberByEmail: (...args: unknown[]) => findMemberByEmail(...args),
+  upsertMembership: (...args: unknown[]) => upsertMembership(...args),
+  migrateMemberUserId: (...args: unknown[]) => migrateMemberUserId(...args),
+}));
+
+vi.mock("@janusly/data/src/invitationsRepo", () => ({
+  findPendingInvitation: (...args: unknown[]) => findPendingInvitation(...args),
+  acceptInvitation: (...args: unknown[]) => acceptInvitation(...args),
+}));
+
+vi.mock("@janusly/data/src/verifiedDomainsRepo", () => ({
+  findVerifiedDomain: (...args: unknown[]) => findVerifiedDomain(...args),
+}));
+
+vi.mock("@janusly/data/src/ssoConnectionsRepo", () => ({
+  getSsoConnectionForOrg: (...args: unknown[]) => getSsoConnectionForOrg(...args),
+}));
+
+vi.mock("./audit", () => ({
+  audit: (...args: unknown[]) => auditMock(...args),
+}));
+
 // `auth.ts` checks supabase / service-token / dev-headers at module init.
 // Tests import the module AFTER stubbing env so the boot-time gate sees
 // the desired configuration. `vi.resetModules()` ensures each test gets a
@@ -15,6 +57,24 @@ vi.mock("@supabase/supabase-js", () => ({
 beforeEach(() => {
   vi.resetModules();
   supabaseGetUser.mockReset();
+  getMembershipForOrgUser.mockReset();
+  listMembershipsForUser.mockReset();
+  findMemberByEmail.mockReset();
+  upsertMembership.mockReset();
+  migrateMemberUserId.mockReset();
+  findPendingInvitation.mockReset();
+  acceptInvitation.mockReset();
+  findVerifiedDomain.mockReset();
+  getSsoConnectionForOrg.mockReset();
+  auditMock.mockReset();
+  // Default: repos return "no rows" so each test only overrides what it cares about.
+  getMembershipForOrgUser.mockResolvedValue(null);
+  listMembershipsForUser.mockResolvedValue([]);
+  findMemberByEmail.mockResolvedValue(null);
+  findPendingInvitation.mockResolvedValue(null);
+  findVerifiedDomain.mockResolvedValue(null);
+  getSsoConnectionForOrg.mockResolvedValue(null);
+  auditMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -43,6 +103,21 @@ function stubDevHeadersEnv() {
   vi.stubEnv("SUPABASE_URL", "");
   vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
   vi.stubEnv("ALLOW_DEV_AUTH_HEADERS", "");
+}
+
+function supabaseUserFixture(overrides: { id?: string; email?: string | null; orgId?: string | null } = {}) {
+  const user_metadata: Record<string, unknown> = {};
+  if (overrides.orgId !== undefined && overrides.orgId !== null) user_metadata.orgId = overrides.orgId;
+  return {
+    data: {
+      user: {
+        id: overrides.id ?? "user-1",
+        email: overrides.email === undefined ? "user@example.com" : overrides.email,
+        user_metadata,
+      },
+    },
+    error: null,
+  };
 }
 
 describe("getAuth — source attribution across modes", () => {
@@ -132,9 +207,10 @@ describe("getAuth — source attribution across modes", () => {
 describe("getAuth — provider boundary contract", () => {
   it("Supabase JWT hardcodes source=web even when x-janusly-source: mcp is sent", async () => {
     stubSupabaseEnv();
-    supabaseGetUser.mockResolvedValueOnce({
-      data: { user: { id: "user-1", user_metadata: { orgId: "org-a" } } },
-      error: null,
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ orgId: "org-a" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "org-a", userId: "user-1", email: "user@example.com",
+      role: "viewer", invitedBy: null, createdAt: null,
     });
 
     const { getAuth } = await import("./auth");
@@ -143,49 +219,13 @@ describe("getAuth — provider boundary contract", () => {
     // consent gate by tagging an ordinary Supabase login as MCP.
     const auth = await getAuth(makeReq({
       authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-a",
       "x-janusly-source": "mcp",
     }));
 
     expect(auth).not.toBeNull();
     expect(auth?.mode).toBe("supabase");
     expect(auth?.source).toBe("web");
-  });
-
-  it("Supabase JWT without user_metadata.orgId resolves orgId to 'default'", async () => {
-    stubSupabaseEnv();
-    supabaseGetUser.mockResolvedValueOnce({
-      data: { user: { id: "user-1", user_metadata: {} } },
-      error: null,
-    });
-
-    const { getAuth } = await import("./auth");
-    // Behavior snapshot — the "default" fallback is the untrusted
-    // JWT-claim seam that a future migration to `org_members` will
-    // delete. Pinning it here is the guardrail so that migration is
-    // an intentional flip, not an accidental one.
-    const auth = await getAuth(makeReq({
-      authorization: "Bearer supabase-jwt",
-    }));
-
-    expect(auth?.mode).toBe("supabase");
-    expect(auth?.orgId).toBe("default");
-    expect(auth?.userId).toBe("user-1");
-  });
-
-  it("Supabase JWT with user_metadata.orgId surfaces that org id", async () => {
-    stubSupabaseEnv();
-    supabaseGetUser.mockResolvedValueOnce({
-      data: { user: { id: "user-1", user_metadata: { orgId: "acme" } } },
-      error: null,
-    });
-
-    const { getAuth } = await import("./auth");
-    const auth = await getAuth(makeReq({
-      authorization: "Bearer supabase-jwt",
-    }));
-
-    expect(auth?.mode).toBe("supabase");
-    expect(auth?.orgId).toBe("acme");
   });
 
   it("service-token mode rejects a Bearer header with wrong length (timing-safe compare invariant)", async () => {
@@ -214,9 +254,6 @@ describe("getAuth — provider boundary contract", () => {
     vi.stubEnv("API_SERVICE_TOKEN", "tok-1234");
 
     const { getAuth } = await import("./auth");
-    // Wrong service token → service-token miss; no `x-org-id` /
-    // `x-user-id` → dev-headers miss; no Supabase configured →
-    // supabase miss. Result: null → 401 at the dispatcher.
     const auth = await getAuth(makeReq({
       authorization: "Bearer wrong-token",
     }));
@@ -232,10 +269,6 @@ describe("getAuth — provider boundary contract", () => {
     });
 
     const { getAuth } = await import("./auth");
-    // When Supabase is configured, the dev-headers path is disabled
-    // unless ALLOW_DEV_AUTH_HEADERS is set explicitly. A rejected JWT
-    // returns null (401 at the dispatcher), never silently downgrades
-    // to dev-headers.
     const auth = await getAuth(makeReq({
       authorization: "Bearer rejected-jwt",
       "x-org-id": "org-a",
@@ -243,5 +276,268 @@ describe("getAuth — provider boundary contract", () => {
     }));
 
     expect(auth).toBeNull();
+  });
+});
+
+describe("getAuth — Supabase membership resolution (org_members + invitations + verified domains + SSO)", () => {
+  it("direct match: existing org_members row resolves to that org", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-1", email: "user@example.com" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "org-a", userId: "user-1", email: "user@example.com",
+      role: "editor", invitedBy: null, createdAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-a",
+    }));
+
+    expect(auth?.mode).toBe("supabase");
+    expect(auth?.orgId).toBe("org-a");
+    expect(auth?.userId).toBe("user-1");
+  });
+
+  it("missing membership and no provisioning paths returns null", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ email: "alice@nobody.com" }));
+
+    const { getAuth } = await import("./auth");
+    // Hint to a real-looking org; no membership, no pending invite, no
+    // verified domain, no SSO. Before membership hardening this would
+    // have silently resolved to `orgId: "default"` (or whatever hint was
+    // sent). Now the resolver fails closed.
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-b",
+    }));
+
+    expect(auth).toBeNull();
+  });
+
+  it("wrong org: user has membership in orgA, hint is orgB, no provisioning paths → null", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-1", email: "alice@nobody.com" }));
+    listMembershipsForUser.mockResolvedValueOnce([
+      { id: "m-1", orgId: "org-a", userId: "user-1", email: "alice@nobody.com",
+        role: "viewer", invitedBy: null, createdAt: null },
+    ]);
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-b",
+    }));
+
+    expect(auth).toBeNull();
+  });
+
+  it("invite acceptance: pending invitation matches → resolver accepts, upserts, audits", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-1", email: "alice@example.com" }));
+    findPendingInvitation.mockResolvedValueOnce({
+      id: "inv-1", orgId: "org-b", email: "alice@example.com",
+      role: "editor", invitedBy: "admin-1", status: "pending",
+      acceptedAt: null, createdAt: null,
+    });
+    upsertMembership.mockResolvedValueOnce({
+      id: "m-2", orgId: "org-b", userId: "user-1", email: "alice@example.com",
+      role: "editor", invitedBy: "admin-1", createdAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-b",
+    }));
+
+    expect(auth?.orgId).toBe("org-b");
+    expect(auth?.mode).toBe("supabase");
+    expect(acceptInvitation).toHaveBeenCalledWith({ id: "inv-1", orgId: "org-b" });
+    expect(upsertMembership).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-b",
+      userId: "user-1",
+      role: "editor",
+    }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-b",
+      "user-1",
+      "member.joined",
+      "member",
+      "user-1",
+      expect.objectContaining({ via: "invitation", invitationId: "inv-1" }),
+    );
+  });
+
+  it("verified-domain join: email domain matches a row for the org → resolver upserts with default role", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-2", email: "bob@acme.com" }));
+    findVerifiedDomain.mockResolvedValueOnce({
+      id: "vd-1", orgId: "org-c", domain: "acme.com",
+      defaultRole: "viewer", createdAt: null,
+    });
+    upsertMembership.mockResolvedValueOnce({
+      id: "m-3", orgId: "org-c", userId: "user-2", email: "bob@acme.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-c",
+    }));
+
+    expect(auth?.orgId).toBe("org-c");
+    expect(findVerifiedDomain).toHaveBeenCalledWith({ orgId: "org-c", domain: "acme.com" });
+    expect(upsertMembership).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-c",
+      userId: "user-2",
+      role: "viewer",
+      email: "bob@acme.com",
+    }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-c",
+      "user-2",
+      "member.joined",
+      "member",
+      "user-2",
+      expect.objectContaining({ via: "verified_domain", domain: "acme.com" }),
+    );
+  });
+
+  it("SSO JIT handoff: active SSO row + no other path → null (seam for the SSO provider's JIT-provisioner)", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ email: "carol@nobody.com" }));
+    getSsoConnectionForOrg.mockResolvedValueOnce({
+      id: "sso-1", orgId: "org-d", provider: "workos",
+      providerConnectionId: "conn_xyz", status: "active",
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    // SSO seam: a Supabase principal landing here without a membership
+    // means the SSO provider's extractor hasn't run. Fail closed; the
+    // future provider will JIT-provision before this resolver is reached.
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-d",
+    }));
+
+    expect(auth).toBeNull();
+    expect(getSsoConnectionForOrg).toHaveBeenCalledWith("org-d");
+    expect(upsertMembership).not.toHaveBeenCalled();
+  });
+
+  it("legacy email orphan: pre-resolver `userId = email` row is rewritten to the real UUID on first sign-in", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-3", email: "dora@example.com" }));
+    // Direct lookup misses (no row with userId = UUID), but the email
+    // lookup finds the legacy `userId = email` placeholder row.
+    findMemberByEmail.mockResolvedValueOnce({
+      id: "m-legacy",
+      orgId: "org-e",
+      userId: "dora@example.com",
+      email: "dora@example.com",
+      role: "editor",
+      invitedBy: "admin-2",
+      createdAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-e",
+    }));
+
+    expect(auth?.orgId).toBe("org-e");
+    expect(auth?.mode).toBe("supabase");
+    expect(migrateMemberUserId).toHaveBeenCalledWith({
+      id: "m-legacy",
+      orgId: "org-e",
+      newUserId: "user-3",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-e",
+      "user-3",
+      "member.userid.migrated",
+      "member",
+      "m-legacy",
+      expect.objectContaining({ from: "dora@example.com", to: "user-3" }),
+    );
+  });
+
+  it("multi-membership without a hint returns null (forces the client to send x-org-id)", async () => {
+    stubSupabaseEnv();
+    // No `user_metadata.orgId` claim and no `x-org-id` header → no hint.
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-4", orgId: null }));
+    listMembershipsForUser.mockResolvedValueOnce([
+      { id: "m-1", orgId: "org-a", userId: "user-4", email: null,
+        role: "viewer", invitedBy: null, createdAt: null },
+      { id: "m-2", orgId: "org-b", userId: "user-4", email: null,
+        role: "viewer", invitedBy: null, createdAt: null },
+    ]);
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+    }));
+
+    expect(auth).toBeNull();
+  });
+
+  it("single-membership without a hint resolves to that org silently", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-5", orgId: null }));
+    listMembershipsForUser.mockResolvedValueOnce([
+      { id: "m-1", orgId: "org-only", userId: "user-5", email: null,
+        role: "viewer", invitedBy: null, createdAt: null },
+    ]);
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+    }));
+
+    expect(auth?.orgId).toBe("org-only");
+    expect(auth?.mode).toBe("supabase");
+  });
+
+  it("Supabase JWT without user_metadata.orgId AND no x-org-id header AND no memberships returns null", async () => {
+    stubSupabaseEnv();
+    // The previous boundary snapshot asserted `orgId: "default"` here.
+    // Membership hardening inverts the contract: an unmembered Supabase
+    // user with no scope hint fails closed. This is the explicit
+    // migration of the contract.
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-6", orgId: null }));
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+    }));
+
+    expect(auth).toBeNull();
+  });
+
+  it("x-org-id header takes precedence over user_metadata.orgId for the scope hint", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-7", orgId: "claim-org" }));
+    getMembershipForOrgUser.mockImplementation(async (input) => {
+      if (input.orgId === "header-org" && input.userId === "user-7") {
+        return {
+          id: "m-7", orgId: "header-org", userId: "user-7", email: "user@example.com",
+          role: "viewer", invitedBy: null, createdAt: null,
+        };
+      }
+      return null;
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "header-org",
+    }));
+
+    expect(auth?.orgId).toBe("header-org");
   });
 });
