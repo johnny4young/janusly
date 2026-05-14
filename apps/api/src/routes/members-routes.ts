@@ -24,6 +24,7 @@ import {
 import { audit } from "../audit";
 import { EMAIL_PATTERN, MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
+import { getOrgRole } from "@janusly/data/src/orgRolesRepo";
 import { isRole } from "../permissions";
 import type { Route } from "../routes";
 
@@ -38,11 +39,20 @@ export const membersRoutes: Route[] = [
       const rows = await listInvitationsByOrg(auth.orgId);
       return sendJson(res, rows);
     } },
-  { method: "POST", match: "/members/invite", role: "admin",
+  { method: "POST", match: "/members/invite", role: "admin", permission: "members.write",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-      const role = isRole(body.role) ? body.role : "viewer";
+      const roleName = typeof body.role === "string" ? body.role.trim() : "viewer";
+      // Accept built-in roles OR custom roles defined for this org.
+      const role = isRole(roleName)
+        ? roleName
+        : (await getOrgRole({ orgId: auth.orgId, name: roleName }))
+          ? roleName
+          : null;
+      if (!role) {
+        return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
+      }
       if (!email) return sendJson(res, { error: "email is required" }, 400);
       if (!EMAIL_PATTERN.test(email) || email.length > 254) {
         return sendJson(res, { error: "email format is invalid" }, 400);
@@ -75,7 +85,7 @@ export const membersRoutes: Route[] = [
       });
       return sendJson(res, { id: invite.id, status: invite.status });
     } },
-  { method: "POST", match: (url) => /^\/members\/invitations\/[^/]+\/revoke$/.test(url), role: "admin",
+  { method: "POST", match: (url) => /^\/members\/invitations\/[^/]+\/revoke$/.test(url), role: "admin", permission: "members.write",
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/members\/invitations\/([^/?]+)\/revoke/);
       const id = match?.[1];
@@ -85,17 +95,26 @@ export const membersRoutes: Route[] = [
       await audit(auth.orgId, auth.userId, "invitation.revoked", "invitation", id, {});
       return sendJson(res, { ok: true });
     } },
-  { method: "POST", match: "/members/role", role: "admin",
+  { method: "POST", match: "/members/role", role: "admin", permission: "members.role_set",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const userId = typeof body.userId === "string" ? body.userId : "";
+      const roleName = typeof body.role === "string" ? body.role.trim() : "";
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
-      if (!isRole(body.role)) return sendJson(res, { error: "role must be viewer, editor, or admin" }, 400);
-      await db.update(orgMembers).set({ role: body.role }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
-      await audit(auth.orgId, auth.userId, "member.role.updated", "member", userId, { role: body.role });
+      // Accept built-in roles OR custom roles defined for this org.
+      const accepted = isRole(roleName)
+        ? roleName
+        : (await getOrgRole({ orgId: auth.orgId, name: roleName }))
+          ? roleName
+          : null;
+      if (!accepted) {
+        return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
+      }
+      await db.update(orgMembers).set({ role: accepted }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
+      await audit(auth.orgId, auth.userId, "member.role.updated", "member", userId, { role: accepted });
       return sendJson(res, { ok: true });
     } },
-  { method: "DELETE", match: (url) => url.startsWith("/members"), role: "admin",
+  { method: "DELETE", match: (url) => url.startsWith("/members"), role: "admin", permission: "members.write",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const userId = url.searchParams.get("userId");

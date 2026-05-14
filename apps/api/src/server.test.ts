@@ -13,14 +13,16 @@ vi.mock("./auth", () => ({
 }));
 
 vi.mock("./permissions", () => ({
+  requirePermission: vi.fn(async () => ({ name: "editor", inheritsFrom: "editor" })),
   requireRole: vi.fn(async () => "editor"),
 }));
 
 import { requireAuth } from "./auth";
-import { requireRole } from "./permissions";
+import { requirePermission, requireRole } from "./permissions";
 import { configureApiServerTimeouts, createApiServer } from "./server";
 
 const requireAuthMock = vi.mocked(requireAuth);
+const requirePermissionMock = vi.mocked(requirePermission);
 const requireRoleMock = vi.mocked(requireRole);
 
 afterEach(() => {
@@ -59,6 +61,7 @@ describe("createApiServer", () => {
       expect(response.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
       expect(requireAuthMock).not.toHaveBeenCalled();
       expect(requireRoleMock).not.toHaveBeenCalled();
+      expect(requirePermissionMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -87,6 +90,37 @@ describe("createApiServer", () => {
       await expect(response.json()).resolves.toEqual({ orgId: "org-1", userId: "user-1" });
       expect(requireAuthMock).toHaveBeenCalledTimes(1);
       expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "editor", "dev-headers");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("enforces declared permissions after auth and role gates", async () => {
+    const routes: Route[] = [
+      {
+        method: "POST",
+        match: "/permissioned",
+        role: "admin",
+        permission: "org.permissions.write",
+        handler: async ({ res }) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        },
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const response = await fetch(`${baseUrl}/permissioned`, {
+        method: "POST",
+        headers: { Origin: "http://localhost:5173" },
+      });
+
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(requireAuthMock).toHaveBeenCalledTimes(1);
+      expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "admin", "dev-headers");
+      expect(requirePermissionMock).toHaveBeenCalledWith("org-1", "user-1", "org.permissions.write", "dev-headers");
     } finally {
       await close(server);
     }

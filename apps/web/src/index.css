@@ -4329,6 +4329,191 @@ a { color: var(--we-primary); }
   gap: 8px;
 }
 
+.we-budget-settings__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.we-budget-settings__header h3,
+.we-permissions-role-card h4 {
+  margin: 0;
+}
+
+.we-budget-settings__status,
+.we-budget-settings__error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.we-budget-settings__status {
+  color: var(--we-text-2);
+}
+
+.we-budget-settings__error {
+  padding: 10px 12px;
+  border: 1px solid var(--we-danger);
+  border-radius: 8px;
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+.we-budget-settings__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-budget-settings__form .we-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-budget-settings__form .we-field__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--we-text-2);
+}
+
+.we-budget-settings__form .we-field__input {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface-1);
+  color: var(--we-text-1);
+  font: inherit;
+}
+
+.we-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  background: var(--we-surface-1);
+  color: var(--we-text-1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.we-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.we-button--primary {
+  border-color: var(--we-primary);
+  background: var(--we-primary);
+  color: var(--we-surface-1);
+}
+
+.we-button--ghost {
+  background: transparent;
+}
+
+.we-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.we-pill--info {
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.we-pill--warn {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+}
+
+.we-permissions-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-1);
+}
+
+.we-permissions-role-card header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.we-permissions-role-card header p {
+  margin: 0;
+  color: var(--we-text-2);
+  font-size: 12px;
+}
+
+.we-permissions-role-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.we-permissions-role-card--new {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface-1));
+}
+
+.we-permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.we-permissions-grid__category {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-2);
+}
+
+.we-permissions-grid__category > strong {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--we-text-2);
+}
+
+.we-permissions-grid__entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  font-size: 12px;
+}
+
+.we-permissions-grid__entry span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 /* AI Studio CTA cost chip --------------------------------------------- */
 
 .copilot-cost-chip {

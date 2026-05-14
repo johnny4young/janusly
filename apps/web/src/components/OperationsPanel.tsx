@@ -19,6 +19,7 @@ import { FailureClustersCard } from './FailureClustersCard'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
+import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -166,6 +167,8 @@ export function OperationsPanel() {
           <AuthPolicySettingsPanel />
 
           <ScimDirectorySettingsPanel />
+
+          <PermissionGrantsPanel />
         </>
       )}
     </div>

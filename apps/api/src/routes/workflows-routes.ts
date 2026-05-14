@@ -70,7 +70,7 @@ export const workflowsRoutes: Route[] = [
       const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt)).limit(limitValue);
       return sendJson(res, rows);
     } },
-  { method: "POST", match: "/workflows/save", role: "editor",
+  { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       // MCP-source mutations gate on the process-wide env AND the
       // tenant's `mcp.writeConsent` flag. Both must be true; otherwise

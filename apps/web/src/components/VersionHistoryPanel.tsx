@@ -56,8 +56,17 @@ type ImprovementState =
     }
   | { kind: 'fallback'; aiError: string }
 
-function canRollbackWithRole(role: OrgRole | null) {
-  return role === 'editor' || role === 'admin'
+/**
+ * UI gate: hide the Rollback / Suggest-improvement CTAs from read-only
+ * viewers. Custom roles (created via the permission-grants admin UI)
+ * carry org-defined names like `compliance`; the server is the
+ * authoritative gate (it consults the role's `inheritsFrom` rank and
+ * effective permission set), so the web only needs to err on the side
+ * of showing the CTA for any non-`viewer` non-null role and let the
+ * server reject if the actual permission is missing.
+ */
+function canRollbackWithRole(role: string | null | undefined) {
+  return typeof role === 'string' && role !== '' && role !== 'viewer'
 }
 
 /** Same role posture as Rollback — read-only viewers can't trigger AI mutation routes. */

@@ -25,6 +25,7 @@
 import type http from "http";
 import type { AuthContext } from "./auth";
 import type { Role } from "./permissions";
+import type { Permission } from "./permission-catalog";
 import type { CorsAwareResponse } from "./http";
 
 /** Either an exact-string URL match or a predicate function over the URL. */
@@ -48,6 +49,15 @@ export type Route = {
   skipAuth?: boolean;
   /** Required role checked after `requireAuth`. Omit for viewer-or-above. */
   role?: Role;
+  /**
+   * Required permission checked after `requireAuth` (and `role`, if
+   * both are set). When set, the dispatcher resolves the user's role
+   * + effective permission set and rejects when `permission` is
+   * absent. Use ALONE for routes whose access shouldn't depend on
+   * role rank, or ALONGSIDE `role:` for defense-in-depth (both gates
+   * must pass).
+   */
+  permission?: Permission;
   /** Handler runs after auth + RBAC; writes the response itself. */
   handler: (ctx: RouteContext) => Promise<unknown>;
 };

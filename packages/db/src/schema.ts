@@ -667,3 +667,45 @@ export const scimProcessedEvents = pgTable(
     index("scim_processed_events_processed_at_idx").on(table.processedAt),
   ],
 );
+
+/**
+ * Per-org role catalog: built-in role overrides + custom roles.
+ *
+ * The default `viewer`/`editor`/`admin` triad is VIRTUAL — no row exists
+ * for a built-in until an admin overrides its permission set. Custom
+ * roles (`compliance`, `ops-readonly`, etc.) ALWAYS have a row.
+ *
+ * `inheritsFrom` is the closed built-in name the role's RANK
+ * inherits from; preserves back-compat with `requireRole(min)` which
+ * uses the rank ordinal (`viewer=1`, `editor=2`, `admin=3`). Custom
+ * roles default to `inheritsFrom: "viewer"` (fail-closed).
+ * `inheritsFrom` is immutable on built-ins (`admin` always inherits
+ * from `admin`).
+ *
+ * `grantedPermissions` is the explicit permission set:
+ *  - Built-ins: NULL means "fall back to PERMISSION_CATALOG defaults".
+ *    Non-null replaces defaults entirely.
+ *  - Custom roles: MUST be non-null at creation.
+ *
+ * Unique on `(orgId, name)`. The membership resolver consults this
+ * table when `org_members.role` is not one of the 3 built-ins.
+ */
+export const orgRoles = pgTable(
+  "org_roles",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    inheritsFrom: text("inherits_from").notNull(),
+    description: text("description"),
+    isBuiltin: boolean("is_builtin").notNull().default(false),
+    grantedPermissions: jsonb("granted_permissions"),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("org_roles_org_name_idx").on(table.orgId, table.name),
+  ],
+);
