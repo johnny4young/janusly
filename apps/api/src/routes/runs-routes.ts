@@ -271,7 +271,7 @@ export const runsRoutes: Route[] = [
   // (engine helper) flips run + non-running nodes to "cancelled" and emits a
   // `run.cancelled` event. The worker's running job continues to completion;
   // the cancelled-stays-cancelled rollup absorbs the post-cancel writes.
-  { method: "POST", match: "/run/cancel", role: "editor",
+  { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const runId = typeof body.runId === "string" ? body.runId : null;

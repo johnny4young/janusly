@@ -37,8 +37,15 @@ const MIN_RUNS_FOR_DELTA = 5
 /** Threshold below which the card surfaces the regression-rollback affordance. */
 const REGRESSION_THRESHOLD = -3
 
-function canRollbackWithRole(role: OrgRole | null) {
-  return role === 'editor' || role === 'admin'
+/**
+ * UI gate: hide the Rollback CTA from read-only viewers. Custom roles
+ * carry org-defined names like `compliance`; the server is the
+ * authoritative gate (it consults `inheritsFrom` rank + effective
+ * permission set), so the web only needs to err on the side of
+ * showing the CTA for any non-`viewer` non-null role.
+ */
+function canRollbackWithRole(role: string | null | undefined) {
+  return typeof role === 'string' && role !== '' && role !== 'viewer'
 }
 
 /** Pre-save snapshot of the workflow's health state, captured at the moment Apply is clicked. */

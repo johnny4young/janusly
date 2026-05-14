@@ -14,7 +14,7 @@ import http from "http";
 
 import { requireAuth, type AuthContext } from "./auth";
 import { corsHeaders, sendJson, type CorsAwareResponse } from "./http";
-import { requireRole } from "./permissions";
+import { requirePermission, requireRole } from "./permissions";
 import { matchesRoute, type Route } from "./routes";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
@@ -107,6 +107,9 @@ async function dispatchRequest(
       auth = await requireAuth(req);
       if (matched.role) {
         await requireRole(auth.orgId, auth.userId, matched.role, auth.mode);
+      }
+      if (matched.permission) {
+        await requirePermission(auth.orgId, auth.userId, matched.permission, auth.mode);
       }
     }
 

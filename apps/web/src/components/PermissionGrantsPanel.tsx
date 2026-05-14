@@ -1,0 +1,365 @@
+/**
+ * Permission grants admin panel — mounted inside `OperationsPanel`.
+ *
+ * Renders the closed permission catalog as a checkbox grid grouped by
+ * category, with one card per role (built-ins first, custom roles
+ * after). Admins can:
+ *
+ *   - Override a built-in role's permission set (or revert to
+ *     catalog defaults).
+ *   - Create a custom role (`compliance`, `ops-readonly`, …) with
+ *     `inheritsFrom` rank inheritance + an explicit permission set.
+ *   - Edit / delete custom roles (built-ins can't be deleted).
+ *
+ * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
+ * panels that depend on roles (MembersPanel) refetch.
+ *
+ * Used by `OperationsPanel.tsx`.
+ */
+
+import React, { useEffect, useMemo, useState } from "react";
+import { KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+
+import { api } from "../api";
+import { useWorkflowStore } from "../store";
+
+type Role = "viewer" | "editor" | "admin";
+
+type CatalogEntry = {
+  key: string;
+  category: string;
+  description: string;
+  defaultRoles: readonly Role[];
+};
+
+type RoleEntry = {
+  name: string;
+  isBuiltin: boolean;
+  inheritsFrom: Role;
+  description: string | null;
+  grantedPermissions: string[];
+  isOverride: boolean;
+};
+
+const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
+
+export function PermissionGrantsPanel() {
+  const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
+  const addToast = useWorkflowStore((s) => s.addToast);
+  const platformVersion = useWorkflowStore((s) => s.platformVersion);
+
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [mandatoryAdmin, setMandatoryAdmin] = useState<string[]>([]);
+  const [roles, setRoles] = useState<RoleEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleInherits, setNewRoleInherits] = useState<Role>("viewer");
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [newRolePermissions, setNewRolePermissions] = useState<Set<string>>(new Set());
+  const [creating, setCreating] = useState(false);
+
+  // Per-role dirty checkbox state for editing
+  const [editing, setEditing] = useState<Record<string, Set<string>>>({});
+  const [savingRole, setSavingRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([api("/org/permissions/catalog"), api("/org/roles")])
+      .then(([catalogResp, rolesResp]) => {
+        if (cancelled) return;
+        const c = (catalogResp as { catalog?: CatalogEntry[]; mandatoryAdminPermissions?: string[] }) ?? {};
+        setCatalog(c.catalog ?? []);
+        setMandatoryAdmin(c.mandatoryAdminPermissions ?? []);
+        const r = (rolesResp as { roles?: RoleEntry[] }) ?? {};
+        setRoles(r.roles ?? []);
+        // Only seed `editing` for roles we haven't touched yet — refetches
+        // from a platformVersion bump must NOT clobber an admin's in-progress
+        // edits on roles they haven't saved yet. New roles that appeared in
+        // the server response (e.g. someone else created a custom role)
+        // still get their default initial state.
+        setEditing((prev) => {
+          const next: Record<string, Set<string>> = { ...prev };
+          for (const role of r.roles ?? []) {
+            if (!(role.name in next)) {
+              next[role.name] = new Set(role.grantedPermissions);
+            }
+          }
+          return next;
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load permissions");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [platformVersion]);
+
+  const grouped = useMemo(() => {
+    const out = new Map<string, CatalogEntry[]>();
+    for (const e of catalog) {
+      const list = out.get(e.category) ?? [];
+      list.push(e);
+      out.set(e.category, list);
+    }
+    return Array.from(out.entries());
+  }, [catalog]);
+
+  function toggleEditing(roleName: string, key: string) {
+    setEditing((prev) => {
+      const set = new Set(prev[roleName] ?? []);
+      if (set.has(key)) set.delete(key);
+      else set.add(key);
+      return { ...prev, [roleName]: set };
+    });
+  }
+
+  async function saveRole(role: RoleEntry) {
+    const granted = Array.from(editing[role.name] ?? new Set<string>()).sort();
+    setSavingRole(role.name);
+    try {
+      await api(`/org/roles/${encodeURIComponent(role.name)}`, {
+        method: "POST",
+        body: JSON.stringify({ grantedPermissions: granted }),
+      });
+      addToast(`Updated permissions for "${role.name}"`, "success");
+      bumpPlatformVersion();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "save failed", "error");
+    } finally {
+      setSavingRole(null);
+    }
+  }
+
+  async function revertBuiltin(role: RoleEntry) {
+    if (!window.confirm(`Revert ${role.name} to default permissions?`)) return;
+    try {
+      await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
+      addToast(`Reverted "${role.name}" to defaults`, "success");
+      bumpPlatformVersion();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "revert failed", "error");
+    }
+  }
+
+  async function deleteCustom(role: RoleEntry) {
+    if (!window.confirm(`Delete custom role "${role.name}"?`)) return;
+    try {
+      await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
+      addToast(`Deleted role "${role.name}"`, "success");
+      bumpPlatformVersion();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "delete failed", "error");
+    }
+  }
+
+  function toggleNewRolePermission(key: string) {
+    setNewRolePermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  async function createRole(event: React.FormEvent) {
+    event.preventDefault();
+    const name = newRoleName.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,32}$/.test(name)) {
+      setError("Role name must match a-z, 0-9, _, - (1-32 chars)");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      await api("/org/roles", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          inheritsFrom: newRoleInherits,
+          description: newRoleDescription.trim() || undefined,
+          grantedPermissions: Array.from(newRolePermissions).sort(),
+        }),
+      });
+      addToast(`Created custom role "${name}"`, "success");
+      setNewRoleName("");
+      setNewRoleDescription("");
+      setNewRolePermissions(new Set());
+      setNewRoleInherits("viewer");
+      bumpPlatformVersion();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "create failed");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <section className="we-budget-settings" aria-labelledby="permissions-heading">
+        <header className="we-budget-settings__header">
+          <KeyRound size={18} aria-hidden="true" />
+          <h3 id="permissions-heading">Permission grants</h3>
+        </header>
+        <p className="we-budget-settings__status">Loading permissions…</p>
+      </section>
+    );
+  }
+
+  const builtins = ROLE_ORDER.map((r) => roles.find((row) => row.name === r)).filter((r): r is RoleEntry => r !== undefined);
+  const customs = roles.filter((r) => !r.isBuiltin);
+
+  return (
+    <section className="we-budget-settings" aria-labelledby="permissions-heading">
+      <header className="we-budget-settings__header">
+        <KeyRound size={18} aria-hidden="true" />
+        <h3 id="permissions-heading">Permission grants</h3>
+      </header>
+
+      {error && (
+        <div className="we-budget-settings__error" role="alert">
+          {error}
+        </div>
+      )}
+
+      {[...builtins, ...customs].map((role) => {
+        const isAdminBuiltin = role.isBuiltin && role.name === "admin";
+        return (
+          <article key={role.name} className="we-permissions-role-card">
+            <header>
+              <h4>
+                <code>{role.name}</code>
+                {role.isBuiltin ? <span> (built-in)</span> : <span> (custom · inherits {role.inheritsFrom})</span>}
+                {role.isOverride && <span className="we-pill we-pill--info"> override</span>}
+              </h4>
+              {role.description && <p>{role.description}</p>}
+            </header>
+            <div className="we-permissions-grid">
+              {grouped.map(([category, entries]) => (
+                <div key={category} className="we-permissions-grid__category">
+                  <strong>{category}</strong>
+                  {entries.map((entry) => {
+                    const isMandatory = isAdminBuiltin && mandatoryAdmin.includes(entry.key);
+                    const checked = editing[role.name]?.has(entry.key) ?? false;
+                    return (
+                      <label key={entry.key} className="we-permissions-grid__entry">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={isMandatory}
+                          onChange={() => toggleEditing(role.name, entry.key)}
+                          aria-label={`${role.name} - ${entry.key}`}
+                        />
+                        <span title={entry.description}>{entry.key}</span>
+                        {isMandatory && <span className="we-pill we-pill--warn">required</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            <footer>
+              <button
+                type="button"
+                className="we-button we-button--primary"
+                onClick={() => saveRole(role)}
+                disabled={savingRole === role.name}
+              >
+                <Save size={14} aria-hidden="true" /> Save
+              </button>
+              {role.isBuiltin && role.isOverride && (
+                <button
+                  type="button"
+                  className="we-button we-button--ghost"
+                  onClick={() => revertBuiltin(role)}
+                >
+                  <RotateCcw size={14} aria-hidden="true" /> Revert to defaults
+                </button>
+              )}
+              {!role.isBuiltin && (
+                <button
+                  type="button"
+                  className="we-button we-button--ghost"
+                  onClick={() => deleteCustom(role)}
+                  aria-label={`Delete custom role ${role.name}`}
+                >
+                  <Trash2 size={14} aria-hidden="true" /> Delete
+                </button>
+              )}
+            </footer>
+          </article>
+        );
+      })}
+
+      <article className="we-permissions-role-card we-permissions-role-card--new">
+        <header>
+          <h4>Add custom role</h4>
+          <p>Create a role with a specific permission set. Inherits a built-in role's rank for back-compat with legacy role gates.</p>
+        </header>
+        <form className="we-budget-settings__form" onSubmit={createRole} noValidate>
+          <label className="we-field">
+            <span className="we-field__label">Name (a-z, 0-9, _, -)</span>
+            <input
+              type="text"
+              className="we-field__input"
+              value={newRoleName}
+              onChange={(e) => setNewRoleName(e.target.value)}
+              placeholder="compliance"
+              maxLength={32}
+            />
+          </label>
+          <label className="we-field">
+            <span className="we-field__label">Inherits rank from</span>
+            <select
+              className="we-field__input"
+              value={newRoleInherits}
+              onChange={(e) => setNewRoleInherits(e.target.value as Role)}
+            >
+              <option value="viewer">viewer (fail-closed, recommended)</option>
+              <option value="editor">editor</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+          <label className="we-field">
+            <span className="we-field__label">Description (optional)</span>
+            <input
+              type="text"
+              className="we-field__input"
+              value={newRoleDescription}
+              onChange={(e) => setNewRoleDescription(e.target.value)}
+              maxLength={240}
+            />
+          </label>
+          <div className="we-permissions-grid">
+            {grouped.map(([category, entries]) => (
+              <div key={category} className="we-permissions-grid__category">
+                <strong>{category}</strong>
+                {entries.map((entry) => (
+                  <label key={entry.key} className="we-permissions-grid__entry">
+                    <input
+                      type="checkbox"
+                      checked={newRolePermissions.has(entry.key)}
+                      onChange={() => toggleNewRolePermission(entry.key)}
+                      aria-label={`new-role-${entry.key}`}
+                    />
+                    <span title={entry.description}>{entry.key}</span>
+                  </label>
+                ))}
+              </div>
+            ))}
+          </div>
+          <button type="submit" className="we-button we-button--primary" disabled={creating}>
+            <Plus size={14} aria-hidden="true" /> {creating ? "Creating…" : "Create role"}
+          </button>
+        </form>
+      </article>
+    </section>
+  );
+}
