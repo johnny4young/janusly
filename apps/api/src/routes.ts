@@ -14,8 +14,9 @@
  *   ordering when refactoring or adding routes that overlap (e.g. `/runs`
  *   prefix vs `/run?` exact).
  * - `requireAuth` and `requireRole` run in the dispatcher, NOT inside
- *   handlers — handlers receive `auth` already-validated. Only `/health`
- *   sets `skipAuth: true`.
+ *   handlers — handlers receive `auth` already-validated. Public routes
+ *   (`/health`, `/auth/sso/start`, `/auth/sso/callback`) set
+ *   `skipAuth: true` and must not authorize from the synthetic auth context.
  * - Multi-tenant scope still lives inside each handler (per AGENTS.md). The
  *   dispatcher only handles auth + RBAC; per-row org checks (`run.orgId !==
  *   auth.orgId`) stay in the handler.
@@ -34,8 +35,8 @@ export type RouteContext = {
   req: http.IncomingMessage;
   res: CorsAwareResponse;
   /** Resolved auth context. The dispatcher casts to `AuthContext` after
-   * `requireAuth`; for `skipAuth` routes the cast is unsafe but only
-   * `/health` opts out and its handler doesn't read the field. */
+   * `requireAuth`; for `skipAuth` routes the cast is synthetic and must
+   * not be used for authorization. */
   auth: AuthContext;
 };
 
@@ -43,7 +44,7 @@ export type RouteContext = {
 export type Route = {
   method: "GET" | "POST" | "DELETE";
   match: RouteMatch;
-  /** When true, skip `requireAuth`. Only `/health` should set this. */
+  /** When true, skip `requireAuth`. Public routes must not trust the synthetic auth context. */
   skipAuth?: boolean;
   /** Required role checked after `requireAuth`. Omit for viewer-or-above. */
   role?: Role;

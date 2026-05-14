@@ -154,6 +154,85 @@ export function verifyResumeToken(
   return payload;
 }
 
+/**
+ * Generic signed-payload primitive built on the same HMAC chokepoint as
+ * `signResumeToken`. Used for purposes other than human-form resume —
+ * notably SSO state tokens (10-min TTL, bound to org + nonce + callback
+ * URL) and SSO session tokens (8-hour TTL, bound to org + user + email).
+ *
+ * The `purpose` discriminator is part of the signed envelope: an SSO
+ * session token cannot be replayed as a human-form resume token (and
+ * vice versa) even when both share `JANUSLY_RESUME_TOKEN_SECRET`. The
+ * underlying HMAC + base64url encoding is identical to the resume-token
+ * format, but the verifier requires the expected `purpose` to match
+ * exactly.
+ *
+ * Errors are uniform "Invalid signed token" so callers can map any
+ * failure to a single 401/400 without leaking which constraint failed.
+ */
+export type SignedTokenEnvelope<P extends string, T> = {
+  purpose: P;
+  payload: T;
+  /** Unix seconds. */
+  issuedAt: number;
+  /** Unix seconds. Expiry is checked against `issuedAt + ttlSeconds <= now`. */
+  expiresAt: number;
+};
+
+export function signSignedToken<P extends string, T>(input: {
+  purpose: P;
+  payload: T;
+  ttlSeconds: number;
+}): string {
+  const now = Math.floor(Date.now() / 1000);
+  const envelope: SignedTokenEnvelope<P, T> = {
+    purpose: input.purpose,
+    payload: input.payload,
+    issuedAt: now,
+    expiresAt: now + input.ttlSeconds,
+  };
+  const encoded = base64UrlEncode(JSON.stringify(envelope));
+  const signature = signPayload(encoded);
+  return `${RESUME_TOKEN_VERSION}.${encoded}.${signature}`;
+}
+
+export function verifySignedToken<P extends string, T>(
+  token: string,
+  expectedPurpose: P,
+): SignedTokenEnvelope<P, T> {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== RESUME_TOKEN_VERSION) {
+    throw new Error("Invalid signed token");
+  }
+
+  const [, encodedPayload, signature] = parts;
+  const expectedSignature = signPayload(encodedPayload);
+  if (!safeEqual(signature, expectedSignature)) {
+    throw new Error("Invalid signed token");
+  }
+
+  let envelope: SignedTokenEnvelope<P, T>;
+  try {
+    envelope = JSON.parse(base64UrlDecode(encodedPayload)) as SignedTokenEnvelope<P, T>;
+  } catch {
+    throw new Error("Invalid signed token");
+  }
+
+  if (
+    envelope.purpose !== expectedPurpose ||
+    typeof envelope.issuedAt !== "number" ||
+    typeof envelope.expiresAt !== "number"
+  ) {
+    throw new Error("Invalid signed token");
+  }
+
+  if (Math.floor(Date.now() / 1000) >= envelope.expiresAt) {
+    throw new Error("Invalid signed token");
+  }
+
+  return envelope;
+}
+
 function signPayload(encodedPayload: string): string {
   return createHmac("sha256", getResumeTokenSecret())
     .update(`${RESUME_TOKEN_VERSION}.${encodedPayload}`)

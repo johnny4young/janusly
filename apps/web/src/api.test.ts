@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
 import { useWorkflowStore } from './store'
 
-vi.mock('./auth', () => ({ supabase: null, getActiveOrg: () => 'default' }))
+let mockSessionToken: string | null = null
+vi.mock('./auth', () => ({
+  supabase: null,
+  getActiveOrg: () => 'default',
+  getSessionToken: () => mockSessionToken,
+}))
 
 function mockJsonResponse(status: number, payload: unknown) {
   vi.stubGlobal('fetch', vi.fn(async () => (
@@ -18,6 +23,7 @@ describe('api', () => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
     useWorkflowStore.getState().clearBudgetBlocked()
+    mockSessionToken = null
   })
 
   it('returns /start field validation envelopes so the run input form can map errors', async () => {
@@ -40,6 +46,22 @@ describe('api', () => {
     mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
 
     await expect(api('/validate', { method: 'POST' })).rejects.toThrow('Request failed with 400')
+  })
+
+  it('sends x-janusly-session instead of x-user-id when a session token is set', async () => {
+    mockSessionToken = 'js-session-token-abc'
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api('/ping')
+
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const headers = init.headers as Record<string, string>
+    expect(headers['x-janusly-session']).toBe('js-session-token-abc')
+    expect(headers['x-org-id']).toBe('default')
+    expect(headers['x-user-id']).toBeUndefined()
+    expect(headers['Authorization']).toBeUndefined()
   })
 
   it('stores the budget envelope on AI 402 responses before throwing', async () => {

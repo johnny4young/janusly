@@ -510,11 +510,47 @@ export const ssoConnections = pgTable(
     provider: text("provider").notNull(),
     providerConnectionId: text("provider_connection_id").notNull(),
     status: text("status").notNull().default("active"),
+    /**
+     * When true, the membership resolver rejects every non-SSO auth mode
+     * for this org (supabase / dev-headers).
+     * Service-token mode bypasses the check (infrastructure callers).
+     * The dev escape hatch is `ALLOW_DEV_SSO_BYPASS=true` — without it
+     * the gate fires even outside production, so staging-on-prod
+     * misconfigs fail closed instead of silently bypassing.
+     */
+    enforcedSso: boolean("enforced_sso").notNull().default(false),
     configJson: jsonb("config_json"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
     uniqueIndex("sso_connections_org_provider_idx").on(table.orgId, table.provider),
+  ],
+);
+
+/**
+ * One-time-use nonces for SSO state tokens. The `/auth/sso/start` route
+ * issues an HMAC-signed state carrying a fresh nonce; the callback
+ * route DELETE-and-checks the row. A row that's missing OR past
+ * `expiresAt` fails the consume call and the callback fails closed.
+ *
+ * Pruning is not automated — expired rows are harmless (the verifier
+ * checks `expiresAt > now` before honoring) and the table is small
+ * (only as wide as concurrent in-flight SSO logins per org). A future
+ * cleanup ticket can add a periodic sweep.
+ *
+ * Multi-tenant scope: every read carries `eq(ssoStateNonces.orgId, orgId)`.
+ */
+export const ssoStateNonces = pgTable(
+  "sso_state_nonces",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    nonce: text("nonce").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sso_state_nonces_org_nonce_idx").on(table.orgId, table.nonce),
   ],
 );

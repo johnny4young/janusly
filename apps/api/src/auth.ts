@@ -50,6 +50,7 @@ import {
 } from "@janusly/data/src/orgMembersRepo";
 import { getSsoConnectionForOrg } from "@janusly/data/src/ssoConnectionsRepo";
 import { findVerifiedDomain } from "@janusly/data/src/verifiedDomainsRepo";
+import { verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "./audit";
 
@@ -72,14 +73,14 @@ if (!supabase && isProduction && !explicitDevHeaders) {
 const allowDevHeaders = explicitDevHeaders || (!supabase && !isProduction);
 
 /** Auth mode label — records which provider extracted the request. */
-export type AuthMode = "supabase" | "dev-headers" | "service-token";
+export type AuthMode = "supabase" | "dev-headers" | "service-token" | "janusly-session";
 
 /**
  * Caller surface label. Informational only — never used as an
  * authorization gate. Real consent gates check server-controlled state
  * (env vars + `org_configs`).
  */
-export type AuthSource = "web" | "mcp" | "service" | "dev";
+export type AuthSource = "web" | "mcp" | "service" | "dev" | "sso";
 
 /** Resolved authentication context handed to each route. */
 export type AuthContext = {
@@ -162,6 +163,58 @@ function constantTimeBearerMatch(authHeader: string | undefined, expected: strin
   const a = Buffer.from(authHeader);
   const b = Buffer.from(expectedHeader);
   return timingSafeEqual(a, b);
+}
+
+/** Session token payload shape (signed via `signSignedToken({ purpose: "sso_session" })`). */
+type JanuslySessionPayload = {
+  orgId: string;
+  userId: string;
+  email: string;
+};
+
+/** SSO state token payload (used by /auth/sso/start ↔ /auth/sso/callback). */
+export type SsoStatePayload = {
+  orgId: string;
+  nonce: string;
+  callbackUrl: string;
+};
+
+/** Purpose discriminator constants (kept in this module so callers don't drift). */
+export const SSO_SESSION_PURPOSE = "sso_session" as const;
+export const SSO_STATE_PURPOSE = "sso_state" as const;
+
+/**
+ * Janusly-session provider — reads `x-janusly-session: <token>` issued
+ * by the SSO callback (`apps/api/src/routes/sso-routes.ts`). The token is
+ * an HMAC-signed envelope (purpose: `sso_session`) carrying the
+ * `{ orgId, userId, email }` triple plus issuedAt/expiresAt; tampering or
+ * expiry returns null.
+ *
+ * Source is hardcoded to `"sso"` — this provider only ever wraps an SSO
+ * login.
+ *
+ * Runs FIRST in `PROVIDER_CHAIN` so a fresh SSO session beats a stale
+ * Supabase cookie that the browser might still be carrying.
+ */
+async function extractJanuslySession(req: http.IncomingMessage): Promise<ProviderPrincipal | null> {
+  const header = req.headers["x-janusly-session"];
+  const token = typeof header === "string" && header.length > 0 ? header : null;
+  if (!token) return null;
+  try {
+    const envelope = verifySignedToken<typeof SSO_SESSION_PURPOSE, JanuslySessionPayload>(
+      token,
+      SSO_SESSION_PURPOSE,
+    );
+    return {
+      providerName: "janusly-session",
+      providerUserId: envelope.payload.userId,
+      providerUserEmail: envelope.payload.email ?? null,
+      providerOrgHint: envelope.payload.orgId,
+      declaredSource: "sso",
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -295,8 +348,40 @@ async function extractDevHeaders(req: http.IncomingMessage): Promise<ProviderPri
 async function resolveJanuslyMembership(
   principal: ProviderPrincipal,
 ): Promise<{ orgId: string; mode: AuthMode } | null> {
+  const membership = await resolvePrincipalToOrg(principal);
+  if (!membership) return null;
+  // Enforced-SSO check. When the target org has an active SSO row with
+  // `enforced_sso: true`, only `janusly-session` (the SSO-issued token)
+  // and `service-token` (infrastructure callers) are allowed through.
+  // `ALLOW_DEV_SSO_BYPASS=true` is the explicit dev escape hatch — the
+  // gate always fires when the flag is unset, including outside
+  // production, so a staging-on-prod misconfig fails closed instead of
+  // silently bypassing the gate.
+  if (membership.mode === "supabase" || membership.mode === "dev-headers") {
+    const sso = await getSsoConnectionForOrg(membership.orgId);
+    if (sso && sso.status === "active" && sso.enforcedSso) {
+      const devBypass = process.env.ALLOW_DEV_SSO_BYPASS === "true";
+      if (!devBypass) return null;
+    }
+  }
+  return membership;
+}
+
+async function resolvePrincipalToOrg(
+  principal: ProviderPrincipal,
+): Promise<{ orgId: string; mode: AuthMode } | null> {
   if (principal.providerName === "supabase") {
     return resolveSupabaseMembership(principal);
+  }
+  if (principal.providerName === "janusly-session") {
+    // The SSO callback already upserted the `org_members` row, so the
+    // direct-match branch of the Supabase resolver hits step 1 and
+    // returns immediately. The `mode` returned by that helper is
+    // hardcoded to "supabase" for the supabase branch; remap to
+    // "janusly-session" so downstream callers see the right mode.
+    const resolved = await resolveSupabaseMembership(principal);
+    if (!resolved) return null;
+    return { orgId: resolved.orgId, mode: "janusly-session" };
   }
   if (principal.providerName === "service-token") {
     return { orgId: principal.providerOrgHint ?? "default", mode: "service-token" };
@@ -411,12 +496,18 @@ async function resolveSupabaseMembership(
 
 
 /**
- * Provider chain in priority order: Supabase JWT first, then
- * service-token (so an MCP-style Bearer beats dev-headers), then
- * dev-headers. The first provider that produces a non-null
- * `ProviderPrincipal` wins; subsequent providers do not run.
+ * Provider chain in priority order: Janusly SSO session first (so a fresh
+ * SSO login beats any stale Supabase cookie), then Supabase JWT, then
+ * service-token (MCP-style Bearer beats dev-headers), then dev-headers.
+ * The first provider that produces a non-null `ProviderPrincipal` wins;
+ * subsequent providers do not run.
  */
-const PROVIDER_CHAIN = [extractSupabase, extractServiceToken, extractDevHeaders] as const;
+const PROVIDER_CHAIN = [
+  extractJanuslySession,
+  extractSupabase,
+  extractServiceToken,
+  extractDevHeaders,
+] as const;
 
 /**
  * Resolve the request's auth context, or `null` when no provider

@@ -6,8 +6,10 @@
  */
 
 import React, { useState } from 'react'
-import { LogIn, UserPlus } from 'lucide-react'
+import { Building2, LogIn, UserPlus } from 'lucide-react'
 import { AuthProvider } from '../auth'
+
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 
 type LoginMode = 'login' | 'signup'
 
@@ -18,6 +20,20 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [mode, setMode] = useState<LoginMode>('login')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [ssoOrgId, setSsoOrgId] = useState('')
+
+  const startSso = (event: React.FormEvent) => {
+    event.preventDefault()
+    const trimmed = ssoOrgId.trim()
+    if (!trimmed) {
+      setError('Org id is required for SSO login')
+      return
+    }
+    // Leave the SPA — the API issues a 302 to WorkOS, and the callback
+    // brings us back to /auth/sso/complete with the session token in
+    // the URL fragment.
+    window.location.href = `${API_URL}/auth/sso/start?orgId=${encodeURIComponent(trimmed)}`
+  }
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -90,6 +106,30 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
           }}
         >
           {mode === 'login' ? 'Need an account? Sign up' : 'Already a member? Log in'}
+        </button>
+
+        <div className="auth-divider" role="separator" aria-label="or">
+          <span>or</span>
+        </div>
+
+        <label className="field-label" htmlFor="auth-sso-org">Org id (for SSO)</label>
+        <input
+          id="auth-sso-org"
+          className="text-field"
+          type="text"
+          autoComplete="organization"
+          placeholder="e.g. acme"
+          value={ssoOrgId}
+          onChange={(event) => setSsoOrgId(event.target.value)}
+        />
+
+        <button
+          type="button"
+          className="command-button command-button-secondary auth-submit"
+          onClick={startSso}
+        >
+          <Building2 size={16} aria-hidden="true" />
+          <span>Continue with SSO</span>
         </button>
       </form>
     </div>
