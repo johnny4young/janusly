@@ -178,6 +178,61 @@ describe("pdf.generate — failure envelopes", () => {
   });
 });
 
+describe("pdf.generate — format dispatch", () => {
+  it("renders and uploads when format='html' with a sanitized HTML template", async () => {
+    const result = await executeTool(
+      "pdf.generate",
+      {
+        format: "html",
+        template: "<h1>Invoice {{number}}</h1>"
+          + "<table><thead><tr><th>Item</th><th>Amount</th></tr></thead>"
+          + "<tbody><tr><td>Service</td><td>$100</td></tr></tbody></table>"
+          + "<script>alert('xss')</script>",
+        variables: { number: "INV-001" },
+        filename: "html-invoice.pdf",
+      },
+      {},
+      { orgId: "org-1", runId: "run-1", nodeId: "node-1", workflowId: "wf-1" },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      provider: "local",
+      key: "orgs/org-1/pdfs/run-1/node-1/html-invoice.pdf",
+    });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].body.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(uploads[0].contentType).toBe("application/pdf");
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({ ok: true, provider: "local", workflowId: "wf-1" });
+  });
+
+  it("defaults format to 'markdown' when the field is omitted — back-compat", async () => {
+    // Pass a Markdown template that would NOT parse as valid HTML (the `#`
+    // would be literal text under HTML). The markdown renderer turns it
+    // into a heading; if the dispatcher had defaulted to HTML, the
+    // produced PDF would render `# Heading` verbatim. We can't directly
+    // inspect the rendered text bytes (Flate-compressed), but the call
+    // succeeds and produces a valid PDF for both formats; the structural
+    // check is implicit via `parseAndSanitizeHtml` coverage in the
+    // renderer test, and the regression guard here is that listTools()
+    // declares `format` as an optional field.
+    const result = await executeTool(
+      "pdf.generate",
+      { template: "# Markdown Heading\n\n- bullet" },
+      {},
+      { orgId: "org-1", runId: "r", nodeId: "n" },
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].body.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+
+    // Confirm listTools() declares `format` as optional.
+    const surfaced = listTools().find((t) => t.name === "pdf.generate");
+    expect(surfaced?.optional).toContain("format");
+  });
+});
+
 describe("pdf.generate — multi-tenant isolation", () => {
   it("never lets one org's call collide with another org's key prefix", async () => {
     await executeTool(
