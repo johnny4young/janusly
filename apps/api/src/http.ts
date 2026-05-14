@@ -111,6 +111,44 @@ export async function readJson(req: http.IncomingMessage, maxBytes: number) {
   });
 }
 
+/**
+ * Read the raw request body as a string (no JSON parse). Used by
+ * webhook handlers that must HMAC-verify against the exact bytes the
+ * sender signed — re-stringifying a parsed object does NOT round-trip
+ * byte-identically across implementations (key ordering, whitespace,
+ * unicode normalization). Enforces the same byte cap as `readJson`.
+ *
+ * Chunks are collected as Buffers and assembled with `Buffer.concat`
+ * before a single `toString("utf8")` decode at the end — incremental
+ * `body += chunk` would invoke the default decoder per chunk, which
+ * (a) replaces invalid UTF-8 bytes with U+FFFD and (b) mis-decodes
+ * multi-byte sequences split across a chunk boundary. Single-shot
+ * decode avoids both pitfalls.
+ */
+export async function readRawBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let receivedBytes = 0;
+    let rejected = false;
+
+    req.on("data", (chunk: Buffer) => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > maxBytes) {
+        rejected = true;
+        reject(httpError(`Request body too large. Limit is ${maxBytes} bytes`, 413));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("error", reject);
+    req.on("end", () => {
+      if (rejected) return;
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+  });
+}
+
 /** Narrow `unknown` to `Record<string, unknown>` (or `{}` on miss). Used for JSON-body destructuring. */
 export function asRecord(value: unknown) {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
