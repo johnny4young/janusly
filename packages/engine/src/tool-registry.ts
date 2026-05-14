@@ -35,7 +35,7 @@ import { parseIsoDuration } from "./iso-duration";
 import { evaluateJsonJq, parseJsonJqQuery } from "./json-jq";
 import { getMailer } from "./mailer";
 import { getObjectStore } from "./object-store";
-import { renderMarkdownToPdf } from "./pdf-renderer";
+import { renderHtmlToPdf, renderMarkdownToPdf } from "./pdf-renderer";
 import { getEngineRateLimiter } from "./rate-limit";
 import { getEmailUsageRecorder } from "./email-usage";
 import { getPdfUsageRecorder } from "./pdf-usage";
@@ -547,12 +547,28 @@ async function firePdfRecorder(input: {
 
 const pdfGenerateInput = z.object({
   /**
-   * Markdown source. `{{name}}` placeholders are substituted from the
-   * `variables` map before rendering. Plain Markdown — heading levels
-   * 1-3, paragraphs with bold/italic, bulleted + numbered lists, fenced
-   * code blocks, and `---` horizontal rules. HTML rendering deferred.
+   * Template source. The dialect is controlled by `format` (default
+   * `"markdown"`). `{{name}}` placeholders are substituted from the
+   * `variables` map BEFORE parsing in both dialects.
+   *
+   * - Markdown: heading levels 1-3, paragraphs with bold (`**…**`) /
+   *   italic (`*…*`), bulleted + numbered lists, fenced code blocks
+   *   (```` ``` ````), and `---` horizontal rules.
+   * - HTML: a sanitized subset parsed via `htmlparser2`. Whitelist covers
+   *   `<h1>`-`<h6>`, `<p>`, `<div>`, `<br>`, `<ul>`, `<ol>`, `<li>`, `<hr>`,
+   *   `<pre>`, `<code>`, `<strong>`/`<b>`, `<em>`/`<i>`, `<span>`,
+   *   `<a href>` (http/https only), and `<table>`/`<thead>`/`<tbody>`/`<tr>`/
+   *   `<th>`/`<td>` (with bounded `colspan`). `<script>`, `<style>`,
+   *   `<iframe>`, `<object>`, `<embed>`, `<link>`, `<meta>`, `<base>`,
+   *   `<form>`, `<input>`, `<img>`, `<svg>` and all `on*` attributes are
+   *   dropped silently.
    */
   template: z.string().min(1).max(200_000),
+  /**
+   * Template dialect. Defaults to `"markdown"` for backward compatibility
+   * — every existing call site continues working without code changes.
+   */
+  format: z.enum(["markdown", "html"]).default("markdown"),
   /**
    * Optional `{{name}}` substitutions. Coerced to strings at render
    * time. Unknown placeholders are left intact in the rendered PDF so
@@ -598,10 +614,11 @@ const pdfGenerateOutput = z.object({
 const tools = {
   "pdf.generate": defineTool({
     name: "pdf.generate",
-    description: "Render a Markdown template into a PDF and upload it to the configured object store.",
+    description: "Render a Markdown or HTML template into a PDF and upload it to the configured object store.",
     inputSchema: pdfGenerateInput,
     outputSchema: pdfGenerateOutput,
     inputExample: {
+      format: "markdown",
       template: "# Invoice {{number}}\n\nAmount: **{{amount}}**",
       variables: { number: "INV-001", amount: "$100.00" },
       filename: "invoice.pdf",
@@ -664,7 +681,8 @@ const tools = {
       let pdfBuffer: Buffer;
       let contentLength = 0;
       try {
-        const result = await renderMarkdownToPdf({
+        const renderer = input.format === "html" ? renderHtmlToPdf : renderMarkdownToPdf;
+        const result = await renderer({
           template: input.template,
           variables: input.variables,
           title: input.title,
