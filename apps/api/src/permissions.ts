@@ -21,7 +21,7 @@ import { and, eq } from 'drizzle-orm'
 /** Closed enum of org-level roles. */
 export type Role = 'viewer' | 'editor' | 'admin'
 /** Auth mode forwarded from `auth.ts` so dev-headers can fall back to admin. */
-export type AuthMode = 'supabase' | 'dev-headers' | 'service-token'
+export type AuthMode = 'supabase' | 'dev-headers' | 'service-token' | 'janusly-session'
 
 const rank: Record<Role, number> = {
   viewer: 1,
