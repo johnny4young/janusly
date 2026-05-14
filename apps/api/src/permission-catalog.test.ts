@@ -14,8 +14,13 @@ import {
 } from "./permission-catalog";
 
 describe("PERMISSION_CATALOG", () => {
-  it("ships at least the documented v1 set (17 keys)", () => {
-    expect(PERMISSION_CATALOG.length).toBeGreaterThanOrEqual(17);
+  it("ships at least the documented v1 set (19 keys after the MCP-client extension)", () => {
+    expect(PERMISSION_CATALOG.length).toBeGreaterThanOrEqual(19);
+  });
+
+  it("exposes the MCP-client connection permissions in the closed catalog", () => {
+    expect(isPermission("mcp.connections.read")).toBe(true);
+    expect(isPermission("mcp.connections.write")).toBe(true);
   });
 
   it("has unique keys", () => {

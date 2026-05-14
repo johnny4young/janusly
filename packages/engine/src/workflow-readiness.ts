@@ -56,7 +56,7 @@ export type ReadinessResult = {
 
 // External-call node types: each makes a network round-trip that can fail
 // transiently. Production workflows must declare a retry policy on these.
-const EXTERNAL_CALL_TYPES = new Set<WorkflowNode["type"]>(["http", "tool", "ai", "agent"]);
+const EXTERNAL_CALL_TYPES = new Set<WorkflowNode["type"]>(["http", "tool", "ai", "agent", "mcp_tool"]);
 
 // HTTP methods that mutate upstream state. A workflow that POSTs/PUTs/PATCHes
 // /DELETEs without an `approval` ancestor in the DAG triggers a warn — many

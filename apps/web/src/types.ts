@@ -49,6 +49,39 @@ export type RunSummary = {
 }
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
+
+export type McpTransport = 'stdio' | 'sse'
+export type McpConnectionStatus = 'pending' | 'active' | 'failed' | 'disabled'
+export type McpEnvRef = { kind: 'env'; name: string }
+export type McpConnection = {
+  id: string
+  orgId: string
+  alias: string
+  transport: McpTransport
+  command: string | null
+  args: string[] | null
+  url: string | null
+  envRefs: Record<string, McpEnvRef>
+  enabled: boolean
+  status: McpConnectionStatus
+  statusReason: string | null
+  lastDiscoveryAt?: string | null
+  toolCount?: number
+  enabledToolCount?: number
+  createdBy?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+export type McpToolDescriptor = {
+  id: string
+  connectionId: string
+  name: string
+  description: string | null
+  inputSchema: Record<string, unknown> | null
+  writeSide: boolean
+  enabled: boolean
+}
+
 export type AiMode = 'ai' | 'fallback' | 'error'
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'

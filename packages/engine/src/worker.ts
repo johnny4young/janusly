@@ -29,9 +29,10 @@ import { Worker, UnrecoverableError } from "bullmq";
 import { NodeSchema, WorkflowSchema } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setUsageRecorder } from "@janusly/ai";
-import { recordEmailUsage, recordIntegrationUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordIntegrationUsage, recordMcpUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
 import { setEmailUsageRecorder } from "./email-usage";
 import { setIntegrationUsageRecorder } from "./integration-usage";
+import { setMcpUsageRecorder } from "./mcp-usage";
 import { setPdfUsageRecorder } from "./pdf-usage";
 import { setEngineRateLimiter } from "./rate-limit";
 import { setBudgetChecker } from "./budget";
@@ -78,6 +79,13 @@ setIntegrationUsageRecorder(recordIntegrationUsage);
 // Sister recorder for pdf.generate. Quantity is the produced PDF byte
 // length so the operator sees storage cost on the same chart.
 setPdfUsageRecorder(recordPdfUsage);
+
+// Sister recorder for external `mcp_tool` invocations. Workers run
+// the actual tool calls, so the recorder MUST be registered here for
+// `usage_events` rows with `metric: "tool.mcp.<alias>.<name>"` to
+// land. Discovery (one-shot listTools) runs from the API process and
+// uses the API-side recorder registration above.
+setMcpUsageRecorder(recordMcpUsage);
 
 // Inject the shared Redis-backed limiter into worker-side tool execution.
 // This is the enforcement point for `email.send`, because workflow tools run

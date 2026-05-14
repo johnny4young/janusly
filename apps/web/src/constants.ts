@@ -61,6 +61,7 @@ export const nodePresets: Record<string, JsonObject> = {
   parallel_fork: { branches: [{ label: 'a' }, { label: 'b' }] },
   join: { sources: { a: '', b: '' } },
   schedule: { cronExpression: '0 9 * * *', enabled: true },
+  mcp_tool: { connectionAlias: '', toolName: '', input: {} },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -88,6 +89,7 @@ export const nodeUi: Record<string, { label: string; helper: string }> = {
   parallel_fork: { label: 'Fan out', helper: 'Run named branches in parallel' },
   join: { label: 'Merge branches', helper: 'Gather labelled outputs from a fan-out' },
   schedule: { label: 'Schedule', helper: 'Trigger this workflow on a cron schedule' },
+  mcp_tool: { label: 'MCP tool', helper: 'Call an external MCP server\'s tool as a step' },
 }
 
 /** Human label for a node type (falls back to the raw id with `_` → space). */
@@ -135,6 +137,12 @@ export function getNodeConfigSummary(type: string, config: JsonObject) {
     const cron = readString(config.cronExpression)
     const enabled = config.enabled === false ? ' (paused)' : ''
     return cron ? `${cron}${enabled}` : 'Set a cron expression'
+  }
+  if (type === 'mcp_tool') {
+    const alias = readString(config.connectionAlias)
+    const toolName = readString(config.toolName)
+    if (alias && toolName) return `${alias} → ${toolName}`
+    return 'Pick an MCP connection + tool'
   }
   return 'Review step settings'
 }

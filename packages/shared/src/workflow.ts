@@ -61,6 +61,7 @@ export const nodeTypeValues = [
   "parallel_fork",
   "join",
   "schedule",
+  "mcp_tool",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

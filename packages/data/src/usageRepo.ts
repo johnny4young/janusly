@@ -206,3 +206,59 @@ export async function recordIntegrationUsage(record: IntegrationUsageRecord): Pr
     },
   });
 }
+
+/**
+ * Wire-shape for MCP-client tool usage rows. Mirrors
+ * `packages/engine/src/mcp-usage.ts:McpUsageRecord` — the engine
+ * package can't be imported from `packages/data` without inverting the
+ * dependency graph, so the shape is duplicated here. Update both sites
+ * together if the row contract changes.
+ */
+type McpUsageRecord = {
+  orgId: string;
+  connectionAlias: string;
+  toolName: string;
+  transport: "stdio" | "sse";
+  runId?: string;
+  nodeId?: string;
+  workflowId?: string;
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+  writeSide: boolean;
+};
+
+/**
+ * Sister writer for external-MCP tool calls. Same `usage_events` table
+ * (multi-tenant scope) with `metric: "tool.mcp.<alias>.<toolName>"` —
+ * operators see "12 tool.mcp.stripe-prod.create_charge" alongside the
+ * builtin slack/github/pdf totals on the existing `GET /billing/usage`
+ * dashboard. Quantity is `1` per call.
+ *
+ * Failure rows are written too (rate-limit reject, timeout, missing
+ * env-ref, tool error). The metadata's `error` field carries a
+ * generic message; the env-var name of a missing secret is NEVER
+ * persisted through this path.
+ */
+export async function recordMcpUsage(record: McpUsageRecord): Promise<void> {
+  await db.insert(usageEvents).values({
+    id: crypto.randomUUID(),
+    orgId: record.orgId,
+    userId: null,
+    runId: record.runId ?? null,
+    metric: `tool.mcp.${record.connectionAlias}.${record.toolName}`,
+    quantity: 1,
+    metadata: {
+      tool: `mcp.${record.connectionAlias}.${record.toolName}`,
+      connectionAlias: record.connectionAlias,
+      toolName: record.toolName,
+      transport: record.transport,
+      writeSide: record.writeSide,
+      ok: record.ok,
+      error: record.error ?? null,
+      latencyMs: record.latencyMs,
+      nodeId: record.nodeId ?? null,
+      workflowId: record.workflowId ?? null,
+    },
+  });
+}

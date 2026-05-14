@@ -20,6 +20,7 @@ import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
+import { McpConnectionsPanel } from './McpConnectionsPanel'
 
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -169,6 +170,8 @@ export function OperationsPanel() {
           <ScimDirectorySettingsPanel />
 
           <PermissionGrantsPanel />
+
+          <McpConnectionsPanel />
         </>
       )}
     </div>
