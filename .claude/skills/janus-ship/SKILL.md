@@ -43,7 +43,7 @@ PHASE 1:
 2. Pick a ticket from §3b (or honor the user-named ENG-NNN).
 3. Read the ticket row, the touched code paths, and the relevant `docs/PLAN.md` section if any.
 4. Write the plan to chat AND to `~/.claude/plans/<slug>.md` (the file the Plan UI reads).
-5. **Before calling ExitPlanMode, end the chat message with the Spanish line `¿Explícame el ticket? No lo entiendo.` on its own line.** This is a permanent convention requested by the user — it gives them a one-tap prompt to ask for a plain-language explanation of the ticket before approving the plan. Apply this to every ticket proposal, in both fresh proposals and re-plans after textual rejection feedback.
+5. **Before calling ExitPlanMode, end both the chat message AND the plan file with a Spanish plain-language explanation of the ticket** under a heading like `## Explicación en plano (qué hace el ticket y por qué)`. The user requested this convention as a permanent rule: every plan proposal must include the explanation pre-emptively, NOT the literal question text `¿Explícame el ticket? No lo entiendo.` — that question was once the prompt; the convention evolved to answering it up front. Write the explanation as if responding to "explícame el ticket": the underlying problem, the proposed solution in non-technical terms, the user-visible behavior changes, intentional breakage / migration risks, and the surface-level scope (which files / components are touched). Apply to every ticket proposal, in fresh proposals and re-plans after textual rejection feedback.
 6. Call ExitPlanMode. The UI shows Accept/Reject. Stop.
 
 After Accept (or after textual feedback on Reject), PHASE 2:

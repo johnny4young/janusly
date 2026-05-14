@@ -13,7 +13,7 @@
  * - JSON body assumed; binary uploads aren't supported here.
  */
 
-import { supabase } from './auth'
+import { getActiveOrg, supabase } from './auth'
 import { useWorkflowStore } from './store'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
@@ -33,10 +33,16 @@ export async function api(path: string, options: RequestInit = {}) {
   const session = supabase ? await supabase.auth.getSession() : { data: { session: null } }
   const token = session.data.session?.access_token
 
+  // `x-org-id` ships on every request — it's the scope hint the API
+  // resolver uses to pick a membership when the user belongs to multiple
+  // orgs. In dev mode (no Supabase) it's the authoritative org. In
+  // Supabase mode it's an untrusted hint — the API resolves the actual
+  // grant through `org_members`.
   const headers = {
     'Content-Type': 'application/json',
+    'x-org-id': getActiveOrg(),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!token ? { 'x-org-id': 'default', 'x-user-id': 'dev-user' } : {}),
+    ...(!token ? { 'x-user-id': 'dev-user' } : {}),
     ...(options.headers ?? {})
   }
 
@@ -92,8 +98,9 @@ export async function downloadFromApi(path: string, filename?: string): Promise<
   const token = session.data.session?.access_token
 
   const headers = {
+    'x-org-id': getActiveOrg(),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!token ? { 'x-org-id': 'default', 'x-user-id': 'dev-user' } : {}),
+    ...(!token ? { 'x-user-id': 'dev-user' } : {}),
   }
 
   let res: Response
