@@ -554,3 +554,116 @@ export const ssoStateNonces = pgTable(
     uniqueIndex("sso_state_nonces_org_nonce_idx").on(table.orgId, table.nonce),
   ],
 );
+
+/**
+ * Per-org WorkOS-backed Directory Sync connection. One row attaches a
+ * WorkOS directory id to an org so inbound SCIM webhook events can be
+ * scoped to a tenant. The provider_directory_id is what WorkOS sends
+ * us inside every event payload; we look it up here to derive `orgId`
+ * — never trust the upstream payload's tenancy hint.
+ *
+ * `defaultRole` is the role applied to every SCIM-provisioned user
+ * (per-group role mapping is a future v2 surface). `status = 'active'`
+ * or `'revoked'`; revoked directories ignore inbound events.
+ *
+ * Unique on `orgId` (one directory per org for v1) AND on
+ * `providerDirectoryId` (a WorkOS directory id maps to exactly one
+ * Janusly org).
+ */
+export const scimDirectories = pgTable(
+  "scim_directories",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    providerDirectoryId: text("provider_directory_id").notNull(),
+    directoryType: text("directory_type"),
+    defaultRole: text("default_role").notNull().default("viewer"),
+    status: text("status").notNull().default("active"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scim_directories_org_idx").on(table.orgId),
+    uniqueIndex("scim_directories_provider_directory_idx").on(table.providerDirectoryId),
+  ],
+);
+
+/**
+ * Per-(directory, IdP-side user) state for SCIM lifecycle ops. The
+ * `providerUserId` is the WorkOS `directory_user.id` (stable across
+ * email changes); `email` carries the user's current address and is
+ * the join key into `org_members` (which uses `lower(email)` as
+ * `userId` for SCIM-provisioned rows, mirroring the legacy-orphan
+ * placeholder shape invitations use today). `active=false` marks a
+ * user the IdP has deprovisioned — the resurrection guard refuses to
+ * re-create membership for a deactivated row with an older event
+ * timestamp.
+ *
+ * `lastEventTimestamp` is the newest event applied to this user; the
+ * out-of-order guard rejects events with `created_at <= last`.
+ */
+export const scimUserState = pgTable(
+  "scim_user_state",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    scimDirectoryId: text("scim_directory_id").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    email: text("email").notNull(),
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+    active: boolean("active").notNull().default(true),
+    lastEventId: text("last_event_id"),
+    lastEventTimestamp: timestamp("last_event_timestamp", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scim_user_state_directory_user_idx").on(table.scimDirectoryId, table.providerUserId),
+    index("scim_user_state_org_email_idx").on(table.orgId, table.email),
+  ],
+);
+
+/**
+ * Per-(directory, IdP-side group) state. v1 captures group existence
+ * + membership so the data is available for future role-mapping; the
+ * group's name is mirrored from the IdP. v2 will add an explicit
+ * `scim_group_role_mappings` table for operator-configured role
+ * overrides per group.
+ */
+export const scimGroupState = pgTable(
+  "scim_group_state",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    scimDirectoryId: text("scim_directory_id").notNull(),
+    providerGroupId: text("provider_group_id").notNull(),
+    name: text("name").notNull(),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scim_group_state_directory_group_idx").on(table.scimDirectoryId, table.providerGroupId),
+  ],
+);
+
+/**
+ * Idempotency table for SCIM webhook events. Every WorkOS event ID is
+ * recorded once; `INSERT … ON CONFLICT DO NOTHING` lets the handler
+ * detect replays cheaply. `processedAt` indexed for a future TTL job
+ * — at enterprise scale ~10k events/day will grow this table linearly
+ * forever without pruning.
+ */
+export const scimProcessedEvents = pgTable(
+  "scim_processed_events",
+  {
+    eventId: text("event_id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    scimDirectoryId: text("scim_directory_id").notNull(),
+    eventType: text("event_type").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    index("scim_processed_events_processed_at_idx").on(table.processedAt),
+  ],
+);
