@@ -40,6 +40,19 @@ import http from "http";
 import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
+import { findPendingInvitation, acceptInvitation } from "@janusly/data/src/invitationsRepo";
+import {
+  findMemberByEmail,
+  getMembershipForOrgUser,
+  listMembershipsForUser,
+  migrateMemberUserId,
+  upsertMembership,
+} from "@janusly/data/src/orgMembersRepo";
+import { getSsoConnectionForOrg } from "@janusly/data/src/ssoConnectionsRepo";
+import { findVerifiedDomain } from "@janusly/data/src/verifiedDomainsRepo";
+
+import { audit } from "./audit";
+
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -111,6 +124,14 @@ type ProviderPrincipal = {
   /** Provider-stable user identifier (e.g. Supabase `user.id`). */
   providerUserId: string;
   /**
+   * Provider-supplied user email when the provider carries one (Supabase
+   * always does for email-password and SSO flows). `null` for
+   * service-token and dev-headers principals — those flows have no email
+   * transport and the resolver paths that consume email
+   * (invitation-acceptance, verified-domain auto-join) are supabase-only.
+   */
+  providerUserEmail: string | null;
+  /**
    * Untrusted provider-supplied org hint (Supabase JWT
    * `user_metadata.orgId` for the supabase provider; `x-org-id`
    * request header for service-token and dev-headers providers).
@@ -160,10 +181,24 @@ async function extractSupabase(req: http.IncomingMessage): Promise<ProviderPrinc
   const token = authHeader.replace("Bearer ", "");
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) return null;
-  const orgHint = (data.user.user_metadata?.orgId as string | undefined) ?? null;
+  // The web client now ships `x-org-id` alongside the Bearer (it reads
+  // `localStorage["janusly:activeOrg"]` and injects on every request).
+  // The legacy Supabase `user_metadata.orgId` claim is no longer
+  // authoritative — `resolveJanuslyMembership` queries `org_members` as
+  // the canonical source — but we still read it as a backward-compat
+  // hint when the web request omits the header.
+  const headerHint = req.headers["x-org-id"];
+  const claimHint = (data.user.user_metadata?.orgId as string | undefined) ?? null;
+  const orgHint = (typeof headerHint === "string" && headerHint.length > 0)
+    ? headerHint
+    : claimHint;
+  const email = typeof data.user.email === "string" && data.user.email.length > 0
+    ? data.user.email.toLowerCase()
+    : null;
   return {
     providerName: "supabase",
     providerUserId: data.user.id,
+    providerUserEmail: email,
     providerOrgHint: orgHint,
     declaredSource: "web",
   };
@@ -190,6 +225,9 @@ async function extractServiceToken(req: http.IncomingMessage): Promise<ProviderP
     providerName: "service-token",
     // Empty header collapses to the "service" service-account label.
     providerUserId: userHeader || "service",
+    // Service-token flows don't transport an email — provisioning paths
+    // (invitations / verified domains) are supabase-only.
+    providerUserEmail: null,
     // Empty header collapses to null so `resolveJanuslyMembership` can
     // apply the "default" fallback uniformly.
     providerOrgHint: orgHeader || null,
@@ -217,34 +255,48 @@ async function extractDevHeaders(req: http.IncomingMessage): Promise<ProviderPri
   return {
     providerName: "dev-headers",
     providerUserId: userId,
+    // Dev-headers carry no email; provisioning paths are supabase-only.
+    providerUserEmail: null,
     providerOrgHint: orgId,
     declaredSource: declaredSource === "mcp" ? "mcp" : "dev",
   };
 }
 
 /**
- * Map a `ProviderPrincipal` into the Janusly-resolved
- * `{ orgId, mode }` pair. This is the seam future work plugs into when
- * org resolution moves to the `org_members` table (instead of trusting
- * provider-supplied hints).
+ * Map a `ProviderPrincipal` into the Janusly-resolved `{ orgId, mode }`
+ * pair, or `null` when nothing legitimate matches. The Supabase branch is
+ * the security-relevant one: the provider's `user_metadata.orgId` /
+ * `x-org-id` hint is treated as a SCOPE selector (which of my orgs am I
+ * working in) — not as authority. The grant is the `org_members` row.
  *
- * Today's behavior preserves the pre-boundary semantics bit-for-bit:
+ * Resolution order for a Supabase principal:
+ *   1. Direct match: `org_members` row for `(hint, providerUserId)`.
+ *   2. Legacy-orphan lazy backfill: if the matching row's `userId` is the
+ *      user's email (the placeholder we used before invite-acceptance
+ *      shipped), rewrite the `userId` column to the real UUID — preserves
+ *      access for users invited before this resolver landed.
+ *   3. Hint-less + exactly one membership: silent default to that org.
+ *   4. Hint-less + multiple memberships: 401 (force the client to send
+ *      `x-org-id`; the web client does this on every request).
+ *   5. Provisioning paths (only with hint + email):
+ *      a. Pending invitation matching `(orgId, email)` → accept + upsert.
+ *      b. Verified-domain match for the email's domain → upsert with the
+ *         row's default role.
+ *      c. Active SSO connection → return null (the JIT seam a future
+ *         enterprise-SSO provider fills in by running its own
+ *         provisioning code path before this resolver).
+ *   6. Otherwise → null (resolver fails closed; dispatcher returns 401).
  *
- * - Supabase: the JWT's `user_metadata.orgId` claim becomes `orgId`,
- *   falling back to `"default"` when the claim is absent. This is an
- *   untrusted-claim path (a user can edit their own `user_metadata`);
- *   the seam exists so the body can be rewritten to query `org_members`
- *   without changing any caller.
- * - Service-token: the `x-org-id` request header becomes `orgId`,
- *   falling back to `"default"` when absent or empty.
- * - Dev-headers: the `x-org-id` request header becomes `orgId` (the
- *   provider already enforced a non-empty value).
+ * Service-token and dev-headers preserve their pre-existing semantics:
+ * the hint becomes `orgId` directly. Service-token callers still have to
+ * be in `org_members` for `requireRole` to grant a role (no implicit
+ * admin); dev-headers gets the admin auto-grant via `permissions.ts`.
  */
 async function resolveJanuslyMembership(
   principal: ProviderPrincipal,
 ): Promise<{ orgId: string; mode: AuthMode } | null> {
   if (principal.providerName === "supabase") {
-    return { orgId: principal.providerOrgHint ?? "default", mode: "supabase" };
+    return resolveSupabaseMembership(principal);
   }
   if (principal.providerName === "service-token") {
     return { orgId: principal.providerOrgHint ?? "default", mode: "service-token" };
@@ -254,6 +306,109 @@ async function resolveJanuslyMembership(
   if (!principal.providerOrgHint) return null;
   return { orgId: principal.providerOrgHint, mode: "dev-headers" };
 }
+
+/**
+ * Resolve the supabase principal through `org_members` → invitations →
+ * verified domains → SSO mapping, in that order. Failure-closed: if no
+ * path matches, returns `null` and the dispatcher responds 401.
+ */
+async function resolveSupabaseMembership(
+  principal: ProviderPrincipal,
+): Promise<{ orgId: string; mode: AuthMode } | null> {
+  const userId = principal.providerUserId;
+  const email = principal.providerUserEmail;
+  const hint = principal.providerOrgHint;
+
+  // 1. Direct match: existing membership row.
+  if (hint) {
+    const direct = await getMembershipForOrgUser({ orgId: hint, userId });
+    if (direct) return { orgId: hint, mode: "supabase" };
+
+    // 2. Legacy-orphan lazy backfill: a previous invite flow seeded
+    //    `org_members` rows with `userId = email` as a placeholder. On
+    //    the user's first authenticated sign-in, rewrite `userId` to the
+    //    real Supabase UUID and accept the row as their membership.
+    if (email) {
+      const byEmail = await findMemberByEmail({ orgId: hint, email });
+      if (byEmail && byEmail.userId !== userId && byEmail.userId.includes("@")) {
+        await migrateMemberUserId({ id: byEmail.id, orgId: hint, newUserId: userId });
+        await audit(hint, userId, "member.userid.migrated", "member", byEmail.id, {
+          from: byEmail.userId,
+          to: userId,
+        });
+        return { orgId: hint, mode: "supabase" };
+      }
+    }
+  }
+
+  // 3 + 4. No hint? Use single membership if unambiguous; 401 on multi.
+  if (!hint) {
+    const all = await listMembershipsForUser(userId);
+    if (all.length === 1) return { orgId: all[0].orgId, mode: "supabase" };
+    if (all.length > 1) return null; // ambiguous — force the client to send x-org-id.
+    return null; // no memberships and no hint — nothing to resolve.
+  }
+
+  // 5. Provisioning paths require an email (Supabase always carries one
+  //    for human flows; truly anonymous Supabase sessions skip these).
+  if (!email) return null;
+
+  // 5a. Pending invitation acceptance.
+  const invite = await findPendingInvitation({ orgId: hint, email });
+  if (invite) {
+    const accepted = await acceptInvitation({ id: invite.id, orgId: hint });
+    if (accepted === false) {
+      const raced = await getMembershipForOrgUser({ orgId: hint, userId });
+      if (raced) return { orgId: hint, mode: "supabase" };
+      return null;
+    }
+    await upsertMembership({
+      orgId: hint,
+      userId,
+      email,
+      role: invite.role,
+      invitedBy: invite.invitedBy ?? null,
+    });
+    await audit(hint, userId, "member.joined", "member", userId, {
+      via: "invitation",
+      invitationId: invite.id,
+      email,
+    });
+    return { orgId: hint, mode: "supabase" };
+  }
+
+  // 5b. Verified-domain auto-join.
+  const atIdx = email.indexOf("@");
+  const domain = atIdx >= 0 ? email.slice(atIdx + 1).toLowerCase() : "";
+  if (domain) {
+    const verified = await findVerifiedDomain({ orgId: hint, domain });
+    if (verified) {
+      await upsertMembership({
+        orgId: hint,
+        userId,
+        email,
+        role: verified.defaultRole,
+      });
+      await audit(hint, userId, "member.joined", "member", userId, {
+        via: "verified_domain",
+        domain,
+        email,
+      });
+      return { orgId: hint, mode: "supabase" };
+    }
+  }
+
+  // 5c. SSO JIT handoff. An active connection means the org expects
+  //     users to arrive via an SSO provider (e.g. WorkOS) — that
+  //     provider's extractor runs its own JIT-provisioning before this
+  //     resolver. A Supabase principal landing here without a membership
+  //     means the SSO flow has NOT run; fail closed.
+  const sso = await getSsoConnectionForOrg(hint);
+  if (sso && sso.status === "active") return null;
+
+  return null;
+}
+
 
 /**
  * Provider chain in priority order: Supabase JWT first, then

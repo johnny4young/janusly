@@ -433,3 +433,88 @@ export const workflowBudgets = pgTable(
     uniqueIndex("workflow_budgets_org_workflow_idx").on(table.orgId, table.workflowId),
   ],
 );
+
+/**
+ * Pending / accepted email-based invitations to an organization.
+ *
+ * The membership resolver in `apps/api/src/auth.ts` reads `status = 'pending'`
+ * rows on a Supabase sign-in: when the authenticated user's email matches a
+ * pending row for the target org, the resolver flips the status to `accepted`
+ * and creates the corresponding `org_members` row atomically. Status enum is
+ * `pending | accepted | revoked` — `revoked` rows are kept for audit but
+ * don't participate in resolution.
+ *
+ * Multi-tenant scope: every read carries `eq(invitations.orgId, orgId)`.
+ * Unique `(orgId, email)` keeps the invite catalogue tidy — re-inviting an
+ * email that's already invited is a no-op at the repo layer.
+ */
+export const invitations = pgTable(
+  "invitations",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    email: text("email").notNull(),
+    role: text("role").notNull().default("viewer"),
+    invitedBy: text("invited_by"),
+    status: text("status").notNull().default("pending"),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("invitations_org_email_idx").on(table.orgId, table.email),
+  ],
+);
+
+/**
+ * Per-org list of email domains pre-authorized to auto-join the org on first
+ * Supabase sign-in. When a user authenticates with an email whose domain
+ * matches a row here AND the target org matches the principal's hint, the
+ * resolver creates an `org_members` row with `defaultRole` (typically
+ * `viewer`).
+ *
+ * Multi-tenant scope: every read carries `eq(verifiedDomains.orgId, orgId)`.
+ * Unique `(orgId, domain)` so an org can't have duplicate domain rows.
+ */
+export const verifiedDomains = pgTable(
+  "verified_domains",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    domain: text("domain").notNull(),
+    defaultRole: text("default_role").notNull().default("viewer"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("verified_domains_org_domain_idx").on(table.orgId, table.domain),
+  ],
+);
+
+/**
+ * Per-org SSO connection metadata for enterprise identity providers
+ * (currently a placeholder for WorkOS; the connection-id maps an org to its
+ * IdP). The membership resolver consults this table as a JIT (just-in-time)
+ * provisioning seam: a Supabase principal with no membership + no invitation
+ * + no verified-domain match, when the target org has an active SSO row,
+ * returns null (the resolver fails closed). The WorkOS extractor that ships
+ * later runs its own JIT-provisioning code path BEFORE the resolver, so a
+ * properly-authenticated SSO user gets here with a membership already
+ * upserted.
+ *
+ * Status enum is `active | revoked`. Multi-tenant scope on every read.
+ */
+export const ssoConnections = pgTable(
+  "sso_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    provider: text("provider").notNull(),
+    providerConnectionId: text("provider_connection_id").notNull(),
+    status: text("status").notNull().default("active"),
+    configJson: jsonb("config_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sso_connections_org_provider_idx").on(table.orgId, table.provider),
+  ],
+);
