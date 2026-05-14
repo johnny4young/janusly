@@ -19,7 +19,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, CheckCircle2, Database, Download, FlaskConical, GitBranch, KeyRound, Layers3, ListChecks, LockKeyhole, Plug, RefreshCw, Send, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, JsonObject, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowInputSchemaShape } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
@@ -633,6 +633,16 @@ function QuickConfigEditor({
     )
   }
 
+  if (type === 'mcp_tool') {
+    return (
+      <McpToolConfigField
+        scope={nodeId}
+        config={config}
+        onPatch={(next) => patch(next)}
+      />
+    )
+  }
+
   if (type === 'schedule') {
     const enabled = config.enabled !== false
     return (
@@ -662,6 +672,127 @@ function QuickConfigEditor({
     <section className="quick-config">
       <div className="section-kicker">Quick setup</div>
       <p className="empty-state">This step has no required setup. Use advanced JSON only for custom behavior.</p>
+    </section>
+  )
+}
+
+/**
+ * Inspector branch for the `mcp_tool` node type. Fetches the org's
+ * MCP connections + tools from the API on mount and renders a
+ * dependent-dropdown pair (connection → tool) plus an input JSON
+ * editor and an optional timeout.
+ *
+ * Only `active` connections appear in the dropdown; only `enabled`
+ * tools appear in the per-connection list. If the saved
+ * `connectionAlias` / `toolName` no longer resolve (e.g. the admin
+ * disabled the tool), the inspector surfaces a "not available"
+ * warning so the author knows the run will fail.
+ */
+function McpToolConfigField({ scope, config, onPatch }: { scope: string; config: JsonObject; onPatch: (next: Record<string, unknown>) => void }) {
+  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const [connections, setConnections] = useState<McpConnection[]>([])
+  const [toolsByAlias, setToolsByAlias] = useState<Record<string, McpToolDescriptor[]>>({})
+  const [loading, setLoading] = useState(true)
+  const selectedAlias = readConfigString(config, 'connectionAlias')
+  const selectedTool = readConfigString(config, 'toolName')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api('/mcp/connections')
+      .then((data) => {
+        if (cancelled) return
+        const rows = (data as { connections?: McpConnection[] })?.connections ?? []
+        setConnections(rows.filter((row) => row.status === 'active'))
+      })
+      .catch(() => {
+        // Keep silent — viewer-without-permission shouldn't crash the inspector
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // Re-fetch when an admin enables / disables / re-discovers a connection in
+    // the Operations panel (they bump platformVersion); otherwise the dropdown
+    // shows stale options until the page reloads.
+  }, [platformVersion])
+
+  useEffect(() => {
+    if (!selectedAlias) return
+    let cancelled = false
+    // Re-fetch the per-connection tool list whenever the alias changes OR
+    // platformVersion bumps (admin re-discovered / disabled a tool). The
+    // previous cache-only guard kept stale descriptors after a disable.
+    api(`/mcp/connections/${encodeURIComponent(selectedAlias)}/tools`)
+      .then((data) => {
+        if (cancelled) return
+        const tools = (data as { tools?: McpToolDescriptor[] })?.tools ?? []
+        setToolsByAlias((prev) => ({ ...prev, [selectedAlias]: tools.filter((t) => t.enabled) }))
+      })
+      .catch(() => {
+        // ignore
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAlias, platformVersion])
+
+  const aliasFieldId = fieldId(scope, 'mcp connection')
+  const toolFieldId = fieldId(scope, 'mcp tool')
+  const tools = selectedAlias ? toolsByAlias[selectedAlias] ?? [] : []
+  const knownAlias = connections.some((c) => c.alias === selectedAlias)
+  const knownTool = tools.some((t) => t.name === selectedTool)
+
+  return (
+    <section className="quick-config">
+      <div className="section-kicker">Quick setup</div>
+      <div className="form-grid">
+        <label className="field-label" htmlFor={aliasFieldId}>MCP connection</label>
+        <select
+          id={aliasFieldId}
+          className="text-field"
+          value={selectedAlias}
+          onChange={(event) => onPatch({ connectionAlias: event.target.value, toolName: '' })}
+        >
+          {!selectedAlias && <option value="">— Pick a connection —</option>}
+          {selectedAlias && !knownAlias && <option value={selectedAlias}>{selectedAlias} (not active)</option>}
+          {connections.map((connection) => (
+            <option key={connection.id} value={connection.alias}>{connection.alias} ({connection.transport})</option>
+          ))}
+        </select>
+        {!loading && connections.length === 0 && (
+          <p className="helper-text">No active MCP connections. An admin must register one in Operations → MCP Connections first.</p>
+        )}
+      </div>
+      <div className="form-grid">
+        <label className="field-label" htmlFor={toolFieldId}>Tool</label>
+        <select
+          id={toolFieldId}
+          className="text-field"
+          value={selectedTool}
+          onChange={(event) => onPatch({ toolName: event.target.value })}
+          disabled={!selectedAlias}
+        >
+          {!selectedTool && <option value="">— Pick a tool —</option>}
+          {selectedTool && !knownTool && <option value={selectedTool}>{selectedTool} (not enabled)</option>}
+          {tools.map((tool) => (
+            <option key={tool.id} value={tool.name}>{tool.name}{tool.writeSide ? ' (write-side)' : ''}</option>
+          ))}
+        </select>
+        {selectedAlias && tools.length === 0 && !loading && (
+          <p className="helper-text">No enabled tools on this connection. Open Operations → MCP Connections to enable per-tool.</p>
+        )}
+      </div>
+      <JsonConfigField scope={scope} label="Tool input" value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
+      <NumberConfigField
+        scope={scope}
+        label="Timeout (ms)"
+        value={readConfigNumber(config, 'timeoutMs') ?? 30000}
+        onChange={(value) => onPatch({ timeoutMs: value })}
+      />
+      <p className="helper-text">Default 30s, max 120s. Tool input is templated against the workflow context like every other step.</p>
     </section>
   )
 }

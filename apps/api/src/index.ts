@@ -35,10 +35,11 @@
  */
 
 import { setUsageRecorder } from "@janusly/ai";
-import { recordEmailUsage, recordIntegrationUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordIntegrationUsage, recordMcpUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { setIntegrationUsageRecorder } from "@janusly/engine/src/integration-usage";
+import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
@@ -63,6 +64,7 @@ import { billingRoutes } from "./routes/billing-routes";
 import { credentialsRoutes } from "./routes/credentials-routes";
 import { dlqRoutes } from "./routes/dlq-routes";
 import { healthRoutes } from "./routes/health-routes";
+import { mcpRoutes } from "./routes/mcp-routes";
 import { membersRoutes } from "./routes/members-routes";
 import { orgRoutes } from "./routes/org-routes";
 import { rolesRoutes } from "./routes/roles-routes";
@@ -95,6 +97,7 @@ export const routes: Route[] = [
   ...ssoRoutes,
   ...scimRoutes,
   ...rolesRoutes,
+  ...mcpRoutes,
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,
@@ -139,6 +142,7 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 // existing `?breakdown=workflow,provider` UI without changes.
 setEmailUsageRecorder(recordEmailUsage);
 setIntegrationUsageRecorder(recordIntegrationUsage);
+setMcpUsageRecorder(recordMcpUsage);
 setPdfUsageRecorder(recordPdfUsage);
 
 // Wire the production AI cost budget checker. Every LLM call site

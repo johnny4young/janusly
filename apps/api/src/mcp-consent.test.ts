@@ -16,7 +16,7 @@ function snapshotWithConsent(consent: boolean) {
     http: {} as never,
     email: {} as never,
     runs: {} as never,
-    mcp: { writeConsent: consent },
+    mcp: { writeConsent: consent, clientWriteConsent: false, clientRateLimitPerMin: 60, clientCommandAllowlist: "" },
     integrations: {} as never,
     objectstore: {} as never,
   } as Awaited<ReturnType<typeof getOrgConfigSnapshot>>;

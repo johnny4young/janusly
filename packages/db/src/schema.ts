@@ -709,3 +709,96 @@ export const orgRoles = pgTable(
     uniqueIndex("org_roles_org_name_idx").on(table.orgId, table.name),
   ],
 );
+
+/**
+ * External MCP servers an admin has registered for an org. Each row is
+ * one alias-addressable connection that workflow steps of type
+ * `mcp_tool` resolve against. Two transports are supported:
+ *
+ *  - `stdio`: spawn a local child process via `command` + `args` and
+ *    speak JSON-RPC over stdin/stdout. `command` MUST appear in
+ *    `JANUSLY_MCP_ALLOWED_COMMANDS` (or the per-org override) — admins
+ *    explicitly opt in to executables, not to arbitrary binaries.
+ *  - `sse`: open a remote SSE connection to `url`. The URL is checked
+ *    through the outbound target-policy validator before the SDK
+ *    transport opens. Empty env-vars at connect time fail closed.
+ *
+ * `envRefs` is a closed-shape JSONB: `Record<string, { kind: "env",
+ * name: string }>`. The child process / outbound HTTP receives
+ * `process.env[ref.name]` resolved server-side; the connection row
+ * never carries actual secret values. For stdio transport the spawn
+ * env is a strict whitelist of `{ PATH, ...resolvedEnvRefs }` only —
+ * no `process.env` leak so a misconfigured MCP server can't read
+ * `DATABASE_URL` / `JANUSLY_RESUME_TOKEN_SECRET`.
+ *
+ * `status` is the discovery / health state: `pending` (just created,
+ * not discovered), `active` (discovered + tools cached), `failed`
+ * (discovery threw), `disabled` (admin paused).
+ *
+ * Multi-tenant scope: every read carries `eq(mcpConnections.orgId, orgId)`.
+ * Unique on `(orgId, alias)`. Transport-shape consistency (stdio rows
+ * require `command`, sse rows require `url`) is enforced in the repo's
+ * `createConnection` / `updateConnection` helpers rather than via a DB
+ * CHECK — matching the codebase convention of application-layer
+ * validation over DB constraints.
+ */
+export const mcpConnections = pgTable(
+  "mcp_connections",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    alias: text("alias").notNull(),
+    transport: text("transport").notNull(),
+    command: text("command"),
+    args: jsonb("args"),
+    url: text("url"),
+    envRefs: jsonb("env_refs"),
+    enabled: boolean("enabled").notNull().default(true),
+    status: text("status").notNull().default("pending"),
+    statusReason: text("status_reason"),
+    lastDiscoveryAt: timestamp("last_discovery_at", { withTimezone: true }),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("mcp_connections_org_alias_idx").on(table.orgId, table.alias),
+  ],
+);
+
+/**
+ * Per-tool descriptor cached from the MCP server at discovery time.
+ * One row per `(connectionId, name)`. `enabled: false` on creation —
+ * the admin opts in per-tool so a 200-tool server doesn't drown the
+ * UI and so prompt-injection material from third-party descriptions
+ * can't reach the LLM without explicit consent.
+ *
+ * `inputSchema` is the JSON Schema object the MCP protocol returns;
+ * the executor validates input against this before invoking. Failures
+ * to discover surface as zero rows for the connection (executor
+ * refuses to call without a descriptor).
+ *
+ * `writeSide` defaults to `true` (fail-safe). Admin marks read-side
+ * tools explicitly. The runtime dry-run gate skips write-side MCP
+ * tools the same way it skips write-side integration tools.
+ *
+ * The delete-connection route removes descriptors before deleting the
+ * parent connection.
+ */
+export const mcpToolDescriptors = pgTable(
+  "mcp_tool_descriptors",
+  {
+    id: text("id").primaryKey(),
+    connectionId: text("connection_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    inputSchema: jsonb("input_schema"),
+    writeSide: boolean("write_side").notNull().default(true),
+    enabled: boolean("enabled").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("mcp_tool_descriptors_connection_name_idx").on(table.connectionId, table.name),
+  ],
+);
