@@ -16,6 +16,7 @@ export function UserMenu() {
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
   const setAuth = useWorkflowStore(state => state.setAuth)
+  const clearAuth = useWorkflowStore(state => state.clearAuth)
   const addToast = useWorkflowStore(state => state.addToast)
 
   const [open, setOpen] = useState(false)
@@ -38,6 +39,7 @@ export function UserMenu() {
   const logout = async () => {
     try {
       await AuthProvider.signOut()
+      clearAuth()
       addToast('Signed out', 'info')
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Sign out failed', 'error')
@@ -83,7 +85,7 @@ export function UserMenu() {
           />
           <button className="small-command" onClick={changeOrg} type="button">Switch org</button>
 
-          {isSupabaseConfigured && user && (
+          {isSupabaseConfigured && (user || userId) && (
             <button className="small-command danger" onClick={logout} type="button">
               <LogOut size={14} aria-hidden="true" />
               <span>Logout</span>

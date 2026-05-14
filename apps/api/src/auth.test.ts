@@ -519,6 +519,104 @@ describe("getAuth — Supabase membership resolution (org_members + invitations 
     expect(auth).toBeNull();
   });
 
+  it("Janusly session token (4th auth mode) resolves to mode=janusly-session, source=sso", async () => {
+    stubDevHeadersEnv();
+    vi.stubEnv("JANUSLY_RESUME_TOKEN_SECRET", "test-resume-secret");
+    const { signSignedToken } = await import("@janusly/engine/src/secrets");
+    const token = signSignedToken({
+      purpose: "sso_session",
+      payload: { orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com" },
+      ttlSeconds: 600,
+    });
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({ "x-janusly-session": token }));
+    expect(auth?.mode).toBe("janusly-session");
+    expect(auth?.source).toBe("sso");
+    expect(auth?.orgId).toBe("org-sso");
+    expect(auth?.userId).toBe("sso-user-1");
+  });
+
+  it("Janusly session token with wrong purpose returns null (purpose discriminator gates replay)", async () => {
+    stubDevHeadersEnv();
+    vi.stubEnv("JANUSLY_RESUME_TOKEN_SECRET", "test-resume-secret");
+    const { signSignedToken } = await import("@janusly/engine/src/secrets");
+    // Token signed with a DIFFERENT purpose — should not authenticate as
+    // an SSO session even though the HMAC validates.
+    const token = signSignedToken({
+      purpose: "sso_state",
+      payload: { orgId: "org-sso", userId: "sso-user-1", email: "alice@acme.com" },
+      ttlSeconds: 600,
+    });
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({ "x-janusly-session": token }));
+    expect(auth).toBeNull();
+  });
+
+  it("Enforced-SSO: Supabase principal hitting an enforced-SSO org returns null (no dev bypass)", async () => {
+    stubSupabaseEnv();
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-9", email: "u@x.com" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "org-sso", userId: "user-9", email: "u@x.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+    getSsoConnectionForOrg.mockResolvedValueOnce({
+      id: "sso-1", orgId: "org-sso", provider: "workos",
+      providerConnectionId: "conn_x", status: "active", enforcedSso: true,
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-sso",
+    }));
+    expect(auth).toBeNull();
+  });
+
+  it("Enforced-SSO with ALLOW_DEV_SSO_BYPASS=true lets Supabase principal through", async () => {
+    stubSupabaseEnv();
+    vi.stubEnv("ALLOW_DEV_SSO_BYPASS", "true");
+    supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-9", email: "u@x.com" }));
+    getMembershipForOrgUser.mockResolvedValueOnce({
+      id: "m-1", orgId: "org-sso", userId: "user-9", email: "u@x.com",
+      role: "viewer", invitedBy: null, createdAt: null,
+    });
+    getSsoConnectionForOrg.mockResolvedValueOnce({
+      id: "sso-1", orgId: "org-sso", provider: "workos",
+      providerConnectionId: "conn_x", status: "active", enforcedSso: true,
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer supabase-jwt",
+      "x-org-id": "org-sso",
+    }));
+    expect(auth?.mode).toBe("supabase");
+    expect(auth?.orgId).toBe("org-sso");
+  });
+
+  it("Enforced-SSO does NOT block service-token (infrastructure callers bypass)", async () => {
+    stubDevHeadersEnv();
+    vi.stubEnv("API_SERVICE_TOKEN", "tok-1234");
+    getSsoConnectionForOrg.mockResolvedValue({
+      id: "sso-1", orgId: "org-sso", provider: "workos",
+      providerConnectionId: "conn_x", status: "active", enforcedSso: true,
+      configJson: null, createdAt: null, updatedAt: null,
+    });
+    const { getAuth } = await import("./auth");
+    const auth = await getAuth(makeReq({
+      authorization: "Bearer tok-1234",
+      "x-org-id": "org-sso",
+      "x-user-id": "robot",
+    }));
+    expect(auth?.mode).toBe("service-token");
+    expect(auth?.orgId).toBe("org-sso");
+  });
+
   it("x-org-id header takes precedence over user_metadata.orgId for the scope hint", async () => {
     stubSupabaseEnv();
     supabaseGetUser.mockResolvedValueOnce(supabaseUserFixture({ id: "user-7", orgId: "claim-org" }));

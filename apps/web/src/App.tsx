@@ -32,7 +32,7 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 import { RunInputDialog } from './components/RunInputDialog'
-import { AuthProvider, isSupabaseConfigured, normalizeAuth } from './auth'
+import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
 import { getNodeHelper, getNodeLabel } from './constants'
@@ -154,6 +154,11 @@ export default function App() {
   useEffect(() => {
     let mounted = true
 
+    // SSO callback delivers `#janusly_session=<token>` in the URL
+    // fragment. Persist it before the auth-state check below runs so the
+    // very first API request after login carries the session token.
+    consumeSsoSessionFragment()
+
     AuthProvider.getSession().then(({ data }) => {
       if (!mounted) return
       setAuth(normalizeAuth(data.session))
@@ -163,7 +168,7 @@ export default function App() {
 
     const { data: listener } = AuthProvider.onAuthStateChange((auth) => {
       if (!mounted) return
-      if (!auth.session) clearAuth()
+      if (!auth.session && !auth.userId) clearAuth()
       else setAuth(auth)
     })
 
@@ -605,7 +610,7 @@ export default function App() {
   }, [storeUpdateEdgeCondition])
 
   if (!authReady) return <div className="boot-screen">Loading Janusly…</div>
-  if (!session && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
+  if (!userId && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
 
   return (
     <Layout

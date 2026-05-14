@@ -40,24 +40,44 @@ export const supabase = isSupabaseConfigured
 
 /** localStorage key carrying the user's currently-selected org. */
 const ACTIVE_ORG_STORAGE_KEY = 'janusly:activeOrg'
+/** localStorage key carrying the SSO-issued Janusly session token. */
+const SESSION_TOKEN_STORAGE_KEY = 'janusly:sessionToken'
+/** URL fragment the SSO callback delivers the session token under. */
+const SESSION_TOKEN_FRAGMENT = 'janusly_session'
+/** Purpose discriminator used by API-issued SSO session tokens. */
+const SESSION_TOKEN_PURPOSE = 'sso_session'
 
-function readActiveOrgFromStorage(): string | null {
+type SessionTokenPayload = {
+  orgId: string
+  userId: string
+  email: string | null
+}
+
+function readFromStorage(key: string): string | null {
   if (typeof window === 'undefined' || !window.localStorage) return null
   try {
-    const value = window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY)
+    const value = window.localStorage.getItem(key)
     return value && value.length > 0 ? value : null
   } catch {
     return null
   }
 }
 
-function writeActiveOrgToStorage(orgId: string): void {
+function writeToStorage(key: string, value: string): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   try {
-    window.localStorage.setItem(ACTIVE_ORG_STORAGE_KEY, orgId)
+    window.localStorage.setItem(key, value)
   } catch {
-    // Storage may be unavailable (private mode, quota); the next read just
-    // falls back to "default" — non-fatal.
+    // Storage may be unavailable (private mode, quota); non-fatal.
+  }
+}
+
+function removeFromStorage(key: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // Non-fatal.
   }
 }
 
@@ -67,7 +87,93 @@ function writeActiveOrgToStorage(orgId: string): void {
  * `api.ts` calls this on every request and ships the value as `x-org-id`.
  */
 export function getActiveOrg(): string {
-  return readActiveOrgFromStorage() ?? 'default'
+  return readFromStorage(ACTIVE_ORG_STORAGE_KEY) ?? 'default'
+}
+
+/**
+ * Read the SSO-issued Janusly session token from localStorage, or null.
+ * `api.ts` calls this on every request; when set, the token ships in the
+ * `x-janusly-session` header INSTEAD of the Supabase Bearer JWT.
+ */
+export function getSessionToken(): string | null {
+  return readFromStorage(SESSION_TOKEN_STORAGE_KEY)
+}
+
+/** Persist a new session token (called by the SSO fragment-extract flow). */
+export function setSessionToken(token: string): void {
+  writeToStorage(SESSION_TOKEN_STORAGE_KEY, token)
+}
+
+/** Drop the session token (logout / token rotation). */
+export function clearSessionToken(): void {
+  removeFromStorage(SESSION_TOKEN_STORAGE_KEY)
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4)
+  return window.atob(padded)
+}
+
+function readSessionTokenPayload(): SessionTokenPayload | null {
+  const token = getSessionToken()
+  if (!token) return null
+  const parts = token.split('.')
+  if (parts.length !== 3 || parts[0] !== 'v1') return null
+  try {
+    const envelope = JSON.parse(decodeBase64Url(parts[1])) as {
+      purpose?: unknown
+      payload?: unknown
+      expiresAt?: unknown
+    }
+    if (envelope.purpose !== SESSION_TOKEN_PURPOSE) return null
+    if (typeof envelope.expiresAt !== 'number' || Math.floor(Date.now() / 1000) >= envelope.expiresAt) {
+      clearSessionToken()
+      return null
+    }
+    const payload = envelope.payload
+    if (!payload || typeof payload !== 'object') return null
+    const { orgId, userId, email } = payload as Record<string, unknown>
+    if (typeof orgId !== 'string' || typeof userId !== 'string') return null
+    return {
+      orgId,
+      userId,
+      email: typeof email === 'string' ? email : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * If the current URL hash carries `janusly_session=<token>` (the SSO
+ * callback's delivery vector), persist the token and strip the fragment
+ * off the URL bar + history via `history.replaceState`. Returns the
+ * extracted token (or null when no fragment was present).
+ *
+ * Safe to call multiple times — once consumed, the fragment is gone and
+ * subsequent calls return null.
+ */
+export function consumeSsoSessionFragment(): string | null {
+  if (typeof window === 'undefined' || !window.location) return null
+  const hash = window.location.hash || ''
+  if (!hash.includes(SESSION_TOKEN_FRAGMENT)) return null
+  // Hash format: `#janusly_session=<token>` (possibly with other
+  // entries; parse as URLSearchParams).
+  const trimmed = hash.startsWith('#') ? hash.slice(1) : hash
+  const params = new URLSearchParams(trimmed)
+  const token = params.get(SESSION_TOKEN_FRAGMENT)
+  if (!token) return null
+  setSessionToken(token)
+  try {
+    // Strip the fragment from the URL bar AND from the browser history
+    // entry so a back-forward navigation doesn't expose the token.
+    const cleanPath = window.location.pathname + window.location.search
+    window.history.replaceState(null, '', cleanPath || '/')
+  } catch {
+    // Non-fatal — we still persisted the token to localStorage.
+  }
+  return token
 }
 
 type SupabaseAuthClient = NonNullable<typeof supabase>['auth']
@@ -125,11 +231,12 @@ function devAuthSubscription(): AuthSubscriptionResponse {
  */
 export function normalizeAuth(session: Session | null): NormalizedAuth {
   const user = session?.user ?? null
+  const ssoPayload = user ? null : readSessionTokenPayload()
   return {
     session,
     user,
-    userId: user?.id ?? null,
-    orgId: getActiveOrg(),
+    userId: user?.id ?? ssoPayload?.userId ?? null,
+    orgId: ssoPayload?.orgId ?? getActiveOrg(),
   }
 }
 
@@ -144,6 +251,7 @@ export const AuthProvider = {
     return supabase.auth.signUp({ email, password })
   },
   signOut: () => {
+    clearSessionToken()
     if (!supabase) return Promise.resolve(devSignOutResponse)
     return supabase.auth.signOut()
   },
@@ -155,7 +263,7 @@ export const AuthProvider = {
     // Active-org is a client-side preference now. Writing to Supabase
     // `user_metadata.orgId` would mislead readers — the API ignores it
     // and resolves membership through `org_members`.
-    writeActiveOrgToStorage(orgId)
+    writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)
     if (!supabase) {
       devAuth.orgId = orgId
       return { result: { data: { user: null }, error: null }, auth: devAuth }

@@ -65,6 +65,7 @@ import { dlqRoutes } from "./routes/dlq-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { membersRoutes } from "./routes/members-routes";
 import { orgRoutes } from "./routes/org-routes";
+import { ssoRoutes } from "./routes/sso-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
@@ -89,6 +90,7 @@ export const routes: Route[] = [
   ...billingRoutes,
   ...orgRoutes,
   ...membersRoutes,
+  ...ssoRoutes,
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,

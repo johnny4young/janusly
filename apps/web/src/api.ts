@@ -13,7 +13,7 @@
  * - JSON body assumed; binary uploads aren't supported here.
  */
 
-import { getActiveOrg, supabase } from './auth'
+import { getActiveOrg, getSessionToken, supabase } from './auth'
 import { useWorkflowStore } from './store'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
@@ -30,19 +30,28 @@ const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
  * rather than losing them in a toast. Other 400 bodies still throw.
  */
 export async function api(path: string, options: RequestInit = {}) {
-  const session = supabase ? await supabase.auth.getSession() : { data: { session: null } }
+  // SSO-issued Janusly session token wins over Supabase JWT — when the
+  // user logged in via WorkOS, the callback set this localStorage entry
+  // and the API's `extractJanuslySession` provider reads it as the 4th
+  // auth mode.
+  const sessionToken = getSessionToken()
+  const session = !sessionToken && supabase
+    ? await supabase.auth.getSession()
+    : { data: { session: null } }
   const token = session.data.session?.access_token
 
   // `x-org-id` ships on every request — it's the scope hint the API
   // resolver uses to pick a membership when the user belongs to multiple
-  // orgs. In dev mode (no Supabase) it's the authoritative org. In
-  // Supabase mode it's an untrusted hint — the API resolves the actual
-  // grant through `org_members`.
+  // orgs. In dev mode (no Supabase / no SSO) it's the authoritative org.
+  // In Supabase mode it's an untrusted hint — the API resolves the actual
+  // grant through `org_members`. With an SSO session, the token's
+  // signed payload already carries orgId.
   const headers = {
     'Content-Type': 'application/json',
     'x-org-id': getActiveOrg(),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
+    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
     ...(options.headers ?? {})
   }
 
@@ -94,13 +103,17 @@ function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
  * sidesteps the browser's "open in tab" default for text MIME types.
  */
 export async function downloadFromApi(path: string, filename?: string): Promise<void> {
-  const session = supabase ? await supabase.auth.getSession() : { data: { session: null } }
+  const sessionToken = getSessionToken()
+  const session = !sessionToken && supabase
+    ? await supabase.auth.getSession()
+    : { data: { session: null } }
   const token = session.data.session?.access_token
 
   const headers = {
     'x-org-id': getActiveOrg(),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(!token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
+    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
   }
 
   let res: Response
