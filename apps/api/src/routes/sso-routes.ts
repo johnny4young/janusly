@@ -52,11 +52,11 @@ import {
   SSO_STATE_PURPOSE,
   type SsoStatePayload,
 } from "../auth";
+import { evaluateAuthPolicy } from "../auth-policy";
 import type { Route } from "../routes";
 import { buildAuthorizeUrl, exchangeCode, WorkOsExchangeError } from "../workos";
 
 const SSO_STATE_TTL_SECONDS = 10 * 60;
-const SSO_SESSION_TTL_SECONDS = 8 * 60 * 60;
 
 function getCallbackUrl(): string {
   return process.env.JANUSLY_SSO_CALLBACK_URL || "";
@@ -271,6 +271,33 @@ export const ssoRoutes: Route[] = [
         return sendJson(res, { error: "SSO connection mismatch" }, 400);
       }
 
+      // Policy gate BEFORE JIT-provisioning. An admin's
+      // `auth.allowedEmailDomains: "acme.com"` policy must fire here
+      // even though the user just authenticated via the IdP — otherwise
+      // an Okta directory exposing `@partner.com` users silently
+      // bypasses the org's domain policy. The evaluator emits its own
+      // `auth.policy.rejected` audit row; we ALSO emit
+      // `auth.sso.callback_failed` so the SSO audit trail stays
+      // chronologically complete.
+      const policyDecision = await evaluateAuthPolicy({
+        orgId,
+        userId: profile.id,
+        mode: "janusly-session",
+        email: profile.email,
+        ssoConnection: sso,
+      });
+      if (!policyDecision.allowed) {
+        await audit(orgId, profile.id, "auth.sso.callback_failed", "sso_connection", sso.id, {
+          reason: "policy_rejected",
+          policyKey: policyDecision.policyKey,
+        });
+        return sendJson(
+          res,
+          { error: "policy_violation", policyKey: policyDecision.policyKey },
+          403,
+        );
+      }
+
       await upsertMembership({
         orgId,
         userId: profile.id,
@@ -281,7 +308,7 @@ export const ssoRoutes: Route[] = [
       const sessionToken = signSignedToken({
         purpose: SSO_SESSION_PURPOSE,
         payload: { orgId, userId: profile.id, email: profile.email },
-        ttlSeconds: SSO_SESSION_TTL_SECONDS,
+        ttlSeconds: policyDecision.sessionTtlSeconds,
       });
 
       await audit(orgId, profile.id, "auth.sso.login", "sso_connection", sso.id, {
