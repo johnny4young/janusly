@@ -24,6 +24,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Play, Workflow, X } from 'lucide-react'
 import type { WorkflowInputSchemaShape } from '../types'
+import { useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type RunInputDialogProps = {
   /** Declared `inputs` schema for the current workflow. Required because the dialog is only mounted when inputs exist. */
@@ -58,23 +60,26 @@ type FormState = Record<string, unknown>
 /** Field-path → user-visible error string. Computed per render from local + server errors. */
 type ErrorMap = Record<string, string>
 
-const DESCRIPTION =
-  'Provide the values this workflow needs to start. Validated locally; the engine re-validates on submit.'
-
 export function RunInputDialog({
   inputs,
   workflowName,
-  kicker = 'Run input',
+  kicker,
   title,
-  description = DESCRIPTION,
-  submitLabel = 'Run workflow',
-  submittingLabel = 'Starting…',
-  closeLabel = 'Close run input',
+  description,
+  submitLabel,
+  submittingLabel,
+  closeLabel,
   serverErrors,
   submitting = false,
   onSubmit,
   onCancel,
 }: RunInputDialogProps) {
+  const { t } = useT()
+  const resolvedKicker = kicker ?? (t('runInput.kicker') as string)
+  const resolvedDescription = description ?? (t('runInput.description') as string)
+  const resolvedSubmitLabel = submitLabel ?? (t('runInput.submit') as string)
+  const resolvedSubmittingLabel = submittingLabel ?? (t('runInput.starting') as string)
+  const resolvedCloseLabel = closeLabel ?? (t('runInput.close') as string)
   const isObjectRoot = inputs.type === 'object' && inputs.properties
   const [state, setState] = useState<FormState>(() => initialFormState(inputs))
   const [localErrors, setLocalErrors] = useState<ErrorMap>({})
@@ -157,15 +162,15 @@ export function RunInputDialog({
             <Workflow size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">{kicker}</div>
-            <h2 id="run-input-title">{title?.trim() || workflowName?.trim() || 'Start workflow'}</h2>
-            <p className="helper-text">{description}</p>
+            <div className="section-kicker">{resolvedKicker}</div>
+            <h2 id="run-input-title">{title?.trim() || workflowName?.trim() || (t('runInput.title') as string)}</h2>
+            <p className="helper-text">{resolvedDescription}</p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
             onClick={handleCancel}
-            aria-label={closeLabel}
+            aria-label={resolvedCloseLabel}
             disabled={submitting}
           >
             <X size={16} aria-hidden="true" />
@@ -208,7 +213,7 @@ export function RunInputDialog({
 
           <footer className="run-input-dialog__footer">
             <button type="button" className="command-button" onClick={handleCancel} disabled={submitting}>
-              Cancel
+              {t('runInput.cancel')}
             </button>
             <button
               type="submit"
@@ -216,7 +221,7 @@ export function RunInputDialog({
               disabled={submitting}
             >
               <Play size={14} aria-hidden="true" />
-              <span>{submitting ? submittingLabel : submitLabel}</span>
+              <span>{submitting ? resolvedSubmittingLabel : resolvedSubmitLabel}</span>
             </button>
           </footer>
         </form>
@@ -308,7 +313,7 @@ function PrimitiveOrArrayField({
   const inputId = `run-input-${path || 'root'}`
   const errorId = `${inputId}-error`
   const error = errors[path]
-  const displayLabel = label ?? (path || 'Input')
+  const displayLabel = label ?? (path || (runtimeT('runInput.fallbackLabel') as string))
   const value = getAtPath(state, path)
   const setValue = (next: unknown) => {
     setState((prev) => setAtPath(prev, path, next))
@@ -339,7 +344,7 @@ function PrimitiveOrArrayField({
         aria-describedby={error ? errorId : undefined}
         ref={firstFieldRef as React.MutableRefObject<HTMLSelectElement | null> | undefined}
       >
-        <option value="">— Select —</option>
+        <option value="">{runtimeT('runInput.select') as string}</option>
         {schema.enum.map((option) => {
           const text = typeof option === 'string' ? option : JSON.stringify(option)
           return (
@@ -391,7 +396,7 @@ function PrimitiveOrArrayField({
           aria-describedby={error ? errorId : undefined}
           ref={firstFieldRef as React.MutableRefObject<HTMLInputElement | null> | undefined}
         />
-        <span>Enabled</span>
+        <span>{runtimeT('runInput.enabled') as string}</span>
       </label>
     )
   } else if (schema.type === 'array') {
@@ -533,7 +538,7 @@ function parseObject(
       // the operator typed at least one value. Guard the empty-object
       // case explicitly so `required: ['user']` actually means it.
       if (isRequired && Object.keys(nested).filter((k) => nested[k] !== undefined).length === 0) {
-        errors[childPath] = `${prettyLabel(childPath)} is required`
+        errors[childPath] = runtimeT('runInput.error.required', { label: prettyLabel(childPath) }) as string
       }
       out[key] = nested
       continue
@@ -555,22 +560,23 @@ function parseLeaf(
   errors: ErrorMap,
   required: boolean,
 ): unknown {
+  const requiredError = (p: string) => runtimeT('runInput.error.required', { label: prettyLabel(p) }) as string
   if (schema.type === 'string') {
     const text = typeof raw === 'string' ? raw : ''
     if (!text) {
-      if (required) errors[path] = `${prettyLabel(path)} is required`
+      if (required) errors[path] = requiredError(path)
       return undefined
     }
     return text
   }
   if (schema.type === 'number') {
     if (raw === '' || raw === undefined || raw === null) {
-      if (required) errors[path] = `${prettyLabel(path)} is required`
+      if (required) errors[path] = requiredError(path)
       return undefined
     }
     const num = typeof raw === 'number' ? raw : Number(raw)
     if (!Number.isFinite(num)) {
-      errors[path] = `${prettyLabel(path)} must be a number`
+      errors[path] = runtimeT('runInput.error.notNumber', { label: prettyLabel(path) }) as string
       return undefined
     }
     return num
@@ -582,36 +588,36 @@ function parseLeaf(
     if (typeof raw === 'string') {
       const trimmed = raw.trim()
       if (!trimmed) {
-        if (required) errors[path] = `${prettyLabel(path)} is required`
+        if (required) errors[path] = requiredError(path)
         return undefined
       }
       try {
         const parsed = JSON.parse(trimmed)
         if (!Array.isArray(parsed)) {
-          errors[path] = `${prettyLabel(path)} must be a JSON array`
+          errors[path] = runtimeT('runInput.error.notArray', { label: prettyLabel(path) }) as string
           return undefined
         }
         return parsed
       } catch {
-        errors[path] = `${prettyLabel(path)} must be valid JSON`
+        errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
         return undefined
       }
     }
     if (Array.isArray(raw)) return raw
-    if (required) errors[path] = `${prettyLabel(path)} is required`
+    if (required) errors[path] = requiredError(path)
     return undefined
   }
   // Unknown / fallback object literal
   if (typeof raw === 'string') {
     const trimmed = raw.trim()
     if (!trimmed) {
-      if (required) errors[path] = `${prettyLabel(path)} is required`
+      if (required) errors[path] = requiredError(path)
       return undefined
     }
     try {
       return JSON.parse(trimmed)
     } catch {
-      errors[path] = `${prettyLabel(path)} must be valid JSON`
+      errors[path] = runtimeT('runInput.error.notJson', { label: prettyLabel(path) }) as string
       return undefined
     }
   }
@@ -649,7 +655,9 @@ function splitServerErrors(
       if (fallback) formLevel.push(fallback)
       continue
     }
-    const display = reason ? `${prettyLabel(fieldPath)} ${reason}` : stripped
+    const display = reason
+      ? (runtimeT('runInput.error.serverPrefix', { label: prettyLabel(fieldPath), reason }) as string)
+      : stripped
     mapped[fieldPath] = display
   }
 
@@ -683,6 +691,6 @@ function matchKnownPath(segment: string, knownPaths: string[]): string | undefin
 }
 
 function prettyLabel(path: string): string {
-  if (!path) return 'Input'
+  if (!path) return runtimeT('runInput.fallbackLabel') as string
   return path
 }

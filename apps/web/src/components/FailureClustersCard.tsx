@@ -21,6 +21,8 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
+import { getResolvedLocale, useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type ClusterCategory =
   | 'secret_missing'
@@ -74,20 +76,20 @@ type ClusterRecoveryState =
 
 const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
 
-const CATEGORY_LABELS: Record<ClusterCategory, string> = {
-  secret_missing: 'Secret',
-  http_error: 'HTTP',
-  network_timeout: 'Network',
-  ai_provider: 'AI provider',
-  parse_error: 'Parse',
-  tool_input: 'Tool',
-  unknown: 'Other',
+const CATEGORY_KEYS: Record<ClusterCategory, string> = {
+  secret_missing: 'clusters.category.secret_missing',
+  http_error: 'clusters.category.http_error',
+  network_timeout: 'clusters.category.network_timeout',
+  ai_provider: 'clusters.category.ai_provider',
+  parse_error: 'clusters.category.parse_error',
+  tool_input: 'clusters.category.tool_input',
+  unknown: 'clusters.category.unknown',
 }
 
-const OWNER_LABELS: Record<ClusterOwner, string> = {
-  ops: 'Ops',
-  workflow_author: 'Workflow author',
-  platform: 'Platform',
+const OWNER_KEYS: Record<ClusterOwner, string> = {
+  ops: 'clusters.owner.ops',
+  workflow_author: 'clusters.owner.workflow_author',
+  platform: 'clusters.owner.platform',
 }
 
 /**
@@ -103,6 +105,7 @@ function severityForCategory(category: ClusterCategory): 'pass' | 'warn' | 'fail
 }
 
 export function FailureClustersCard() {
+  const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const [data, setData] = useState<ClusterData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -139,7 +142,7 @@ export function FailureClustersCard() {
         // patch against that row instead.
         const fallback = membersResp.deadLetterIds[0]
         if (!fallback) {
-          setRecovery({ kind: 'error', signature: cluster.signature, message: 'No open DLQ entries match this pattern any more.' })
+          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') as string })
           return
         }
         selectedDlq = await api(`/dlq?id=${encodeURIComponent(fallback)}`) as DeadLetter
@@ -156,7 +159,7 @@ export function FailureClustersCard() {
       setRecovery({
         kind: 'error',
         signature: cluster.signature,
-        message: err instanceof Error ? err.message : 'Failed to load cluster members',
+        message: err instanceof Error ? err.message : (t('clusters.errorMembers') as string),
       })
     }
   }
@@ -173,25 +176,25 @@ export function FailureClustersCard() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Cluster rollup unavailable')
+        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' }) as string))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [platformVersion])
+  }, [platformVersion, t])
 
   if (error) {
     return (
       <section className="panel-card">
-        <div className="section-kicker">Failure clusters</div>
-        <p className="helper-text">Cluster rollup unavailable — {error}</p>
+        <div className="section-kicker">{t('clusters.heading')}</div>
+        <p className="helper-text">{t('clusters.unavailable', { detail: error })}</p>
       </section>
     )
   }
   if (loading || !data) {
     return (
       <section className="panel-card">
-        <div className="section-kicker">Failure clusters</div>
-        <p className="helper-text" aria-live="polite">Scoring recent failures…</p>
+        <div className="section-kicker">{t('clusters.heading')}</div>
+        <p className="helper-text" aria-live="polite">{t('clusters.scoring')}</p>
       </section>
     )
   }
@@ -201,8 +204,8 @@ export function FailureClustersCard() {
   if (clusters.length === 0) {
     return (
       <section className="panel-card">
-        <div className="section-kicker">Failure clusters</div>
-        <p className="helper-text">No recurring failures in the last {windowDays} days.</p>
+        <div className="section-kicker">{t('clusters.heading')}</div>
+        <p className="helper-text">{t('clusters.empty', { days: windowDays })}</p>
       </section>
     )
   }
@@ -211,11 +214,12 @@ export function FailureClustersCard() {
     <section className="panel-card">
       <div className="split-row">
         <div>
-          <div className="section-kicker">Failure clusters</div>
-          <strong>{clusters.length} pattern{clusters.length === 1 ? '' : 's'}</strong>
+          <div className="section-kicker">{t('clusters.heading')}</div>
+          <strong>{t('clusters.patterns', { count: clusters.length })}</strong>
         </div>
         <span className="helper-text we-cluster-summary">
-          <RefreshCw size={12} aria-hidden="true" /> {totalSamples} sample{totalSamples === 1 ? '' : 's'} · last {windowDays} days
+          <RefreshCw size={12} aria-hidden="true" />{' '}
+          {t('clusters.windowSummary', { samples: t('clusters.samples', { count: totalSamples }), days: windowDays })}
         </span>
       </div>
 
@@ -232,7 +236,11 @@ export function FailureClustersCard() {
                 className="we-cluster-row__summary"
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
-                aria-label={`${cluster.signature} — ${cluster.frequency} occurrences across ${cluster.affectedWorkflows.length} workflow${cluster.affectedWorkflows.length === 1 ? '' : 's'}`}
+                aria-label={t('clusters.rowAria', {
+                  signature: cluster.signature,
+                  occurrences: t('clusters.occurrences', { count: cluster.frequency }),
+                  workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
+                }) as string}
               >
                 <span className="we-cluster-row__icon" aria-hidden="true">
                   {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -243,37 +251,37 @@ export function FailureClustersCard() {
                     <strong>{cluster.signature}</strong>
                   </span>
                   <span className="we-cluster-row__meta">
-                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{CATEGORY_LABELS[cluster.category]}</span>
-                    <span className="we-cluster-meta-sep">{cluster.frequency} occurrence{cluster.frequency === 1 ? '' : 's'}</span>
-                    <span className="we-cluster-meta-sep">{cluster.affectedWorkflows.length} workflow{cluster.affectedWorkflows.length === 1 ? '' : 's'}</span>
-                    <span className="we-cluster-meta-sep">last seen {lastSeenLabel}</span>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never) as string}</span>
+                    <span className="we-cluster-meta-sep">{t('clusters.occurrences', { count: cluster.frequency })}</span>
+                    <span className="we-cluster-meta-sep">{t('clusters.workflows', { count: cluster.affectedWorkflows.length })}</span>
+                    <span className="we-cluster-meta-sep">{t('clusters.lastSeen', { rel: lastSeenLabel })}</span>
                   </span>
                 </span>
-                <span className="we-cluster-row__owner" title="Suggested owner">
-                  <Users size={12} aria-hidden="true" /> {OWNER_LABELS[cluster.suggestedOwner]}
+                <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner') as string}>
+                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never) as string}
                 </span>
               </button>
 
               {isOpen && (
                 <div className="we-cluster-row__details">
                   <div className="we-cluster-row__section">
-                    <div className="field-label">Affected workflows</div>
+                    <div className="field-label">{t('clusters.affected')}</div>
                     <ul className="we-cluster-row__workflows">
                       {cluster.affectedWorkflows.map((wf) => (
                         <li key={wf.workflowId}>
                           <strong>{wf.workflowName}</strong>
-                          <span className="helper-text">{wf.count} occurrence{wf.count === 1 ? '' : 's'}</span>
+                          <span className="helper-text">{t('clusters.occurrences', { count: wf.count })}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
                   <div className="we-cluster-row__section">
-                    <div className="field-label">Recent runs</div>
+                    <div className="field-label">{t('clusters.recent')}</div>
                     <ul className="we-cluster-row__samples">
                       {cluster.samples.map((sample) => (
                         <li key={`${sample.source}:${sample.id}`}>
                           <code>{sample.runId.slice(0, 12)}…</code>
-                          <span className="helper-text">{sample.source === 'dead_letter' ? 'DLQ' : 'failed run'}</span>
+                          <span className="helper-text">{sample.source === 'dead_letter' ? t('clusters.dlq') : t('clusters.failedRun')}</span>
                         </li>
                       ))}
                     </ul>
@@ -290,13 +298,13 @@ export function FailureClustersCard() {
                         <Sparkles size={14} aria-hidden="true" />
                         <span>
                           {recovery?.kind === 'loading' && recovery.signature === cluster.signature
-                            ? 'Loading members…'
-                            : 'Recover this pattern'}
+                            ? t('clusters.loadingMembers')
+                            : t('clusters.recover')}
                         </span>
                       </button>
                       {recovery?.kind === 'error' && recovery.signature === cluster.signature && (
                         <p className="helper-text we-recovery-warning" role="alert">
-                          Could not start cluster recovery — {recovery.message}
+                          {t('clusters.recoveryError', { detail: recovery.message })}
                         </p>
                       )}
                     </div>
@@ -327,9 +335,9 @@ function formatRelative(iso: string, nowMs: number): string {
   const time = new Date(iso).getTime()
   if (!Number.isFinite(time)) return iso
   const diffSec = Math.max(0, Math.floor((nowMs - time) / 1000))
-  if (diffSec < 60) return 'just now'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
-  if (diffSec < 7 * 86400) return `${Math.floor(diffSec / 86400)}d ago`
-  return new Date(iso).toLocaleDateString()
+  if (diffSec < 60) return runtimeT('clusters.relative.justNow') as string
+  if (diffSec < 3600) return runtimeT('clusters.relative.minutes', { count: Math.floor(diffSec / 60) }) as string
+  if (diffSec < 86400) return runtimeT('clusters.relative.hours', { count: Math.floor(diffSec / 3600) }) as string
+  if (diffSec < 7 * 86400) return runtimeT('clusters.relative.days', { count: Math.floor(diffSec / 86400) }) as string
+  return new Date(iso).toLocaleDateString(getResolvedLocale())
 }

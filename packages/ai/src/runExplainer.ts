@@ -48,8 +48,16 @@ export type RunExplanation = {
 /**
  * Build the prompt sent to the LLM for run explanation. Pure function — no
  * side effects — so the same input always yields the same prompt.
+ *
+ * The optional `locale` flips the response language for the operator-
+ * facing answer; the prompt skeleton stays English so the model has
+ * stable instruction grounding regardless of UI locale. Default `'en'`
+ * keeps the eval suite's existing English-only baseline.
  */
-export function buildRunExplanationPrompt(input: RunExplanationInput) {
+export function buildRunExplanationPrompt(input: RunExplanationInput & { locale?: "en" | "es" }) {
+  const localeSuffix = input.locale === "es"
+    ? "\n\nIMPORTANT — RESPONSE LANGUAGE: write the answer in Spanish. Keep run / event / node ids and event-type literals (e.g. `node.failed`, `decision.made`) verbatim — they are machine identifiers, not display text."
+    : "";
   return `You are an AI workflow observability assistant.
 
 Explain the workflow run in clear, concise terms.
@@ -68,7 +76,7 @@ ${JSON.stringify(input.run, null, 2)}
 Events:
 ${JSON.stringify(input.events, null, 2)}
 
-Return a concise answer with bullet points.`;
+Return a concise answer with bullet points.${localeSuffix}`;
 }
 
 /**
@@ -91,10 +99,13 @@ export async function explainRun({
   question,
   model,
   context,
+  locale,
 }: RunExplanationInput & {
   llm?: LlmClient | null;
   model?: string;
   context?: { orgId: string; userId?: string; runId?: string; nodeId?: string; workflowId?: string };
+  /** Operator UI locale forwarded by the route from `Accept-Language`. */
+  locale?: "en" | "es";
 }): Promise<RunExplanation> {
   if (!llm) {
     return {
@@ -105,7 +116,7 @@ export async function explainRun({
 
   try {
     const result = await llm.generateText({
-      prompt: buildRunExplanationPrompt({ run, events, question }),
+      prompt: buildRunExplanationPrompt({ run, events, question, locale }),
       modelHint: model,
       context,
     });

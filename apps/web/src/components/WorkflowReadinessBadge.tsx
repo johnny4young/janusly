@@ -25,6 +25,8 @@ import { useEffect, useState } from 'react'
 import { ShieldCheck, AlertTriangle, ShieldAlert } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { tReadinessIssue, useT } from '../i18n'
+import type { ReadinessIssue as ServerReadinessIssue } from '../i18n/server-events'
 
 type ReadinessSeverity = 'warn' | 'fail'
 
@@ -42,6 +44,7 @@ type ReadinessResult = {
 }
 
 export function WorkflowReadinessBadge() {
+  const { t } = useT()
   // Select the canvas-to-JSON helper directly off the store rather than
   // accepting it as a prop. App.tsx's destructuring of the whole store
   // produces a fresh local binding on every re-render (which happens on
@@ -69,19 +72,19 @@ export function WorkflowReadinessBadge() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Readiness check unavailable')
+        setError(err instanceof Error ? err.message : t('badges.readiness.unavailable'))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [getWorkflowJson, platformVersion])
+  }, [getWorkflowJson, platformVersion, t])
 
   if (error) {
-    return <span className="we-readiness-badge we-readiness-badge--error">Readiness unavailable</span>
+    return <span className="we-readiness-badge we-readiness-badge--error">{t('badges.readiness.unavailable')}</span>
   }
   if (loading || !result) {
     return (
       <span className="we-readiness-badge we-readiness-badge--loading" aria-live="polite">
-        <span className="we-readiness-dot we-readiness-dot--idle" /> Checking…
+        <span className="we-readiness-dot we-readiness-dot--idle" /> {t('badges.readiness.checking')}
       </span>
     )
   }
@@ -91,10 +94,10 @@ export function WorkflowReadinessBadge() {
   const warnCount = issues.filter((issue) => issue.severity === 'warn').length
 
   const summaryLabel = status === 'pass'
-    ? 'Production Ready'
+    ? t('badges.readiness.productionReady')
     : status === 'warn'
-      ? `${warnCount} warning${warnCount === 1 ? '' : 's'}`
-      : `${failCount} blocker${failCount === 1 ? '' : 's'}`
+      ? t('badges.readiness.warnings', { count: warnCount })
+      : t('badges.readiness.blockers', { count: failCount })
   const Icon = status === 'pass' ? ShieldCheck : status === 'warn' ? AlertTriangle : ShieldAlert
 
   return (
@@ -104,21 +107,26 @@ export function WorkflowReadinessBadge() {
         className="we-readiness-badge__summary"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
-        aria-label={`Production readiness: ${summaryLabel}`}
+        aria-label={t('badges.readiness.aria', { summary: summaryLabel })}
       >
         <Icon size={14} aria-hidden="true" />
         <span>{summaryLabel}</span>
       </button>
       {expanded && issues.length > 0 && (
         <ul className="we-readiness-badge__issues">
-          {issues.map((issue, index) => (
-            <li key={`${issue.code}-${index}`} className={`we-readiness-issue we-readiness-issue--${issue.severity}`}>
-              <strong className="we-readiness-issue__code">{issue.code}</strong>
-              {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
-              <p className="we-readiness-issue__message">{issue.message}</p>
-              {issue.suggestion && <p className="we-readiness-issue__suggestion">{issue.suggestion}</p>}
-            </li>
-          ))}
+          {issues.map((issue, index) => {
+            // Translate via the server-event helper — falls back to the raw
+            // engine `message` when the catalog hasn't mirrored the code yet.
+            const localised = tReadinessIssue(issue as ServerReadinessIssue)
+            return (
+              <li key={`${issue.code}-${index}`} className={`we-readiness-issue we-readiness-issue--${issue.severity}`}>
+                <strong className="we-readiness-issue__code">{issue.code}</strong>
+                {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
+                <p className="we-readiness-issue__message">{localised}</p>
+                {issue.suggestion && <p className="we-readiness-issue__suggestion">{issue.suggestion}</p>}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

@@ -22,6 +22,7 @@ import { KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
+import { tApiError, useT } from "../i18n";
 
 type Role = "viewer" | "editor" | "admin";
 
@@ -44,6 +45,7 @@ type RoleEntry = {
 const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
 
 export function PermissionGrantsPanel() {
+  const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
   const addToast = useWorkflowStore((s) => s.addToast);
   const platformVersion = useWorkflowStore((s) => s.platformVersion);
@@ -92,7 +94,7 @@ export function PermissionGrantsPanel() {
         });
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load permissions");
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("permissions.errorLoad") as string));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -100,7 +102,7 @@ export function PermissionGrantsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [platformVersion]);
+  }, [platformVersion, t]);
 
   const grouped = useMemo(() => {
     const out = new Map<string, CatalogEntry[]>();
@@ -129,34 +131,34 @@ export function PermissionGrantsPanel() {
         method: "POST",
         body: JSON.stringify({ grantedPermissions: granted }),
       });
-      addToast(`Updated permissions for "${role.name}"`, "success");
+      addToast(t("permissions.toastUpdated", { role: role.name }), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "save failed", "error");
+      addToast(tApiError(err) || (t("permissions.errorSave") as string), "error");
     } finally {
       setSavingRole(null);
     }
   }
 
   async function revertBuiltin(role: RoleEntry) {
-    if (!window.confirm(`Revert ${role.name} to default permissions?`)) return;
+    if (!window.confirm(t("permissions.confirmRevert", { role: role.name }) as string)) return;
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
-      addToast(`Reverted "${role.name}" to defaults`, "success");
+      addToast(t("permissions.toastReverted", { role: role.name }), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "revert failed", "error");
+      addToast(tApiError(err) || (t("permissions.errorRevert") as string), "error");
     }
   }
 
   async function deleteCustom(role: RoleEntry) {
-    if (!window.confirm(`Delete custom role "${role.name}"?`)) return;
+    if (!window.confirm(t("permissions.confirmDelete", { role: role.name }) as string)) return;
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
-      addToast(`Deleted role "${role.name}"`, "success");
+      addToast(t("permissions.toastDeleted", { role: role.name }), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "delete failed", "error");
+      addToast(tApiError(err) || (t("permissions.errorDelete") as string), "error");
     }
   }
 
@@ -173,7 +175,7 @@ export function PermissionGrantsPanel() {
     event.preventDefault();
     const name = newRoleName.trim().toLowerCase();
     if (!/^[a-z0-9_-]{1,32}$/.test(name)) {
-      setError("Role name must match a-z, 0-9, _, - (1-32 chars)");
+      setError(t("permissions.errorName") as string);
       return;
     }
     setCreating(true);
@@ -188,14 +190,14 @@ export function PermissionGrantsPanel() {
           grantedPermissions: Array.from(newRolePermissions).sort(),
         }),
       });
-      addToast(`Created custom role "${name}"`, "success");
+      addToast(t("permissions.toastCreated", { role: name }), "success");
       setNewRoleName("");
       setNewRoleDescription("");
       setNewRolePermissions(new Set());
       setNewRoleInherits("viewer");
       bumpPlatformVersion();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
+      setError(err instanceof Error ? err.message : (t("permissions.errorCreate") as string));
     } finally {
       setCreating(false);
     }
@@ -206,9 +208,9 @@ export function PermissionGrantsPanel() {
       <section className="we-budget-settings" aria-labelledby="permissions-heading">
         <header className="we-budget-settings__header">
           <KeyRound size={18} aria-hidden="true" />
-          <h3 id="permissions-heading">Permission grants</h3>
+          <h3 id="permissions-heading">{t("permissions.heading")}</h3>
         </header>
-        <p className="we-budget-settings__status">Loading permissions…</p>
+        <p className="we-budget-settings__status">{t("permissions.loading")}</p>
       </section>
     );
   }
@@ -220,7 +222,7 @@ export function PermissionGrantsPanel() {
     <section className="we-budget-settings" aria-labelledby="permissions-heading">
       <header className="we-budget-settings__header">
         <KeyRound size={18} aria-hidden="true" />
-        <h3 id="permissions-heading">Permission grants</h3>
+        <h3 id="permissions-heading">{t("permissions.heading")}</h3>
       </header>
 
       {error && (
@@ -236,8 +238,8 @@ export function PermissionGrantsPanel() {
             <header>
               <h4>
                 <code>{role.name}</code>
-                {role.isBuiltin ? <span> (built-in)</span> : <span> (custom · inherits {role.inheritsFrom})</span>}
-                {role.isOverride && <span className="we-pill we-pill--info"> override</span>}
+                {role.isBuiltin ? <span> {t("permissions.builtin")}</span> : <span> {t("permissions.custom", { base: role.inheritsFrom })}</span>}
+                {role.isOverride && <span className="we-pill we-pill--info"> {t("permissions.override")}</span>}
               </h4>
               {role.description && <p>{role.description}</p>}
             </header>
@@ -255,10 +257,10 @@ export function PermissionGrantsPanel() {
                           checked={checked}
                           disabled={isMandatory}
                           onChange={() => toggleEditing(role.name, entry.key)}
-                          aria-label={`${role.name} - ${entry.key}`}
+                          aria-label={t("permissions.entryAria", { role: role.name, key: entry.key }) as string}
                         />
                         <span title={entry.description}>{entry.key}</span>
-                        {isMandatory && <span className="we-pill we-pill--warn">required</span>}
+                        {isMandatory && <span className="we-pill we-pill--warn">{t("permissions.required")}</span>}
                       </label>
                     );
                   })}
@@ -272,7 +274,7 @@ export function PermissionGrantsPanel() {
                 onClick={() => saveRole(role)}
                 disabled={savingRole === role.name}
               >
-                <Save size={14} aria-hidden="true" /> Save
+                <Save size={14} aria-hidden="true" /> {t("permissions.save")}
               </button>
               {role.isBuiltin && role.isOverride && (
                 <button
@@ -280,7 +282,7 @@ export function PermissionGrantsPanel() {
                   className="we-button we-button--ghost"
                   onClick={() => revertBuiltin(role)}
                 >
-                  <RotateCcw size={14} aria-hidden="true" /> Revert to defaults
+                  <RotateCcw size={14} aria-hidden="true" /> {t("permissions.revert")}
                 </button>
               )}
               {!role.isBuiltin && (
@@ -288,9 +290,9 @@ export function PermissionGrantsPanel() {
                   type="button"
                   className="we-button we-button--ghost"
                   onClick={() => deleteCustom(role)}
-                  aria-label={`Delete custom role ${role.name}`}
+                  aria-label={t("permissions.deleteAria", { role: role.name }) as string}
                 >
-                  <Trash2 size={14} aria-hidden="true" /> Delete
+                  <Trash2 size={14} aria-hidden="true" /> {t("permissions.delete")}
                 </button>
               )}
             </footer>
@@ -300,35 +302,35 @@ export function PermissionGrantsPanel() {
 
       <article className="we-permissions-role-card we-permissions-role-card--new">
         <header>
-          <h4>Add custom role</h4>
-          <p>Create a role with a specific permission set. Inherits a built-in role's rank for back-compat with legacy role gates.</p>
+          <h4>{t("permissions.add.heading")}</h4>
+          <p>{t("permissions.add.intro")}</p>
         </header>
         <form className="we-budget-settings__form" onSubmit={createRole} noValidate>
           <label className="we-field">
-            <span className="we-field__label">Name (a-z, 0-9, _, -)</span>
+            <span className="we-field__label">{t("permissions.add.name")}</span>
             <input
               type="text"
               className="we-field__input"
               value={newRoleName}
               onChange={(e) => setNewRoleName(e.target.value)}
-              placeholder="compliance"
+              placeholder={t("permissions.add.namePlaceholder") as string}
               maxLength={32}
             />
           </label>
           <label className="we-field">
-            <span className="we-field__label">Inherits rank from</span>
+            <span className="we-field__label">{t("permissions.add.inherits")}</span>
             <select
               className="we-field__input"
               value={newRoleInherits}
               onChange={(e) => setNewRoleInherits(e.target.value as Role)}
             >
-              <option value="viewer">viewer (fail-closed, recommended)</option>
-              <option value="editor">editor</option>
-              <option value="admin">admin</option>
+              <option value="viewer">{t("permissions.add.inheritOption.viewer")}</option>
+              <option value="editor">{t("permissions.add.inheritOption.editor")}</option>
+              <option value="admin">{t("permissions.add.inheritOption.admin")}</option>
             </select>
           </label>
           <label className="we-field">
-            <span className="we-field__label">Description (optional)</span>
+            <span className="we-field__label">{t("permissions.add.description")}</span>
             <input
               type="text"
               className="we-field__input"
@@ -347,7 +349,7 @@ export function PermissionGrantsPanel() {
                       type="checkbox"
                       checked={newRolePermissions.has(entry.key)}
                       onChange={() => toggleNewRolePermission(entry.key)}
-                      aria-label={`new-role-${entry.key}`}
+                      aria-label={t("permissions.add.entryAria", { key: entry.key }) as string}
                     />
                     <span title={entry.description}>{entry.key}</span>
                   </label>
@@ -356,7 +358,7 @@ export function PermissionGrantsPanel() {
             ))}
           </div>
           <button type="submit" className="we-button we-button--primary" disabled={creating}>
-            <Plus size={14} aria-hidden="true" /> {creating ? "Creating…" : "Create role"}
+            <Plus size={14} aria-hidden="true" /> {creating ? t("permissions.add.creating") : t("permissions.add.create")}
           </button>
         </form>
       </article>

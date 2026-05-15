@@ -10,6 +10,7 @@
 import React from 'react'
 import type { WorkflowInputSchemaShape } from '../types'
 import { RunInputDialog } from './RunInputDialog'
+import { useT } from '../i18n'
 
 type HumanFormDialogProps = {
   title?: string
@@ -31,15 +32,16 @@ export function HumanFormDialog({
   onSubmit,
   onCancel,
 }: HumanFormDialogProps) {
+  const { t } = useT()
   return (
     <RunInputDialog
       inputs={schema}
-      kicker="Form step"
-      title={title?.trim() || 'Complete form'}
-      description={description?.trim() || 'Submit the requested fields so this workflow can continue.'}
-      submitLabel="Submit form"
-      submittingLabel="Submitting…"
-      closeLabel="Close form"
+      kicker={t('humanFormDialog.kicker')}
+      title={title?.trim() || t('humanFormDialog.title')}
+      description={description?.trim() || t('humanFormDialog.description')}
+      submitLabel={t('humanFormDialog.submit')}
+      submittingLabel={t('humanFormDialog.submitting')}
+      closeLabel={t('humanFormDialog.close')}
       serverErrors={serverErrors}
       submitting={submitting}
       onSubmit={onSubmit}

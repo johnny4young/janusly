@@ -27,6 +27,7 @@
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import {
   createConnection,
@@ -257,7 +258,7 @@ export const mcpRoutes: Route[] = [
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
       if (existing) {
-        return sendJson(res, { error: "connection with this alias already exists" }, 409);
+        return sendJson(res, errorEnvelope("mcp_connection_duplicate", "connection with this alias already exists", { alias }), 409);
       }
 
       const connection = await createConnection({
@@ -297,7 +298,7 @@ export const mcpRoutes: Route[] = [
       if (!alias) return sendJson(res, { error: "alias is required" }, 400);
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      if (!existing) return sendJson(res, { error: "connection not found" }, 404);
+      if (!existing) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const updates: Parameters<typeof updateConnection>[0] = { orgId: auth.orgId, alias };
@@ -358,7 +359,7 @@ export const mcpRoutes: Route[] = [
       if (!alias) return sendJson(res, { error: "alias is required" }, 400);
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      if (!existing) return sendJson(res, { error: "connection not found" }, 404);
+      if (!existing) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
 
       await deleteConnection({ orgId: auth.orgId, alias });
       await audit(auth.orgId, auth.userId, "mcp.connection.deleted", "mcp_connection", existing.id, {
@@ -392,7 +393,7 @@ export const mcpRoutes: Route[] = [
       }
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      if (!existing) return sendJson(res, { error: "connection not found" }, 404);
+      if (!existing) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
 
       const before = await listToolDescriptors(existing.id);
       const discovery = await runDiscovery(existing);
@@ -421,7 +422,7 @@ export const mcpRoutes: Route[] = [
       const alias = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
       if (!alias) return sendJson(res, { error: "alias is required" }, 400);
       const connection = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      if (!connection) return sendJson(res, { error: "connection not found" }, 404);
+      if (!connection) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
       const tools = await listToolDescriptors(connection.id);
       return sendJson(res, { tools });
     },
@@ -438,9 +439,9 @@ export const mcpRoutes: Route[] = [
       if (!alias || !toolName) return sendJson(res, { error: "alias and tool name are required" }, 400);
 
       const connection = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      if (!connection) return sendJson(res, { error: "connection not found" }, 404);
+      if (!connection) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
       const descriptor = await getToolDescriptor({ connectionId: connection.id, name: toolName });
-      if (!descriptor) return sendJson(res, { error: "tool not found" }, 404);
+      if (!descriptor) return sendJson(res, errorEnvelope("mcp_tool_not_found", "tool not found", { tool: toolName }), 404);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;

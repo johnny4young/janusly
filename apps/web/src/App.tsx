@@ -35,10 +35,11 @@ import { RunInputDialog } from './components/RunInputDialog'
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
-import { getNodeHelper, getNodeLabel } from './constants'
+import { formatStatusLabel, getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
+import { useT } from './i18n'
 
 type RunResponse = {
   run?: RunSummary
@@ -134,6 +135,8 @@ export default function App() {
     updateEdgeCondition: storeUpdateEdgeCondition,
     bumpPlatformVersion,
   } = useWorkflowStore()
+
+  const { t, i18n } = useT()
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [tools, setTools] = useState<ToolSchema[]>([])
@@ -248,7 +251,7 @@ export default function App() {
       } catch (error) {
         if (!closed) {
           setStreamStatus('error')
-          addToast(error instanceof Error ? error.message : 'Run status failed', 'error')
+          addToast(error instanceof Error ? error.message : t('toasts.runStatusFailed'), 'error')
         }
       }
     }
@@ -263,7 +266,7 @@ export default function App() {
       window.clearInterval(interval)
       setStreamStatus('closed')
     }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, setStreamStatus])
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, setStreamStatus, t])
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedEdge = useMemo(() => edges.find(edge => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
@@ -291,13 +294,13 @@ export default function App() {
         selected: isSelected,
       }
     })
-  }, [nodeStatusMap, nodes, selectedNodeId, validationIssues])
+  }, [i18n.language, nodeStatusMap, nodes, selectedNodeId, validationIssues])
 
   const visibleEdges = useMemo<WorkflowGraphEdge[]>(() => {
     return edges.map(edge => ({
       ...edge,
       animated: Boolean(edge.data?.condition),
-      label: edge.data?.condition ? 'condition' : edge.label,
+      label: edge.data?.condition ? t('canvas.edge.condition') : edge.label,
       style: {
         stroke: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
         strokeWidth: selectedEdgeId === edge.id ? 2.8 : 1.8,
@@ -307,20 +310,20 @@ export default function App() {
         color: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
       },
     }))
-  }, [edges, selectedEdgeId])
+  }, [edges, selectedEdgeId, t])
 
   const validateWorkflow = useCallback(async () => {
     try {
       const workflow = getWorkflowJson()
       const result = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }) as ValidationResponse
       setValidationIssues(result.issues ?? [])
-      addToast(result.valid ? 'Flow is ready to run' : 'Flow needs a quick fix', result.valid ? 'success' : 'error')
+      addToast(result.valid ? t('toasts.validationOk') : t('toasts.validationNeedsFix'), result.valid ? 'success' : 'error')
       return result.valid
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Validation failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.validationFailed'), 'error')
       return false
     }
-  }, [addToast, getWorkflowJson])
+  }, [addToast, getWorkflowJson, t])
 
   const saveWorkflow = useCallback(async () => {
     if (!await validateWorkflow()) return
@@ -328,13 +331,13 @@ export default function App() {
     try {
       const workflow = getWorkflowJson()
       const result = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }) as { version?: number }
-      addToast(`Saved version ${result.version ?? '?'}`, 'success')
+      addToast(t('toasts.savedVersion', { version: result.version ?? '?' }), 'success')
       bumpPlatformVersion()
       await refreshPlatform()
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Save failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.saveFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, validateWorkflow])
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, t, validateWorkflow])
 
   /**
    * Internal helper: send the actual `POST /start` request with an optional
@@ -347,15 +350,15 @@ export default function App() {
     const body = input !== undefined ? { workflow, input } : workflow
     const result = await api('/start', { method: 'POST', body: JSON.stringify(body) }) as { runId?: string; errors?: string[] }
     if (result?.errors) return result
-    if (!result?.runId) throw new Error('API did not return runId')
+    if (!result?.runId) throw new Error(t('toasts.apiNoRunId'))
     resetRun()
     setRunId(result.runId)
     setActiveTab('multiAgent')
-    addToast(`Run started: ${result.runId.slice(0, 8)}`, 'success')
+    addToast(t('toasts.runStarted', { runIdShort: result.runId.slice(0, 8) }), 'success')
     bumpPlatformVersion()
     await refreshPlatform()
     return result
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId])
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId, t])
 
   const startWorkflow = useCallback(async () => {
     if (!await validateWorkflow()) return
@@ -369,9 +372,9 @@ export default function App() {
     try {
       await startRunWith(undefined)
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Run failed to start', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.runFailedToStart'), 'error')
     }
-  }, [addToast, currentWorkflowInputs, startRunWith, validateWorkflow])
+  }, [addToast, currentWorkflowInputs, startRunWith, t, validateWorkflow])
 
   const submitRunInput = useCallback(async (input: unknown) => {
     setRunInputSubmitting(true)
@@ -384,11 +387,11 @@ export default function App() {
       }
       setRunInputOpen(false)
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Run failed to start', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.runFailedToStart'), 'error')
     } finally {
       setRunInputSubmitting(false)
     }
-  }, [addToast, startRunWith])
+  }, [addToast, startRunWith, t])
 
   const openWorkflow = useCallback(async (id: string) => {
     try {
@@ -399,9 +402,9 @@ export default function App() {
         setActiveTab('inspector')
       }
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Workflow failed to open', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.workflowOpenFailed'), 'error')
     }
-  }, [addToast, hydrateWorkflow, setActiveTab])
+  }, [addToast, hydrateWorkflow, setActiveTab, t])
 
   const openRun = useCallback(async (id: string) => {
     try {
@@ -412,9 +415,9 @@ export default function App() {
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
       setActiveTab('multiAgent')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Run failed to open', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
-  }, [addToast, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes])
+  }, [addToast, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes, t])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return
@@ -423,29 +426,29 @@ export default function App() {
       addEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Older events failed to load', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.olderEventsFailed'), 'error')
     }
-  }, [addEvents, addToast, eventsCursor, eventsHasMore, runId, setEventsPagination])
+  }, [addEvents, addToast, eventsCursor, eventsHasMore, runId, setEventsPagination, t])
 
   const installPlugin = useCallback(async (pluginId: string) => {
     try {
       await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) })
-      addToast(`Installed ${pluginId}`, 'success')
+      addToast(t('toasts.installSucceeded', { pluginId }), 'success')
       await refreshPlatform()
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Tool install failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.installFailed'), 'error')
     }
-  }, [addToast, refreshPlatform])
+  }, [addToast, refreshPlatform, t])
 
   const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string }) => {
     try {
       await api('/credentials', { method: 'POST', body: JSON.stringify(credential) })
-      addToast(`Credential ${credential.name} added`, 'success')
+      addToast(t('toasts.credentialAdded', { name: credential.name }), 'success')
       await refreshPlatform()
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Credential failed to save', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.credentialFailed'), 'error')
     }
-  }, [addToast, refreshPlatform])
+  }, [addToast, refreshPlatform, t])
 
   const approveNode = useCallback(async (nodeId: string) => {
     if (!runId) return
@@ -453,14 +456,14 @@ export default function App() {
     try {
       await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) })
       await loadStatus(runId)
-      addToast(`Step ${nodeId} approved`, 'success')
+      addToast(t('toasts.stepApproved', { nodeId }), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Resume failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.resumeFailed'), 'error')
     }
-  }, [addToast, loadStatus, runId])
+  }, [addToast, loadStatus, runId, t])
 
   const submitHumanForm = useCallback(async (nodeId: string, input: unknown, resumeToken: string) => {
-    if (!runId) return ['No active run is selected.']
+    if (!runId) return [t('toasts.formNoActiveRun')]
 
     try {
       const result = await api('/resume', {
@@ -473,14 +476,14 @@ export default function App() {
       await loadStatus(runId)
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast(`Form ${nodeId} submitted`, 'success')
+      addToast(t('toasts.formSubmitted', { nodeId }), 'success')
       return undefined
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Form submit failed'
+      const message = error instanceof Error ? error.message : t('toasts.formSubmitFailed')
       addToast(message, 'error')
       return [message]
     }
-  }, [addToast, loadStatus, refreshPlatform, runId])
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
 
   const replayNode = useCallback(async (nodeId: string) => {
     if (!runId) return
@@ -493,17 +496,17 @@ export default function App() {
       await loadStatus(runId)
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast(`Step ${nodeId} retried`, 'success')
+      addToast(t('toasts.stepRetried', { nodeId }), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Replay failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.replayFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
 
   const cancelActiveRun = useCallback(async () => {
     if (!runId) return
     const activeRun = runs.find(r => r.id === runId)
     if (activeRun && isTerminalRunStatus(activeRun.status)) {
-      addToast(`Run is already ${activeRun.status}`, 'info')
+      addToast(t('toasts.runAlreadyTerminal', { status: formatStatusLabel(activeRun.status) }), 'info')
       return
     }
     try {
@@ -514,11 +517,11 @@ export default function App() {
       await loadStatus(runId)
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast('Run cancelled', 'success')
+      addToast(t('toasts.runCancelled'), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Cancel failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.runCancelFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs])
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs, t])
 
   const replayDeadLetter = useCallback(async (deadLetterId: string) => {
     try {
@@ -529,11 +532,11 @@ export default function App() {
       if (runId) await loadStatus(runId)
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast('Dead letter replayed', 'success')
+      addToast(t('toasts.deadLetterReplayed'), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Dead letter replay failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.deadLetterReplayFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId])
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
 
   const generateWorkflow = useCallback(async (prompt: string) => {
     const result = await api('/ai/generate-workflow', {
@@ -543,7 +546,7 @@ export default function App() {
 
     if (result.error) throw new Error(result.error)
     if (!Array.isArray(result.nodes) || !Array.isArray(result.edges)) {
-      throw new Error('AI response did not include a runnable workflow.')
+      throw new Error(t('toasts.aiResponseInvalid'))
     }
 
     hydrateWorkflow(result)
@@ -551,13 +554,13 @@ export default function App() {
     const mode = result.mode ?? 'fallback'
     const tone = mode === 'error' ? 'error' : result.aiError ? 'info' : 'success'
     const message = mode === 'ai'
-      ? 'AI drafted a flow'
+      ? t('toasts.aiDrafted')
       : result.aiError
-        ? 'AI failed — starter flow loaded'
-        : 'Starter flow loaded locally'
+        ? t('toasts.aiFallbackStarter')
+        : t('toasts.starterLoaded')
     addToast(message, tone)
     return { mode, workflow: result as WorkflowDefinition, aiError: result.aiError }
-  }, [addToast, hydrateWorkflow])
+  }, [addToast, hydrateWorkflow, t])
 
   const explainWorkflow = useCallback(async () => {
     const workflow = getWorkflowJson()
@@ -569,11 +572,11 @@ export default function App() {
     if (result.error) throw new Error(result.error)
     return {
       mode: result.mode ?? 'fallback',
-      explanation: result.explanation ?? 'No workflow explanation available.',
+      explanation: result.explanation ?? t('toasts.noWorkflowExplanation'),
       model: result.model,
       aiError: result.aiError,
     }
-  }, [getWorkflowJson])
+  }, [getWorkflowJson, t])
 
   const reviewWorkflow = useCallback(async () => {
     const workflow = getWorkflowJson()
@@ -599,17 +602,17 @@ export default function App() {
       })
       bumpPlatformVersion()
       await refreshPlatform()
-      addToast('Dead letter resolved', 'success')
+      addToast(t('toasts.deadLetterResolved'), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Dead letter resolve failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.deadLetterResolveFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, refreshPlatform])
+  }, [addToast, bumpPlatformVersion, refreshPlatform, t])
 
   const updateEdgeCondition = useCallback((edgeId: string, condition: string) => {
     storeUpdateEdgeCondition(edgeId, condition || null)
   }, [storeUpdateEdgeCondition])
 
-  if (!authReady) return <div className="boot-screen">Loading Janusly…</div>
+  if (!authReady) return <div className="boot-screen">{t('app.loading')}</div>
   if (!userId && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
 
   return (
@@ -619,11 +622,11 @@ export default function App() {
           <div className="brand-lockup">
             <span className="brand-mark">JN</span>
             <div>
-              <strong>Janusly</strong>
-              <span>{currentWorkflowName} · {orgId ?? 'default'}</span>
+              <strong>{t('app.brand')}</strong>
+              <span>{t('layout.brandSubtitle', { workflowName: currentWorkflowName, org: orgId ?? 'default' })}</span>
             </div>
           </div>
-          <div className="top-bar-status" aria-label="Workflow status">
+          <div className="top-bar-status" aria-label={t('layout.workflowStatus')}>
             <WorkflowReadinessBadge />
             <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
           </div>

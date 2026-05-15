@@ -14,9 +14,35 @@
  */
 
 import { getActiveOrg, getSessionToken, supabase } from './auth'
+import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+
+/**
+ * Thrown by `api()` when the server returns a non-2xx body. Carries
+ * the stable `code` + structured `params` from the server's
+ * `{ error, code, params? }` envelope so call sites can pass the
+ * whole error to `tApiError` for client-side translation. Plain `Error`
+ * call sites still work — `tApiError` falls back to `message` then to
+ * `serverEvents.fallback`.
+ */
+export class ApiError extends Error {
+  /** Stable snake_case code from `apps/api/src/error-codes.ts`. */
+  readonly code?: string
+  /** Structured interpolation values for `apiErrors.<code>` catalog templates. */
+  readonly params?: Record<string, unknown>
+  /** HTTP status code (4xx / 5xx). Optional — request-failed paths omit it. */
+  readonly statusCode?: number
+
+  constructor(message: string, opts: { code?: string; params?: Record<string, unknown>; statusCode?: number } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    if (opts.code !== undefined) this.code = opts.code
+    if (opts.params !== undefined) this.params = opts.params
+    if (opts.statusCode !== undefined) this.statusCode = opts.statusCode
+  }
+}
 
 /**
  * Make an authenticated request to the API; resolves the parsed body or
@@ -49,6 +75,14 @@ export async function api(path: string, options: RequestInit = {}) {
   const headers = {
     'Content-Type': 'application/json',
     'x-org-id': getActiveOrg(),
+    // The API's AI helpers (`/ai/patch-workflow`, `/ai/suggest-improvement`,
+    // `/ai/explain-workflow`, `/ai/explain-run`, `/ai/review-workflow`)
+    // read this header (`apps/api/src/locale.ts:localeFromRequest`) and
+    // append a one-line "respond in <language>" instruction to the LLM
+    // system prompt so the operator-facing free-form fields (rationale,
+    // explanation, message) come back in the user's UI locale. Other
+    // routes ignore the header.
+    'Accept-Language': getResolvedLocale(),
     ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
     ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
     ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
@@ -59,7 +93,7 @@ export async function api(path: string, options: RequestInit = {}) {
   try {
     res = await fetch(`${API_URL}${path}`, { ...options, headers })
   } catch {
-    throw new Error('Janusly API is offline. Start the API and refresh this view.')
+    throw new Error(t('api.error.offline') as string)
   }
   const payload = await res.json().catch(() => ({}))
 
@@ -79,8 +113,17 @@ export async function api(path: string, options: RequestInit = {}) {
         // Non-fatal — the throw below still surfaces the original 402.
       }
     }
-    const message = typeof payload?.error === 'string' ? payload.error : `Request failed with ${res.status}`
-    throw new Error(message)
+    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status }) as string
+    // Preserve the structured envelope on the thrown error so toast
+    // call sites can translate via `tApiError(err)`. Plain string-message
+    // consumers (`err.message`) keep working unchanged — the new fields
+    // are additive.
+    const code = typeof payload?.code === 'string' ? payload.code : undefined
+    const rawParams = payload?.params
+    const params = rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
+      ? (rawParams as Record<string, unknown>)
+      : undefined
+    throw new ApiError(message, { code, params, statusCode: res.status })
   }
 
   return payload
@@ -120,11 +163,11 @@ export async function downloadFromApi(path: string, filename?: string): Promise<
   try {
     res = await fetch(`${API_URL}${path}`, { headers })
   } catch {
-    throw new Error('Janusly API is offline. Start the API and refresh this view.')
+    throw new Error(t('api.error.offline') as string)
   }
 
   if (!res.ok) {
-    let errorMessage = `Download failed with ${res.status}`
+    let errorMessage = t('api.error.downloadFailed', { status: res.status }) as string
     try {
       const payload = await res.json()
       if (typeof payload?.error === 'string') errorMessage = payload.error

@@ -18,6 +18,7 @@ import { ClipboardList, Link2, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
+import { getResolvedLocale, useT } from "../i18n";
 
 type DefaultRole = "viewer" | "editor" | "admin";
 type DirectoryStatus = "active" | "revoked";
@@ -41,6 +42,7 @@ const EMPTY_FORM: { providerDirectoryId: string; directoryType: string; defaultR
 };
 
 export function ScimDirectorySettingsPanel() {
+  const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
   const platformVersion = useWorkflowStore((state) => state.platformVersion);
@@ -62,7 +64,7 @@ export function ScimDirectorySettingsPanel() {
         setDirectories(rows);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load SCIM directories");
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("scim.errorLoad") as string));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -70,13 +72,13 @@ export function ScimDirectorySettingsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [platformVersion]);
+  }, [platformVersion, t]);
 
   const attach = async (event: React.FormEvent) => {
     event.preventDefault();
     const providerDirectoryId = form.providerDirectoryId.trim();
     if (!providerDirectoryId) {
-      setError("WorkOS Directory ID is required");
+      setError(t("scim.errorMissing") as string);
       return;
     }
     setSaving(true);
@@ -90,26 +92,26 @@ export function ScimDirectorySettingsPanel() {
           defaultRole: form.defaultRole,
         }),
       });
-      addToast("SCIM directory attached", "success");
+      addToast(t("scim.toast.attached"), "success");
       setForm(EMPTY_FORM);
       bumpPlatformVersion();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to attach directory");
+      setError(err instanceof Error ? err.message : (t("scim.errorAttach") as string));
     } finally {
       setSaving(false);
     }
   };
 
   const revoke = async (row: ScimDirectoryRow) => {
-    if (!window.confirm(`Disconnect SCIM directory ${row.providerDirectoryId}?\n\nDoes not delete existing memberships.`)) {
+    if (!window.confirm(t("scim.disconnectPrompt", { id: row.providerDirectoryId }) as string)) {
       return;
     }
     try {
       await api(`/org/scim/directories/${row.id}`, { method: "DELETE" });
-      addToast("SCIM directory disconnected", "success");
+      addToast(t("scim.toast.disconnected"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "failed to disconnect", "error");
+      addToast(err instanceof Error ? err.message : (t("scim.errorDisconnect") as string), "error");
     }
   };
 
@@ -117,23 +119,23 @@ export function ScimDirectorySettingsPanel() {
     <section className="we-budget-settings" aria-labelledby="scim-heading">
       <header className="we-budget-settings__header">
         <ClipboardList size={18} aria-hidden="true" />
-        <h3 id="scim-heading">SCIM directory sync</h3>
+        <h3 id="scim-heading">{t("scim.heading")}</h3>
       </header>
 
       {loading ? (
-        <p className="we-budget-settings__status">Loading SCIM directories…</p>
+        <p className="we-budget-settings__status">{t("scim.loading")}</p>
       ) : (
         <>
           {directories.length > 0 && (
-            <table className="we-table we-table--compact" aria-label="Connected SCIM directories">
+            <table className="we-table we-table--compact" aria-label={t("scim.list.aria")}>
               <thead>
                 <tr>
-                  <th>Directory ID</th>
-                  <th>Type</th>
-                  <th>Default role</th>
-                  <th>Status</th>
-                  <th>Last synced</th>
-                  <th aria-label="Actions" />
+                  <th>{t("scim.col.directoryId")}</th>
+                  <th>{t("scim.col.type")}</th>
+                  <th>{t("scim.col.defaultRole")}</th>
+                  <th>{t("scim.col.status")}</th>
+                  <th>{t("scim.col.lastSynced")}</th>
+                  <th aria-label={t("scim.col.actions")} />
                 </tr>
               </thead>
               <tbody>
@@ -143,16 +145,16 @@ export function ScimDirectorySettingsPanel() {
                     <td>{row.directoryType || "—"}</td>
                     <td>{row.defaultRole}</td>
                     <td>{row.status}</td>
-                    <td>{row.lastSyncedAt ? new Date(row.lastSyncedAt).toLocaleString() : "—"}</td>
+                    <td>{row.lastSyncedAt ? new Date(row.lastSyncedAt).toLocaleString(getResolvedLocale()) : "—"}</td>
                     <td>
                       {row.status === "active" && (
                         <button
                           type="button"
                           className="we-button we-button--ghost"
                           onClick={() => revoke(row)}
-                          aria-label={`Disconnect directory ${row.providerDirectoryId}`}
+                          aria-label={t("scim.disconnectAria", { id: row.providerDirectoryId }) as string}
                         >
-                          <Trash2 size={14} aria-hidden="true" /> Disconnect
+                          <Trash2 size={14} aria-hidden="true" /> {t("scim.disconnect")}
                         </button>
                       )}
                     </td>
@@ -165,46 +167,40 @@ export function ScimDirectorySettingsPanel() {
           {directories.filter((d) => d.status === "active").length === 0 && (
             <form className="we-budget-settings__form" onSubmit={attach} noValidate>
               <label className="we-field">
-                <span className="we-field__label">WorkOS Directory ID</span>
+                <span className="we-field__label">{t("scim.field.directoryId")}</span>
                 <input
                   type="text"
                   className="we-field__input"
-                  placeholder="directory_01…"
+                  placeholder={t("scim.field.directoryIdPlaceholder") as string}
                   value={form.providerDirectoryId}
                   onChange={(e) => setForm({ ...form, providerDirectoryId: e.target.value })}
                 />
-                <small className="we-field__hint">
-                  Copy this from your WorkOS dashboard after the IdP admin connects Okta /
-                  Azure AD / Google Workspace.
-                </small>
+                <small className="we-field__hint">{t("scim.field.directoryIdHint")}</small>
               </label>
 
               <label className="we-field">
-                <span className="we-field__label">Directory type (optional label)</span>
+                <span className="we-field__label">{t("scim.field.type")}</span>
                 <input
                   type="text"
                   className="we-field__input"
-                  placeholder="okta_scim, azure_scim, gsuite, …"
+                  placeholder={t("scim.field.typePlaceholder") as string}
                   value={form.directoryType}
                   onChange={(e) => setForm({ ...form, directoryType: e.target.value })}
                 />
               </label>
 
               <label className="we-field">
-                <span className="we-field__label">Default role for provisioned users</span>
+                <span className="we-field__label">{t("scim.field.defaultRole")}</span>
                 <select
                   className="we-field__input"
                   value={form.defaultRole}
                   onChange={(e) => setForm({ ...form, defaultRole: e.target.value as DefaultRole })}
                 >
-                  <option value="viewer">viewer</option>
-                  <option value="editor">editor</option>
-                  <option value="admin">admin</option>
+                  <option value="viewer">{t("scim.role.viewer")}</option>
+                  <option value="editor">{t("scim.role.editor")}</option>
+                  <option value="admin">{t("scim.role.admin")}</option>
                 </select>
-                <small className="we-field__hint">
-                  Per-group role overrides are deferred to v2; every SCIM-provisioned user
-                  gets this role.
-                </small>
+                <small className="we-field__hint">{t("scim.field.defaultRoleHint")}</small>
               </label>
 
               {error && (
@@ -218,7 +214,7 @@ export function ScimDirectorySettingsPanel() {
                 className="we-button we-button--primary we-budget-settings__save"
                 disabled={saving}
               >
-                {saving ? <>Connecting…</> : <><Link2 size={14} aria-hidden="true" /> Connect directory</>}
+                {saving ? <>{t("scim.connecting")}</> : <><Link2 size={14} aria-hidden="true" /> {t("scim.connect")}</>}
                 {!saving && <Save size={14} aria-hidden="true" />}
               </button>
             </form>

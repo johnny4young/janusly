@@ -159,7 +159,31 @@ export type SuggestWorkflowPatchInput = {
    * `metadata.workflowId` for the breakdown surface.
    */
   context?: LlmGenerateObjectInput<PatchEnvelopeSchemaResult>["context"];
+  /**
+   * Operator's UI locale, forwarded by the route from the request's
+   * `Accept-Language` header. When set to `'es'` the helper appends a
+   * one-line instruction so the model writes the `rationale` field in
+   * Spanish; the structured fields (`approachLabel`, `confidence`,
+   * `patchedConfig` keys) stay English because they are part of the
+   * machine contract. Default `'en'` keeps the prompt shape unchanged
+   * for back-compat with the existing eval suite.
+   */
+  locale?: "en" | "es";
 };
+
+/**
+ * Build the per-locale "respond in <language>" suffix. The structured
+ * fields (`approachLabel` / `confidence` / `patchedConfig` keys) MUST
+ * stay English because they're a machine contract — the suffix only
+ * targets the operator-facing free-form fields (`rationale` here,
+ * `approvalMessage` for the structural envelope).
+ */
+export function localeInstructionForLlm(locale: "en" | "es" | undefined): string {
+  if (locale === "es") {
+    return "\n\nIMPORTANT — RESPONSE LANGUAGE: write every operator-facing free-form field (rationale, approvalMessage) in Spanish. Keep machine-contract fields verbatim in English: approachLabel values (`add_retry`, `raise_timeout`, `swap_secret_ref`, `add_approval`, `fix_url`, `other`, `insert_approval_upstream`), confidence (number), and every key inside patchedConfig (`headers`, `timeoutMs`, etc.). Template tokens like `{{secret.NAME}}`, `{{context.foo.output.bar}}`, and tool / node identifiers (`text.replace`, `slack.post`, node ids) MUST also stay verbatim — they are evaluated by the engine, not displayed to humans.";
+  }
+  return "";
+}
 
 /** Maximum number of run events embedded in the prompt. Keeps the model from drowning in noisy logs. */
 export const RUN_EVENT_PROMPT_CAP = 20;
@@ -256,7 +280,7 @@ If you cannot propose a sensible approval (e.g. the operator's intent is genuine
 export async function suggestWorkflowPatch(
   input: SuggestWorkflowPatchInput,
 ): Promise<PatchSuggestion> {
-  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context, systemPromptOverride } = input;
+  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context, systemPromptOverride, locale } = input;
 
   if (!llm) {
     return {
@@ -300,7 +324,11 @@ export async function suggestWorkflowPatch(
       schema: envelopeSchema,
       schemaName: "JanuslyWorkflowPatch",
       schemaDescription: "1-3 alternative config patches for the failing node, ordered most-likely-fix first.",
-      system: systemPromptOverride ?? SYSTEM_PROMPT,
+      // Append the locale instruction to the active system prompt
+      // (whether it's the default config-patch one or the structural
+      // override). The suffix is empty for `en`, so the eval suite's
+      // existing assertions stay stable.
+      system: (systemPromptOverride ?? SYSTEM_PROMPT) + localeInstructionForLlm(locale),
       prompt: promptBody,
       modelHint: model,
       context,

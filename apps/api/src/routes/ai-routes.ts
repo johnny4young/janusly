@@ -35,6 +35,7 @@ import { asRecord, readJson, sendJson } from "../http";
 import { applyConfigPatchToWorkflow, applyStructuralPatchToWorkflow } from "../patch-workflow-merge";
 import { enforceRateLimit } from "../rate-limit";
 import { attachBudgetEnvelope, budgetBlockedResponse, gateBudget, type GateBudgetOutcome } from "../budget-gate";
+import { localeFromRequest } from "../locale";
 import type { Route } from "../routes";
 
 function withBudgetWarning<T extends Record<string, unknown>>(response: T, budgetGate: GateBudgetOutcome): T {
@@ -150,8 +151,12 @@ export const aiRoutes: Route[] = [
         const explainWorkflowId = (workflow && typeof workflow === "object" && "id" in workflow && typeof (workflow as { id?: unknown }).id === "string")
           ? (workflow as { id: string }).id
           : undefined;
+        const explainLocale = localeFromRequest(req);
+        const explainLocaleSuffix = explainLocale === "es"
+          ? "\n\nIMPORTANT — RESPONSE LANGUAGE: write the explanation in Spanish. Keep node ids, type literals (`http`, `ai`, `tool`), and template tokens (`{{secret.NAME}}`, `{{context.foo.output.bar}}`) verbatim — they are workflow-DSL identifiers, not display text."
+          : "";
         const result = await llm.generateText({
-          prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}`,
+          prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}${explainLocaleSuffix}`,
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
         });
@@ -212,11 +217,17 @@ export const aiRoutes: Route[] = [
       }
 
       try {
+        const reviewLocale = localeFromRequest(req);
         const result = await llm.generateObject<ReviewFindings>({
           schema: ReviewFindingsSchema,
           schemaName: "JanuslyWorkflowReview",
           schemaDescription: "Production-readiness review of a Janusly workflow DAG.",
-          system: REVIEW_WORKFLOW_SYSTEM_PROMPT,
+          // Per-issue `code` / `severity` / `nodeId` / `edgeId` stay
+          // English (machine contract); only the operator-facing
+          // `message` / `rationale` / `suggestion` come back localised.
+          system: REVIEW_WORKFLOW_SYSTEM_PROMPT + (reviewLocale === "es"
+            ? "\n\nIMPORTANT — RESPONSE LANGUAGE: write the per-issue `message`, `rationale`, and `suggestion` fields in Spanish. Keep `code` (closed enum), `severity` values (`info`/`warn`/`fail`), `nodeId`, and `edgeId` verbatim — they are machine identifiers."
+            : ""),
           prompt: JSON.stringify(workflow),
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
@@ -386,6 +397,12 @@ export const aiRoutes: Route[] = [
         errorJson: safePersistPayload(dlq.errorJson ?? null),
         extraContext: Object.keys(extraContext).length > 0 ? extraContext : undefined,
         context: { orgId: auth.orgId, userId: auth.userId, workflowId: failingWorkflowId ?? undefined },
+        // Operator locale flows from the web's `Accept-Language` header
+        // through the route into the LLM helper so the rationale (and,
+        // for the structural envelope, the approvalMessage) come back in
+        // the operator's display language. Machine-contract fields stay
+        // English (see `localeInstructionForLlm`).
+        locale: localeFromRequest(req),
         // Structural envelope changes the LLM's output shape — it emits
         // `action`/`approvalNodeId`/`approvalMessage`/`insertBeforeNodeId`
         // instead of `patchedConfig`. The helper stays schema-agnostic and
@@ -587,6 +604,8 @@ export const aiRoutes: Route[] = [
         focus,
         model: modelOverride,
         context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
+        // See `/ai/patch-workflow` for the locale propagation rationale.
+        locale: localeFromRequest(req),
       });
 
       // Fan-out validation: each suggestion's `patchedWorkflowJson` must
@@ -732,6 +751,8 @@ export const aiRoutes: Route[] = [
         events,
         question: questionText,
         context: { orgId: auth.orgId, userId: auth.userId, runId, workflowId: explainRunWorkflowId },
+        // See `/ai/patch-workflow` for the locale propagation rationale.
+        locale: localeFromRequest(req),
       });
       await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
         mode: result.mode,

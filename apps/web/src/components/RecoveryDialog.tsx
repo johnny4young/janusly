@@ -39,6 +39,8 @@ import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { RecoveryDeltaCard, type PreSaveBeforeSnapshot } from './RecoveryDeltaCard'
 import type { DeadLetter } from './DeadLettersPanel'
+import { Trans, useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type PatchApproachLabel =
   | 'add_retry'
@@ -68,13 +70,15 @@ type PatchSuggestion = {
   aiError?: string
 }
 
-const APPROACH_LABEL_DISPLAY: Record<PatchApproachLabel, string> = {
-  add_retry: 'Add retry',
-  raise_timeout: 'Raise timeout',
-  swap_secret_ref: 'Swap secret',
-  add_approval: 'Add approval',
-  fix_url: 'Fix URL',
-  other: 'Other',
+function approachLabelDisplay(label: PatchApproachLabel): string {
+  switch (label) {
+    case 'add_retry': return runtimeT('recoveryDialog.approachLabel.add_retry') as string
+    case 'raise_timeout': return runtimeT('recoveryDialog.approachLabel.raise_timeout') as string
+    case 'swap_secret_ref': return runtimeT('recoveryDialog.approachLabel.swap_secret_ref') as string
+    case 'add_approval': return runtimeT('recoveryDialog.approachLabel.add_approval') as string
+    case 'fix_url': return runtimeT('recoveryDialog.approachLabel.fix_url') as string
+    case 'other': return runtimeT('recoveryDialog.approachLabel.other') as string
+  }
 }
 
 function suggestionTabKey(tab: SuggestionTab): string {
@@ -140,16 +144,18 @@ type Step =
 
 /**
  * Closed enum of quick-pick reasons shown as chips in the cancel UX.
- * Clicking a chip writes a feedback row with `comment = chip` and
- * closes the dialog. The operator can also type a free-text comment
+ * Clicking a chip writes a feedback row with `comment = chip.id` (the
+ * canonical English value, kept stable for server-side analytics) and
+ * closes the dialog. The chip's display label is translated via
+ * `chip.labelKey`. The operator can also type a free-text comment
  * below the chips, or skip and close with no comment.
  */
 const CANCEL_REASON_CHIPS = [
-  'Wrong approach',
-  "Doesn't fix root cause",
-  'Risky',
-  'Too narrow',
-  'Other',
+  { id: 'Wrong approach', labelKey: 'recoveryDialog.cancelling.chip.wrongApproach' },
+  { id: "Doesn't fix root cause", labelKey: 'recoveryDialog.cancelling.chip.doesntFix' },
+  { id: 'Risky', labelKey: 'recoveryDialog.cancelling.chip.risky' },
+  { id: 'Too narrow', labelKey: 'recoveryDialog.cancelling.chip.tooNarrow' },
+  { id: 'Other', labelKey: 'recoveryDialog.cancelling.chip.other' },
 ] as const
 
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled'])
@@ -172,8 +178,6 @@ type RecoveryDialogProps = {
   clusterMembersTotal?: number
 }
 
-const DESCRIPTION =
-  'Janusly will analyse the failure and propose a workflow change. Review the diff before anything is saved.'
 
 /**
  * Fire-and-forget POST to `/recovery/feedback`. Captures the operator's
@@ -209,6 +213,7 @@ export function RecoveryDialog({
   clusterMembersCapped,
   clusterMembersTotal,
 }: RecoveryDialogProps) {
+  const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
 
@@ -309,7 +314,7 @@ export function RecoveryDialog({
         if (cancelled) return
         setStep({
           kind: 'error',
-          message: error instanceof Error ? error.message : 'Validation polling failed',
+          message: error instanceof Error ? error.message : (runtimeT('recoveryDialog.errors.validationPolling') as string),
         })
       }
     }
@@ -338,7 +343,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Suggestion request failed',
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest') as string),
       })
     }
   }
@@ -360,7 +365,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Validation request failed',
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest') as string),
       })
     }
   }
@@ -368,7 +373,7 @@ export function RecoveryDialog({
   const applyAfterValidation = async (suggestion: PatchSuggestion, selectedIndex: number) => {
     const selected = suggestion.suggestions[selectedIndex]
     if (!selected) {
-      setStep({ kind: 'error', message: 'Selected suggestion is no longer available.' })
+      setStep({ kind: 'error', message: t('recoveryDialog.errors.selectedSuggestionUnavailable') as string })
       return
     }
     const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
@@ -473,7 +478,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Apply failed',
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed') as string),
       })
     }
   }
@@ -505,15 +510,15 @@ export function RecoveryDialog({
             <Sparkles size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">Suggest a fix</div>
-            <h2 id="recovery-dialog-title">{describeDeadLetter(dlq)}</h2>
-            <p className="helper-text">{DESCRIPTION}</p>
+            <div className="section-kicker">{t('recoveryDialog.kicker')}</div>
+            <h2 id="recovery-dialog-title">{t('recoveryDialog.titleRecover', { nodeId: dlq.nodeId, runIdShort: dlq.runId.slice(0, 8) })}</h2>
+            <p className="helper-text">{t('recoveryDialog.description')}</p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label="Close recovery dialog"
+            aria-label={t('recoveryDialog.closeAria') as string}
             disabled={
               step.kind === 'loading'
               || step.kind === 'applying'
@@ -528,21 +533,29 @@ export function RecoveryDialog({
         <div className="run-input-dialog__body">
           {step.kind === 'idle' && (
             <p className="helper-text">
-              The failing node is <code>{dlq.nodeId}</code> on run <code>{dlq.runId.slice(0, 8)}…</code> after
-              {' '}{dlq.attempt} attempt{dlq.attempt === 1 ? '' : 's'}.
+              {t('recoveryDialog.idle.failingNodeIs')} <code>{dlq.nodeId}</code> {t('recoveryDialog.idle.onRun')} <code>{dlq.runId.slice(0, 8)}…</code>{' '}
+              {t('recoveryDialog.idle.afterAttempts', { count: dlq.attempt })}
               {isClusterMode ? (
                 <>
-                  {' '}This pattern matches <strong>{clusterMemberCount}{clusterMembersCapped ? ` of ${clusterVisibleTotal}` : ''}</strong> open DLQ entries —
-                  approving the patch will replay {clusterMembersCapped ? 'this capped batch' : 'all of them'} after the sandbox check.
+                  {' '}{t('recoveryDialog.idle.clusterMatch')}{' '}
+                  <strong>
+                    {clusterMembersCapped
+                      ? t('recoveryDialog.idle.clusterMatchOf', { visible: clusterMemberCount, total: clusterVisibleTotal })
+                      : clusterMemberCount}
+                  </strong>
+                  {' '}{t('recoveryDialog.idle.clusterEntries', { count: clusterMemberCount })} —{' '}
+                  {clusterMembersCapped
+                    ? t('recoveryDialog.idle.clusterReplayCapped')
+                    : t('recoveryDialog.idle.clusterReplayAll')}
                 </>
               ) : null}
-              {' '}Click <strong>Generate suggestion</strong> to ask Janusly for a patch.
+              {' '}<Trans i18nKey="recoveryDialog.idle.clickGenerate" components={{ strong: <strong /> }} />
             </p>
           )}
 
           {step.kind === 'loading' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
-              Analyzing run history…
+              {t('recoveryDialog.loading.analyzing')}
             </p>
           )}
 
@@ -559,7 +572,7 @@ export function RecoveryDialog({
 
           {step.kind === 'validating' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
-              Validating fix in a sandbox run — write-side actions are skipped, terminal status will gate Apply…
+              {t('recoveryDialog.validating.body')}
             </p>
           )}
 
@@ -610,8 +623,8 @@ export function RecoveryDialog({
           {step.kind === 'applying' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
               {step.mode === 'cluster' && step.total
-                ? `Saving the new workflow version and replaying ${step.total} matching DLQ entries…`
-                : 'Saving the new workflow version and replaying the failed entry…'}
+                ? t('recoveryDialog.applying.clusterBody', { total: step.total })
+                : t('recoveryDialog.applying.singleBody')}
             </p>
           )}
 
@@ -638,7 +651,7 @@ export function RecoveryDialog({
           {step.kind === 'idle' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Cancel
+                {t('recoveryDialog.footer.cancel')}
               </button>
               <button
                 type="button"
@@ -647,7 +660,7 @@ export function RecoveryDialog({
                 onClick={generateSuggestion}
               >
                 <Sparkles size={14} aria-hidden="true" />
-                <span>Generate suggestion</span>
+                <span>{t('recoveryDialog.footer.generate')}</span>
               </button>
             </>
           )}
@@ -664,7 +677,7 @@ export function RecoveryDialog({
                   sourceStep: 'review',
                 })}
               >
-                Cancel
+                {t('recoveryDialog.footer.cancel')}
               </button>
               <button
                 type="button"
@@ -676,8 +689,8 @@ export function RecoveryDialog({
                 <Play size={14} aria-hidden="true" />
                 <span>
                   {isClusterMode
-                    ? `Apply & validate (${clusterMembers!.length} entries)`
-                    : 'Apply & validate'}
+                    ? t('recoveryDialog.footer.applyValidateCluster', { count: clusterMembers!.length })
+                    : t('recoveryDialog.footer.applyValidate')}
                 </span>
               </button>
             </>
@@ -697,7 +710,7 @@ export function RecoveryDialog({
                   errorJson: step.errorJson,
                 })}
               >
-                Cancel
+                {t('recoveryDialog.footer.cancel')}
               </button>
               <button
                 type="button"
@@ -724,7 +737,7 @@ export function RecoveryDialog({
                 }}
               >
                 <RefreshCcw size={14} aria-hidden="true" />
-                <span>Iterate</span>
+                <span>{t('recoveryDialog.footer.iterate')}</span>
               </button>
             </>
           )}
@@ -732,7 +745,7 @@ export function RecoveryDialog({
           {step.kind === 'error' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Close
+                {t('recoveryDialog.footer.close')}
               </button>
               <button
                 type="button"
@@ -740,7 +753,7 @@ export function RecoveryDialog({
                 className="command-button command-button-primary"
                 onClick={() => setStep({ kind: 'idle' })}
               >
-                Retry
+                {t('recoveryDialog.footer.retry')}
               </button>
             </>
           )}
@@ -752,13 +765,13 @@ export function RecoveryDialog({
               className="command-button command-button-primary"
               onClick={onClose}
             >
-              Close
+              {t('recoveryDialog.footer.close')}
             </button>
           )}
 
           {(step.kind === 'loading' || step.kind === 'applying' || step.kind === 'validating') && (
             <button type="button" className="command-button" disabled>
-              Working…
+              {t('recoveryDialog.footer.working')}
             </button>
           )}
         </footer>
@@ -782,6 +795,7 @@ function ReviewBody({
   dlq: DeadLetter
   canApplyPatch: boolean
 }) {
+  const { t } = useT()
   const tabs = suggestion.suggestions
   const showTabs = tabs.length > 1
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -809,9 +823,8 @@ function ReviewBody({
         <div className="we-recovery-warning" role="alert">
           <AlertCircle size={14} aria-hidden="true" />
           <div>
-            <strong>AI was unavailable.</strong> The original workflow is shown below — Apply is disabled because there's
-            nothing to change.
-            {suggestion.aiError ? ` Reason: ${suggestion.aiError}` : null}
+            <strong>{t('recoveryDialog.review.aiUnavailable')}</strong> {t('recoveryDialog.review.aiUnavailableBody')}
+            {suggestion.aiError ? ` ${t('recoveryDialog.review.aiUnavailableReason', { reason: suggestion.aiError })}` : null}
           </div>
         </div>
       )}
@@ -819,13 +832,12 @@ function ReviewBody({
         <div className="we-recovery-warning" role="alert">
           <AlertCircle size={14} aria-hidden="true" />
           <div>
-            <strong>No structural patch was returned.</strong> Review the rationale and make the Inspector change manually
-            before replaying.
+            <strong>{t('recoveryDialog.review.noStructuralPatch')}</strong> {t('recoveryDialog.review.noStructuralPatchBody')}
           </div>
         </div>
       )}
       {showTabs && (
-        <div className="we-recovery-tabs" role="tablist" aria-label="Alternative suggestions">
+        <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel') as string}>
           {tabs.map((tab, index) => (
             <button
               key={suggestionTabKey(tab)}
@@ -838,9 +850,9 @@ function ReviewBody({
               className={`we-recovery-tab${index === selectedIndex ? ' we-recovery-tab--active' : ''}`}
               onClick={() => onSelectIndex(index)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
-              title={`Self-rated confidence: ${tab.confidence}%`}
+              title={t('recoveryDialog.review.tabConfidenceTitle', { confidence: tab.confidence }) as string}
             >
-              <span className="we-recovery-tab__label">{APPROACH_LABEL_DISPLAY[tab.approachLabel] ?? tab.approachLabel}</span>
+              <span className="we-recovery-tab__label">{approachLabelDisplay(tab.approachLabel)}</span>
               <span className="we-recovery-tab__confidence">{tab.confidence}%</span>
             </button>
           ))}
@@ -854,8 +866,10 @@ function ReviewBody({
         <WorkflowDiffView
           before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
           after={selected.workflow}
-          beforeLabel="Current"
-          afterLabel={showTabs ? `Suggested · ${APPROACH_LABEL_DISPLAY[selected.approachLabel] ?? selected.approachLabel}` : 'Suggested'}
+          beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
+          afterLabel={showTabs
+            ? (t('recoveryDialog.review.suggestedLabelWithApproach', { approach: approachLabelDisplay(selected.approachLabel) }) as string)
+            : (t('recoveryDialog.review.suggestedLabel') as string)}
           aiPatchRationale={selected.rationale}
         />
       </div>
@@ -894,31 +908,31 @@ function CancellingBody({
   onSubmit: (comment: string) => void
   onBack: () => void
 }) {
+  const { t } = useT()
   const [comment, setComment] = useState('')
   const selected = suggestion.suggestions[selectedIndex]
-  const approachLabel = selected ? APPROACH_LABEL_DISPLAY[selected.approachLabel] : 'this approach'
+  const approachLabel = selected ? approachLabelDisplay(selected.approachLabel) : (t('recoveryDialog.cancelling.thisApproach') as string)
 
   return (
     <div className="we-recovery-cancelling">
       <p className="helper-text">
-        Why is <strong>{approachLabel}</strong> not the right fix for{' '}
-        <code>{dlq.nodeId}</code>? Your reason helps Janusly suggest a better
-        approach next time the same workflow fails.
+        {t('recoveryDialog.cancelling.questionPrefix')} <strong>{approachLabel}</strong> {t('recoveryDialog.cancelling.questionSuffix')}{' '}
+        <code>{dlq.nodeId}</code>{t('recoveryDialog.cancelling.questionTail')}
       </p>
-      <div className="we-recovery-cancelling__chips" role="group" aria-label="Quick reason">
+      <div className="we-recovery-cancelling__chips" role="group" aria-label={t('recoveryDialog.cancelling.chipsAriaLabel') as string}>
         {CANCEL_REASON_CHIPS.map((chip) => (
           <button
-            key={chip}
+            key={chip.id}
             type="button"
             className="we-recovery-cancelling__chip"
-            onClick={() => onSubmit(chip)}
+            onClick={() => onSubmit(chip.id)}
           >
-            {chip}
+            {t(chip.labelKey)}
           </button>
         ))}
       </div>
       <label className="we-recovery-cancelling__label" htmlFor="recovery-cancel-comment">
-        Or write your own (optional):
+        {t('recoveryDialog.cancelling.commentLabel')}
       </label>
       <textarea
         id="recovery-cancel-comment"
@@ -927,7 +941,7 @@ function CancellingBody({
         maxLength={2000}
         onChange={(event) => setComment(event.target.value)}
         rows={3}
-        placeholder="e.g. The retry approach masks a deeper auth issue we should fix instead."
+        placeholder={t('recoveryDialog.cancelling.commentPlaceholder') as string}
       />
       <div className="we-recovery-cancelling__actions">
         <button
@@ -935,11 +949,11 @@ function CancellingBody({
           className="we-recovery-cancelling__skip"
           onClick={() => onSubmit('')}
         >
-          Skip &amp; close
+          {t('recoveryDialog.cancelling.skipClose')}
         </button>
         <div className="we-recovery-cancelling__primary">
           <button type="button" className="command-button" onClick={onBack}>
-            Back
+            {t('recoveryDialog.cancelling.back')}
           </button>
           <button
             type="button"
@@ -947,7 +961,7 @@ function CancellingBody({
             onClick={() => onSubmit(comment.trim())}
             disabled={comment.trim().length === 0}
           >
-            Submit &amp; close
+            {t('recoveryDialog.cancelling.submitClose')}
           </button>
         </div>
       </div>
@@ -968,6 +982,7 @@ function ValidationFailedBody({
   runId: string
   errorJson: unknown
 }) {
+  const { t } = useT()
   const message = pickErrorMessage(errorJson)
   const selected = suggestion.suggestions[selectedIndex] ?? suggestion.suggestions[0]!
   return (
@@ -975,21 +990,24 @@ function ValidationFailedBody({
       <div className="we-recovery-warning" role="alert">
         <AlertCircle size={14} aria-hidden="true" />
         <div>
-          <strong>Sandbox replay failed.</strong> The suggested patch did not pass validation against the failing entry —
-          nothing has been saved. Review the error below and click <strong>Iterate</strong> to ask Janusly for a different
-          fix. Validation run id <code>{runId.slice(0, 8)}…</code>.
+          <strong>{t('recoveryDialog.validationFailed.title')}</strong>{' '}
+          <Trans
+            i18nKey="recoveryDialog.validationFailed.body"
+            values={{ runIdShort: runId.slice(0, 8) }}
+            components={{ strong: <strong />, code: <code /> }}
+          />
         </div>
       </div>
       {message ? (
-        <pre className="we-recovery-error-detail" aria-label="Validation error detail">
+        <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria') as string}>
           {message}
         </pre>
       ) : null}
       <WorkflowDiffView
         before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
         after={selected.workflow}
-        beforeLabel="Current"
-        afterLabel="Suggested (rejected)"
+        beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
+        afterLabel={t('recoveryDialog.validationFailed.suggestedRejected') as string}
         aiPatchRationale={selected.rationale}
       />
     </>
@@ -1011,6 +1029,7 @@ function AppliedBody({
   priorFailureSignature?: string | null
   preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
 }) {
+  const { t } = useT()
   const ribbon = cluster ? (
     (() => {
       const total = cluster.replayed + cluster.failed
@@ -1018,12 +1037,12 @@ function AppliedBody({
         <div className="we-recovery-success" role="alert">
           <CheckCircle2 size={14} aria-hidden="true" />
           <div>
-            <strong>Patch applied.</strong>
-            {' '}Replayed {cluster.replayed} of {total}
-            {cluster.failed > 0 ? `; ${cluster.failed} failed` : ''}.
+            <strong>{t('recoveryDialog.applied.title')}</strong>
+            {' '}{t('recoveryDialog.applied.replayedNofM', { replayed: cluster.replayed, total })}
+            {cluster.failed > 0 ? `; ${t('recoveryDialog.applied.numFailed', { count: cluster.failed })}` : ''}.
             {cluster.errors.length > 0 ? (
               <details className="we-recovery-cluster-errors">
-                <summary>Show per-row errors ({cluster.errors.length})</summary>
+                <summary>{t('recoveryDialog.applied.showRowErrors', { count: cluster.errors.length })}</summary>
                 <ul>
                   {cluster.errors.map((entry) => (
                     <li key={entry.deadLetterId}>
@@ -1042,10 +1061,10 @@ function AppliedBody({
     <div className="we-recovery-success" role="alert">
       <CheckCircle2 size={14} aria-hidden="true" />
       <div>
-        <strong>Patch applied.</strong>
+        <strong>{t('recoveryDialog.applied.title')}</strong>{' '}
         {runId
-          ? ` Replay started — run id ${runId.slice(0, 8)}…`
-          : ' DLQ entry replayed.'}
+          ? t('recoveryDialog.applied.runStarted', { runIdShort: runId.slice(0, 8) })
+          : t('recoveryDialog.applied.dlqReplayed')}
       </div>
     </div>
   )
@@ -1068,10 +1087,6 @@ function AppliedBody({
       />
     </div>
   )
-}
-
-function describeDeadLetter(dlq: DeadLetter): string {
-  return `Recover ${dlq.nodeId} on run ${dlq.runId.slice(0, 8)}…`
 }
 
 type RunStatusPayload = {

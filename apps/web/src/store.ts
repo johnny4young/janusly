@@ -28,7 +28,8 @@ import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
-import { nodePresets } from './constants'
+import { getNodePreset } from './constants'
+import { t } from './i18n/runtime'
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 type ToastTone = 'success' | 'error' | 'info'
@@ -110,7 +111,7 @@ type WorkflowStore = {
 
 const initialNodes: WorkflowGraphNode[] = [
   { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: nodePresets.multi_agent } },
+  { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: getNodePreset('multi_agent') } },
 ]
 
 const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
@@ -149,7 +150,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
 
   currentWorkflowId: 'ui-test',
-  currentWorkflowName: 'UI Test Workflow',
+  currentWorkflowName: t('workflow.sampleName') as string,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   nodes: initialNodes,
@@ -181,7 +182,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       nodes: state.nodes.concat({
         id,
         position: { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
-        data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} },
+        data: { label: type.toUpperCase(), type, config: getNodePreset(type) },
       })
     }))
   },
@@ -189,7 +190,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   hydrateWorkflow: (workflow) => {
     set({
       currentWorkflowId: workflow.id ?? 'ui-test',
-      currentWorkflowName: workflow.name ?? workflow.id ?? 'Untitled Workflow',
+      currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
       nodes: (workflow.nodes ?? []).map((node, index) => ({
@@ -231,7 +232,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
     set({
       currentWorkflowId: id,
-      currentWorkflowName: 'Untitled Workflow',
+      currentWorkflowName: t('workflow.defaultName') as string,
       currentWorkflowInputs: undefined,
       currentWorkflowOutputs: undefined,
       nodes: [],
@@ -270,7 +271,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     if (!selectedNodeId) return
     set((state) => ({
       nodes: state.nodes.map((node) => node.id === selectedNodeId
-        ? { ...node, data: { label: type.toUpperCase(), type, config: nodePresets[type] ?? {} } }
+        ? { ...node, data: { label: type.toUpperCase(), type, config: getNodePreset(type) } }
         : node)
     }))
   },

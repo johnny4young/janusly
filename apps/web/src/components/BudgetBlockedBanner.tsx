@@ -16,6 +16,7 @@ import React from 'react'
 import { Coins, ShieldAlert, X } from 'lucide-react'
 import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
+import { Trans, useT } from '../i18n'
 
 export type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number
@@ -26,6 +27,7 @@ export type BudgetBlockedEnvelope = {
 }
 
 export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
+  const { t } = useT()
   const envelope = useWorkflowStore((state) => state.budgetBlocked)
   const clear = useWorkflowStore((state) => state.clearBudgetBlocked)
 
@@ -33,16 +35,24 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
 
   const limit = envelope.monthlyUsdLimit ?? 0
   const spent = envelope.monthlyUsdSpent ?? 0
-  const scopeLabel = envelope.exceededAt === 'workflow' ? 'workflow' : 'org'
+  const scopeLabel = envelope.exceededAt === 'workflow'
+    ? t('budgetBanner.scope.workflow')
+    : t('budgetBanner.scope.org')
 
   return (
     <div className="we-budget-banner" role="alert" data-testid="budget-blocked-banner">
       <span className="we-budget-banner__icon" aria-hidden="true"><ShieldAlert size={18} /></span>
       <div className="we-budget-banner__copy">
-        <strong>AI {scopeLabel} budget exceeded — call blocked.</strong>
+        <strong>{t('budgetBanner.exceeded', { scope: scopeLabel })}</strong>
         <span>
-          You've spent <strong>${spent.toFixed(2)}</strong> of the <strong>${limit.toFixed(2)}</strong> monthly limit.
-          Raise the budget in Operations or change the policy to warn only to keep AI calls running.
+          {/* `<Trans>` lets the translation file control sentence order
+              while keeping <strong> wrappers safe — react-i18next maps
+              numbered placeholders (<0> … </0>) to the children below. */}
+          <Trans
+            i18nKey="budgetBanner.detail"
+            values={{ spent: spent.toFixed(2), limit: limit.toFixed(2) }}
+            components={[<strong key="spent" />, <strong key="limit" />]}
+          />
         </span>
       </div>
       <div className="we-budget-banner__actions">
@@ -56,13 +66,13 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
           data-testid="budget-blocked-banner-cta"
         >
           <Coins size={14} aria-hidden="true" />
-          Open budget settings
+          {t('budgetBanner.openSettings')}
         </button>
         <button
           type="button"
           className="we-budget-banner__close"
           onClick={() => clear()}
-          aria-label="Dismiss budget banner"
+          aria-label={t('budgetBanner.dismiss')}
           data-testid="budget-blocked-banner-dismiss"
         >
           <X size={16} aria-hidden="true" />

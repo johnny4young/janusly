@@ -28,6 +28,7 @@ import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { tHealthRationale, useT } from '../i18n'
 
 type HealthCategory =
   | 'reliability'
@@ -40,6 +41,8 @@ type HealthCategory =
 type HealthBreakdownEntry = {
   score: number
   rationale: string
+  rationaleCode?: string
+  rationaleMeta?: Record<string, string | number | boolean>
 }
 
 type HealthScore = {
@@ -48,13 +51,19 @@ type HealthScore = {
   breakdown: Record<HealthCategory, HealthBreakdownEntry>
 }
 
-const CATEGORY_LABELS: Record<HealthCategory, string> = {
-  reliability: 'Reliability',
-  safety: 'Safety',
-  cost: 'Cost',
-  latency: 'Latency',
-  maintainability: 'Maintainability',
-  aiRisk: 'AI risk',
+const CATEGORY_LABEL_KEYS: Record<HealthCategory, string> = {
+  reliability: 'badges.health.category.reliability',
+  safety: 'badges.health.category.safety',
+  cost: 'badges.health.category.cost',
+  latency: 'badges.health.category.latency',
+  maintainability: 'badges.health.category.maintainability',
+  aiRisk: 'badges.health.category.aiRisk',
+}
+
+const STATUS_LABEL_KEYS: Record<HealthScore['status'], string> = {
+  healthy: 'badges.health.statusHealthy',
+  warn: 'badges.health.statusWarn',
+  unhealthy: 'badges.health.statusUnhealthy',
 }
 
 type WorkflowHealthBadgeProps = {
@@ -65,6 +74,7 @@ type WorkflowHealthBadgeProps = {
 }
 
 export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHealthBadgeProps) {
+  const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const [result, setResult] = useState<HealthScore | null>(null)
   const [loading, setLoading] = useState(false)
@@ -87,20 +97,20 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Health unavailable')
+        setError(err instanceof Error ? err.message : t('badges.health.unavailable'))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [workflowId, platformVersion])
+  }, [workflowId, platformVersion, t])
 
   if (!workflowId) return null
   if (error) {
-    return <span className="we-readiness-badge we-readiness-badge--error">Health unavailable</span>
+    return <span className="we-readiness-badge we-readiness-badge--error">{t('badges.health.unavailable')}</span>
   }
   if (loading || !result) {
     return (
       <span className="we-readiness-badge we-readiness-badge--loading" aria-live="polite">
-        <span className="we-readiness-dot we-readiness-dot--idle" /> Scoring…
+        <span className="we-readiness-dot we-readiness-dot--idle" /> {t('badges.health.scoring')}
       </span>
     )
   }
@@ -113,7 +123,8 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
     unhealthy: 'fail',
   }
   const severity = statusToSeverity[result.status]
-  const summaryLabel = showLabel ? `Health: ${result.score} / 100` : `${result.score}`
+  const summaryLabel = showLabel ? t('badges.health.label', { score: result.score }) : `${result.score}`
+  const localisedStatus = t(STATUS_LABEL_KEYS[result.status] as never) as string
 
   return (
     <div className={`we-readiness-badge we-readiness-badge--${severity}`}>
@@ -122,7 +133,7 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
         className="we-readiness-badge__summary"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
-        aria-label={`Workflow health: ${result.score} of 100 (${result.status})`}
+        aria-label={t('badges.health.aria', { score: result.score, status: localisedStatus })}
       >
         <Activity size={14} aria-hidden="true" />
         <span>{summaryLabel}</span>
@@ -134,10 +145,11 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
             // Same severity bands as the rollup but per category — green
             // (pass) for ≥80, amber (warn) for ≥60, red (fail) below.
             const cellSeverity: 'pass' | 'warn' | 'fail' = entry.score >= 80 ? 'pass' : entry.score >= 60 ? 'warn' : 'fail'
+            const categoryLabel = t(CATEGORY_LABEL_KEYS[category] as never) as string
             return (
               <li key={category} className={`we-readiness-issue we-readiness-issue--${cellSeverity}`}>
-                <strong className="we-readiness-issue__code">{CATEGORY_LABELS[category]}: {entry.score}</strong>
-                <p className="we-readiness-issue__message">{entry.rationale}</p>
+                <strong className="we-readiness-issue__code">{t('badges.health.cellLabel', { category: categoryLabel, score: entry.score })}</strong>
+                <p className="we-readiness-issue__message">{tHealthRationale(entry)}</p>
               </li>
             )
           })}

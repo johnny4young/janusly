@@ -26,8 +26,28 @@ export type WorkflowNodeData = {
 }
 export type WorkflowEdgeData = { condition?: string }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
-export type ToolSchema = { name: string; description: string; required?: string[]; optional?: string[]; inputExample?: Record<string, unknown> }
-export type Template = { id: string; name: string; description: string; category: string; workflow: WorkflowDefinition }
+export type ToolSchema = {
+  name: string
+  description: string
+  /** Stable slug (`slack.post` → `slack-post`) the client uses to look up `tools.<descriptionCode>.description` in the i18n catalog. Falls back to the literal `description` when no key exists. */
+  descriptionCode?: string
+  required?: string[]
+  optional?: string[]
+  inputExample?: Record<string, unknown>
+}
+export type Template = {
+  id: string
+  name: string
+  description: string
+  category: string
+  /** Stable code (`<id>.name`) the client uses to look up `templates.<nameCode>` in the i18n catalog. Falls back to the literal `name` when no key exists. */
+  nameCode?: string
+  /** Stable code (`<id>.description`). Falls back to the literal `description`. */
+  descriptionCode?: string
+  /** Slugified category (`Human-in-the-loop` → `human-in-the-loop`). Falls back to the literal `category`. */
+  categoryCode?: string
+  workflow: WorkflowDefinition
+}
 export type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: JsonObject }
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string }

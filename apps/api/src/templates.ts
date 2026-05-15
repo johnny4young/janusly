@@ -42,6 +42,42 @@ export type WorkflowTemplate = {
   workflow: Workflow;
 };
 
+/**
+ * Public-facing template entry returned by `GET /templates`. Identical to
+ * `WorkflowTemplate` plus stable codes so the web layer can translate the
+ * `name` / `description` / `category` fields via the i18n catalog
+ * (`apps/web/src/i18n/locales/<lng>/common.json` keys
+ * `templates.<id>.{name,description}` + `templates.category.<category>`).
+ *
+ * Codes are derived deterministically from `id` / `category` so the
+ * mapping stays trivial: a brand-new template ships English-only by
+ * virtue of the catalog miss falling back to the literal `name` /
+ * `description` field; mirror the keys later to localise.
+ */
+export type WorkflowTemplatePublic = WorkflowTemplate & {
+  nameCode: string;
+  descriptionCode: string;
+  categoryCode: string;
+};
+
+/** Stable code derived from a template id. `http-ai-summary` → `http-ai-summary.name`. */
+function templateNameCode(id: string): string { return `${id}.name`; }
+function templateDescriptionCode(id: string): string { return `${id}.description`; }
+/** Slug a category label into a stable code: `Human-in-the-loop` → `human-in-the-loop`. */
+function templateCategoryCode(category: string): string {
+  return category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** Decorate a `WorkflowTemplate` with translation codes. Pure; no I/O. */
+export function asPublicTemplate(template: WorkflowTemplate): WorkflowTemplatePublic {
+  return {
+    ...template,
+    nameCode: templateNameCode(template.id),
+    descriptionCode: templateDescriptionCode(template.id),
+    categoryCode: templateCategoryCode(template.category),
+  };
+}
+
 /** All built-in recipes. New templates append to this array. */
 export const workflowTemplates: WorkflowTemplate[] = [
   {

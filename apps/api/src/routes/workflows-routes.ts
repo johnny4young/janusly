@@ -34,6 +34,7 @@ import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import { audit } from "../audit";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
@@ -173,7 +174,7 @@ export const workflowsRoutes: Route[] = [
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
 
       const existing = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-      if (!existing[0]) return sendJson(res, { error: "Workflow not found" }, 404);
+      if (!existing[0]) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
       // Schedule teardown fails open — a Redis blip shouldn't block a
       // workflow delete from completing. The worker's cold-start replay
@@ -267,7 +268,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, { error: "Workflow not found" }, 404);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
       // Latest version drives readiness (the workflow JSON the operator
       // currently saved is the post-Apply state). The before-side health
@@ -434,7 +435,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, { error: "Workflow not found" }, 404);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
       // Latest version drives the readiness check (the workflow JSON the
       // operator currently saved). Falling back to readiness on the

@@ -118,6 +118,8 @@ describe('<RunComparisonView />', () => {
 
     const summary = screen.getByLabelText('Replay comparison summary')
     expect(summary.textContent).toMatch(/1\s*of\s*2.*node/i)
-    expect(summary).toHaveTextContent(/succeeded/)
+    // The raw `succeeded` status is rendered through `formatStatusLabel`,
+    // which goes through i18n — `Done` (en) / `Hecho` (es) is what users see.
+    expect(summary).toHaveTextContent(/Done/)
   })
 })
