@@ -44,6 +44,8 @@ describe('computeWorkflowHealth — category breakdown', () => {
       signals: { ...baseSignals, totalRuns: 30, successCount: 30 },
     })
     expect(result.breakdown.reliability.score).toBe(100)
+    expect(result.breakdown.reliability.rationaleCode).toBe('reliability.summary')
+    expect(result.breakdown.reliability.rationaleMeta).toMatchObject({ successCount: 30, totalRuns: 30 })
   })
 
   it('reliability dips with failures', () => {
@@ -78,6 +80,7 @@ describe('computeWorkflowHealth — category breakdown', () => {
       signals: baseSignals,
     })
     expect(result.breakdown.reliability.score).toBe(NEUTRAL_DEFAULT)
+    expect(result.breakdown.reliability.rationaleCode).toBe('reliability.no_runs')
   })
 
   it('safety penalises readiness fail and warn issues', () => {

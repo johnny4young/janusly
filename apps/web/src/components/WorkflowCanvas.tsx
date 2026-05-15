@@ -13,6 +13,7 @@ import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/reac
 import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
+import { useT } from '../i18n'
 import '@xyflow/react/dist/style.css'
 
 type WorkflowCanvasProps = {
@@ -27,14 +28,15 @@ type WorkflowCanvasProps = {
 
 /** Render the workflow editor canvas with React Flow + custom step nodes. */
 export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick }: WorkflowCanvasProps) {
+  const { t } = useT()
   return (
     <div className="canvas-frame">
-      <div className="canvas-toolbar" aria-label="Flow map summary">
+      <div className="canvas-toolbar" aria-label={t('canvas.flowMapSummary')}>
         <div>
-          <div className="section-kicker">Flow map</div>
-          <strong>{nodes.length} steps</strong>
+          <div className="section-kicker">{t('canvas.flowMap')}</div>
+          <strong>{t('canvas.steps', { count: nodes.length })}</strong>
         </div>
-        <span>{edges.length} paths</span>
+        <span>{t('canvas.paths', { count: edges.length })}</span>
       </div>
       <ReactFlow
         nodes={nodes}

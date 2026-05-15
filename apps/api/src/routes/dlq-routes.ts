@@ -26,6 +26,7 @@ import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
 import { getDeadLetter, isDeadLetterStatus, listDeadLetters, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
@@ -109,14 +110,14 @@ export const dlqRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
-      if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+      if (!deadLetterId) return sendJson(res, errorEnvelope("dlq_field_required", "deadLetterId is required", { field: "deadLetterId" }), 400);
       const suggestedWorkflow = body.suggestedWorkflow;
       if (!suggestedWorkflow || typeof suggestedWorkflow !== "object") {
         return sendJson(res, { error: "suggestedWorkflow is required" }, 400);
       }
 
       const item = await getDeadLetter(auth.orgId, deadLetterId);
-      if (!item) return sendJson(res, { error: "DLQ entry not found" }, 404);
+      if (!item) return sendJson(res, errorEnvelope("dlq_not_found", "DLQ entry not found"), 404);
 
       // Validate the proposed workflow through the same grammar gate
       // `/ai/patch-workflow` runs on its output: strict schema parse +

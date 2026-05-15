@@ -31,6 +31,8 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
+import { useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 /** Minimum after-side run count for the full delta to render. Mirrors `MIN_RUNS_FOR_DELTA` in the engine. */
 const MIN_RUNS_FOR_DELTA = 5
@@ -97,6 +99,7 @@ export function RecoveryDeltaCard({
   priorFailureSignature,
   preSaveBeforeSnapshot,
 }: RecoveryDeltaCardProps) {
+  const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const session = useWorkflowStore((state) => state.session)
   const userId = useWorkflowStore((state) => state.userId)
@@ -123,7 +126,7 @@ export function RecoveryDeltaCard({
         if (cancelled) return
         setState({
           kind: 'error',
-          message: error instanceof Error ? error.message : 'Failed to load delta',
+          message: error instanceof Error ? error.message : (t('recoveryDelta.errorLoad') as string),
         })
       })
     return () => {
@@ -167,7 +170,7 @@ export function RecoveryDeltaCard({
       const current = versions.find((v) => v.version === afterVersion)
       const target = versions.find((v) => v.version === priorVersionNumber)
       if (!current || !target) {
-        setRollback({ kind: 'error', message: 'Could not load both versions for rollback.' })
+        setRollback({ kind: 'error', message: t('recoveryDelta.errorBothVersions') as string })
         return
       }
       // Defense-in-depth: the `RollbackConfirmDialog` consumes the
@@ -176,17 +179,17 @@ export function RecoveryDeltaCard({
       // renamed) the soft cast above wouldn't catch it — guard here so
       // the operator sees a usable error instead of a blank diff.
       if (!current.dagJson || !target.dagJson) {
-        setRollback({ kind: 'error', message: 'Version data is incomplete for rollback.' })
+        setRollback({ kind: 'error', message: t('recoveryDelta.errorIncomplete') as string })
         return
       }
       setRollback({ kind: 'open', current, target })
     } catch (error) {
       setRollback({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Failed to fetch versions',
+        message: error instanceof Error ? error.message : (t('recoveryDelta.errorVersions') as string),
       })
     }
-  }, [workflowId, afterVersion])
+  }, [workflowId, afterVersion, t])
 
   if (state.kind === 'loading') {
     return (
@@ -199,14 +202,14 @@ export function RecoveryDeltaCard({
     return (
       <div className="we-recovery-delta-card we-recovery-delta-card--error" role="alert">
         <span className="we-recovery-delta-error-msg">
-          <AlertCircle size={14} aria-hidden="true" /> Couldn't load delta — {state.message}
+          <AlertCircle size={14} aria-hidden="true" /> {t('recoveryDelta.errorMessage', { detail: state.message })}
         </span>
         <button
           type="button"
           className="we-recovery-delta-link"
           onClick={() => setRetryNonce((n) => n + 1)}
         >
-          Retry
+          {t('recoveryDelta.retry')}
         </button>
       </div>
     )
@@ -221,7 +224,7 @@ export function RecoveryDeltaCard({
 
   return (
     <>
-      <div className="we-recovery-delta-card" aria-label="Recovery delta">
+      <div className="we-recovery-delta-card" aria-label={t('recoveryDelta.aria') as string}>
         <RunCounterPill
           afterVersion={afterVersion}
           counts={data.recentRunsAgainstAfter}
@@ -273,7 +276,7 @@ export function RecoveryDeltaCard({
             disabled={rollback.kind === 'fetching'}
           >
             <RotateCcw size={14} aria-hidden="true" />
-            <span>{rollback.kind === 'fetching' ? 'Loading versions…' : `Roll back to v${data.priorVersion.version}`}</span>
+            <span>{rollback.kind === 'fetching' ? t('recoveryDelta.loadingVersions') : (t('recoveryDelta.rollbackTo', { version: data.priorVersion.version }) as string)}</span>
           </button>
         ) : null}
 
@@ -304,19 +307,21 @@ function BeforeOnlySkeleton({
   afterVersion: number
 }) {
   if (!snapshot) {
-    return <div className="we-recovery-delta-skeleton">Loading delta against v{afterVersion}…</div>
+    return <div className="we-recovery-delta-skeleton">{runtimeT('recoveryDelta.skeletonLoading', { version: afterVersion }) as string}</div>
   }
   // For afterVersion=1 there is no prior version to label, so drop the
   // "(v0)" parenthetical — versions are 1-based.
-  const label = afterVersion > 1 ? `Before Apply (v${afterVersion - 1}):` : 'Before Apply:'
+  const label = afterVersion > 1
+    ? (runtimeT('recoveryDelta.beforeApplyVersion', { prior: afterVersion - 1 }) as string)
+    : (runtimeT('recoveryDelta.beforeApply') as string)
   const detail = snapshot.signals.p95LatencyMs != null
-    ? `Health ${snapshot.score}, p95 ${formatMs(snapshot.signals.p95LatencyMs)}`
-    : `Health ${snapshot.score}`
+    ? (runtimeT('recoveryDelta.beforeHealthLatency', { score: snapshot.score, latency: formatMs(snapshot.signals.p95LatencyMs) }) as string)
+    : (runtimeT('recoveryDelta.beforeHealth', { score: snapshot.score }) as string)
   return (
     <div className="we-recovery-delta-skeleton">
       <span className="we-recovery-delta-skeleton__label">{label}</span>
       <span className="we-recovery-delta-skeleton__value">{detail}</span>
-      <span className="we-recovery-delta-skeleton__hint">Loading post-Apply data…</span>
+      <span className="we-recovery-delta-skeleton__hint">{runtimeT('recoveryDelta.skeletonHint') as string}</span>
     </div>
   )
 }
@@ -331,8 +336,8 @@ function RunCounterPill({
   if (counts.totalRuns === 0 && counts.running === 0) {
     return (
       <div className="we-recovery-delta-pill we-recovery-delta-pill--counter" data-testid="recovery-delta-counter">
-        <span className="we-recovery-delta-pill__value">{`No runs against v${afterVersion} yet`}</span>
-        <span className="we-recovery-delta-pill__sentence">Start a run to see the impact.</span>
+        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.noRunsYet', { version: afterVersion }) as string}</span>
+        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.noRunsHint') as string}</span>
       </div>
     )
   }
@@ -340,11 +345,11 @@ function RunCounterPill({
   // as single text nodes (Testing-Library `getByText` doesn't reach across
   // sibling text nodes from a JSX template literal mix).
   const valueText = counts.running > 0
-    ? `Runs against v${afterVersion}: ${counts.totalRuns} (+ ${counts.running} running)`
-    : `Runs against v${afterVersion}: ${counts.totalRuns}`
+    ? (runtimeT('recoveryDelta.runsValueRunning', { version: afterVersion, total: counts.totalRuns, running: counts.running }) as string)
+    : (runtimeT('recoveryDelta.runsValue', { version: afterVersion, total: counts.totalRuns }) as string)
   const sentenceText = counts.running > 0
-    ? `${counts.succeeded}✓ ${counts.failed}✗ ${counts.running}…`
-    : `${counts.succeeded}✓ ${counts.failed}✗`
+    ? (runtimeT('recoveryDelta.runsSentenceRunning', { succeeded: counts.succeeded, failed: counts.failed, running: counts.running }) as string)
+    : (runtimeT('recoveryDelta.runsSentence', { succeeded: counts.succeeded, failed: counts.failed }) as string)
   return (
     <div className="we-recovery-delta-pill we-recovery-delta-pill--counter" data-testid="recovery-delta-counter">
       <span className="we-recovery-delta-pill__value">{valueText}</span>
@@ -363,24 +368,24 @@ function SameFailurePill({
   if (count === 0) {
     return (
       <div className="we-recovery-delta-pill we-recovery-delta-pill--same-failure we-recovery-delta-pill--success" data-testid="recovery-delta-same-failure">
-        <span className="we-recovery-delta-pill__value">Same failure since Apply: ✓ 0 occurrences</span>
-        <span className="we-recovery-delta-pill__sentence">The original failure is no longer happening.</span>
+        <span className="we-recovery-delta-pill__value">{runtimeT('recoveryDelta.sameFailureZero') as string}</span>
+        <span className="we-recovery-delta-pill__sentence">{runtimeT('recoveryDelta.sameFailureZeroSentence') as string}</span>
       </div>
     )
   }
   const link = sampleDeadLetterIds.length > 0
     ? `?dlqFocus=${encodeURIComponent(sampleDeadLetterIds[0]!)}`
     : null
-  const valueText = `⚠ Same failure: ${count} occurrence${count === 1 ? '' : 's'}`
+  const valueText = runtimeT('recoveryDelta.sameFailureValue', { count }) as string
   return (
     <div className="we-recovery-delta-pill we-recovery-delta-pill--same-failure we-recovery-delta-pill--danger" data-testid="recovery-delta-same-failure">
       <span className="we-recovery-delta-pill__value">{valueText}</span>
       <span className="we-recovery-delta-pill__sentence">
-        {'The original failure is still occurring after Apply.'}
+        {runtimeT('recoveryDelta.sameFailureSentence') as string}
         {link ? (
           <>
             {' '}
-            <a href={link} className="we-recovery-delta-failure-link">View DLQ</a>
+            <a href={link} className="we-recovery-delta-failure-link">{runtimeT('recoveryDelta.viewDlq') as string}</a>
           </>
         ) : null}
       </span>
@@ -390,10 +395,10 @@ function SameFailurePill({
 
 function HealthPill({ before, after, delta }: { before: number; after: number; delta: number }) {
   const sentence = delta > 0
-    ? `Health improved ${delta} point${delta === 1 ? '' : 's'}`
+    ? (runtimeT('recoveryDelta.healthImproved', { count: delta }) as string)
     : delta < 0
-      ? `Health dropped ${Math.abs(delta)} point${Math.abs(delta) === 1 ? '' : 's'}`
-      : 'Health unchanged'
+      ? (runtimeT('recoveryDelta.healthDropped', { count: Math.abs(delta) }) as string)
+      : (runtimeT('recoveryDelta.healthUnchanged') as string)
   return (
     <div className={`we-recovery-delta-pill ${tintForHealth(delta)}`}>
       <span className="we-recovery-delta-pill__value">
@@ -408,10 +413,10 @@ function LatencyPill({ beforeMs, afterMs, deltaMs }: { beforeMs: number; afterMs
   const ratio = beforeMs > 0 ? Math.abs(deltaMs) / beforeMs : 0
   const pct = Math.round(ratio * 100)
   const sentence = deltaMs < 0
-    ? `${pct}% faster`
+    ? (runtimeT('recoveryDelta.faster', { pct }) as string)
     : deltaMs > 0
-      ? `${pct}% slower`
-      : '≈ same speed'
+      ? (runtimeT('recoveryDelta.slower', { pct }) as string)
+      : (runtimeT('recoveryDelta.sameSpeed') as string)
   // Lower is better — flip the tint mapping so a NEGATIVE delta is success-tinted.
   return (
     <div className={`we-recovery-delta-pill ${tintForLowerIsBetter(deltaMs)}`}>
@@ -439,10 +444,10 @@ function CostPill({
   const beforePerRun = beforeRuns > 0 ? beforeCost / beforeRuns : 0
   const afterPerRun = afterRuns > 0 ? afterCost / afterRuns : 0
   const sentence = deltaPerRun < 0
-    ? `${formatUsd(Math.abs(deltaPerRun))} cheaper per run`
+    ? (runtimeT('recoveryDelta.cheaper', { usd: formatUsd(Math.abs(deltaPerRun)) }) as string)
     : deltaPerRun > 0
-      ? `${formatUsd(deltaPerRun)} more per run`
-      : '≈ same cost'
+      ? (runtimeT('recoveryDelta.moreExpensive', { usd: formatUsd(deltaPerRun) }) as string)
+      : (runtimeT('recoveryDelta.sameCost') as string)
   return (
     <div className={`we-recovery-delta-pill ${tintForLowerIsBetter(deltaPerRun)}`}>
       <span className="we-recovery-delta-pill__value">
@@ -463,7 +468,7 @@ function GatheringRow({
   threshold: number
 }) {
   const pct = Math.min(100, Math.round((currentRuns / threshold) * 100))
-  const label = `${currentRuns} of ${threshold} runs collected — full delta available at ${threshold}+ runs against v${afterVersion}.`
+  const label = runtimeT('recoveryDelta.gathering', { current: currentRuns, threshold, version: afterVersion }) as string
   return (
     <div className="we-recovery-delta-gathering">
       <div className="we-recovery-delta-gathering__label">{label}</div>

@@ -26,6 +26,8 @@ import {
   type WorkflowDiff,
 } from '@janusly/shared/src/workflow-diff'
 import type { WorkflowDefinition } from '../types'
+import { useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type WorkflowDiffViewProps = {
   before: WorkflowDefinition
@@ -38,22 +40,25 @@ type WorkflowDiffViewProps = {
   aiPatchRationale?: string
 }
 
-const TAG_LABELS: Record<ChangeTag, string> = {
-  secret_ref: 'Secret-ref',
-  retry: 'Retry',
-  timeout: 'Timeout',
-  approval: 'Approval',
-  bounds: 'Bounds',
-  rationale: 'Metadata',
+const TAG_KEYS: Record<ChangeTag, string> = {
+  secret_ref: 'diff.tag.secret_ref',
+  retry: 'diff.tag.retry',
+  timeout: 'diff.tag.timeout',
+  approval: 'diff.tag.approval',
+  bounds: 'diff.tag.bounds',
+  rationale: 'diff.tag.rationale',
 }
 
 export function WorkflowDiffView({
   before,
   after,
-  beforeLabel = 'Before',
-  afterLabel = 'After',
+  beforeLabel,
+  afterLabel,
   aiPatchRationale,
 }: WorkflowDiffViewProps) {
+  const { t } = useT()
+  const resolvedBeforeLabel = beforeLabel ?? (t('diff.beforeLabel') as string)
+  const resolvedAfterLabel = afterLabel ?? (t('diff.afterLabel') as string)
   const diff = useMemo(() => computeWorkflowDiff(before, after), [before, after])
 
   if (diff.summary.totalChanges === 0) {
@@ -62,27 +67,27 @@ export function WorkflowDiffView({
         <div className="we-diff-summary">
           <GitBranch size={14} aria-hidden="true" />
           <span>
-            <strong>{beforeLabel}</strong> → <strong>{afterLabel}</strong>
+            <strong>{resolvedBeforeLabel}</strong> → <strong>{resolvedAfterLabel}</strong>
           </span>
-          <span className="helper-text">No structural changes between these versions.</span>
+          <span className="helper-text">{t('diff.noChanges')}</span>
         </div>
       </section>
     )
   }
 
   return (
-    <section className="we-diff-section" aria-label="Structural workflow diff">
+    <section className="we-diff-section" aria-label={t('diff.aria')}>
       <div className="we-diff-summary">
         <GitBranch size={14} aria-hidden="true" />
         <span>
-          <strong>{beforeLabel}</strong> → <strong>{afterLabel}</strong>
+          <strong>{resolvedBeforeLabel}</strong> → <strong>{resolvedAfterLabel}</strong>
         </span>
         <span className="helper-text">{summarize(diff)}</span>
       </div>
 
       {diff.workflow.length > 0 && (
         <div className="we-diff-block">
-          <div className="section-kicker">Workflow</div>
+          <div className="section-kicker">{t('diff.workflow')}</div>
           <ul className="we-diff-list">
             {diff.workflow.map((change) => (
               <li key={change.path} className="we-diff-row we-diff-row--changed">
@@ -95,7 +100,7 @@ export function WorkflowDiffView({
 
       {diff.nodes.length > 0 && (
         <div className="we-diff-block">
-          <div className="section-kicker">Nodes</div>
+          <div className="section-kicker">{t('diff.nodes')}</div>
           <ul className="we-diff-list">
             {diff.nodes.map((change) => (
               <li
@@ -103,10 +108,10 @@ export function WorkflowDiffView({
                 className={`we-diff-row we-diff-row--${nodeChangeKindClass(change.kind)}`}
               >
                 {change.kind === 'added' && (
-                  <NodeAddedOrRemovedRow icon={<Plus size={12} aria-hidden="true" />} verb="Added" change={change} />
+                  <NodeAddedOrRemovedRow icon={<Plus size={12} aria-hidden="true" />} verbKey="diff.verb.added" change={change} />
                 )}
                 {change.kind === 'removed' && (
-                  <NodeAddedOrRemovedRow icon={<Minus size={12} aria-hidden="true" />} verb="Removed" change={change} />
+                  <NodeAddedOrRemovedRow icon={<Minus size={12} aria-hidden="true" />} verbKey="diff.verb.removed" change={change} />
                 )}
                 {change.kind === 'changed' && <NodeChangedRow change={change} />}
               </li>
@@ -117,7 +122,7 @@ export function WorkflowDiffView({
 
       {diff.edges.length > 0 && (
         <div className="we-diff-block">
-          <div className="section-kicker">Edges</div>
+          <div className="section-kicker">{t('diff.edges')}</div>
           <ul className="we-diff-list">
             {diff.edges.map((change) => (
               <li
@@ -133,7 +138,7 @@ export function WorkflowDiffView({
 
       {aiPatchRationale && aiPatchRationale.trim().length > 0 && (
         <div className="we-diff-block we-diff-rationale">
-          <div className="section-kicker">AI patch rationale</div>
+          <div className="section-kicker">{t('diff.aiPatchRationale')}</div>
           <p className="helper-text">{aiPatchRationale}</p>
         </div>
       )}
@@ -145,17 +150,18 @@ export function WorkflowDiffView({
 
 function NodeAddedOrRemovedRow({
   icon,
-  verb,
+  verbKey,
   change,
 }: {
   icon: React.ReactNode
-  verb: 'Added' | 'Removed'
+  verbKey: 'diff.verb.added' | 'diff.verb.removed'
   change: Extract<WorkflowDiff['nodes'][number], { kind: 'added' | 'removed' }>
 }) {
+  const { t } = useT()
   return (
     <div className="we-diff-row__head">
       <span className="we-diff-row__verb">
-        {icon} {verb}
+        {icon} {t(verbKey)}
       </span>
       <code className="we-diff-row__id">{change.node.id}</code>
       <span className="mode-pill mode-pill-neutral">{change.node.type}</span>
@@ -169,12 +175,13 @@ function NodeChangedRow({
 }: {
   change: Extract<WorkflowDiff['nodes'][number], { kind: 'changed' }>
 }) {
+  const { t } = useT()
   // Tags render once per field below — no head-level tag here, otherwise
   // a single retry change shows the "Retry" pill twice.
   return (
     <>
       <div className="we-diff-row__head">
-        <span className="we-diff-row__verb">Changed</span>
+        <span className="we-diff-row__verb">{t('diff.verb.changed')}</span>
         <code className="we-diff-row__id">{change.nodeId}</code>
         <span className="mode-pill mode-pill-neutral">{change.nodeType}</span>
       </div>
@@ -190,16 +197,17 @@ function NodeChangedRow({
 }
 
 function EdgeChangeRow({ change }: { change: WorkflowDiff['edges'][number] }) {
+  const { t } = useT()
   if (change.kind === 'added') {
     return (
       <div className="we-diff-row__head">
         <span className="we-diff-row__verb">
-          <Plus size={12} aria-hidden="true" /> Added
+          <Plus size={12} aria-hidden="true" /> {t('diff.verb.added')}
         </span>
         <code className="we-diff-row__id">{change.edgeKey}</code>
         {change.edge.condition && (
           <span className="we-diff-condition" title={change.edge.condition}>
-            when {truncate(change.edge.condition, 60)}
+            {t('diff.condition.when', { condition: truncate(change.edge.condition, 60) })}
           </span>
         )}
       </div>
@@ -209,7 +217,7 @@ function EdgeChangeRow({ change }: { change: WorkflowDiff['edges'][number] }) {
     return (
       <div className="we-diff-row__head">
         <span className="we-diff-row__verb">
-          <Minus size={12} aria-hidden="true" /> Removed
+          <Minus size={12} aria-hidden="true" /> {t('diff.verb.removed')}
         </span>
         <code className="we-diff-row__id">{change.edgeKey}</code>
       </div>
@@ -218,7 +226,7 @@ function EdgeChangeRow({ change }: { change: WorkflowDiff['edges'][number] }) {
   return (
     <>
       <div className="we-diff-row__head">
-        <span className="we-diff-row__verb">Changed</span>
+        <span className="we-diff-row__verb">{t('diff.verb.changed')}</span>
         <code className="we-diff-row__id">{change.edgeKey}</code>
       </div>
       <ul className="we-diff-fields">
@@ -233,6 +241,7 @@ function EdgeChangeRow({ change }: { change: WorkflowDiff['edges'][number] }) {
 }
 
 function FieldChangeRow({ change }: { change: FieldChange }) {
+  const { t } = useT()
   // A `secret_ref`-tagged change either points at a sensitive key name
   // (`apiKey` / `Authorization` / …) or carries a `{{secret.X}}` /
   // `{{credential.X}}` / `{{env.X}}` template. In either case the raw
@@ -241,8 +250,9 @@ function FieldChangeRow({ change }: { change: FieldChange }) {
   // would leak it through the diff. Mask both sides with `[redacted]`
   // and rely on the path + tag pill to communicate the change.
   const isSecret = change.tag === 'secret_ref'
-  const beforeDisplay = isSecret ? '[redacted]' : formatValue(change.before)
-  const afterDisplay = isSecret ? '[redacted]' : formatValue(change.after)
+  const redacted = t('diff.redacted') as string
+  const beforeDisplay = isSecret ? redacted : formatValue(change.before)
+  const afterDisplay = isSecret ? redacted : formatValue(change.after)
   return (
     <div className="we-diff-field">
       <code className="we-diff-field__path">{change.path}</code>
@@ -257,10 +267,11 @@ function FieldChangeRow({ change }: { change: FieldChange }) {
 }
 
 function TagPill({ tag }: { tag: ChangeTag }) {
+  const { t } = useT()
   return (
     <span className={`we-diff-tag we-diff-tag--${tag}`}>
       {tag === 'secret_ref' && <ShieldAlert size={11} aria-hidden="true" />}
-      {TAG_LABELS[tag]}
+      {t(TAG_KEYS[tag] as never) as string}
     </span>
   )
 }
@@ -270,14 +281,14 @@ function TagPill({ tag }: { tag: ChangeTag }) {
 function summarize(diff: WorkflowDiff): string {
   const parts: string[] = []
   const { summary } = diff
-  if (summary.nodesAdded) parts.push(`+${summary.nodesAdded} node${summary.nodesAdded === 1 ? '' : 's'}`)
-  if (summary.nodesRemoved) parts.push(`−${summary.nodesRemoved} node${summary.nodesRemoved === 1 ? '' : 's'}`)
-  if (summary.nodesChanged) parts.push(`${summary.nodesChanged} node${summary.nodesChanged === 1 ? '' : 's'} changed`)
-  if (summary.edgesAdded) parts.push(`+${summary.edgesAdded} edge${summary.edgesAdded === 1 ? '' : 's'}`)
-  if (summary.edgesRemoved) parts.push(`−${summary.edgesRemoved} edge${summary.edgesRemoved === 1 ? '' : 's'}`)
-  if (summary.edgesChanged) parts.push(`${summary.edgesChanged} edge${summary.edgesChanged === 1 ? '' : 's'} changed`)
-  if (diff.workflow.length > 0) parts.push(`${diff.workflow.length} workflow field${diff.workflow.length === 1 ? '' : 's'}`)
-  return parts.length === 0 ? 'No changes' : parts.join(' · ')
+  if (summary.nodesAdded) parts.push(runtimeT('diff.summary.nodesAdded', { count: summary.nodesAdded }) as string)
+  if (summary.nodesRemoved) parts.push(runtimeT('diff.summary.nodesRemoved', { count: summary.nodesRemoved }) as string)
+  if (summary.nodesChanged) parts.push(runtimeT('diff.summary.nodesChanged', { count: summary.nodesChanged }) as string)
+  if (summary.edgesAdded) parts.push(runtimeT('diff.summary.edgesAdded', { count: summary.edgesAdded }) as string)
+  if (summary.edgesRemoved) parts.push(runtimeT('diff.summary.edgesRemoved', { count: summary.edgesRemoved }) as string)
+  if (summary.edgesChanged) parts.push(runtimeT('diff.summary.edgesChanged', { count: summary.edgesChanged }) as string)
+  if (diff.workflow.length > 0) parts.push(runtimeT('diff.summary.workflowFields', { count: diff.workflow.length }) as string)
+  return parts.length === 0 ? (runtimeT('diff.summary.empty') as string) : parts.join(' · ')
 }
 
 function nodeChangeKey(change: WorkflowDiff['nodes'][number]): string {

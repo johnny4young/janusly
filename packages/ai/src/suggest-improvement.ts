@@ -130,6 +130,14 @@ export type SuggestWorkflowImprovementInput = {
    * write `metadata.workflowId` for the breakdown surface.
    */
   context?: LlmGenerateObjectInput<SuggestEnvelopeSchemaResult>["context"];
+  /**
+   * Operator UI locale forwarded by the route from `Accept-Language`.
+   * When `'es'` the helper appends a one-line instruction so the
+   * `rationale` field comes back in Spanish. Structured fields
+   * (`approachLabel`, `confidence`, `patchedWorkflowJson`) stay
+   * English / machine-contract.
+   */
+  locale?: "en" | "es";
 };
 
 /** Maximum focus length the route accepts before trimming. */
@@ -178,7 +186,7 @@ Rules per suggestion:
 export async function suggestWorkflowImprovement(
   input: SuggestWorkflowImprovementInput,
 ): Promise<SuggestImprovementResult> {
-  const { llm, envelopeSchema, workflow, focus, model, context } = input;
+  const { llm, envelopeSchema, workflow, focus, model, context, locale } = input;
 
   if (!llm) {
     return {
@@ -198,7 +206,13 @@ export async function suggestWorkflowImprovement(
       schema: envelopeSchema,
       schemaName: "JanuslyWorkflowImprovement",
       schemaDescription: "One to three distinct high-impact improvements to a workflow snapshot.",
-      system: SYSTEM_PROMPT,
+      // Locale suffix is empty for `en`; for `es` it instructs the
+      // model to write the operator-facing `rationale` field in
+      // Spanish while keeping `approachLabel` / structural workflow
+      // fields verbatim English (machine contract).
+      system: SYSTEM_PROMPT + (locale === "es"
+        ? "\n\nIMPORTANT — RESPONSE LANGUAGE: write the operator-facing `rationale` field in Spanish. Keep `approachLabel` values verbatim English (closed enum) and keep every node id, type literal, template token (`{{secret.NAME}}`, `{{context.foo}}`), tool name, and other workflow-DSL identifier verbatim — they are machine contracts, not display text."
+        : ""),
       prompt: promptBody,
       context,
       modelHint: model,

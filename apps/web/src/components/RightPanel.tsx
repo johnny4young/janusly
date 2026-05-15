@@ -35,6 +35,8 @@ import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
+import { getResolvedLocale, Trans, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type RightPanelProps = {
   tab: ActiveTab
@@ -89,6 +91,7 @@ type RightPanelProps = {
  *  at the layout level (panel slot is null, Recovery Center goes in the main area
  *  so it has hero-page real estate); this dispatcher never receives it. */
 export function RightPanel(props: RightPanelProps) {
+  const { t } = useT()
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
       health={props.aiHealth}
@@ -101,23 +104,23 @@ export function RightPanel(props: RightPanelProps) {
     />
   )
   if (props.tab === 'multiAgent') return (
-    <PanelChrome title="Multi-agent timeline" description="Follow agent and team events as a run moves through the flow." icon={<Layers3 size={18} />}>
+    <PanelChrome title={t('rightPanel.multiAgent.title') as string} description={t('rightPanel.multiAgent.description') as string} icon={<Layers3 size={18} />}>
       <MultiAgentTimeline events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (
-    <PanelChrome title="Flows" description="Open saved flows and continue from the latest version." icon={<Database size={18} />}>
+    <PanelChrome title={t('rightPanel.workflows.title') as string} description={t('rightPanel.workflows.description') as string} icon={<Database size={18} />}>
       <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
     </PanelChrome>
   )
   if (props.tab === 'operations') return <OperationsPanel />
   if (props.tab === 'members') return (
-    <PanelChrome title="Team" description="Invite teammates and choose what they can operate." icon={<Users size={18} />}>
+    <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
       <MembersPanel />
     </PanelChrome>
   )
   if (props.tab === 'inspector') return (
-    <PanelChrome title="Step setup" description="Select a step or path on the canvas to edit how it behaves." icon={<GitBranch size={18} />}>
+    <PanelChrome title={t('rightPanel.inspector.title') as string} description={t('rightPanel.inspector.description') as string} icon={<GitBranch size={18} />}>
       <InspectorPanel
         selectedNode={props.selectedNode}
         selectedEdge={props.selectedEdge}
@@ -154,7 +157,7 @@ export function RightPanel(props: RightPanelProps) {
     />
   )
   return (
-    <PanelChrome title="Run events" description="Low-level execution signals for debugging." icon={<Activity size={18} />}>
+    <PanelChrome title={t('rightPanel.reasoning.title') as string} description={t('rightPanel.reasoning.description') as string} icon={<Activity size={18} />}>
       <ReasoningPanel events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
     </PanelChrome>
   )
@@ -163,7 +166,7 @@ export function RightPanel(props: RightPanelProps) {
 function PanelChrome({
   title,
   children,
-  kicker = 'Workspace',
+  kicker,
   description,
   icon,
 }: {
@@ -173,11 +176,13 @@ function PanelChrome({
   description?: string
   icon?: React.ReactNode
 }) {
+  const { t } = useT()
+  const resolvedKicker = kicker ?? (t('rightPanel.chrome.kicker') as string)
   return (
     <div className="panel-stack">
       <div className="panel-heading">
         <div className="panel-heading-copy">
-          <div className="section-kicker">{kicker}</div>
+          <div className="section-kicker">{resolvedKicker}</div>
           <h2>{title}</h2>
           {description && <p>{description}</p>}
         </div>
@@ -200,6 +205,7 @@ function InspectorPanel({
   onUpdateNodeType,
   onUpdateEdgeCondition,
 }: Pick<RightPanelProps, 'selectedNode' | 'selectedEdge' | 'runNodes' | 'validationIssues' | 'tools' | 'currentWorkflowInputs' | 'currentWorkflowOutputs' | 'onUpdateNodeConfig' | 'onUpdateNodeType' | 'onUpdateEdgeCondition'>) {
+  const { t } = useT()
   const [jsonError, setJsonError] = useState<string | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
@@ -211,7 +217,7 @@ function InspectorPanel({
       <section className="panel-card">
         <div className="split-row">
           <div>
-            <div className="section-kicker">Step</div>
+            <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
             <h3>{getNodeLabel(selectedNode.data.type)}</h3>
             <p className="helper-text">{getNodeConfigSummary(selectedNode.data.type, selectedNode.data.config ?? {})}</p>
           </div>
@@ -219,15 +225,15 @@ function InspectorPanel({
         </div>
 
         <div className="inspector-meta">
-          <span>Step ID {selectedNode.id}</span>
-          <span>{nodeIssues.length ? `${nodeIssues.length} issue${nodeIssues.length === 1 ? '' : 's'}` : 'No validation issues'}</span>
+          <span>{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}</span>
+          <span>{nodeIssues.length ? t('rightPanel.inspector.issueCount', { count: nodeIssues.length }) : t('rightPanel.inspector.noIssues')}</span>
         </div>
 
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />
 
 
         <div className="form-grid">
-          <label className="field-label" htmlFor="node-type">Step kind</label>
+          <label className="field-label" htmlFor="node-type">{t('rightPanel.inspector.stepKindLabel')}</label>
           <select id="node-type" className="text-field" value={selectedNode.data.type} onChange={event => onUpdateNodeType(event.target.value)}>
             {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
           </select>
@@ -243,8 +249,8 @@ function InspectorPanel({
         />
 
         <details className="advanced-config">
-          <summary>Advanced JSON</summary>
-          <p className="helper-text">Use this when you need to edit the exact payload sent to the engine.</p>
+          <summary>{t('rightPanel.inspector.advancedJsonSummary')}</summary>
+          <p className="helper-text">{t('rightPanel.inspector.advancedJsonHelper')}</p>
           <textarea
             key={`${selectedNode.id}-json`}
             id="node-config"
@@ -256,7 +262,7 @@ function InspectorPanel({
                 onUpdateNodeConfig(parsed)
                 setJsonError(null)
               } catch (error) {
-                setJsonError(error instanceof Error ? error.message : 'Settings must be valid JSON')
+                setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson') as string))
               }
             }}
           />
@@ -271,15 +277,15 @@ function InspectorPanel({
   if (selectedEdge) {
     return (
       <section className="panel-card">
-        <div className="section-kicker">Path</div>
-        <h3>{selectedEdge.source} to {selectedEdge.target}</h3>
-        <label className="field-label" htmlFor="edge-condition">Run only when</label>
+        <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
+        <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
+        <label className="field-label" htmlFor="edge-condition">{t('rightPanel.inspector.runOnlyWhen')}</label>
         <textarea
           id="edge-condition"
           className="code-field code-field-short"
           defaultValue={selectedEdge.data?.condition ?? ''}
           onBlur={(event) => onUpdateEdgeCondition(selectedEdge.id, event.target.value.trim())}
-          placeholder="context.http.output.statusCode === 200"
+          placeholder={t('rightPanel.inspector.conditionPlaceholder') as string}
         />
       </section>
     )
@@ -293,8 +299,8 @@ function InspectorPanel({
       <section className="panel-card">
         <div className="empty-panel">
           <GitBranch size={24} aria-hidden="true" />
-          <strong>Select a step to configure it</strong>
-          <p>Click any node on the canvas to edit inputs, prompts, tools, path rules, and advanced JSON.</p>
+          <strong>{t('rightPanel.inspector.emptyTitle')}</strong>
+          <p>{t('rightPanel.inspector.emptyBody')}</p>
         </div>
       </section>
     </>
@@ -313,20 +319,21 @@ function WorkflowIoCard({
   inputs?: WorkflowDefinition['inputs']
   outputs?: WorkflowDefinition['outputs']
 }) {
+  const { t } = useT()
   return (
     <section className="panel-card" data-testid="workflow-io-card">
-      <div className="section-kicker">Workflow I/O</div>
-      <h3>Declared inputs &amp; outputs</h3>
-      <p className="helper-text">Surface contract for callers and subworkflow consumers. Inputs validate at run start; outputs project at terminal status.</p>
+      <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
+      <h3>{t('rightPanel.inspector.ioTitle')}</h3>
+      <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>
 
       {inputs && (
         <div className="form-grid">
-          <div className="field-label">Inputs</div>
+          <div className="field-label">{t('rightPanel.inspector.inputsLabel')}</div>
           <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {renderInputFields(inputs).map((row, idx) => (
               <li key={`${row.path}-${idx}`}>
                 <span>{row.path}</span>
-                <span>{row.type}{row.required ? ' (required)' : ''}</span>
+                <span>{row.type}{row.required ? t('rightPanel.inspector.requiredSuffix') : ''}</span>
               </li>
             ))}
           </ul>
@@ -335,7 +342,7 @@ function WorkflowIoCard({
 
       {outputs && Object.keys(outputs).length > 0 && (
         <div className="form-grid">
-          <div className="field-label">Outputs</div>
+          <div className="field-label">{t('rightPanel.inspector.outputsLabel')}</div>
           <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {Object.entries(outputs).map(([key, template]) => (
               <li key={key}>
@@ -428,13 +435,14 @@ function QuickConfigEditor({
   tools: ToolSchema[]
   onUpdate: (config: Record<string, unknown>) => void
 }) {
+  const { t } = useT()
   const patch = (next: Record<string, unknown>) => onUpdate({ ...config, ...next })
 
   if (type === 'http') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Request URL" value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.requestUrl') as string} value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
       </section>
     )
   }
@@ -442,8 +450,8 @@ function QuickConfigEditor({
   if (type === 'ai') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField scope={nodeId} label="Prompt" value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.prompt') as string} value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
       </section>
     )
   }
@@ -464,28 +472,28 @@ function QuickConfigEditor({
     }
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <div className="form-grid">
-          <label className="field-label" htmlFor={toolNameId}>Tool</label>
+          <label className="field-label" htmlFor={toolNameId}>{t('rightPanel.quickConfig.tool')}</label>
           <select
             id={toolNameId}
             className="text-field"
             value={selectedTool}
             onChange={event => onSelectTool(event.target.value)}
           >
-            {!selectedTool && <option value="">— Pick a tool —</option>}
-            {showCurrentToolOption && <option value={selectedTool}>{selectedTool}{tools.length > 0 ? ' (not registered)' : ' (loading)'}</option>}
+            {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
+            {showCurrentToolOption && <option value={selectedTool}>{tools.length > 0 ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool }) : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}</option>}
             {tools.map(tool => (
               <option key={tool.name} value={tool.name}>{tool.name}</option>
             ))}
           </select>
           {matchedTool?.description && <p className="helper-text">{matchedTool.description}</p>}
           {matchedTool?.required && matchedTool.required.length > 0 && (
-            <p className="helper-text">Required input: {matchedTool.required.join(', ')}{matchedTool.optional?.length ? ` · Optional: ${matchedTool.optional.join(', ')}` : ''}</p>
+            <p className="helper-text">{t('rightPanel.quickConfig.requiredInput', { required: matchedTool.required.join(', ') })}{matchedTool.optional?.length ? t('rightPanel.quickConfig.optionalSuffix', { optional: matchedTool.optional.join(', ') }) : ''}</p>
           )}
-          {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">This tool is not registered — pick one from the list.</p>}
+          {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">{t('rightPanel.quickConfig.unknownToolWarning')}</p>}
         </div>
-        <JsonConfigField scope={nodeId} label="Tool input" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
   }
@@ -495,30 +503,30 @@ function QuickConfigEditor({
     const teamModeId = fieldId(nodeId, 'team mode')
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? 'Team goal' : 'Agent goal'} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? (t('rightPanel.quickConfig.teamGoal') as string) : (t('rightPanel.quickConfig.agentGoal') as string)} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
         <div className="config-field-row">
-          <label className="field-label" htmlFor={plannerId}>Planner</label>
+          <label className="field-label" htmlFor={plannerId}>{t('rightPanel.quickConfig.planner')}</label>
           <select id={plannerId} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
-            <option value="rules">Rules</option>
-            <option value="openai">OpenAI</option>
+            <option value="rules">{t('rightPanel.quickConfig.plannerRules')}</option>
+            <option value="openai">{t('rightPanel.quickConfig.plannerOpenai')}</option>
           </select>
         </div>
         {type === 'multi_agent' && (
           <div className="config-field-row">
-            <label className="field-label" htmlFor={teamModeId}>Team mode</label>
+            <label className="field-label" htmlFor={teamModeId}>{t('rightPanel.quickConfig.teamMode')}</label>
             <select id={teamModeId} className="text-field" value={readConfigString(config, 'mode') || 'sequential'} onChange={event => patch({ mode: event.target.value })}>
-              <option value="sequential">Sequential</option>
-              <option value="parallel">Parallel</option>
+              <option value="sequential">{t('rightPanel.quickConfig.teamModeSequential')}</option>
+              <option value="parallel">{t('rightPanel.quickConfig.teamModeParallel')}</option>
             </select>
           </div>
         )}
-        {type === 'agent' && <TextConfigField scope={nodeId} label="Input value" value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
-        <NumberConfigField scope={nodeId} label="Max steps" value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
+        {type === 'agent' && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue') as string} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
+        <NumberConfigField scope={nodeId} label={t('rightPanel.quickConfig.maxSteps') as string} value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
         {type === 'multi_agent' && (
           <label className="checkbox-row">
             <input type="checkbox" checked={config.reflection !== false} onChange={event => patch({ reflection: event.target.checked })} />
-            <span>Review results before completing</span>
+            <span>{t('rightPanel.quickConfig.reflection')}</span>
           </label>
         )}
       </section>
@@ -528,8 +536,8 @@ function QuickConfigEditor({
   if (type === 'approval') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField scope={nodeId} label="Approval message" value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalMessage') as string} value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
       </section>
     )
   }
@@ -537,11 +545,11 @@ function QuickConfigEditor({
   if (type === 'human_form') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Form title" value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
-        <TextareaConfigField scope={nodeId} label="Operator instructions" value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
-        <JsonConfigField scope={nodeId} label="Fields schema" value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
-        <p className="helper-text">Use an object schema with simple string, number, or boolean fields. Required fields block submit until filled.</p>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.formTitle') as string} value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.formInstructions') as string} value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldsSchema') as string} value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
+        <p className="helper-text">{t('rightPanel.quickConfig.humanFormHelper')}</p>
       </section>
     )
   }
@@ -549,8 +557,8 @@ function QuickConfigEditor({
   if (type === 'condition') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextareaConfigField scope={nodeId} label="Branch expression" value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.branchExpression') as string} value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
       </section>
     )
   }
@@ -558,9 +566,9 @@ function QuickConfigEditor({
   if (type === 'subworkflow') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Workflow id" value={readConfigString(config, 'workflowId')} onChange={value => patch({ workflowId: value })} />
-        <JsonConfigField scope={nodeId} label="Override input (optional)" value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.workflowId') as string} value={readConfigString(config, 'workflowId')} onChange={value => patch({ workflowId: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.overrideInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
   }
@@ -568,9 +576,11 @@ function QuickConfigEditor({
   if (type === 'wait_until') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Duration (ISO 8601)" value={readConfigString(config, 'duration')} onChange={value => patch({ duration: value })} />
-        <p className="helper-text">Examples: <code>PT5M</code> (5 min), <code>PT2H</code> (2 hours), <code>P3D</code> (3 days), <code>P1Y</code> (1 year ≈ 365 days). Manual resume short-circuits the wait.</p>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.duration') as string} value={readConfigString(config, 'duration')} onChange={value => patch({ duration: value })} />
+        <p className="helper-text">
+          <Trans i18nKey="rightPanel.quickConfig.durationHelper" components={{ code: <code /> }} />
+        </p>
       </section>
     )
   }
@@ -578,9 +588,9 @@ function QuickConfigEditor({
   if (type === 'loop') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <TextConfigField scope={nodeId} label="Items" value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
-        <JsonConfigField scope={nodeId} label="Item mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.items') as string} value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
       </section>
     )
   }
@@ -588,8 +598,8 @@ function QuickConfigEditor({
   if (type === 'transform') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <JsonConfigField scope={nodeId} label="Field mapping" value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
       </section>
     )
   }
@@ -597,8 +607,8 @@ function QuickConfigEditor({
   if (type === 'router' || type === 'router_llm') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
-        <JsonConfigField scope={nodeId} label="Candidate paths" value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.candidates') as string} value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
       </section>
     )
   }
@@ -606,14 +616,16 @@ function QuickConfigEditor({
   if (type === 'parallel_fork') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <JsonConfigField
           scope={nodeId}
-          label="Branches"
+          label={t('rightPanel.quickConfig.branches') as string}
           value={Array.isArray(config.branches) ? config.branches : []}
           onChange={value => patch({ branches: value })}
         />
-        <p className="helper-text">2-10 entries. Each branch is <code>{'{ "label": "name", "description"?: "what it computes" }'}</code>. Wire one outgoing edge per branch in the canvas; the matching <code>join</code> downstream merges results by label.</p>
+        <p className="helper-text">
+          <Trans i18nKey="rightPanel.quickConfig.branchesHelper" components={{ code: <code /> }} />
+        </p>
       </section>
     )
   }
@@ -621,14 +633,16 @@ function QuickConfigEditor({
   if (type === 'join') {
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <JsonConfigField
           scope={nodeId}
-          label="Branch sources"
+          label={t('rightPanel.quickConfig.branchSources') as string}
           value={asJsonObject(config.sources)}
           onChange={value => patch({ sources: value })}
         />
-        <p className="helper-text"><code>{'{ "<label>": "<predecessor_node_id>" }'}</code>. Output is <code>{'{ branches: { <label>: <predecessor.output> } }'}</code>. Every predecessor id must be a node that actually feeds this join.</p>
+        <p className="helper-text">
+          <Trans i18nKey="rightPanel.quickConfig.branchSourcesHelper" components={{ code: <code /> }} />
+        </p>
       </section>
     )
   }
@@ -647,15 +661,15 @@ function QuickConfigEditor({
     const enabled = config.enabled !== false
     return (
       <section className="quick-config">
-        <div className="section-kicker">Quick setup</div>
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField
           scope={nodeId}
-          label="Cron expression"
+          label={t('rightPanel.quickConfig.cronExpression') as string}
           value={readConfigString(config, 'cronExpression')}
           onChange={value => patch({ cronExpression: value })}
         />
         <div className="config-field-row">
-          <label className="field-label" htmlFor={fieldId(nodeId, 'Enabled')}>Enabled</label>
+          <label className="field-label" htmlFor={fieldId(nodeId, 'Enabled')}>{t('rightPanel.quickConfig.scheduleEnabled')}</label>
           <input
             id={fieldId(nodeId, 'Enabled')}
             type="checkbox"
@@ -663,15 +677,17 @@ function QuickConfigEditor({
             onChange={event => patch({ enabled: event.target.checked })}
           />
         </div>
-        <p className="helper-text">5-field cron (minute hour day-of-month month day-of-week). Examples: <code>0 9 * * *</code> (daily 9am), <code>*/5 * * * *</code> (every 5 min), <code>0 0 * * 1</code> (Mondays). Uncheck Enabled to pause without losing the schedule.</p>
+        <p className="helper-text">
+          <Trans i18nKey="rightPanel.quickConfig.scheduleHelper" components={{ code: <code /> }} />
+        </p>
       </section>
     )
   }
 
   return (
     <section className="quick-config">
-      <div className="section-kicker">Quick setup</div>
-      <p className="empty-state">This step has no required setup. Use advanced JSON only for custom behavior.</p>
+      <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+      <p className="empty-state">{t('rightPanel.quickConfig.noSetup')}</p>
     </section>
   )
 }
@@ -689,6 +705,7 @@ function QuickConfigEditor({
  * warning so the author knows the run will fail.
  */
 function McpToolConfigField({ scope, config, onPatch }: { scope: string; config: JsonObject; onPatch: (next: Record<string, unknown>) => void }) {
+  const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const [connections, setConnections] = useState<McpConnection[]>([])
   const [toolsByAlias, setToolsByAlias] = useState<Record<string, McpToolDescriptor[]>>({})
@@ -747,27 +764,27 @@ function McpToolConfigField({ scope, config, onPatch }: { scope: string; config:
 
   return (
     <section className="quick-config">
-      <div className="section-kicker">Quick setup</div>
+      <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
       <div className="form-grid">
-        <label className="field-label" htmlFor={aliasFieldId}>MCP connection</label>
+        <label className="field-label" htmlFor={aliasFieldId}>{t('rightPanel.mcpInspector.connection')}</label>
         <select
           id={aliasFieldId}
           className="text-field"
           value={selectedAlias}
           onChange={(event) => onPatch({ connectionAlias: event.target.value, toolName: '' })}
         >
-          {!selectedAlias && <option value="">— Pick a connection —</option>}
-          {selectedAlias && !knownAlias && <option value={selectedAlias}>{selectedAlias} (not active)</option>}
+          {!selectedAlias && <option value="">{t('rightPanel.mcpInspector.pickConnection')}</option>}
+          {selectedAlias && !knownAlias && <option value={selectedAlias}>{t('rightPanel.mcpInspector.notActiveSuffix', { alias: selectedAlias })}</option>}
           {connections.map((connection) => (
-            <option key={connection.id} value={connection.alias}>{connection.alias} ({connection.transport})</option>
+            <option key={connection.id} value={connection.alias}>{t('rightPanel.mcpInspector.connectionOption', { alias: connection.alias, transport: connection.transport })}</option>
           ))}
         </select>
         {!loading && connections.length === 0 && (
-          <p className="helper-text">No active MCP connections. An admin must register one in Operations → MCP Connections first.</p>
+          <p className="helper-text">{t('rightPanel.mcpInspector.noActiveConnections')}</p>
         )}
       </div>
       <div className="form-grid">
-        <label className="field-label" htmlFor={toolFieldId}>Tool</label>
+        <label className="field-label" htmlFor={toolFieldId}>{t('rightPanel.mcpInspector.tool')}</label>
         <select
           id={toolFieldId}
           className="text-field"
@@ -775,24 +792,28 @@ function McpToolConfigField({ scope, config, onPatch }: { scope: string; config:
           onChange={(event) => onPatch({ toolName: event.target.value })}
           disabled={!selectedAlias}
         >
-          {!selectedTool && <option value="">— Pick a tool —</option>}
-          {selectedTool && !knownTool && <option value={selectedTool}>{selectedTool} (not enabled)</option>}
+          {!selectedTool && <option value="">{t('rightPanel.mcpInspector.pickTool')}</option>}
+          {selectedTool && !knownTool && <option value={selectedTool}>{t('rightPanel.mcpInspector.notEnabledSuffix', { name: selectedTool })}</option>}
           {tools.map((tool) => (
-            <option key={tool.id} value={tool.name}>{tool.name}{tool.writeSide ? ' (write-side)' : ''}</option>
+            <option key={tool.id} value={tool.name}>
+              {tool.writeSide
+                ? t('rightPanel.mcpInspector.toolWriteSideOption', { name: tool.name })
+                : tool.name}
+            </option>
           ))}
         </select>
         {selectedAlias && tools.length === 0 && !loading && (
-          <p className="helper-text">No enabled tools on this connection. Open Operations → MCP Connections to enable per-tool.</p>
+          <p className="helper-text">{t('rightPanel.mcpInspector.noEnabledTools')}</p>
         )}
       </div>
-      <JsonConfigField scope={scope} label="Tool input" value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
+      <JsonConfigField scope={scope} label={t('rightPanel.mcpInspector.toolInput') as string} value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
       <NumberConfigField
         scope={scope}
-        label="Timeout (ms)"
+        label={t('rightPanel.mcpInspector.timeoutMs') as string}
         value={readConfigNumber(config, 'timeoutMs') ?? 30000}
         onChange={(value) => onPatch({ timeoutMs: value })}
       />
-      <p className="helper-text">Default 30s, max 120s. Tool input is templated against the workflow context like every other step.</p>
+      <p className="helper-text">{t('rightPanel.mcpInspector.timeoutHelper')}</p>
     </section>
   )
 }
@@ -828,6 +849,7 @@ function TextareaConfigField({ scope, label, value, onChange }: { scope: string;
 }
 
 function JsonConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: unknown; onChange: (value: unknown) => void }) {
+  const { t } = useT()
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState(() => JSON.stringify(value ?? {}, null, 2))
   const id = fieldId(scope, label)
@@ -856,7 +878,7 @@ function JsonConfigField({ scope, label, value, onChange }: { scope: string; lab
             onChange(JSON.parse(event.target.value))
             setError(null)
           } catch (jsonError) {
-            setError(jsonError instanceof Error ? jsonError.message : 'Value must be valid JSON')
+            setError(jsonError instanceof Error ? jsonError.message : (t('rightPanel.jsonField.invalidJson') as string))
           }
         }}
       />
@@ -880,19 +902,20 @@ function asJsonObject(value: unknown) {
 }
 
 function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'templates' | 'onUseTemplate'>) {
+  const { t } = useT()
   return (
-    <PanelChrome title="Recipes" description="Start from a tested pattern, then adjust the steps on the canvas." icon={<Workflow size={18} />}>
+    <PanelChrome title={t('rightPanel.templates.title') as string} description={t('rightPanel.templates.description') as string} icon={<Workflow size={18} />}>
       <div className="panel-list">
-        {templates.length === 0 && <EmptyView icon={<Workflow size={22} />} title="No recipes loaded" body="Refresh the API connection and try again." />}
+        {templates.length === 0 && <EmptyView icon={<Workflow size={22} />} title={t('rightPanel.templates.empty.title') as string} body={t('rightPanel.templates.empty.body') as string} />}
         {templates.map(template => (
           <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
             <div className="split-row" style={{ width: '100%' }}>
-              <span className="section-kicker">{template.category}</span>
-              <span className="mode-pill mode-pill-neutral">{template.workflow.nodes.length} steps</span>
+              <span className="section-kicker">{tTemplateCategory(template)}</span>
+              <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
             </div>
-            <strong>{template.name}</strong>
-            <span>{template.description}</span>
-            <span className="list-card-action">Use recipe</span>
+            <strong>{tTemplateName(template)}</strong>
+            <span>{tTemplateDescription(template)}</span>
+            <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
           </button>
         ))}
       </div>
@@ -901,24 +924,25 @@ function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'tem
 }
 
 function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 'onInstallPlugin'>) {
+  const { t } = useT()
   return (
-    <PanelChrome title="Tools" description="Install backend actions that a flow or agent can call." icon={<Boxes size={18} />}>
+    <PanelChrome title={t('rightPanel.tools.title') as string} description={t('rightPanel.tools.description') as string} icon={<Boxes size={18} />}>
       <div className="panel-list">
-        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title="No tools available" body="Start the API to load registered tool actions." />}
+        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title={t('rightPanel.tools.empty.title') as string} body={t('rightPanel.tools.empty.body') as string} />}
         {tools.map(tool => (
           <div key={tool.name} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{tool.name}</strong>
-              <span className="mode-pill mode-pill-neutral">{tool.required?.length ?? 0} required</span>
+              <span className="mode-pill mode-pill-neutral">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
             </div>
-            <span>{tool.description}</span>
+            <span>{tToolDescription(tool)}</span>
             {(tool.required?.length || tool.optional?.length) && (
               <div className="mini-grid mini-grid-tight">
-                {(tool.required ?? []).map(field => <span key={`required-${field}`}>Required: {field}</span>)}
-                {(tool.optional ?? []).map(field => <span key={`optional-${field}`}>Optional: {field}</span>)}
+                {(tool.required ?? []).map(field => <span key={`required-${field}`}>{t('rightPanel.tools.requiredField', { field })}</span>)}
+                {(tool.optional ?? []).map(field => <span key={`optional-${field}`}>{t('rightPanel.tools.optionalField', { field })}</span>)}
               </div>
             )}
-            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>Install tool</button>
+            <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
           </div>
         ))}
       </div>
@@ -927,26 +951,27 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
 }
 
 function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelProps, 'credentials' | 'onCreateCredential'>) {
+  const { t } = useT()
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
   const [secretRef, setSecretRef] = useState('')
 
   return (
-    <PanelChrome title="Connections" description="Reference secrets by environment variable name without exposing values in the UI." icon={<KeyRound size={18} />}>
+    <PanelChrome title={t('rightPanel.credentials.title') as string} description={t('rightPanel.credentials.description') as string} icon={<KeyRound size={18} />}>
       <section className="panel-card connection-form">
         <div className="split-row">
           <div>
-            <div className="section-kicker">New connection</div>
-            <strong>Register a secret reference</strong>
+            <div className="section-kicker">{t('rightPanel.credentials.formKicker')}</div>
+            <strong>{t('rightPanel.credentials.formTitle')}</strong>
           </div>
           <LockKeyhole size={18} aria-hidden="true" />
         </div>
-        <label className="field-label" htmlFor="credential-name">Connection name</label>
+        <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
         <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
-        <label className="field-label" htmlFor="credential-kind">Connection kind</label>
+        <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
         <input id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)} />
-        <label className="field-label" htmlFor="credential-secret">Environment variable</label>
-        <input id="credential-secret" className="text-field" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder="SLACK_BOT_TOKEN" />
+        <label className="field-label" htmlFor="credential-secret">{t('rightPanel.credentials.envLabel')}</label>
+        <input id="credential-secret" className="text-field" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t('rightPanel.credentials.envPlaceholder') as string} />
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
@@ -956,12 +981,12 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
               setSecretRef('')
             }}
           >
-            Add connection
+            {t('rightPanel.credentials.addButton')}
           </button>
         </div>
       </section>
       <div className="panel-list">
-        {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title="No connections yet" body="Create a reference once the matching environment variable exists in the runtime." />}
+        {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title={t('rightPanel.credentials.empty.title') as string} body={t('rightPanel.credentials.empty.body') as string} />}
         {credentials.map(credential => (
           <div key={credential.id} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
@@ -985,13 +1010,13 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
 const USAGE_BREAKDOWN_DIMENSIONS = ['provider', 'model', 'mode', 'day', 'node', 'workflow'] as const
 type UsageBreakdownDimension = typeof USAGE_BREAKDOWN_DIMENSIONS[number]
 
-const USAGE_BREAKDOWN_LABELS: Record<UsageBreakdownDimension, string> = {
-  provider: 'Provider',
-  model: 'Model',
-  mode: 'Mode',
-  day: 'Day',
-  node: 'Node',
-  workflow: 'Workflow',
+const USAGE_BREAKDOWN_LABEL_KEYS: Record<UsageBreakdownDimension, string> = {
+  provider: 'rightPanel.usage.dim.provider',
+  model: 'rightPanel.usage.dim.model',
+  mode: 'rightPanel.usage.dim.mode',
+  day: 'rightPanel.usage.dim.day',
+  node: 'rightPanel.usage.dim.node',
+  workflow: 'rightPanel.usage.dim.workflow',
 }
 
 type UsageBreakdownBucket = {
@@ -1047,12 +1072,12 @@ function bucketLabel(b: UsageBreakdownBucket, dims: UsageBreakdownDimension[]): 
   return dims
     .map((dim) => {
       const value = dim === 'mode' ? b.mode : b[dim]
-      if (value === undefined || value === null) return 'unknown'
+      if (value === undefined || value === null) return runtimeT('rightPanel.usage.unknown') as string
       // Legacy-data sentinel from the backfill script — render as
       // "Legacy" so operators can distinguish backfilled-pre-attribution
       // rows from genuinely-unattributed `/ai/generate-workflow` rows
       // (which keep value === undefined → "unknown").
-      if (dim === 'workflow' && value === LEGACY_WORKFLOW_SENTINEL) return 'Legacy'
+      if (dim === 'workflow' && value === LEGACY_WORKFLOW_SENTINEL) return runtimeT('rightPanel.usage.legacy') as string
       return value
     })
     .join(' / ')
@@ -1085,6 +1110,7 @@ export function UsageSummaryCard({
   usage: Record<string, number>
   onRefreshPlatform: () => void
 }) {
+  const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const addToast = useWorkflowStore(state => state.addToast)
   const [activeDims, setActiveDims] = useState<UsageBreakdownDimension[]>([])
@@ -1128,7 +1154,7 @@ export function UsageSummaryCard({
       })
       .catch((error) => {
         if (cancelled) return
-        addToast(error instanceof Error ? error.message : 'Usage breakdown failed to load', 'error')
+        addToast(error instanceof Error ? error.message : (t('rightPanel.usage.breakdownLoadFailed') as string), 'error')
         setBreakdown([])
       })
       .finally(() => {
@@ -1137,7 +1163,7 @@ export function UsageSummaryCard({
     return () => {
       cancelled = true
     }
-  }, [activeDims, platformVersion, refreshNonce, addToast])
+  }, [activeDims, platformVersion, refreshNonce, addToast, t])
 
   const sortedBreakdown = useMemo(() => {
     if (!breakdown) return null
@@ -1154,11 +1180,11 @@ export function UsageSummaryCard({
   return (
     <section className="panel-card">
       <div className="split-row">
-        <strong>Usage summary</strong>
-        <button className="small-command" onClick={refreshUsage}>Refresh</button>
+        <strong>{t('rightPanel.usage.title')}</strong>
+        <button className="small-command" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</button>
       </div>
       {Object.keys(usage).length === 0 ? (
-        <p className="empty-state">No usage recorded yet.</p>
+        <p className="empty-state">{t('rightPanel.usage.empty')}</p>
       ) : (
         <div className="mini-grid">
           {Object.entries(usage).map(([key, value]) => (
@@ -1168,8 +1194,8 @@ export function UsageSummaryCard({
       )}
 
       <div className="we-usage-breakdown-controls">
-        <span className="section-kicker">Group by</span>
-        <div className="we-usage-breakdown-chips" role="group" aria-label="Usage breakdown dimensions">
+        <span className="section-kicker">{t('rightPanel.usage.groupBy')}</span>
+        <div className="we-usage-breakdown-chips" role="group" aria-label={t('rightPanel.usage.dimensionsAria') as string}>
           {USAGE_BREAKDOWN_DIMENSIONS.map((dim) => {
             const active = activeDims.includes(dim)
             return (
@@ -1180,37 +1206,37 @@ export function UsageSummaryCard({
                 onClick={() => toggleDim(dim)}
                 aria-pressed={active}
               >
-                {USAGE_BREAKDOWN_LABELS[dim]}
+                {t(USAGE_BREAKDOWN_LABEL_KEYS[dim])}
               </button>
             )
           })}
         </div>
       </div>
 
-      {loading && <p className="helper-text" aria-live="polite">Loading breakdown…</p>}
+      {loading && <p className="helper-text" aria-live="polite">{t('rightPanel.usage.loading')}</p>}
 
       {!loading && sortedBreakdown && sortedBreakdown.length === 0 && (
-        <p className="helper-text" aria-live="polite">No buckets in this window.</p>
+        <p className="helper-text" aria-live="polite">{t('rightPanel.usage.noBuckets')}</p>
       )}
 
       {!loading && visibleBuckets.length > 0 && (
-        <ul className="we-usage-breakdown-list" aria-label="Usage breakdown buckets">
+        <ul className="we-usage-breakdown-list" aria-label={t('rightPanel.usage.bucketsAria') as string}>
           {visibleBuckets.map((b) => (
             <li key={b.key} className="we-usage-breakdown-row">
               <span className="we-usage-breakdown-label">{bucketLabel(b, activeDims)}</span>
               <span className="we-usage-breakdown-stats">
-                <span><strong>{b.callCount}</strong> calls</span>
-                <span><strong>{formatQuantity(b.quantity)}</strong> tokens</span>
+                <span><strong>{b.callCount}</strong> {t('rightPanel.usage.calls')}</span>
+                <span><strong>{formatQuantity(b.quantity)}</strong> {t('rightPanel.usage.tokens')}</span>
                 <span><strong>{formatCost(b.costUsd)}</strong></span>
-                <span>p95 {formatLatency(b.latency.p95Ms)}</span>
-                {b.fallbackCount > 0 && <span className="we-usage-breakdown-fallback">{b.fallbackCount} fallback</span>}
+                <span>{t('rightPanel.usage.p95Prefix')} {formatLatency(b.latency.p95Ms)}</span>
+                {b.fallbackCount > 0 && <span className="we-usage-breakdown-fallback">{t('rightPanel.usage.fallbackSuffix', { count: b.fallbackCount })}</span>}
               </span>
             </li>
           ))}
           {hiddenCount > 0 && !showAll && (
             <li className="we-usage-breakdown-more">
               <button type="button" className="small-command" onClick={() => setShowAll(true)}>
-                + {hiddenCount} more
+                {t('rightPanel.usage.moreCount', { count: hiddenCount })}
               </button>
             </li>
           )}
@@ -1273,6 +1299,7 @@ function RunsPanel({
   onReplayDeadLetter,
   onResolveDeadLetter,
 }: Pick<RightPanelProps, 'runs' | 'usage' | 'runNodes' | 'activeRunId' | 'deadLetters' | 'onOpenRun' | 'onRefreshPlatform' | 'onApproveNode' | 'onSubmitHumanForm' | 'onReplayNode' | 'onCancelActiveRun' | 'onReplayDeadLetter' | 'onResolveDeadLetter'>) {
+  const { t } = useT()
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
@@ -1302,18 +1329,18 @@ function RunsPanel({
   )
 
   return (
-    <PanelChrome title="Runs" description="Review execution history, approvals, retries, and AI explanations." icon={<Activity size={18} />}>
-      <section className="metric-strip" aria-label="Run summary">
-        <Metric label="Total" value={runs.length} icon={<ListChecks size={15} />} />
-        <Metric label="Active" value={activeRuns} icon={<Activity size={15} />} />
-        <Metric label="Done" value={completedRuns} icon={<CheckCircle2 size={15} />} />
-        <Metric label="Failed" value={failedRuns} icon={<RefreshCw size={15} />} />
+    <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
+      <section className="metric-strip" aria-label={t('rightPanel.runs.summaryAria') as string}>
+        <Metric label={t('rightPanel.runs.metric.total') as string} value={runs.length} icon={<ListChecks size={15} />} />
+        <Metric label={t('rightPanel.runs.metric.active') as string} value={activeRuns} icon={<Activity size={15} />} />
+        <Metric label={t('rightPanel.runs.metric.done') as string} value={completedRuns} icon={<CheckCircle2 size={15} />} />
+        <Metric label={t('rightPanel.runs.metric.failed') as string} value={failedRuns} icon={<RefreshCw size={15} />} />
       </section>
 
       {activeRunId && (
         <section className="panel-card">
           <div className="split-row">
-            <strong>Active run</strong>
+            <strong>{t('rightPanel.runs.activeRun')}</strong>
             <div style={{ display: 'flex', gap: 8 }}>
               {activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
                 <button
@@ -1322,7 +1349,7 @@ function RunsPanel({
                   onClick={() => setLabSourceRun(activeRun)}
                   data-testid="active-run-replay-in-lab"
                 >
-                  <FlaskConical size={12} aria-hidden="true" /> Open in Lab
+                  <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.openInLab')}
                 </button>
               )}
               <button
@@ -1331,18 +1358,20 @@ function RunsPanel({
                 onClick={() => onCancelActiveRun?.()}
                 disabled={!isActiveRunCancellable}
               >
-                Cancel run
+                {t('rightPanel.runs.cancelRun')}
               </button>
             </div>
           </div>
           <p className="helper-text">
             {activeRun
-              ? `Status: ${activeRun.status}. ${isActiveRunCancellable ? "Cancel flips it to cancelled and stops scheduling further nodes." : "Run already finished — cancel is a no-op."}`
-              : "Run details are loading."}
+              ? (isActiveRunCancellable
+                ? t('rightPanel.runs.activeRunStatusCancellable', { status: activeRun.status })
+                : t('rightPanel.runs.activeRunStatusFinished', { status: activeRun.status }))
+              : t('rightPanel.runs.activeRunLoading')}
           </p>
           {activeRun?.status === 'succeeded' && activeRun.outputJson && Object.keys(activeRun.outputJson).length > 0 && (
             <details data-testid="workflow-output" style={{ marginTop: 12 }}>
-              <summary>Workflow output</summary>
+              <summary>{t('rightPanel.runs.workflowOutput')}</summary>
               <pre className="code-field" style={{ marginTop: 8, padding: 8 }}>
                 {JSON.stringify(activeRun.outputJson, null, 2)}
               </pre>
@@ -1356,8 +1385,8 @@ function RunsPanel({
       {waitingNodes.length > 0 && (
         <section className="panel-card action-card">
           <div>
-            <strong>Paused steps</strong>
-            <p className="helper-text">Continue steps that are waiting for a person, form, webhook, or timer.</p>
+            <strong>{t('rightPanel.runs.pausedTitle')}</strong>
+            <p className="helper-text">{t('rightPanel.runs.pausedDescription')}</p>
           </div>
           {waitingNodes.map(node => {
             const form = readHumanFormWaiting(node)
@@ -1371,13 +1400,13 @@ function RunsPanel({
                     setActiveHumanFormNodeId(node.nodeId)
                   }}
                 >
-                  Fill form {node.nodeId}
+                  {t('rightPanel.runs.fillForm', { nodeId: node.nodeId })}
                 </button>
               )
             }
             return (
               <button key={node.nodeId} className="small-command" onClick={() => onApproveNode(node.nodeId)}>
-                Resume {node.nodeId}
+                {t('rightPanel.runs.resume', { nodeId: node.nodeId })}
               </button>
             )
           })}
@@ -1415,12 +1444,12 @@ function RunsPanel({
       {failedNodes.length > 0 && (
         <section className="panel-card action-card">
           <div>
-            <strong>Needs attention</strong>
-            <p className="helper-text">Retry failed steps after reviewing their payloads.</p>
+            <strong>{t('rightPanel.runs.attentionTitle')}</strong>
+            <p className="helper-text">{t('rightPanel.runs.attentionDescription')}</p>
           </div>
           {failedNodes.map(node => (
             <button key={node.nodeId} className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-              Retry {node.nodeId}
+              {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
             </button>
           ))}
         </section>
@@ -1436,8 +1465,8 @@ function RunsPanel({
       />
 
       <div className="panel-list">
-        <div className="section-kicker">History</div>
-        {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title="No runs yet" body="Press Run to execute the current flow and inspect the result here." />}
+        <div className="section-kicker">{t('rightPanel.runs.historyKicker')}</div>
+        {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.runs.historyEmpty.title') as string} body={t('rightPanel.runs.historyEmpty.body') as string} />}
         {runs.map(run => {
           const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
           return (
@@ -1447,8 +1476,8 @@ function RunsPanel({
                   <strong>{run.id.slice(0, 8)}…</strong>
                   <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
                 </div>
-                <span>{run.createdAt ? new Date(run.createdAt).toLocaleString() : 'run'}</span>
-                <span className="list-card-action">Open run timeline</span>
+                <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback') as string)}</span>
+                <span className="list-card-action">{t('rightPanel.runs.openTimeline')}</span>
               </button>
               {showLabAction && (
                 <button
@@ -1456,9 +1485,9 @@ function RunsPanel({
                   className="small-command we-replay-lab-history-button"
                   onClick={() => setLabSourceRun(run)}
                   data-testid={`history-replay-in-lab-${run.id}`}
-                  aria-label={`Replay run ${run.id} in lab`}
+                  aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id }) as string}
                 >
-                  <FlaskConical size={12} aria-hidden="true" /> Lab
+                  <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
                 </button>
               )}
               <button
@@ -1467,25 +1496,25 @@ function RunsPanel({
                 onClick={async () => {
                   try {
                     await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
-                    addToast('Run explain report downloaded', 'success')
+                    addToast(t('rightPanel.runs.exportSuccess') as string, 'success')
                   } catch (err) {
-                    const message = err instanceof Error ? err.message : 'Failed to export report'
+                    const message = err instanceof Error ? err.message : (t('rightPanel.runs.exportFailed') as string)
                     addToast(message, 'error')
                   }
                 }}
                 data-testid={`history-export-${run.id}`}
-                aria-label={`Export run explain report for ${run.id}`}
+                aria-label={t('rightPanel.runs.exportAria', { id: run.id }) as string}
               >
-                <Download size={12} aria-hidden="true" /> Export
+                <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
               </button>
               <button
                 type="button"
                 className="small-command we-run-history-send-button"
                 onClick={() => setDeliveryRun(run)}
                 data-testid={`history-send-${run.id}`}
-                aria-label={`Send run explain report for ${run.id}`}
+                aria-label={t('rightPanel.runs.sendAria', { id: run.id }) as string}
               >
-                <Send size={12} aria-hidden="true" /> Send
+                <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
               </button>
             </div>
           )
@@ -1546,15 +1575,16 @@ function ReasoningPanel({
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
 }) {
+  const { t } = useT()
   const visibleEvents = useMemo(() => [...events].reverse(), [events])
 
   return (
     <div className="panel-list">
-      {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title="No run events yet" body="Run a flow to inspect low-level execution signals." />}
+      {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.reasoning.empty.title') as string} body={t('rightPanel.reasoning.empty.body') as string} />}
       {visibleEvents.map(event => (
         <div key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`} className="list-card">
           <strong>{event.type}</strong>
-          <span>{event.nodeId ?? 'run'}</span>
+          <span>{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
           <pre className="mini-pre">{JSON.stringify(event.payload ?? {}, null, 2)}</pre>
         </div>
       ))}
@@ -1564,6 +1594,7 @@ function ReasoningPanel({
 }
 
 function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void> }) {
+  const { t } = useT()
   const [busy, setBusy] = useState(false)
   return (
     <button
@@ -1579,7 +1610,7 @@ function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void
         }
       }}
     >
-      {busy ? 'Loading…' : 'Load older events'}
+      {busy ? t('rightPanel.reasoning.loading') : t('rightPanel.reasoning.loadOlder')}
     </button>
   )
 }

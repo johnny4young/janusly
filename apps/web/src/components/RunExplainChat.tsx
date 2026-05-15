@@ -10,6 +10,7 @@ import React, { useState } from 'react'
 import { api } from '../api'
 import { formatAiModeLabel } from '../constants'
 import type { AiMode } from '../types'
+import { useT } from '../i18n'
 
 type Message = {
   role: 'user' | 'assistant'
@@ -26,30 +27,25 @@ type ExplainRunResponse = {
   aiError?: string
 }
 
-function describeAiError(message: string) {
-  if (/quota|billing|insufficient_quota/i.test(message)) {
-    return 'Your OpenAI account has no quota left. Add a payment method in your OpenAI dashboard and retry.'
-  }
-  if (/rate limit/i.test(message)) {
-    return 'Rate limit reached. Wait a few seconds and ask again, or switch to a higher-tier model.'
-  }
-  if (/invalid api key|incorrect api key|unauthorized/i.test(message)) {
-    return 'OpenAI rejected the API key. Check the value in the root .env and restart the API.'
-  }
-  return message
-}
-
-const starterQuestions = [
-  'What happened in this run?',
-  'What should I check next?',
-  'Did anything need a retry or approval?',
-]
-
 /** Conversational explainer for the active run. Shows mode chip + aiError when present. */
 export function RunExplainChat({ runId }: { runId?: string | null }) {
+  const { t } = useT()
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+
+  function describeAiError(message: string): string {
+    if (/quota|billing|insufficient_quota/i.test(message)) return t('runExplain.errorQuota')
+    if (/rate limit/i.test(message)) return t('runExplain.errorRate')
+    if (/invalid api key|incorrect api key|unauthorized/i.test(message)) return t('runExplain.errorAuth')
+    return message
+  }
+
+  const starterQuestions: string[] = [
+    t('runExplain.starter1') as string,
+    t('runExplain.starter2') as string,
+    t('runExplain.starter3') as string,
+  ]
 
   const ask = async () => {
     if (!runId || !question.trim()) return
@@ -67,9 +63,10 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       if (response.error) throw new Error(response.error)
 
+      const baseAnswer = response.answer ?? (t('runExplain.noAnswer') as string)
       const body = response.aiError
-        ? `${response.answer ?? 'No explanation available.'}\n\nNote: AI request failed — ${describeAiError(response.aiError)}`
-        : response.answer ?? 'No explanation available.'
+        ? `${baseAnswer}\n\n${t('runExplain.noteFailed', { detail: describeAiError(response.aiError) })}`
+        : baseAnswer
 
       setMessages((current) => [
         ...current,
@@ -83,7 +80,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
     } catch (error) {
       setMessages((current) => [
         ...current,
-        { role: 'assistant', content: error instanceof Error ? error.message : 'Failed to explain run.' },
+        { role: 'assistant', content: error instanceof Error ? error.message : (t('runExplain.failed') as string) },
       ])
     } finally {
       setLoading(false)
@@ -94,19 +91,19 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
     <section className="panel-card">
       <div className="split-row">
         <div>
-          <strong>Ask Janusly about this run</strong>
-          <p className="helper-text">Use plain language. Janusly answers with AI when connected, otherwise from local run signals.</p>
+          <strong>{t('runExplain.title')}</strong>
+          <p className="helper-text">{t('runExplain.helper')}</p>
         </div>
-        <span className="section-kicker">Chat</span>
+        <span className="section-kicker">{t('runExplain.kicker')}</span>
       </div>
 
-      {!runId && <p className="empty-state">Run or open a workflow first to ask what happened.</p>}
+      {!runId && <p className="empty-state">{t('runExplain.empty')}</p>}
 
       <div className="panel-list">
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className={`message-card message-card-${message.role}`}>
             <div className="split-row">
-              <span className="section-kicker">{message.role === 'user' ? 'You' : 'Janusly'}</span>
+              <span className="section-kicker">{message.role === 'user' ? t('runExplain.you') : t('runExplain.assistant')}</span>
               {message.mode && (
                 <span className={`mode-pill mode-pill-${message.mode}`}>
                   {message.model ? `${formatAiModeLabel(message.mode)} · ${message.model}` : formatAiModeLabel(message.mode)}
@@ -118,7 +115,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
         ))}
       </div>
 
-      <div className="chat-starters" aria-label="Run question examples">
+      <div className="chat-starters" aria-label={t('runExplain.starterAria')}>
         {starterQuestions.map((starter) => (
           <button
             key={starter}
@@ -137,11 +134,11 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
         value={question}
         disabled={!runId || loading}
         onChange={(event) => setQuestion(event.target.value)}
-        placeholder="Ask: why did this run fail? why was this route chosen? what should I do next?"
+        placeholder={t('runExplain.placeholder')}
       />
 
       <button className="command-button command-button-primary" disabled={!runId || loading || !question.trim()} onClick={ask}>
-        {loading ? 'Explaining…' : 'Ask Janusly'}
+        {loading ? t('runExplain.explaining') : t('runExplain.ask')}
       </button>
     </section>
   )

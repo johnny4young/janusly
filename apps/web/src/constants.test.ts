@@ -5,7 +5,8 @@
  * cases where one of those forgets to land.
  */
 import { describe, expect, it } from 'vitest'
-import { nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary } from './constants'
+import { nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary, getNodePreset } from './constants'
+import { changeAppLanguage } from './i18n'
 
 describe('node-type catalogue', () => {
   it('declares parallel_fork and join in the preset map and ordered list', () => {
@@ -79,7 +80,7 @@ describe('node-type catalogue', () => {
   describe('human_form node type', () => {
     it('declares a usable default form preset', () => {
       expect(nodeTypes).toContain('human_form')
-      expect(nodePresets.human_form).toMatchObject({
+      expect(getNodePreset('human_form')).toMatchObject({
         title: 'Collect request details',
         schema: {
           type: 'object',
@@ -93,6 +94,20 @@ describe('node-type catalogue', () => {
       expect(getNodeHelper('human_form')).toBe('Pause for structured input')
       expect(getNodeConfigSummary('human_form', { title: 'Access review' })).toBe('Access review')
       expect(getNodeConfigSummary('human_form', {})).toBe('Add form fields')
+    })
+
+    it('localizes seeded node defaults through the active locale', () => {
+      changeAppLanguage('es')
+
+      expect(getNodePreset('approval')).toEqual({ message: 'Aprobá este paso del flujo.' })
+      expect(getNodePreset('human_form')).toMatchObject({
+        title: 'Recolectar detalles de la solicitud',
+        schema: {
+          properties: {
+            requester: { description: '¿Sobre quién es esto?' },
+          },
+        },
+      })
     })
   })
 })

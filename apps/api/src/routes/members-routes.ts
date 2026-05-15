@@ -23,6 +23,7 @@ import {
 
 import { audit } from "../audit";
 import { EMAIL_PATTERN, MAX_JSON_BODY_BYTES } from "../api-config";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { getOrgRole } from "@janusly/data/src/orgRolesRepo";
 import { isRole } from "../permissions";
@@ -53,16 +54,16 @@ export const membersRoutes: Route[] = [
       if (!role) {
         return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
       }
-      if (!email) return sendJson(res, { error: "email is required" }, 400);
+      if (!email) return sendJson(res, errorEnvelope("email_required", "email is required"), 400);
       if (!EMAIL_PATTERN.test(email) || email.length > 254) {
-        return sendJson(res, { error: "email format is invalid" }, 400);
+        return sendJson(res, errorEnvelope("email_invalid", "email format is invalid"), 400);
       }
       // Reject re-invites that already have a pending row (avoids
       // collision on the unique (orgId, email) index). A previously
       // accepted invite for the same email is allowed to re-issue (the
       // pending check ignores `accepted` / `revoked`).
       const pending = await findPendingInvitation({ orgId: auth.orgId, email });
-      if (pending) return sendJson(res, { error: "Invitation already pending for this email" }, 409);
+      if (pending) return sendJson(res, errorEnvelope("invitation_pending_exists", "Invitation already pending for this email", { email }), 409);
       // Reject when the email already has an accepted membership row
       // (`org_members.email` is set by resolver upserts and by the legacy
       // `userId = email` rows; in both cases the user is already a member
@@ -71,7 +72,7 @@ export const membersRoutes: Route[] = [
         .select()
         .from(orgMembers)
         .where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.email, email)));
-      if (existing[0]) return sendJson(res, { error: "Member already exists for this org" }, 409);
+      if (existing[0]) return sendJson(res, errorEnvelope("member_exists", "Member already exists for this org", { email }), 409);
 
       const invite = await createInvitation({
         orgId: auth.orgId,

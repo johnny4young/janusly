@@ -27,6 +27,7 @@
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import {
   countMembersInRole,
@@ -209,7 +210,7 @@ export const rolesRoutes: Route[] = [
 
       const existing = await getOrgRole({ orgId: auth.orgId, name });
       if (existing) {
-        return sendJson(res, { error: "role with this name already exists" }, 409);
+        return sendJson(res, errorEnvelope("role_already_exists", "role with this name already exists", { name }), 409);
       }
 
       const description = typeof body.description === "string" ? body.description.slice(0, 240) : null;
@@ -249,7 +250,7 @@ export const rolesRoutes: Route[] = [
       // Built-ins: row may not exist yet — create one on first override.
       // Custom: row MUST exist.
       if (!isBuiltinTarget && !existing) {
-        return sendJson(res, { error: "role not found" }, 404);
+        return sendJson(res, errorEnvelope("role_not_found", "role not found"), 404);
       }
 
       // Validate `inheritsFrom` — immutable on built-ins
@@ -369,15 +370,21 @@ export const rolesRoutes: Route[] = [
       }
 
       const existing = await getOrgRole({ orgId: auth.orgId, name });
-      if (!existing) return sendJson(res, { error: "role not found" }, 404);
+      if (!existing) return sendJson(res, errorEnvelope("role_not_found", "role not found"), 404);
 
       const membersAffected = await countMembersInRole({ orgId: auth.orgId, roleName: name });
       if (membersAffected > 0) {
-        return sendJson(res, {
-          error: "cannot delete a role with active members",
-          code: "role_in_use",
-          membersAffected,
-        }, 409);
+        return sendJson(
+          res,
+          {
+            ...errorEnvelope("role_in_use", "cannot delete a role with active members", { membersAffected }),
+            // Top-level `membersAffected` preserved for back-compat with existing
+            // clients that read it outside `params`. New clients use `tApiError`
+            // which reads from `params`.
+            membersAffected,
+          },
+          409,
+        );
       }
       await deleteOrgRole({ orgId: auth.orgId, name });
       await audit(auth.orgId, auth.userId, "org.role.deleted", "org_role", existing.id, {

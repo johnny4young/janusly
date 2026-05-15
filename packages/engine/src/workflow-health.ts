@@ -44,12 +44,29 @@ export type HealthCategory =
   | "maintainability"
   | "aiRisk";
 
+export type HealthRationaleCode =
+  | "reliability.no_runs"
+  | "reliability.summary"
+  | "safety.clean"
+  | "safety.summary"
+  | "latency.insufficient"
+  | "latency.summary"
+  | "cost.none"
+  | "cost.summary"
+  | "maintainability.summary"
+  | "ai_risk.no_ai"
+  | "ai_risk.summary";
+
 /** Per-category sub-score + human-readable rationale. */
 export type HealthBreakdownEntry = {
   /** Sub-score, 0–100 integer. */
   score: number;
   /** Single-sentence operator-facing explanation. */
   rationale: string;
+  /** Stable client-localisable rationale code. */
+  rationaleCode: HealthRationaleCode;
+  /** Structured interpolation data for `rationaleCode`. */
+  rationaleMeta?: Record<string, string | number | boolean>;
 };
 
 export type HealthBreakdown = Record<HealthCategory, HealthBreakdownEntry>;
@@ -206,7 +223,11 @@ function rollupStatus(score: number): HealthStatus {
 
 function computeReliability(signals: HealthSignals): HealthBreakdownEntry {
   if (signals.totalRuns === 0) {
-    return { score: NEUTRAL_DEFAULT, rationale: "No runs yet — neutral score until execution data accrues." };
+    return {
+      score: NEUTRAL_DEFAULT,
+      rationale: "No runs yet — neutral score until execution data accrues.",
+      rationaleCode: "reliability.no_runs",
+    };
   }
   const successRate = signals.successCount / signals.totalRuns;
   const successScore = successRate * 100;
@@ -217,6 +238,13 @@ function computeReliability(signals: HealthSignals): HealthBreakdownEntry {
   return {
     score,
     rationale: `${signals.successCount}/${signals.totalRuns} runs succeeded; ${signals.dlqOpenCount} open dead letters; ${signals.retryCount} retry events.`,
+    rationaleCode: "reliability.summary",
+    rationaleMeta: {
+      successCount: signals.successCount,
+      totalRuns: signals.totalRuns,
+      dlqOpenCount: signals.dlqOpenCount,
+      retryCount: signals.retryCount,
+    },
   };
 }
 
@@ -225,17 +253,27 @@ function computeSafety(readiness: ReadinessResult): HealthBreakdownEntry {
   const warnCount = readiness.issues.filter((issue) => issue.severity === "warn").length;
   const score = Math.max(0, 100 - failCount * SAFETY_FAIL_PENALTY - warnCount * SAFETY_WARN_PENALTY);
   if (failCount === 0 && warnCount === 0) {
-    return { score: 100, rationale: "Readiness checks pass — no production-posture issues." };
+    return {
+      score: 100,
+      rationale: "Readiness checks pass — no production-posture issues.",
+      rationaleCode: "safety.clean",
+    };
   }
   return {
     score,
     rationale: `${failCount} blocking + ${warnCount} warning readiness finding${failCount + warnCount === 1 ? "" : "s"} (retries, bounds, secrets, approvals, outputs).`,
+    rationaleCode: "safety.summary",
+    rationaleMeta: { failCount, warnCount },
   };
 }
 
 function computeLatency(signals: HealthSignals): HealthBreakdownEntry {
   if (signals.p95LatencyMs === null) {
-    return { score: NEUTRAL_DEFAULT, rationale: "Insufficient runs to compute p95 latency — neutral score." };
+    return {
+      score: NEUTRAL_DEFAULT,
+      rationale: "Insufficient runs to compute p95 latency — neutral score.",
+      rationaleCode: "latency.insufficient",
+    };
   }
   const score = bandScore(
     signals.p95LatencyMs,
@@ -247,12 +285,18 @@ function computeLatency(signals: HealthSignals): HealthBreakdownEntry {
   return {
     score,
     rationale: `p95 run duration ${(signals.p95LatencyMs / 1000).toFixed(1)}s across ${signals.totalRuns} runs.`,
+    rationaleCode: "latency.summary",
+    rationaleMeta: { seconds: (signals.p95LatencyMs / 1000).toFixed(1), totalRuns: signals.totalRuns },
   };
 }
 
 function computeCost(signals: HealthSignals): HealthBreakdownEntry {
   if (signals.totalRuns === 0 || signals.totalCostUsd === 0) {
-    return { score: NEUTRAL_DEFAULT, rationale: "No usage cost recorded yet — neutral score." };
+    return {
+      score: NEUTRAL_DEFAULT,
+      rationale: "No usage cost recorded yet — neutral score.",
+      rationaleCode: "cost.none",
+    };
   }
   const costPerRun = signals.totalCostUsd / signals.totalRuns;
   const score = bandScore(
@@ -265,6 +309,12 @@ function computeCost(signals: HealthSignals): HealthBreakdownEntry {
   return {
     score,
     rationale: `$${costPerRun.toFixed(4)} per run (${signals.totalCostUsd.toFixed(2)} total across ${signals.totalRuns} runs).`,
+    rationaleCode: "cost.summary",
+    rationaleMeta: {
+      costPerRun: costPerRun.toFixed(4),
+      totalCostUsd: signals.totalCostUsd.toFixed(2),
+      totalRuns: signals.totalRuns,
+    },
   };
 }
 
@@ -282,13 +332,27 @@ function computeMaintainability(workflow: Workflow, readiness: ReadinessResult, 
   parts.push(hasOutputs ? "outputs declared" : "no outputs");
   parts.push(hasMultipleVersions ? `${signals.versionCount} versions` : "single version (no rollback target)");
   parts.push(hasApprovalNode ? "approval node present" : "no human gate");
-  return { score, rationale: parts.join("; ") + "." };
+  return {
+    score,
+    rationale: parts.join("; ") + ".",
+    rationaleCode: "maintainability.summary",
+    rationaleMeta: {
+      hasOutputs,
+      hasMultipleVersions,
+      versionCount: signals.versionCount,
+      hasApprovalNode,
+    },
+  };
 }
 
 function computeAiRisk(workflow: Workflow, readiness: ReadinessResult, signals: HealthSignals): HealthBreakdownEntry {
   const aiNodeCount = workflow.nodes.filter((node) => node.type === "ai" || node.type === "agent" || node.type === "multi_agent").length;
   if (aiNodeCount === 0) {
-    return { score: 100, rationale: "No AI / agent nodes — no AI risk surface." };
+    return {
+      score: 100,
+      rationale: "No AI / agent nodes — no AI risk surface.",
+      rationaleCode: "ai_risk.no_ai",
+    };
   }
   const rawSecretCount = readiness.issues.filter((issue) => issue.code === "raw_secret_in_config").length;
   const score = Math.max(
@@ -303,6 +367,12 @@ function computeAiRisk(workflow: Workflow, readiness: ReadinessResult, signals: 
   return {
     score,
     rationale: `${aiNodeCount} AI/agent node${aiNodeCount === 1 ? "" : "s"}; ${signals.totalTokens.toLocaleString()} tokens consumed; ${rawSecretCount} hardcoded-secret finding${rawSecretCount === 1 ? "" : "s"}.`,
+    rationaleCode: "ai_risk.summary",
+    rationaleMeta: {
+      aiNodeCount,
+      totalTokens: signals.totalTokens,
+      rawSecretCount,
+    },
   };
 }
 

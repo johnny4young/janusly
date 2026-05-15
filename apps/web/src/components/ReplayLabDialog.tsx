@@ -24,6 +24,8 @@ import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { RunComparisonView, type RunComparisonPayload } from './RunComparisonView'
+import { useT } from '../i18n'
+import { formatStatusLabel } from '../constants'
 
 type SourceRun = {
   id: string
@@ -56,6 +58,7 @@ export function ReplayLabDialog({
   sourceRun: SourceRun
   onClose: () => void
 }) {
+  const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
@@ -129,14 +132,14 @@ export function ReplayLabDialog({
           if (!aliveRef.current) return
           setStep({
             kind: 'error',
-            message: err instanceof Error ? err.message : 'Failed to load comparison',
+            message: err instanceof Error ? err.message : (t('replayLab.errorComparison') as string),
           })
         }
       } catch (err) {
         if (cancelled || !aliveRef.current) return
         setStep({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Polling the replay run failed',
+          message: err instanceof Error ? err.message : (t('replayLab.errorPolling') as string),
         })
       }
     }
@@ -162,7 +165,7 @@ export function ReplayLabDialog({
       if (!aliveRef.current) return
       setStep({
         kind: 'error',
-        message: err instanceof Error ? err.message : 'Failed to start replay',
+        message: err instanceof Error ? err.message : (t('replayLab.errorStart') as string),
       })
     }
   }
@@ -190,19 +193,15 @@ export function ReplayLabDialog({
             <FlaskConical size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">Replay Lab</div>
-            <h2 id="replay-lab-title">Sandbox replay</h2>
-            <p className="helper-text">
-              Re-run this run in a sandbox. Write-side HTTP calls and tools flagged write-side
-              are skipped. The result won&apos;t affect production metrics or be saved as a new
-              version.
-            </p>
+            <div className="section-kicker">{t('replayLab.kicker')}</div>
+            <h2 id="replay-lab-title">{t('replayLab.title')}</h2>
+            <p className="helper-text">{t('replayLab.description')}</p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label="Close Replay Lab"
+            aria-label={t('replayLab.close') as string}
             disabled={step.kind === 'starting' || step.kind === 'replaying' || step.kind === 'comparing'}
           >
             <X size={16} aria-hidden="true" />
@@ -211,19 +210,19 @@ export function ReplayLabDialog({
 
         <div className="run-input-dialog__body">
           <section className="we-replay-lab-source">
-            <div className="section-kicker">Source run</div>
+            <div className="section-kicker">{t('replayLab.sourceRun')}</div>
             <dl className="we-replay-lab-source-grid">
               <div>
-                <dt>Run id</dt>
+                <dt>{t('replayLab.runId')}</dt>
                 <dd className="we-replay-lab-id">{sourceRun.id}</dd>
               </div>
               <div>
-                <dt>Status</dt>
-                <dd>{sourceRun.status}</dd>
+                <dt>{t('replayLab.status')}</dt>
+                <dd>{formatStatusLabel(sourceRun.status)}</dd>
               </div>
               {sourceRun.createdAt && (
                 <div>
-                  <dt>Started</dt>
+                  <dt>{t('replayLab.started')}</dt>
                   <dd>{sourceRun.createdAt}</dd>
                 </div>
               )}
@@ -239,18 +238,18 @@ export function ReplayLabDialog({
 
           {(step.kind === 'replaying' || step.kind === 'comparing') && (
             <section className="we-replay-lab-progress" aria-live="polite">
-              <div className="section-kicker">Replay run</div>
+              <div className="section-kicker">{t('replayLab.replayRun')}</div>
               <p className="helper-text">
-                Sandbox run <code className="we-replay-lab-id">{step.replayRunId}</code> is{' '}
-                <strong>{step.replayStatus}</strong>
-                {step.kind === 'comparing' ? ' — loading comparison…' : '…'}
+                {step.kind === 'comparing'
+                  ? t('replayLab.progressLoading', { runId: step.replayRunId, status: formatStatusLabel(step.replayStatus) })
+                  : t('replayLab.progress', { runId: step.replayRunId, status: formatStatusLabel(step.replayStatus) })}
               </p>
             </section>
           )}
 
           {step.kind === 'done' && (
             <section className="we-replay-lab-result">
-              <div className="section-kicker">Comparison</div>
+              <div className="section-kicker">{t('replayLab.comparison')}</div>
               <RunComparisonView payload={step.comparison} />
             </section>
           )}
@@ -260,7 +259,7 @@ export function ReplayLabDialog({
           {step.kind === 'idle' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Cancel
+                {t('replayLab.cancel')}
               </button>
               <button
                 ref={primaryRef}
@@ -270,18 +269,18 @@ export function ReplayLabDialog({
                 data-testid="replay-lab-start"
               >
                 <Play size={14} aria-hidden="true" />
-                Start replay
+                {t('replayLab.start')}
               </button>
             </>
           )}
           {step.kind === 'starting' && (
             <button type="button" className="command-button command-button-primary" disabled>
-              Starting…
+              {t('replayLab.starting')}
             </button>
           )}
           {(step.kind === 'replaying' || step.kind === 'comparing') && (
             <button type="button" className="command-button command-button-primary" disabled>
-              Running…
+              {t('replayLab.running')}
             </button>
           )}
           {step.kind === 'done' && (
@@ -292,13 +291,13 @@ export function ReplayLabDialog({
               onClick={onClose}
               data-testid="replay-lab-close-done"
             >
-              Close
+              {t('replayLab.closeButton')}
             </button>
           )}
           {step.kind === 'error' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Close
+                {t('replayLab.closeButton')}
               </button>
               <button
                 ref={primaryRef}
@@ -307,7 +306,7 @@ export function ReplayLabDialog({
                 onClick={() => setStep({ kind: 'idle' })}
               >
                 <RefreshCcw size={14} aria-hidden="true" />
-                Retry
+                {t('replayLab.retry')}
               </button>
             </>
           )}

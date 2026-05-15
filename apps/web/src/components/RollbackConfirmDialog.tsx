@@ -24,6 +24,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { WorkflowDiffView } from './WorkflowDiffView'
+import { useT } from '../i18n'
 
 type VersionForRollback = {
   id: string
@@ -57,6 +58,7 @@ export function RollbackConfirmDialog({
   target,
   onClose,
 }: RollbackConfirmDialogProps) {
+  const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const hydrateWorkflow = useWorkflowStore((state) => state.hydrateWorkflow)
   const addToast = useWorkflowStore((state) => state.addToast)
@@ -108,13 +110,13 @@ export function RollbackConfirmDialog({
       if (!aliveRef.current) return
       hydrateWorkflow(target.dagJson)
       bumpPlatformVersion()
-      addToast(`Rolled back to v${target.version} as v${result.version}`, 'success')
+      addToast(t('rollback.toastSuccess', { target: target.version, newVersion: result.version }), 'success')
       setStep({ kind: 'done', newVersion: result.version })
     } catch (error) {
       if (!aliveRef.current) return
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Rollback failed',
+        message: error instanceof Error ? error.message : t('rollback.failed'),
       })
     }
   }
@@ -133,18 +135,17 @@ export function RollbackConfirmDialog({
             <RotateCcw size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">Roll back workflow</div>
-            <h2 id="rollback-dialog-title">Roll back to v{target.version}?</h2>
+            <div className="section-kicker">{t('rollback.kicker')}</div>
+            <h2 id="rollback-dialog-title">{t('rollback.title', { version: target.version })}</h2>
             <p className="helper-text">
-              This creates a new version with v{target.version} as its content. Your history stays intact —
-              v{current.version} and any later versions remain accessible.
+              {t('rollback.description', { target: target.version, current: current.version })}
             </p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label="Close rollback dialog"
+            aria-label={t('rollback.close')}
             disabled={step.kind === 'rolling-back'}
           >
             <X size={16} aria-hidden="true" />
@@ -154,7 +155,7 @@ export function RollbackConfirmDialog({
         <div className="run-input-dialog__body">
           {step.kind === 'rolling-back' && (
             <p className="helper-text we-recovery-loading" aria-live="polite">
-              Saving v{target.version} as the new latest version…
+              {t('rollback.saving', { version: target.version })}
             </p>
           )}
 
@@ -162,8 +163,7 @@ export function RollbackConfirmDialog({
             <div className="we-recovery-warning" role="status">
               <CheckCircle2 size={14} aria-hidden="true" />
               <div>
-                Rolled back to v{target.version} as v{step.newVersion}. The canvas now shows the rolled-back
-                content.
+                {t('rollback.success', { target: target.version, newVersion: step.newVersion })}
               </div>
             </div>
           )}
@@ -179,8 +179,8 @@ export function RollbackConfirmDialog({
             <WorkflowDiffView
               before={current.dagJson}
               after={target.dagJson}
-              beforeLabel={`v${current.version} (current)`}
-              afterLabel={`v${target.version} (rolling back to)`}
+              beforeLabel={t('rollback.beforeLabel', { version: current.version }) as string}
+              afterLabel={t('rollback.afterLabel', { version: target.version }) as string}
             />
           )}
         </div>
@@ -189,7 +189,7 @@ export function RollbackConfirmDialog({
           {step.kind === 'idle' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
@@ -198,14 +198,14 @@ export function RollbackConfirmDialog({
                 onClick={rollback}
               >
                 <RotateCcw size={14} aria-hidden="true" />
-                <span>Roll back</span>
+                <span>{t('rollback.action')}</span>
               </button>
             </>
           )}
 
           {step.kind === 'rolling-back' && (
             <button type="button" className="command-button" disabled>
-              Working…
+              {t('common.working')}
             </button>
           )}
 
@@ -216,7 +216,7 @@ export function RollbackConfirmDialog({
               className="command-button command-button-primary"
               onClick={onClose}
             >
-              Close
+              {t('common.close')}
             </button>
           )}
         </footer>

@@ -1207,12 +1207,53 @@ a { color: var(--we-primary); }
   display: grid;
   height: 100vh;
   place-items: center;
+  position: relative;
   background:
     radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--we-primary) 12%, transparent), transparent 55%),
     radial-gradient(circle at 80% 90%, color-mix(in srgb, var(--we-accent) 12%, transparent), transparent 55%),
     var(--we-bg);
   color: var(--we-ink);
   font-size: 16px;
+}
+
+/* Compact locale picker shared by Login (corner) and UserMenu (popover row).
+   Single source-of-styles for the i18n switcher — see apps/web/src/i18n/LocaleSwitcher.tsx. */
+.we-locale-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--we-ink-muted);
+}
+.we-locale-switcher__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.we-locale-switcher__select {
+  font-size: 12px;
+  padding: 4px 8px;
+  height: 28px;
+  min-width: 110px;
+}
+.we-locale-switcher--corner {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 999px;
+  padding: 6px 10px;
+  box-shadow: 0 8px 18px -10px var(--we-shadow-ink-25);
+}
+.we-locale-switcher--row {
+  width: 100%;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--we-line);
+  justify-content: space-between;
 }
 
 .boot-screen { font-weight: 600; color: var(--we-primary); }

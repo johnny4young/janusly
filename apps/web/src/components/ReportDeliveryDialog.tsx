@@ -25,6 +25,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { useT } from '../i18n'
+import { formatStatusLabel } from '../constants'
 
 type SourceRun = {
   id: string
@@ -56,6 +58,7 @@ export function ReportDeliveryDialog({
   sourceRun: SourceRun
   onClose: () => void
 }) {
+  const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
@@ -135,19 +138,19 @@ export function ReportDeliveryDialog({
 
       if (result.ok) {
         setStep({ kind: 'succeeded', deliveryId: result.deliveryId, statusCode: result.statusCode })
-        addToast(`Run explain report sent to ${destination}`, 'success')
+        addToast(t('reportDelivery.toastSent', { destination }), 'success')
         // The audit-log panel can refresh against the new
         // `report.run_explain.delivered` row.
         bumpPlatformVersion()
       } else {
-        const message = result.error ?? 'Delivery failed'
+        const message = result.error ?? (t('reportDelivery.errorDefault') as string)
         setStep({ kind: 'failed', message })
       }
     } catch (err) {
       if (!aliveRef.current) return
       setStep({
         kind: 'failed',
-        message: err instanceof Error ? err.message : 'Delivery failed',
+        message: err instanceof Error ? err.message : (t('reportDelivery.errorDefault') as string),
       })
     }
   }
@@ -166,18 +169,15 @@ export function ReportDeliveryDialog({
             <Send size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">Send report</div>
-            <h2 id="report-delivery-title">Send run report</h2>
-            <p className="helper-text">
-              Send the same run summary that Export creates to Slack, GitHub,
-              or a signed webhook using a stored credential.
-            </p>
+            <div className="section-kicker">{t('reportDelivery.kicker')}</div>
+            <h2 id="report-delivery-title">{t('reportDelivery.title')}</h2>
+            <p className="helper-text">{t('reportDelivery.description')}</p>
           </div>
           <button
             type="button"
             className="run-input-dialog__close"
             onClick={onBackdrop}
-            aria-label="Close report delivery"
+            aria-label={t('reportDelivery.close') as string}
             disabled={step.kind === 'submitting'}
           >
             <X size={16} aria-hidden="true" />
@@ -186,19 +186,19 @@ export function ReportDeliveryDialog({
 
         <div className="run-input-dialog__body">
           <section className="we-replay-lab-source">
-            <div className="section-kicker">Source run</div>
+            <div className="section-kicker">{t('reportDelivery.sourceRun')}</div>
             <dl className="we-replay-lab-source-grid">
               <div>
-                <dt>Run id</dt>
+                <dt>{t('reportDelivery.runId')}</dt>
                 <dd className="we-replay-lab-id">{sourceRun.id}</dd>
               </div>
               <div>
-                <dt>Status</dt>
-                <dd>{sourceRun.status}</dd>
+                <dt>{t('reportDelivery.status')}</dt>
+                <dd>{formatStatusLabel(sourceRun.status)}</dd>
               </div>
               {sourceRun.workflowName && (
                 <div>
-                  <dt>Workflow</dt>
+                  <dt>{t('reportDelivery.workflow')}</dt>
                   <dd>{sourceRun.workflowName}</dd>
                 </div>
               )}
@@ -207,7 +207,7 @@ export function ReportDeliveryDialog({
 
           {step.kind !== 'succeeded' && (
             <section className="we-report-delivery-form">
-              <div className="section-kicker">Destination</div>
+              <div className="section-kicker">{t('reportDelivery.destination')}</div>
               <fieldset
                 className="we-report-delivery-options"
                 disabled={step.kind === 'submitting'}
@@ -221,8 +221,8 @@ export function ReportDeliveryDialog({
                     onChange={() => setDestination('slack')}
                     data-testid="report-delivery-destination-slack"
                   />
-                  <span>Slack</span>
-                  <small>Posts a header + summary to a stored Incoming Webhook URL.</small>
+                  <span>{t('reportDelivery.dest.slack')}</span>
+                  <small>{t('reportDelivery.dest.slackHelper')}</small>
                 </label>
                 <label className={`we-report-delivery-option ${destination === 'github' ? 'is-active' : ''}`}>
                   <input
@@ -233,8 +233,8 @@ export function ReportDeliveryDialog({
                     onChange={() => setDestination('github')}
                     data-testid="report-delivery-destination-github"
                   />
-                  <span>GitHub issue</span>
-                  <small>Creates a new issue with the full Markdown report as the body.</small>
+                  <span>{t('reportDelivery.dest.github')}</span>
+                  <small>{t('reportDelivery.dest.githubHelper')}</small>
                 </label>
                 <label className={`we-report-delivery-option ${destination === 'webhook' ? 'is-active' : ''}`}>
                   <input
@@ -245,31 +245,35 @@ export function ReportDeliveryDialog({
                     onChange={() => setDestination('webhook')}
                     data-testid="report-delivery-destination-webhook"
                   />
-                  <span>Signed webhook</span>
-                  <small>POSTs the JSON envelope with an HMAC-SHA256 signature header.</small>
+                  <span>{t('reportDelivery.dest.webhook')}</span>
+                  <small>{t('reportDelivery.dest.webhookHelper')}</small>
                 </label>
               </fieldset>
 
               <div className="we-report-delivery-fields">
                 <label className="we-field">
-                  <span>Credential name</span>
+                  <span>{t('reportDelivery.field.credential')}</span>
                   <input
                     type="text"
                     value={credentialName}
                     onChange={(event) => setCredentialName(event.target.value)}
-                    placeholder={destination === 'slack' ? 'ops-channel' : destination === 'github' ? 'bot-github' : 'partner-webhook'}
+                    placeholder={(destination === 'slack'
+                      ? t('reportDelivery.placeholder.slack')
+                      : destination === 'github'
+                        ? t('reportDelivery.placeholder.github')
+                        : t('reportDelivery.placeholder.webhook')) as string}
                     autoComplete="off"
                     spellCheck={false}
                     disabled={step.kind === 'submitting'}
                     data-testid="report-delivery-credential"
                   />
-                  <small>The stored credential name (not an env-var). Configure under Credentials.</small>
+                  <small>{t('reportDelivery.field.credentialHint')}</small>
                 </label>
 
                 {destination === 'github' && (
                   <>
                     <label className="we-field">
-                      <span>Owner</span>
+                      <span>{t('reportDelivery.field.owner')}</span>
                       <input
                         type="text"
                         value={owner}
@@ -281,7 +285,7 @@ export function ReportDeliveryDialog({
                       />
                     </label>
                     <label className="we-field">
-                      <span>Repo</span>
+                      <span>{t('reportDelivery.field.repo')}</span>
                       <input
                         type="text"
                         value={repo}
@@ -293,7 +297,7 @@ export function ReportDeliveryDialog({
                       />
                     </label>
                     <label className="we-field">
-                      <span>Labels (comma-separated, optional)</span>
+                      <span>{t('reportDelivery.field.labels')}</span>
                       <input
                         type="text"
                         value={labels}
@@ -309,7 +313,7 @@ export function ReportDeliveryDialog({
 
                 {destination === 'webhook' && (
                   <label className="we-field">
-                    <span>URL</span>
+                    <span>{t('reportDelivery.field.url')}</span>
                     <input
                       type="url"
                       value={webhookUrl}
@@ -336,7 +340,7 @@ export function ReportDeliveryDialog({
             <section className="we-report-delivery-result" aria-live="polite">
               <div className="run-input-form-success" role="status">
                 <CheckCircle2 size={14} aria-hidden="true" />
-                <div>Report delivered to {destination}.</div>
+                <div>{t('reportDelivery.successMessage', { destination })}</div>
               </div>
               {step.deliveryId && /^https?:\/\//i.test(step.deliveryId) ? (
                 <a
@@ -346,11 +350,11 @@ export function ReportDeliveryDialog({
                   className="small-command"
                   data-testid="report-delivery-result-link"
                 >
-                  <ExternalLink size={12} aria-hidden="true" /> View destination
+                  <ExternalLink size={12} aria-hidden="true" /> {t('reportDelivery.viewDestination')}
                 </a>
               ) : null}
               {step.statusCode != null && (
-                <p className="helper-text">Upstream responded {step.statusCode}.</p>
+                <p className="helper-text">{t('reportDelivery.upstreamStatus', { code: step.statusCode })}</p>
               )}
             </section>
           )}
@@ -360,7 +364,7 @@ export function ReportDeliveryDialog({
           {step.kind === 'idle' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Cancel
+                {t('reportDelivery.cancel')}
               </button>
               <button
                 ref={primaryRef}
@@ -371,13 +375,13 @@ export function ReportDeliveryDialog({
                 data-testid="report-delivery-submit"
               >
                 <Send size={14} aria-hidden="true" />
-                Send report
+                {t('reportDelivery.send')}
               </button>
             </>
           )}
           {step.kind === 'submitting' && (
             <button type="button" className="command-button command-button-primary" disabled>
-              Sending…
+              {t('reportDelivery.sending')}
             </button>
           )}
           {step.kind === 'succeeded' && (
@@ -388,13 +392,13 @@ export function ReportDeliveryDialog({
               onClick={onClose}
               data-testid="report-delivery-close-done"
             >
-              Close
+              {t('reportDelivery.closeButton')}
             </button>
           )}
           {step.kind === 'failed' && (
             <>
               <button type="button" className="command-button" onClick={onClose}>
-                Close
+                {t('reportDelivery.closeButton')}
               </button>
               <button
                 ref={primaryRef}
@@ -403,7 +407,7 @@ export function ReportDeliveryDialog({
                 onClick={() => setStep({ kind: 'idle' })}
                 data-testid="report-delivery-retry"
               >
-                Retry
+                {t('reportDelivery.retry')}
               </button>
             </>
           )}
