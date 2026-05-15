@@ -17,6 +17,8 @@
 
 import React, { useMemo, useState } from 'react'
 import type { JsonObject, RunEvent } from './types'
+import { useT } from './i18n'
+import { t as runtimeT } from './i18n/runtime'
 
 type Tone = 'info' | 'success' | 'warning' | 'error'
 
@@ -33,33 +35,50 @@ type TimelineItem = {
 
 function getAgentName(event: RunEvent): string {
   const payload = event.payload ?? {}
+  const fallbackTeam = runtimeT('multiAgent.defaultAgent') as string
+  const fallbackWorkflow = runtimeT('multiAgent.defaultWorkflow') as string
 
-  if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : 'agents'
-  if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : 'agents'
+  if (event.type === 'multi_agent.agent.started') return typeof payload.name === 'string' ? payload.name : fallbackTeam
+  if (event.type === 'multi_agent.agent.completed') return typeof payload.name === 'string' ? payload.name : fallbackTeam
   if (typeof payload.name === 'string') return payload.name
   if (typeof payload.agent === 'string') return payload.agent
 
   const match = event.type.match(/^multi_agent\.agent\.(\d+)\./)
+  // `agent_N` is an identifier (not a label) — keep English to stay
+  // consistent with engine-emitted event types.
   if (match) return `agent_${Number(match[1]) + 1}`
 
-  if (event.type.startsWith('multi_agent')) return 'agents'
-  return 'workflow'
+  if (event.type.startsWith('multi_agent')) return fallbackTeam
+  return fallbackWorkflow
 }
 
 function getLabel(event: RunEvent): string {
   const payload = event.payload ?? {}
+  const defaultAgent = runtimeT('multiAgent.defaultAgentName') as string
+  const defaultTool = runtimeT('multiAgent.defaultTool') as string
+  const defaultDecision = runtimeT('multiAgent.defaultDecision') as string
 
-  if (event.type === 'multi_agent.started') return `Team started (${payload.count ?? 0})`
-  if (event.type === 'multi_agent.agent.started') return `${typeof payload.name === 'string' ? payload.name : 'agent'} started`
-  if (event.type.match(/^multi_agent\.agent\.\d+\.started$/)) return `${typeof payload.name === 'string' ? payload.name : 'agent'} started`
-  if (event.type.match(/^multi_agent\.agent\.\d+\.completed$/)) return `${typeof payload.name === 'string' ? payload.name : 'agent'} completed`
-  if (event.type.endsWith('.step.started')) return `Step ${readNumber(payload.iteration) + 1}`
-  if (event.type.endsWith('.step.planned')) return `Plan: ${readNestedString(payload, ['plan', 'tool']) ?? 'tool'}`
-  if (event.type.endsWith('.tool.started')) return `Run ${typeof payload.tool === 'string' ? payload.tool : 'tool'}`
-  if (event.type.endsWith('.tool.completed')) return 'Tool completed'
-  if (event.type.includes('reflection')) return `Reflection: ${typeof payload.decision === 'string' ? payload.decision : 'decision'}`
-  if (event.type === 'multi_agent.agent.completed') return `${typeof payload.name === 'string' ? payload.name : 'agent'} completed`
-  if (event.type === 'multi_agent.completed') return 'Team completed'
+  if (event.type === 'multi_agent.started') return runtimeT('multiAgent.teamStarted', { count: payload.count ?? 0 }) as string
+  if (event.type === 'multi_agent.agent.started') {
+    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+  }
+  if (event.type.match(/^multi_agent\.agent\.\d+\.started$/)) {
+    return runtimeT('multiAgent.agentStarted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+  }
+  if (event.type.match(/^multi_agent\.agent\.\d+\.completed$/)) {
+    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+  }
+  if (event.type.endsWith('.step.started')) return runtimeT('multiAgent.stepStarted', { step: readNumber(payload.iteration) + 1 }) as string
+  if (event.type.endsWith('.step.planned')) return runtimeT('multiAgent.stepPlanned', { tool: readNestedString(payload, ['plan', 'tool']) ?? defaultTool }) as string
+  if (event.type.endsWith('.tool.started')) return runtimeT('multiAgent.toolStarted', { tool: typeof payload.tool === 'string' ? payload.tool : defaultTool }) as string
+  if (event.type.endsWith('.tool.completed')) return runtimeT('multiAgent.toolCompleted') as string
+  if (event.type.includes('reflection')) {
+    return runtimeT('multiAgent.reflection', { decision: typeof payload.decision === 'string' ? payload.decision : defaultDecision }) as string
+  }
+  if (event.type === 'multi_agent.agent.completed') {
+    return runtimeT('multiAgent.agentCompleted', { name: typeof payload.name === 'string' ? payload.name : defaultAgent }) as string
+  }
+  if (event.type === 'multi_agent.completed') return runtimeT('multiAgent.teamCompleted') as string
 
   return event.type
 }
@@ -96,6 +115,7 @@ export function MultiAgentTimeline({
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
 }) {
+  const { t, i18n } = useT()
   const [selected, setSelected] = useState<TimelineItem | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -110,6 +130,8 @@ export function MultiAgentTimeline({
       }
     : null
 
+  // `getAgentName` and `getLabel` call `runtimeT` internally, so include
+  // `i18n.language` in the dep array so the memo re-computes on locale switch.
   const items = useMemo<TimelineItem[]>(() => {
     return events
       .filter(event => event.type.startsWith('multi_agent'))
@@ -124,7 +146,7 @@ export function MultiAgentTimeline({
         index,
         createdAt: event.createdAt,
       }))
-  }, [events])
+  }, [events, i18n.language])
 
   const lanes = useMemo(() => {
     const map = new Map<string, TimelineItem[]>()
@@ -139,8 +161,8 @@ export function MultiAgentTimeline({
     return (
       <div className="panel-card">
         <div className="empty-panel">
-          <strong>No team activity yet</strong>
-          <p>Run an agent or agent team step to see planning, tool calls, reflection, and completion events.</p>
+          <strong>{t('multiAgent.empty')}</strong>
+          <p>{t('multiAgent.emptyHelper')}</p>
         </div>
       </div>
     )
@@ -150,10 +172,10 @@ export function MultiAgentTimeline({
     <div className="timeline-shell">
       <div className="timeline-header">
         <div>
-          <h3>Multi-agent timeline</h3>
-          <p className="helper-text">Grouped by agent so multi-step reasoning is easier to scan.</p>
+          <h3>{t('multiAgent.heading')}</h3>
+          <p className="helper-text">{t('multiAgent.headerHelper')}</p>
         </div>
-        <span className="mode-pill mode-pill-neutral">{items.length} events</span>
+        <span className="mode-pill mode-pill-neutral">{t('multiAgent.eventCount', { count: items.length })}</span>
       </div>
 
       {eventsHasMore && handleLoadOlder && (
@@ -163,7 +185,7 @@ export function MultiAgentTimeline({
           disabled={loadingOlder}
           onClick={handleLoadOlder}
         >
-          {loadingOlder ? 'Loading…' : 'Load older events'}
+          {loadingOlder ? t('multiAgent.loading') : t('multiAgent.loadOlder')}
         </button>
       )}
 
@@ -171,7 +193,7 @@ export function MultiAgentTimeline({
         <div key={agent} className="timeline-lane">
           <div className="timeline-lane-head">
             <strong>{agent}</strong>
-            <span className="empty-state">{laneItems.length} steps</span>
+            <span className="empty-state">{t('multiAgent.stepCount', { count: laneItems.length })}</span>
           </div>
 
           <div className="timeline-track">

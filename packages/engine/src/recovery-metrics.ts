@@ -25,6 +25,19 @@
 /** Severity tier for a single metric card. */
 export type MetricSeverity = "healthy" | "warn" | "unhealthy" | "neutral";
 
+export type RecoveryMetricRationaleCode =
+  | "success_rate.empty"
+  | "success_rate.summary"
+  | "mttr.empty"
+  | "mttr.summary"
+  | "latency.insufficient"
+  | "latency.summary"
+  | "approvals.none"
+  | "approvals.blocked"
+  | "replay.empty"
+  | "replay.summary"
+  | "cost.summary";
+
 /** Per-provider/model row inside the cost breakdown. */
 export type CostProviderRow = {
   provider: string;
@@ -68,6 +81,8 @@ export type RecoveryMetric = {
   display: string;
   severity: MetricSeverity;
   rationale: string;
+  rationaleCode: RecoveryMetricRationaleCode;
+  rationaleMeta?: Record<string, string | number | boolean>;
 };
 
 /** Full UI-friendly rollup returned by `composeRecoveryMetrics`. */
@@ -143,6 +158,7 @@ function computeSuccessRate(counts: RunStatusCounts): RecoveryMetric {
       display: "—",
       severity: "neutral",
       rationale: "No terminal runs in the window yet.",
+      rationaleCode: "success_rate.empty",
     };
   }
   const rate = (counts.succeeded / terminal) * 100;
@@ -154,6 +170,8 @@ function computeSuccessRate(counts: RunStatusCounts): RecoveryMetric {
     display: `${rate.toFixed(1)}%`,
     severity,
     rationale: `${counts.succeeded} of ${terminal} terminal runs succeeded.`,
+    rationaleCode: "success_rate.summary",
+    rationaleMeta: { succeeded: counts.succeeded, terminal },
   };
 }
 
@@ -164,6 +182,7 @@ function computeMttr(durations: number[]): RecoveryMetric {
       display: "—",
       severity: "neutral",
       rationale: "No replays in the window — fallback when there's nothing to recover from.",
+      rationaleCode: "mttr.empty",
     };
   }
   const avg = durations.reduce((sum, d) => sum + d, 0) / durations.length;
@@ -179,6 +198,13 @@ function computeMttr(durations: number[]): RecoveryMetric {
     display: formatDurationMs(avg),
     severity,
     rationale: `Avg ${formatDurationMs(avg)} across ${durations.length} replay${durations.length === 1 ? "" : "s"} · p50 ${formatDurationMs(p50)} · p95 ${formatDurationMs(p95)}.`,
+    rationaleCode: "mttr.summary",
+    rationaleMeta: {
+      avg: formatDurationMs(avg),
+      count: durations.length,
+      p50: formatDurationMs(p50),
+      p95: formatDurationMs(p95),
+    },
   };
 }
 
@@ -189,6 +215,7 @@ function computeLatency(p95Ms: number | null): RecoveryMetric {
       display: "—",
       severity: "neutral",
       rationale: "Need at least 5 runs in the window to surface a stable p95.",
+      rationaleCode: "latency.insufficient",
     };
   }
   const severity: MetricSeverity = p95Ms <= LATENCY_BANDS_MS.healthy
@@ -199,6 +226,7 @@ function computeLatency(p95Ms: number | null): RecoveryMetric {
     display: formatDurationMs(p95Ms),
     severity,
     rationale: "p95 across all runs in the window.",
+    rationaleCode: "latency.summary",
   };
 }
 
@@ -217,6 +245,8 @@ function computeApprovals(count: number): RecoveryMetric {
     rationale: count === 0
       ? "Current state: no human approvals are blocking a run right now."
       : `Current state: ${count} run${count === 1 ? "" : "s"} paused at an approval node — independent of the window.`,
+    rationaleCode: count === 0 ? "approvals.none" : "approvals.blocked",
+    rationaleMeta: { count },
   };
 }
 
@@ -228,6 +258,7 @@ function computeReplayRate(replay: ReplayOutcomeCounts): RecoveryMetric {
       display: "—",
       severity: "neutral",
       rationale: "No replay attempts in the window yet.",
+      rationaleCode: "replay.empty",
     };
   }
   const rate = (replay.replayedSuccess / denom) * 100;
@@ -239,6 +270,11 @@ function computeReplayRate(replay: ReplayOutcomeCounts): RecoveryMetric {
     display: `${rate.toFixed(1)}%`,
     severity,
     rationale: `${replay.replayedSuccess} replay${replay.replayedSuccess === 1 ? "" : "s"} succeeded · ${replay.replayedAndReopened} re-failed.`,
+    rationaleCode: "replay.summary",
+    rationaleMeta: {
+      replayedSuccess: replay.replayedSuccess,
+      replayedAndReopened: replay.replayedAndReopened,
+    },
   };
 }
 
@@ -255,6 +291,8 @@ function computeCost(
     display: `$${total.toFixed(2)}`,
     severity: "neutral",
     rationale: `Across ${providers.length} provider${providers.length === 1 ? "" : "s"} over the last ${windowDays} day${windowDays === 1 ? "" : "s"}.`,
+    rationaleCode: "cost.summary",
+    rationaleMeta: { providerCount: providers.length, windowDays },
     providers,
   };
 }

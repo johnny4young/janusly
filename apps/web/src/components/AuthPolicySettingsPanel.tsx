@@ -17,6 +17,7 @@ import React, { useEffect, useState } from "react";
 import { CheckCircle2, ShieldCheck, Save } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
+import { useT } from "../i18n";
 
 const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
@@ -48,6 +49,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export function AuthPolicySettingsPanel() {
+  const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
   const platformVersion = useWorkflowStore((state) => state.platformVersion);
@@ -82,7 +84,7 @@ export function AuthPolicySettingsPanel() {
         setForm(next);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "failed to load auth policies");
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("authPolicy.errorLoad") as string));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -90,15 +92,15 @@ export function AuthPolicySettingsPanel() {
     return () => {
       cancelled = true;
     };
-  }, [platformVersion]);
+  }, [platformVersion, t]);
 
   const validateForm = (): string | null => {
     const ttl = Number(form.sessionTtlSeconds);
     if (!Number.isFinite(ttl) || !Number.isInteger(ttl)) {
-      return "Session TTL must be a whole number of seconds";
+      return t("authPolicy.errorTtlInteger") as string;
     }
     if (ttl < SESSION_TTL_MIN || ttl > SESSION_TTL_MAX) {
-      return `Session TTL must be between ${SESSION_TTL_MIN} and ${SESSION_TTL_MAX} seconds`;
+      return t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX }) as string;
     }
     // Lightweight domain-list validation: each entry shouldn't contain spaces
     // or `@`; the server normalizes case + trims further.
@@ -108,7 +110,7 @@ export function AuthPolicySettingsPanel() {
       .filter(Boolean);
     for (const domain of domains) {
       if (domain.includes("@") || domain.includes(" ")) {
-        return `Invalid domain "${domain}" — use bare domains like "acme.com"`;
+        return t("authPolicy.errorInvalidDomain", { domain }) as string;
       }
     }
     return null;
@@ -142,10 +144,10 @@ export function AuthPolicySettingsPanel() {
           value: Number(form.sessionTtlSeconds),
         }),
       });
-      addToast("Authentication policies saved", "success");
+      addToast(t("authPolicy.toastSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to save");
+      setError(err instanceof Error ? err.message : (t("authPolicy.errorSave") as string));
     } finally {
       setSaving(false);
     }
@@ -155,26 +157,23 @@ export function AuthPolicySettingsPanel() {
     <section className="we-budget-settings" aria-labelledby="auth-policy-heading">
       <header className="we-budget-settings__header">
         <ShieldCheck size={18} aria-hidden="true" />
-        <h3 id="auth-policy-heading">Authentication policies</h3>
+        <h3 id="auth-policy-heading">{t("authPolicy.heading")}</h3>
       </header>
 
       {loading ? (
-        <p className="we-budget-settings__status">Loading authentication policies…</p>
+        <p className="we-budget-settings__status">{t("authPolicy.loading")}</p>
       ) : (
         <form className="we-budget-settings__form" onSubmit={save} noValidate>
           <label className="we-field">
-            <span className="we-field__label">Allowed email domains</span>
+            <span className="we-field__label">{t("authPolicy.allowedDomains")}</span>
             <input
               type="text"
               className="we-field__input"
-              placeholder="acme.com, partner.com"
+              placeholder={t("authPolicy.allowedDomainsPlaceholder") as string}
               value={form.allowedEmailDomains}
               onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
             />
-            <small className="we-field__hint">
-              Comma-separated list. Leave empty to allow any email domain. Applies to both
-              direct Supabase logins and SSO-authenticated sessions.
-            </small>
+            <small className="we-field__hint">{t("authPolicy.allowedDomainsHint")}</small>
           </label>
 
           <label className="we-field we-field--checkbox">
@@ -183,16 +182,12 @@ export function AuthPolicySettingsPanel() {
               checked={form.mfaRequired}
               onChange={(e) => setForm({ ...form, mfaRequired: e.target.checked })}
             />
-            <span className="we-field__label">Require multi-factor authentication</span>
-            <small className="we-field__hint">
-              Marker only. Multi-factor authentication is enforced by your identity provider
-              (Okta, Azure AD, etc.) — Janusly stores the requirement for policy visibility
-              but does not itself block logins that lack a verified MFA claim.
-            </small>
+            <span className="we-field__label">{t("authPolicy.mfaRequired")}</span>
+            <small className="we-field__hint">{t("authPolicy.mfaRequiredHint")}</small>
           </label>
 
           <label className="we-field">
-            <span className="we-field__label">Session TTL (seconds)</span>
+            <span className="we-field__label">{t("authPolicy.sessionTtl")}</span>
             <input
               type="number"
               className="we-field__input"
@@ -203,9 +198,7 @@ export function AuthPolicySettingsPanel() {
               onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
             />
             <small className="we-field__hint">
-              Lifetime of SSO-issued session tokens. Default {SESSION_TTL_DEFAULT} (8 hours).
-              Range {SESSION_TTL_MIN}..{SESSION_TTL_MAX} (5 minutes..24 hours). Existing
-              session tokens keep their original expiry; only newly-minted ones use this.
+              {t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
             </small>
           </label>
 
@@ -221,10 +214,10 @@ export function AuthPolicySettingsPanel() {
             disabled={saving}
           >
             {saving ? (
-              <>Saving…</>
+              <>{t("authPolicy.saving")}</>
             ) : (
               <>
-                <Save size={14} aria-hidden="true" /> Save policies
+                <Save size={14} aria-hidden="true" /> {t("authPolicy.save")}
               </>
             )}
             {!saving && form.allowedEmailDomains.trim().length > 0 && (

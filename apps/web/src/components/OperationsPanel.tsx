@@ -21,6 +21,7 @@ import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
+import { getResolvedLocale, tRecoveryMetricRationale, useT } from '../i18n'
 
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
@@ -29,6 +30,8 @@ type RecoveryMetric = {
   display: string
   severity: MetricSeverity
   rationale: string
+  rationaleCode?: string
+  rationaleMeta?: Record<string, string | number | boolean>
 }
 
 type CostProviderRow = {
@@ -51,6 +54,7 @@ type RecoveryMetrics = {
 }
 
 export function OperationsPanel() {
+  const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [loading, setLoading] = useState(false)
@@ -68,32 +72,32 @@ export function OperationsPanel() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Recovery metrics unavailable')
+        setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' }) as string))
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [platformVersion])
+  }, [platformVersion, t])
 
   return (
     <div className="panel-stack">
       <div className="panel-heading">
         <div className="panel-heading-copy">
-          <div className="section-kicker">Workspace</div>
-          <h2>Operations</h2>
-          <p>Org-wide recovery posture rolled up across the last {metrics?.windowDays ?? 30} days.</p>
+          <div className="section-kicker">{t('operations.kicker')}</div>
+          <h2>{t('operations.title')}</h2>
+          <p>{t('operations.intro', { days: metrics?.windowDays ?? 30 })}</p>
         </div>
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
       </div>
 
       {error && (
         <section className="panel-card">
-          <p className="helper-text">Recovery metrics unavailable — {error}</p>
+          <p className="helper-text">{t('operations.metricsUnavailable', { detail: error })}</p>
         </section>
       )}
 
       {!error && (loading || !metrics) && (
         <section className="panel-card">
-          <p className="helper-text" aria-live="polite">Computing recovery metrics…</p>
+          <p className="helper-text" aria-live="polite">{t('operations.computing')}</p>
         </section>
       )}
 
@@ -102,48 +106,48 @@ export function OperationsPanel() {
           <div className="we-ops-grid">
             <MetricCard
               icon={<CheckCircle2 size={14} aria-hidden="true" />}
-              label="Workflow success rate"
+              label={t('operations.metric.successRate') as string}
               metric={metrics.successRate}
               progressValue={metrics.successRate.value}
             />
             <MetricCard
               icon={<RefreshCw size={14} aria-hidden="true" />}
-              label="Mean time to recovery"
+              label={t('operations.metric.mttr') as string}
               metric={metrics.mttr}
             />
             <MetricCard
               icon={<Zap size={14} aria-hidden="true" />}
-              label="p95 latency"
+              label={t('operations.metric.p95') as string}
               metric={metrics.p95Latency}
             />
             <MetricCard
               icon={<Users size={14} aria-hidden="true" />}
-              label="Approvals pending"
+              label={t('operations.metric.approvals') as string}
               metric={metrics.approvalsPending}
             />
             <MetricCard
               icon={<Clock size={14} aria-hidden="true" />}
-              label="Replay success rate"
+              label={t('operations.metric.replayRate') as string}
               metric={metrics.replayRate}
             />
             <MetricCard
               icon={<DollarSign size={14} aria-hidden="true" />}
-              label="Cost this window"
+              label={t('operations.metric.cost') as string}
               metric={metrics.costThisWindow}
             />
           </div>
 
           {metrics.costThisWindow.providers.length > 0 && (
             <section className="panel-card">
-              <div className="section-kicker">Cost breakdown</div>
+              <div className="section-kicker">{t('operations.cost.heading')}</div>
               <table className="we-ops-cost-table">
                 <thead>
                   <tr>
-                    <th>Provider</th>
-                    <th>Model</th>
-                    <th>USD</th>
-                    <th>Tokens</th>
-                    <th>Calls</th>
+                    <th>{t('operations.cost.col.provider')}</th>
+                    <th>{t('operations.cost.col.model')}</th>
+                    <th>{t('operations.cost.col.usd')}</th>
+                    <th>{t('operations.cost.col.tokens')}</th>
+                    <th>{t('operations.cost.col.calls')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,8 +156,8 @@ export function OperationsPanel() {
                       <td>{row.provider}</td>
                       <td><code>{row.model}</code></td>
                       <td>${row.usd.toFixed(4)}</td>
-                      <td>{row.tokens.toLocaleString()}</td>
-                      <td>{row.calls.toLocaleString()}</td>
+                      <td>{row.tokens.toLocaleString(getResolvedLocale())}</td>
+                      <td>{row.calls.toLocaleString(getResolvedLocale())}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -206,7 +210,7 @@ function MetricCard({
           />
         </div>
       )}
-      <p className="helper-text we-ops-metric-card__rationale">{metric.rationale}</p>
+      <p className="helper-text we-ops-metric-card__rationale">{tRecoveryMetricRationale(metric)}</p>
     </section>
   )
 }

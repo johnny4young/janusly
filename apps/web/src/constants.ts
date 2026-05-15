@@ -11,12 +11,15 @@
  * Invariants:
  * - `nodePresets` keys mirror `nodeTypeValues` exactly. A type missing
  *   here means the "Add step" UI can't seed a config.
- * - `formatStatusLabel` is the single labeller for statuses surfaced in
- *   the UI; localising messages happens here, not in 30 component sites.
+ * - All user-facing strings flow through `i18n/runtime.t(...)` — adding a
+ *   new node type means a sibling pair of `nodes.<type>.label` /
+ *   `nodes.<type>.helper` keys in `apps/web/src/i18n/locales/<lng>/common.json`.
+ *   The parity test catches missing translations at CI time.
  */
 
 import type { CSSProperties } from 'react'
 import type { JsonObject } from './types'
+import { t } from './i18n/runtime'
 
 /** Default `config` per node type — used by the "Add step" affordance. */
 export const nodePresets: Record<string, JsonObject> = {
@@ -25,35 +28,32 @@ export const nodePresets: Record<string, JsonObject> = {
   transform: { mapping: { value: '{{context.api.output.statusCode}}' } },
   condition: { expression: 'true' },
   webhook: {},
-  approval: { message: 'Please approve this workflow step.' },
+  approval: {},
   human_form: {
-    title: 'Collect request details',
-    description: 'Ask an operator to provide the fields this workflow needs before continuing.',
     schema: {
       type: 'object',
       properties: {
-        requester: { type: 'string', description: 'Who is this about?' },
-        reason: { type: 'string', description: 'What should the workflow know before continuing?' },
+        requester: { type: 'string' },
+        reason: { type: 'string' },
       },
       required: ['requester', 'reason'],
     },
   },
-  ai: { prompt: 'Summarize the latest workflow result and suggest the next action.' },
+  ai: {},
   tool: { tool: 'text.uppercase', input: { value: 'hello' } },
-  agent: { planner: 'rules', goal: 'uppercase this text', value: 'hello', maxSteps: 3 },
+  agent: { planner: 'rules', value: 'hello', maxSteps: 3 },
   router: { candidates: [{ nodeId: 'fast_path', avgCost: 0.001, avgLatencyMs: 500, successRate: 0.9 }] },
   router_llm: { candidates: [{ nodeId: 'accurate_path', avgCost: 0.01, avgLatencyMs: 1500, successRate: 0.98 }] },
   loop: { items: 'a,b,c', mapping: { value: '{{item}}', index: '{{index}}' } },
   agent_reflection: { input: '{{context.agent.output}}' },
   multi_agent: {
     mode: 'sequential',
-    goal: 'Analyze and validate the workflow result',
     planner: 'rules',
     maxSteps: 2,
     reflection: true,
     agents: [
-      { name: 'analyzer', role: 'Data analyst', persona: 'Careful and concise analyst', goal: 'Analyze the current context and produce a useful summary' },
-      { name: 'validator', role: 'QA reviewer', persona: 'Skeptical reviewer', goal: 'Validate the previous agent output and identify issues' },
+      { name: 'analyzer' },
+      { name: 'validator' },
     ],
   },
   subworkflow: { workflowId: '' },
@@ -67,111 +67,144 @@ export const nodePresets: Record<string, JsonObject> = {
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
 export const nodeTypes = Object.keys(nodePresets)
 
-/** Display label + helper text per node type for the Inspector / step picker. */
-export const nodeUi: Record<string, { label: string; helper: string }> = {
-  http: { label: 'Call an API', helper: 'Fetch data from a service' },
-  noop: { label: 'Do nothing', helper: 'Start or finish cleanly' },
-  transform: { label: 'Shape data', helper: 'Map fields for the next step' },
-  condition: { label: 'Branch rule', helper: 'Continue only when true' },
-  webhook: { label: 'Wait for webhook', helper: 'Pause for an external event' },
-  approval: { label: 'Ask approval', helper: 'Pause for a person' },
-  human_form: { label: 'Collect form', helper: 'Pause for structured input' },
-  ai: { label: 'AI prompt', helper: 'Ask Janusly to summarize or decide' },
-  tool: { label: 'Run a tool', helper: 'Use a registered backend action' },
-  agent: { label: 'Agent', helper: 'Plan tool calls toward a goal' },
-  router: { label: 'Smart router', helper: 'Pick the best path from scores' },
-  router_llm: { label: 'AI router', helper: 'Route with AI-ready context' },
-  loop: { label: 'Repeat list', helper: 'Run a mapping for each item' },
-  agent_reflection: { label: 'Review result', helper: 'Accept or retry a result' },
-  multi_agent: { label: 'Agent team', helper: 'Coordinate multiple agents' },
-  subworkflow: { label: 'Call workflow', helper: 'Run another saved workflow as a step' },
-  wait_until: { label: 'Wait', helper: 'Pause the run for an ISO 8601 duration' },
-  parallel_fork: { label: 'Fan out', helper: 'Run named branches in parallel' },
-  join: { label: 'Merge branches', helper: 'Gather labelled outputs from a fan-out' },
-  schedule: { label: 'Schedule', helper: 'Trigger this workflow on a cron schedule' },
-  mcp_tool: { label: 'MCP tool', helper: 'Call an external MCP server\'s tool as a step' },
+/** Localised default `config` per node type — used when the UI seeds a new step. */
+export function getNodePreset(type: string): JsonObject {
+  switch (type) {
+    case 'approval':
+      return { message: t('nodeDefaults.approval.message') as string }
+    case 'human_form':
+      return {
+        ...clonePreset(nodePresets.human_form),
+        title: t('nodeDefaults.humanForm.title') as string,
+        description: t('nodeDefaults.humanForm.description') as string,
+        schema: {
+          type: 'object',
+          properties: {
+            requester: { type: 'string', description: t('nodeDefaults.humanForm.requester') as string },
+            reason: { type: 'string', description: t('nodeDefaults.humanForm.reason') as string },
+          },
+          required: ['requester', 'reason'],
+        },
+      }
+    case 'ai':
+      return { prompt: t('nodeDefaults.ai.prompt') as string }
+    case 'agent':
+      return {
+        ...clonePreset(nodePresets.agent),
+        goal: t('nodeDefaults.agent.goal') as string,
+      }
+    case 'multi_agent':
+      return {
+        ...clonePreset(nodePresets.multi_agent),
+        goal: t('nodeDefaults.multiAgent.goal') as string,
+        agents: [
+          {
+            name: 'analyzer',
+            role: t('nodeDefaults.multiAgent.analyzer.role') as string,
+            persona: t('nodeDefaults.multiAgent.analyzer.persona') as string,
+            goal: t('nodeDefaults.multiAgent.analyzer.goal') as string,
+          },
+          {
+            name: 'validator',
+            role: t('nodeDefaults.multiAgent.validator.role') as string,
+            persona: t('nodeDefaults.multiAgent.validator.persona') as string,
+            goal: t('nodeDefaults.multiAgent.validator.goal') as string,
+          },
+        ],
+      }
+    default:
+      return clonePreset(nodePresets[type] ?? {})
+  }
 }
 
+/**
+ * Closed enum of node types we ship UI strings for. We keep this list
+ * separate from `nodePresets` so that lookups for an unknown / experimental
+ * type fall back gracefully (`label = id, helper = generic`) without
+ * tripping the i18next missing-key warning for catalog noise.
+ */
+const KNOWN_NODE_TYPES = new Set(nodeTypes)
+
 /** Human label for a node type (falls back to the raw id with `_` → space). */
-export function getNodeLabel(type: string) {
-  return nodeUi[type]?.label ?? type.replaceAll('_', ' ')
+export function getNodeLabel(type: string): string {
+  if (KNOWN_NODE_TYPES.has(type)) {
+    return t(`nodes.${type}.label` as never) as string
+  }
+  return type.replaceAll('_', ' ')
 }
 
 /** Helper / hint text for a node type (used in the step-picker subtitle). */
-export function getNodeHelper(type: string) {
-  return nodeUi[type]?.helper ?? 'Workflow step'
+export function getNodeHelper(type: string): string {
+  if (KNOWN_NODE_TYPES.has(type)) {
+    return t(`nodes.${type}.helper` as never) as string
+  }
+  return t('nodes.fallbackHelper') as string
 }
 
 /** One-line config summary for the Inspector header (e.g. "GET https://api.example.com"). */
-export function getNodeConfigSummary(type: string, config: JsonObject) {
-  if (type === 'http') return readString(config.url) ?? 'Add a request URL'
-  if (type === 'ai') return compact(readString(config.prompt) ?? 'Add a prompt for Janusly')
-  if (type === 'tool') return readString(config.tool) ?? 'Choose a backend tool'
-  if (type === 'agent') return compact(readString(config.goal) ?? 'Define the agent goal')
+export function getNodeConfigSummary(type: string, config: JsonObject): string {
+  if (type === 'http') return readString(config.url) ?? (t('nodeSummary.http.empty') as string)
+  if (type === 'ai') return compact(readString(config.prompt) ?? (t('nodeSummary.ai.empty') as string))
+  if (type === 'tool') return readString(config.tool) ?? (t('nodeSummary.tool.empty') as string)
+  if (type === 'agent') return compact(readString(config.goal) ?? (t('nodeSummary.agent.empty') as string))
   if (type === 'multi_agent') {
     const agentCount = Array.isArray(config.agents) ? config.agents.length : 0
-    const goal = compact(readString(config.goal) ?? 'Coordinate a team goal')
-    return agentCount ? `${agentCount} agents - ${goal}` : goal
+    const goal = compact(readString(config.goal) ?? (t('nodeSummary.multi_agent.coordinate') as string))
+    return agentCount
+      ? (t('nodeSummary.multi_agent.withCount', { count: agentCount, goal }) as string)
+      : goal
   }
-  if (type === 'approval') return compact(readString(config.message) ?? 'Add an approval message')
-  if (type === 'human_form') return compact(readString(config.title) ?? 'Add form fields')
-  if (type === 'condition') return compact(readString(config.expression) ?? 'Add a branch rule')
-  if (type === 'loop') return compact(readString(config.items) ?? 'Add list items')
-  if (type === 'transform') return 'Map output fields'
-  if (type === 'router' || type === 'router_llm') return 'Rank candidate paths'
-  if (type === 'webhook') return 'Wait for an external event'
-  if (type === 'noop') return 'No setup needed'
-  if (type === 'subworkflow') return readString(config.workflowId) ?? 'Pick a saved workflow'
-  if (type === 'wait_until') return readString(config.duration) ?? 'Set an ISO 8601 duration'
+  if (type === 'approval') return compact(readString(config.message) ?? (t('nodeSummary.approval.empty') as string))
+  if (type === 'human_form') return compact(readString(config.title) ?? (t('nodeSummary.human_form.empty') as string))
+  if (type === 'condition') return compact(readString(config.expression) ?? (t('nodeSummary.condition.empty') as string))
+  if (type === 'loop') return compact(readString(config.items) ?? (t('nodeSummary.loop.empty') as string))
+  if (type === 'transform') return t('nodeSummary.transform.text') as string
+  if (type === 'router' || type === 'router_llm') return t('nodeSummary.router.text') as string
+  if (type === 'webhook') return t('nodeSummary.webhook.text') as string
+  if (type === 'noop') return t('nodeSummary.noop.text') as string
+  if (type === 'subworkflow') return readString(config.workflowId) ?? (t('nodeSummary.subworkflow.empty') as string)
+  if (type === 'wait_until') return readString(config.duration) ?? (t('nodeSummary.wait_until.empty') as string)
   if (type === 'parallel_fork') {
     const branches = Array.isArray(config.branches) ? config.branches.length : 0
-    return branches > 0 ? `${branches} branch${branches === 1 ? '' : 'es'}` : 'Add at least 2 branches'
+    if (branches === 0) return t('nodeSummary.parallel_fork.empty') as string
+    return t('nodeSummary.parallelForkBranches', { count: branches }) as string
   }
   if (type === 'join') {
     const sources = config.sources && typeof config.sources === 'object' && !Array.isArray(config.sources)
       ? Object.keys(config.sources as Record<string, unknown>).length
       : 0
-    return sources > 0 ? `Merging ${sources} branch${sources === 1 ? '' : 'es'}` : 'Map branches to predecessor nodes'
+    if (sources === 0) return t('nodeSummary.join.empty') as string
+    return t('nodeSummary.joinBranches', { count: sources }) as string
   }
   if (type === 'schedule') {
     const cron = readString(config.cronExpression)
-    const enabled = config.enabled === false ? ' (paused)' : ''
-    return cron ? `${cron}${enabled}` : 'Set a cron expression'
+    if (!cron) return t('nodeSummary.schedule.empty') as string
+    return config.enabled === false
+      ? (t('nodeSummary.schedule.paused', { cron }) as string)
+      : (t('nodeSummary.schedule.active', { cron }) as string)
   }
   if (type === 'mcp_tool') {
     const alias = readString(config.connectionAlias)
     const toolName = readString(config.toolName)
-    if (alias && toolName) return `${alias} → ${toolName}`
-    return 'Pick an MCP connection + tool'
+    if (alias && toolName) return t('nodeSummary.mcp_tool.set', { alias, tool: toolName }) as string
+    return t('nodeSummary.mcp_tool.empty') as string
   }
-  return 'Review step settings'
+  return t('nodeSummary.fallback') as string
 }
 
 /** Human label for a node/run status string (e.g. `"running"` → `"Running"`). */
-export function formatStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    draft: 'Draft',
-    pending: 'Ready',
-    queued: 'Queued',
-    running: 'Running',
-    waiting: 'Waiting',
-    skipped: 'Skipped',
-    succeeded: 'Done',
-    failed: 'Needs attention',
-    cancelled: 'Cancelled',
-    open: 'Open',
-    replayed: 'Retried',
-    resolved: 'Resolved',
-  }
-
-  return labels[status] ?? status.replaceAll('_', ' ')
+export function formatStatusLabel(status: string): string {
+  const KNOWN: ReadonlySet<string> = new Set([
+    'draft', 'pending', 'queued', 'running', 'waiting', 'skipped',
+    'succeeded', 'failed', 'cancelled', 'open', 'replayed', 'resolved',
+  ])
+  if (KNOWN.has(status)) return t(`status.${status}` as never) as string
+  return status.replaceAll('_', ' ')
 }
 
 /** Label for the AI mode chip — surfaces `"AI"` / `"Fallback"` / `"Error"` per AGENTS.md fallback contract. */
-export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error') {
-  if (mode === 'ai') return 'AI'
-  if (mode === 'fallback') return 'Local mode'
-  return 'Needs attention'
+export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error'): string {
+  return t(`aiMode.${mode}` as never) as string
 }
 
 /** Per-status inline-style map for the canvas + status pills (colour tokens from `index.css`). */
@@ -185,10 +218,14 @@ export const statusStyles: Record<string, CSSProperties> = {
   failed: { border: '1.5px solid var(--we-danger)', background: 'var(--we-danger-soft)' },
 }
 
-function readString(value: unknown) {
+function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function compact(value: string) {
+function compact(value: string): string {
   return value.length > 72 ? `${value.slice(0, 69)}...` : value
+}
+
+function clonePreset(value: JsonObject): JsonObject {
+  return JSON.parse(JSON.stringify(value)) as JsonObject
 }

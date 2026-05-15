@@ -416,3 +416,68 @@ describe("suggestWorkflowPatch — structural system prompt override", () => {
     expect(callArg.system).not.toContain("insert_approval_upstream");
   });
 });
+
+// Locale propagation: the route forwards the operator's UI locale
+// (`Accept-Language`) to the helper so the LLM writes the operator-
+// facing free-form fields (rationale / approvalMessage) in that
+// language. Machine-contract fields (`approachLabel`, `confidence`,
+// `patchedConfig` keys, template tokens) MUST stay verbatim English.
+describe("suggestWorkflowPatch — locale instruction", () => {
+  // Cast through `unknown` to dodge TS2589 (excessive depth) the same
+  // way the AI-mode describe block above does.
+  const envelopeSchema = z.object({
+    suggestions: z
+      .array(z.object({
+        patchedConfig: z.record(z.string(), z.unknown()),
+        rationale: z.string(),
+        approachLabel: z.enum(["other"]),
+        confidence: z.number(),
+      }))
+      .min(1)
+      .max(3),
+  }) as unknown as LlmGenerateObjectInput<PatchEnvelopeSchemaResult>["schema"];
+  const baseInput = {
+    workflow: { id: "wf", name: "Demo", nodes: [], edges: [] },
+    failedNodeId: "n1",
+    errorJson: { message: "boom" },
+    runEvents: [] as Array<{ type: string; nodeId?: string | null; payload?: unknown; createdAt?: string | Date | null }>,
+  };
+
+  function makeLlm() {
+    const generateObject = vi.fn(async () => ({
+      object: { suggestions: [{ patchedConfig: {}, rationale: "x", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    }));
+    return { generateObject, llm: { generateText: vi.fn(), generateObject } as unknown as LlmClient };
+  }
+
+  it("appends nothing when locale is undefined", async () => {
+    const { generateObject, llm } = makeLlm();
+    await suggestWorkflowPatch({ llm, envelopeSchema, ...baseInput });
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).not.toMatch(/IMPORTANT — RESPONSE LANGUAGE/);
+  });
+
+  it("appends nothing when locale is 'en'", async () => {
+    const { generateObject, llm } = makeLlm();
+    await suggestWorkflowPatch({ llm, envelopeSchema, ...baseInput, locale: "en" });
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).not.toMatch(/IMPORTANT — RESPONSE LANGUAGE/);
+  });
+
+  it("instructs Spanish output when locale is 'es', without changing the schema-fields-stay-English contract", async () => {
+    const { generateObject, llm } = makeLlm();
+    await suggestWorkflowPatch({ llm, envelopeSchema, ...baseInput, locale: "es" });
+    const callArg = (generateObject.mock.calls[0] as unknown[])[0] as { system: string };
+    expect(callArg.system).toMatch(/IMPORTANT — RESPONSE LANGUAGE/);
+    expect(callArg.system).toContain("Spanish");
+    // Machine-contract fields explicitly stay English.
+    expect(callArg.system).toContain("approachLabel");
+    expect(callArg.system).toContain("patchedConfig");
+    // Template tokens and identifiers are flagged as verbatim.
+    expect(callArg.system).toContain("{{secret.NAME}}");
+  });
+});

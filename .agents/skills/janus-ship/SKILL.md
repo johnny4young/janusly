@@ -63,6 +63,7 @@ These never bend, in either phase:
 
 - **Git:** only `git add <paths>` is mutating. Everything else is read-only. Full list in [`references/git-policy.md`](references/git-policy.md).
 - **No AI co-authorship in commit messages.** No `Co-Authored-By: Claude`, no "Generated with Claude Code", no watermarks of any kind.
+- **i18n coverage:** new or changed user-facing text in `apps/web/**` must go through `useT()` / `t()` exported from `apps/web/src/i18n` — never raw string literals in JSX, `aria-label`, `placeholder`, `title`, `alt`, or in the first argument of `addToast(...)`. Every new key in `en/common.json` requires its sibling in `es/common.json` (gated by `apps/web/src/i18n/parity.test.ts`). Strings emitted from the server with a stable `code` go through the dedicated helpers (`tValidationIssue` / `tReadinessIssue` / `tAiReviewIssue` / `tRunEvent` / `tFailureCluster`) and gain a `<surface>.<code>` entry in the catalog when the engine adds a new code; free-form server messages flow through `t('serverEvents.fallback', { message })`. Components MUST NOT import from `i18next` / `react-i18next` directly — every consumer is the i18n module. Exempt: technical identifiers (`'dev-user'`, role tokens like `'admin'` when stored as values, tool names like `'slack.post'`), brand-mark codes (`'JN'`, `'Janusly'`), single-punctuation / emoji-only nodes, test files, console / log messages, and backend `error.message` strings passed through unmodified. Spot scan: `bash .agents/skills/janus-ship/scripts/check-i18n-coverage.sh` (a wrapper for `apps/web/scripts/check-i18n-coverage.sh`) reports suspect literals against `git diff --cached`.
 - **Multi-tenant scope:** every new query carries `eq(<table>.orgId, auth.orgId)`. No bespoke middleware.
 - **AI fallback contract:** every OpenAI call wrapped in try/catch; failure returns `{ mode: "fallback", aiError, ... }`; `parseAiWorkflow` looser stays.
 - **Engine atomicity:** no non-atomic `markNodeQueued`, no split `startRun`, no DLQ adapter bypass, worker `SIGTERM`/`SIGINT` handler intact.
@@ -70,7 +71,7 @@ These never bend, in either phase:
 - **Cross-panel reactivity:** mutations that invalidate server data call `bumpPlatformVersion()`.
 - **Pagination cap 100/200** on `/runs` and `/workflows`; new list endpoints follow the pattern.
 - **API routing (Open/Closed):** new HTTP routes plug into `routes: Route[]` in `apps/api/src/index.ts` via `routes.push({...})`. No inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` are declared on the route entry, not called inside the handler.
-- **Web deps lockdown:** `apps/web` imports stay within `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`. No radix, cva, clsx, tailwind-merge, shadcn scaffolding.
+- **Web deps lockdown:** `apps/web` imports stay within `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`, `i18next`, `react-i18next`. The two i18n libs are restricted to the `apps/web/src/i18n/` module — components NEVER import from `i18next` / `react-i18next` directly. No radix, cva, clsx, tailwind-merge, shadcn scaffolding.
 - **Tailwind 4 CSS-first:** no `tailwind.config.ts`, no `postcss.config.js`, no inline hex.
 - **Vite 8:** `manualChunks` is a function.
 - **Zod 4:** two-arg `z.record(z.string(), z.unknown())`.

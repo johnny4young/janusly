@@ -19,6 +19,8 @@ import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import { WorkflowDiffView } from './WorkflowDiffView'
+import { getResolvedLocale, useT } from '../i18n'
+import { t as runtimeT } from '../i18n/runtime'
 
 type VersionRow = { id: string; version: number; dagJson: WorkflowDefinition; createdAt?: string }
 
@@ -72,22 +74,24 @@ function canRollbackWithRole(role: string | null | undefined) {
 /** Same role posture as Rollback — read-only viewers can't trigger AI mutation routes. */
 const canSuggestWithRole = canRollbackWithRole
 
-const APPROACH_LABEL_TEXT: Record<string, string> = {
-  add_retry: 'Add retry',
-  raise_timeout: 'Raise timeout',
-  swap_secret_ref: 'Swap secret-ref',
-  add_approval: 'Add approval',
-  add_observability: 'Add observability',
-  simplify: 'Simplify',
-  other: 'Other',
+const APPROACH_KEYS: Record<string, string> = {
+  add_retry: 'versionHistory.approach.add_retry',
+  raise_timeout: 'versionHistory.approach.raise_timeout',
+  swap_secret_ref: 'versionHistory.approach.swap_secret_ref',
+  add_approval: 'versionHistory.approach.add_approval',
+  add_observability: 'versionHistory.approach.add_observability',
+  simplify: 'versionHistory.approach.simplify',
+  other: 'versionHistory.approach.other',
 }
 
 function approachLabelText(label: string): string {
-  return APPROACH_LABEL_TEXT[label] ?? label
+  const key = APPROACH_KEYS[label]
+  return key ? (runtimeT(key as never) as string) : label
 }
 
 /** Render the version-history list for the active workflow with click-to-hydrate. */
 export function VersionHistoryPanel() {
+  const { t } = useT()
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
   const session = useWorkflowStore(state => state.session)
   const userId = useWorkflowStore(state => state.userId)
@@ -143,7 +147,7 @@ export function VersionHistoryPanel() {
         if (rows.length < 2) setCompareMode(false)
       } catch (error) {
         if (!cancelled) {
-          addToast(error instanceof Error ? error.message : 'Version history failed to load', 'error')
+          addToast(error instanceof Error ? error.message : (t('versionHistory.loadFailed') as string), 'error')
         }
       }
     }
@@ -152,7 +156,7 @@ export function VersionHistoryPanel() {
     return () => {
       cancelled = true
     }
-  }, [addToast, currentWorkflowId, platformVersion])
+  }, [addToast, currentWorkflowId, platformVersion, t])
 
   useEffect(() => {
     let cancelled = false
@@ -206,7 +210,7 @@ export function VersionHistoryPanel() {
       return
     }
     hydrateWorkflow(version.dagJson)
-    addToast(`Loaded v${version.version}`, 'success')
+    addToast(t('versionHistory.loaded', { version: version.version }), 'success')
   }
 
   const toggleSelected = (id: string) => {
@@ -271,14 +275,14 @@ export function VersionHistoryPanel() {
       } else {
         setImprovement({
           kind: 'fallback',
-          aiError: data.aiError ?? 'AI improvement is not available right now.',
+          aiError: data.aiError ?? (t('versionHistory.aiUnavailableDefault') as string),
         })
       }
     } catch (error) {
       if (suggestCancelRef.current) return
       setImprovement({
         kind: 'fallback',
-        aiError: error instanceof Error ? error.message : 'AI improvement request failed.',
+        aiError: error instanceof Error ? error.message : (t('versionHistory.aiRequestFailed') as string),
       })
     }
   }
@@ -300,7 +304,7 @@ export function VersionHistoryPanel() {
       <div className="version-history__head">
         <div className="section-kicker">
           <History size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
-          Version History
+          {t('versionHistory.heading')}
         </div>
         {versions.length >= 2 && (
           <button
@@ -309,12 +313,12 @@ export function VersionHistoryPanel() {
             onClick={onToggleCompare}
             aria-pressed={compareMode}
           >
-            <GitCompare size={12} aria-hidden="true" /> {compareMode ? 'Cancel' : 'Compare'}
+            <GitCompare size={12} aria-hidden="true" /> {compareMode ? t('versionHistory.cancelCompare') : t('versionHistory.compare')}
           </button>
         )}
       </div>
 
-      {versions.length === 0 && <p className="empty-state">Save a workflow to start tracking versions.</p>}
+      {versions.length === 0 && <p className="empty-state">{t('versionHistory.empty')}</p>}
 
       {versions.map((version, index) => {
         const isSelected = selectedIds.includes(version.id)
@@ -336,15 +340,15 @@ export function VersionHistoryPanel() {
                 </span>
               )}
               <span>v{version.version}</span>
-              <span>{version.createdAt ? new Date(version.createdAt).toLocaleString() : ''}</span>
+              <span>{version.createdAt ? new Date(version.createdAt).toLocaleString(getResolvedLocale()) : ''}</span>
             </button>
             {showRollback && versions[0] && (
               <button
                 type="button"
                 className="version-row__rollback"
                 onClick={() => setRollbackPair({ currentId: versions[0]!.id, targetId: version.id })}
-                aria-label={`Roll back to v${version.version}`}
-                title={`Roll back to v${version.version}`}
+                aria-label={t('versionHistory.rollbackAria', { version: version.version }) as string}
+                title={t('versionHistory.rollbackAria', { version: version.version }) as string}
               >
                 <RotateCcw size={12} aria-hidden="true" />
               </button>
@@ -364,7 +368,7 @@ export function VersionHistoryPanel() {
 
       {compareMode && !comparePair && (
         <p className="helper-text" aria-live="polite">
-          Pick two versions to see the diff.
+          {t('versionHistory.pickPair')}
         </p>
       )}
 
@@ -377,10 +381,10 @@ export function VersionHistoryPanel() {
             disabled={improvement.kind === 'loading'}
           >
             <Sparkles size={12} aria-hidden="true" />{' '}
-            {improvement.kind === 'loading' ? 'Generating…' : 'Suggest improvement'}
+            {improvement.kind === 'loading' ? t('versionHistory.generating') : t('versionHistory.suggest')}
           </button>
           <p className="helper-text we-suggest-hint">
-            Ask the AI to suggest improvements to v{comparePair![1].version}. Suggestions are previewed as a diff — apply by saving as a new version.
+            {t('versionHistory.suggestHint', { version: comparePair![1].version })}
           </p>
         </div>
       )}
@@ -388,24 +392,24 @@ export function VersionHistoryPanel() {
       {improvement.kind === 'ai' && comparePair && improvement.suggestions[improvement.activeIdx] && (() => {
         const active = improvement.suggestions[improvement.activeIdx]!
         return (
-          <div className="we-suggest-result" aria-label="AI suggested improvement">
+          <div className="we-suggest-result" aria-label={t('versionHistory.aiSuggestionsAria') as string}>
             <div className="we-suggest-header">
               <span className="section-kicker">
                 <Sparkles size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />
-                AI suggestions vs {improvement.baseLabel}
+                {t('versionHistory.aiHeader', { baseLabel: improvement.baseLabel })}
               </span>
               <button
                 type="button"
                 className="we-suggest-close"
                 onClick={onResetImprovement}
-                aria-label="Dismiss AI suggestions"
-                title="Dismiss"
+                aria-label={t('versionHistory.dismissAi') as string}
+                title={t('versionHistory.dismissShort') as string}
               >
                 <X size={12} aria-hidden="true" />
               </button>
             </div>
             {improvement.suggestions.length > 1 && (
-              <div className="we-suggest-chips" role="tablist" aria-label="Suggested improvement angles">
+              <div className="we-suggest-chips" role="tablist" aria-label={t('versionHistory.anglesAria') as string}>
                 {improvement.suggestions.map((suggestion, idx) => (
                   <button
                     key={`${suggestion.approachLabel}:${idx}`}
@@ -424,7 +428,7 @@ export function VersionHistoryPanel() {
               before={improvement.baseWorkflow}
               after={active.workflow}
               beforeLabel={improvement.baseLabel}
-              afterLabel={`Suggested · ${approachLabelText(active.approachLabel)}`}
+              afterLabel={t('versionHistory.suggested', { approach: approachLabelText(active.approachLabel) }) as string}
               aiPatchRationale={active.rationale}
             />
           </div>
@@ -433,13 +437,13 @@ export function VersionHistoryPanel() {
 
       {improvement.kind === 'fallback' && (
         <div className="we-suggest-fallback" role="status" aria-live="polite">
-          <span className="we-suggest-fallback__title">AI improvement unavailable</span>
+          <span className="we-suggest-fallback__title">{t('versionHistory.aiUnavailable')}</span>
           <span className="we-suggest-fallback__detail">{improvement.aiError}</span>
           <button
             type="button"
             className="we-suggest-fallback__close"
             onClick={onResetImprovement}
-            aria-label="Dismiss AI fallback notice"
+            aria-label={t('versionHistory.dismissFallback') as string}
           >
             <X size={12} aria-hidden="true" />
           </button>

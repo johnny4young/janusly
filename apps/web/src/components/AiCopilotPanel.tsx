@@ -12,6 +12,8 @@
  * - The review action falls back to the deterministic readiness check
  *   from the API engine when the LLM is unavailable, so the findings
  *   list is never empty just because the model is down.
+ * - All user-visible strings flow through the i18n module — never raw
+ *   literals; engine-emitted review issue codes go through tAiReviewIssue.
  */
 
 import React, { useMemo, useState } from 'react'
@@ -19,6 +21,7 @@ import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText
 import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
+import { tAiReviewIssue, useT } from '../i18n'
 
 // Action-specific assumed token budgets used by the predicted-spend label.
 // Real spend varies; these are order-of-magnitude indicators chosen from
@@ -62,29 +65,10 @@ type ResultState =
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
   | { kind: 'review'; mode: AiMode; title: string; review: ReviewFindings; aiError?: string }
 
-const starterPrompts = [
-  'Watch a GitHub release, summarize what changed, and ask for approval when risk is high.',
-  'Collect customer feedback, classify urgency, and route critical issues to a person.',
-  'Check an order status, explain what changed, and retry failed handoff steps.',
-]
-
-const modeCopy: Record<AiMode, string> = {
-  ai: 'Generated with the connected model.',
-  fallback: 'Generated locally so the flow still works without external AI.',
-  error: 'The AI request needs attention.',
-}
-
-function describeAiError(message: string) {
-  if (/quota|billing|insufficient_quota/i.test(message)) {
-    return 'Your OpenAI account has no quota left. Add a payment method at https://platform.openai.com/account/billing and retry.'
-  }
-  if (/rate limit/i.test(message)) {
-    return 'Rate limit reached. Wait a few seconds and retry, or switch to a higher-tier model.'
-  }
-  if (/invalid api key|incorrect api key|unauthorized/i.test(message)) {
-    return 'OpenAI rejected the API key. Re-check the value in the root .env and restart the API.'
-  }
-  return message
+const MODE_COPY_KEYS: Record<AiMode, string> = {
+  ai: 'aiCopilot.modeCopy.ai',
+  fallback: 'aiCopilot.modeCopy.fallback',
+  error: 'aiCopilot.modeCopy.error',
 }
 
 /** Renders the Copilot panel: prompt → workflow generator + explain-current-workflow surface. */
@@ -97,68 +81,85 @@ export function AiCopilotPanel({
   onOpenRuns,
   onOpenTemplates,
 }: AiCopilotPanelProps) {
+  const { t } = useT()
+
+  const starterPrompts = [
+    t('aiCopilot.starter1') as string,
+    t('aiCopilot.starter2') as string,
+    t('aiCopilot.starter3') as string,
+  ]
+
   const [prompt, setPrompt] = useState(starterPrompts[0])
   const [loading, setLoading] = useState<'generate' | 'explain' | 'review' | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
 
-  const healthLabel = health?.enabled ? 'AI is connected' : 'Local mode is active'
+  const healthLabel = health?.enabled ? t('aiCopilot.healthOn') : t('aiCopilot.healthOff')
   const healthDetail = health?.enabled
-    ? `${health.model} can draft flows, explain runs, and power AI steps.`
-    : 'Janusly still works locally. Add OPENAI_API_KEY to the root .env and restart the API to use full AI.'
+    ? t('aiCopilot.healthDetailOn', { model: health.model })
+    : t('aiCopilot.healthDetailOff')
+
+  function describeAiError(message: string): string {
+    if (/quota|billing|insufficient_quota/i.test(message)) return t('aiCopilot.aiError.quota') as string
+    if (/rate limit/i.test(message)) return t('aiCopilot.aiError.rate') as string
+    if (/invalid api key|incorrect api key|unauthorized/i.test(message)) return t('aiCopilot.aiError.auth') as string
+    return message
+  }
 
   const useCases = useMemo(() => [
     {
       icon: <Workflow size={16} />,
-      title: 'Prompt to workflow',
-      body: 'Describe the business outcome. Janusly turns it into a runnable flow.',
-      state: health?.enabled ? 'AI ready' : 'Starter flow',
+      title: t('aiCopilot.useCase.prompt.title') as string,
+      body: t('aiCopilot.useCase.prompt.body') as string,
+      state: (health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.prompt.stateOff')) as string,
     },
     {
       icon: <MessageSquareText size={16} />,
-      title: 'Explain a workflow',
-      body: 'Translate the current canvas into purpose, path, and next checks.',
-      state: health?.enabled ? 'AI ready' : 'Local summary',
+      title: t('aiCopilot.useCase.explain.title') as string,
+      body: t('aiCopilot.useCase.explain.body') as string,
+      state: (health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.explain.stateOff')) as string,
     },
     {
       icon: <Bot size={16} />,
-      title: 'Explain a run',
-      body: 'Ask what happened after execution, including failures, retries, skipped steps, and rollback signals.',
-      state: health?.enabled ? 'AI chat' : 'Local chat',
+      title: t('aiCopilot.useCase.explainRun.title') as string,
+      body: t('aiCopilot.useCase.explainRun.body') as string,
+      state: (health?.enabled ? t('aiCopilot.useCase.explainRun.stateOn') : t('aiCopilot.useCase.explainRun.stateOff')) as string,
     },
     {
       icon: <BrainCircuit size={16} />,
-      title: 'Agent planning',
-      body: 'Agent and team steps choose tools from a goal. With no key, they use rules.',
-      state: health?.enabled ? 'AI planner' : 'Rules planner',
+      title: t('aiCopilot.useCase.agent.title') as string,
+      body: t('aiCopilot.useCase.agent.body') as string,
+      state: (health?.enabled ? t('aiCopilot.useCase.agent.stateOn') : t('aiCopilot.useCase.agent.stateOff')) as string,
     },
     {
       icon: <Route size={16} />,
-      title: 'Causal routing',
-      body: 'Routing and counterfactual replay stay available without an LLM.',
-      state: 'Always on',
+      title: t('aiCopilot.useCase.causal.title') as string,
+      body: t('aiCopilot.useCase.causal.body') as string,
+      state: t('aiCopilot.useCase.causal.alwaysOn') as string,
     },
-  ], [health?.enabled])
+  ], [health?.enabled, t])
 
   const readinessSteps = useMemo(() => [
     {
       icon: <KeyRound size={15} />,
-      title: 'Root .env has OPENAI_API_KEY',
-      body: 'The API and worker load the repository root .env, not nested app env files.',
+      title: t('aiCopilot.readiness.envTitle') as string,
+      body: t('aiCopilot.readiness.envBody') as string,
       ready: Boolean(health?.enabled),
     },
     {
       icon: <RefreshCw size={15} />,
-      title: 'API and worker restarted',
-      body: 'Restart both processes after changing AI environment variables.',
+      title: t('aiCopilot.readiness.restartTitle') as string,
+      body: t('aiCopilot.readiness.restartBody') as string,
       ready: Boolean(health),
     },
     {
       icon: <CheckCircle2 size={15} />,
-      title: '/ai/health returns enabled: true',
-      body: health?.enabled ? `${health.model} is the active model.` : 'Current response is enabled: false.',
+      title: t('aiCopilot.readiness.healthTitle') as string,
+      body: (health?.enabled
+        ? t('aiCopilot.readiness.healthBodyOn', { model: health.model })
+        : t('aiCopilot.readiness.healthBodyOff')) as string,
       ready: Boolean(health?.enabled),
     },
-  ], [health])
+  ], [health, t])
 
   const generate = async () => {
     const trimmed = prompt.trim()
@@ -167,23 +168,26 @@ export function AiCopilotPanel({
     try {
       const response = await onGenerateWorkflow(trimmed)
       const draftedByAi = response.mode === 'ai'
+      const titleKey = draftedByAi
+        ? 'aiCopilot.draftedAi'
+        : response.aiError
+          ? 'aiCopilot.draftedFallback'
+          : 'aiCopilot.draftedLocal'
       setResult({
         kind: 'workflow',
         mode: response.mode,
-        title: draftedByAi
-          ? 'Flow drafted by AI'
-          : response.aiError
-            ? 'Starter flow used because AI failed'
-            : 'Starter flow loaded locally',
-        body: `${response.workflow.name ?? response.workflow.id ?? 'Untitled workflow'} is now on the canvas. Review the setup, then run it when ready.`,
+        title: t(titleKey as never) as string,
+        body: t('aiCopilot.draftedBody', {
+          name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow') as string),
+        }) as string,
         aiError: response.aiError,
       })
     } catch (error) {
       setResult({
         kind: 'workflow',
         mode: 'error',
-        title: 'Workflow draft failed',
-        body: error instanceof Error ? error.message : 'Janusly could not draft a workflow.',
+        title: t('aiCopilot.draftFailed') as string,
+        body: error instanceof Error ? error.message : (t('aiCopilot.draftFailedBody') as string),
       })
     } finally {
       setLoading(null)
@@ -198,8 +202,8 @@ export function AiCopilotPanel({
         kind: 'explanation',
         mode: response.mode,
         title: response.aiError
-          ? `Local explanation for ${workflowName} (AI failed)`
-          : `Explanation for ${workflowName}`,
+          ? (t('aiCopilot.explanationLocal', { name: workflowName }) as string)
+          : (t('aiCopilot.explanationOk', { name: workflowName }) as string),
         body: response.explanation,
         aiError: response.aiError,
       })
@@ -207,8 +211,8 @@ export function AiCopilotPanel({
       setResult({
         kind: 'explanation',
         mode: 'error',
-        title: 'Explanation failed',
-        body: error instanceof Error ? error.message : 'Janusly could not explain this workflow.',
+        title: t('aiCopilot.explanationFailed') as string,
+        body: error instanceof Error ? error.message : (t('aiCopilot.explanationFailedBody') as string),
       })
     } finally {
       setLoading(null)
@@ -223,8 +227,8 @@ export function AiCopilotPanel({
         kind: 'review',
         mode: response.mode,
         title: response.aiError
-          ? `Local readiness review for ${workflowName} (AI failed)`
-          : `Production readiness review for ${workflowName}`,
+          ? (t('aiCopilot.reviewLocal', { name: workflowName }) as string)
+          : (t('aiCopilot.reviewOk', { name: workflowName }) as string),
         review: response.review,
         aiError: response.aiError,
       })
@@ -232,13 +236,21 @@ export function AiCopilotPanel({
       setResult({
         kind: 'review',
         mode: 'error',
-        title: 'Review failed',
+        title: t('aiCopilot.reviewFailed') as string,
         review: { status: 'fail', issues: [] },
-        aiError: error instanceof Error ? error.message : 'Janusly could not review this workflow.',
+        aiError: error instanceof Error ? error.message : (t('aiCopilot.reviewFailedBody') as string),
       })
     } finally {
       setLoading(null)
     }
+  }
+
+  const reviewSummary = (review: ReviewFindings, mode: AiMode): string => {
+    if (mode === 'error') return t('aiCopilot.reviewError') as string
+    if (review.status === 'pass') return t('aiCopilot.reviewPass') as string
+    if (review.status === 'warn') return t('aiCopilot.reviewWarn', { count: review.issues.length }) as string
+    const blockerCount = review.issues.filter((i) => i.severity === 'fail').length
+    return t('aiCopilot.reviewFail', { count: blockerCount }) as string
   }
 
   return (
@@ -248,7 +260,7 @@ export function AiCopilotPanel({
           <span className={health?.enabled ? 'mode-pill mode-pill-ai' : 'mode-pill mode-pill-fallback'}>
             {healthLabel}
           </span>
-          <h2>Describe the outcome. Janusly builds the flow.</h2>
+          <h2>{t('aiCopilot.heroTitle')}</h2>
           <p>{healthDetail}</p>
         </div>
         <Sparkles size={28} aria-hidden="true" />
@@ -257,11 +269,11 @@ export function AiCopilotPanel({
       <section className="panel-card">
         <div className="split-row">
           <div>
-            <div className="section-kicker">Create</div>
-            <strong>Tell Janusly what should happen</strong>
+            <div className="section-kicker">{t('aiCopilot.create')}</div>
+            <strong>{t('aiCopilot.tellHeading')}</strong>
           </div>
           <span className={health?.enabled ? 'mode-pill mode-pill-ai' : 'mode-pill mode-pill-neutral'}>
-            {health?.enabled ? health.model : 'Local rules'}
+            {health?.enabled ? health.model : t('aiCopilot.localRules')}
           </span>
         </div>
 
@@ -270,10 +282,10 @@ export function AiCopilotPanel({
           value={prompt}
           disabled={loading === 'generate'}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Example: when a customer asks for a refund, check policy, summarize risk, and ask for approval."
+          placeholder={t('aiCopilot.placeholder') as string}
         />
 
-        <div className="suggestion-row" aria-label="Prompt examples">
+        <div className="suggestion-row" aria-label={t('aiCopilot.examplesAria') as string}>
           {starterPrompts.map((starter) => (
             <button key={starter} className="small-command" onClick={() => setPrompt(starter)} type="button">
               {starter.slice(0, 34)}…
@@ -284,17 +296,17 @@ export function AiCopilotPanel({
         <div className="copilot-actions">
           <button className="command-button command-button-primary" disabled={loading === 'generate' || !prompt.trim()} onClick={generate}>
             <Sparkles size={16} aria-hidden="true" />
-            <span>{loading === 'generate' ? 'Drafting…' : 'Draft flow'}</span>
+            <span>{loading === 'generate' ? t('aiCopilot.drafting') : t('aiCopilot.draft')}</span>
             <CostEstimateChip action="generate" model={health?.model} />
           </button>
           <button className="command-button" disabled={loading === 'explain'} onClick={explain}>
             <CheckCircle2 size={16} aria-hidden="true" />
-            <span>{loading === 'explain' ? 'Explaining…' : 'Explain this flow'}</span>
+            <span>{loading === 'explain' ? t('aiCopilot.explaining') : t('aiCopilot.explain')}</span>
             <CostEstimateChip action="explain" model={health?.model} />
           </button>
           <button className="command-button" disabled={loading === 'review'} onClick={review}>
             <ShieldCheck size={16} aria-hidden="true" />
-            <span>{loading === 'review' ? 'Reviewing…' : 'Review this flow'}</span>
+            <span>{loading === 'review' ? t('aiCopilot.reviewing') : t('aiCopilot.review')}</span>
             <CostEstimateChip action="review" model={health?.model} />
           </button>
         </div>
@@ -306,11 +318,11 @@ export function AiCopilotPanel({
             <strong>{result.title}</strong>
             <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
           </div>
-          <p className="helper-text">{modeCopy[result.mode]}</p>
+          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never) as string}</p>
           <div className="result-body">{result.body}</div>
           {result.aiError && (
             <div className="issue issue-warn" role="status">
-              <strong>AI request failed.</strong>{' '}
+              <strong>{t('aiCopilot.aiFailedTitle')}</strong>{' '}
               <span>{describeAiError(result.aiError)}</span>
             </div>
           )}
@@ -323,40 +335,38 @@ export function AiCopilotPanel({
             <strong>{result.title}</strong>
             <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
           </div>
-          <p className="helper-text">
-            {result.mode === 'error'
-              ? 'The review could not be completed. Check the API connection and try again.'
-              : result.review.status === 'pass'
-              ? 'No production-readiness blockers found.'
-              : result.review.status === 'warn'
-                ? `${result.review.issues.length} issue${result.review.issues.length === 1 ? '' : 's'} worth reviewing before production.`
-                : `${result.review.issues.filter((i) => i.severity === 'fail').length} blocker${result.review.issues.filter((i) => i.severity === 'fail').length === 1 ? '' : 's'} — fix before production-mode runs.`}
-          </p>
+          <p className="helper-text">{reviewSummary(result.review, result.mode)}</p>
           {result.aiError && (
             <div className={`issue ${result.mode === 'error' ? 'issue-error' : 'issue-warn'}`} role="status">
-              <strong>{result.mode === 'error' ? 'Review request failed.' : 'AI review fell back to local rules.'}</strong>{' '}
+              <strong>{result.mode === 'error' ? t('aiCopilot.reviewErrorTitle') : t('aiCopilot.reviewFallbackTitle')}</strong>{' '}
               <span>{describeAiError(result.aiError)}</span>
             </div>
           )}
           {result.review.issues.length > 0 && (
             <ul className="we-readiness-badge__issues" style={{ position: 'static', maxWidth: 'none' }}>
-              {result.review.issues.map((issue, index) => (
-                <li key={`${issue.code}-${index}`} className={`we-readiness-issue we-readiness-issue--${issue.severity === 'info' ? 'warn' : issue.severity}`}>
-                  <strong className="we-readiness-issue__code">{issue.code}</strong>
-                  {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
-                  {issue.edgeId && <span className="we-readiness-issue__node"> · {issue.edgeId}</span>}
-                  <p className="we-readiness-issue__message">{issue.message}</p>
-                  <p className="we-readiness-issue__suggestion">Why: {issue.rationale}</p>
-                  <p className="we-readiness-issue__suggestion">Fix: {issue.suggestion}</p>
-                </li>
-              ))}
+              {result.review.issues.map((issue, index) => {
+                // Translate the engine-emitted code via the AI-review helper;
+                // falls back to the original `issue.message` when no catalog
+                // entry matches.
+                const localised = tAiReviewIssue(issue)
+                return (
+                  <li key={`${issue.code}-${index}`} className={`we-readiness-issue we-readiness-issue--${issue.severity === 'info' ? 'warn' : issue.severity}`}>
+                    <strong className="we-readiness-issue__code">{issue.code}</strong>
+                    {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
+                    {issue.edgeId && <span className="we-readiness-issue__node"> · {issue.edgeId}</span>}
+                    <p className="we-readiness-issue__message">{localised}</p>
+                    <p className="we-readiness-issue__suggestion">{t('aiCopilot.reviewWhy', { rationale: issue.rationale })}</p>
+                    <p className="we-readiness-issue__suggestion">{t('aiCopilot.reviewFix', { suggestion: issue.suggestion })}</p>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
       )}
 
       <section className="panel-card">
-        <div className="section-kicker">Supported AI use cases</div>
+        <div className="section-kicker">{t('aiCopilot.useCases')}</div>
         <div className="usecase-list">
           {useCases.map((useCase) => (
             <div key={useCase.title} className="usecase-row">
@@ -372,7 +382,7 @@ export function AiCopilotPanel({
       </section>
 
       <section className="panel-card">
-        <div className="section-kicker">Full AI readiness</div>
+        <div className="section-kicker">{t('aiCopilot.readiness.heading')}</div>
         <div className="usecase-list">
           {readinessSteps.map((step) => (
             <div key={step.title} className="usecase-row">
@@ -382,7 +392,7 @@ export function AiCopilotPanel({
                 <p>{step.body}</p>
               </div>
               <span className={step.ready ? 'mode-pill mode-pill-ai' : 'mode-pill mode-pill-neutral'}>
-                {step.ready ? 'Ready' : 'Check'}
+                {step.ready ? t('aiCopilot.readiness.ready') : t('aiCopilot.readiness.check')}
               </span>
             </div>
           ))}
@@ -392,11 +402,11 @@ export function AiCopilotPanel({
       <section className="copilot-secondary-actions">
         <button className="command-button" onClick={onOpenRuns}>
           <MessageSquareText size={16} aria-hidden="true" />
-          <span>Ask about a run</span>
+          <span>{t('aiCopilot.askAboutRun')}</span>
         </button>
         <button className="command-button" onClick={onOpenTemplates}>
           <GitBranch size={16} aria-hidden="true" />
-          <span>Browse recipes</span>
+          <span>{t('aiCopilot.browseRecipes')}</span>
         </button>
       </section>
     </div>

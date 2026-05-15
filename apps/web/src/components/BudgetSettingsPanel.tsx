@@ -20,6 +20,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Save, ShieldAlert } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
+import { tApiError, useT } from "../i18n";
 
 type OrgBudgetForm = {
   monthlyUsd: string;
@@ -54,6 +55,7 @@ type WorkflowBudgetRow = {
 };
 
 export function BudgetSettingsPanel() {
+  const { t } = useT();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
   const platformVersion = useWorkflowStore((state) => state.platformVersion);
@@ -97,11 +99,11 @@ export function BudgetSettingsPanel() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load budget");
+        setError(err instanceof Error ? err.message : (t("budget.errorLoad") as string));
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [platformVersion]);
+  }, [platformVersion, t]);
 
   // Load workflows for the per-workflow dropdown.
   useEffect(() => {
@@ -172,9 +174,9 @@ export function BudgetSettingsPanel() {
     try {
       const monthlyUsd = Number(form.monthlyUsd);
       const warnPercent = Number(form.warnPercent);
-      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error("Monthly budget must be a non-negative number");
+      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly") as string);
       if (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100) {
-        throw new Error("Warning threshold must be a whole number between 0 and 100");
+        throw new Error(t("budget.errorWarn") as string);
       }
       await api("/org/config", {
         method: "POST",
@@ -188,10 +190,10 @@ export function BudgetSettingsPanel() {
         method: "POST",
         body: JSON.stringify({ key: ORG_CONFIG_KEYS.policy, value: form.policy }),
       });
-      addToast("AI budget updated", "success");
+      addToast(t("budget.toastOrgSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Save failed";
+      const message = tApiError(err) || (t("budget.errorSave") as string);
       setError(message);
       addToast(message, "error");
     } finally {
@@ -206,19 +208,19 @@ export function BudgetSettingsPanel() {
     try {
       const monthlyUsd = Number(wfMonthly);
       const warnPercent = Number(wfWarnPercent);
-      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error("Monthly budget must be a non-negative number");
+      if (!Number.isFinite(monthlyUsd) || monthlyUsd < 0) throw new Error(t("budget.errorMonthly") as string);
       if (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100) {
-        throw new Error("Warning threshold must be a whole number between 0 and 100");
+        throw new Error(t("budget.errorWarn") as string);
       }
       await api(`/workflows/${encodeURIComponent(selectedWorkflowId)}/budget`, {
         method: "POST",
         body: JSON.stringify({ monthlyUsd, warnPercent, policy: wfPolicy }),
       });
       setWfStatus("saved");
-      addToast("Workflow budget saved", "success");
+      addToast(t("budget.workflow.toastSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Save failed";
+      const message = tApiError(err) || (t("budget.errorSave") as string);
       setWfStatus(message);
       addToast(message, "error");
     } finally {
@@ -235,12 +237,9 @@ export function BudgetSettingsPanel() {
       <div className="we-budget-settings__head">
         <span className="we-budget-settings__icon" aria-hidden="true"><Coins size={18} /></span>
         <div>
-          <div className="section-kicker">AI cost governance</div>
-          <h2 id="budget-settings-heading">Budget settings</h2>
-          <p className="helper-text">
-            Configure monthly AI spend limits. Set 0 to turn the limit off.
-            Choose whether Janusly warns only or stops new AI calls when the limit is reached.
-          </p>
+          <div className="section-kicker">{t("budget.kicker")}</div>
+          <h2 id="budget-settings-heading">{t("budget.heading")}</h2>
+          <p className="helper-text">{t("budget.intro")}</p>
         </div>
       </div>
 
@@ -252,9 +251,9 @@ export function BudgetSettingsPanel() {
       )}
 
       <fieldset className="we-budget-settings__fields" disabled={loading || saving}>
-        <legend className="section-kicker">Org-wide</legend>
+        <legend className="section-kicker">{t("budget.org")}</legend>
         <label className="we-field">
-          <span>Monthly USD ceiling</span>
+          <span>{t("budget.field.monthly")}</span>
           <input
             type="number"
             min={0}
@@ -263,10 +262,10 @@ export function BudgetSettingsPanel() {
             onChange={(event) => setForm((prev) => ({ ...prev, monthlyUsd: event.target.value }))}
             data-testid="budget-org-monthly"
           />
-          <small>{orgBudgetDisabled ? "No budget configured (0 turns the limit off)." : "Janusly watches monthly spend against this amount."}</small>
+          <small>{orgBudgetDisabled ? t("budget.field.monthlyHintOff") : t("budget.field.monthlyHintOn")}</small>
         </label>
         <label className="we-field">
-          <span>Warning threshold (%)</span>
+          <span>{t("budget.field.warn")}</span>
           <input
             type="number"
             min={0}
@@ -276,17 +275,17 @@ export function BudgetSettingsPanel() {
             onChange={(event) => setForm((prev) => ({ ...prev, warnPercent: event.target.value }))}
             data-testid="budget-org-warn"
           />
-          <small>Janusly records a warning when monthly spend reaches this percent.</small>
+          <small>{t("budget.field.warnHint")}</small>
         </label>
         <label className="we-field">
-          <span>Exceeded policy</span>
+          <span>{t("budget.field.policy")}</span>
           <select
             value={form.policy}
             onChange={(event) => setForm((prev) => ({ ...prev, policy: event.target.value === "block" ? "block" : "warn" }))}
             data-testid="budget-org-policy"
           >
-            <option value="warn">Warn only — keep AI calls running</option>
-            <option value="block">Block calls — stop AI calls at the limit</option>
+            <option value="warn">{t("budget.policy.warnLabel")}</option>
+            <option value="block">{t("budget.policy.blockLabel")}</option>
           </select>
         </label>
         <div className="we-budget-settings__actions">
@@ -298,35 +297,35 @@ export function BudgetSettingsPanel() {
             data-testid="budget-org-save"
           >
             <Save size={14} aria-hidden="true" />
-            {saving ? "Saving…" : "Save org budget"}
+            {saving ? t("budget.saving") : t("budget.action.saveOrg")}
           </button>
         </div>
       </fieldset>
 
       <fieldset className="we-budget-settings__fields" disabled={workflows.length === 0 || wfSaving}>
-        <legend className="section-kicker">Per-workflow override</legend>
+        <legend className="section-kicker">{t("budget.workflow.title")}</legend>
         {workflows.length === 0 ? (
-          <p className="helper-text">No saved workflows yet. Save a workflow to set per-workflow budgets.</p>
+          <p className="helper-text">{t("budget.workflow.empty")}</p>
         ) : (
           <>
             <label className="we-field">
-              <span>Workflow</span>
+              <span>{t("budget.workflow.label")}</span>
               <select
                 value={selectedWorkflowId}
                 onChange={(event) => setSelectedWorkflowId(event.target.value)}
                 data-testid="budget-workflow-select"
               >
-                <option value="">— pick a workflow —</option>
+                <option value="">{t("budget.workflow.pick")}</option>
                 {workflows.map((wf) => (
                   <option key={wf.id} value={wf.id ?? ""}>{wf.name ?? wf.id}</option>
                 ))}
               </select>
               {wfExisting && (
-                <small>Current override: ${wfExisting.monthlyUsd.toFixed(2)} / month.</small>
+                <small>{t("budget.workflow.current", { usd: wfExisting.monthlyUsd.toFixed(2) })}</small>
               )}
             </label>
             <label className="we-field">
-              <span>Monthly USD ceiling</span>
+              <span>{t("budget.field.monthly")}</span>
               <input
                 type="number"
                 min={0}
@@ -338,7 +337,7 @@ export function BudgetSettingsPanel() {
               />
             </label>
             <label className="we-field">
-              <span>Warning threshold (%)</span>
+              <span>{t("budget.field.warn")}</span>
               <input
                 type="number"
                 min={0}
@@ -351,21 +350,21 @@ export function BudgetSettingsPanel() {
               />
             </label>
             <label className="we-field">
-              <span>Exceeded policy</span>
+              <span>{t("budget.field.policy")}</span>
               <select
                 value={wfPolicy}
                 onChange={(event) => setWfPolicy(event.target.value === "block" ? "block" : "warn")}
                 disabled={!selectedWorkflowId}
                 data-testid="budget-workflow-policy"
               >
-                <option value="warn">warn</option>
-                <option value="block">block</option>
+                <option value="warn">{t("budget.policy.warn")}</option>
+                <option value="block">{t("budget.policy.block")}</option>
               </select>
             </label>
             {wfStatus === "saved" && (
               <div className="run-input-form-success" role="status">
                 <CheckCircle2 size={14} aria-hidden="true" />
-                <span>Workflow budget saved.</span>
+                <span>{t("budget.workflow.savedConfirm")}</span>
               </div>
             )}
             {wfStatus && wfStatus !== "saved" && (
@@ -383,7 +382,7 @@ export function BudgetSettingsPanel() {
                 data-testid="budget-workflow-save"
               >
                 <Save size={14} aria-hidden="true" />
-                {wfSaving ? "Saving…" : "Save workflow budget"}
+                {wfSaving ? t("budget.saving") : t("budget.workflow.action")}
               </button>
             </div>
           </>

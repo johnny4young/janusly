@@ -25,6 +25,8 @@ describe("composeRecoveryMetrics — successRate band", () => {
     );
     expect(result.successRate.severity).toBe("healthy");
     expect(result.successRate.display).toBe("95.0%");
+    expect(result.successRate.rationaleCode).toBe("success_rate.summary");
+    expect(result.successRate.rationaleMeta).toMatchObject({ succeeded: 95, terminal: 100 });
   });
 
   it("86/100 succeeded → warn", () => {
@@ -50,6 +52,7 @@ describe("composeRecoveryMetrics — successRate band", () => {
     );
     expect(result.successRate.value).toBe(null);
     expect(result.successRate.severity).toBe("neutral");
+    expect(result.successRate.rationaleCode).toBe("success_rate.empty");
   });
 });
 

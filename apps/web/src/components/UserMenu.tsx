@@ -1,6 +1,7 @@
 /**
  * User dropdown — shows the current user/org, lets the user switch org
- * (Supabase mode) or sign out. Closes on outside-click via a ref.
+ * (Supabase mode), pick a UI language, or sign out. Closes on outside-click
+ * via a ref.
  *
  * Used by `App.tsx` (top-bar header).
  */
@@ -9,9 +10,12 @@ import React, { useEffect, useRef, useState } from 'react'
 import { ChevronDown, LogOut } from 'lucide-react'
 import { AuthProvider, isSupabaseConfigured } from '../auth'
 import { useWorkflowStore } from '../store'
+import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
+import { useT } from '../i18n'
 
-/** Render the user-info chip with org-switch + sign-out actions. */
+/** Render the user-info chip with org-switch + locale-switch + sign-out actions. */
 export function UserMenu() {
+  const { t } = useT()
   const user = useWorkflowStore(state => state.user)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
@@ -40,25 +44,25 @@ export function UserMenu() {
     try {
       await AuthProvider.signOut()
       clearAuth()
-      addToast('Signed out', 'info')
+      addToast(t('toasts.signedOut'), 'info')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Sign out failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
     }
   }
 
   const changeOrg = async () => {
     const trimmed = newOrg.trim()
     if (!trimmed) {
-      addToast('Org id cannot be empty', 'error')
+      addToast(t('toasts.orgRequired'), 'error')
       return
     }
     try {
       const { auth } = await AuthProvider.updateOrg(trimmed)
       setAuth(auth)
       setOpen(false)
-      addToast(`Switched to ${trimmed}`, 'success')
+      addToast(t('toasts.orgSwitched', { org: trimmed }), 'success')
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Org switch failed', 'error')
+      addToast(error instanceof Error ? error.message : t('toasts.orgSwitchFailed'), 'error')
     }
   }
 
@@ -69,6 +73,7 @@ export function UserMenu() {
         className="small-command user-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={open ? t('layout.closeMenu') : t('layout.openMenu')}
       >
         <span className="user-trigger-label">{user?.email ?? userId ?? 'dev-user'}</span>
         <ChevronDown size={14} aria-hidden="true" />
@@ -76,19 +81,21 @@ export function UserMenu() {
 
       {open && (
         <div className="user-popover" role="menu">
-          <label className="field-label" htmlFor="org-switcher">Org</label>
+          <label className="field-label" htmlFor="org-switcher">{t('auth.userMenu.org')}</label>
           <input
             id="org-switcher"
             className="text-field"
             value={newOrg}
             onChange={(event) => setNewOrg(event.target.value)}
           />
-          <button className="small-command" onClick={changeOrg} type="button">Switch org</button>
+          <button className="small-command" onClick={changeOrg} type="button">{t('auth.userMenu.switchOrg')}</button>
+
+          <LocaleSwitcher variant="popover-row" />
 
           {isSupabaseConfigured && (user || userId) && (
             <button className="small-command danger" onClick={logout} type="button">
               <LogOut size={14} aria-hidden="true" />
-              <span>Logout</span>
+              <span>{t('auth.userMenu.logout')}</span>
             </button>
           )}
         </div>

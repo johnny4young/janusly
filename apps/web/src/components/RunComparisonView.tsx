@@ -10,6 +10,8 @@
 
 import React, { useMemo } from 'react'
 import { ArrowRight, Minus, Check, AlertCircle, Beaker } from 'lucide-react'
+import { useT } from '../i18n'
+import { formatStatusLabel } from '../constants'
 
 export type RunComparisonNodeSide = {
   status: string
@@ -142,37 +144,38 @@ function computeSummary(perNode: RunComparisonNode[]): SummaryStats {
   }
 }
 
-const EQUALITY_LABEL: Record<Equality, string> = {
-  equal: 'Equal',
-  changed: 'Changed',
-  'only-base': 'Only base',
-  'only-replay': 'Only replay',
+const EQUALITY_KEY: Record<Equality, string> = {
+  equal: 'comparison.equality.equal',
+  changed: 'comparison.equality.changed',
+  'only-base': 'comparison.equality.onlyBase',
+  'only-replay': 'comparison.equality.onlyReplay',
 }
 
 export function RunComparisonView({ payload }: { payload: RunComparisonPayload }) {
+  const { t } = useT()
   const summary = useMemo(() => computeSummary(payload.perNode), [payload.perNode])
 
   if (payload.perNode.length === 0) {
     return (
       <div className="we-comparison-empty" role="status">
-        No nodes ran in either run. Nothing to compare.
+        {t('comparison.empty')}
       </div>
     )
   }
 
   return (
     <div className="we-comparison">
-      <header className="we-comparison-summary" aria-label="Replay comparison summary">
+      <header className="we-comparison-summary" aria-label={t('comparison.summaryAria')}>
         <div className="we-comparison-summary__line">
           <Beaker size={14} aria-hidden="true" />
           <span>
-            <strong>{summary.changedNodes}</strong> of {summary.totalNodes} {summary.totalNodes === 1 ? 'node' : 'nodes'} changed
+            {t('comparison.changedNodes', { changed: summary.changedNodes, total: summary.totalNodes, count: summary.totalNodes })}
           </span>
           <span aria-hidden="true">·</span>
-          <span>Replay <strong>{payload.replayRun.status}</strong></span>
+          <span>{t('comparison.replayStatus', { status: formatStatusLabel(payload.replayRun.status) })}</span>
           <span aria-hidden="true">·</span>
           <span>
-            latency {formatLatency(summary.baseTotalLatencyMs)}
+            {t('comparison.latency')} {formatLatency(summary.baseTotalLatencyMs)}
             <ArrowRight size={12} aria-hidden="true" style={{ verticalAlign: 'middle', margin: '0 4px' }} />
             {formatLatency(summary.replayTotalLatencyMs)}
             <span className="we-comparison-delta">
@@ -181,7 +184,7 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
           </span>
           <span aria-hidden="true">·</span>
           <span>
-            cost {formatCost(summary.baseTotalCostUsd)}
+            {t('comparison.cost')} {formatCost(summary.baseTotalCostUsd)}
             <ArrowRight size={12} aria-hidden="true" style={{ verticalAlign: 'middle', margin: '0 4px' }} />
             {formatCost(summary.replayTotalCostUsd)}
             <span className="we-comparison-delta">
@@ -191,15 +194,15 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
         </div>
       </header>
 
-      <table className="we-comparison-table" role="table" aria-label="Per-node comparison">
+      <table className="we-comparison-table" role="table" aria-label={t('comparison.tableAria')}>
         <thead>
           <tr>
-            <th scope="col">Node</th>
-            <th scope="col">Base</th>
-            <th scope="col">Replay</th>
-            <th scope="col">Output</th>
-            <th scope="col">Latency Δ</th>
-            <th scope="col">Cost Δ</th>
+            <th scope="col">{t('comparison.col.node')}</th>
+            <th scope="col">{t('comparison.col.base')}</th>
+            <th scope="col">{t('comparison.col.replay')}</th>
+            <th scope="col">{t('comparison.col.output')}</th>
+            <th scope="col">{t('comparison.col.latencyDelta')}</th>
+            <th scope="col">{t('comparison.col.costDelta')}</th>
           </tr>
         </thead>
         <tbody>
@@ -237,9 +240,10 @@ export function RunComparisonView({ payload }: { payload: RunComparisonPayload }
 }
 
 function StatusPill({ status }: { status: string }) {
+  const { t } = useT()
   if (status === 'missing') {
     return (
-      <span className="we-comparison-pill we-comparison-pill--neutral" aria-label="missing">
+      <span className="we-comparison-pill we-comparison-pill--neutral" aria-label={t('comparison.missing')}>
         <Minus size={11} aria-hidden="true" /> —
       </span>
     )
@@ -249,15 +253,16 @@ function StatusPill({ status }: { status: string }) {
     <span className={`we-comparison-pill we-comparison-pill--${tone}`}>
       {tone === 'success' && <Check size={11} aria-hidden="true" />}
       {tone === 'danger' && <AlertCircle size={11} aria-hidden="true" />}
-      {status}
+      {formatStatusLabel(status)}
     </span>
   )
 }
 
 function EqualityChip({ equality }: { equality: Equality }) {
+  const { t } = useT()
   return (
     <span className={`we-comparison-chip we-comparison-chip--${equality}`}>
-      {EQUALITY_LABEL[equality]}
+      {t(EQUALITY_KEY[equality] as never) as string}
     </span>
   )
 }

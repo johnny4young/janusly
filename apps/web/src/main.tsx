@@ -7,11 +7,20 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
+import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
 import './index.css'
 
-createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)
+// Resolve the user's preferred locale BEFORE React mounts so the very first
+// render (boot screen, login form) is already in the right language. The
+// `'system'` sentinel resolves once against `navigator.languages`; explicit
+// choices win indefinitely.
+const stored = getStoredLanguage()
+initI18n(resolveAppLanguage(stored))
+
+void import('./App').then(({ default: App }) => {
+  createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  )
+})

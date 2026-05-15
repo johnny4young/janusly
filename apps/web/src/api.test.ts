@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from './api'
+import { changeAppLanguage, initI18n } from './i18n'
 import { useWorkflowStore } from './store'
 
 let mockSessionToken: string | null = null
@@ -19,6 +20,10 @@ function mockJsonResponse(status: number, payload: unknown) {
 }
 
 describe('api', () => {
+  beforeEach(() => {
+    initI18n('en')
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
@@ -46,6 +51,22 @@ describe('api', () => {
     mockJsonResponse(400, { errors: ['$.invoiceId is required'] })
 
     await expect(api('/validate', { method: 'POST' })).rejects.toThrow('Request failed with 400')
+  })
+
+  it('localizes generic request failures through the active locale', async () => {
+    changeAppLanguage('es')
+    mockJsonResponse(500, {})
+
+    await expect(api('/validate', { method: 'POST' })).rejects.toThrow('La solicitud falló con estado 500')
+  })
+
+  it('localizes offline failures through the active locale', async () => {
+    changeAppLanguage('es')
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('network unavailable')
+    }))
+
+    await expect(api('/ping')).rejects.toThrow('La API de Janusly no está disponible')
   })
 
   it('sends x-janusly-session instead of x-user-id when a session token is set', async () => {

@@ -62,11 +62,11 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 
 ## g. Web deps lockdown
 
-**What:** `apps/web/package.json` only imports: `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`. Forbidden: `@radix-ui/*`, `class-variance-authority`, `clsx`, `tailwind-merge`, any shadcn-style scaffolding.
+**What:** `apps/web/package.json` only imports: `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`, `i18next`, `react-i18next`. The two i18n libs are scoped to the `apps/web/src/i18n/` module — components NEVER import from `i18next` / `react-i18next` directly; every consumer routes through `useT()` / `t()` / the server-event helpers exported from the i18n module. Forbidden: `@radix-ui/*`, `class-variance-authority`, `clsx`, `tailwind-merge`, any shadcn-style scaffolding.
 
-**Why:** The Janusly design system is hand-written CSS with `@theme` tokens. Reintroducing radix/cva/clsx pulls in a parallel design system that fights the CSS-first approach — components end up half-tokenized, theme tokens stop being the source of truth, bundle size grows. The whitelist keeps the design system coherent.
+**Why:** The Janusly design system is hand-written CSS with `@theme` tokens. Reintroducing radix/cva/clsx pulls in a parallel design system that fights the CSS-first approach — components end up half-tokenized, theme tokens stop being the source of truth, bundle size grows. The whitelist keeps the design system coherent. `i18next` + `react-i18next` are an explicit cross-project decision (paridad con `lingua`) but stay isolated behind `apps/web/src/i18n/` so the chokepoint pattern (server-event mapping, parity tests, missing-key fallback) is the only path consumers see.
 
-**Action:** FIX INLINE by rewriting the component with CSS-first Tailwind 4 utilities and removing the dep.
+**Action:** FIX INLINE by rewriting the component with CSS-first Tailwind 4 utilities and removing the dep — or, for the i18n libs, by routing the call through `apps/web/src/i18n` instead of importing them directly.
 
 ## h. Tailwind 4 CSS-first
 
@@ -152,3 +152,19 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 **Why:** the repo is intended to go open source. Comments that link out to internal planning docs become meaningless when those docs aren't shipped (or are stripped before public release). Self-contained explanations age well; planning-artifact links don't.
 
 **Action:** FIX INLINE — rewrite the comment to explain the **what** and **why** in self-contained terms (the motivation usually fits inline in 1–2 sentences). Spot scan: `grep -nE "ENG-[0-9]+|Phase [1-9]|Layer [1-9]|§[0-9]" $(git diff --cached --name-only -- 'packages/*/src/*' 'apps/*/src/*')` should be empty.
+
+## q. i18n coverage
+
+**What:**
+
+- User-facing text added or changed under `apps/web/**` is wrapped via `useT()` / `t()` from `apps/web/src/i18n` — never raw string literals in JSX text nodes, `aria-label`, `placeholder`, `title`, `alt`, or the first argument of `addToast(...)`.
+- Every new key in `apps/web/src/i18n/locales/en/common.json` has a sibling in `apps/web/src/i18n/locales/es/common.json`. The parity test (`apps/web/src/i18n/parity.test.ts`) fails CI when the key sets diverge.
+- Server-emitted strings with a stable `code` flow through the dedicated helpers exported from `apps/web/src/i18n`: `tValidationIssue` (`/validate`, `/start` 422), `tReadinessIssue` (`/workflows/readiness`), `tAiReviewIssue` (`/ai/review-workflow`), `tRunEvent` (`run_events` timeline), `tFailureCluster` (`/dlq/clusters`). When the engine adds a new code, mirror it as `<surface>.<code>` in `en/common.json` + `es/common.json`. Free-form server messages (Supabase errors, generic `Error.message`) flow through `t('serverEvents.fallback', { message })`.
+- Components MUST NOT import from `i18next` / `react-i18next` directly. Every consumer routes through `apps/web/src/i18n` (its `index.ts` re-exports `useTranslation` and `Trans` for the rare cases that need them).
+- Exempt: technical identifiers (`'dev-user'`, role tokens like `'admin'` when stored as values, tool registry keys like `'slack.post'` / `'noop'`), brand-mark codes (`'JN'`, `'Janusly'`), single-punctuation / emoji-only nodes, test files (`*.test.tsx`, `*.browser.test.tsx`), `console.*` / log strings, and backend `error.message` strings passed through unmodified (those become `tServerFallback(message)` if surfaced inline).
+
+**Why:** Janusly ships with `en` + `es` today and is structured to grow to more locales without component rewrites. The chokepoint at `apps/web/src/i18n` keeps the `i18next` + `react-i18next` dependency contained (matching the AGENTS.md Web-deps invariant) and lets the same module own the server-event mapping (codes from the engine become localised on the client). Skipping `t()` regresses coverage silently — a Spanish operator suddenly sees one English string after a feature lands. The parity test catches missing translations at CI time so the only way to add a key is in both locales.
+
+**Action:** FIX INLINE — wrap the literal in `t('namespace.key')` and add the matching pair to `en/common.json` + `es/common.json`. For server-emitted strings, route through the surface-specific helper instead of `t()` directly so missing engine codes still surface readable text via the wrapper. When a component imports `i18next` / `react-i18next` directly, replace with `import { useT, Trans } from '../i18n'`. REPORT (don't fix) when the diff legitimately needs a new exemption category — exemptions live in this file's "Exempt" list above.
+
+**Spot scan:** `bash .claude/skills/janus-review/scripts/check-i18n-coverage.sh` (a symlink to `apps/web/scripts/check-i18n-coverage.sh`) reports suspect literals against `git diff --cached`. Exit 0 = clean, exit 1 = at least one suspect line. False positives are tolerable; the reviewer judges.

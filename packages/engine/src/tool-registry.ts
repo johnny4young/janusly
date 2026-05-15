@@ -47,14 +47,25 @@ import { githubCreateIssueTool, slackPostTool, webhookSendTool } from "./integra
  * Derived at runtime from each tool's Zod input schema (see `describeShape`),
  * so producers can't drift from consumers — change the schema and the JSON
  * shape updates automatically.
+ *
+ * `descriptionCode` is a stable derivation from `name` (`slack.post` →
+ * `slack-post`) so the web layer can translate the description via the
+ * i18n catalog under `tools.<descriptionCode>.description` and fall back
+ * to the literal `description` (English) when no key exists yet.
  */
 export type ToolSchema = {
   name: string;
   description: string;
+  descriptionCode: string;
   required?: string[];
   optional?: string[];
   inputExample?: Record<string, unknown>;
 };
+
+/** Slugify a tool `name` (`slack.post` → `slack-post`) for catalog keys. */
+export function toolDescriptionCode(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
 
 /**
  * Internal definition shape for one registered tool.
@@ -1174,6 +1185,7 @@ export function listTools(): ToolSchema[] {
     return {
       name: tool.name,
       description: tool.description,
+      descriptionCode: toolDescriptionCode(tool.name),
       required,
       optional: optional.length > 0 ? optional : undefined,
       inputExample: tool.inputExample,
