@@ -7,7 +7,7 @@
  */
 
 import React, { useMemo, useState } from 'react'
-import { Download, FlaskConical, Sparkles } from 'lucide-react'
+import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
 import { downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
@@ -88,21 +88,46 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
 
       <div className="panel-list">
         {filtered.length === 0 && (
-          <div className="empty-panel empty-panel-compact">
-            <strong>{t('dlq.empty')}</strong>
-            <p>{t('dlq.emptyHelper')}</p>
+          <div className="we-allclear" data-testid="dlq-empty">
+            <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
+            <div className="we-allclear__copy">
+              <strong>{t('dlq.empty')}</strong>
+              <span>{t('dlq.emptyHelper')}</span>
+            </div>
           </div>
         )}
-        {filtered.map(item => (
-          <button key={item.id} className="list-card list-card-button" onClick={() => setSelectedId(item.id)}>
-            <div className="split-row" style={{ width: '100%' }}>
-              <strong>{item.nodeId}</strong>
-              <span className="status-pill" data-status={item.status}>{formatStatusLabel(item.status)}</span>
-            </div>
-            <span>{t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}</span>
-            <span>{item.createdAt ? new Date(item.createdAt).toLocaleString(getResolvedLocale()) : t('dlq.failedHandoff')}</span>
-          </button>
-        ))}
+        {filtered.length > 0 && (
+          <ul className="we-list">
+            {filtered.map(item => {
+              const severity = item.status === 'open' ? 'danger' : item.status === 'replayed' ? 'success' : 'cobalt'
+              return (
+                <li key={item.id}>
+                  <div
+                    className="we-list-row"
+                    data-clickable="true"
+                    data-severity={severity}
+                    data-testid={`dlq-row-${item.id}`}
+                    onClick={() => setSelectedId(item.id)}
+                  >
+                    <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
+                    <div className="we-list-row__body">
+                      <strong>{item.nodeId}</strong>
+                      <small>
+                        {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
+                        {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
+                      </small>
+                    </div>
+                    <div className="we-list-row__meta">
+                      <span className={`we-list-row__pill we-list-row__pill--${severity === 'danger' ? 'danger' : severity === 'success' ? 'success' : 'cobalt'}`}>
+                        {formatStatusLabel(item.status)}
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
 
       {selected && (

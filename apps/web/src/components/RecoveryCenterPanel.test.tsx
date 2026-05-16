@@ -135,7 +135,10 @@ describe('computeRecommendedActions', () => {
     })
     expect(actions[0]!.id).toBe('run_getting_started')
     expect(actions[0]!.severity).toBe('cyan')
-    expect(actions[0]!.ctaTab).toBe('templates')
+    // CTA routes to AI Studio so the operator can draft a real first flow
+    // (the previous "Browse recipes" placeholder pointed at a demo recipe
+    // that doesn't exist).
+    expect(actions[0]!.ctaTab).toBe('copilot')
   })
 
   it('falls through to healthy_try_studio when every signal is clean', () => {
@@ -170,9 +173,12 @@ describe('buildGreeting', () => {
     const g = buildGreeting({ hour: 20, displayName: 'Jane', openFailures: 0, pendingApprovals: 0, healthScore: 95, totalRuns: 10 })
     expect(g.salutation).toBe('Good evening, Jane.')
   })
-  it('falls back to "there" when displayName is null', () => {
+  it('drops the name filler when displayName is null', () => {
+    // Operator with no resolvable name reads cleaner as "Good morning."
+    // than "Good morning, there." — the former feels intentional, the
+    // latter feels like a stale placeholder.
     const g = buildGreeting({ hour: 9, displayName: null, openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
-    expect(g.salutation).toContain('there')
+    expect(g.salutation).toBe('Good morning.')
   })
   it('subline reflects approvals waiting', () => {
     const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 3, pendingApprovals: 2, healthScore: 80, totalRuns: 50 })
@@ -186,9 +192,13 @@ describe('buildGreeting', () => {
     const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: 96, totalRuns: 50 })
     expect(g.subline).toContain('All clear')
   })
-  it('subline welcomes new operator', () => {
+  it('subline falls to the clean-posture line when no runs yet (the pitch carries the welcome)', () => {
+    // The hero pitch right below the greeting already explains what
+    // Janusly does — duplicating that with a "Welcome to Janusly" subline
+    // wastes attention. New-operator subline now matches the steady-state
+    // clean posture: "Recovery posture is clean across the last 30 days."
     const g = buildGreeting({ hour: 9, displayName: 'J', openFailures: 0, pendingApprovals: 0, healthScore: null, totalRuns: 0 })
-    expect(g.subline).toContain('Welcome to Janusly')
+    expect(g.subline).toContain('Recovery posture is clean')
   })
 })
 
@@ -231,9 +241,9 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     render(<RecoveryCenterPanel {...baseProps} />)
 
     await waitFor(() => {
-      expect(screen.getByTestId('recovery-center-empty')).toBeInTheDocument()
+      expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument()
     })
-    expect(screen.getByText('Welcome to Janusly')).toBeInTheDocument()
+    expect(screen.getByText('From failure to fix in one screen.')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-empty-cta-studio')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-empty-cta-recipes')).toBeInTheDocument()
   })
@@ -249,7 +259,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-empty')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-studio'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('copilot')
@@ -266,7 +276,7 @@ describe('<RecoveryCenterPanel /> — empty state', () => {
     })
 
     render(<RecoveryCenterPanel {...baseProps} />)
-    await waitFor(() => expect(screen.getByTestId('recovery-center-empty')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('recovery-flow-demo')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTestId('recovery-center-empty-cta-recipes'))
     expect(baseProps.onOpenTab).toHaveBeenCalledWith('templates')

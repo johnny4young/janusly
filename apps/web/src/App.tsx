@@ -22,7 +22,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from './Layout'
 import { MarkerType } from '@xyflow/react'
+import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
+import { CommandPalette } from './components/CommandPalette'
+import { ShortcutsModal } from './components/ShortcutsModal'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
@@ -32,12 +35,13 @@ import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
 import { RunInputDialog } from './components/RunInputDialog'
+import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
 import { formatStatusLabel, getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
-import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { useT } from './i18n'
 
@@ -139,10 +143,12 @@ export default function App() {
   const { t, i18n } = useT()
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
   const [tools, setTools] = useState<ToolSchema[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [runs, setRuns] = useState<RunSummary[]>([])
+  const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
   const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
   const [usage, setUsage] = useState<Record<string, number>>({})
   const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
@@ -153,6 +159,64 @@ export default function App() {
   const [runInputOpen, setRunInputOpen] = useState(false)
   const [runInputServerErrors, setRunInputServerErrors] = useState<string[]>([])
   const [runInputSubmitting, setRunInputSubmitting] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  // Stable references for the overlay close callbacks. Inline arrows here
+  // would create a fresh function ref on every App render — polling at 1.5s
+  // plus every Zustand mutation would re-bind the Escape keydown listener
+  // inside each modal's `useEffect`. useCallback pins the ref.
+  const closePalette = useCallback(() => setPaletteOpen(false), [])
+  const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
+
+  // Global keyboard shortcuts:
+  //   Cmd/Ctrl+K — toggle command palette
+  //   ?         — open keyboard shortcuts overlay (when not typing in an input)
+  //   Ctrl+Shift+Q — sign out (matches the kbd shown in the user menu)
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const isTypingInForm = !!target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      )
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen(prev => !prev)
+        return
+      }
+      if (event.key === '?' && !isTypingInForm && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault()
+        setShortcutsOpen(prev => !prev)
+        return
+      }
+      if (event.key === '/' && !isTypingInForm && !event.metaKey && !event.ctrlKey) {
+        // Focus the sidebar search input via a stable data attribute so a
+        // future CSS class rename doesn't silently no-op the shortcut.
+        const search = document.querySelector<HTMLInputElement>('[data-shortcut="sidebar-search"]')
+        if (search) {
+          event.preventDefault()
+          search.focus()
+          search.select()
+        }
+        return
+      }
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'q') {
+        event.preventDefault()
+        void (async () => {
+          try {
+            await AuthProvider.signOut()
+            clearAuth()
+            addToast(t('toasts.signedOut'), 'info')
+          } catch (error) {
+            addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
+          }
+        })()
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [addToast, clearAuth, t])
 
   useEffect(() => {
     let mounted = true
@@ -182,7 +246,7 @@ export default function App() {
   }, [clearAuth, setAuth, setAuthReady])
 
   const refreshPlatform = useCallback(async () => {
-    const [toolData, templateData, credentialData, runData, deadLetterData, usageData, aiHealthData] = await Promise.allSettled([
+    const [toolData, templateData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
       api('/tools'),
       api('/templates'),
       api('/credentials'),
@@ -190,6 +254,7 @@ export default function App() {
       api('/dlq'),
       api('/billing/usage'),
       api('/ai/health'),
+      api('/workflows'),
     ])
 
     if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
@@ -203,6 +268,7 @@ export default function App() {
     if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
       setAiHealth(aiHealthData.value as AiHealth)
     }
+    if (workflowsData.status === 'fulfilled') setSavedWorkflows(Array.isArray(workflowsData.value) ? workflowsData.value : [])
   }, [])
 
   useEffect(() => {
@@ -331,6 +397,7 @@ export default function App() {
     try {
       const workflow = getWorkflowJson()
       const result = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }) as { version?: number }
+      if (typeof result.version === 'number') setCurrentWorkflowVersion(result.version)
       addToast(t('toasts.savedVersion', { version: result.version ?? '?' }), 'success')
       bumpPlatformVersion()
       await refreshPlatform()
@@ -612,25 +679,71 @@ export default function App() {
     storeUpdateEdgeCondition(edgeId, condition || null)
   }, [storeUpdateEdgeCondition])
 
-  if (!authReady) return <div className="boot-screen">{t('app.loading')}</div>
+  if (!authReady) return (
+    <div className="boot-screen" role="status" aria-live="polite">
+      <div className="boot-screen__inner">
+        <BrandMark size={64} />
+        <span className="boot-screen__label">{t('app.loading')}</span>
+      </div>
+    </div>
+  )
   if (!userId && isSupabaseConfigured) return <Login onAuthenticated={() => undefined} />
+
+  const env: 'sandbox' | 'production' = (import.meta as { env?: { PROD?: boolean } }).env?.PROD ? 'production' : 'sandbox'
+  const envLabel = env === 'production' ? t('topbar.env.production') : t('topbar.env.sandbox')
+  const openDlqCount = deadLetters.filter(dlq => dlq.status === 'open').length
+  const activeRunCount = runs.filter(run => run.status === 'running' || run.status === 'paused').length
+  const queueCount = 0
+  const isConnected = streamStatus === 'connected'
 
   return (
     <Layout
       header={
         <>
-          <div className="brand-lockup">
-            <span className="brand-mark">JN</span>
-            <div>
-              <strong>{t('app.brand')}</strong>
-              <span>{t('layout.brandSubtitle', { workflowName: currentWorkflowName, org: orgId ?? 'default' })}</span>
+          <div className="top-bar-left">
+            <BrandMark size={32} />
+            <nav className="top-bar-breadcrumb" aria-label={t('layout.workflowStatus')}>
+              <span>{orgId ?? 'default'}</span>
+              <ChevronRight size={12} aria-hidden="true" />
+              <b>{currentWorkflowName}</b>
+              <span className={`top-bar-env top-bar-env--${env}`}>{envLabel}</span>
+            </nav>
+          </div>
+          <div className="top-bar-right">
+            <div className="top-bar-pill-group">
+              <WorkflowReadinessBadge />
+              <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
             </div>
+            <button
+              type="button"
+              className={openDlqCount > 0 ? 'top-bar-cta top-bar-cta--active' : 'top-bar-cta top-bar-cta--clear'}
+              onClick={() => setActiveTab('home')}
+              aria-label={openDlqCount > 0 ? t('topbar.recoverAria', { count: openDlqCount }) : t('topbar.allClearAria')}
+            >
+              {openDlqCount > 0 ? (
+                <>
+                  <ShieldAlert size={13} aria-hidden="true" />
+                  <span>{t('topbar.recover', { count: openDlqCount })}</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={13} aria-hidden="true" />
+                  <span>{t('topbar.allClear')}</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              className="top-bar-cmdk"
+              onClick={() => setPaletteOpen(true)}
+              aria-label={t('topbar.cmdkAria')}
+            >
+              <Search size={13} aria-hidden="true" />
+              <span>{t('topbar.cmdkLabel')}</span>
+              <kbd>⌘K</kbd>
+            </button>
+            <UserMenu aiHealth={aiHealth} onOpenTab={setActiveTab} onOpenShortcuts={() => setShortcutsOpen(true)} />
           </div>
-          <div className="top-bar-status" aria-label={t('layout.workflowStatus')}>
-            <WorkflowReadinessBadge />
-            <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
-          </div>
-          <UserMenu />
         </>
       }
       sidebar={
@@ -639,6 +752,9 @@ export default function App() {
           aiHealth={aiHealth}
           workflowName={currentWorkflowName}
           streamStatus={streamStatus}
+          workflowEnv={env}
+          workflowVersion={currentWorkflowVersion}
+          workflowRunsCount={runs.length}
           onWorkflowNameChange={setWorkflowName}
           onAdd={addNode}
           onValidate={validateWorkflow}
@@ -647,6 +763,7 @@ export default function App() {
           onNew={() => {
             newWorkflow()
             setValidationIssues([])
+            setCurrentWorkflowVersion(null)
           }}
           onStart={startWorkflow}
         />
@@ -740,6 +857,86 @@ export default function App() {
               onCancel={() => setRunInputOpen(false)}
             />
           ) : null}
+          <CommandPalette
+            open={paletteOpen}
+            onClose={closePalette}
+            openTab={setActiveTab}
+            onValidate={validateWorkflow}
+            onSave={saveWorkflow}
+            onStart={startWorkflow}
+            onNew={() => {
+              newWorkflow()
+              setValidationIssues([])
+              setCurrentWorkflowVersion(null)
+            }}
+            onSignOut={async () => {
+              try {
+                await AuthProvider.signOut()
+                clearAuth()
+                addToast(t('toasts.signedOut'), 'info')
+              } catch (error) {
+                addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
+              }
+            }}
+            onDocsUnavailable={() => addToast(t('statusBar.docsUnavailable'), 'info')}
+            workflows={savedWorkflows.map(wf => ({ id: wf.id, name: wf.name }))}
+            recipes={templates.map(template => ({ id: template.id, name: template.name }))}
+            onOpenWorkflow={(id) => { void openWorkflow(id) }}
+            onOpenRecipe={(id) => {
+              const tmpl = templates.find(template => template.id === id)
+              if (tmpl) {
+                hydrateWorkflow(tmpl.workflow)
+                setValidationIssues([])
+                setActiveTab('inspector')
+              }
+            }}
+          />
+          <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} />
+        </>
+      }
+      statusBar={
+        <>
+          <div className="bottom-status-bar__group">
+            <span className={`bottom-status-bar__item ${isConnected ? 'bottom-status-bar__item--live' : ''}`}>
+              <span className="bottom-status-bar__dot" />
+              <span>{isConnected ? t('statusBar.operatorOnline') : t('statusBar.operatorOffline')}</span>
+            </span>
+            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            <span className="bottom-status-bar__item">
+              <Activity size={12} aria-hidden="true" />
+              <span>{t('statusBar.queue', { queue: queueCount, dlq: openDlqCount })}</span>
+            </span>
+            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            <span className="bottom-status-bar__item">
+              <PlayCircle size={12} aria-hidden="true" />
+              <span>{t('statusBar.activeRuns', { count: activeRunCount })}</span>
+            </span>
+          </div>
+          <div className="bottom-status-bar__group bottom-status-bar__group--right">
+            <button
+              type="button"
+              className="bottom-status-bar__item"
+              onClick={() => addToast(t('statusBar.docsUnavailable'), 'info')}
+              title={t('statusBar.docsUnavailable')}
+              aria-label={t('statusBar.docsUnavailable')}
+            >
+              {t('statusBar.docs')}
+            </button>
+            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            <span className="bottom-status-bar__item">
+              {orgId ?? 'default'} · build <span>2026.05.14-90f3a77</span>
+            </span>
+            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            <button
+              type="button"
+              className="bottom-status-bar__item bottom-status-bar__item--button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label={t('statusBar.shortcuts')}
+            >
+              <kbd>?</kbd>
+              <span>{t('statusBar.shortcuts')}</span>
+            </button>
+          </div>
         </>
       }
     />
