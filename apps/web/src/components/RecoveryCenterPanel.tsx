@@ -28,18 +28,33 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertOctagon,
   AlertTriangle,
   ArrowRight,
+  ArrowUp,
+  BarChart3,
+  Check,
+  CheckSquare,
   ChevronRight,
+  CircleCheck,
   Coins,
   Compass,
+  DollarSign,
+  Eye,
+  FileDiff,
+  FlaskConical,
   Gauge,
   Inbox,
   Layers,
   PlayCircle,
   RefreshCw,
+  RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
+  User,
   Users,
+  Wand2,
   Workflow,
   Zap,
 } from 'lucide-react'
@@ -49,6 +64,7 @@ import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
+import { BrandMark } from './BrandMark'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
@@ -378,7 +394,7 @@ export function computeRecommendedActions(signals: RecommendedActionSignals): Re
       title: runtimeT('recoveryCenter.action.run_getting_started.title'),
       body: runtimeT('recoveryCenter.action.run_getting_started.body'),
       ctaLabel: runtimeT('recoveryCenter.action.run_getting_started.cta'),
-      ctaTab: 'templates',
+      ctaTab: 'copilot',
       severity: 'cyan',
     })
   }
@@ -407,16 +423,21 @@ export function buildGreeting(args: {
   healthScore: number | null
   totalRuns: number
 }): { salutation: string; subline: string } {
-  const slotKey = args.hour < 12
-    ? 'recoveryCenter.greeting.morning'
-    : args.hour < 18
-      ? 'recoveryCenter.greeting.afternoon'
-      : 'recoveryCenter.greeting.evening'
-  const who = args.displayName ?? runtimeT('recoveryCenter.greeting.fallbackName')
-  const salutation = runtimeT(slotKey, { who })
+  // Greeting drops the "there" filler when no name is available — a bare
+  // "Good morning." reads cleaner than "Good morning, there." and avoids
+  // any sense of generic auto-personalization. Suffix variants land in
+  // sibling keys so the i18n parity test holds for both shapes.
+  const slot = args.hour < 12 ? 'morning' : args.hour < 18 ? 'afternoon' : 'evening'
+  const slotKey = `recoveryCenter.greeting.${slot}${args.displayName ? '' : 'Bare'}`
+  const salutation = args.displayName
+    ? runtimeT(slotKey, { who: args.displayName })
+    : runtimeT(slotKey)
   let subline: string
   if (args.totalRuns === 0) {
-    subline = runtimeT('recoveryCenter.greeting.subline.welcome')
+    // In an empty workspace the pitch line below the hero carries the
+    // copy work — surface the dynamic recovery posture instead of a
+    // generic welcome (which would duplicate the pitch).
+    subline = runtimeT('recoveryCenter.greeting.subline.clean')
   } else if (args.pendingApprovals > 0) {
     subline = runtimeT('recoveryCenter.greeting.subline.approvals', { count: args.pendingApprovals })
   } else if (args.openFailures > 0) {
@@ -574,67 +595,85 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     && (clusters?.clusters.length ?? 0) === 0
     && totalRuns === 0
 
+  const metricStrip = (
+    <section className="we-recovery-center-strip" aria-label={t('recoveryCenter.metricStripAria')}>
+      <RecoveryCenterMetric
+        label={t('recoveryCenter.metric.failures.label')}
+        display={openDeadLetters.length === 0 ? '0' : String(openDeadLetters.length)}
+        numericValue={openDeadLetters.length}
+        severity={openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn'}
+        icon={<AlertTriangle size={16} aria-hidden="true" />}
+        rationale={openDeadLetters.length === 0 ? t('recoveryCenter.metric.failures.rationaleEmpty') : t('recoveryCenter.metric.failures.rationale')}
+        onClick={() => props.onOpenTab('runs')}
+        testId="recovery-center-metric-failures"
+      />
+      <RecoveryCenterMetric
+        label={t('recoveryCenter.metric.mttr.label')}
+        display={metrics?.mttr.display ?? '—'}
+        numericValue={metrics?.mttr.value ?? null}
+        severity={metrics?.mttr.severity ?? 'neutral'}
+        icon={<RefreshCw size={16} aria-hidden="true" />}
+        rationale={metrics?.mttr ? tRecoveryMetricRationale(metrics.mttr) : t('recoveryCenter.metric.mttr.rationaleFallback')}
+        onClick={() => props.onOpenTab('operations')}
+        testId="recovery-center-metric-mttr"
+      />
+      <RecoveryCenterMetric
+        label={t('recoveryCenter.metric.approvals.label')}
+        display={waitingNodes.length === 0 ? '0' : String(waitingNodes.length)}
+        numericValue={waitingNodes.length}
+        severity={waitingNodes.length === 0 ? 'healthy' : 'warn'}
+        icon={<Users size={16} aria-hidden="true" />}
+        rationale={waitingNodes.length === 0 ? t('recoveryCenter.metric.approvals.rationaleEmpty') : t('recoveryCenter.metric.approvals.rationale')}
+        onClick={() => props.onOpenTab('runs')}
+        testId="recovery-center-metric-approvals"
+      />
+      <RecoveryCenterMetric
+        label={t('recoveryCenter.metric.replay.label')}
+        display={metrics?.replayRate.display ?? '—'}
+        numericValue={metrics?.replayRate.value ?? null}
+        severity={metrics?.replayRate.severity ?? 'neutral'}
+        icon={<Zap size={16} aria-hidden="true" />}
+        rationale={metrics?.replayRate ? tRecoveryMetricRationale(metrics.replayRate) : t('recoveryCenter.metric.replay.rationaleFallback')}
+        onClick={() => props.onOpenTab('operations')}
+        testId="recovery-center-metric-replay"
+      />
+    </section>
+  )
+
+  // Operator chat surface (left, 1.7fr) + live status rail (right, 1fr).
+  // Mirrors `ui_kits/studio/home-operator.html` from the design system zip.
+  // The layout is the same in empty and populated states — every tile
+  // surfaces its own AllClearState when it has nothing to show, so the
+  // operator's mental model never changes between "fresh install" and
+  // "production workflow".
   return (
-    <div className="we-recovery-center-panel">
+    <div className="we-recovery-center-panel we-recovery-center-panel--operator">
       <header className="we-recovery-center-hero" role="banner">
         <div className="we-recovery-center-hero__copy">
           <div className="section-kicker">{t('recoveryCenter.kicker')}</div>
           <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{greeting.salutation}</h1>
           <p className="we-recovery-center-hero__subline">{greeting.subline}</p>
+          <p className="we-recovery-center-hero__pitch">{t('recoveryCenter.hero.pitch')}</p>
         </div>
         <HealthRing score={healthScore} />
       </header>
 
-      <section className="we-recovery-center-strip" aria-label={t('recoveryCenter.metricStripAria')}>
-        <RecoveryCenterMetric
-          label={t('recoveryCenter.metric.failures.label')}
-          display={openDeadLetters.length === 0 ? '0' : String(openDeadLetters.length)}
-          numericValue={openDeadLetters.length}
-          severity={openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn'}
-          icon={<AlertTriangle size={16} aria-hidden="true" />}
-          rationale={openDeadLetters.length === 0 ? t('recoveryCenter.metric.failures.rationaleEmpty') : t('recoveryCenter.metric.failures.rationale')}
-          onClick={() => props.onOpenTab('runs')}
-          testId="recovery-center-metric-failures"
-        />
-        <RecoveryCenterMetric
-          label={t('recoveryCenter.metric.mttr.label')}
-          display={metrics?.mttr.display ?? '—'}
-          numericValue={metrics?.mttr.value ?? null}
-          severity={metrics?.mttr.severity ?? 'neutral'}
-          icon={<RefreshCw size={16} aria-hidden="true" />}
-          rationale={metrics?.mttr ? tRecoveryMetricRationale(metrics.mttr) : t('recoveryCenter.metric.mttr.rationaleFallback')}
-          onClick={() => props.onOpenTab('operations')}
-          testId="recovery-center-metric-mttr"
-        />
-        <RecoveryCenterMetric
-          label={t('recoveryCenter.metric.approvals.label')}
-          display={waitingNodes.length === 0 ? '0' : String(waitingNodes.length)}
-          numericValue={waitingNodes.length}
-          severity={waitingNodes.length === 0 ? 'healthy' : 'warn'}
-          icon={<Users size={16} aria-hidden="true" />}
-          rationale={waitingNodes.length === 0 ? t('recoveryCenter.metric.approvals.rationaleEmpty') : t('recoveryCenter.metric.approvals.rationale')}
-          onClick={() => props.onOpenTab('runs')}
-          testId="recovery-center-metric-approvals"
-        />
-        <RecoveryCenterMetric
-          label={t('recoveryCenter.metric.replay.label')}
-          display={metrics?.replayRate.display ?? '—'}
-          numericValue={metrics?.replayRate.value ?? null}
-          severity={metrics?.replayRate.severity ?? 'neutral'}
-          icon={<Zap size={16} aria-hidden="true" />}
-          rationale={metrics?.replayRate ? tRecoveryMetricRationale(metrics.replayRate) : t('recoveryCenter.metric.replay.rationaleFallback')}
-          onClick={() => props.onOpenTab('operations')}
-          testId="recovery-center-metric-replay"
-        />
-      </section>
+      {metricStrip}
 
-      {isEmpty ? (
-        <RecoveryCenterEmptyHero
-          onOpenStudio={() => props.onOpenTab('copilot')}
-          onOpenRecipes={() => props.onOpenTab('templates')}
-        />
-      ) : (
-        <div className="we-recovery-center-grid">
+      <div className="we-operator-grid">
+        <section className="we-operator-chat">
+          <RecoveryCenterComposer
+            onOpenTab={props.onOpenTab}
+            recentDlqRunId={openDeadLetters[0]?.runId}
+            showSeedTranscript={isEmpty}
+          />
+          {isEmpty && (
+            <RecoveryFlowDemo
+              onOpenStudio={() => props.onOpenTab('copilot')}
+              onOpenRecipes={() => props.onOpenTab('templates')}
+            />
+          )}
+          <RecommendedActionsTile actions={recommendedActions} onOpenTab={props.onOpenTab} />
           <RecoveryQueueTile
             deadLetters={openDeadLetters}
             runs={props.runs}
@@ -642,24 +681,29 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             onOpenRun={props.onOpenRun}
             onOpenTab={props.onOpenTab}
           />
-          <FailureClustersTile
-            clusters={topClusters}
-            totalSamples={clusters?.totalSamples ?? 0}
-            onOpenTab={props.onOpenTab}
-          />
+        </section>
+        <aside className="we-operator-rail" aria-label={t('recoveryCenter.railAria')}>
           <PendingApprovalsTile
             waitingNodes={waitingNodes}
             runs={props.runs}
             onOpenRun={props.onOpenRun}
             onOpenTab={props.onOpenTab}
+            onApproveNode={props.onApproveNode}
           />
-          <RecommendedActionsTile
-            actions={recommendedActions}
+          <FailureClustersTile
+            clusters={topClusters}
+            totalSamples={clusters?.totalSamples ?? 0}
+            onOpenTab={props.onOpenTab}
+          />
+          <OperatorTodayTile
+            metrics={metrics}
+            openDeadLetters={openDeadLetters.length}
+            waitingNodes={waitingNodes.length}
             onOpenTab={props.onOpenTab}
           />
           <BudgetTile onOpenTab={props.onOpenTab} />
-        </div>
-      )}
+        </aside>
+      </div>
 
       {metricsError && !metricsLoading && (
         <p className="we-recovery-center-error" role="status">
@@ -667,6 +711,358 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         </p>
       )}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// OperatorTodayTile — mini stats grid mirroring the right rail of
+// `ui_kits/studio/home-operator.html` (Runs / Success / Spend / MTTR).
+// Lives only here; not a generic export.
+// ─────────────────────────────────────────────────────────────────────────
+
+function OperatorTodayTile({
+  metrics,
+  openDeadLetters,
+  waitingNodes,
+  onOpenTab,
+}: {
+  metrics: RecoveryMetrics | null
+  openDeadLetters: number
+  waitingNodes: number
+  onOpenTab: (tab: ActiveTab) => void
+}) {
+  const { t } = useT()
+  return (
+    <RecoveryCenterTile
+      title={t('recoveryCenter.tile.today.title')}
+      kicker={t('recoveryCenter.tile.today.kicker')}
+      severity="cobalt"
+      icon={<BarChart3 size={18} aria-hidden="true" />}
+      testId="recovery-center-tile-today"
+      footer={(
+        <button
+          type="button"
+          className="we-recovery-center-tile__link"
+          onClick={() => onOpenTab('operations')}
+        >
+          {t('recoveryCenter.tile.today.openAll')} <ChevronRight size={14} aria-hidden="true" />
+        </button>
+      )}
+    >
+      <div className="we-operator-mini">
+        <div className="we-operator-mini__cell">
+          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.runs')}</div>
+          <div className="we-operator-mini__val">{metrics?.terminalRuns ?? 0}</div>
+          <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.windowDays', { days: metrics?.windowDays ?? 30 })}</div>
+        </div>
+        <div className="we-operator-mini__cell">
+          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.success')}</div>
+          <div className="we-operator-mini__val">{metrics?.successRate.display ?? '—'}</div>
+          <div className="we-operator-mini__delta" data-severity={metrics?.successRate.severity ?? 'neutral'}>{metrics?.successRate.severity ?? '—'}</div>
+        </div>
+        <div className="we-operator-mini__cell">
+          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.failures')}</div>
+          <div className="we-operator-mini__val">{openDeadLetters}</div>
+          <div className="we-operator-mini__delta" data-severity={openDeadLetters === 0 ? 'success' : 'danger'}>{openDeadLetters === 0 ? t('recoveryCenter.tile.today.clean') : t('recoveryCenter.tile.today.pending')}</div>
+        </div>
+        <div className="we-operator-mini__cell">
+          <div className="we-operator-mini__lbl">{t('recoveryCenter.tile.today.mttr')}</div>
+          <div className="we-operator-mini__val">{metrics?.mttr.display ?? '—'}</div>
+          <div className="we-operator-mini__delta">{t('recoveryCenter.tile.today.pending')} {waitingNodes}</div>
+        </div>
+      </div>
+    </RecoveryCenterTile>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// AllClearState — shared "everything is OK" empty-state component.
+// Stylized with a soft success ring + check glyph + reassuring copy.
+// Used inside each tile when there's no work for the operator.
+// ─────────────────────────────────────────────────────────────────────────
+
+function AllClearState({ message, testId }: { message: string; testId?: string }) {
+  const { t } = useT()
+  return (
+    <div className="we-recovery-allclear" data-testid={testId}>
+      <span className="we-recovery-allclear__ring" aria-hidden="true">
+        <CircleCheck size={18} />
+      </span>
+      <div className="we-recovery-allclear__copy">
+        <strong>{t('recoveryCenter.allClear.title')}</strong>
+        <span>{message}</span>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Operator composer — chat-style input + quick chips that route to existing
+// tabs (Runs / Inspector / Operations / Copilot). The composer is v1
+// UI-only: pressing Send dispatches a "coming soon" toast and opens the
+// AI Studio tab. The chips route directly so the operator can jump into
+// the relevant surface in one click.
+// ─────────────────────────────────────────────────────────────────────────
+
+function RecoveryCenterComposer({
+  onOpenTab,
+  recentDlqRunId,
+  showSeedTranscript,
+}: {
+  onOpenTab: (tab: ActiveTab) => void
+  recentDlqRunId?: string
+  showSeedTranscript?: boolean
+}) {
+  const { t } = useT()
+  const addToast = useWorkflowStore((state) => state.addToast)
+  const nodes = useWorkflowStore((state) => state.nodes)
+  const edges = useWorkflowStore((state) => state.edges)
+  const currentWorkflowName = useWorkflowStore((state) => state.currentWorkflowName)
+  const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [answer, setAnswer] = useState<{ text: string; mode: 'ai' | 'fallback'; aiError?: string } | null>(null)
+
+  const buildWorkflowPayload = () => {
+    return {
+      id: currentWorkflowId,
+      name: currentWorkflowName,
+      nodes: nodes.map((node) => ({ id: node.id, type: node.data.type, config: node.data.config ?? {}, position: node.position })),
+      edges: edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, data: edge.data })),
+    }
+  }
+
+  const askWorkflow = async (prompt: string) => {
+    if (nodes.length === 0) {
+      addToast(runtimeT('recoveryCenter.composer.needWorkflow'), 'info')
+      onOpenTab('copilot')
+      return
+    }
+    setBusy(true)
+    setAnswer(null)
+    try {
+      const result = await api('/ai/explain-workflow', {
+        method: 'POST',
+        body: JSON.stringify({ workflow: buildWorkflowPayload(), prompt }),
+      }) as { mode?: 'ai' | 'fallback' | 'error'; explanation?: string; aiError?: string; error?: string }
+      if (result.error) {
+        addToast(result.error, 'error')
+        return
+      }
+      const mode: 'ai' | 'fallback' = result.mode === 'ai' ? 'ai' : 'fallback'
+      setAnswer({
+        text: result.explanation ?? runtimeT('recoveryCenter.composer.noAnswer'),
+        mode,
+        aiError: result.aiError,
+      })
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : runtimeT('recoveryCenter.composer.callFailed'), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const askRun = async (runId: string, question: string) => {
+    setBusy(true)
+    setAnswer(null)
+    try {
+      const result = await api('/ai/explain-run', {
+        method: 'POST',
+        body: JSON.stringify({ runId, question }),
+      }) as { mode?: 'ai' | 'fallback' | 'error'; explanation?: string; aiError?: string; error?: string }
+      if (result.error) {
+        addToast(result.error, 'error')
+        return
+      }
+      const mode: 'ai' | 'fallback' = result.mode === 'ai' ? 'ai' : 'fallback'
+      setAnswer({
+        text: result.explanation ?? runtimeT('recoveryCenter.composer.noAnswer'),
+        mode,
+        aiError: result.aiError,
+      })
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : runtimeT('recoveryCenter.composer.callFailed'), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submit = async (event?: React.FormEvent) => {
+    event?.preventDefault()
+    const prompt = value.trim()
+    if (!prompt) return
+    await askWorkflow(prompt)
+    setValue('')
+  }
+
+  const handleWhyFail = () => {
+    if (recentDlqRunId) {
+      void askRun(recentDlqRunId, runtimeT('recoveryCenter.composer.chip.whyFail'))
+    } else {
+      onOpenTab('runs')
+    }
+  }
+
+  const handleWhatChanged = () => {
+    if (nodes.length === 0) {
+      onOpenTab('inspector')
+      return
+    }
+    void askWorkflow(runtimeT('recoveryCenter.composer.intent.whatChangedPrompt'))
+  }
+
+  const handleSuggestFix = () => {
+    if (nodes.length === 0) {
+      onOpenTab('operations')
+      return
+    }
+    void askWorkflow(runtimeT('recoveryCenter.composer.intent.suggestFixPrompt'))
+  }
+
+  const handleSummarize = () => {
+    if (nodes.length === 0) {
+      onOpenTab('operations')
+      return
+    }
+    void askWorkflow(runtimeT('recoveryCenter.composer.intent.summarizePrompt'))
+  }
+
+  const handleSpend = () => {
+    if (nodes.length === 0) {
+      onOpenTab('operations')
+      return
+    }
+    void askWorkflow(runtimeT('recoveryCenter.composer.intent.spendPrompt'))
+  }
+
+  return (
+    <section className="recovery-center-composer" data-testid="recovery-center-composer">
+      <header className="recovery-center-composer__head">
+        <span className="recovery-center-composer__avatar" aria-hidden="true">
+          <Sparkles size={14} />
+        </span>
+        <div>
+          <div className="section-kicker">{t('recoveryCenter.composer.kicker')}</div>
+        </div>
+      </header>
+
+      {showSeedTranscript && !answer && (
+        <div className="recovery-center-composer__seed" data-testid="recovery-center-composer-seed">
+          <article className="recovery-center-composer__msg recovery-center-composer__msg--ai">
+            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><Sparkles size={12} /></span>
+            <div className="recovery-center-composer__msg-body">
+              <header>
+                <strong>{t('recoveryCenter.composer.seed.ai1.who')}</strong>
+                <small>{t('recoveryCenter.composer.seed.ai1.when')}</small>
+              </header>
+              <p>{t('recoveryCenter.composer.seed.ai1.body')}</p>
+              <div className="recovery-center-composer__seed-chips">
+                <span className="recovery-center-composer__seed-chip"><Sparkles size={10} aria-hidden="true" /> secret_missing</span>
+                <span className="recovery-center-composer__seed-chip"><Layers size={10} aria-hidden="true" /> 9 cluster entries</span>
+                <span className="recovery-center-composer__seed-chip"><Check size={10} aria-hidden="true" /> sandbox 412ms</span>
+                <span className="recovery-center-composer__seed-chip recovery-center-composer__seed-chip--conf">92 AI</span>
+              </div>
+              <div className="recovery-center-composer__seed-actions" aria-label={t('recoveryCenter.composer.seed.ai1.actionsAria')}>
+                <button type="button" className="command-button command-button-primary command-button-compact" disabled>
+                  <Check size={13} aria-hidden="true" />
+                  <span>{t('recoveryCenter.composer.seed.ai1.action.apply')}</span>
+                </button>
+                <button type="button" className="command-button command-button-compact" disabled>
+                  <FileDiff size={13} aria-hidden="true" />
+                  <span>{t('recoveryCenter.composer.seed.ai1.action.diff')}</span>
+                </button>
+                <button type="button" className="command-button command-button-compact" disabled>
+                  <span>{t('recoveryCenter.composer.seed.ai1.action.reject')}</span>
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article className="recovery-center-composer__msg recovery-center-composer__msg--user">
+            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><User size={12} /></span>
+            <div className="recovery-center-composer__msg-body">
+              <header>
+                <strong>{t('recoveryCenter.composer.seed.user.who')}</strong>
+                <small>{t('recoveryCenter.composer.seed.user.when')}</small>
+              </header>
+              <p>{t('recoveryCenter.composer.seed.user.body')}</p>
+            </div>
+          </article>
+
+          <article className="recovery-center-composer__msg recovery-center-composer__msg--ai">
+            <span className="recovery-center-composer__msg-ic" aria-hidden="true"><Sparkles size={12} /></span>
+            <div className="recovery-center-composer__msg-body">
+              <header>
+                <strong>{t('recoveryCenter.composer.seed.ai2.who')}</strong>
+                <small>{t('recoveryCenter.composer.seed.ai2.when')}</small>
+              </header>
+              <p>{t('recoveryCenter.composer.seed.ai2.body')}</p>
+            </div>
+          </article>
+
+          <div className="recovery-center-composer__seed-hint">
+            <Sparkles size={11} aria-hidden="true" />
+            <span>{t('recoveryCenter.composer.seed.hint')}</span>
+          </div>
+        </div>
+      )}
+
+      <form className="recovery-center-composer__input" onSubmit={submit}>
+        <Sparkles size={16} aria-hidden="true" />
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={t('recoveryCenter.composer.placeholder')}
+          aria-label={t('recoveryCenter.composer.placeholder')}
+          disabled={busy}
+        />
+        <button type="submit" className="recovery-center-composer__send" disabled={busy || value.trim().length === 0}>
+          <ArrowUp size={13} aria-hidden="true" />
+          <span>{busy ? t('recoveryCenter.composer.thinking') : t('recoveryCenter.composer.send')}</span>
+        </button>
+      </form>
+      {answer && (
+        <div className={`recovery-center-composer__answer recovery-center-composer__answer--${answer.mode}`} data-testid="recovery-center-composer-answer">
+          <span className={`recovery-center-composer__answer-pill recovery-center-composer__answer-pill--${answer.mode}`}>{answer.mode === 'ai' ? t('recoveryCenter.composer.modeAi') : t('recoveryCenter.composer.modeFallback')}</span>
+          <p>{answer.text}</p>
+          {answer.aiError && <small className="recovery-center-composer__answer-error">{answer.aiError}</small>}
+          <div className="recovery-center-composer__answer-acts">
+            <button type="button" className="command-button command-button-compact" onClick={() => setAnswer(null)}>
+              {t('recoveryCenter.composer.dismiss')}
+            </button>
+            <button type="button" className="command-button command-button-compact" onClick={() => onOpenTab('copilot')}>
+              {t('recoveryCenter.composer.openStudio')}
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Chips ordered recovery-first: Suggest fix and Why fail (the two
+          chips that touch Janusly's differentiator) come before the
+          diagnostic + diff + spend chips. */}
+      <div className="recovery-center-composer__chips">
+        <button type="button" className="recovery-center-composer__chip recovery-center-composer__chip--primary" onClick={handleSuggestFix} disabled={busy}>
+          <Wand2 size={11} aria-hidden="true" />
+          <span>{t('recoveryCenter.composer.chip.suggestFix')}</span>
+        </button>
+        <button type="button" className="recovery-center-composer__chip" onClick={handleWhyFail} disabled={busy}>
+          <ShieldAlert size={11} aria-hidden="true" />
+          <span>{t('recoveryCenter.composer.chip.whyFail')}</span>
+        </button>
+        <button type="button" className="recovery-center-composer__chip" onClick={handleWhatChanged} disabled={busy}>
+          <FileDiff size={11} aria-hidden="true" />
+          <span>{t('recoveryCenter.composer.chip.whatChanged')}</span>
+        </button>
+        <button type="button" className="recovery-center-composer__chip" onClick={handleSummarize} disabled={busy}>
+          <BarChart3 size={11} aria-hidden="true" />
+          <span>{t('recoveryCenter.composer.chip.summarize')}</span>
+        </button>
+        <button type="button" className="recovery-center-composer__chip" onClick={handleSpend} disabled={busy}>
+          <DollarSign size={11} aria-hidden="true" />
+          <span>{t('recoveryCenter.composer.chip.spend')}</span>
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -747,7 +1143,10 @@ function RecoveryQueueTile({
       )}
     >
       {top.length === 0 ? (
-        <p className="we-recovery-center-tile__empty">{t('recoveryCenter.tile.queue.empty')}</p>
+        <AllClearState
+          message={t('recoveryCenter.tile.queue.empty')}
+          testId="recovery-center-queue-allclear"
+        />
       ) : (
         <ul className="we-recovery-center-rows">
           {top.map((dlq) => {
@@ -796,7 +1195,7 @@ function FailureClustersTile({
       title={t('recoveryCenter.tile.clusters.title')}
       kicker={t('recoveryCenter.tile.clusters.kicker', { count: totalSamples })}
       severity={clusters.length === 0 ? 'success' : 'cobalt'}
-      icon={<Layers size={18} aria-hidden="true" />}
+      icon={<Eye size={18} aria-hidden="true" />}
       testId="recovery-center-tile-clusters"
       footer={(
         <button
@@ -810,21 +1209,30 @@ function FailureClustersTile({
       )}
     >
       {clusters.length === 0 ? (
-        <p className="we-recovery-center-tile__empty">{t('recoveryCenter.tile.clusters.empty')}</p>
+        <AllClearState
+          message={t('recoveryCenter.tile.clusters.empty')}
+          testId="recovery-center-clusters-allclear"
+        />
       ) : (
-        <ul className="we-recovery-center-rows">
-          {clusters.map((cluster) => (
-            <li key={cluster.signature}>
-              <div className="we-recovery-center-row" data-static="true">
-                <span className="we-recovery-center-row__title">{cluster.signature}</span>
-                <span className="we-recovery-center-row__meta">
-                  <span className="we-recovery-center-row__pill" data-severity="cobalt">{t('recoveryCenter.tile.clusters.frequency', { count: cluster.frequency })}</span>
-                  <span className="we-recovery-center-row__pill" data-severity="cyan">{clusterCategoryLabel(cluster.category)}</span>
-                  <span className="we-recovery-center-row__pill" data-severity="neutral">{clusterOwnerLabel(cluster.suggestedOwner)}</span>
-                </span>
-              </div>
-            </li>
-          ))}
+        <ul className="we-recovery-watch">
+          {clusters.map((cluster) => {
+            const state = cluster.frequency >= 2 ? 'ready' : 'monitoring'
+            const stateLabel = state === 'ready'
+              ? t('recoveryCenter.tile.clusters.statePatchReady')
+              : t('recoveryCenter.tile.clusters.stateMonitoring')
+            return (
+              <li key={cluster.signature}>
+                <div className="we-recovery-watch-row" data-testid={`recovery-center-watch-row-${cluster.signature}`}>
+                  <span className="we-recovery-watch-row__sig">{cluster.signature}</span>
+                  <div className="we-recovery-watch-row__body">
+                    <strong>{clusterCategoryLabel(cluster.category)}</strong>
+                    <small>{t('recoveryCenter.tile.clusters.frequency', { count: cluster.frequency })} · {clusterOwnerLabel(cluster.suggestedOwner)}</small>
+                  </div>
+                  <span className={`we-recovery-watch-row__state we-recovery-watch-row__state--${state}`}>{stateLabel}</span>
+                </div>
+              </li>
+            )
+          })}
         </ul>
       )}
     </RecoveryCenterTile>
@@ -836,11 +1244,13 @@ function PendingApprovalsTile({
   runs,
   onOpenRun,
   onOpenTab,
+  onApproveNode,
 }: {
   waitingNodes: RunNode[]
   runs: RunSummary[]
   onOpenRun: (runId: string) => void | Promise<void>
   onOpenTab: (tab: ActiveTab) => void
+  onApproveNode: (nodeId: string) => void | Promise<void>
 }) {
   const { t } = useT()
   const top = waitingNodes.slice(0, 3)
@@ -849,7 +1259,7 @@ function PendingApprovalsTile({
       title={t('recoveryCenter.tile.approvals.title')}
       kicker={t('recoveryCenter.tile.approvals.kicker')}
       severity={waitingNodes.length === 0 ? 'success' : 'warning'}
-      icon={<Users size={18} aria-hidden="true" />}
+      icon={<CheckSquare size={18} aria-hidden="true" />}
       testId="recovery-center-tile-approvals"
       footer={(
         <button
@@ -863,9 +1273,12 @@ function PendingApprovalsTile({
       )}
     >
       {top.length === 0 ? (
-        <p className="we-recovery-center-tile__empty">{t('recoveryCenter.tile.approvals.empty')}</p>
+        <AllClearState
+          message={t('recoveryCenter.tile.approvals.empty')}
+          testId="recovery-center-approvals-allclear"
+        />
       ) : (
-        <ul className="we-recovery-center-rows">
+        <ul className="we-recovery-signoff">
           {top.map((node) => {
             const waiting = (node.stateJson as { waiting?: { kind?: string; title?: string } } | undefined)?.waiting
             const kind = waiting?.kind ?? 'approval'
@@ -874,23 +1287,39 @@ function PendingApprovalsTile({
             const matchingRun = runs.find((entry) => entry.workflowVersionId && entry.status === 'paused')
             const runId = matchingRun?.id
             return (
-              <li key={node.nodeId}>
-                <button
-                  type="button"
-                  className="we-recovery-center-row"
-                  onClick={() => {
-                    if (runId) void onOpenRun(runId)
-                    onOpenTab('runs')
-                  }}
-                  data-testid={`recovery-center-approvals-row-${node.nodeId}`}
-                >
-                  <span className="we-recovery-center-row__title">{title}</span>
-                  <span className="we-recovery-center-row__meta">
-                    <code className="we-recovery-center-row__node">{node.nodeId}</code>
-                    <span className="we-recovery-center-row__pill" data-severity="warning">{kind === 'human_form' ? t('recoveryCenter.tile.approvals.kindForm') : t('recoveryCenter.tile.approvals.kindApproval')}</span>
-                  </span>
-                  <span className="we-recovery-center-row__age">{t('recoveryCenter.tile.approvals.waiting')}</span>
-                </button>
+              <li key={node.nodeId} className="we-recovery-signoff-row" data-testid={`recovery-center-approvals-row-${node.nodeId}`}>
+                <span className="we-recovery-signoff-row__ic" aria-hidden="true">
+                  <ShieldAlert size={14} />
+                </span>
+                <div className="we-recovery-signoff-row__body">
+                  <strong>{title}</strong>
+                  <p>
+                    <code>{node.nodeId}</code>
+                    <span> · {kind === 'human_form' ? t('recoveryCenter.tile.approvals.kindForm') : t('recoveryCenter.tile.approvals.kindApproval')} · {t('recoveryCenter.tile.approvals.waiting')}</span>
+                  </p>
+                  <div className="we-recovery-signoff-row__acts">
+                    {kind === 'approval' && (
+                      <button
+                        type="button"
+                        className="command-button command-button-primary command-button-compact"
+                        onClick={() => onApproveNode(node.nodeId)}
+                      >
+                        <Check size={14} aria-hidden="true" />
+                        <span>{t('recoveryCenter.tile.approvals.apply')}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="command-button command-button-compact"
+                      onClick={() => {
+                        if (runId) void onOpenRun(runId)
+                        onOpenTab('runs')
+                      }}
+                    >
+                      {t('recoveryCenter.tile.approvals.hold')}
+                    </button>
+                  </div>
+                </div>
               </li>
             )
           })}
@@ -1054,6 +1483,99 @@ function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// RecoveryFlowDemo — the headline visual of the Home when there's no real
+// activity yet. Showcases Janusly's differentiator (the recovery loop)
+// as a 4-step horizontal flow: failure → 3 AI suggestions w/ confidence →
+// sandbox replay → apply across the failure cluster, with rollback hint.
+//
+// Replaces the legacy "Welcome to Janusly" hero card. Static markup
+// (no animation) — the goal is to TEACH the loop, not to delight.
+// Tokens-only colors; honors `prefers-reduced-motion` for hover.
+// ─────────────────────────────────────────────────────────────────────────
+
+function RecoveryFlowDemo({ onOpenStudio, onOpenRecipes }: { onOpenStudio: () => void; onOpenRecipes: () => void }) {
+  const { t } = useT()
+  return (
+    <section className="we-flow-demo" aria-labelledby="we-flow-demo-title" data-testid="recovery-flow-demo">
+      <header className="we-flow-demo__head">
+        <div>
+          <div className="section-kicker">{t('recoveryCenter.flowDemo.kicker')}</div>
+          <h2 id="we-flow-demo-title">{t('recoveryCenter.flowDemo.title')}</h2>
+          <p>{t('recoveryCenter.flowDemo.body')}</p>
+        </div>
+        <div className="we-flow-demo__ctas">
+          <button
+            type="button"
+            className="command-button command-button-primary"
+            onClick={onOpenStudio}
+            data-testid="recovery-center-empty-cta-studio"
+          >
+            <Sparkles size={14} aria-hidden="true" />
+            <span>{t('recoveryCenter.flowDemo.cta.studio')}</span>
+          </button>
+          <button
+            type="button"
+            className="command-button"
+            onClick={onOpenRecipes}
+            data-testid="recovery-center-empty-cta-recipes"
+          >
+            <Workflow size={14} aria-hidden="true" />
+            <span>{t('recoveryCenter.flowDemo.cta.recipes')}</span>
+          </button>
+        </div>
+      </header>
+
+      <ol className="we-flow-demo__steps">
+        <li className="we-flow-demo__step" data-step="failure" data-testid="recovery-flow-demo-step-1">
+          <span className="we-flow-demo__step-num">1</span>
+          <span className="we-flow-demo__step-ic" aria-hidden="true"><AlertOctagon size={16} /></span>
+          <strong>{t('recoveryCenter.flowDemo.step1.title')}</strong>
+          <code className="we-flow-demo__sig">0x9af2</code>
+          <span className="we-flow-demo__step-meta">stripe.charge · secret_missing</span>
+        </li>
+        <span className="we-flow-demo__arrow" aria-hidden="true"><ArrowRight size={14} /></span>
+        <li className="we-flow-demo__step" data-step="suggest" data-testid="recovery-flow-demo-step-2">
+          <span className="we-flow-demo__step-num">2</span>
+          <span className="we-flow-demo__step-ic" aria-hidden="true"><Wand2 size={16} /></span>
+          <strong>{t('recoveryCenter.flowDemo.step2.title')}</strong>
+          <span className="we-flow-demo__confidence-strip">
+            <span className="we-flow-demo__conf we-flow-demo__conf--top">92 AI</span>
+            <span className="we-flow-demo__conf">78 AI</span>
+            <span className="we-flow-demo__conf we-flow-demo__conf--low">55 AI</span>
+          </span>
+          <span className="we-flow-demo__step-meta">{t('recoveryCenter.flowDemo.step2.meta')}</span>
+        </li>
+        <span className="we-flow-demo__arrow" aria-hidden="true"><ArrowRight size={14} /></span>
+        <li className="we-flow-demo__step" data-step="sandbox" data-testid="recovery-flow-demo-step-3">
+          <span className="we-flow-demo__step-num">3</span>
+          <span className="we-flow-demo__step-ic" aria-hidden="true"><FlaskConical size={16} /></span>
+          <strong>{t('recoveryCenter.flowDemo.step3.title')}</strong>
+          <span className="we-flow-demo__pill we-flow-demo__pill--success">
+            <Check size={11} aria-hidden="true" />
+            <span>412ms · signature stable</span>
+          </span>
+          <span className="we-flow-demo__step-meta">{t('recoveryCenter.flowDemo.step3.meta')}</span>
+        </li>
+        <span className="we-flow-demo__arrow" aria-hidden="true"><ArrowRight size={14} /></span>
+        <li className="we-flow-demo__step" data-step="apply" data-testid="recovery-flow-demo-step-4">
+          <span className="we-flow-demo__step-num">4</span>
+          <span className="we-flow-demo__step-ic" aria-hidden="true"><ShieldCheck size={16} /></span>
+          <strong>{t('recoveryCenter.flowDemo.step4.title')}</strong>
+          <span className="we-flow-demo__pill we-flow-demo__pill--cobalt">
+            <Layers size={11} aria-hidden="true" />
+            <span>{t('recoveryCenter.flowDemo.step4.cluster', { count: 9 })}</span>
+          </span>
+          <span className="we-flow-demo__step-meta">
+            <RotateCcw size={11} aria-hidden="true" />
+            {t('recoveryCenter.flowDemo.step4.meta')}
+          </span>
+        </li>
+      </ol>
+    </section>
+  )
+}
+
 function RecoveryCenterEmptyHero({
   onOpenStudio,
   onOpenRecipes,
@@ -1064,10 +1586,11 @@ function RecoveryCenterEmptyHero({
   const { t } = useT()
   return (
     <section className="we-recovery-center-empty" aria-labelledby="recovery-center-empty-title" data-testid="recovery-center-empty">
-      <div className="we-recovery-center-empty__circle" aria-hidden="true">
-        <Compass size={36} aria-hidden="true" />
+      <div className="we-recovery-center-empty__brand" aria-hidden="true">
+        <BrandMark size={56} />
       </div>
       <div className="we-recovery-center-empty__copy">
+        <div className="section-kicker">{t('recoveryCenter.empty.kicker')}</div>
         <h2 id="recovery-center-empty-title">{t('recoveryCenter.empty.title')}</h2>
         <p>{t('recoveryCenter.empty.body')}</p>
       </div>

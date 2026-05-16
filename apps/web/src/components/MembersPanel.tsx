@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { Trash2, UserPlus } from 'lucide-react'
+import { CircleCheck, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
@@ -177,44 +177,58 @@ export function MembersPanel() {
       </section>
 
       {members.length === 0 && (
-        <div className="empty-panel">
-          <UserPlus size={22} aria-hidden="true" />
-          <strong>{t('members.empty')}</strong>
-          <p>{t('members.emptyHelper')}</p>
+        <div className="we-allclear" data-testid="members-empty">
+          <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
+          <div className="we-allclear__copy">
+            <strong>{t('members.empty')}</strong>
+            <span>{t('members.emptyHelper')}</span>
+          </div>
         </div>
       )}
 
-      {members.map(member => (
-        <div key={member.id} className="list-card member-row">
-          <div>
-            <strong>{member.email ?? member.userId}</strong>
-            <span>{describeRole(member.role, orgRoles.find(r => r.name === member.role))}</span>
-          </div>
-          <div className="member-actions">
-            <select
-              className="text-field"
-              value={member.role}
-              onChange={(event) => updateRole(member.userId, event.target.value)}
-              aria-label={t('members.row.roleAria', { member: member.email ?? member.userId }) as string}
-            >
-              {orgRoles.map(option => (
-                <option key={option.name} value={option.name}>
-                  {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="small-command danger"
-              onClick={() => remove(member.userId)}
-              aria-label={t('members.row.removeAria', { member: member.email ?? member.userId }) as string}
-              title={t('members.row.removeTitle') as string}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
-          </div>
-        </div>
-      ))}
+      {members.length > 0 && (
+        <ul className="we-list">
+          {members.map(member => {
+            const label = member.email ?? member.userId
+            const initials = (label.includes('@') ? label.split('@')[0] : label).slice(0, 2).toUpperCase()
+            const isAdmin = member.role === 'admin'
+            return (
+              <li key={member.id}>
+                <div className="we-list-row" data-testid={`members-row-${member.userId}`} data-severity={isAdmin ? 'cobalt' : undefined}>
+                  <span className="we-list-row__avatar" aria-hidden="true">{initials}</span>
+                  <div className="we-list-row__body">
+                    <strong>{label}</strong>
+                    <small>{describeRole(member.role, orgRoles.find(r => r.name === member.role))}</small>
+                  </div>
+                  <div className="we-list-row__meta">
+                    <select
+                      className="text-field text-field--compact"
+                      value={member.role}
+                      onChange={(event) => updateRole(member.userId, event.target.value)}
+                      aria-label={t('members.row.roleAria', { member: label }) as string}
+                    >
+                      {orgRoles.map(option => (
+                        <option key={option.name} value={option.name}>
+                          {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="small-command danger"
+                      onClick={() => remove(member.userId)}
+                      aria-label={t('members.row.removeAria', { member: label }) as string}
+                      title={t('members.row.removeTitle') as string}
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }

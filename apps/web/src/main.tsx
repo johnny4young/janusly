@@ -8,6 +8,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
+import { bootTheme } from './theme'
 import './index.css'
 
 // Resolve the user's preferred locale BEFORE React mounts so the very first
@@ -16,6 +17,11 @@ import './index.css'
 // choices win indefinitely.
 const stored = getStoredLanguage()
 initI18n(resolveAppLanguage(stored))
+
+// Apply the stored theme + density preference BEFORE createRoot so the
+// dark token block resolves during first paint — avoids a light→dark flicker
+// when the user reloads with a non-default theme.
+bootTheme()
 
 void import('./App').then(({ default: App }) => {
   createRoot(document.getElementById('root')!).render(

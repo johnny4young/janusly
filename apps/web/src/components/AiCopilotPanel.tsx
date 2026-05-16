@@ -22,6 +22,7 @@ import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
 import { tAiReviewIssue, useT } from '../i18n'
+import { BrandMark } from './BrandMark'
 
 // Action-specific assumed token budgets used by the predicted-spend label.
 // Real spend varies; these are order-of-magnitude indicators chosen from
@@ -255,7 +256,7 @@ export function AiCopilotPanel({
 
   return (
     <div className="panel-stack">
-      <section className="copilot-hero">
+      <section className="copilot-hero copilot-hero--branded">
         <div>
           <span className={health?.enabled ? 'mode-pill mode-pill-ai' : 'mode-pill mode-pill-fallback'}>
             {healthLabel}
@@ -263,7 +264,7 @@ export function AiCopilotPanel({
           <h2>{t('aiCopilot.heroTitle')}</h2>
           <p>{healthDetail}</p>
         </div>
-        <Sparkles size={28} aria-hidden="true" />
+        <BrandMark size={44} />
       </section>
 
       <section className="panel-card">

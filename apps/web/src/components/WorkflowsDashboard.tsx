@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { CircleCheck, RefreshCw, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -51,25 +51,42 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       </div>
 
       {workflows.length === 0 && !loading && (
-        <div className="empty-panel">
-          <RefreshCw size={22} aria-hidden="true" />
-          <strong>{t('workflowsDashboard.empty')}</strong>
-          <p>{t('workflowsDashboard.emptyHelper')}</p>
+        <div className="we-allclear" data-testid="workflows-empty">
+          <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
+          <div className="we-allclear__copy">
+            <strong>{t('workflowsDashboard.empty')}</strong>
+            <span>{t('workflowsDashboard.emptyHelper')}</span>
+          </div>
         </div>
       )}
 
-      {workflows.map(workflow => (
-        <div key={workflow.id} className="list-card workflow-row">
-          <div>
-            <strong>{workflow.name}</strong>
-            <span>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</span>
-          </div>
-          <div className="workflow-row-actions">
-            <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
-            <button onClick={() => onOpen(workflow.id)} className="small-command">{t('workflowsDashboard.openFlow')}</button>
-          </div>
-        </div>
-      ))}
+      {workflows.length > 0 && (
+        <ul className="we-list">
+          {workflows.map(workflow => (
+            <li key={workflow.id}>
+              <div
+                className="we-list-row"
+                data-clickable="true"
+                data-severity="cobalt"
+                data-testid={`workflows-row-${workflow.id}`}
+                onClick={() => onOpen(workflow.id)}
+              >
+                <span className="we-list-row__avatar" aria-hidden="true">
+                  <Workflow size={14} />
+                </span>
+                <div className="we-list-row__body">
+                  <strong>{workflow.name}</strong>
+                  <small>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
+                </div>
+                <div className="we-list-row__meta">
+                  <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
+                  <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

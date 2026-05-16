@@ -12,6 +12,7 @@ import { Building2, LogIn, UserPlus } from 'lucide-react'
 import { AuthProvider } from '../auth'
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import { useT } from '../i18n'
+import { BrandMark } from './BrandMark'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
 
@@ -63,8 +64,8 @@ export function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
     <div className="auth-screen">
       <LocaleSwitcher variant="auth-corner" />
       <form className="auth-card" onSubmit={submit}>
-        <div className="brand-lockup">
-          <span className="brand-mark">JN</span>
+        <div className="brand-lockup auth-card__brand">
+          <BrandMark size={36} />
           <div>
             <strong>{t('app.brand')}</strong>
             <span>{t('app.brandSubtitle')}</span>
