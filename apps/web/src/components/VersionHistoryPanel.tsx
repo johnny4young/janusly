@@ -322,12 +322,18 @@ export function VersionHistoryPanel() {
 
       {versions.map((version, index) => {
         const isSelected = selectedIds.includes(version.id)
+        const isLatest = index === 0
         // Rolling back to the latest version is a no-op; in compare-mode the
         // row's checkbox owns the click. Hide the Rollback button in both
         // cases. With only one version there's nothing to roll back to.
         const showRollback = canRollbackWithRole(effectiveRole) && !compareMode && versions.length > 1 && index !== 0
         return (
-          <div key={version.id} className="version-row">
+          <div
+            key={version.id}
+            className="version-row"
+            data-latest={isLatest ? 'true' : undefined}
+            data-selected={compareMode && isSelected ? 'true' : undefined}
+          >
             <button
               type="button"
               onClick={() => onRowClick(version)}
@@ -340,6 +346,7 @@ export function VersionHistoryPanel() {
                 </span>
               )}
               <span>v{version.version}</span>
+              {isLatest && <span className="we-list-row__pill we-list-row__pill--cobalt">{t('versionHistory.latest')}</span>}
               <span>{version.createdAt ? new Date(version.createdAt).toLocaleString(getResolvedLocale()) : ''}</span>
             </button>
             {showRollback && versions[0] && (
