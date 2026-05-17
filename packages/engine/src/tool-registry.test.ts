@@ -1,17 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./http-policy', () => ({
+  consumeStreamToPreview: vi.fn(),
   fetchHttpTarget: vi.fn(),
 }))
 
-import { fetchHttpTarget } from './http-policy'
+import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
+const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 
 describe('tool-registry', () => {
   beforeEach(() => {
     fetchHttpTargetMock.mockReset()
+    consumeStreamToPreviewMock.mockReset()
   })
 
   it('listTools exposes the registered schemas', () => {
@@ -99,6 +102,46 @@ describe('tool-registry', () => {
     ).rejects.toThrow('Tool http.request returned invalid output')
   })
 
+  it('executeTool consumes streamed http.request output into a schema-safe preview', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('preview'))
+        controller.close()
+      },
+    })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: {},
+    } as never)
+    consumeStreamToPreviewMock.mockResolvedValueOnce({
+      preview: 'preview',
+      originalBytes: 7,
+      truncated: false,
+    })
+
+    const result = await executeTool('http.request', {
+      url: 'https://example.com/file.csv',
+      bodyMode: 'stream',
+      streamPreviewBytes: 8_192,
+    }, {})
+
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      'https://example.com/file.csv',
+      expect.objectContaining({ bodyMode: 'stream' }),
+    )
+    expect(consumeStreamToPreviewMock).toHaveBeenCalledWith(stream, 8_192)
+    expect(result).toEqual({
+      statusCode: 200,
+      ok: true,
+      body: 'preview',
+      streamed: true,
+      streamedBytes: 7,
+      streamTruncated: false,
+    })
+  })
+
   it('isToolWriteSide flags http.request and ignores read-side tools', () => {
     expect(isToolWriteSide('http.request')).toBe(true)
     expect(isToolWriteSide('text.uppercase')).toBe(false)
@@ -113,10 +156,12 @@ describe('tool-registry', () => {
     expect(http?.required).toEqual(['url'])
     expect(http?.optional?.slice().sort()).toEqual([
       'body',
+      'bodyMode',
       'headers',
       'maxRedirects',
       'maxResponseBytes',
       'method',
+      'streamPreviewBytes',
       'timeoutMs',
     ])
     const textUpper = tools.find(tool => tool.name === 'text.uppercase')

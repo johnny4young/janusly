@@ -139,4 +139,28 @@ describe('safePersistPayload', () => {
     expect(safePersistPayload(null)).toBeNull()
     expect(safePersistPayload(true)).toBe(true)
   })
+
+  it('substitutes a stream sentinel when a ReadableStream leaks into the payload', () => {
+    // Defense-in-depth: the streaming-mode HTTP executor always pre-consumes
+    // the body into a preview before returning, but if a regression let a
+    // live stream escape, the persistence chokepoint must NOT try to JSON
+    // it (would either throw or write garbage). The sentinel keeps the
+    // sibling keys intact so the operator still sees the rest of the
+    // executor output.
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.close() } })
+    const payload = {
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      streamed: true,
+    }
+    const result = safePersistPayload(payload) as Record<string, unknown>
+    expect(result.statusCode).toBe(200)
+    expect(result.ok).toBe(true)
+    expect(result.streamed).toBe(true)
+    expect(result.body).toEqual({
+      __stream: true,
+      note: expect.stringContaining('ReadableStream not persisted'),
+    })
+  })
 })

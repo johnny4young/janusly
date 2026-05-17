@@ -65,6 +65,7 @@ export type OrgConfigSnapshot = {
     timeoutMs: number;
     maxResponseBytes: number;
     maxRedirects: number;
+    streamPreviewBytes: number;
   };
   email: {
     provider: string;
@@ -223,6 +224,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 5,
     envKeys: ["JANUSLY_HTTP_MAX_REDIRECTS"],
     min: 0,
+  },
+  {
+    key: "http.streamPreviewBytes",
+    category: "http",
+    description: "How many bytes of a streamed HTTP response body get captured into the persisted node output for audit when `bodyMode: \"stream\"` is set on an `http` node or `http.request` tool. The full response still flows through the byte cap (`http.maxResponseBytes`); only the preview is what survives into `run_nodes.state_json`. Range 1024..1048576 (1 KB..1 MB), default 65536 (64 KB).",
+    valueType: "number",
+    defaultValue: 65_536,
+    envKeys: ["JANUSLY_HTTP_STREAM_PREVIEW_BYTES"],
+    min: 1_024,
+    max: 1_048_576,
   },
   {
     key: "email.provider",
@@ -525,6 +536,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       timeoutMs: readNumber(values, "http.timeoutMs"),
       maxResponseBytes: readNumber(values, "http.maxResponseBytes"),
       maxRedirects: readNumber(values, "http.maxRedirects"),
+      streamPreviewBytes: readNumber(values, "http.streamPreviewBytes"),
     },
     email: {
       provider: readString(values, "email.provider"),
@@ -660,6 +672,7 @@ export function applyOrgConfigToEnv(
     JANUSLY_HTTP_TIMEOUT_MS: String(config.http.timeoutMs),
     JANUSLY_HTTP_MAX_RESPONSE_BYTES: String(config.http.maxResponseBytes),
     JANUSLY_HTTP_MAX_REDIRECTS: String(config.http.maxRedirects),
+    JANUSLY_HTTP_STREAM_PREVIEW_BYTES: String(config.http.streamPreviewBytes),
     JANUSLY_MAILER_PROVIDER: config.email.provider,
     JANUSLY_MAILER_FROM: config.email.from,
     JANUSLY_EMAIL_RATE_LIMIT_PER_MIN: String(config.email.rateLimitPerMin),

@@ -184,11 +184,27 @@ function wrapsWholeExpression(expression: string) {
   return depth === 0;
 }
 
+function isReadableStreamLike(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (typeof (globalThis as { ReadableStream?: unknown }).ReadableStream !== "undefined"
+    && value instanceof (globalThis as { ReadableStream: { new (): unknown } }).ReadableStream) {
+    return true;
+  }
+  const v = value as { getReader?: unknown; tee?: unknown };
+  return typeof v.getReader === "function" && typeof v.tee === "function";
+}
+
 function getBySafePath(scope: ExpressionScope, path: string) {
   const normalized = path.replace(/\[(\d+)\]/g, ".$1");
 
-  return normalized.split(".").reduce<unknown>((acc, key) => {
+  const resolved = normalized.split(".").reduce<unknown>((acc, key) => {
     if (acc == null || typeof acc !== "object") return undefined;
     return (acc as Record<string, unknown>)[key];
   }, scope);
+
+  if (isReadableStreamLike(resolved)) {
+    throw new Error(`Refusing to evaluate a ReadableStream value at path ${path}; streams must be consumed within their executor.`);
+  }
+
+  return resolved;
 }
