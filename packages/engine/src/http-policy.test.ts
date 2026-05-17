@@ -10,7 +10,7 @@ vi.mock("node:dns/promises", () => ({
 }));
 
 import { lookup as mockedLookup } from "node:dns/promises";
-import { __testInternals, fetchHttpTarget, validateHttpTarget } from "./http-policy";
+import { __testInternals, consumeStreamToPreview, fetchHttpTarget, validateHttpTarget } from "./http-policy";
 
 const lookupMock = vi.mocked(mockedLookup);
 
@@ -305,5 +305,134 @@ describe("HTTP bound execution", () => {
     // accidentally disable the byte cap.
     await expect(fetchHttpTarget(url, { maxResponseBytes: "not-a-number" } as never))
       .rejects.toThrow(/exceeds maxResponseBytes/);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Streaming mode (opt-in via bodyMode: "stream")
+  // ---------------------------------------------------------------------------
+
+  it("bodyMode:stream returns a ReadableStream whose chunks reconstruct the response byte-for-byte", async () => {
+    const payload = Buffer.from("hello-streaming-world-" + "x".repeat(500));
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Length", String(payload.byteLength));
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.end(payload);
+    });
+
+    const streaming = await fetchHttpTarget(url, { bodyMode: "stream" });
+    expect(streaming.statusCode).toBe(200);
+    expect(streaming.ok).toBe(true);
+    expect(streaming.body).toBeInstanceOf(ReadableStream);
+
+    // Drain the stream and assert the assembled bytes match.
+    const reader = streaming.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+    const assembled = Buffer.concat(chunks.map((c) => Buffer.from(c)), total);
+    expect(assembled.equals(payload)).toBe(true);
+  });
+
+  it("bodyMode:stream aborts mid-stream when running total exceeds maxResponseBytes", async () => {
+    const chunkSize = 64 * 1024;
+    const totalChunks = 32; // 2 MB total via chunked transfer-encoding.
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/octet-stream");
+      const buf = Buffer.alloc(chunkSize, 0x53);
+      for (let i = 0; i < totalChunks; i++) res.write(buf);
+      res.end();
+    });
+
+    const streaming = await fetchHttpTarget(url, { bodyMode: "stream", maxResponseBytes: 100_000 });
+    expect(streaming.body).toBeInstanceOf(ReadableStream);
+
+    // Draining must surface the same cap-exceeded error string the buffered
+    // path uses — the byte-cap contract is identical between modes.
+    const reader = streaming.body.getReader();
+    await expect((async () => {
+      while (true) {
+        const { done } = await reader.read();
+        if (done) break;
+      }
+    })()).rejects.toThrow(/exceeds maxResponseBytes after \d+ bytes/);
+  });
+
+  it("bodyMode:stream keeps the timeout budget active while the caller consumes the body", async () => {
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.write("first");
+      setTimeout(() => {
+        res.write("late");
+        res.end();
+      }, 1_000);
+    });
+
+    const streaming = await fetchHttpTarget(url, { bodyMode: "stream", timeoutMs: 500 });
+    const reader = streaming.body.getReader();
+    const first = await reader.read();
+
+    expect(Buffer.from(first.value ?? new Uint8Array()).toString("utf8")).toBe("first");
+    await expect(reader.read()).rejects.toThrow(/HTTP request timed out after 500ms/);
+  });
+
+  it("bodyMode:stream rejects oversized Content-Length in the pre-check (no stream returned)", async () => {
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Length", "999999999");
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.end("partial");
+    });
+    // Streaming mode preflights Content-Length BEFORE handing the stream to
+    // the caller, so an oversized declared body rejects synchronously
+    // (matches the buffered path's pre-check).
+    await expect(fetchHttpTarget(url, { bodyMode: "stream", maxResponseBytes: 1_000 }))
+      .rejects.toThrow(/Content-Length 999999999/);
+  });
+
+  it("consumeStreamToPreview returns a bounded preview and marks truncated when source > previewBytes", async () => {
+    const payload = Buffer.alloc(200_000, 0x41); // 200KB of "A"
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Length", String(payload.byteLength));
+      res.end(payload);
+    });
+
+    // Generous response cap so the byte-cap doesn't fire — we want to test
+    // the preview-truncation path here.
+    const streaming = await fetchHttpTarget(url, { bodyMode: "stream", maxResponseBytes: 5_000_000 });
+    const { preview, originalBytes, truncated } = await consumeStreamToPreview(streaming.body, 8_192);
+
+    expect(originalBytes).toBe(200_000);
+    expect(truncated).toBe(true);
+    expect(preview.length).toBeLessThanOrEqual(8_192);
+    expect(preview.startsWith("A")).toBe(true);
+  });
+
+  it("consumeStreamToPreview re-throws the byte-cap error when the underlying stream aborts during preview read", async () => {
+    const chunkSize = 64 * 1024;
+    const totalChunks = 32;
+    const url = await spawn((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/octet-stream");
+      const buf = Buffer.alloc(chunkSize, 0x42);
+      for (let i = 0; i < totalChunks; i++) res.write(buf);
+      res.end();
+    });
+
+    const streaming = await fetchHttpTarget(url, { bodyMode: "stream", maxResponseBytes: 100_000 });
+    // The byte cap fires mid-stream; consumeStreamToPreview must surface
+    // the same error string the buffered path emits (not silently truncate
+    // the preview and hide the cap violation).
+    await expect(consumeStreamToPreview(streaming.body, 200_000))
+      .rejects.toThrow(/exceeds maxResponseBytes after \d+ bytes/);
   });
 });

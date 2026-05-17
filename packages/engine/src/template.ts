@@ -33,12 +33,52 @@ function isPathContainer(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Walk a dotted path through `source`. Returns `undefined` on any null link. */
+/**
+ * Detect a `ReadableStream`-shaped value. Streams cannot be templated into
+ * strings — interpolating one would either coerce to `[object ReadableStream]`
+ * (useless) or surface as an opaque error downstream. We throw with the
+ * resolved path so the operator can spot which `{{...}}` reference is
+ * pointing at a stream-typed context value.
+ *
+ * The streaming-mode HTTP executor always pre-consumes into a preview before
+ * returning, so context values reachable from a template should never be a
+ * live stream in practice. This guard is defense-in-depth for the rare path
+ * where a stream escapes its executor invocation.
+ */
+function isReadableStreamLike(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (typeof (globalThis as { ReadableStream?: unknown }).ReadableStream !== 'undefined'
+    && value instanceof (globalThis as { ReadableStream: { new (): unknown } }).ReadableStream) {
+    return true;
+  }
+  const v = value as { getReader?: unknown; tee?: unknown };
+  return typeof v.getReader === 'function' && typeof v.tee === 'function';
+}
+
+/**
+ * Thrown when a template / expression / mapping resolves a `{{...}}` path
+ * to a `ReadableStream`. The `.path` field carries the offending dotted
+ * reference so the operator sees exactly which node output is the source.
+ */
+export class StreamValueInTemplateError extends Error {
+  readonly path: string;
+  constructor(path: string) {
+    super(`Refusing to template a ReadableStream value at path ${path}; streams must be consumed within their executor (see consumeStreamToPreview).`);
+    this.name = 'StreamValueInTemplateError';
+    this.path = path;
+  }
+}
+
+/** Walk a dotted path through `source`. Returns `undefined` on any null link. Throws `StreamValueInTemplateError` if the terminal value is a `ReadableStream`. */
 export function getByPath(source: unknown, path: string): unknown {
-  return path.split('.').reduce<unknown>((acc, key) => {
+  const resolved = path.split('.').reduce<unknown>((acc, key) => {
     if (!isPathContainer(acc)) return undefined;
     return acc[key];
   }, source);
+  if (isReadableStreamLike(resolved)) {
+    throw new StreamValueInTemplateError(path);
+  }
+  return resolved;
 }
 
 function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionList: Set<string>): unknown {

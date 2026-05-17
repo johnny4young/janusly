@@ -4,6 +4,18 @@
  * block list, constructs an `undici.Agent` whose `connect.lookup` returns
  * the pinned IP, and wraps the fetch with three runtime bounds:
  *
+ * Two body-handling modes:
+ *   - **`bodyMode: "buffer"` (default)** — `HttpBufferedResult` with the
+ *     decoded body as a `string`, fully consumed and capped.
+ *   - **`bodyMode: "stream"` (opt-in)** — `HttpStreamingResult` with the
+ *     body as a `ReadableStream<Uint8Array>` the caller iterates
+ *     chunk-by-chunk. The same byte cap applies; the stream aborts the
+ *     shared AbortController the instant total bytes exceed the cap and
+ *     surfaces the same descriptive error the buffered path emits. Streams
+ *     MUST be consumed within the same executor invocation — they cannot
+ *     survive `safePersistPayload`. Use `consumeStreamToPreview` for an
+ *     audit-friendly bounded slice before persistence.
+ *
  *   - **Timeout** (default 30s, env `JANUSLY_HTTP_TIMEOUT_MS`, per-call
  *     override `init.timeoutMs`): single AbortController + `setTimeout`
  *     budget across all redirect hops. Without this, Node's `fetch` never
@@ -259,22 +271,58 @@ export async function validateHttpTarget(rawUrl: unknown): Promise<string> {
   return url;
 }
 
-/** Already-consumed result of `fetchHttpTarget`. The body has been read, capped, and decoded — callers can't sidestep the byte cap. */
-export type HttpResult = {
+/** Already-consumed result of `fetchHttpTarget` in the default `bodyMode: "buffer"` path. The body has been read, capped, and decoded — callers can't sidestep the byte cap. */
+export type HttpBufferedResult = {
   statusCode: number;
   ok: boolean;
   body: string;
   headers: Record<string, string>;
 };
 
-/** RequestInit + the three optional override fields. Pass these alongside any standard fetch options. */
+/**
+ * Live-stream result of `fetchHttpTarget` in opt-in `bodyMode: "stream"`. The
+ * `body` is a `ReadableStream<Uint8Array>` the caller iterates chunk-by-chunk
+ * without buffering the full payload in memory. The byte cap still applies —
+ * the underlying stream aborts the shared `AbortController` the instant total
+ * bytes exceed `maxResponseBytes`, and any pending `read()` rejects with the
+ * same descriptive error message the buffered path emits.
+ *
+ * Streams are one-shot in JS and cannot be persisted to jsonb directly — the
+ * caller MUST consume the stream within the same executor invocation (e.g.
+ * via `consumeStreamToPreview` for an audit-friendly bounded slice). The
+ * `safePersistPayload` chokepoint substitutes a placeholder if a `ReadableStream`
+ * accidentally leaks through, but that's defense-in-depth; relying on it
+ * loses the actual response data.
+ */
+export type HttpStreamingResult = {
+  statusCode: number;
+  ok: boolean;
+  body: ReadableStream<Uint8Array>;
+  headers: Record<string, string>;
+};
+
+/**
+ * Union of buffered + streaming results. Each call narrows to one side via
+ * the `fetchHttpTarget` overloads — callers that omit `bodyMode` (the
+ * default `"buffer"`) get `HttpBufferedResult` and never have to check for
+ * `ReadableStream`. Kept as the existing exported `HttpResult` name so all
+ * pre-stream call sites continue to compile unchanged.
+ */
+export type HttpResult = HttpBufferedResult;
+
+/** Opt-in body-handling mode for `fetchHttpTarget`. `"buffer"` (default) returns the decoded body as a string; `"stream"` returns a `ReadableStream<Uint8Array>` the caller iterates. */
+export type HttpBodyMode = "buffer" | "stream";
+
+/** RequestInit + the three optional override fields plus the body-mode discriminator. Pass these alongside any standard fetch options. */
 export type HttpFetchInit = RequestInit & {
   /** Total timeout budget across all redirect hops, in ms. Default 30000 (env `JANUSLY_HTTP_TIMEOUT_MS`). */
   timeoutMs?: number;
-  /** Maximum decoded response body size, in bytes. Default 1_000_000 (env `JANUSLY_HTTP_MAX_RESPONSE_BYTES`). */
+  /** Maximum decoded response body size, in bytes. Default 1_000_000 (env `JANUSLY_HTTP_MAX_RESPONSE_BYTES`). Applies in BOTH buffer and stream modes — the streaming path aborts mid-flight at the cap, identical to the buffered path. */
   maxResponseBytes?: number;
   /** Maximum redirect chain length. Default 5 (env `JANUSLY_HTTP_MAX_REDIRECTS`). */
   maxRedirects?: number;
+  /** Body handling. `"buffer"` (default) buffers the body into a `string`; `"stream"` returns a `ReadableStream<Uint8Array>` the caller MUST consume within the same executor invocation. */
+  bodyMode?: HttpBodyMode;
 };
 
 function splitInit(init: HttpFetchInit | undefined): {
@@ -282,6 +330,7 @@ function splitInit(init: HttpFetchInit | undefined): {
   timeoutMs: number;
   maxBytes: number;
   maxRedirects: number;
+  bodyMode: HttpBodyMode;
 } {
   if (!init) {
     return {
@@ -289,9 +338,10 @@ function splitInit(init: HttpFetchInit | undefined): {
       timeoutMs: defaultTimeoutMs(),
       maxBytes: defaultMaxResponseBytes(),
       maxRedirects: defaultMaxRedirects(),
+      bodyMode: "buffer",
     };
   }
-  const { timeoutMs, maxResponseBytes, maxRedirects, ...rest } = init;
+  const { timeoutMs, maxResponseBytes, maxRedirects, bodyMode, ...rest } = init;
   const timeoutDefault = defaultTimeoutMs();
   const maxBytesDefault = defaultMaxResponseBytes();
   const maxRedirectsDefault = defaultMaxRedirects();
@@ -300,6 +350,7 @@ function splitInit(init: HttpFetchInit | undefined): {
     timeoutMs: positiveIntOrFallback(timeoutMs, timeoutDefault),
     maxBytes: positiveIntOrFallback(maxResponseBytes, maxBytesDefault),
     maxRedirects: nonNegativeIntOrFallback(maxRedirects, maxRedirectsDefault),
+    bodyMode: bodyMode === "stream" ? "stream" : "buffer",
   };
 }
 
@@ -322,6 +373,30 @@ function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
 }
 
 /**
+ * Pre-check the Content-Length header against the byte cap. Returns the
+ * declared length when it's present and under the cap; throws + aborts when
+ * the upstream declared an oversized body, saving the round-trip before any
+ * payload is consumed. Returns `null` when the header is absent (chunked
+ * transfer-encoding) — the streaming counter catches the cap mid-stream
+ * either way.
+ */
+function preflightContentLength(
+  res: Response,
+  maxBytes: number,
+  controller: AbortController,
+): number | null {
+  const declared = res.headers.get("content-length");
+  if (declared === null) return null;
+  const n = Number(declared);
+  if (!Number.isFinite(n)) return null;
+  if (n > maxBytes) {
+    controller.abort();
+    throw new Error(`HTTP response exceeds maxResponseBytes (Content-Length ${n} > cap ${maxBytes})`);
+  }
+  return n;
+}
+
+/**
  * Stream the response body into memory, aborting if total bytes exceed the
  * cap. A Content-Length pre-check rejects oversized declared bodies before
  * the stream starts, saving the round-trip when the upstream is honest about
@@ -332,14 +407,7 @@ async function readBoundedBody(
   maxBytes: number,
   controller: AbortController,
 ): Promise<string> {
-  const declared = res.headers.get("content-length");
-  if (declared !== null) {
-    const n = Number(declared);
-    if (Number.isFinite(n) && n > maxBytes) {
-      controller.abort();
-      throw new Error(`HTTP response exceeds maxResponseBytes (Content-Length ${n} > cap ${maxBytes})`);
-    }
-  }
+  preflightContentLength(res, maxBytes, controller);
 
   const reader = res.body?.getReader();
   if (!reader) return "";
@@ -362,9 +430,202 @@ async function readBoundedBody(
 }
 
 /**
+ * Wrap the upstream response body in a `ReadableStream<Uint8Array>` that
+ * tracks running byte count and aborts the shared `AbortController` the
+ * instant the total exceeds `maxBytes`. The pattern mirrors `readBoundedBody`
+ * exactly — same cap, same error message, same `controller.abort()` trigger —
+ * so the buffered and streaming paths are observationally identical from a
+ * safety standpoint. Any pending reader on the returned stream surfaces the
+ * cap-exceeded error the same way the buffered path's `throw` does.
+ *
+ * Returns an empty stream if the upstream provided no body (e.g. a 204 No
+ * Content). The Content-Length pre-check already fired before this is
+ * reached, so an oversized declared body has rejected upstream.
+ */
+function streamBoundedBody(
+  res: Response,
+  maxBytes: number,
+  controller: AbortController,
+): ReadableStream<Uint8Array> {
+  const upstream = res.body;
+  if (!upstream) {
+    return new ReadableStream<Uint8Array>({
+      start(streamController) {
+        streamController.close();
+      },
+    });
+  }
+
+  let total = 0;
+  const reader = upstream.getReader();
+  let released = false;
+  const releaseReader = () => {
+    if (released) return;
+    released = true;
+    try { reader.releaseLock(); } catch { /* best effort */ }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(streamController) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          releaseReader();
+          streamController.close();
+          return;
+        }
+        if (!value) return;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          // Cap exceeded — abort the shared controller so the underlying
+          // socket closes immediately, and surface the same error string
+          // the buffered path uses so test assertions and DLQ rows match.
+          controller.abort();
+          const err = new Error(`HTTP response exceeds maxResponseBytes after ${total} bytes (cap ${maxBytes})`);
+          streamController.error(err);
+          releaseReader();
+          return;
+        }
+        streamController.enqueue(value);
+      } catch (err) {
+        // Reader throws (e.g. AbortError on timeout) — propagate to the
+        // stream's consumer instead of silently closing.
+        releaseReader();
+        streamController.error(err);
+      }
+    },
+    cancel(reason) {
+      // Caller stopped consuming early — release the upstream reader and
+      // abort the shared controller so the socket isn't left dangling.
+      try { void reader.cancel(reason).catch(() => undefined).finally(releaseReader); } catch { releaseReader(); }
+      controller.abort();
+    },
+  });
+}
+
+/**
+ * Read up to `previewBytes` from a `ReadableStream<Uint8Array>` and return a
+ * UTF-8 decoded preview plus the original byte count consumed. Helper for
+ * persistence wrappers — the streaming-mode HTTP node executor calls this
+ * before returning so the persisted `output.body` is a bounded preview the
+ * operator can audit, instead of a `ReadableStream` that can't survive jsonb.
+ *
+ * The stream is consumed in full (or until `previewBytes` is reached AND any
+ * remaining chunks are drained) — that way the byte-cap abort fires for the
+ * full response even when the operator only persists a small preview. If
+ * the underlying stream aborts mid-flight (cap exceeded), the helper rethrows
+ * the same descriptive error the buffered path emits.
+ *
+ * Pure helper — does not access the network or the AbortController directly;
+ * relies on the stream's own error propagation from `streamBoundedBody`.
+ */
+export async function consumeStreamToPreview(
+  stream: ReadableStream<Uint8Array>,
+  previewBytes: number,
+): Promise<{ preview: string; originalBytes: number; truncated: boolean }> {
+  const cap = positiveIntOrFallback(previewBytes, 65_536);
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let previewCollected = 0;
+  let truncated = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (previewCollected < cap) {
+        const remaining = cap - previewCollected;
+        if (value.byteLength <= remaining) {
+          chunks.push(value);
+          previewCollected += value.byteLength;
+        } else {
+          chunks.push(value.subarray(0, remaining));
+          previewCollected += remaining;
+          truncated = true;
+        }
+      } else {
+        // Past the preview cap — keep counting bytes so the upstream
+        // byte-cap abort still has a chance to fire, but stop buffering.
+        truncated = true;
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* best effort */ }
+  }
+
+  return {
+    preview: new TextDecoder("utf-8").decode(concatBytes(chunks, previewCollected)),
+    originalBytes: total,
+    truncated,
+  };
+}
+
+/**
+ * Keep the total request timeout alive until the caller finishes consuming a
+ * streamed body, without teeing and eagerly draining a second branch. A tee'd
+ * timer branch would make the unread caller branch buffer the full response in
+ * memory, defeating the streaming contract.
+ */
+function wrapStreamingBodyWithTimeoutCleanup(
+  stream: ReadableStream<Uint8Array>,
+  controller: AbortController,
+  timer: ReturnType<typeof setTimeout>,
+  timeoutMs: number,
+  didTimeout: () => boolean,
+): ReadableStream<Uint8Array> {
+  const reader = stream.getReader();
+  let finalized = false;
+
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    clearTimeout(timer);
+    try { reader.releaseLock(); } catch { /* best effort */ }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(streamController) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          finalize();
+          streamController.close();
+          return;
+        }
+        if (value) streamController.enqueue(value);
+      } catch (err) {
+        finalize();
+        streamController.error(
+          didTimeout()
+            ? new Error(`HTTP request timed out after ${timeoutMs}ms`)
+            : err,
+        );
+      }
+    },
+    cancel(reason) {
+      const finish = () => {
+        controller.abort();
+        finalize();
+      };
+      try {
+        return reader.cancel(reason).catch(() => undefined).finally(finish);
+      } catch {
+        finish();
+        return undefined;
+      }
+    },
+  });
+}
+
+/**
  * One redirect hop. Recurses on 3xx, revalidating the next URL through the
  * same SSRF pin. Shares the AbortController across recursion so the total
- * timeout is a single budget — not per-hop.
+ * timeout is a single budget — not per-hop. The `bodyMode` parameter only
+ * affects how the terminal (non-3xx) hop's body is shaped — redirect hops
+ * always drain + close, regardless of mode.
  */
 async function fetchOneHop(
   rawUrl: unknown,
@@ -372,7 +633,8 @@ async function fetchOneHop(
   controller: AbortController,
   maxBytes: number,
   redirectsRemaining: number,
-): Promise<HttpResult> {
+  bodyMode: HttpBodyMode,
+): Promise<HttpBufferedResult | HttpStreamingResult> {
   const { url, agent } = await validateAndResolveTarget(rawUrl);
 
   const baseInit: RequestInit = {
@@ -393,8 +655,19 @@ async function fetchOneHop(
 
     const location = res.headers.get("location");
     if (!location) {
-      // 3xx without Location is a malformed response — surface as-is.
-      return { statusCode: res.status, ok: res.ok, body: "", headers: headersToRecord(res.headers) };
+      // 3xx without Location is a malformed response — surface as-is. In
+      // streaming mode we still return an empty stream so the discriminator
+      // type stays sound (the caller can `.getReader()` and read EOF).
+      const headers = headersToRecord(res.headers);
+      if (bodyMode === "stream") {
+        return {
+          statusCode: res.status,
+          ok: res.ok,
+          body: new ReadableStream<Uint8Array>({ start(c) { c.close(); } }),
+          headers,
+        };
+      }
+      return { statusCode: res.status, ok: res.ok, body: "", headers };
     }
     if (redirectsRemaining <= 0) {
       throw new Error(`HTTP redirect limit exceeded; last hop ${url} -> ${location}`);
@@ -408,22 +681,64 @@ async function fetchOneHop(
       nextInit = { ...(requestInit ?? {}), method: "GET", body: undefined };
     }
 
-    return fetchOneHop(nextUrl, nextInit, controller, maxBytes, redirectsRemaining - 1);
+    return fetchOneHop(nextUrl, nextInit, controller, maxBytes, redirectsRemaining - 1, bodyMode);
   }
 
+  const headers = headersToRecord(res.headers);
+  if (bodyMode === "stream") {
+    // Pre-check Content-Length BEFORE handing the stream to the caller so
+    // an upstream that lies about size large rejects on the first byte
+    // (matches the buffered path's `readBoundedBody` precheck shape).
+    preflightContentLength(res, maxBytes, controller);
+    return {
+      statusCode: res.status,
+      ok: res.ok,
+      body: streamBoundedBody(res, maxBytes, controller),
+      headers,
+    };
+  }
   const body = await readBoundedBody(res, maxBytes, controller);
-  return { statusCode: res.status, ok: res.ok, body, headers: headersToRecord(res.headers) };
+  return { statusCode: res.status, ok: res.ok, body, headers };
 }
 
 /**
  * Validated, bounded `fetch` for outbound HTTP. Resolves DNS once, pins the
  * IP to the connect path, applies the timeout / body-cap / redirect-limit
- * bounds, and returns a fully-consumed `HttpResult`. The single chokepoint
- * for `http` node + `http.request` tool — direct `fetch` calls bypass all
- * of this and must not be reintroduced.
+ * bounds, and returns either a fully-consumed `HttpBufferedResult` (default)
+ * or an `HttpStreamingResult` whose `body` is a `ReadableStream<Uint8Array>`
+ * the caller iterates chunk-by-chunk. The single chokepoint for `http` node
+ * + `http.request` tool — direct `fetch` calls bypass all of this and must
+ * not be reintroduced.
+ *
+ * Streaming mode does NOT loosen the byte cap — the returned stream aborts
+ * the same shared `AbortController` and surfaces the same descriptive error
+ * the moment total bytes exceed `maxResponseBytes`. Callers MUST consume the
+ * stream within the same executor invocation; streams cannot survive
+ * `safePersistPayload` (the chokepoint substitutes a placeholder if one
+ * leaks through).
  */
-export async function fetchHttpTarget(rawUrl: unknown, init?: HttpFetchInit): Promise<HttpResult> {
-  const { requestInit, timeoutMs, maxBytes, maxRedirects } = splitInit(init);
+// Overload order matters for tooling, not for call-site resolution. TS
+// picks the first matching overload at the call site — both signatures
+// here are mutually exclusive on the literal `bodyMode` discriminant, so
+// a caller's narrowed return type is determined by what they pass.
+// However, tools like vitest's `vi.mocked()` rely on `ReturnType<typeof
+// fetchHttpTarget>`, which resolves to the LAST overload's return type
+// — so the buffered signature is last to keep `vi.mocked(fetchHttpTarget)
+// .mockResolvedValueOnce({ body: "...", ... })` working without explicit
+// casts in every pre-existing test that doesn't care about streams.
+export function fetchHttpTarget(
+  rawUrl: unknown,
+  init: HttpFetchInit & { bodyMode: "stream" },
+): Promise<HttpStreamingResult>;
+export function fetchHttpTarget(
+  rawUrl: unknown,
+  init?: HttpFetchInit & { bodyMode?: "buffer" | undefined },
+): Promise<HttpBufferedResult>;
+export async function fetchHttpTarget(
+  rawUrl: unknown,
+  init?: HttpFetchInit,
+): Promise<HttpBufferedResult | HttpStreamingResult> {
+  const { requestInit, timeoutMs, maxBytes, maxRedirects, bodyMode } = splitInit(init);
 
   const controller = new AbortController();
   let timedOut = false;
@@ -432,8 +747,36 @@ export async function fetchHttpTarget(rawUrl: unknown, init?: HttpFetchInit): Pr
     controller.abort();
   }, timeoutMs);
 
+  // In streaming mode the timer must outlive `fetchOneHop`'s return — the
+  // caller still has to read the body, and a hung mid-stream upstream
+  // should still trip the timeout. Cleanup is attached to the caller's stream
+  // consumption path; the buffered path keeps the existing finally block.
+  if (bodyMode === "stream") {
+    try {
+      const result = await fetchOneHop(rawUrl, requestInit, controller, maxBytes, maxRedirects, "stream");
+      // Type narrows via the bodyMode switch.
+      const streaming = result as HttpStreamingResult;
+      return {
+        ...streaming,
+        body: wrapStreamingBodyWithTimeoutCleanup(
+          streaming.body,
+          controller,
+          timer,
+          timeoutMs,
+          () => timedOut,
+        ),
+      };
+    } catch (err) {
+      clearTimeout(timer);
+      if (timedOut) {
+        throw new Error(`HTTP request timed out after ${timeoutMs}ms`);
+      }
+      throw err;
+    }
+  }
+
   try {
-    return await fetchOneHop(rawUrl, requestInit, controller, maxBytes, maxRedirects);
+    return await fetchOneHop(rawUrl, requestInit, controller, maxBytes, maxRedirects, "buffer");
   } catch (err) {
     if (timedOut) {
       throw new Error(`HTTP request timed out after ${timeoutMs}ms`);
