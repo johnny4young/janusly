@@ -17,14 +17,18 @@
  * Invariants:
  * - Tool surface split: read-only (`workflows.list`, `workflows.get`,
  *   `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`,
- *   `runs.get`, `runs.list`, `dlq.list`), pre-flight checks
- *   (`workflows.validate` and `workflows.readiness` — POST but no side
- *   effects), and a gated write surface (`workflows.save`). Write tools
- *   are advertised ONLY when `JANUSLY_MCP_WRITES_ENABLED=true`. When the
- *   env is off the tool is absent from `tools()` and a direct call is
+ *   `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`,
+ *   `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`),
+ *   pre-flight checks (`workflows.validate` and `workflows.readiness` —
+ *   POST but no side effects), and a gated write surface (`workflows.save`).
+ *   Write tools are advertised ONLY when `JANUSLY_MCP_WRITES_ENABLED=true`.
+ *   When the env is off the tool is absent from `tools()` and a direct call is
  *   rejected with a clear error. The API enforces a second gate
  *   (per-tenant `mcp.writeConsent`) so flipping the env without tenant
- *   opt-in still rejects at the wire.
+ *   opt-in still rejects at the wire. `ai.patch_workflow` is read-only
+ *   from system-state POV (writes an audit row + incurs LLM cost, but
+ *   never saves a workflow version); applying a suggested patch requires
+ *   a follow-up `workflows.save` and therefore the same two-flag consent.
  * - Don't add more write tools without an explicit product/security review
  *   matching the required posture: explicit consent (both env + tenant),
  *   RBAC enforced upstream, audit row written by the API with
@@ -250,6 +254,62 @@ const READ_TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: "dlq.clusters",
+    description:
+      "List failure clusters — normalized signatures (e.g. \"Missing secret: GITHUB_TOKEN\", \"HTTP 401 on http node\") with frequency counts and DLQ-row samples, computed across the recent failure window. Use this to spot which failure shape is hitting the org most often before drilling into one DLQ entry. No side effects.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowDays: {
+          type: "number",
+          minimum: 1,
+          maximum: 90,
+          description: "Lookback window in days. Defaults to 30 on the API side when omitted.",
+        },
+      },
+    },
+  },
+  {
+    name: "recovery.metrics",
+    description:
+      "Org-level recovery rollup — success rate, MTTR, p95 latency, approvals pending, replay rate, and cost — with severity bands per metric. Use this to answer \"how is recovery health right now?\" from chat. No side effects.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        windowDays: {
+          type: "number",
+          minimum: 1,
+          maximum: 90,
+          description: "Lookback window in days. Defaults to 30 on the API side when omitted.",
+        },
+      },
+    },
+  },
+  {
+    name: "reports.run_explain",
+    description:
+      "Generate a structured explanation report for a single run (root cause, failed node, recommended next action, run metadata). Returns the JSON envelope shape; the equivalent Markdown rendering is available from the same API by passing format=markdown but this tool forces JSON for structured client consumption. No workflow mutation; the API writes the same report-export audit row as the web download path.",
+    inputSchema: {
+      type: "object",
+      required: ["runId"],
+      properties: {
+        runId: { type: "string", description: "Stable run id (the same id returned by `runs.list` / `dlq.list`)." },
+      },
+    },
+  },
+  {
+    name: "ai.patch_workflow",
+    description:
+      "Ask the AI for up to 3 suggested patches that would fix a specific failed DLQ entry. Returns each candidate as `{ workflow, rationale, approachLabel, confidence }` — the operator reviews and chooses one. NO workflow version is saved by this call; applying a chosen patch requires a separate `workflows.save` request, which is gated by the two-flag write consent (process `JANUSLY_MCP_WRITES_ENABLED` AND tenant `org_configs.mcp.writeConsent`). The API enforces per-org AI rate limit + LLM budget on this call.",
+    inputSchema: {
+      type: "object",
+      required: ["deadLetterId"],
+      properties: {
+        deadLetterId: { type: "string", description: "Stable dead-letter id (from `dlq.list`)." },
+      },
+    },
+  },
 ];
 
 /** Pure variant that lets tests vary the env per-case. */
@@ -363,6 +423,38 @@ async function runOne(
       }
       const query = params.toString();
       return callApi(query ? `/dlq?${query}` : "/dlq");
+    }
+    case "dlq.clusters": {
+      const params = new URLSearchParams();
+      if (typeof args.windowDays === "number" && Number.isFinite(args.windowDays) && args.windowDays > 0) {
+        params.set("windowDays", String(args.windowDays));
+      }
+      const query = params.toString();
+      return callApi(query ? `/dlq/clusters?${query}` : "/dlq/clusters");
+    }
+    case "recovery.metrics": {
+      const params = new URLSearchParams();
+      if (typeof args.windowDays === "number" && Number.isFinite(args.windowDays) && args.windowDays > 0) {
+        params.set("windowDays", String(args.windowDays));
+      }
+      const query = params.toString();
+      return callApi(query ? `/recovery/metrics?${query}` : "/recovery/metrics");
+    }
+    case "reports.run_explain": {
+      if (typeof args.runId !== "string" || args.runId.length === 0) {
+        throw new Error("reports.run_explain requires `runId` (non-empty string)");
+      }
+      const params = new URLSearchParams({ runId: args.runId, format: "json" });
+      return callApi(`/reports/run-explain?${params.toString()}`);
+    }
+    case "ai.patch_workflow": {
+      if (typeof args.deadLetterId !== "string" || args.deadLetterId.length === 0) {
+        throw new Error("ai.patch_workflow requires `deadLetterId` (non-empty string)");
+      }
+      return callApi("/ai/patch-workflow", {
+        method: "POST",
+        body: JSON.stringify({ deadLetterId: args.deadLetterId }),
+      });
     }
     case "workflows.save": {
       if (!mcpWritesEnabled()) {

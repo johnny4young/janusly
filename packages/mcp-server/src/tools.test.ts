@@ -15,11 +15,15 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the eleven read-only tools by default (no write surface)", () => {
+  it("exposes the fifteen read-only tools by default (no write surface)", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "ai.patch_workflow",
+      "dlq.clusters",
       "dlq.list",
       "recipes.list",
+      "recovery.metrics",
+      "reports.run_explain",
       "runs.get",
       "runs.list",
       "tools.list",
@@ -262,6 +266,93 @@ describe("dispatchTool", () => {
   it("dlq.list rejects invalid status before broadening to the full DLQ list", async () => {
     const { mock } = makeMockCallApi();
     await expect(dispatchTool(mock, "dlq.list", { status: "pending" })).rejects.toThrow(/status/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  // -------- dlq.clusters --------
+
+  it("dlq.clusters with no args hits /dlq/clusters without query params", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "dlq.clusters", {});
+    expect(mock).toHaveBeenCalledWith("/dlq/clusters");
+  });
+
+  it("dlq.clusters threads windowDays when provided", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "dlq.clusters", { windowDays: 14 });
+    expect(mock).toHaveBeenCalledWith("/dlq/clusters?windowDays=14");
+  });
+
+  it("dlq.clusters drops out-of-shape windowDays values (no NaN injection)", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "dlq.clusters", { windowDays: "not-a-number" as unknown as number });
+    expect(mock).toHaveBeenCalledWith("/dlq/clusters");
+  });
+
+  // -------- recovery.metrics --------
+
+  it("recovery.metrics with no args hits /recovery/metrics without query params", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "recovery.metrics", {});
+    expect(mock).toHaveBeenCalledWith("/recovery/metrics");
+  });
+
+  it("recovery.metrics threads windowDays when provided", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "recovery.metrics", { windowDays: 7 });
+    expect(mock).toHaveBeenCalledWith("/recovery/metrics?windowDays=7");
+  });
+
+  it("recovery.metrics drops zero/negative windowDays as no-op", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "recovery.metrics", { windowDays: 0 });
+    expect(mock).toHaveBeenCalledWith("/recovery/metrics");
+  });
+
+  // -------- reports.run_explain --------
+
+  it("reports.run_explain forces format=json so the client gets a structured envelope", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "reports.run_explain", { runId: "run-77" });
+    const path = mock.mock.calls[0][0] as string;
+    expect(path).toMatch(/^\/reports\/run-explain\?/);
+    expect(path).toContain("runId=run-77");
+    expect(path).toContain("format=json");
+  });
+
+  it("reports.run_explain URL-encodes the runId", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "reports.run_explain", { runId: "run with space" });
+    const path = mock.mock.calls[0][0] as string;
+    expect(path).toContain("runId=run+with+space");
+  });
+
+  it("reports.run_explain throws when runId is missing", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "reports.run_explain", {})).rejects.toThrow(/runId/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  // -------- ai.patch_workflow --------
+
+  it("ai.patch_workflow POSTs the deadLetterId to /ai/patch-workflow", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "ai.patch_workflow", { deadLetterId: "dlq-99" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/ai/patch-workflow");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ deadLetterId: "dlq-99" });
+  });
+
+  it("ai.patch_workflow throws when deadLetterId is missing", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "ai.patch_workflow", {})).rejects.toThrow(/deadLetterId/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("ai.patch_workflow throws when deadLetterId is an empty string (not a fallthrough to listing)", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "ai.patch_workflow", { deadLetterId: "" })).rejects.toThrow(/deadLetterId/);
     expect(mock).not.toHaveBeenCalled();
   });
 });
