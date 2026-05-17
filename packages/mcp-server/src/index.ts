@@ -10,7 +10,7 @@
  *      `default`, user `mcp-user`, no service token.
  *   2. `createApiClient(cfg)` — closure that injects auth headers per request.
  *   3. `Server` registered with two request handlers:
- *      - `tools/list` → returns the five tool descriptors.
+ *      - `tools/list` → returns the MCP tool descriptors.
  *      - `tools/call` → dispatches to `runOne` in `./tools`.
  *   4. `await server.connect(transport)` — JSON-RPC over stdio, runs forever.
  *

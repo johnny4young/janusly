@@ -1,6 +1,6 @@
 # `@janusly/mcp-server`
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes eleven read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `workflows.validate`, `workflows.readiness`) plus a gated write surface (`workflows.save`) advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes Janusly to MCP-aware AI clients (Claude Desktop, Cursor, custom agents). It publishes fifteen read-only tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`, `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`, `workflows.validate`, `workflows.readiness`) plus a gated write surface (`workflows.save`) advertised only when explicit consent is configured. All tools proxy HTTP to the running Janusly API.
 
 ## What is MCP and why ship a server?
 
@@ -57,6 +57,10 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `runs.get`            | `GET /run?runId=…[&eventsLimit=…&eventsCursor=…]`           | Fetch one run with paginated events.                                    |
 | `runs.list`           | `GET /runs[?workflowId=…&limit=…]`                          | List recent runs newest-first; optional `workflowId` filter.            |
 | `dlq.list`            | `GET /dlq[?status=…&limit=…]`                               | List DLQ entries newest-first; optional `status` filter.                |
+| `dlq.clusters`        | `GET /dlq/clusters[?windowDays=…]`                          | Group recent failures by normalized signature (e.g. "Missing secret: GITHUB_TOKEN"). |
+| `recovery.metrics`    | `GET /recovery/metrics[?windowDays=…]`                      | Org-level recovery rollup: success rate, MTTR, p95 latency, approvals pending, replay rate, cost. |
+| `reports.run_explain` | `GET /reports/run-explain?runId=…&format=json`              | Structured explanation envelope for one run (root cause, failed node, recommended next action). |
+| `ai.patch_workflow`   | `POST /ai/patch-workflow`                                   | Ask the AI for up to 3 suggested patches for one DLQ entry. NO save happens; review only. |
 | `workflows.validate`  | `POST /validate`                                            | Validate workflow shape and graph rules without saving.                 |
 | `workflows.readiness` | `POST /workflows/readiness`                                 | Pre-flight readiness check (safety / rollback / approvals / secrets).   |
 
