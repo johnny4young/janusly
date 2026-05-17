@@ -43,6 +43,39 @@ Calls an external HTTP endpoint. Subject to the SSRF policy (`ALLOW_PRIVATE_HTTP
 
 Read the body downstream with: `{{context.fetch_user.output.body}}`.
 
+### Streaming HTTP responses (5 MB CSV recipe)
+
+The default `http` node buffers the entire response into `output.body` before any downstream step runs. That's fine for typical API calls but blocks legitimate large-fetch use cases — multi-MB CSV ingest, PDF retrieval, image processing — because raising the global byte cap (`http.maxResponseBytes`, default 1 MB) defeats the OOM guard.
+
+Set `bodyMode: "stream"` on the node config to opt into the streaming primitive. The executor reads the response chunk-by-chunk and captures the first N bytes into a bounded preview that gets persisted to `run_nodes.state_json.output.body`; the full body still flows through the byte cap (the stream aborts mid-flight if the cap is exceeded). The preview size is controlled per-org by `http.streamPreviewBytes` (default 64 KB, range 1 KB..1 MB) or per-call via the `streamPreviewBytes` config field.
+
+```jsonc
+{
+  "id": "ingest_invoices_csv",
+  "type": "http",
+  "config": {
+    "url": "https://files.partner.example.com/invoices/2026-05.csv",
+    "method": "GET",
+    "headers": { "Accept": "text/csv" },
+    "bodyMode": "stream",
+    "maxResponseBytes": 8000000,
+    "streamPreviewBytes": 16384
+  }
+}
+```
+
+**Output when streamed:** `{ statusCode, ok, body, streamed: true, streamedBytes, streamTruncated }`
+
+- `body` is a UTF-8 string preview (up to `streamPreviewBytes`); auditable in the Runs panel without inflating the row.
+- `streamedBytes` is the total bytes consumed from the upstream (capped by `maxResponseBytes`).
+- `streamTruncated` is `true` when `streamedBytes > streamPreviewBytes`.
+
+**v1 limitations:**
+- Streams are consumed within the same executor invocation. Downstream nodes (different DAG steps) see only the persisted preview — workflows can't pass a live stream across persistence boundaries, because the run state is checkpointed to Postgres between every node.
+- A future streaming-aware tool (e.g. `csv.parse-stream` that combines fetch + parse in one step) is the path for true line-by-line processing of large payloads. Until then, raise `streamPreviewBytes` per call when the operator needs more bytes for downstream `transform` / `condition` evaluation.
+
+**Safeguards preserved:** the SSRF guard (`ALLOW_PRIVATE_HTTP_TARGETS=false` rejects private targets), DNS-rebinding pin (the validated IP is pinned to the connect), timeout (`timeoutMs`), redirect chain (`maxRedirects`), and the byte cap (`maxResponseBytes`) all apply to the streaming path identically. The `http.request` tool gains the same `bodyMode` / `streamPreviewBytes` input fields when called directly from an `agent` or `tool` node.
+
 ## `condition`
 
 Evaluates a sandboxed boolean expression and emits `{ result: boolean }`. Combine with edge `condition` to branch the graph.

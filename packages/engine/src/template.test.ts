@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getByPath, mapInput, redactError, redactValues, renderTemplate, renderTemplateWithRedactions } from './template'
+import { getByPath, mapInput, redactError, redactValues, renderTemplate, renderTemplateWithRedactions, StreamValueInTemplateError } from './template'
 
 describe('getByPath', () => {
   it('reads nested paths', () => {
@@ -16,6 +16,23 @@ describe('getByPath', () => {
 
   it('reads numeric array segments', () => {
     expect(getByPath({ items: [{ id: 'first' }] }, 'items.0.id')).toBe('first')
+  })
+
+  it('throws StreamValueInTemplateError when the resolved value is a ReadableStream', () => {
+    // Defense-in-depth: the streaming-mode HTTP executor always pre-consumes
+    // the body into a preview, so a context value reachable from a template
+    // should never be a live stream. If a regression let one escape, the
+    // operator gets a precise error naming the path instead of a confusing
+    // `[object ReadableStream]` showing up in the rendered output.
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.close() } })
+    const source = { context: { 1: { output: { body: stream } } } }
+    try {
+      getByPath(source, 'context.1.output.body')
+      throw new Error('expected getByPath to throw')
+    } catch (err) {
+      expect(err).toBeInstanceOf(StreamValueInTemplateError)
+      expect((err as StreamValueInTemplateError).path).toBe('context.1.output.body')
+    }
   })
 })
 

@@ -40,7 +40,7 @@ import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 import { appendEvent } from "./persistence";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
-import { fetchHttpTarget } from "./http-policy";
+import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
 import { checkBudget } from "./budget";
 import { subworkflowExecutor } from "./subworkflow";
@@ -138,6 +138,12 @@ function withHttpToolDefaults(
   next.timeoutMs ??= orgConfig.http.timeoutMs;
   next.maxResponseBytes ??= orgConfig.http.maxResponseBytes;
   next.maxRedirects ??= orgConfig.http.maxRedirects;
+  // When the operator opted into streaming and didn't pass a per-call
+  // preview cap, fall back to the tenant default so a low per-org cap
+  // applies without the operator having to set it on every node.
+  if (next.bodyMode === "stream") {
+    next.streamPreviewBytes ??= orgConfig.http.streamPreviewBytes;
+  }
   return next;
 }
 
@@ -314,7 +320,7 @@ function aggregateCrewResults(results: any[], strategy = "last") {
 
 export const nodeRegistry: Record<string, NodeExecutor> = {
   http: async (ctx) => {
-    const { url, method, headers, body, timeoutMs, maxResponseBytes, maxRedirects } = ctx.config;
+    const { url, method, headers, body, timeoutMs, maxResponseBytes, maxRedirects, bodyMode, streamPreviewBytes } = ctx.config;
     const resolvedMethod = (method ?? "GET").toUpperCase();
 
     // In sandbox/validation mode, skip non-safe methods so the validation
@@ -331,15 +337,57 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
+    const resolvedTimeoutMs = typeof timeoutMs === "number" ? timeoutMs : orgConfig.http.timeoutMs;
+    const resolvedMaxBytes = typeof maxResponseBytes === "number" ? maxResponseBytes : orgConfig.http.maxResponseBytes;
+    const resolvedMaxRedirects = typeof maxRedirects === "number" ? maxRedirects : orgConfig.http.maxRedirects;
+
+    // Streaming opt-in: the body comes back as a ReadableStream the executor
+    // immediately consumes into a bounded preview before returning. The
+    // persisted output shape is a JSON-safe `{ body, streamed, streamedBytes,
+    // streamTruncated }` so downstream nodes / templates / persistence see
+    // a string preview, not a live stream.
+    if (bodyMode === "stream") {
+      const previewCap = typeof streamPreviewBytes === "number" && Number.isFinite(streamPreviewBytes)
+        ? Math.max(1024, Math.min(streamPreviewBytes, 1_048_576))
+        : orgConfig.http.streamPreviewBytes;
+      const streaming = await fetchHttpTarget(url, {
+        method: resolvedMethod,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        timeoutMs: resolvedTimeoutMs,
+        maxResponseBytes: resolvedMaxBytes,
+        maxRedirects: resolvedMaxRedirects,
+        bodyMode: "stream",
+      });
+      if (!streaming.ok) {
+        // Drain the stream so the socket releases — `streamBoundedBody`'s
+        // cancel path aborts the shared controller cleanly.
+        try { await streaming.body.cancel(); } catch { /* best effort */ }
+        throw new Error(`HTTP failed: ${streaming.statusCode}`);
+      }
+      const { preview, originalBytes, truncated } = await consumeStreamToPreview(streaming.body, previewCap);
+      return {
+        status: "completed",
+        output: {
+          statusCode: streaming.statusCode,
+          ok: streaming.ok,
+          body: preview,
+          streamed: true,
+          streamedBytes: originalBytes,
+          streamTruncated: truncated,
+        },
+      };
+    }
+
     const result = await fetchHttpTarget(url, {
       method: resolvedMethod,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       // Optional bounds — nodes that fetch large payloads or call slow APIs
       // pass these through; otherwise tenant/runtime defaults apply.
-      timeoutMs: timeoutMs ?? orgConfig.http.timeoutMs,
-      maxResponseBytes: maxResponseBytes ?? orgConfig.http.maxResponseBytes,
-      maxRedirects: maxRedirects ?? orgConfig.http.maxRedirects,
+      timeoutMs: resolvedTimeoutMs,
+      maxResponseBytes: resolvedMaxBytes,
+      maxRedirects: resolvedMaxRedirects,
     });
 
     if (!result.ok) throw new Error(`HTTP failed: ${result.statusCode}`);

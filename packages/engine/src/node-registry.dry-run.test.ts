@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./http-policy', () => ({
+  consumeStreamToPreview: vi.fn(),
   fetchHttpTarget: vi.fn(),
 }))
 
@@ -25,7 +26,7 @@ vi.mock('./persistence', async (importOriginal) => {
 vi.mock('@janusly/data/src/orgConfigRepo', () => ({
   getOrgConfigSnapshot: vi.fn().mockResolvedValue({
     ai: { provider: 'openai', model: 'gpt-4o-mini', rateLimitPerMin: 60 },
-    http: { timeoutMs: 30_000, maxResponseBytes: 1_000_000, maxRedirects: 5 },
+    http: { timeoutMs: 30_000, maxResponseBytes: 1_000_000, maxRedirects: 5, streamPreviewBytes: 65_536 },
     email: { provider: 'noop', from: 'sender@example.com', rateLimitPerMin: 100 },
     runs: {},
   }),
@@ -37,13 +38,14 @@ vi.mock('./memory', () => ({
   summarizeMemory: vi.fn(() => []),
 }))
 
-import { fetchHttpTarget } from './http-policy'
+import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
 import { verifyResumeToken } from './secrets'
 import { setMailerForTests, type MailerProvider } from './mailer'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
+const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 const appendEventMock = vi.mocked(appendEvent)
 
 const baseCtx: Omit<NodeContext, 'config'> = {
@@ -57,6 +59,7 @@ const baseCtx: Omit<NodeContext, 'config'> = {
 
 beforeEach(() => {
   fetchHttpTargetMock.mockReset()
+  consumeStreamToPreviewMock.mockReset()
   appendEventMock.mockReset()
   setMailerForTests(null)
 })
@@ -125,6 +128,54 @@ describe('http node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ statusCode: 201, ok: true })
+  })
+
+  it('consumes streaming responses into a JSON-safe preview envelope', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('preview'))
+        controller.close()
+      },
+    })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: {},
+    } as never)
+    consumeStreamToPreviewMock.mockResolvedValueOnce({
+      preview: 'preview',
+      originalBytes: 7,
+      truncated: false,
+    })
+
+    const result = await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example', method: 'GET', bodyMode: 'stream' },
+    })
+
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      'https://x.example',
+      expect.objectContaining({
+        method: 'GET',
+        bodyMode: 'stream',
+        timeoutMs: 30_000,
+        maxResponseBytes: 1_000_000,
+        maxRedirects: 5,
+      }),
+    )
+    expect(consumeStreamToPreviewMock).toHaveBeenCalledWith(stream, 65_536)
+    expect(result).toEqual({
+      status: 'completed',
+      output: {
+        statusCode: 200,
+        ok: true,
+        body: 'preview',
+        streamed: true,
+        streamedBytes: 7,
+        streamTruncated: false,
+      },
+    })
   })
 
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(

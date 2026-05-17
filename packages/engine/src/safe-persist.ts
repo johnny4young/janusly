@@ -131,10 +131,43 @@ function redactSensitiveKeys(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Detect a `ReadableStream` (Web Streams) or an async-iterable that wraps
+ * one. Returns `true` only for live stream-shaped values that can't be
+ * JSON-serialized and would either throw or produce useless output if
+ * persisted as-is. Defense-in-depth — the streaming-mode HTTP executor
+ * always pre-consumes into a preview before returning, so this guard
+ * should only trip on a regression that lets a live stream escape its
+ * executor invocation.
+ */
+function isReadableStreamLike(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  // Web Streams ReadableStream — covers both the Node global and the
+  // `node:stream/web` import.
+  if (typeof ReadableStream !== "undefined" && value instanceof ReadableStream) return true;
+  // Structural check for ReadableStream-shaped values (cross-realm /
+  // polyfilled instances): both `getReader` AND `tee` are required so we
+  // don't false-positive on user objects that happen to expose just one.
+  const v = value as { getReader?: unknown; tee?: unknown };
+  return typeof v.getReader === "function" && typeof v.tee === "function";
+}
+
+function streamSentinel(): { __stream: true; note: string } {
+  return {
+    __stream: true,
+    note: "ReadableStream not persisted — consume within the executor (see consumeStreamToPreview)",
+  };
+}
+
 function normalizeJsonValue(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function" || typeof value === "symbol") return undefined;
   if (!value || typeof value !== "object") return value;
+
+  // Stream guard — substitute BEFORE we touch any field, so a wrapping
+  // executor object containing both a stream and other keys doesn't drop
+  // its siblings just because the stream itself can't be enumerated.
+  if (isReadableStreamLike(value)) return streamSentinel();
 
   if (seen.has(value)) return "[circular]";
   seen.add(value);
