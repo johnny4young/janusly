@@ -79,7 +79,15 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
   });
   const sanitized = { ...workflow, nodes: sanitizedNodes, edges: sanitizedEdges };
 
-  const validation = validateWorkflow(sanitized);
+  // Draft-generation tolerance: AI-emitted `tool` nodes may carry
+  // partial `input` because the operator finishes the rest in the
+  // Inspector. The strict consumption surfaces (`/start`, `/save`,
+  // `/validate`, `/workflows/readiness`, the web pre-save check) keep
+  // the default `strictToolInputs: true` and reject incomplete inputs
+  // at run / save / preflight time. Without this carve-out every
+  // tool-using prompt silently fell back to a fixture template
+  // because the schema couldn't even carry partial inputs.
+  const validation = validateWorkflow(sanitized, { strictToolInputs: false });
   if (!validation.valid) {
     throw httpError(`AI returned a workflow with validation issues: ${validation.issues.map(issue => issue.message).join(", ")}`, 502);
   }
@@ -134,7 +142,13 @@ export function fallbackExplainWorkflow(workflow: unknown) {
 
 export function fallbackWorkflowForPrompt(prompt: unknown) {
   const text = typeof prompt === "string" ? prompt.toLowerCase() : "";
-  const templateId = text.includes("incident") || text.includes("on-call") || text.includes("slack") || text.includes("github")
+  // Email-shape matcher runs FIRST so a prompt like "respond to incidents
+  // by email" lands on the email skeleton instead of the incident webhook
+  // template — the operator's intent (send a reply) is closer to the
+  // email shape than the incident shape.
+  const templateId = text.includes("email") || text.includes("correo") || text.includes("gmail") || text.includes("mail")
+    ? "email-reply"
+    : text.includes("incident") || text.includes("on-call") || text.includes("slack") || text.includes("github")
     ? "incident-triage"
     : text.includes("approval") || text.includes("approve") || text.includes("aprob") || text.includes("human") || text.includes("risk")
     ? "approval-gate"

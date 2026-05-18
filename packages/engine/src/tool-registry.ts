@@ -1238,6 +1238,10 @@ export function listTools(): ToolSchema[] {
   });
 }
 
+export function isRegisteredTool(name: string): name is RegisteredTool {
+  return name in tools;
+}
+
 /**
  * Validate a candidate input against the registered tool's input schema.
  *
