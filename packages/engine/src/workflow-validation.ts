@@ -20,7 +20,7 @@ import { validateExpression } from "./expression";
 import { parseIsoDuration } from "./iso-duration";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
-import { validateToolInput } from "./tool-registry";
+import { isRegisteredTool, validateToolInput } from "./tool-registry";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
 
@@ -38,8 +38,28 @@ export type WorkflowValidationResult = {
   issues: WorkflowValidationIssue[];
 };
 
+/**
+ * Per-call options for `validateWorkflow`. Default behaviour
+ * (`strictToolInputs: true`) keeps every existing call site
+ * unchanged — `tool` nodes still must carry every required input
+ * declared by the per-tool Zod schema in `tool-registry.ts`.
+ *
+ * The draft-generation surface (`apps/api/src/ai-runtime.ts`
+ * `sanitizeAiWorkflow`) passes `strictToolInputs: false` so the
+ * LLM can return a workflow with partial tool inputs the operator
+ * finishes in the Inspector. The other validation surfaces
+ * (`/start`, `/save`, `/validate`, `/workflows/readiness`, the
+ * web pre-save check, the patch matrix, the template load test)
+ * keep the default and reject incomplete tool inputs.
+ */
+export type ValidateWorkflowOptions = {
+  /** When `true` (default), every `tool` node's `input` is validated against the per-tool Zod schema. When `false`, the per-tool input check is skipped — `tool_missing_name` still fires. */
+  strictToolInputs?: boolean;
+};
+
 /** Run every cross-node check; returns `valid: true` only when no issues. */
-export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
+export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOptions = {}): WorkflowValidationResult {
+  const strictToolInputs = options.strictToolInputs ?? true;
   const issues: WorkflowValidationIssue[] = [];
 
   const parsed = WorkflowSchema.safeParse(workflow);
@@ -70,7 +90,9 @@ export function validateWorkflow(workflow: unknown): WorkflowValidationResult {
     if (!supportedNodeTypes.has(node.type)) issues.push({ code: "unsupported_node_type", message: `Unsupported node type: ${node.type}`, nodeId: node.id });
     if (node.type === "http" && !node.config.url) issues.push({ code: "http_missing_url", message: "HTTP node requires config.url", nodeId: node.id });
     if (node.type === "tool" && !node.config.tool) issues.push({ code: "tool_missing_name", message: "Tool node requires config.tool", nodeId: node.id });
-    if (node.type === "tool" && typeof node.config.tool === "string") {
+    if (node.type === "tool" && typeof node.config.tool === "string" && !isRegisteredTool(node.config.tool)) {
+      issues.push({ code: "tool_invalid_input", message: `Unknown tool: ${node.config.tool}`, nodeId: node.id });
+    } else if (strictToolInputs && node.type === "tool" && typeof node.config.tool === "string") {
       const validation = validateToolInput(node.config.tool, node.config.input ?? {});
       if (!validation.valid) {
         issues.push({ code: "tool_invalid_input", message: validation.issues.join(", "), nodeId: node.id });

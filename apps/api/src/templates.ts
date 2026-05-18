@@ -563,5 +563,57 @@ export const workflowTemplates: WorkflowTemplate[] = [
         { from: "rank", to: "post_digest" }
       ]
     }
-  }
+  },
+  {
+    id: "email-reply",
+    name: "Email auto-reply",
+    description: "Skeleton for reading inbound email and sending a templated reply via email.send. Operator fills the trigger source and recipient details in the Inspector.",
+    category: "Communication",
+    // Placeholder credential — the actual Gmail-read integration is a
+    // future ticket. The template ships as a scaffold so an operator
+    // who asked the AI for an email reply gets a usefully-shaped DAG
+    // when the LLM is unavailable.
+    requiredCredentials: [],
+    workflow: {
+      dslVersion: "1.0",
+      id: "email-reply",
+      name: "Email auto-reply",
+      nodes: [
+        // Inbound fetch placeholder. The operator points this at
+        // their Gmail (or other inbox) integration in the Inspector
+        // before running.
+        { id: "fetch_inbound", type: "noop", config: {} },
+        {
+          id: "match_sender",
+          type: "condition",
+          // Placeholder expression — the operator refines this in the
+          // Inspector with the real sender-domain check once they've
+          // wired the inbound source's output shape.
+          config: { expression: "true" },
+        },
+        {
+          id: "reply",
+          type: "tool",
+          // Placeholder values so the template loads through strict
+          // `validateWorkflow` and the operator can run a smoke as
+          // soon as they wire the inbound source. The Inspector
+          // surface lets them override every field; the placeholders
+          // are explicitly templated against the inbound match so
+          // it's obvious where the real data flows from.
+          config: {
+            tool: "email.send",
+            input: {
+              to: "{{context.match_sender.output.sender}}",
+              subject: "Auto-reply",
+              text: "Thanks for your message — I'll get back to you shortly.",
+            },
+          },
+        },
+      ],
+      edges: [
+        { from: "fetch_inbound", to: "match_sender" },
+        { from: "match_sender", to: "reply" },
+      ],
+    },
+  },
 ];

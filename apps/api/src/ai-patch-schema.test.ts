@@ -540,6 +540,37 @@ describe("AiGenerationWorkflowSchema — selected 11-node grammar", () => {
     expect(parsed.success).toBe(true);
   });
 
+  it("keeps tool input fields the LLM forwarded from the operator prompt", () => {
+    const parsed = AiGenerationWorkflowSchema.safeParse({
+      nodes: [{
+        id: "reply",
+        type: "tool",
+        config: {
+          tool: "email.send",
+          input: {
+            to: "alice@example.com",
+            subject: "Invoice",
+            metadata: { source: "prompt" },
+            labels: ["customer", "billing"],
+          },
+        },
+      }],
+      edges: [],
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.nodes[0]?.config).toMatchObject({
+      tool: "email.send",
+      input: {
+        to: "alice@example.com",
+        subject: "Invoice",
+        metadata: { source: "prompt" },
+        labels: ["customer", "billing"],
+      },
+    });
+  });
+
   it("accepts human_form in the generation grammar", () => {
     const parsed = AiGenerationWorkflowSchema.safeParse({
       nodes: [{

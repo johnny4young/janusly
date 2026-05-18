@@ -41,6 +41,60 @@ describe('validateWorkflow', () => {
     expect(result.issues).toContainEqual(expect.objectContaining({ code: 'tool_invalid_input', nodeId: 'tool' }))
   })
 
+  it('skips the per-tool input check when strictToolInputs: false (AI Studio draft path)', () => {
+    // Workflow has the same incomplete tool node as the test above —
+    // when the draft-generation surface validates it (with the option
+    // flipped), the tool_invalid_input issue MUST NOT fire so the
+    // operator's draft can carry partial inputs into the Inspector.
+    const result = validateWorkflow(
+      {
+        nodes: [{ id: 'email', type: 'tool', config: { tool: 'email.send', input: {} } }],
+        edges: [],
+      },
+      { strictToolInputs: false },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.issues.find(issue => issue.code === 'tool_invalid_input')).toBeUndefined()
+  })
+
+  it('still flags tool_missing_name when strictToolInputs: false', () => {
+    // The structural `tool_missing_name` check is independent of the
+    // per-input gate — a tool node with no `tool` field is invalid in
+    // both strict and draft modes.
+    const result = validateWorkflow(
+      {
+        nodes: [{ id: 'tool', type: 'tool', config: {} }],
+        edges: [],
+      },
+      { strictToolInputs: false },
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'tool_missing_name', nodeId: 'tool' }))
+    expect(result.issues.find(issue => issue.code === 'tool_invalid_input')).toBeUndefined()
+  })
+
+  it('still rejects unknown tool names when strictToolInputs: false', () => {
+    // Draft mode only skips per-tool input completeness. It must still
+    // reject unknown tool names so malformed AI output falls back instead
+    // of landing as a runtime-invalid workflow in the Inspector.
+    const result = validateWorkflow(
+      {
+        nodes: [{ id: 'tool', type: 'tool', config: { tool: 'gmail.search', input: {} } }],
+        edges: [],
+      },
+      { strictToolInputs: false },
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'tool_invalid_input',
+      message: 'Unknown tool: gmail.search',
+      nodeId: 'tool',
+    }))
+  })
+
   it('rejects empty workflows', () => {
     const result = validateWorkflow({ nodes: [], edges: [] })
     expect(result.valid).toBe(false)

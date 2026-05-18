@@ -1409,6 +1409,7 @@
   "multiAgent.loading": "Loading…",
 
   "templates.category.ai": "AI",
+  "templates.category.communication": "Communication",
   "templates.category.data": "Data",
   "templates.category.human-in-the-loop": "Human-in-the-loop",
   "templates.category.operations": "Operations",
@@ -1431,6 +1432,8 @@
   "templates.ai-support-draft-review.description": "Webhook receives a support ticket, AI drafts a response, a human agent reviews/edits via a typed form, and the final reply is emailed to the customer.",
   "templates.churn-risk-weekly-digest.name": "Churn-risk weekly digest (scheduled)",
   "templates.churn-risk-weekly-digest.description": "Cron-fires every Monday 9am, pulls at-risk users from a configured analytics endpoint, AI ranks them, then a digest message lands in Slack for the customer-success channel.",
+  "templates.email-reply.name": "Email auto-reply",
+  "templates.email-reply.description": "Skeleton for reading inbound email and sending a templated reply via email.send. Operator fills the trigger source and recipient details in the Inspector.",
 
   "tools.pdf-generate.description": "Render a Markdown or HTML template into a PDF and upload it to the configured object store.",
   "tools.email-send.description": "Send a transactional email via the configured mailer (Resend or SendGrid).",
