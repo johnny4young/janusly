@@ -102,11 +102,32 @@ const AiAiNode = z.object({
   }),
 });
 
+const AiToolInputScalar = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const AiToolInputValue = z.union([
+  AiToolInputScalar,
+  z.array(AiToolInputScalar),
+  z.record(z.string(), AiToolInputScalar),
+]);
+
 const AiToolNode = z.object({
   id: z.string().min(1),
   type: z.literal("tool"),
   config: z.object({
     tool: z.string().min(1),
+    // Optional `input` lets the LLM forward fields the operator gave
+    // verbatim in the prompt (e.g. `to`, `subject` for email.send;
+    // `channel`, `text` for slack.post; `url` for http.request). The
+    // record is open because per-tool Zod schemas live in
+    // `packages/engine/src/tool-registry.ts` — `validateToolInput`
+    // enforces them at the strict consumption surfaces (`/start`,
+    // `/save`, `/validate`, `/workflows/readiness`). The draft path
+    // (`/ai/generate-workflow` → `sanitizeAiWorkflow` with
+    // `strictToolInputs: false`) accepts partial input so operators
+    // can finish in the Inspector. Without this field the LLM-emitted
+    // input would be silently stripped at Zod parse time. Values stay
+    // concrete rather than `z.unknown()` because Anthropic structured
+    // output rejects empty schemas.
+    input: z.record(z.string(), AiToolInputValue).optional(),
   }),
 });
 

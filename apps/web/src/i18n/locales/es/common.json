@@ -1409,6 +1409,7 @@
   "multiAgent.loading": "Cargando…",
 
   "templates.category.ai": "IA",
+  "templates.category.communication": "Comunicación",
   "templates.category.data": "Datos",
   "templates.category.human-in-the-loop": "Con humano en el loop",
   "templates.category.operations": "Operaciones",
@@ -1431,6 +1432,8 @@
   "templates.ai-support-draft-review.description": "Un webhook recibe el ticket de soporte, la IA arma un borrador de respuesta, un agente humano revisa/edita en un formulario tipado y la respuesta final se envía por email al cliente.",
   "templates.churn-risk-weekly-digest.name": "Digest semanal de riesgo de churn (programado)",
   "templates.churn-risk-weekly-digest.description": "Cron dispara cada lunes a las 9 am, trae usuarios en riesgo desde un endpoint de analytics configurado, la IA los rankea y un mensaje de digest llega a Slack para el canal de éxito de cliente.",
+  "templates.email-reply.name": "Auto-respuesta por email",
+  "templates.email-reply.description": "Esqueleto para leer un email entrante y enviar una respuesta con plantilla vía email.send. El operador completa la fuente de disparo y los datos del destinatario en el Inspector.",
 
   "tools.pdf-generate.description": "Renderiza un template Markdown o HTML como PDF y lo sube al object store configurado.",
   "tools.email-send.description": "Envía un email transaccional vía el mailer configurado (Resend o SendGrid).",

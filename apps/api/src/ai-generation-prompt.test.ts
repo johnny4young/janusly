@@ -7,6 +7,10 @@ import { describe, expect, it } from "vitest";
 const promptsSource = readFileSync(new URL("./ai-prompts.ts", import.meta.url), "utf8");
 const runtimeSource = readFileSync(new URL("./ai-runtime.ts", import.meta.url), "utf8");
 
+import { fallbackWorkflowForPrompt, sanitizeAiWorkflow } from "./ai-runtime";
+import type { Workflow } from "@janusly/shared";
+import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
+
 describe("generate-workflow system prompt", () => {
   it("documents the current 11-node Anthropic grammar selection", () => {
     expect(promptsSource).toContain("'approval', 'human_form', 'loop'");
@@ -18,8 +22,23 @@ describe("generate-workflow system prompt", () => {
 
   it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {
     expect(promptsSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
-    expect(promptsSource).toContain("emit the tool name only");
-    expect(promptsSource).toContain("The operator fills credential names, destinations, and richer inputs");
+    // The tool rule now asks the LLM to forward fields the operator
+    // gave verbatim (closing the bug where every tool-using prompt
+    // silently fell back). Pin the new phrasing so a future edit
+    // doesn't accidentally revert to "emit the tool name only".
+    expect(promptsSource).toContain("emit the tool name AND any required-field values the operator gave VERBATIM");
+    expect(promptsSource).toContain("Tool input examples must match the runtime tool registry");
+    expect(promptsSource).toContain("credential: slack_ops text: deploy started");
+    expect(promptsSource).not.toContain("channel: #ops");
+    expect(promptsSource).toContain("NEVER invent realistic-looking values");
+    expect(promptsSource).toContain("the operator finishes in the Inspector");
+  });
+
+  it("routes email-shape prompts to the email-reply fallback (matcher in ai-runtime)", () => {
+    expect(runtimeSource).toContain('text.includes("email")');
+    expect(runtimeSource).toContain('text.includes("correo")');
+    expect(runtimeSource).toContain('text.includes("gmail")');
+    expect(runtimeSource).toContain('"email-reply"');
   });
 
   it("routes incident, Slack, and GitHub prompts to the incident-triage fallback template", () => {
@@ -48,5 +67,98 @@ describe("generate-workflow system prompt", () => {
     // explicitly call out "schedule a meeting" style on-demand intents
     // so the LLM doesn't tag them as cron.
     expect(promptsSource).toContain("schedule a meeting");
+  });
+});
+
+describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
+  it("does NOT throw on a tool node with partial input (operator finishes in the Inspector)", () => {
+    // Reproducer for the silent-fallback bug: pre-fix this threw
+    // `httpError("AI returned a workflow with validation issues:
+    // Missing required input: to, Missing required input: subject")`,
+    // which the route's outer try/catch converted into a fallback
+    // template. With strictToolInputs: false on the draft surface,
+    // the partial-input draft passes through cleanly.
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "email_draft",
+      name: "Email draft",
+      nodes: [
+        { id: "reply", type: "tool", config: { tool: "email.send", input: {} } },
+      ],
+      edges: [],
+    };
+
+    expect(() => sanitizeAiWorkflow(draft)).not.toThrow();
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes[0]?.type).toBe("tool");
+    expect((sanitized.nodes[0]?.config as { tool?: string }).tool).toBe("email.send");
+  });
+
+  it("still throws on a tool node with NO `tool` name (structural check stays strict)", () => {
+    // The per-tool input check is the only thing relaxed for drafts.
+    // Missing `config.tool` is a structural issue and must still
+    // fail-fast so the operator gets a clear error instead of a
+    // half-shaped node landing in the Inspector.
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "broken",
+      name: "Broken",
+      nodes: [
+        { id: "no_tool", type: "tool", config: {} },
+      ],
+      edges: [],
+    };
+
+    expect(() => sanitizeAiWorkflow(draft)).toThrow(/Tool node requires config\.tool/);
+  });
+
+  it("round-trips registry-required inputs for every write-side generated tool", () => {
+    const cases: Array<{ tool: string; input: Record<string, unknown> }> = [
+      { tool: "email.send", input: { to: "ops@example.com", subject: "Alert", text: "Escalating this alert." } },
+      { tool: "slack.post", input: { credential: "slack_ops", text: "Deploy started" } },
+      { tool: "github.create_issue", input: { credential: "github_ops", owner: "acme", repo: "ops", title: "Investigate alert" } },
+      { tool: "webhook.send", input: { credential: "hooks_ops", url: "https://hooks.example.com/ops", payload: { event: "alert" } } },
+      { tool: "pdf.generate", input: { template: "# Incident\n\n{{summary}}" } },
+      { tool: "http.request", input: { url: "https://api.example.com/status" } },
+    ];
+
+    for (const { tool, input } of cases) {
+      const draft: Workflow = {
+        dslVersion: "1.0",
+        id: `${tool.replaceAll(".", "_")}_draft`,
+        name: `${tool} draft`,
+        nodes: [{ id: "run_tool", type: "tool", config: { tool, input } }],
+        edges: [],
+      };
+
+      const sanitized = sanitizeAiWorkflow(draft);
+      expect((sanitized.nodes[0]?.config as { input?: unknown }).input).toEqual(input);
+      expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+    }
+  });
+});
+
+describe("fallbackWorkflowForPrompt — email-shape matcher", () => {
+  it("routes an email/correo/gmail/mail prompt to the email-reply template", () => {
+    for (const prompt of [
+      "revisa mi correo de Gmail y respondé desde to: x@y.com subject: hola",
+      "send a reply email when a customer writes from @acme.com",
+      "auto-reply via gmail to onboarding requests",
+      "if I get an inbound mail, send an out-of-office reply",
+    ]) {
+      const workflow = fallbackWorkflowForPrompt(prompt);
+      expect(workflow?.id).toBe("email-reply");
+    }
+  });
+
+  it("does not steal incident/approval/transform prompts that already had matches (regression pin)", () => {
+    // Email matcher runs FIRST so a prompt with both email AND
+    // incident keywords lands on email-reply (operator intent: reply,
+    // not triage). Pure-incident/approval/transform prompts stay on
+    // their original templates.
+    expect(fallbackWorkflowForPrompt("respond to incident in #ops slack")?.id).toBe("incident-triage");
+    expect(fallbackWorkflowForPrompt("require human approval before charging")?.id).toBe("approval-gate");
+    expect(fallbackWorkflowForPrompt("transform the backend response into a report")?.id).toBe("api-transform-tool");
+    expect(fallbackWorkflowForPrompt("just call a public api")?.id).toBe("http-ai-summary");
   });
 });
