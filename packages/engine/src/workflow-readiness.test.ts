@@ -123,6 +123,37 @@ describe('checkWorkflowReadiness', () => {
     }))
   })
 
+  it('flags every mcp_tool node as a sensitive action (fail-safe — workflow JSON has no visibility into the descriptor writeSide flag)', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'edit_page', type: 'mcp_tool', config: { connectionAlias: 'notion', toolName: 'pages.update', input: { pageId: 'p1' }, retry: { maxAttempts: 3 } } },
+      ],
+      edges: [{ from: 'start', to: 'edit_page' }],
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'sensitive_action_missing_approval',
+      nodeId: 'edit_page',
+    }))
+  })
+
+  it('does not flag an mcp_tool node when there is an approval ancestor', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'review', type: 'approval', config: { message: 'Approve before editing the Notion page.' } },
+        { id: 'edit_page', type: 'mcp_tool', config: { connectionAlias: 'notion', toolName: 'pages.update', input: { pageId: 'p1' }, retry: { maxAttempts: 3 } } },
+      ],
+      edges: [
+        { from: 'start', to: 'review' },
+        { from: 'review', to: 'edit_page' },
+      ],
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues.find((issue) => issue.code === 'sensitive_action_missing_approval')).toBeUndefined()
+  })
+
   it('flags hardcoded secret-like values in node config as fail', () => {
     const workflow = makeWorkflow({
       nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://api.example.com', method: 'GET', timeoutMs: 5000, retry: { maxAttempts: 3 }, headers: { Authorization: 'Bearer literal-leaky-token' } } }],

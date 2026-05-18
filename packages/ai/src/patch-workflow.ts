@@ -255,6 +255,8 @@ Rules per suggestion:
  */
 export const STRUCTURAL_PATCH_SYSTEM_PROMPT = `You are Janusly's failure-recovery agent. You are given a workflow that just failed, the id of the failing node (a write-side action with no human-approval gate upstream), the error envelope, and recent run events.
 
+This pattern covers two failing-node types: write-side HTTP calls (POST/PUT/PATCH/DELETE) and \`mcp_tool\` invocations of external MCP servers. Both can mutate state outside Janusly and benefit from a human gate before they fire; the structural fix is identical.
+
 The fix is STRUCTURAL: insert a new \`approval\` node BEFORE the failing node so a human reviews the action before it fires. You cannot change the failing node's config — only add the approval upstream.
 
 Produce up to 3 ALTERNATIVE structural patches. The operator sees them as tabs and picks one.

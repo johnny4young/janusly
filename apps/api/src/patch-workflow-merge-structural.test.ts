@@ -67,6 +67,48 @@ describe("applyStructuralPatchToWorkflow — happy path", () => {
     const parsed = WorkflowSchema.safeParse(merged);
     expect(parsed.success).toBe(true);
   });
+
+  it("inserts an approval upstream of an mcp_tool failing-node target (type-agnostic merger)", () => {
+    // Merger only inspects edges + node ids; the failing node's `type`
+    // is opaque to it. Pinning this contract prevents a future regression
+    // that would special-case `http` in the merger and silently miss
+    // `mcp_tool` targets the dispatcher now routes through.
+    const workflow: Workflow = {
+      dslVersion: "1.0",
+      id: "notion_flow",
+      name: "Notion flow",
+      nodes: [
+        { id: "intent", type: "noop", config: {} },
+        {
+          id: "edit_page",
+          type: "mcp_tool",
+          config: {
+            connectionAlias: "notion",
+            toolName: "pages.update",
+            input: { pageId: "{{context.intent.output.pageId}}" },
+          },
+        },
+      ],
+      edges: [{ from: "intent", to: "edit_page" }],
+    } as Workflow;
+
+    const merged = applyStructuralPatchToWorkflow(workflow, {
+      action: "insert_approval_upstream",
+      approvalNodeId: "approve_edit",
+      approvalMessage: "Approve editing the Notion page?",
+      insertBeforeNodeId: "edit_page",
+    });
+
+    expect(merged.nodes.map((n) => n.id).sort()).toEqual(["approve_edit", "edit_page", "intent"]);
+    const approval = merged.nodes.find((n) => n.id === "approve_edit")!;
+    expect(approval.type).toBe("approval");
+    expect(merged.edges).toEqual([
+      { from: "intent", to: "approve_edit" },
+      { from: "approve_edit", to: "edit_page" },
+    ]);
+    const parsed = WorkflowSchema.safeParse(merged);
+    expect(parsed.success).toBe(true);
+  });
 });
 
 describe("applyStructuralPatchToWorkflow — multi-predecessor rewiring", () => {

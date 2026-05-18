@@ -210,6 +210,15 @@ export function isSensitiveAction(node: WorkflowNode): boolean {
     if (SENSITIVE_TOOL_NAMES.has(tool)) return true;
     return SENSITIVE_TOOL_SUFFIXES.some((suffix) => tool.endsWith(suffix));
   }
+  // External MCP tool invocations are treated as write-side by default.
+  // The workflow JSON only carries (connectionAlias, toolName); the
+  // per-tool `writeSide` flag lives on the API-side `mcp_tool_descriptors`
+  // table and isn't visible at suggestion time. Fail-safe matches the
+  // descriptor table's own posture (`writeSide: true` default, admins
+  // mark read-only explicitly). False positives just surface an extra
+  // approval suggestion in the Recovery dialog that the operator can
+  // ignore; false negatives miss a real write that needed a human gate.
+  if (node.type === "mcp_tool") return true;
   return false;
 }
 
