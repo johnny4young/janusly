@@ -404,9 +404,129 @@ describe('tool-registry', () => {
     expect(names).toEqual(expect.arrayContaining([
       'text.lowercase', 'text.trim', 'text.replace', 'text.regex',
       'json.set', 'json.merge', 'json.jq',
-      'csv.parse', 'csv.stringify', 'csv.filter',
+      'csv.parse', 'csv.stringify', 'csv.filter', 'csv.fetch',
       'time.now', 'time.parse', 'time.format', 'time.diff', 'time.add',
       'crypto.sha256', 'crypto.hmac', 'crypto.uuid',
     ]))
+  })
+
+  it('csv.fetch streams a CSV URL and returns a bounded summary', async () => {
+    // Happy path: a small 3-row CSV streams through, the tool returns
+    // the bounded summary with counts + sample. The mock body is a real
+    // ReadableStream so `streamCsvSummary` exercises its actual reader
+    // path — only the SSRF / network primitive is mocked.
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('id,status\n1,ACTIVE\n2,ACTIVE\n3,inactive'))
+        controller.close()
+      },
+    })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: {},
+    } as never)
+
+    const result = await executeTool('csv.fetch', {
+      url: 'https://example.com/data.csv',
+      sampleRows: 10,
+    }, {}) as Record<string, unknown>
+
+    expect(fetchHttpTargetMock).toHaveBeenCalledWith(
+      'https://example.com/data.csv',
+      expect.objectContaining({ bodyMode: 'stream' }),
+    )
+    expect(result.ok).toBe(true)
+    expect(result.statusCode).toBe(200)
+    expect(result.totalRows).toBe(3)
+    expect(result.matchedRows).toBe(3)
+    expect(result.headers).toEqual(['id', 'status'])
+    expect(result.streamTruncated).toBe(false)
+    expect((result.sampleRows as unknown[]).length).toBe(3)
+  })
+
+  it('csv.fetch includes an error when a non-2xx response still streams', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('code,message\nE_LIMIT,too many rows'))
+        controller.close()
+      },
+    })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 503,
+      ok: false,
+      body: stream,
+      headers: {},
+    } as never)
+
+    const result = await executeTool('csv.fetch', {
+      url: 'https://example.com/data.csv',
+      sampleRows: 10,
+    }, {}) as Record<string, unknown>
+
+    expect(result.ok).toBe(false)
+    expect(result.statusCode).toBe(503)
+    expect(result.error).toBe('HTTP 503')
+    expect(result.totalRows).toBe(1)
+    expect(result.sampleRows).toEqual([{ code: 'E_LIMIT', message: 'too many rows' }])
+  })
+
+  it('csv.fetch surfaces streamTruncated:true with partial sample when the stream aborts mid-flight', async () => {
+    // Simulate a byte-cap abort by streaming a few good chunks then
+    // erroring the controller. The tool should NOT throw — the partial
+    // summary rides through with `ok: false, streamTruncated: true`.
+    let i = 0
+    const chunks = ['id,name\n', '1,alice\n', '2,bob\n']
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (i < chunks.length) {
+          controller.enqueue(new TextEncoder().encode(chunks[i]))
+          i += 1
+          return
+        }
+        controller.error(new Error('response body exceeded maxBytes (10485760)'))
+      },
+    })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: {},
+    } as never)
+
+    const result = await executeTool('csv.fetch', {
+      url: 'https://example.com/large.csv',
+      sampleRows: 10,
+    }, {}) as Record<string, unknown>
+
+    expect(result.ok).toBe(false)
+    expect(result.streamTruncated).toBe(true)
+    expect((result.error as string)).toMatch(/maxBytes/)
+    expect(result.totalRows).toBe(2)             // both rows arrived before abort
+    expect((result.sampleRows as unknown[]).length).toBe(2)
+  })
+
+  it('csv.fetch returns ok:false statusCode:0 when fetchHttpTarget rejects pre-stream (SSRF / DNS)', async () => {
+    // The shared `fetchHttpTarget` chokepoint throws synchronously when
+    // the URL fails the SSRF guard or DNS pinning — the stream is never
+    // opened. The tool catches and returns a uniform envelope so
+    // downstream `condition` nodes can branch on `.ok` without knowing
+    // which guard fired.
+    fetchHttpTargetMock.mockRejectedValueOnce(new Error('private target blocked: 169.254.169.254 Bearer secret_token_1234567890'))
+
+    const result = await executeTool('csv.fetch', {
+      url: 'http://169.254.169.254/secrets.csv',
+      sampleRows: 10,
+    }, {}) as Record<string, unknown>
+
+    expect(result.ok).toBe(false)
+    expect(result.statusCode).toBe(0)
+    expect((result.error as string)).toMatch(/private/)
+    expect((result.error as string)).not.toContain('secret_token')
+    expect((result.error as string)).toContain('[redacted]')
+    expect(result.streamedBytes).toBe(0)
+    expect((result.sampleRows as unknown[]).length).toBe(0)
+    expect(result.headers).toEqual([])
   })
 })
