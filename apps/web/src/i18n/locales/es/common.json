@@ -1075,6 +1075,7 @@
   "mcpConnections.form.transport": "Transporte",
   "mcpConnections.form.transportStdio": "stdio (proceso hijo local)",
   "mcpConnections.form.transportSse": "sse (flujo remoto)",
+  "mcpConnections.form.transportHttp": "http (Streamable HTTP — recomendado)",
   "mcpConnections.form.command": "Comando",
   "mcpConnections.form.commandPlaceholder": "node",
   "mcpConnections.form.args": "Argumentos (separados por espacios)",

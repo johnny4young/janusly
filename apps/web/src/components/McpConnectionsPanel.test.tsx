@@ -28,6 +28,22 @@ const ONE_CONNECTION = {
     },
   ],
 }
+const HTTP_CONNECTION = {
+  connections: [
+    {
+      ...ONE_CONNECTION.connections[0],
+      id: 'conn-http',
+      alias: 'hosted-http',
+      transport: 'http',
+      command: null,
+      args: null,
+      url: 'https://hosted-mcp.example.com/',
+      envRefs: {},
+      toolCount: 0,
+      enabledToolCount: 0,
+    },
+  ],
+}
 const TOOLS_FOR_CONN_1 = {
   tools: [
     { id: 't1', connectionId: 'conn-1', name: 'list_charges', description: 'List charges', inputSchema: null, writeSide: false, enabled: true, exposeToAi: false },
@@ -57,6 +73,14 @@ describe('<McpConnectionsPanel />', () => {
       expect(screen.getByText('active')).toBeInTheDocument()
       expect(screen.getByText(/2 tools \/ 1 enabled/i)).toBeInTheDocument()
     })
+  })
+
+  it('renders http transport connections and exposes http in the create form', async () => {
+    vi.mocked(api).mockResolvedValueOnce(HTTP_CONNECTION)
+    render(<McpConnectionsPanel />)
+    await waitFor(() => expect(screen.getByText('hosted-http')).toBeInTheDocument())
+    expect(screen.getByText('http · https://hosted-mcp.example.com/')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /http \(Streamable HTTP .* recommended\)/i })).toHaveValue('http')
   })
 
   it('loads + renders tools after expanding the accordion', async () => {
@@ -129,6 +153,37 @@ describe('<McpConnectionsPanel />', () => {
         expect.objectContaining({
           method: 'POST',
           body: expect.stringContaining('"alias":"stripe-prod"'),
+        }),
+      )
+    })
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
+
+  it('submits an http create-connection form with the url transport payload', async () => {
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/mcp/connections' && (!init || init.method !== 'POST')) return EMPTY
+      if (path === '/mcp/connections' && init?.method === 'POST') {
+        return { connection: HTTP_CONNECTION.connections[0], tools: [], discovery: { ok: true, tools: 0 } }
+      }
+      return null
+    })
+    render(<McpConnectionsPanel />)
+    await waitFor(() => expect(screen.getByText(/No MCP connections yet/i)).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Alias'), { target: { value: 'hosted-http' } })
+    fireEvent.change(screen.getByLabelText('Transport'), { target: { value: 'http' } })
+    fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://hosted-mcp.example.com/' } })
+    fireEvent.click(screen.getByRole('button', { name: /Register \+ discover/i }))
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/mcp/connections',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            alias: 'hosted-http',
+            transport: 'http',
+            envRefs: {},
+            url: 'https://hosted-mcp.example.com/',
+          }),
         }),
       )
     })
