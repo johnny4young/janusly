@@ -316,12 +316,14 @@ export const aiRoutes: Route[] = [
       // Reuses the same `isSensitiveAction` + `hasApprovalAncestor` rule
       // that drives the readiness check, so dispatch is consistent with
       // what the operator sees flagged on the Production Readiness badge.
-      // v1 narrows to HTTP only — tool write-side failures stay on the
-      // config envelope until a future ticket extends the dispatcher.
+      // Covers HTTP write-side AND every `mcp_tool` node. Classic `tool`
+      // nodes (against `SENSITIVE_TOOL_NAMES` / `SENSITIVE_TOOL_SUFFIXES`)
+      // stay on the config envelope — the operator UX for "insert approval
+      // upstream of slack.post / email.send" hasn't been validated yet.
       const parsedWorkflowForDispatch = WorkflowSchema.safeParse(dlq.workflowJson);
       const useStructural =
         failingNode.success
-        && failingNode.data.type === "http"
+        && (failingNode.data.type === "http" || failingNode.data.type === "mcp_tool")
         && isSensitiveAction(failingNode.data)
         && parsedWorkflowForDispatch.success
         && !hasApprovalAncestor(
