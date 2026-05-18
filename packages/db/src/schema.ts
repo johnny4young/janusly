@@ -795,6 +795,13 @@ export const mcpToolDescriptors = pgTable(
     inputSchema: jsonb("input_schema"),
     writeSide: boolean("write_side").notNull().default(true),
     enabled: boolean("enabled").notNull().default(false),
+    // Per-tool rate-limit override. NULL = use the org default
+    // (`org_configs.mcp.clientRateLimitPerMin`, default 60/min). A
+    // positive integer overrides the org default for this descriptor
+    // only — the `mcp_client.<alias>.<toolname>` bucket inherits the
+    // value at execute time. Set / cleared by admins via the existing
+    // tool-flags PATCH route; audited as `mcp.tool.rate_limit_set`.
+    rateLimitPerMin: integer("rate_limit_per_min"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

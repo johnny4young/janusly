@@ -69,6 +69,7 @@ function descriptor(overrides: Partial<McpToolDescriptorRow> = {}): McpToolDescr
     inputSchema: null,
     writeSide: false,
     enabled: true,
+    rateLimitPerMin: null,
     createdAt: null,
     updatedAt: null,
     ...overrides,
@@ -298,6 +299,67 @@ describe("executeMcpTool", () => {
     });
     expect(envelope.ok).toBe(false);
     expect(envelope.error).toBe("Rate limit exceeded");
+  });
+
+  it("uses the descriptor's rateLimitPerMin override instead of the caller's org default", async () => {
+    // Admin set a lower per-tool budget (e.g. notion.pages.create
+    // costs more than the rest of the connection). The executor MUST
+    // pass the descriptor value to the limiter — passing the caller's
+    // org default would defeat the override.
+    getConnectionMock.mockResolvedValueOnce(activeConnection());
+    getDescriptorMock.mockResolvedValueOnce(descriptor({ rateLimitPerMin: 10 }));
+    const limiterCalls: Array<{ name: string; orgId: string; max: number }> = [];
+    setEngineRateLimiter(async (name, orgId, opts) => {
+      limiterCalls.push({ name, orgId, max: opts.max });
+    });
+    withMcpClientMock.mockImplementationOnce(async (_factory, fn) =>
+      (fn as (client: unknown) => Promise<unknown>)({
+        callTool: async () => ({ output: { ok: true }, latencyMs: 1 }),
+      }),
+    );
+
+    const envelope = await executeMcpTool({
+      orgId: "org-1",
+      connectionAlias: "demo",
+      toolName: "do_thing",
+      writeConsentProcess: true,
+      writeConsentTenant: true,
+      // Caller passes the org default (60) — the override (10) should win.
+      rateLimitPerMin: 60,
+    });
+
+    expect(envelope.ok).toBe(true);
+    expect(limiterCalls).toHaveLength(1);
+    expect(limiterCalls[0]?.name).toBe("mcp_client.demo.do_thing");
+    expect(limiterCalls[0]?.max).toBe(10);
+  });
+
+  it("falls back to the caller's rateLimitPerMin when the descriptor override is null", async () => {
+    // The common case: no per-tool override → caller's org default wins.
+    // Pins the back-compat default behaviour so future regressions are caught.
+    getConnectionMock.mockResolvedValueOnce(activeConnection());
+    getDescriptorMock.mockResolvedValueOnce(descriptor({ rateLimitPerMin: null }));
+    const limiterCalls: Array<{ max: number }> = [];
+    setEngineRateLimiter(async (_name, _orgId, opts) => {
+      limiterCalls.push({ max: opts.max });
+    });
+    withMcpClientMock.mockImplementationOnce(async (_factory, fn) =>
+      (fn as (client: unknown) => Promise<unknown>)({
+        callTool: async () => ({ output: { ok: true }, latencyMs: 1 }),
+      }),
+    );
+
+    await executeMcpTool({
+      orgId: "org-1",
+      connectionAlias: "demo",
+      toolName: "do_thing",
+      writeConsentProcess: true,
+      writeConsentTenant: true,
+      rateLimitPerMin: 60,
+    });
+
+    expect(limiterCalls).toHaveLength(1);
+    expect(limiterCalls[0]?.max).toBe(60);
   });
 
   it("surfaces an MCP isError result as an error envelope", async () => {
