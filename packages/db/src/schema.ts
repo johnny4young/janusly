@@ -756,6 +756,13 @@ export const mcpConnections = pgTable(
     enabled: boolean("enabled").notNull().default(true),
     status: text("status").notNull().default("pending"),
     statusReason: text("status_reason"),
+    // Admin opt-in: when true, the connection's enabled tool descriptors
+    // (with their sanitised descriptions) get appended to the AI Studio's
+    // system prompt at generation time so the LLM can reference them in
+    // `noop` placeholders the operator promotes in the Inspector. Default
+    // `false` — descriptions come from third-party MCP servers and are
+    // a potential prompt-injection vector; admin must explicitly opt in.
+    exposeToAi: boolean("expose_to_ai").notNull().default(false),
     lastDiscoveryAt: timestamp("last_discovery_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

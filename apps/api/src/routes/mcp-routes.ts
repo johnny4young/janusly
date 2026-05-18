@@ -10,7 +10,7 @@
  *    `enabled: false` and flips status to `active` on success or
  *    `failed` with `statusReason` on error.
  *  - `POST /mcp/connections/:alias` — update enabled flag / envRefs /
- *    args / url / command. Idempotent.
+ *    args / url / command / exposeToAi. Idempotent.
  *  - `DELETE /mcp/connections/:alias` — cascade-delete descriptors
  *    then the connection row.
  *  - `POST /mcp/connections/:alias/rediscover` — re-runs the
@@ -20,9 +20,10 @@
  *  - `POST /mcp/connections/:alias/tools/:toolName` — flip the
  *    operator-controlled flags (enabled, writeSide, rateLimitPerMin).
  *
- * Multi-tenant scope on every read/write. Seven audit actions:
+ * Multi-tenant scope on every read/write. Eight audit actions:
  * `mcp.connection.created` / `_updated` / `_deleted` / `_rediscovered`,
- * `mcp.tool.enabled` / `mcp.tool.disabled` / `mcp.tool.rate_limit_set`.
+ * `mcp.connection.expose_to_ai_set`, `mcp.tool.enabled` /
+ * `mcp.tool.disabled` / `mcp.tool.rate_limit_set`.
  */
 
 import { audit } from "../audit";
@@ -322,8 +323,12 @@ export const mcpRoutes: Route[] = [
         }
         updates.command = command;
       }
+      // Admin opt-in flag for surfacing this connection's MCP tools to
+      // `/ai/generate-workflow`'s system prompt. Defaults to false on
+      // create; this PATCH is the only mutation surface.
+      if (typeof body.exposeToAi === "boolean") updates.exposeToAi = body.exposeToAi;
 
-      const updated = await updateConnection(updates);
+      const { before, after } = await updateConnection(updates);
       // When the admin re-enables a disabled connection, return status to pending
       // so the discovery-status display reflects the operator intent.
       if (typeof body.enabled === "boolean") {
@@ -341,10 +346,27 @@ export const mcpRoutes: Route[] = [
         commandChanged: body.command !== undefined,
         urlChanged: body.url !== undefined,
         argsChanged: body.args !== undefined,
+        exposeToAiChanged: typeof body.exposeToAi === "boolean" && before
+          ? body.exposeToAi !== before.exposeToAi
+          : undefined,
       });
 
+      // Audit-on-change for the exposeToAi flip — independent row so an
+      // operator review can grep just the `mcp.connection.expose_to_ai_set`
+      // history without scanning every generic `mcp.connection.updated`.
+      if (typeof body.exposeToAi === "boolean" && before && body.exposeToAi !== before.exposeToAi) {
+        await audit(
+          auth.orgId,
+          auth.userId,
+          "mcp.connection.expose_to_ai_set",
+          "mcp_connection",
+          existing.id,
+          { alias, before: before.exposeToAi, after: body.exposeToAi },
+        );
+      }
+
       const fresh = await getConnectionByAlias({ orgId: auth.orgId, alias });
-      return sendJson(res, fresh ?? updated);
+      return sendJson(res, fresh ?? after);
     },
   },
 

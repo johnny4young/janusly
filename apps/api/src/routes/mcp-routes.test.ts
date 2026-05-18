@@ -147,6 +147,7 @@ const connectionRow = {
   enabled: true,
   status: "pending" as const,
   statusReason: null,
+  exposeToAi: false,
   lastDiscoveryAt: null,
   createdBy: "user-1",
   createdAt: null,
@@ -295,6 +296,74 @@ describe("POST /mcp/connections/:alias", () => {
     await route.handler({ req: mockReq("POST", "/mcp/connections/demo", { url: "   " }), res, auth });
     expect(captured.status).toBe(400);
     expect(updateConnection).not.toHaveBeenCalled();
+  });
+
+  it("persists exposeToAi: true AND emits a mcp.connection.expose_to_ai_set audit row when the flag flips false → true", async () => {
+    // First lookup (existence check) sees the prior row with exposeToAi: false.
+    // Second lookup (post-update fresh) returns the updated row.
+    vi.mocked(getConnectionByAlias)
+      .mockResolvedValueOnce(connectionRow) // existence check at route entry
+      .mockResolvedValueOnce({ ...connectionRow, exposeToAi: true }); // fresh after update
+    vi.mocked(updateConnection).mockResolvedValueOnce({
+      before: { enabled: true, exposeToAi: false },
+      after: { ...connectionRow, exposeToAi: true },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo")!;
+    const { res } = mockRes();
+    await route.handler({ req: mockReq("POST", "/mcp/connections/demo", { exposeToAi: true }), res, auth });
+
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({ exposeToAi: true }));
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.connection.expose_to_ai_set",
+      "mcp_connection",
+      "conn-1",
+      expect.objectContaining({ alias: "demo", before: false, after: true }),
+    );
+  });
+
+  it("audits the reverse flip true → false with before/after", async () => {
+    const exposedRow = { ...connectionRow, exposeToAi: true };
+    vi.mocked(getConnectionByAlias)
+      .mockResolvedValueOnce(exposedRow)
+      .mockResolvedValueOnce({ ...exposedRow, exposeToAi: false });
+    vi.mocked(updateConnection).mockResolvedValueOnce({
+      before: { enabled: true, exposeToAi: true },
+      after: { ...exposedRow, exposeToAi: false },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo")!;
+    const { res } = mockRes();
+    await route.handler({ req: mockReq("POST", "/mcp/connections/demo", { exposeToAi: false }), res, auth });
+
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.connection.expose_to_ai_set",
+      "mcp_connection",
+      "conn-1",
+      expect.objectContaining({ before: true, after: false }),
+    );
+  });
+
+  it("does NOT emit the expose_to_ai_set audit row when the field is omitted from the body", async () => {
+    vi.mocked(getConnectionByAlias)
+      .mockResolvedValueOnce(connectionRow)
+      .mockResolvedValueOnce({ ...connectionRow, enabled: false });
+    vi.mocked(updateConnection).mockResolvedValueOnce({
+      before: { enabled: true, exposeToAi: false },
+      after: { ...connectionRow, enabled: false },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo")!;
+    const { res } = mockRes();
+    await route.handler({ req: mockReq("POST", "/mcp/connections/demo", { enabled: false }), res, auth });
+
+    // The generic `mcp.connection.updated` row fires for the enabled flip
+    // but the expose_to_ai_set row must NOT, because the field wasn't in
+    // the body.
+    const auditActions = vi.mocked(audit).mock.calls.map((call) => call[2]);
+    expect(auditActions).toContain("mcp.connection.updated");
+    expect(auditActions).not.toContain("mcp.connection.expose_to_ai_set");
   });
 });
 
