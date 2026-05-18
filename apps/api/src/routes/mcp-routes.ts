@@ -18,11 +18,11 @@
  *    survive).
  *  - `GET /mcp/connections/:alias/tools` — list cached descriptors.
  *  - `POST /mcp/connections/:alias/tools/:toolName` — flip the
- *    operator-controlled flags (enabled, writeSide).
+ *    operator-controlled flags (enabled, writeSide, rateLimitPerMin).
  *
- * Multi-tenant scope on every read/write. Six audit actions:
+ * Multi-tenant scope on every read/write. Seven audit actions:
  * `mcp.connection.created` / `_updated` / `_deleted` / `_rediscovered`,
- * `mcp.tool.enabled` / `_disabled`.
+ * `mcp.tool.enabled` / `mcp.tool.disabled` / `mcp.tool.rate_limit_set`.
  */
 
 import { audit } from "../audit";
@@ -428,7 +428,7 @@ export const mcpRoutes: Route[] = [
     },
   },
 
-  // === Toggle tool descriptor (enabled / writeSide) ===
+  // === Toggle tool descriptor (enabled / writeSide / rateLimitPerMin) ===
   {
     method: "POST",
     match: (url) => /^\/mcp\/connections\/[^/]+\/tools\/[^/?]+$/.test(url),
@@ -446,22 +446,67 @@ export const mcpRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
       const writeSide = typeof body.writeSide === "boolean" ? body.writeSide : undefined;
-      if (enabled === undefined && writeSide === undefined) {
+
+      // Per-tool rate-limit override. Three states distinguished:
+      //   - field absent → leave the prior value alone (undefined).
+      //   - explicit `null` → clear the override; tool reverts to the
+      //     org default (`org_configs.mcp.clientRateLimitPerMin`).
+      //   - positive integer in [1, 10_000] → set the override.
+      // The upper bound is a sanity ceiling: the chokepoint must never
+      // expose an effectively-unbounded rate-limit even when an admin
+      // pastes a large number by mistake.
+      let rateLimitPerMin: number | null | undefined;
+      if ("rateLimitPerMin" in body) {
+        const raw = body.rateLimitPerMin;
+        if (raw === null) {
+          rateLimitPerMin = null;
+        } else if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 10_000) {
+          rateLimitPerMin = raw;
+        } else {
+          return sendJson(res, { error: "rateLimitPerMin must be null or an integer in [1, 10000]" }, 400);
+        }
+      }
+
+      if (enabled === undefined && writeSide === undefined && rateLimitPerMin === undefined) {
         return sendJson(res, { error: "no updatable fields provided" }, 400);
       }
-      const updated = await setToolFlags({ connectionId: connection.id, name: toolName, enabled, writeSide });
+      const { before, after } = await setToolFlags({
+        connectionId: connection.id,
+        name: toolName,
+        enabled,
+        writeSide,
+        rateLimitPerMin,
+      });
 
-      if (enabled !== undefined && enabled !== descriptor.enabled) {
+      if (enabled !== undefined && before && enabled !== before.enabled) {
         await audit(
           auth.orgId,
           auth.userId,
           enabled ? "mcp.tool.enabled" : "mcp.tool.disabled",
           "mcp_tool",
           descriptor.id,
-          { alias, toolName, writeSide: updated?.writeSide },
+          { alias, toolName, writeSide: after?.writeSide },
         );
       }
-      return sendJson(res, updated);
+
+      // Audit on actual change only — pinning to setting the same
+      // value as before is a no-op for the audit trail.
+      if (
+        rateLimitPerMin !== undefined
+        && before
+        && rateLimitPerMin !== before.rateLimitPerMin
+      ) {
+        await audit(
+          auth.orgId,
+          auth.userId,
+          "mcp.tool.rate_limit_set",
+          "mcp_tool",
+          descriptor.id,
+          { alias, toolName, before: before.rateLimitPerMin, after: rateLimitPerMin },
+        );
+      }
+
+      return sendJson(res, after);
     },
   },
 ];

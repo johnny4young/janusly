@@ -59,6 +59,7 @@ import {
 } from "@janusly/data/src/mcpConnectionsRepo";
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { withMcpClient } from "@janusly/engine/src/mcp-client";
+import { audit } from "../audit";
 import { mcpRoutes } from "./mcp-routes";
 import type { Route, RouteContext } from "../routes";
 import type { AuthContext } from "../auth";
@@ -163,6 +164,7 @@ beforeEach(() => {
   vi.mocked(setToolFlags).mockReset();
   vi.mocked(updateConnection).mockReset();
   vi.mocked(upsertToolDescriptor).mockReset();
+  vi.mocked(audit).mockReset();
   vi.mocked(getOrgConfigSnapshot).mockReset();
   vi.mocked(getOrgConfigSnapshot).mockResolvedValue({
     ai: {} as never,
@@ -230,6 +232,7 @@ describe("POST /mcp/connections", () => {
       inputSchema: { type: "object" },
       writeSide: true,
       enabled: false,
+      rateLimitPerMin: null,
       createdAt: null,
       updatedAt: null,
     });
@@ -324,19 +327,24 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       inputSchema: null,
       writeSide: false,
       enabled: false,
+      rateLimitPerMin: null,
       createdAt: null,
       updatedAt: null,
     });
     vi.mocked(setToolFlags).mockResolvedValueOnce({
-      id: "tool-1",
-      connectionId: "conn-1",
-      name: "do_thing",
-      description: null,
-      inputSchema: null,
-      writeSide: false,
-      enabled: true,
-      createdAt: null,
-      updatedAt: null,
+      before: { enabled: false, writeSide: false, rateLimitPerMin: null },
+      after: {
+        id: "tool-1",
+        connectionId: "conn-1",
+        name: "do_thing",
+        description: null,
+        inputSchema: null,
+        writeSide: false,
+        enabled: true,
+        rateLimitPerMin: null,
+        createdAt: null,
+        updatedAt: null,
+      },
     });
     const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
     const { res } = mockRes();
@@ -363,6 +371,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       inputSchema: null,
       writeSide: false,
       enabled: true,
+      rateLimitPerMin: null,
       createdAt: null,
       updatedAt: null,
     });
@@ -370,6 +379,125 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
     const { res, captured } = mockRes();
     await route.handler({ req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", {}), res, auth });
     expect(captured.status).toBe(400);
+  });
+
+  it("persists a numeric rateLimitPerMin override AND writes a mcp.tool.rate_limit_set audit row", async () => {
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(getToolDescriptor).mockResolvedValueOnce({
+      id: "tool-1",
+      connectionId: "conn-1",
+      name: "do_thing",
+      description: null,
+      inputSchema: null,
+      writeSide: false,
+      enabled: true,
+      rateLimitPerMin: null,
+      createdAt: null,
+      updatedAt: null,
+    });
+    vi.mocked(setToolFlags).mockResolvedValueOnce({
+      before: { enabled: true, writeSide: false, rateLimitPerMin: null },
+      after: {
+        id: "tool-1",
+        connectionId: "conn-1",
+        name: "do_thing",
+        description: null,
+        inputSchema: null,
+        writeSide: false,
+        enabled: true,
+        rateLimitPerMin: 30,
+        createdAt: null,
+        updatedAt: null,
+      },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
+    const { res } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", { rateLimitPerMin: 30 }),
+      res,
+      auth,
+    });
+    expect(setToolFlags).toHaveBeenCalledWith(expect.objectContaining({ rateLimitPerMin: 30 }));
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.tool.rate_limit_set",
+      "mcp_tool",
+      "tool-1",
+      expect.objectContaining({ alias: "demo", toolName: "do_thing", before: null, after: 30 }),
+    );
+  });
+
+  it("clears a prior rateLimitPerMin override on explicit null AND audits before/after", async () => {
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(getToolDescriptor).mockResolvedValueOnce({
+      id: "tool-1",
+      connectionId: "conn-1",
+      name: "do_thing",
+      description: null,
+      inputSchema: null,
+      writeSide: false,
+      enabled: true,
+      rateLimitPerMin: 30,
+      createdAt: null,
+      updatedAt: null,
+    });
+    vi.mocked(setToolFlags).mockResolvedValueOnce({
+      before: { enabled: true, writeSide: false, rateLimitPerMin: 30 },
+      after: {
+        id: "tool-1",
+        connectionId: "conn-1",
+        name: "do_thing",
+        description: null,
+        inputSchema: null,
+        writeSide: false,
+        enabled: true,
+        rateLimitPerMin: null,
+        createdAt: null,
+        updatedAt: null,
+      },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
+    const { res } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", { rateLimitPerMin: null }),
+      res,
+      auth,
+    });
+    expect(setToolFlags).toHaveBeenCalledWith(expect.objectContaining({ rateLimitPerMin: null }));
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.tool.rate_limit_set",
+      "mcp_tool",
+      "tool-1",
+      expect.objectContaining({ before: 30, after: null }),
+    );
+  });
+
+  it("400s when rateLimitPerMin is above the 10_000 sanity ceiling", async () => {
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(getToolDescriptor).mockResolvedValueOnce({
+      id: "tool-1",
+      connectionId: "conn-1",
+      name: "do_thing",
+      description: null,
+      inputSchema: null,
+      writeSide: false,
+      enabled: true,
+      rateLimitPerMin: null,
+      createdAt: null,
+      updatedAt: null,
+    });
+    const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
+    const { res, captured } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", { rateLimitPerMin: 10_001 }),
+      res,
+      auth,
+    });
+    expect(captured.status).toBe(400);
+    expect(setToolFlags).not.toHaveBeenCalled();
   });
 });
 
