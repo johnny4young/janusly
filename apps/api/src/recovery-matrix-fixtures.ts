@@ -61,7 +61,7 @@ const wf = (id: string, name: string, nodes: Workflow["nodes"], edges: Workflow[
 });
 
 /**
- * Catalog of 15 failure shapes covering the recovery surface. Order is
+ * Catalog of 16 failure shapes covering the recovery surface. Order is
  * stable — both the matrix test and the seed script iterate this array
  * in declaration order so log output and test-case names align.
  */
@@ -356,5 +356,40 @@ export const RECOVERY_MATRIX_FIXTURES: readonly RecoveryMatrixFixture[] = [
       prompt: "do something useful",
     },
     expectedTopApproachLabel: "other",
+  },
+
+  {
+    id: "mcp_tool_without_approval",
+    label: "MCP tool write-side without approval",
+    description: "`mcp_tool` invocation that mutates external state (e.g. a Notion page edit) lacks an upstream approval node — same structural fix as a write-side HTTP without approval, applied to the MCP client surface.",
+    workflow: wf(
+      "recovery_matrix_mcp_tool_without_approval",
+      "Recovery Matrix · MCP tool without approval",
+      [
+        // The `intent` upstream is what `edit_notion_page.config.input.pageId`
+        // templates against — without it the seeder would materialize a
+        // workflow whose first runtime error is template resolution
+        // (`context.intent.output.pageId` missing) rather than the readiness
+        // failure we want the Recovery dialog to handle.
+        { id: "intent", type: "noop" as const, config: {} },
+        {
+          id: "edit_notion_page",
+          type: "mcp_tool" as const,
+          config: {
+            connectionAlias: "notion",
+            toolName: "pages.update",
+            input: { pageId: "{{context.intent.output.pageId}}", title: "Refund processed" },
+          },
+        },
+      ],
+      [{ from: "intent", to: "edit_notion_page" }],
+    ),
+    failedNodeId: "edit_notion_page",
+    errorJson: {
+      code: "E_READINESS_FAIL",
+      message: "Write-side MCP tool invocation requires an upstream approval node (notion.pages.update)",
+      readinessCode: "write_side_missing_approval",
+    },
+    expectedTopApproachLabel: "add_approval",
   },
 ] as const;
