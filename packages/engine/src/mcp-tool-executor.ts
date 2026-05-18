@@ -260,12 +260,21 @@ export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpTo
   }
 
   // Per-tool rate-limit. Fail-open on Redis blips (matches the integration-tools posture).
+  // Effective limit: a descriptor-level override (set by admins via the
+  // tool-flags PATCH route) takes precedence over the org default the
+  // caller resolved. NULL on the descriptor = use the caller's value.
+  // The bucket key stays per-`(alias, toolName)` so lowering a specific
+  // tool just throttles its own bucket faster without affecting the
+  // sibling tools on the same connection.
+  const effectiveRateLimit = typeof descriptor.rateLimitPerMin === "number"
+    ? descriptor.rateLimitPerMin
+    : input.rateLimitPerMin;
   const limiter = getEngineRateLimiter();
   if (limiter) {
     try {
       await limiter(`mcp_client.${connection.alias}.${input.toolName}`, input.orgId, {
         windowMs: 60_000,
-        max: input.rateLimitPerMin,
+        max: effectiveRateLimit,
       });
     } catch (err) {
       const error = err instanceof Error ? err.message : "rate limit exceeded";

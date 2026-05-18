@@ -58,6 +58,14 @@ export type McpToolDescriptorRow = {
   inputSchema: Record<string, unknown> | null;
   writeSide: boolean;
   enabled: boolean;
+  /**
+   * Per-tool rate-limit override in calls/min. `null` means "use the
+   * org default" (`org_configs.mcp.clientRateLimitPerMin`, today 60).
+   * A positive integer overrides for THIS descriptor only — every
+   * other tool on the same connection still uses the org default.
+   * Set / cleared by admins; audited as `mcp.tool.rate_limit_set`.
+   */
+  rateLimitPerMin: number | null;
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
 };
@@ -126,6 +134,7 @@ function mapDescriptorRow(row: typeof mcpToolDescriptors.$inferSelect): McpToolD
         : null,
     writeSide: row.writeSide,
     enabled: row.enabled,
+    rateLimitPerMin: typeof row.rateLimitPerMin === "number" ? row.rateLimitPerMin : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -317,24 +326,49 @@ export async function upsertToolDescriptor(input: {
 }
 
 /**
- * Set the operator-controlled flags on a tool descriptor. Both fields
- * are optional — the admin can flip enabled without revisiting
- * writeSide and vice versa.
+ * Outcome of a `setToolFlags` call. `before` holds the prior values
+ * of the operator-controlled fields so the route handler can emit an
+ * audit row only when something actually changed (mirrors the
+ * `mcp.tool.enabled/disabled` pattern). `after` is the refreshed row.
+ */
+export type SetToolFlagsResult = {
+  before: { enabled: boolean; writeSide: boolean; rateLimitPerMin: number | null } | null;
+  after: McpToolDescriptorRow | null;
+};
+
+/**
+ * Set the operator-controlled flags on a tool descriptor. Every field
+ * is optional — the admin can flip one without revisiting the others.
+ *
+ * `rateLimitPerMin: undefined` leaves the prior value alone;
+ * `rateLimitPerMin: null` clears the per-tool override (revert to org
+ * default); `rateLimitPerMin: <positive int>` sets the override.
  */
 export async function setToolFlags(input: {
   connectionId: string;
   name: string;
   enabled?: boolean;
   writeSide?: boolean;
-}): Promise<McpToolDescriptorRow | null> {
+  rateLimitPerMin?: number | null;
+}): Promise<SetToolFlagsResult> {
+  const existing = await getToolDescriptor({ connectionId: input.connectionId, name: input.name });
+  const before = existing
+    ? { enabled: existing.enabled, writeSide: existing.writeSide, rateLimitPerMin: existing.rateLimitPerMin }
+    : null;
+
   const updates: Partial<typeof mcpToolDescriptors.$inferInsert> = { updatedAt: new Date() };
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.writeSide !== undefined) updates.writeSide = input.writeSide;
+  // Distinguish "not provided" (undefined) from "explicit clear" (null).
+  if (input.rateLimitPerMin !== undefined) updates.rateLimitPerMin = input.rateLimitPerMin;
+
   await db
     .update(mcpToolDescriptors)
     .set(updates)
     .where(and(eq(mcpToolDescriptors.connectionId, input.connectionId), eq(mcpToolDescriptors.name, input.name)));
-  return getToolDescriptor({ connectionId: input.connectionId, name: input.name });
+
+  const after = await getToolDescriptor({ connectionId: input.connectionId, name: input.name });
+  return { before, after };
 }
 
 /**
