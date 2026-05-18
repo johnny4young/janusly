@@ -20,10 +20,11 @@
  *  - `POST /mcp/connections/:alias/tools/:toolName` — flip the
  *    operator-controlled flags (enabled, writeSide, rateLimitPerMin).
  *
- * Multi-tenant scope on every read/write. Eight audit actions:
+ * Multi-tenant scope on every read/write. Nine audit actions:
  * `mcp.connection.created` / `_updated` / `_deleted` / `_rediscovered`,
  * `mcp.connection.expose_to_ai_set`, `mcp.tool.enabled` /
- * `mcp.tool.disabled` / `mcp.tool.rate_limit_set`.
+ * `mcp.tool.disabled` / `mcp.tool.rate_limit_set` /
+ * `mcp.tool.expose_to_ai_set`.
  */
 
 import { audit } from "../audit";
@@ -481,6 +482,12 @@ export const mcpRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const enabled = typeof body.enabled === "boolean" ? body.enabled : undefined;
       const writeSide = typeof body.writeSide === "boolean" ? body.writeSide : undefined;
+      // Per-tool admin opt-in for LLM exposure. Mirrors `writeSide` /
+      // `enabled` shape: explicit boolean or absent → no-op. The
+      // descriptor only surfaces in `/ai/generate-workflow`'s prompt
+      // when BOTH connection.exposeToAi AND descriptor.exposeToAi are
+      // true; revoking either kills exposure for that one tool.
+      const exposeToAi = typeof body.exposeToAi === "boolean" ? body.exposeToAi : undefined;
 
       // Per-tool rate-limit override. Three states distinguished:
       //   - field absent → leave the prior value alone (undefined).
@@ -502,7 +509,12 @@ export const mcpRoutes: Route[] = [
         }
       }
 
-      if (enabled === undefined && writeSide === undefined && rateLimitPerMin === undefined) {
+      if (
+        enabled === undefined
+        && writeSide === undefined
+        && rateLimitPerMin === undefined
+        && exposeToAi === undefined
+      ) {
         return sendJson(res, { error: "no updatable fields provided" }, 400);
       }
       const { before, after } = await setToolFlags({
@@ -511,6 +523,7 @@ export const mcpRoutes: Route[] = [
         enabled,
         writeSide,
         rateLimitPerMin,
+        exposeToAi,
       });
 
       if (enabled !== undefined && before && enabled !== before.enabled) {
@@ -538,6 +551,25 @@ export const mcpRoutes: Route[] = [
           "mcp_tool",
           descriptor.id,
           { alias, toolName, before: before.rateLimitPerMin, after: rateLimitPerMin },
+        );
+      }
+
+      // Per-tool exposeToAi flip — also audited on actual change.
+      // Independent row from the generic tool toggle so an operator
+      // can grep just the `mcp.tool.expose_to_ai_set` history when
+      // tracing what surfaces in the LLM prompt over time.
+      if (
+        exposeToAi !== undefined
+        && before
+        && exposeToAi !== before.exposeToAi
+      ) {
+        await audit(
+          auth.orgId,
+          auth.userId,
+          "mcp.tool.expose_to_ai_set",
+          "mcp_tool",
+          descriptor.id,
+          { alias, toolName, before: before.exposeToAi, after: exposeToAi },
         );
       }
 

@@ -30,8 +30,8 @@ const ONE_CONNECTION = {
 }
 const TOOLS_FOR_CONN_1 = {
   tools: [
-    { id: 't1', connectionId: 'conn-1', name: 'list_charges', description: 'List charges', inputSchema: null, writeSide: false, enabled: true },
-    { id: 't2', connectionId: 'conn-1', name: 'create_charge', description: 'Create a charge', inputSchema: null, writeSide: true, enabled: false },
+    { id: 't1', connectionId: 'conn-1', name: 'list_charges', description: 'List charges', inputSchema: null, writeSide: false, enabled: true, exposeToAi: false },
+    { id: 't2', connectionId: 'conn-1', name: 'create_charge', description: 'Create a charge', inputSchema: null, writeSide: true, enabled: false, exposeToAi: false },
   ],
 }
 
@@ -70,6 +70,43 @@ describe('<McpConnectionsPanel />', () => {
       expect(screen.getByText('list_charges')).toBeInTheDocument()
       expect(screen.getByText('create_charge')).toBeInTheDocument()
     })
+  })
+
+  it('sends exposeToAi when the per-tool AI exposure toggle changes', async () => {
+    let toolsFetches = 0
+    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/mcp/connections') return ONE_CONNECTION
+      if (path === '/mcp/connections/stripe-prod/tools' && (!init || init.method !== 'POST')) {
+        toolsFetches += 1
+        return {
+          tools: [
+            { ...TOOLS_FOR_CONN_1.tools[0], exposeToAi: toolsFetches > 1 },
+            TOOLS_FOR_CONN_1.tools[1],
+          ],
+        }
+      }
+      if (path === '/mcp/connections/stripe-prod/tools/list_charges' && init?.method === 'POST') {
+        return { ...TOOLS_FOR_CONN_1.tools[0], exposeToAi: true }
+      }
+      return EMPTY
+    })
+    render(<McpConnectionsPanel />)
+    await waitFor(() => expect(screen.getByText('stripe-prod')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Show tools/i }))
+    await waitFor(() => expect(screen.getByText('list_charges')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('Expose list_charges description to AI'))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/mcp/connections/stripe-prod/tools/list_charges',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ exposeToAi: true }),
+        }),
+      )
+    })
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
   })
 
   it('submits a stdio create-connection form and bumps platformVersion on success', async () => {

@@ -79,6 +79,15 @@ export type McpToolDescriptorRow = {
    * Set / cleared by admins; audited as `mcp.tool.rate_limit_set`.
    */
   rateLimitPerMin: number | null;
+  /**
+   * Per-tool admin opt-in for LLM exposure. Default `false`. The
+   * descriptor only surfaces in `/ai/generate-workflow`'s system
+   * prompt when BOTH this flag AND the parent connection's
+   * `exposeToAi` flag are `true` — revoking either kills exposure
+   * for this tool immediately. Audited as `mcp.tool.expose_to_ai_set`
+   * with before/after on each toggle.
+   */
+  exposeToAi: boolean;
   createdAt: Date | string | null;
   updatedAt: Date | string | null;
 };
@@ -149,6 +158,7 @@ function mapDescriptorRow(row: typeof mcpToolDescriptors.$inferSelect): McpToolD
     writeSide: row.writeSide,
     enabled: row.enabled,
     rateLimitPerMin: typeof row.rateLimitPerMin === "number" ? row.rateLimitPerMin : null,
+    exposeToAi: row.exposeToAi,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -380,7 +390,12 @@ export async function upsertToolDescriptor(input: {
  * `mcp.tool.enabled/disabled` pattern). `after` is the refreshed row.
  */
 export type SetToolFlagsResult = {
-  before: { enabled: boolean; writeSide: boolean; rateLimitPerMin: number | null } | null;
+  before: {
+    enabled: boolean;
+    writeSide: boolean;
+    rateLimitPerMin: number | null;
+    exposeToAi: boolean;
+  } | null;
   after: McpToolDescriptorRow | null;
 };
 
@@ -398,10 +413,16 @@ export async function setToolFlags(input: {
   enabled?: boolean;
   writeSide?: boolean;
   rateLimitPerMin?: number | null;
+  exposeToAi?: boolean;
 }): Promise<SetToolFlagsResult> {
   const existing = await getToolDescriptor({ connectionId: input.connectionId, name: input.name });
   const before = existing
-    ? { enabled: existing.enabled, writeSide: existing.writeSide, rateLimitPerMin: existing.rateLimitPerMin }
+    ? {
+        enabled: existing.enabled,
+        writeSide: existing.writeSide,
+        rateLimitPerMin: existing.rateLimitPerMin,
+        exposeToAi: existing.exposeToAi,
+      }
     : null;
 
   const updates: Partial<typeof mcpToolDescriptors.$inferInsert> = { updatedAt: new Date() };
@@ -409,6 +430,7 @@ export async function setToolFlags(input: {
   if (input.writeSide !== undefined) updates.writeSide = input.writeSide;
   // Distinguish "not provided" (undefined) from "explicit clear" (null).
   if (input.rateLimitPerMin !== undefined) updates.rateLimitPerMin = input.rateLimitPerMin;
+  if (input.exposeToAi !== undefined) updates.exposeToAi = input.exposeToAi;
 
   await db
     .update(mcpToolDescriptors)
@@ -432,8 +454,8 @@ export async function deleteToolDescriptorsForConnection(connectionId: string): 
 /**
  * One sanitised MCP tool entry ready to inject into the AI Studio's
  * system prompt. `description` has already been run through
- * `sanitizeMcpToolDescription` (control chars stripped, known secret
- * shapes scrubbed, length-capped at 300 chars).
+ * `sanitizeMcpToolDescription` (Unicode hardening, control chars
+ * stripped, known secret shapes scrubbed, length-capped at 300 chars).
  */
 export type ExposedMcpTool = {
   connectionAlias: string;
@@ -451,10 +473,14 @@ export const MAX_EXPOSED_DESCRIPTION_BYTES = 20_000;
  * downstream prompt composer can produce deterministic output (testable
  * + cacheable against the same dataset).
  *
- * Three independent filters apply:
+ * Four independent filters apply (ALL must be true):
  *   - `connection.enabled === true` — disabled connections never expose tools.
  *   - `connection.exposeToAi === true` — admin opted in for this connection.
- *   - `descriptor.enabled === true` — operator opted in for this tool.
+ *   - `descriptor.enabled === true` — operator opted in for tool execution.
+ *   - `descriptor.exposeToAi === true` — admin opted in for THIS tool's
+ *     description to reach the LLM. Per-tool granularity on top of the
+ *     connection-level flag — revoking either kills exposure for that
+ *     tool immediately.
  *
  * Capped at `MAX_EXPOSED_TOOLS` (60) and `MAX_EXPOSED_DESCRIPTION_BYTES`
  * (20 KB total UTF-8 bytes). When either cap is hit, a synthetic last
@@ -482,6 +508,7 @@ export async function listExposedMcpToolsForAi(orgId: string): Promise<ExposedMc
         eq(mcpConnections.enabled, true),
         eq(mcpConnections.exposeToAi, true),
         eq(mcpToolDescriptors.enabled, true),
+        eq(mcpToolDescriptors.exposeToAi, true),
       ),
     );
 
