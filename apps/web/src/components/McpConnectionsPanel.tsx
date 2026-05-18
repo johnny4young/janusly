@@ -240,7 +240,7 @@ export function McpConnectionsPanel() {
     }
   }
 
-  const setToolFlag = async (connection: ConnectionListEntry, tool: McpToolDescriptor, patch: { enabled?: boolean; writeSide?: boolean }) => {
+  const setToolFlag = async (connection: ConnectionListEntry, tool: McpToolDescriptor, patch: { enabled?: boolean; writeSide?: boolean; exposeToAi?: boolean }) => {
     try {
       await api(`/mcp/connections/${encodeURIComponent(connection.alias)}/tools/${encodeURIComponent(tool.name)}`, {
         method: 'POST',
@@ -454,6 +454,15 @@ export function McpConnectionsPanel() {
                                 aria-label={t('mcpConnections.tools.writeSideAria', { name: tool.name }) as string}
                               />
                               <span>{t('mcpConnections.tools.writeSideLabel')}</span>
+                            </label>
+                            <label className="small-command">
+                              <input
+                                type="checkbox"
+                                checked={tool.exposeToAi}
+                                onChange={(event) => setToolFlag(connection, tool, { exposeToAi: event.target.checked })}
+                                aria-label={t('mcpConnections.tools.exposeToAiAria', { name: tool.name }) as string}
+                              />
+                              <span>{t('mcpConnections.tools.exposeToAiLabel')}</span>
                             </label>
                           </div>
                         </div>

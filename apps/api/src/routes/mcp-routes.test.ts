@@ -234,6 +234,7 @@ describe("POST /mcp/connections", () => {
       writeSide: true,
       enabled: false,
       rateLimitPerMin: null,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
@@ -476,11 +477,12 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       writeSide: false,
       enabled: false,
       rateLimitPerMin: null,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
     vi.mocked(setToolFlags).mockResolvedValueOnce({
-      before: { enabled: false, writeSide: false, rateLimitPerMin: null },
+      before: { enabled: false, writeSide: false, rateLimitPerMin: null, exposeToAi: false },
       after: {
         id: "tool-1",
         connectionId: "conn-1",
@@ -490,6 +492,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
         writeSide: false,
         enabled: true,
         rateLimitPerMin: null,
+        exposeToAi: false,
         createdAt: null,
         updatedAt: null,
       },
@@ -520,6 +523,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       writeSide: false,
       enabled: true,
       rateLimitPerMin: null,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
@@ -540,11 +544,12 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       writeSide: false,
       enabled: true,
       rateLimitPerMin: null,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
     vi.mocked(setToolFlags).mockResolvedValueOnce({
-      before: { enabled: true, writeSide: false, rateLimitPerMin: null },
+      before: { enabled: true, writeSide: false, rateLimitPerMin: null, exposeToAi: false },
       after: {
         id: "tool-1",
         connectionId: "conn-1",
@@ -554,6 +559,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
         writeSide: false,
         enabled: true,
         rateLimitPerMin: 30,
+        exposeToAi: false,
         createdAt: null,
         updatedAt: null,
       },
@@ -587,11 +593,12 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       writeSide: false,
       enabled: true,
       rateLimitPerMin: 30,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
     vi.mocked(setToolFlags).mockResolvedValueOnce({
-      before: { enabled: true, writeSide: false, rateLimitPerMin: 30 },
+      before: { enabled: true, writeSide: false, rateLimitPerMin: 30, exposeToAi: false },
       after: {
         id: "tool-1",
         connectionId: "conn-1",
@@ -601,6 +608,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
         writeSide: false,
         enabled: true,
         rateLimitPerMin: null,
+        exposeToAi: false,
         createdAt: null,
         updatedAt: null,
       },
@@ -634,6 +642,7 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
       writeSide: false,
       enabled: true,
       rateLimitPerMin: null,
+      exposeToAi: false,
       createdAt: null,
       updatedAt: null,
     });
@@ -646,6 +655,105 @@ describe("POST /mcp/connections/:alias/tools/:toolName", () => {
     });
     expect(captured.status).toBe(400);
     expect(setToolFlags).not.toHaveBeenCalled();
+  });
+
+  it("persists exposeToAi: true AND audits mcp.tool.expose_to_ai_set with before/after", async () => {
+    // Per-tool opt-in for LLM exposure. The audit row fires only when
+    // the value actually flips — mirror of the rate_limit_set pattern.
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(getToolDescriptor).mockResolvedValueOnce({
+      id: "tool-1",
+      connectionId: "conn-1",
+      name: "do_thing",
+      description: null,
+      inputSchema: null,
+      writeSide: false,
+      enabled: true,
+      rateLimitPerMin: null,
+      exposeToAi: false,
+      createdAt: null,
+      updatedAt: null,
+    });
+    vi.mocked(setToolFlags).mockResolvedValueOnce({
+      before: { enabled: true, writeSide: false, rateLimitPerMin: null, exposeToAi: false },
+      after: {
+        id: "tool-1",
+        connectionId: "conn-1",
+        name: "do_thing",
+        description: null,
+        inputSchema: null,
+        writeSide: false,
+        enabled: true,
+        rateLimitPerMin: null,
+        exposeToAi: true,
+        createdAt: null,
+        updatedAt: null,
+      },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
+    const { res } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", { exposeToAi: true }),
+      res,
+      auth,
+    });
+    expect(setToolFlags).toHaveBeenCalledWith(expect.objectContaining({ exposeToAi: true }));
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.tool.expose_to_ai_set",
+      "mcp_tool",
+      "tool-1",
+      expect.objectContaining({ alias: "demo", toolName: "do_thing", before: false, after: true }),
+    );
+  });
+
+  it("audits the reverse flip exposeToAi true → false with the inverse metadata", async () => {
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(getToolDescriptor).mockResolvedValueOnce({
+      id: "tool-1",
+      connectionId: "conn-1",
+      name: "do_thing",
+      description: null,
+      inputSchema: null,
+      writeSide: false,
+      enabled: true,
+      rateLimitPerMin: null,
+      exposeToAi: true,
+      createdAt: null,
+      updatedAt: null,
+    });
+    vi.mocked(setToolFlags).mockResolvedValueOnce({
+      before: { enabled: true, writeSide: false, rateLimitPerMin: null, exposeToAi: true },
+      after: {
+        id: "tool-1",
+        connectionId: "conn-1",
+        name: "do_thing",
+        description: null,
+        inputSchema: null,
+        writeSide: false,
+        enabled: true,
+        rateLimitPerMin: null,
+        exposeToAi: false,
+        createdAt: null,
+        updatedAt: null,
+      },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo/tools/do_thing")!;
+    const { res } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo/tools/do_thing", { exposeToAi: false }),
+      res,
+      auth,
+    });
+    expect(audit).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "mcp.tool.expose_to_ai_set",
+      "mcp_tool",
+      "tool-1",
+      expect.objectContaining({ before: true, after: false }),
+    );
   });
 });
 

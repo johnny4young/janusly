@@ -113,8 +113,45 @@ export const MAX_MCP_PROMPT_LABEL_CHARS = 120;
 /** Closed regex matching ASCII control characters (newlines, tabs, NUL, etc.) — the cheapest prompt-injection vector when the description gets pasted into a system prompt. */
 const CONTROL_CHAR_PATTERN = /[\x00-\x1f\x7f]/g;
 
+/**
+ * Closed regex matching the Unicode-categorical block we strip before the
+ * ASCII control-char pass. Covers four classes of invisible / direction-
+ * altering characters that a malicious MCP server can use to steer an LLM
+ * without being visually detectable in operator-facing UIs:
+ *
+ *  - `U+200B–U+200F`: zero-width space / non-joiner / joiner / LTR + RTL marks.
+ *  - `U+202A–U+202E`: left-to-right + right-to-left embedding / override.
+ *  - `U+2060–U+2069`: word joiner + invisible separators + invisible operators.
+ *  - `U+2066–U+2069`: directional isolate codes.
+ *  - `U+FEFF`: BOM / zero-width no-break space.
+ *
+ * Cyrillic / Greek visual look-alikes (е, а, о, etc.) are NOT in this set —
+ * they have legitimate use in non-Latin descriptions and stripping them
+ * would break correctness for those operators. The operator opt-in
+ * (`mcp_tool_descriptors.expose_to_ai`) + the LLM suspicion-framing escape
+ * clause cover the residual homoglyph risk.
+ */
+const UNICODE_INJECTION_PATTERN = /[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g;
+
 /** Closed regex for anything that is unsafe inside the `- alias.tool:` prompt label. */
 const MCP_PROMPT_LABEL_UNSAFE_PATTERN = /[^A-Za-z0-9_.-]+/g;
+
+/**
+ * NFKC-normalise the input and strip the Unicode-injection block. This
+ * runs as the FIRST pass on every MCP description / label before the
+ * control-char strip + secret scrub + length cap. NFKC composes look-
+ * alike sequences (fullwidth → halfwidth, decomposed → composed) into
+ * canonical form so a description that visually reads "Ignore previous"
+ * but is encoded with combining marks won't slip past a downstream
+ * heuristic that compares against literal English keywords.
+ *
+ * The function is pure + idempotent + safe on ASCII (no-op) and on
+ * legitimate non-Latin Unicode (only the injection-block chars are
+ * dropped — accented letters, CJK, Cyrillic body text all pass).
+ */
+function applyUnicodeHardening(input: string): string {
+  return input.normalize("NFKC").replace(UNICODE_INJECTION_PATTERN, "");
+}
 
 /**
  * Sanitise an MCP tool description before it gets injected into the
@@ -136,7 +173,13 @@ const MCP_PROMPT_LABEL_UNSAFE_PATTERN = /[^A-Za-z0-9_.-]+/g;
  */
 export function sanitizeMcpToolDescription(description: string | null | undefined): string {
   if (typeof description !== "string" || description.length === 0) return "(no description)";
-  const stripped = description.replace(CONTROL_CHAR_PATTERN, " ");
+  // NFKC normalise + drop zero-width / RTL-override / format / BOM chars
+  // BEFORE the existing ASCII control-char strip. The Unicode pass closes
+  // the gap where a hostile description can sneak invisible characters
+  // (e.g. zero-width space inside "SYSTEM OVERRIDE") past the ASCII-only
+  // filter and steer downstream LLM tokenisation.
+  const unicoded = applyUnicodeHardening(description);
+  const stripped = unicoded.replace(CONTROL_CHAR_PATTERN, " ");
   const scrubbed = scrubSecretShapes(stripped);
   if (scrubbed.length <= MAX_MCP_DESCRIPTION_CHARS) return scrubbed;
   return scrubbed.slice(0, MAX_MCP_DESCRIPTION_CHARS - 1) + "…";
@@ -150,7 +193,12 @@ export function sanitizeMcpToolDescription(description: string | null | undefine
  */
 export function sanitizeMcpPromptLabel(label: string | null | undefined, fallback = "unnamed"): string {
   if (typeof label !== "string" || label.length === 0) return fallback;
-  const stripped = scrubSecretShapes(label.replace(CONTROL_CHAR_PATTERN, " "));
+  // Same Unicode hardening as the description sanitiser — NFKC + drop
+  // the injection block — runs first so a label like `"pages.update\u200BSYSTEM"`
+  // becomes `"pages.updateSYSTEM"` before the label-unsafe regex turns it
+  // into a single safe token.
+  const unicoded = applyUnicodeHardening(label);
+  const stripped = scrubSecretShapes(unicoded.replace(CONTROL_CHAR_PATTERN, " "));
   const safe = stripped
     .trim()
     .replace(/\s+/g, "_")

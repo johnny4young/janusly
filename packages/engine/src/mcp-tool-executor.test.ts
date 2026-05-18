@@ -72,6 +72,7 @@ function descriptor(overrides: Partial<McpToolDescriptorRow> = {}): McpToolDescr
     writeSide: false,
     enabled: true,
     rateLimitPerMin: null,
+    exposeToAi: false,
     createdAt: null,
     updatedAt: null,
     ...overrides,
