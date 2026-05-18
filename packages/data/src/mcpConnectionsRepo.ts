@@ -44,6 +44,16 @@ export type McpConnectionRow = {
   enabled: boolean;
   status: McpConnectionStatus;
   statusReason: string | null;
+  /**
+   * Admin opt-in: when `true`, this connection's enabled tool
+   * descriptors are surfaced to `/ai/generate-workflow`'s system
+   * prompt (with descriptions sanitised via
+   * `sanitizeMcpToolDescription`). Default `false` — third-party MCP
+   * server descriptions are operator-supplied data and a potential
+   * prompt-injection vector; admin must explicitly opt in. Audited
+   * as `mcp.connection.expose_to_ai_set` on change.
+   */
+  exposeToAi: boolean;
   lastDiscoveryAt: Date | string | null;
   createdBy: string | null;
   createdAt: Date | string | null;
@@ -115,6 +125,7 @@ function mapConnectionRow(row: typeof mcpConnections.$inferSelect): McpConnectio
     enabled: row.enabled,
     status: isStatus(row.status) ? row.status : "pending",
     statusReason: row.statusReason ?? null,
+    exposeToAi: row.exposeToAi,
     lastDiscoveryAt: row.lastDiscoveryAt,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
@@ -208,7 +219,26 @@ export async function createConnection(input: {
   return created;
 }
 
-/** Partial-update an existing connection (admin "edit" surface). */
+/**
+ * Outcome of an `updateConnection` call. `before` holds the prior
+ * values of the operator-controlled fields so the route handler can
+ * emit an audit row only when something actually changed. `after` is
+ * the refreshed row. Mirrors the `setToolFlags` pattern.
+ */
+export type UpdateConnectionResult = {
+  before: { enabled: boolean; exposeToAi: boolean } | null;
+  after: McpConnectionRow | null;
+};
+
+/**
+ * Partial-update an existing connection (admin "edit" surface).
+ *
+ * `exposeToAi: undefined` leaves the prior value alone;
+ * `exposeToAi: boolean` overrides. Same convention for `enabled` and
+ * the transport-specific fields. Returns `{ before, after }` so the
+ * caller can audit `enabled` flips and `exposeToAi` flips
+ * independently — only audit when the value actually changed.
+ */
 export async function updateConnection(input: {
   orgId: string;
   alias: string;
@@ -217,19 +247,27 @@ export async function updateConnection(input: {
   args?: string[];
   url?: string;
   command?: string;
-}): Promise<McpConnectionRow | null> {
+  exposeToAi?: boolean;
+}): Promise<UpdateConnectionResult> {
+  const existing = await getConnectionByAlias({ orgId: input.orgId, alias: input.alias });
+  const before = existing
+    ? { enabled: existing.enabled, exposeToAi: existing.exposeToAi }
+    : null;
+
   const updates: Partial<typeof mcpConnections.$inferInsert> = { updatedAt: new Date() };
   if (input.enabled !== undefined) updates.enabled = input.enabled;
   if (input.envRefs !== undefined) updates.envRefs = input.envRefs;
   if (input.args !== undefined) updates.args = input.args;
   if (input.url !== undefined) updates.url = input.url;
   if (input.command !== undefined) updates.command = input.command;
+  if (input.exposeToAi !== undefined) updates.exposeToAi = input.exposeToAi;
 
   await db
     .update(mcpConnections)
     .set(updates)
     .where(and(eq(mcpConnections.orgId, input.orgId), eq(mcpConnections.alias, input.alias)));
-  return getConnectionByAlias({ orgId: input.orgId, alias: input.alias });
+  const after = await getConnectionByAlias({ orgId: input.orgId, alias: input.alias });
+  return { before, after };
 }
 
 /** Update the discovery/health status of a connection. Used by the route's discovery flow. */
@@ -379,4 +417,106 @@ export async function setToolFlags(input: {
  */
 export async function deleteToolDescriptorsForConnection(connectionId: string): Promise<void> {
   await db.delete(mcpToolDescriptors).where(eq(mcpToolDescriptors.connectionId, connectionId));
+}
+
+/**
+ * One sanitised MCP tool entry ready to inject into the AI Studio's
+ * system prompt. `description` has already been run through
+ * `sanitizeMcpToolDescription` (control chars stripped, known secret
+ * shapes scrubbed, length-capped at 300 chars).
+ */
+export type ExposedMcpTool = {
+  connectionAlias: string;
+  toolName: string;
+  description: string;
+};
+
+/** Per-org token-budget caps for the LLM prompt injection. */
+export const MAX_EXPOSED_TOOLS = 60;
+export const MAX_EXPOSED_DESCRIPTION_BYTES = 20_000;
+
+/**
+ * List every MCP tool an org has opted in for AI exposure. Returns
+ * sanitised descriptions in `(alias, name)`-stable order so the
+ * downstream prompt composer can produce deterministic output (testable
+ * + cacheable against the same dataset).
+ *
+ * Three independent filters apply:
+ *   - `connection.enabled === true` — disabled connections never expose tools.
+ *   - `connection.exposeToAi === true` — admin opted in for this connection.
+ *   - `descriptor.enabled === true` — operator opted in for this tool.
+ *
+ * Capped at `MAX_EXPOSED_TOOLS` (60) and `MAX_EXPOSED_DESCRIPTION_BYTES`
+ * (20 KB total UTF-8 bytes). When either cap is hit, a synthetic last
+ * entry with `connectionAlias: "_truncated"`, `toolName: "_truncated"`,
+ * and `description: "(N more truncated — narrow your opt-ins)"` is
+ * appended so the LLM (and the operator) sees the truncation rather
+ * than receiving a silently-clipped list.
+ *
+ * Multi-tenant scope: a single SQL JOIN scoped to `orgId` from the
+ * `mcp_connections` side; tool descriptors inherit scope through the
+ * `connectionId` foreign-key-style relationship.
+ */
+export async function listExposedMcpToolsForAi(orgId: string): Promise<ExposedMcpTool[]> {
+  const rows = await db
+    .select({
+      alias: mcpConnections.alias,
+      toolName: mcpToolDescriptors.name,
+      description: mcpToolDescriptors.description,
+    })
+    .from(mcpConnections)
+    .innerJoin(mcpToolDescriptors, eq(mcpToolDescriptors.connectionId, mcpConnections.id))
+    .where(
+      and(
+        eq(mcpConnections.orgId, orgId),
+        eq(mcpConnections.enabled, true),
+        eq(mcpConnections.exposeToAi, true),
+        eq(mcpToolDescriptors.enabled, true),
+      ),
+    );
+
+  // Lazy import to avoid pulling `@janusly/shared` into the data
+  // package's runtime entry when this helper is not called. Shared is
+  // browser-safe so this is purely a startup-cost optimisation; the
+  // shared package compiles to TS modules consumed directly.
+  const { sanitizeMcpToolDescription } = await import("@janusly/shared/src/error-signature");
+
+  // Stable order: by alias, then tool name. Matches a future SQL
+  // ORDER BY but kept in JS so the helper stays testable without a DB.
+  rows.sort((a, b) => {
+    if (a.alias !== b.alias) return a.alias < b.alias ? -1 : 1;
+    return a.toolName < b.toolName ? -1 : a.toolName > b.toolName ? 1 : 0;
+  });
+
+  const out: ExposedMcpTool[] = [];
+  let totalBytes = 0;
+  let truncatedCount = 0;
+  for (const row of rows) {
+    if (out.length >= MAX_EXPOSED_TOOLS) {
+      truncatedCount = rows.length - out.length;
+      break;
+    }
+    const description = sanitizeMcpToolDescription(row.description);
+    const projectedBytes = totalBytes + Buffer.byteLength(description, "utf8");
+    if (projectedBytes > MAX_EXPOSED_DESCRIPTION_BYTES) {
+      truncatedCount = rows.length - out.length;
+      break;
+    }
+    out.push({
+      connectionAlias: row.alias,
+      toolName: row.toolName,
+      description,
+    });
+    totalBytes = projectedBytes;
+  }
+
+  if (truncatedCount > 0) {
+    out.push({
+      connectionAlias: "_truncated",
+      toolName: "_truncated",
+      description: `(${truncatedCount} more truncated — narrow your opt-ins)`,
+    });
+  }
+
+  return out;
 }

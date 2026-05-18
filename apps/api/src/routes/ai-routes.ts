@@ -25,7 +25,8 @@ import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/work
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
 import { composeFeedbackHint } from "../ai-patch-feedback";
-import { GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
+import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
+import { listExposedMcpToolsForAi } from "@janusly/data/src/mcpConnectionsRepo";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema, AiPatchStructuralEnvelope, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { audit } from "../audit";
@@ -77,11 +78,20 @@ export const aiRoutes: Route[] = [
         // is gone — schema enforcement is now real. Failures (LLM emits
         // non-conformant JSON) throw inside the SDK and flow through the
         // existing try/catch into the fallback contract.
+        // Org-level admins can opt MCP connections into LLM exposure via
+        // the `exposeToAi` flag. When present, the connection's enabled
+        // tool descriptors (with sanitised descriptions) are appended to
+        // the system prompt as DATA so the LLM can reference them when
+        // emitting `noop` placeholders the operator promotes later. The
+        // composer is a no-op when nothing is exposed → identical
+        // behaviour to today for non-opt-in orgs.
+        const exposedMcpTools = await listExposedMcpToolsForAi(auth.orgId);
+        const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools);
         const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
           schema: AiGenerationWorkflowSchema,
           schemaName: "JanuslyWorkflow",
           schemaDescription: "Workflow DAG for /ai/generate-workflow.",
-          system: GENERATE_WORKFLOW_SYSTEM_PROMPT,
+          system: systemPrompt,
           prompt: promptText,
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId },

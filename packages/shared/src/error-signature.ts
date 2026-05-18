@@ -104,6 +104,64 @@ export function scrubSecretShapes(input: string): string {
   return output;
 }
 
+/** Cap for `sanitizeMcpToolDescription`. Trades a small loss of descriptive context for a bounded prompt-injection blast radius per tool. */
+export const MAX_MCP_DESCRIPTION_CHARS = 300;
+
+/** Cap for prompt-facing MCP aliases / tool names. These are labels, not execution identifiers. */
+export const MAX_MCP_PROMPT_LABEL_CHARS = 120;
+
+/** Closed regex matching ASCII control characters (newlines, tabs, NUL, etc.) — the cheapest prompt-injection vector when the description gets pasted into a system prompt. */
+const CONTROL_CHAR_PATTERN = /[\x00-\x1f\x7f]/g;
+
+/** Closed regex for anything that is unsafe inside the `- alias.tool:` prompt label. */
+const MCP_PROMPT_LABEL_UNSAFE_PATTERN = /[^A-Za-z0-9_.-]+/g;
+
+/**
+ * Sanitise an MCP tool description before it gets injected into the
+ * AI Studio's system prompt. Defense in depth:
+ *
+ *   1. Strip ASCII control characters (newlines, tabs, NUL bytes).
+ *      Newlines are the easiest way for a malicious server description
+ *      to break out of the surrounding list-item framing.
+ *   2. Run `scrubSecretShapes` so a description that includes a token
+ *      shape (sk-*, ghp_*, Bearer …, JWT, AWS key, Slack token) lands
+ *      as `[redacted]` in the prompt.
+ *   3. Length-cap at 300 chars with an ellipsis. A single description
+ *      can't inflate the system prompt unbounded; the per-org call to
+ *      `listExposedMcpToolsForAi` then caps the total prose at 20 KB.
+ *
+ * Returns `"(no description)"` for null / empty input so the prompt
+ * line stays structurally consistent even when an MCP server omits
+ * the description.
+ */
+export function sanitizeMcpToolDescription(description: string | null | undefined): string {
+  if (typeof description !== "string" || description.length === 0) return "(no description)";
+  const stripped = description.replace(CONTROL_CHAR_PATTERN, " ");
+  const scrubbed = scrubSecretShapes(stripped);
+  if (scrubbed.length <= MAX_MCP_DESCRIPTION_CHARS) return scrubbed;
+  return scrubbed.slice(0, MAX_MCP_DESCRIPTION_CHARS - 1) + "…";
+}
+
+/**
+ * Sanitise a prompt-facing MCP connection alias or tool name. MCP tool
+ * names are discovered from third-party servers, so they are treated as
+ * untrusted prompt data just like descriptions. This helper deliberately
+ * returns a label for AI awareness, not the canonical runtime tool name.
+ */
+export function sanitizeMcpPromptLabel(label: string | null | undefined, fallback = "unnamed"): string {
+  if (typeof label !== "string" || label.length === 0) return fallback;
+  const stripped = scrubSecretShapes(label.replace(CONTROL_CHAR_PATTERN, " "));
+  const safe = stripped
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(MCP_PROMPT_LABEL_UNSAFE_PATTERN, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (safe.length === 0) return fallback;
+  if (safe.length <= MAX_MCP_PROMPT_LABEL_CHARS) return safe;
+  return safe.slice(0, MAX_MCP_PROMPT_LABEL_CHARS);
+}
+
 /** Normalize one error into a `{ signature, category, suggestedOwner }` triple. */
 export function normalizeErrorSignature(error: unknown, context: ErrorContext = {}): SignatureResult {
   const nodeType = context.nodeType ?? "node";
