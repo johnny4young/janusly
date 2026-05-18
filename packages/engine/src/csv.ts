@@ -86,68 +86,165 @@ export function filterCsv(
   return rows.filter((row) => entries.every(([key, value]) => row[key] === value));
 }
 
-/* -------- internals -------- */
+/**
+ * Mutable parser state. Carries the in-flight row + field + inQuotes flag
+ * across chunks. Streaming consumers (e.g. `csv-stream.ts`) hold one of
+ * these and call `feedCsvChunk` repeatedly; the buffered `parseRows` below
+ * is a thin wrapper that initialises a state, feeds the full input, and
+ * finalises in one shot.
+ *
+ * Field-spanning quotes is the whole reason a per-line tokenizer wouldn't
+ * work: a quoted field can contain embedded newlines (RFC 4180), so a
+ * row's logical boundary isn't a `\n` outside quotes — only the parser's
+ * state can decide where a row ends.
+ */
+export type CsvParseState = {
+  row: string[];
+  field: string;
+  inQuotes: boolean;
+  pendingQuote: boolean;
+  pendingCr: boolean;
+};
 
-function parseRows(input: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
+/** Fresh streaming parser state. */
+export function createCsvParseState(): CsvParseState {
+  return { row: [], field: "", inQuotes: false, pendingQuote: false, pendingCr: false };
+}
+
+/**
+ * Feed a chunk of CSV text into a streaming parser. Mutates `state` in
+ * place; returns any rows that finished inside this chunk. Call repeatedly
+ * with successive chunks (no constraint on chunk boundary alignment with
+ * row / line breaks), then call `finalizeCsvParse(state)` at end-of-stream
+ * to drain any partial trailing row.
+ *
+ * Strips a leading UTF-8 BOM from the very first feed.
+ */
+export function feedCsvChunk(state: CsvParseState, input: string): string[][] {
+  // BOM only ever appears at the start of the whole stream — strip on the
+  // first chunk that has any content (caller passes through chunks
+  // verbatim from the decoder).
   let i = 0;
+  if (
+    state.row.length === 0
+    && state.field.length === 0
+    && !state.inQuotes
+    && !state.pendingQuote
+    && !state.pendingCr
+    && input.startsWith(BOM)
+  ) {
+    i = BOM.length;
+  }
+  const rows: string[][] = [];
 
   while (i < input.length) {
-    const ch = input[i];
-
-    if (inQuotes) {
-      if (ch === '"') {
-        if (input[i + 1] === '"') {
-          // Escaped quote inside a quoted field.
-          field += '"';
-          i += 2;
-          continue;
-        }
-        inQuotes = false;
+    if (state.pendingCr) {
+      state.pendingCr = false;
+      if (input[i] === "\n") {
         i += 1;
         continue;
       }
-      field += ch;
+    }
+
+    if (state.pendingQuote) {
+      if (input[i] === '"') {
+        state.field += '"';
+        state.pendingQuote = false;
+        i += 1;
+        continue;
+      }
+      state.pendingQuote = false;
+      state.inQuotes = false;
+      continue;
+    }
+
+    const ch = input[i];
+
+    if (state.inQuotes) {
+      if (ch === '"') {
+        if (i + 1 >= input.length) {
+          state.pendingQuote = true;
+          i += 1;
+          continue;
+        }
+        if (input[i + 1] === '"') {
+          // Escaped quote inside a quoted field.
+          state.field += '"';
+          i += 2;
+          continue;
+        }
+        state.inQuotes = false;
+        i += 1;
+        continue;
+      }
+      state.field += ch;
       i += 1;
       continue;
     }
 
     if (ch === '"') {
-      inQuotes = true;
+      state.inQuotes = true;
       i += 1;
       continue;
     }
     if (ch === ",") {
-      row.push(field);
-      field = "";
+      state.row.push(state.field);
+      state.field = "";
       i += 1;
       continue;
     }
     if (ch === "\n" || ch === "\r") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
+      state.row.push(state.field);
+      rows.push(state.row);
+      state.row = [];
+      state.field = "";
       // Consume CRLF as a single line break.
       if (ch === "\r" && input[i + 1] === "\n") i += 2;
-      else i += 1;
+      else {
+        i += 1;
+        if (ch === "\r" && i >= input.length) state.pendingCr = true;
+      }
       continue;
     }
-    field += ch;
+    state.field += ch;
     i += 1;
   }
 
-  // Tail field / row. Skip emitting an empty trailing row when the input
-  // ends with a newline.
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
   return rows;
+}
+
+/**
+ * Drain a partial trailing row at end-of-stream. Returns `[]` when the
+ * input ended cleanly on a newline; returns `[lastRow]` when there's a
+ * non-empty trailing field or row.
+ */
+export function finalizeCsvParse(state: CsvParseState): string[][] {
+  if (state.pendingQuote) {
+    state.pendingQuote = false;
+    state.inQuotes = false;
+  }
+  state.pendingCr = false;
+
+  if (state.field.length > 0 || state.row.length > 0) {
+    state.row.push(state.field);
+    const out = [state.row];
+    state.row = [];
+    state.field = "";
+    return out;
+  }
+  return [];
+}
+
+/* -------- internals -------- */
+
+function parseRows(input: string): string[][] {
+  // Thin wrapper around the streaming primitives. Behavior is identical
+  // to the original character-by-character implementation that lived here
+  // — the tests pin that.
+  const state = createCsvParseState();
+  const fed = feedCsvChunk(state, input);
+  const tail = finalizeCsvParse(state);
+  return tail.length > 0 ? [...fed, ...tail] : fed;
 }
 
 function formatCell(value: string | number | boolean | null | undefined): string {

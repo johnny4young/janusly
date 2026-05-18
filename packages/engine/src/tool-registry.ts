@@ -28,8 +28,10 @@
 import { z } from "zod";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { RE2 } from "re2-wasm";
+import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { getByPath } from "./template";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
+import { streamCsvSummary } from "./csv-stream";
 import { filterCsv, parseCsv, stringifyCsv } from "./csv";
 import { parseIsoDuration } from "./iso-duration";
 import { evaluateJsonJq, parseJsonJqQuery } from "./json-jq";
@@ -304,6 +306,57 @@ const csvFilterInput = z.object({
   where: z.record(z.string(), z.string()),
 });
 const csvFilterOutput = z.object({ rows: z.array(z.record(z.string(), z.string())) });
+
+// csv.fetch — streaming variant. Fetches a CSV URL via the streaming
+// HTTP primitive, consumes the body row-by-row, applies an optional
+// exact-match filter, returns a bounded summary (counts + sample). The
+// shared `maxResponseBytes` cap on the upstream stream still applies —
+// when hit, the partial sample + counts ride through with
+// `streamTruncated: true` so the operator sees what got through.
+const csvFetchInput = z.object({
+  url: z.string().min(1),
+  headers: z.record(z.string(), z.string()).optional(),
+  /** Max number of matched rows to retain in the response sample. Default 50, hard cap 500 (memory bound). */
+  sampleRows: z.number().int().min(1).max(500).optional(),
+  /** Optional exact-match WHERE clause; same shape `csv.filter` already uses. */
+  filter: z.record(z.string(), z.string()).optional(),
+  /** Max bytes pulled from the upstream stream. Default 10 MB; hard cap 50 MB. The shared `fetchHttpTarget` cap fires at this boundary. */
+  maxBytes: z.number().int().min(1_024).max(52_428_800).optional(),
+  /** Total HTTP timeout budget in ms. Range 1000..120000. */
+  timeoutMs: z.number().int().min(1_000).max(120_000).optional(),
+  /** Max redirect chain length. 0..5. */
+  maxRedirects: z.number().int().min(0).max(5).optional(),
+});
+const csvFetchOutput = z.object({
+  ok: z.boolean(),
+  /** HTTP status from the upstream response. `0` when the call never opened (SSRF / DNS / cap pre-check). */
+  statusCode: z.number().int().nonnegative(),
+  /** Total data rows seen (excludes the header row). Includes filtered-out + malformed. */
+  totalRows: z.number().int().nonnegative(),
+  /** Rows that passed the filter (or `=== totalRows` when no filter). Excludes malformed. */
+  matchedRows: z.number().int().nonnegative(),
+  /** First `min(sampleRows, matchedRows)` matched rows, keyed by header. */
+  sampleRows: z.array(z.record(z.string(), z.string())),
+  /** Header tokens in upstream order. `[]` when the stream produced zero rows. */
+  headers: z.array(z.string()),
+  /** Total bytes pulled from the upstream stream (capped by `maxBytes`). */
+  streamedBytes: z.number().int().nonnegative(),
+  /**
+   * True iff the stream OPENED and then aborted before clean end (byte
+   * cap exceeded mid-stream, decoder error, network blip). False on
+   * pre-stream rejection paths (SSRF / DNS pin / Content-Length pre-check)
+   * — those return `ok: false` with `streamTruncated: false` because no
+   * stream was ever opened. Downstream `condition` nodes that need to
+   * distinguish "rejected before open" from "aborted mid-flight" should
+   * branch on `(ok === false && streamedBytes > 0)` for the mid-flight
+   * case, or `(ok === false && statusCode === 0)` for pre-stream.
+   */
+  streamTruncated: z.boolean(),
+  /** Rows whose column count didn't match the header. Counted toward totalRows, not matchedRows. */
+  malformedRows: z.number().int().nonnegative(),
+  /** Present iff `ok: false`. Generic message; never echoes the upstream URL. */
+  error: z.string().optional(),
+});
 
 // time.*
 const timeNowOutput = z.object({ iso: z.string(), epochMs: z.number() });
@@ -1049,6 +1102,74 @@ const tools = {
     inputExample: { rows: [{ id: "1", status: "open" }], where: { status: "open" } },
     async execute(input) {
       return { rows: filterCsv(input.rows, input.where) };
+    },
+  }),
+
+  "csv.fetch": defineTool({
+    name: "csv.fetch",
+    description: "Stream a CSV URL row-by-row and return a bounded summary (counts + sample). Use this for multi-MB CSV payloads instead of `http.request` + `csv.parse` — memory stays O(sampleRows).",
+    inputSchema: csvFetchInput,
+    outputSchema: csvFetchOutput,
+    inputExample: { url: "https://example.com/data.csv", sampleRows: 10 },
+    // Pure read — no remote mutation. Dry-run sandbox replays exercise
+    // this identically to a production run.
+    async execute(input) {
+      const sampleCap = input.sampleRows ?? 50;
+      const maxBytes = input.maxBytes ?? 10 * 1024 * 1024;
+      // Outer try/catch turns the SSRF / DNS / pre-check failures
+      // (which throw before any stream opens) into a clean
+      // `{ ok: false, statusCode: 0 }` envelope. The stream-level
+      // failures (mid-stream byte-cap abort, decoder error) flow
+      // through `streamCsvSummary`'s catch and surface as
+      // `{ ok: false, streamTruncated: true, ... }` with partial counts.
+      try {
+        const streaming = await fetchHttpTarget(input.url, {
+          method: "GET",
+          headers: input.headers,
+          timeoutMs: input.timeoutMs,
+          maxResponseBytes: maxBytes,
+          maxRedirects: input.maxRedirects,
+          bodyMode: "stream",
+        });
+        // Even when the response is non-2xx, the body is still streamed
+        // (an error payload could be a CSV-shaped error response).
+        // Surface the statusCode on the envelope so downstream
+        // `condition` nodes can branch on it.
+        const summary = await streamCsvSummary(streaming.body, {
+          sampleRows: sampleCap,
+          filter: input.filter,
+        });
+        const ok = summary.ok && streaming.ok;
+        return {
+          ok,
+          statusCode: streaming.statusCode,
+          totalRows: summary.totalRows,
+          matchedRows: summary.matchedRows,
+          sampleRows: summary.sampleRows,
+          headers: summary.headers,
+          streamedBytes: summary.streamedBytes,
+          streamTruncated: summary.streamTruncated,
+          malformedRows: summary.malformedRows,
+          error: summary.error ?? (ok ? undefined : `HTTP ${streaming.statusCode}`),
+        };
+      } catch (err) {
+        // Pre-stream rejection (SSRF / DNS pin / Content-Length cap /
+        // unsupported scheme). Return a uniform error envelope so the
+        // workflow can branch on `.ok` regardless of which guard fired.
+        const message = err instanceof Error ? err.message : "csv fetch failed";
+        return {
+          ok: false,
+          statusCode: 0,
+          totalRows: 0,
+          matchedRows: 0,
+          sampleRows: [],
+          headers: [],
+          streamedBytes: 0,
+          streamTruncated: false,
+          malformedRows: 0,
+          error: scrubSecretShapes(message).slice(0, 200),
+        };
+      }
     },
   }),
 

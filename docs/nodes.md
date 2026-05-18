@@ -70,9 +70,35 @@ Set `bodyMode: "stream"` on the node config to opt into the streaming primitive.
 - `streamedBytes` is the total bytes consumed from the upstream (capped by `maxResponseBytes`).
 - `streamTruncated` is `true` when `streamedBytes > streamPreviewBytes`.
 
-**v1 limitations:**
-- Streams are consumed within the same executor invocation. Downstream nodes (different DAG steps) see only the persisted preview — workflows can't pass a live stream across persistence boundaries, because the run state is checkpointed to Postgres between every node.
-- A future streaming-aware tool (e.g. `csv.parse-stream` that combines fetch + parse in one step) is the path for true line-by-line processing of large payloads. Until then, raise `streamPreviewBytes` per call when the operator needs more bytes for downstream `transform` / `condition` evaluation.
+For true row-by-row CSV processing, use the `csv.fetch` tool instead of `http.request` + `csv.parse`. It fetches through the same streaming HTTP chokepoint, parses chunks through the shared RFC 4180 tokenizer, and returns a bounded summary/sample rather than a live stream:
+
+```jsonc
+{
+  "id": "summarize_invoices_csv",
+  "type": "tool",
+  "config": {
+    "toolName": "csv.fetch",
+    "input": {
+      "url": "https://files.partner.example.com/invoices/2026-05.csv",
+      "headers": { "Accept": "text/csv" },
+      "sampleRows": 25,
+      "filter": { "status": "open" },
+      "maxBytes": 8000000,
+      "timeoutMs": 30000,
+      "maxRedirects": 3
+    }
+  }
+}
+```
+
+**`csv.fetch` output:** `{ ok, statusCode, totalRows, matchedRows, sampleRows, headers, streamedBytes, streamTruncated, malformedRows, error? }`
+
+- `totalRows` counts data rows after the header, including filtered-out and malformed rows.
+- `matchedRows` and `sampleRows` include only rows that match the optional exact-match `filter`; malformed rows are excluded from the sample.
+- `malformedRows` counts rows whose column count does not match the header.
+- `streamTruncated` is `true` when the upstream stream aborts mid-flight, for example after `maxBytes` is exceeded. Partial counts and sample rows still return with `ok: false`.
+
+**Remaining limitation:** live streams are still consumed within the same executor invocation. Downstream nodes see only the persisted preview or the bounded `csv.fetch` summary, because run state is checkpointed to Postgres between every node.
 
 **Safeguards preserved:** the SSRF guard (`ALLOW_PRIVATE_HTTP_TARGETS=false` rejects private targets), DNS-rebinding pin (the validated IP is pinned to the connect), timeout (`timeoutMs`), redirect chain (`maxRedirects`), and the byte cap (`maxResponseBytes`) all apply to the streaming path identically. The `http.request` tool gains the same `bodyMode` / `streamPreviewBytes` input fields when called directly from an `agent` or `tool` node.
 
