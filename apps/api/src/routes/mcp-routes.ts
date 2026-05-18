@@ -46,6 +46,7 @@ import {
   type McpTransport,
 } from "@janusly/data/src/mcpConnectionsRepo";
 import {
+  createHttpMcpClient,
   createSseMcpClient,
   createStdioMcpClient,
   withMcpClient,
@@ -57,7 +58,7 @@ import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
 const ALIAS_PATTERN = /^[a-z0-9_-]{1,32}$/;
-const TRANSPORTS = new Set<McpTransport>(["stdio", "sse"]);
+const TRANSPORTS = new Set<McpTransport>(["stdio", "sse", "http"]);
 const MAX_DISCOVERY_TOOLS = 200;
 
 function isValidAlias(value: unknown): value is string {
@@ -111,7 +112,8 @@ function buildDiscoveryClient(connection: McpConnectionRow): McpClient | Promise
   // env-var name. Same posture as the executor's resolution path so
   // operators get consistent behaviour at discovery and at runtime.
   // CR/LF values are rejected to prevent header injection through the
-  // SSE transport (operator-supplied env values flow as HTTP headers).
+  // URL-shaped transports (sse + http) — operator-supplied env values
+  // flow to remote servers as HTTP headers for both.
   const env: Record<string, string> = {};
   for (const [key, ref] of Object.entries(connection.envRefs)) {
     if (ref.kind !== "env") continue;
@@ -131,6 +133,12 @@ function buildDiscoveryClient(connection: McpConnectionRow): McpClient | Promise
   if (connection.transport === "sse") {
     if (!connection.url) throw new Error("sse connection missing url");
     return createSseMcpClient({ url: connection.url, headers: env });
+  }
+  if (connection.transport === "http") {
+    if (!connection.url) throw new Error("http connection missing url");
+    // Streamable HTTP shares the SSRF + headers contract with sse.
+    // The only difference is the SDK transport class wrapping the wire.
+    return createHttpMcpClient({ url: connection.url, headers: env });
   }
   throw new Error(`unknown mcp transport: ${connection.transport}`);
 }
@@ -228,7 +236,7 @@ export const mcpRoutes: Route[] = [
       }
       const transport = typeof body.transport === "string" ? body.transport : "";
       if (!TRANSPORTS.has(transport as McpTransport)) {
-        return sendJson(res, { error: "transport must be stdio or sse" }, 400);
+        return sendJson(res, { error: "transport must be stdio, sse, or http" }, 400);
       }
 
       const envRefs = parseEnvRefsBody(body.envRefs);
@@ -253,8 +261,13 @@ export const mcpRoutes: Route[] = [
           }, 400);
         }
       } else {
+        // `sse` and `http` both register a URL endpoint. The `transport`
+        // literal distinguishes them at dispatch time inside the engine
+        // (sse opens an `eventsource` stream; http uses
+        // `StreamableHTTPClientTransport`'s POST + optional SSE). The
+        // route-layer shape check is the same.
         url = typeof body.url === "string" ? body.url.trim() : "";
-        if (!url) return sendJson(res, { error: "sse transport requires a non-empty url" }, 400);
+        if (!url) return sendJson(res, { error: `${transport} transport requires a non-empty url` }, 400);
       }
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
@@ -306,7 +319,7 @@ export const mcpRoutes: Route[] = [
       if (typeof body.enabled === "boolean") updates.enabled = body.enabled;
       if (body.envRefs !== undefined) updates.envRefs = parseEnvRefsBody(body.envRefs);
       if (body.args !== undefined && existing.transport === "stdio") updates.args = parseArgsBody(body.args);
-      if (typeof body.url === "string" && existing.transport === "sse") {
+      if (typeof body.url === "string" && (existing.transport === "sse" || existing.transport === "http")) {
         const url = body.url.trim();
         if (!url) return sendJson(res, { error: "url must be non-empty" }, 400);
         updates.url = url;

@@ -29,7 +29,7 @@ export type McpUsageRecord = {
   /** Tool name on the external MCP server (e.g. "create_charge"). */
   toolName: string;
   /** Transport used for this call. */
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "http";
   /** Workflow run id when the call fired from an `mcp_tool` node. */
   runId?: string;
   /** Workflow node id when the call fired from an `mcp_tool` node. */

@@ -23,8 +23,9 @@
  *     normalised `{ ok, error?, output?, latencyMs, ... }` envelope.
  *
  * The function NEVER throws on runtime failures — every error becomes
- * `{ ok: false, error }`. The node executor consumes the envelope and
- * downstream `condition` nodes branch on `.ok`.
+ * `{ ok: false, error }`. The `mcp_tool` node executor then converts
+ * `ok: false` into a throw so the existing retry / DLQ machinery handles
+ * failed external calls consistently with `http` nodes.
  *
  * Adding a new transport means a new branch in `buildClient` and a
  * new entry in `validateTransportShape`. Everything else (audit,
@@ -51,7 +52,7 @@ import {
   type McpToolDescriptorRow,
 } from "@janusly/data/src/mcpConnectionsRepo";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
-import { createSseMcpClient, createStdioMcpClient, withMcpClient, type McpClient } from "./mcp-client";
+import { createHttpMcpClient, createSseMcpClient, createStdioMcpClient, withMcpClient, type McpClient } from "./mcp-client";
 import { getEngineRateLimiter } from "./rate-limit";
 import { getMcpUsageRecorder } from "./mcp-usage";
 
@@ -68,7 +69,7 @@ export type McpToolEnvelope = {
   /** Echo back which connection / tool / transport produced the envelope (debug aid). */
   connectionAlias: string;
   toolName: string;
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "http";
   /** Echo the descriptor's `writeSide` flag for the audit row. */
   writeSide: boolean;
 };
@@ -146,7 +147,7 @@ export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpTo
   const envelopeBase = {
     connectionAlias: input.connectionAlias,
     toolName: input.toolName,
-    transport: "stdio" as "stdio" | "sse",
+    transport: "stdio" as "stdio" | "sse" | "http",
     writeSide: true,
   };
 
@@ -240,8 +241,8 @@ export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpTo
   // Resolve env-refs from process.env. Missing values surface a generic
   // message — never echo the env-var name in errors. CR/LF values are
   // rejected pre-emptively so they can't smuggle a `\r\nX-Header: ...`
-  // into the SSE transport's outbound request headers (the same
-  // resolved values flow through as HTTP headers for SSE transport).
+  // into the URL-shaped transports' outbound request headers (the same
+  // resolved values flow through as HTTP headers for sse + http).
   const envForSpawn: Record<string, string> = {};
   for (const [key, ref] of Object.entries(connection.envRefs)) {
     if (ref.kind !== "env") continue;
@@ -439,14 +440,18 @@ async function buildClientForConnection(connection: McpConnectionRow, env: Recor
       env,
     });
   }
-  if (connection.transport === "sse") {
-    if (!connection.url) throw new Error("sse connection missing url");
-    // The env map becomes HTTP headers for SSE transport — the same
-    // resolved secret values flow to the remote server as headers
-    // (e.g. `Authorization: Bearer <token>`) rather than as process env.
+  if (connection.transport === "sse" || connection.transport === "http") {
+    if (!connection.url) throw new Error(`${connection.transport} connection missing url`);
+    // The env map becomes HTTP headers for both URL-shaped transports —
+    // the same resolved secret values flow to the remote server as
+    // headers (e.g. `Authorization: Bearer <token>`) rather than as
+    // process env. Same posture for sse + http; the only difference is
+    // the SDK transport class.
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(env)) headers[key] = value;
-    return createSseMcpClient({ url: connection.url, headers });
+    return connection.transport === "sse"
+      ? createSseMcpClient({ url: connection.url, headers })
+      : createHttpMcpClient({ url: connection.url, headers });
   }
   throw new Error(`unknown mcp transport: ${connection.transport}`);
 }
@@ -455,7 +460,7 @@ async function fireUsage(input: {
   orgId: string;
   connectionAlias: string;
   toolName: string;
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "http";
   runId?: string;
   nodeId?: string;
   workflowId?: string;

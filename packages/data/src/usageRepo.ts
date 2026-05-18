@@ -218,7 +218,7 @@ type McpUsageRecord = {
   orgId: string;
   connectionAlias: string;
   toolName: string;
-  transport: "stdio" | "sse";
+  transport: "stdio" | "sse" | "http";
   runId?: string;
   nodeId?: string;
   workflowId?: string;
