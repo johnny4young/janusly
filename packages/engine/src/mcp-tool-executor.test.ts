@@ -16,6 +16,7 @@ vi.mock("./mcp-client", () => ({
   withMcpClient: vi.fn(),
   createStdioMcpClient: vi.fn(),
   createSseMcpClient: vi.fn(),
+  createHttpMcpClient: vi.fn(),
 }));
 
 import {
@@ -24,7 +25,7 @@ import {
   type McpConnectionRow,
   type McpToolDescriptorRow,
 } from "@janusly/data/src/mcpConnectionsRepo";
-import { withMcpClient } from "./mcp-client";
+import { createHttpMcpClient, createSseMcpClient, withMcpClient } from "./mcp-client";
 import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin } from "./mcp-tool-executor";
 import {
   _resetMcpUsageRecorderForTests,
@@ -472,6 +473,53 @@ describe("executeMcpTool", () => {
       },
     });
     expect(auditEvents).toEqual([{ ok: true }, { ok: false }]);
+  });
+
+  it("dispatches to the Streamable HTTP factory when the connection transport is `http`", async () => {
+    // The dispatcher inside `buildClientForConnection` selects the
+    // factory by `connection.transport`. Wire up `withMcpClient` to
+    // actually invoke the factory closure so we can assert which
+    // SDK-wrapping factory got called. The same envelope shape comes
+    // back regardless of transport — the difference is the wire.
+    getConnectionMock.mockResolvedValueOnce(
+      activeConnection({
+        transport: "http",
+        command: null,
+        args: null,
+        url: "https://hosted-mcp.example.com/",
+      }),
+    );
+    getDescriptorMock.mockResolvedValueOnce(descriptor());
+    vi.mocked(createHttpMcpClient).mockResolvedValueOnce({
+      listTools: async () => [],
+      callTool: async () => ({ output: { text: "ok", isError: false }, latencyMs: 7 }),
+      close: async () => {
+        // no-op
+      },
+    });
+    withMcpClientMock.mockImplementationOnce(async (factory, fn) => {
+      const client = await factory();
+      return (fn as (c: unknown) => Promise<unknown>)(client);
+    });
+
+    const envelope = await executeMcpTool({
+      orgId: "org-1",
+      connectionAlias: "demo",
+      toolName: "do_thing",
+      writeConsentProcess: true,
+      writeConsentTenant: true,
+      rateLimitPerMin: 60,
+    });
+
+    expect(envelope.ok).toBe(true);
+    expect(envelope.transport).toBe("http");
+    expect(createHttpMcpClient).toHaveBeenCalledWith({
+      url: "https://hosted-mcp.example.com/",
+      headers: {},
+    });
+    // Sister factories MUST NOT fire on an http transport — keeps the
+    // dispatcher branches mutually exclusive.
+    expect(createSseMcpClient).not.toHaveBeenCalled();
   });
 });
 
