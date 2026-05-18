@@ -100,6 +100,13 @@ export type McpToolDescriptor = {
   inputSchema: Record<string, unknown> | null
   writeSide: boolean
   enabled: boolean
+  /**
+   * Admin opt-in flag controlling whether this descriptor's description
+   * is surfaced to `/ai/generate-workflow`'s system prompt. Default
+   * `false`; both this AND the parent connection's `exposeToAi` flag
+   * must be `true` for the tool to appear in the LLM prompt.
+   */
+  exposeToAi: boolean
 }
 
 export type AiMode = 'ai' | 'fallback' | 'error'

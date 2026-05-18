@@ -207,6 +207,51 @@ describe("sanitizeMcpToolDescription", () => {
     expect(cleaned.length).toBe(MAX_MCP_DESCRIPTION_CHARS);
     expect(cleaned.endsWith("…")).toBe(true);
   });
+
+  it("strips zero-width spaces hidden inside otherwise-clean text", () => {
+    // U+200B zero-width spaces between words look identical to the
+    // clean form when rendered, but they tokenise differently to the
+    // LLM. The Unicode hardening pass drops them before the prompt is
+    // composed so a description like `"Edit page\u200B SYSTEM\u200B OVERRIDE"`
+    // can't ferry hidden tokens through.
+    const malicious = "Edit page\u200B SYSTEM\u200B OVERRIDE";
+    const cleaned = sanitizeMcpToolDescription(malicious);
+    expect(cleaned).not.toContain("\u200B");
+    expect(cleaned).toBe("Edit page SYSTEM OVERRIDE");
+  });
+
+  it("strips RTL-override and other directional/format chars", () => {
+    // U+202E RTL override flips the apparent reading order in some
+    // renderers — operators could see one thing while the model sees
+    // another. We drop every U+202A..U+202E embedding/override and
+    // every U+2060..U+206F invisible / directional isolate.
+    const malicious = "hello\u202E world\u2068 end";
+    const cleaned = sanitizeMcpToolDescription(malicious);
+    expect(cleaned).not.toMatch(/[\u202A-\u202E\u2060-\u206F]/);
+    expect(cleaned).toContain("hello");
+    expect(cleaned).toContain("world");
+  });
+
+  it("NFKC-normalises decomposed Unicode to canonical form", () => {
+    // The decomposed sequence `e` + `́` renders as `é`. After
+    // NFKC the two encodings are equivalent. We pin the canonical
+    // form so downstream heuristics that compare against literal
+    // English keywords (e.g. `"Ignore"`) can't be sidestepped via
+    // decomposition.
+    const decomposed = "Café menu";   // 'Café' as 'Cafe' + combining acute
+    const cleaned = sanitizeMcpToolDescription(decomposed);
+    expect(cleaned).toBe("Café menu");      // NFKC composes the marks
+  });
+
+  it("passes legitimate non-Latin text (Spanish accents, Mandarin) through unchanged", () => {
+    // The Unicode-injection regex is a closed set — it does NOT strip
+    // Cyrillic / Greek / accented Latin / CJK. False positives here
+    // would break correctness for non-English operators.
+    expect(sanitizeMcpToolDescription("Edita la página de Notion según el contexto."))
+      .toBe("Edita la página de Notion según el contexto.");
+    expect(sanitizeMcpToolDescription("更新 Notion 页面"))
+      .toBe("更新 Notion 页面");
+  });
 });
 
 describe("sanitizeMcpPromptLabel", () => {

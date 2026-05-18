@@ -809,6 +809,16 @@ export const mcpToolDescriptors = pgTable(
     // value at execute time. Set / cleared by admins via the existing
     // tool-flags PATCH route; audited as `mcp.tool.rate_limit_set`.
     rateLimitPerMin: integer("rate_limit_per_min"),
+    // Per-tool admin opt-in flag for LLM exposure. Default `false`
+    // — even when the parent connection has `expose_to_ai: true`, a
+    // descriptor only surfaces in `/ai/generate-workflow`'s system
+    // prompt when BOTH the connection AND the descriptor flag are
+    // `true`. The fail-safe default forces the operator to review
+    // each tool individually before its description (operator-
+    // supplied data from a third-party MCP server) reaches the LLM.
+    // Audited as `mcp.tool.expose_to_ai_set` with before/after on
+    // each toggle.
+    exposeToAi: boolean("expose_to_ai").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
