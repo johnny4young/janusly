@@ -52,6 +52,7 @@ function activeConnection(overrides: Partial<McpConnectionRow> = {}): McpConnect
     enabled: true,
     status: "active",
     statusReason: null,
+    exposeToAi: false,
     lastDiscoveryAt: null,
     createdBy: null,
     createdAt: null,
