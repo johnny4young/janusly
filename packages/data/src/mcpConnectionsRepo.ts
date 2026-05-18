@@ -3,10 +3,13 @@
  *
  * Stores per-org external MCP server registrations (`mcp_connections`)
  * and the per-tool descriptors cached at discovery time
- * (`mcp_tool_descriptors`). Two transports are supported:
+ * (`mcp_tool_descriptors`). Three transports are supported:
  *
  *  - `stdio`: spawn a local child process (`command` + `args`),
- *  - `sse`: open a remote SSE stream (`url`).
+ *  - `sse`: open a remote SSE stream (`url`) — legacy MCP transport.
+ *  - `http`: open a Streamable HTTP connection (`url`) — the
+ *    canonical MCP transport per the June 2025 spec; supersedes
+ *    `sse` for modern hosted servers.
  *
  * `envRefs` is a closed-shape JSONB: `Record<string, { kind: "env",
  * name: string }>`. Secret material never lives on the row — the
@@ -25,7 +28,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, mcpConnections, mcpToolDescriptors } from "@janusly/db";
 
-export type McpTransport = "stdio" | "sse";
+export type McpTransport = "stdio" | "sse" | "http";
 
 export type McpEnvRef = { kind: "env"; name: string };
 export type McpEnvRefs = Record<string, McpEnvRef>;
@@ -80,7 +83,7 @@ export type McpToolDescriptorRow = {
   updatedAt: Date | string | null;
 };
 
-const TRANSPORTS = new Set<McpTransport>(["stdio", "sse"]);
+const TRANSPORTS = new Set<McpTransport>(["stdio", "sse", "http"]);
 
 function isTransport(value: unknown): value is McpTransport {
   return typeof value === "string" && TRANSPORTS.has(value as McpTransport);
@@ -198,6 +201,13 @@ export async function createConnection(input: {
   if (input.transport === "sse" && (!input.url || input.url.trim().length === 0)) {
     throw new Error("sse transport requires a non-empty url");
   }
+  if (input.transport === "http" && (!input.url || input.url.trim().length === 0)) {
+    throw new Error("http transport requires a non-empty url");
+  }
+
+  // URL-shaped transports (`sse`, `http`) both store the endpoint in
+  // the `url` column. The transport literal is the dispatcher key.
+  const isUrlTransport = input.transport === "sse" || input.transport === "http";
 
   const id = crypto.randomUUID();
   await db.insert(mcpConnections).values({
@@ -207,7 +217,7 @@ export async function createConnection(input: {
     transport: input.transport,
     command: input.transport === "stdio" ? input.command! : null,
     args: input.transport === "stdio" ? input.args ?? [] : null,
-    url: input.transport === "sse" ? input.url! : null,
+    url: isUrlTransport ? input.url! : null,
     envRefs: input.envRefs,
     enabled: true,
     status: "pending",

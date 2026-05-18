@@ -280,6 +280,85 @@ describe("POST /mcp/connections", () => {
     await route.handler({ req: mockReq("POST", "/mcp/connections", { alias: "demo", transport: "stdio", command: "node" }), res, auth });
     expect(setConnectionStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
   });
+
+  it("creates an http (Streamable HTTP) connection with a url and runs discovery", async () => {
+    // Modern hosted MCP servers (Cloudflare Workers, Anthropic native
+    // endpoints) ship Streamable HTTP only — confirming the route
+    // accepts `transport: "http"` with `url` is the unblocker for that
+    // population of operators. The route shape mirrors sse: no
+    // command, no args, just a URL endpoint + optional envRefs.
+    const httpRow = {
+      ...connectionRow,
+      transport: "http" as const,
+      command: null,
+      args: null,
+      url: "https://hosted-mcp.example.com/",
+    };
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(null).mockResolvedValueOnce({ ...httpRow, status: "active" });
+    vi.mocked(createConnection).mockResolvedValueOnce(httpRow);
+    vi.mocked(withMcpClient).mockImplementationOnce(async () => []);
+    vi.mocked(listToolDescriptors).mockResolvedValue([]);
+    const route = findRoute("POST", "/mcp/connections")!;
+    const { res, captured } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections", {
+        alias: "hosted",
+        transport: "http",
+        url: "https://hosted-mcp.example.com/",
+      }),
+      res,
+      auth,
+    });
+    expect(captured.status).toBe(200);
+    expect(createConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ alias: "hosted", transport: "http", url: "https://hosted-mcp.example.com/" }),
+    );
+    expect(setConnectionStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+  });
+
+  it("rejects an http transport with an empty url", async () => {
+    // Symmetric to the existing sse-empty-url check — http requires
+    // a URL. The error message names the transport so the operator
+    // knows which field to fill.
+    const route = findRoute("POST", "/mcp/connections")!;
+    const { res, captured } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections", { alias: "demo", transport: "http", url: "   " }),
+      res,
+      auth,
+    });
+    expect(captured.status).toBe(400);
+    expect((captured.payload as { error?: string }).error).toMatch(/http.*url/);
+    expect(createConnection).not.toHaveBeenCalled();
+  });
+
+  it("updates the url on an existing http connection", async () => {
+    // Once an http connection exists, the admin can repoint it at a
+    // new endpoint (server migrated, alias re-purposed) via the
+    // POST /:alias update route — same code path sse already uses.
+    const httpRow = {
+      ...connectionRow,
+      transport: "http" as const,
+      command: null,
+      args: null,
+      url: "https://old.example.com/",
+    };
+    vi.mocked(getConnectionByAlias)
+      .mockResolvedValueOnce(httpRow)
+      .mockResolvedValueOnce({ ...httpRow, url: "https://new.example.com/" });
+    vi.mocked(updateConnection).mockResolvedValueOnce({
+      before: { enabled: true, exposeToAi: false },
+      after: { ...httpRow, url: "https://new.example.com/" },
+    });
+    const route = findRoute("POST", "/mcp/connections/demo")!;
+    const { res } = mockRes();
+    await route.handler({
+      req: mockReq("POST", "/mcp/connections/demo", { url: "https://new.example.com/" }),
+      res,
+      auth,
+    });
+    expect(updateConnection).toHaveBeenCalledWith(expect.objectContaining({ url: "https://new.example.com/" }));
+  });
 });
 
 describe("POST /mcp/connections/:alias", () => {

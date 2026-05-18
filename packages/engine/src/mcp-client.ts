@@ -5,18 +5,23 @@
  *  - `listTools()` — used by discovery to cache descriptors.
  *  - `callTool({name, input, timeoutMs})` — used per workflow step.
  *
- * Two factory functions, one per supported transport:
+ * Three factory functions, one per supported transport:
  *  - `createStdioMcpClient({command, args, env})` spawns a local child
  *    process and speaks JSON-RPC over its stdin/stdout. The spawn env
  *    is a strict whitelist (`{ PATH, ...envRefs }`) so a misconfigured
  *    third-party MCP server cannot read `DATABASE_URL` or any other
  *    `process.env` value the worker carries.
- *  - `createSseMcpClient({url, headers})` opens an SSE connection to a
- *    remote MCP server. The URL is validated up-front through the
- *    same target-policy validator that backs `fetchHttpTarget`, so
- *    localhost / private-IP / link-local targets are rejected before
- *    the SDK transport is constructed. The SDK transport still owns
- *    the actual SSE fetch path.
+ *  - `createSseMcpClient({url, headers})` opens a legacy SSE
+ *    connection to a remote MCP server. The URL is validated up-front
+ *    through the same target-policy validator that backs
+ *    `fetchHttpTarget`, so localhost / private-IP / link-local targets
+ *    are rejected before the SDK transport is constructed. The SDK
+ *    transport still owns the actual SSE fetch path.
+ *  - `createHttpMcpClient({url, headers})` opens a Streamable HTTP
+ *    connection (the canonical MCP transport per the June 2025 spec;
+ *    supersedes SSE). Same SSRF gate as `sse`, same headers
+ *    pass-through. The SDK's `StreamableHTTPClientTransport` owns the
+ *    POST + optional SSE wire format.
  *
  * The factory itself does NOT call `connect()` — the caller does that
  * inside a try/finally so `close()` always runs even if the connect
@@ -44,6 +49,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { validateHttpTarget } from "./http-policy";
 
 export type McpClientToolDescriptor = {
@@ -119,6 +125,39 @@ export async function createSseMcpClient(input: {
   await validateHttpTarget(input.url);
   const url = new URL(input.url);
   const transport = new SSEClientTransport(url, {
+    requestInit: input.headers ? { headers: input.headers } : undefined,
+  });
+  return buildClient(transport);
+}
+
+/**
+ * Streamable HTTP MCP client (canonical transport per the MCP spec
+ * 2025-06-18; supersedes `sse`). The URL is validated through the
+ * same `validateHttpTarget` SSRF chokepoint immediately before the
+ * transport opens so private-IP / localhost / link-local / metadata
+ * targets are rejected up-front.
+ *
+ * Wire shape: a single HTTPS endpoint that accepts JSON-RPC over POST
+ * and optionally opens an SSE stream (server-to-client GET) for
+ * server-initiated messages. The SDK's `StreamableHTTPClientTransport`
+ * owns both halves; this factory only wires the URL + headers.
+ *
+ * Known v1 limitation: same as `createSseMcpClient` — the SDK's HTTP
+ * fetch path does NOT go through the pinned `undici.Agent` dispatcher
+ * that `fetchHttpTarget` uses for `http` nodes + `http.request` tool.
+ * The TCP connect runs a fresh DNS lookup separate from
+ * `validateHttpTarget`'s validation pass, so a slow DNS-rebinding
+ * attack between validation and connect (microseconds apart, but not
+ * zero) could land on a private IP that validation rejected. Same
+ * follow-up applies to both transports.
+ */
+export async function createHttpMcpClient(input: {
+  url: string;
+  headers?: Record<string, string>;
+}): Promise<McpClient> {
+  await validateHttpTarget(input.url);
+  const url = new URL(input.url);
+  const transport = new StreamableHTTPClientTransport(url, {
     requestInit: input.headers ? { headers: input.headers } : undefined,
   });
   return buildClient(transport);
