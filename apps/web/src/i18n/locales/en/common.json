@@ -1075,6 +1075,7 @@
   "mcpConnections.form.transport": "Transport",
   "mcpConnections.form.transportStdio": "stdio (local child process)",
   "mcpConnections.form.transportSse": "sse (remote stream)",
+  "mcpConnections.form.transportHttp": "http (Streamable HTTP — recommended)",
   "mcpConnections.form.command": "Command",
   "mcpConnections.form.commandPlaceholder": "node",
   "mcpConnections.form.args": "Args (space-separated)",

@@ -70,7 +70,7 @@ export type RunSummary = {
 export type OrgRole = 'viewer' | 'editor' | 'admin'
 export type OrgMember = { id: string; orgId: string; userId: string; email?: string; role: OrgRole; invitedBy?: string; createdAt?: string }
 
-export type McpTransport = 'stdio' | 'sse'
+export type McpTransport = 'stdio' | 'sse' | 'http'
 export type McpConnectionStatus = 'pending' | 'active' | 'failed' | 'disabled'
 export type McpEnvRef = { kind: 'env'; name: string }
 export type McpConnection = {
