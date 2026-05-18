@@ -3,10 +3,11 @@
  *
  * Admins register external MCP servers (alias + transport + connection
  * details + env-refs), then per-tool toggle which descriptors the
- * workflow's `mcp_tool` step can call. Two transports today: `stdio`
+ * workflow's `mcp_tool` step can call. Three transports today: `stdio`
  * (local child process; subject to a server-controlled command
- * allowlist) and `sse` (remote SSE stream; SSRF-guarded by the same
- * outbound target-policy validator used by the engine HTTP client).
+ * allowlist), `sse` (remote SSE stream), and `http` (remote Streamable
+ * HTTP); URL transports are SSRF-guarded by the same outbound
+ * target-policy validator used by the engine HTTP client.
  *
  * Discovery is one-shot on create + admin-triggered re-discovery. The
  * panel does NOT subscribe to a live discovery stream; status badges
@@ -295,6 +296,7 @@ export function McpConnectionsPanel() {
             >
               <option value="stdio">{t('mcpConnections.form.transportStdio')}</option>
               <option value="sse">{t('mcpConnections.form.transportSse')}</option>
+              <option value="http">{t('mcpConnections.form.transportHttp')}</option>
             </select>
           </div>
         </div>
@@ -358,7 +360,7 @@ export function McpConnectionsPanel() {
                   <div className="helper-text">
                     {connection.transport === 'stdio'
                       ? `stdio · ${connection.command ?? ''} ${(connection.args ?? []).join(' ')}`.trim()
-                      : `sse · ${connection.url ?? ''}`}
+                      : `${connection.transport} · ${connection.url ?? ''}`}
                   </div>
                   {connection.statusReason && (
                     <div className="helper-text" style={{ color: 'var(--we-danger-500)' }}>
