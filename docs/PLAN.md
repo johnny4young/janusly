@@ -974,6 +974,8 @@ Add-on:
 | --- | --- |
 | AI Recovery Pack | Failure explanation, patch suggestions, replay/evals, model usage. |
 
+**Operational long-form:** the operational pricing strategy — per-tier feature lists with shipped/roadmap honesty tags, free/self-host boundary, value-metric candidates with pros/cons + recommendation matrix, tier-to-segment mapping, enterprise controls deep dive, and pricing release plan tied to ENG-093 — lives in [`docs/marketing/pricing.md`](marketing/pricing.md). Numbers are intentionally TBD until ENG-093 closes; sales conversations name "tier + value metric candidate", not dollar amounts.
+
 ### 16.8 Sales demos
 
 Flagship demos:
