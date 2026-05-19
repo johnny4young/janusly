@@ -849,6 +849,8 @@ The §15 review consolidated the product story around a single sentence. This su
 
 **Brand-voice consolidation:** the same anchors above, written for marketers / founders / sales conversations rather than engineers, live in [`docs/marketing/narrative.md`](marketing/narrative.md). Downstream marketing tickets (ENG-066 landing, ENG-067 ICP, ENG-095 competitive) cite `narrative.md` for voice and §16.0 for substance.
 
+**Operational competitive packet:** the sales-ready competitive long-form — comparison table across the seven AC competitors, "where Janusly intentionally does not compete," buying triggers, per-competitor sub-blocks with objection-handling lines, demo mapping, and the anti-positioning principle that keeps recovery/MTTR the wedge — lives in [`docs/marketing/competitive-positioning.md`](marketing/competitive-positioning.md). The packet cites `narrative.md` for voice, `icp.md` for segment definitions, and `pricing.md` for pricing-related objections; every "where Janusly is stronger" claim carries an inline citation to a shipped route, table, or AGENTS.md invariant.
+
 ### 16.1 Positioning
 
 Building on the §16.0 thesis above, the tactical tagline + alternative short pitches:
