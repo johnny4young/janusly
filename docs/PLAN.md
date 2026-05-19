@@ -823,7 +823,33 @@ The product promise is:
 
 > Janusly does not just automate a process. It operates it: every run is observable, every failure is explainable, every proposed fix is reviewable, and every production change is replayable before rollout.
 
+### 16.0 Positioning thesis (review-derived)
+
+The §15 review consolidated the product story around a single sentence. This subsection hardens that sentence into the canonical thesis every downstream marketing artifact (landing copy, ICP, pricing, brand narrative, competitive packet) cites instead of reinventing. New marketing tickets should link to §16.0 rather than restate the four anchors below.
+
+**Category & one-sentence pitch:**
+
+> Janusly is the **self-healing AI workflow operator**: every run is **observable**, every failure is **explainable**, every proposed fix is **reviewable**, and every production change is **replayable before rollout**.
+
+**The four product anchors** — what each anchor names, plus the engineering reality that grounds the claim:
+
+1. **Observable DAGs.** Every workflow runs through a Postgres-backed runtime that emits structured `run_events` per node lifecycle transition. The Recovery Center (`apps/web/src/components/RecoveryCenterPanel.tsx`) surfaces open DLQ items, failure clusters, pending approvals, and recommended next actions as the authenticated home screen. The OpenTelemetry tracer + meter carry `service.name="janusly"` end-to-end, and `usage_events` rolls up per-org spend across LLM / PDF / email / integration tools.
+2. **Failure explanation.** When a node fails, the runtime captures a structured `errorJson` envelope; `POST /ai/explain-run` produces a root-cause narrative grounded in `run_events`; failure-signature normalization (`packages/shared/src/error-signature.ts`) clusters DLQ rows so the operator sees "47 workflows failed for the same reason," not 47 individual rows.
+3. **Patch suggestions.** `POST /ai/patch-workflow` proposes 1–3 alternative fixes with self-rated confidence (0–100) and an `approachLabel` per suggestion. Two patch families ship: **config-only envelopes** (per-node-type bounded shapes for `swap_secret_ref`, `add_retry`, `raise_timeout`, etc. — provider-safe base in ENG-086, non-resilience envelopes in ENG-088, headers/tool-input expansion in ENG-089) and a **structural envelope** (multi-node patches like `insert_approval_upstream`, from ENG-083). The recovery feedback loop (ENG-081) feeds operator accepts/rejects back into the prompt so the suggestions adapt to the workflow's history.
+4. **Safe version evolution.** Sandbox-validation runs (`replayMode: "validation"`) prove a patch works end-to-end BEFORE save, with the dryRun gate skipping write-side tool calls so no external state mutates. `workflow_versions` makes prior versions one click from rollback (ENG-079, `RollbackConfirmDialog`); the before/after delta card (ENG-082) surfaces the measurable impact of every applied patch.
+
+**What we are NOT** (mirror of §3, with a one-line "why" per item so downstream copy never has to choose between three variants of the rejection):
+
+- **Not "better Zapier UI."** Recovery, not integration breadth, is the wedge. Zapier wins on integration count; Janusly wins on what happens when an automation fails in production.
+- **Not "n8n with AI."** AI is part of the engine — the patch-suggestion route, the explain-run route, the multi-agent primitive — not a button glued on top of a visual builder.
+- **Not generic RPA.** We operate AI workflows. We do not click-record desktop UI scripts. The runtime is a DAG, not a screen-recorder.
+- **Not "agents that do everything."** Human approval gates and the recovery dialog are first-class primitives. The operator stays in the loop; the AI proposes, the human decides.
+
+**Primary metric:** The number we hold ourselves to is **Mean Time To Recovery for failed automations**. Every demo loops back to it; every business-case slide cites it; every private-beta measurement (ENG-093) anchors on it.
+
 ### 16.1 Positioning
+
+Building on the §16.0 thesis above, the tactical tagline + alternative short pitches:
 
 Preferred tagline:
 
@@ -839,8 +865,8 @@ Anti-positioning:
 
 - Not “better Zapier UI.”
 - Not “n8n with AI.”
-- Not “agents that do everything.”
 - Not generic RPA.
+- Not “agents that do everything.”
 
 ### 16.2 Differentiating product bets
 
