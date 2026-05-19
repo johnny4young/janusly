@@ -47,7 +47,7 @@ Janusly already has the core shape of that vision:
 - Not generic RPA. We operate AI workflows; we don't click-record desktop scripts.
 - Not "agents that do everything." Human approval gates are first-class; the operator stays in the loop.
 
-See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis.
+See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis, or [`docs/marketing/narrative.md`](docs/marketing/narrative.md) for the brand-voice version — same anchors, written for a slide or a sales conversation.
 
 > Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
 
