@@ -955,6 +955,8 @@ Sections:
 6. Security and control — RBAC, audit logs, secret refs, approvals, replay before apply.
 7. Deployment/pricing — self-host and managed cloud.
 
+**Live copy + design brief:** the bilingual landing-page design brief (English + Spanish, with hero/CTA variants for A/B test, SEO metadata, navigation, footer, forms, and Claude Design handoff notes) lives in [`docs/marketing/landing-page.md`](marketing/landing-page.md). The brief consumes [`docs/marketing/narrative.md`](marketing/narrative.md) for voice, [`docs/marketing/icp.md`](marketing/icp.md) for segment pain quotes, and the existing demo recording scripts under [`docs/marketing/recording-scripts/`](marketing/recording-scripts/) for CTA targets.
+
 ### 16.7 Packaging
 
 Suggested packaging:
