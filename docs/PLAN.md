@@ -847,6 +847,8 @@ The §15 review consolidated the product story around a single sentence. This su
 
 **Primary metric:** The number we hold ourselves to is **Mean Time To Recovery for failed automations**. Every demo loops back to it; every business-case slide cites it; every private-beta measurement (ENG-093) anchors on it.
 
+**Brand-voice consolidation:** the same anchors above, written for marketers / founders / sales conversations rather than engineers, live in [`docs/marketing/narrative.md`](marketing/narrative.md). Downstream marketing tickets (ENG-066 landing, ENG-067 ICP, ENG-095 competitive) cite `narrative.md` for voice and §16.0 for substance.
+
 ### 16.1 Positioning
 
 Building on the §16.0 thesis above, the tactical tagline + alternative short pitches:
