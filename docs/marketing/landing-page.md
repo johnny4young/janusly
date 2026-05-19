@@ -656,7 +656,7 @@ Match con los del AI Studio: 1100 / 760 / 480 px. Mantener consistencia entre ma
 **Out of scope para Claude Design (cosas que vienen después):**
 
 - Página de pricing (`/pricing` / `/es/precios`) — ENG-068.
-- Tabla competitiva contra Zapier / n8n / Workato — ENG-095.
+- Tabla competitiva contra Zapier / n8n / Workato — la versión operativa interna ya existe en [`docs/marketing/competitive-positioning.md`](competitive-positioning.md). La página pública (`/compare/zapier`, `/compare/n8n`, etc.) es un ticket futuro de implementación web.
 - Página de blog / case studies — futuro post-ENG-093.
 - Status page / changelog — ya existe como link, no parte del landing core.
 
