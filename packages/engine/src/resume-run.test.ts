@@ -131,4 +131,34 @@ describe('resumeRun', () => {
     await expect(resumeRun('run-1', 'gate')).rejects.toBeInstanceOf(ResumeRunConflictError)
     expect(enqueueReadyNodesMock).not.toHaveBeenCalled()
   })
+
+  it('captures webhook resume input as the node output', async () => {
+    dbRows.push({
+      orgId: 'org-1',
+      inputJson: {
+        workflow: workflow({ id: 'trigger', type: 'webhook', config: {} }),
+      },
+    })
+
+    await expect(resumeRun('run-1', 'trigger', {
+      input: { customer: 'leah@example.com', amountUsd: 49 },
+    })).resolves.toEqual({ resumed: true })
+
+    expect(markWaitingNodeSucceededMock).toHaveBeenCalledWith('run-1', 'trigger', { customer: 'leah@example.com', amountUsd: 49 })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'trigger', 'node.resumed', { output: { customer: 'leah@example.com', amountUsd: 49 } })
+  })
+
+  it('approval resume preserves empty output (decision lives in audit, not node state)', async () => {
+    dbRows.push({
+      orgId: 'org-1',
+      inputJson: {
+        workflow: workflow({ id: 'gate', type: 'approval', config: {} }),
+      },
+    })
+
+    await expect(resumeRun('run-1', 'gate', { input: { reason: 'looks fine' } })).resolves.toEqual({ resumed: true })
+
+    expect(markWaitingNodeSucceededMock).toHaveBeenCalledWith('run-1', 'gate', {})
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'gate', 'node.resumed', {})
+  })
 })

@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 const views = [
-  { button: 'Home', selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
-  { button: 'AI Studio', text: 'Describe the outcome. Janusly builds the flow.' },
+  { button: /^Home\b/, selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
+  { button: /^AI Studio\b/, text: 'Describe the outcome. Janusly builds the flow.' },
   { button: 'Flows', heading: 'Flows' },
   { button: 'Multi-agent timeline', heading: 'Multi-agent timeline' },
   { button: 'Step setup', heading: 'Step setup' },
@@ -16,8 +16,15 @@ const views = [
 test('workspace views can be opened independently', async ({ page }) => {
   await page.goto('/')
 
+  const workspaceGroup = page.getByRole('button', { name: /^Workspace\b/ })
+  if (await workspaceGroup.getAttribute('aria-expanded') !== 'true') await workspaceGroup.click()
+
   for (const view of views) {
-    await page.getByRole('button', { name: view.button, exact: true }).click()
+    const button =
+      typeof view.button === 'string'
+        ? page.getByRole('button', { name: view.button, exact: true })
+        : page.getByRole('button', { name: view.button })
+    await button.click()
 
     if (view.heading) {
       await expect(page.getByRole('heading', { name: view.heading, exact: true })).toBeVisible()
@@ -32,7 +39,7 @@ test('workspace views can be opened independently', async ({ page }) => {
 
 test('selecting a node opens quick setup controls', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'AI Studio', exact: true }).click()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await page.locator('.workflow-node').filter({ hasText: 'Call an API' }).click()
 
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()

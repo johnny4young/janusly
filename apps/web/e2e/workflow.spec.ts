@@ -1,4 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+async function expandStepPaletteGroup(page: Page, name: RegExp) {
+  const group = page.getByRole('button', { name }).first()
+  if ((await group.count()) === 0) return
+  if ((await group.getAttribute('aria-expanded')) !== 'true') await group.click()
+}
 
 test('dev session can create, save, run, and reopen a workflow', async ({ page }) => {
   const workflowName = `E2E Noop ${Date.now()}`
@@ -7,7 +13,8 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
   await expect(page.getByText('dev-user')).toBeVisible()
 
   await page.getByRole('button', { name: 'New', exact: true }).click()
-  await page.getByLabel('Name').fill(workflowName)
+  await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
+  await expandStepPaletteGroup(page, /^Misc\b/)
   await page.getByRole('button', { name: /Do nothing/i }).click()
 
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
@@ -22,7 +29,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Flows' }).click()
   await page.getByRole('button', { name: 'Refresh' }).click()
-  await expect(page.getByText(workflowName, { exact: true })).toBeVisible()
+  await expect(page.locator('[data-testid^="workflows-row-"]').filter({ hasText: workflowName })).toBeVisible()
 })
 
 test('human form pauses a run, validates input, and resumes with submitted output', async ({ page }) => {
@@ -30,7 +37,8 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await expect(page.getByText('dev-user')).toBeVisible()
 
   await page.getByRole('button', { name: 'New', exact: true }).click()
-  await page.getByLabel('Name').fill(`E2E Human Form ${Date.now()}`)
+  await page.getByRole('textbox', { name: 'Name' }).fill(`E2E Human Form ${Date.now()}`)
+  await expandStepPaletteGroup(page, /^Human-in-the-loop\b/)
   await page.getByRole('button', { name: /Collect form/i }).click()
 
   await page.getByRole('button', { name: 'Validate', exact: true }).click()
