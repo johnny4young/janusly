@@ -1,8 +1,53 @@
 # Janusly
 
-> **Operator-grade workflow recovery.** When a run fails, AI proposes 1–3 alternative fixes with confidence scores. Sandbox-validate before saving. Apply across every similar failure with one click. One-click rollback if a patch goes wrong.
+> **The operational backbone for AI workflows.**
+> Janusly is being built to make AI workflows feel less like fragile demos and more like production infrastructure: observable, recoverable, reviewable, auditable.
 
-Janusly is an AI operator for business workflows — a DAG runtime where AI is part of the loop, not glued on top. The differentiator is the **failure-recovery loop**: AI patch suggestions with self-rated confidence, sandbox replay before commit, cluster apply across DLQ entries that share a failure signature, and one-click rollback. Generic workflow execution (durable retries, decision engine, RL adjustments, NL run explanations) is the table-stakes layer underneath. With an Anthropic key it becomes an end-to-end AI operator: prompt → workflow → execution → decision → learning → recovery → rollback → conversational explainability. Without one, every deterministic path still works.
+**Purpose:** make AI workflows dependable enough for the boring, critical work companies actually run every day.
+
+## Why Janusly exists
+
+Every company is racing to put AI into production. Most discover the same hard truth: an LLM that works perfectly in a demo is a different animal in week three — when it's running a billing flow at 3am and something upstream broke, when the credential rotated and nobody noticed, when the third-party API silently changed its contract.
+
+Workflow tools were built for the **integration era** — drag-and-drop connectors between APIs that already worked. They were not built for the **AI era**, where the hardest question is not "how do I wire these systems together?" but "what happens when the model returns nonsense, the secret expires, or a step that worked yesterday fails today?"
+
+**Janusly is being built to answer that question.** The vision is a control plane for AI workflows where every step leaves evidence, every failure creates a recovery path, every fix can be reviewed before rollout, and every workflow can evolve without losing human control. Running an AI workflow should become as operationally boring as running a database: instrumented, backed up, recoverable, auditable, and trusted enough for work that matters.
+
+The number we hold ourselves to is **Mean Time To Recovery for failed automations**: from hours to minutes, from minutes to seconds.
+
+## Where Janusly is going
+
+Janusly's end state is not another automation builder. It is the operating layer teams trust for AI-driven business processes: support triage, refunds, billing exceptions, incident response, reporting, back-office approvals, and every workflow where model output, human judgment, and external systems meet.
+
+The product is taking shape around four bets:
+
+- **Observe every run.** A workflow should leave enough structured evidence for any operator to understand what happened.
+- **Explain every failure.** The system should translate runtime state into a clear root cause, owner, and recovery path.
+- **Recover safely.** AI can suggest, but production changes must be reviewable, sandboxed, auditable, and reversible.
+- **Improve over time.** Every accepted or rejected fix should teach the operator loop how this business wants to run.
+
+This is the destination, not a claim that every edge is finished today. The direction is deliberate: Janusly should become the place where AI workflows stop being demos and start becoming dependable operations.
+
+## What ships today
+
+Janusly already has the core shape of that vision:
+
+- A Postgres-backed workflow runtime for observable DAG execution.
+- A Recovery Center that surfaces failed runs, failure clusters, pending human actions, and recovery metrics.
+- AI-assisted failure explanation and 1–3 patch suggestions with confidence scores.
+- Sandbox validation before applying a recovery patch, cluster-level apply for repeated failures, and one-click rollback through workflow version history.
+- Deterministic fallback paths when no Anthropic key is configured, so non-AI runtime behavior still works.
+
+**In one line:** Run critical AI workflows, explain failures, propose safe fixes, and evolve workflow versions with full auditability.
+
+## What Janusly is NOT
+
+- Not a "better Zapier UI." Recovery, not integration breadth, is the wedge.
+- Not "n8n with AI." AI is part of the engine, not a button glued on top.
+- Not generic RPA. We operate AI workflows; we don't click-record desktop scripts.
+- Not "agents that do everything." Human approval gates are first-class; the operator stays in the loop.
+
+See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis.
 
 > Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
 
