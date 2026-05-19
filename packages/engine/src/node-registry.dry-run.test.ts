@@ -328,3 +328,69 @@ describe('agent node — dryRun gating', () => {
     )
   })
 })
+
+describe('loop node — array reference resolution', () => {
+  it('preserves an array reference from context (single-template-reference shape)', async () => {
+    const result = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      context: { trigger: { output: { customers: [
+        { id: 'c1', email: 'a@example.com', plan: 'free' },
+        { id: 'c2', email: 'b@example.com', plan: 'team' },
+        { id: 'c3', email: 'c@example.com', plan: 'free' },
+      ] } } },
+      config: {
+        items: '{{context.trigger.output.customers}}',
+        mapping: 'Customer {{item.id}} — plan={{item.plan}}',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toEqual({
+      count: 3,
+      items: [
+        'Customer c1 — plan=free',
+        'Customer c2 — plan=team',
+        'Customer c3 — plan=free',
+      ],
+    })
+  })
+
+  it('still accepts comma-separated string input (backwards compatibility)', async () => {
+    const result = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      config: {
+        items: 'one, two, three',
+        mapping: 'item={{item}}',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toEqual({
+      count: 3,
+      items: ['item=one', 'item=two', 'item=three'],
+    })
+  })
+
+  it('returns zero iterations when the referenced array is missing', async () => {
+    const result = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      context: {},
+      config: {
+        items: '{{context.missing.output.list}}',
+        mapping: '{{item}}',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toEqual({ count: 0, items: [] })
+  })
+})

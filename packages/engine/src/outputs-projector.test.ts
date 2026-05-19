@@ -18,7 +18,9 @@ describe('projectOutputs', () => {
       },
       { fetch: { output: { text: 'ok', count: 42 } } },
     )
-    expect(result).toEqual({ result: 'ok', count: '42' })
+    // Single-template-reference shape preserves the raw resolved value
+    // (number stays a number) so JSON-typed outputs survive intact.
+    expect(result).toEqual({ result: 'ok', count: 42 })
   })
 
   it('returns an empty record for an empty spec', () => {
@@ -46,12 +48,23 @@ describe('projectOutputs', () => {
     expect(projectOutputs({ echo: '{{inputs}}' }, {}, 'INV-1')).toEqual({ echo: 'INV-1' })
   })
 
-  it('serialises object lookups to JSON via the renderer', () => {
+  it('preserves object lookups as raw values when the entire template is one reference', () => {
     const result = projectOutputs(
       { payload: '{{context.fetch.output}}' },
       { fetch: { output: { text: 'hi', count: 1 } } },
     )
-    expect(result).toEqual({ payload: '{"text":"hi","count":1}' })
+    // Single-template-reference shape returns the raw object so the
+    // declared output is a structured JSON document, not an opaque
+    // stringified blob.
+    expect(result).toEqual({ payload: { text: 'hi', count: 1 } })
+  })
+
+  it('still stringifies object lookups inside multi-reference / interpolated strings', () => {
+    const result = projectOutputs(
+      { sentence: 'payload was {{context.fetch.output}} (verbose)' },
+      { fetch: { output: { text: 'hi', count: 1 } } },
+    )
+    expect(result).toEqual({ sentence: 'payload was {"text":"hi","count":1} (verbose)' })
   })
 
   it('redacts secret and env references before output persistence', () => {

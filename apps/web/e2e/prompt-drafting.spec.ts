@@ -24,7 +24,7 @@ test('AI Studio drafts a flow from a business prompt', async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'AI Studio', exact: true }).click()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await page.getByPlaceholder('Example: when a customer asks for a refund, check policy, summarize risk, and ask for approval.').fill('When a refund is risky, pause for approval before notifying the customer.')
   await page.getByRole('button', { name: 'Draft flow', exact: true }).click()
 
@@ -46,7 +46,7 @@ test('AI Studio explains the current flow from the panel', async ({ page }) => {
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'AI Studio', exact: true }).click()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await page.getByRole('button', { name: 'Explain this flow', exact: true }).click()
 
   await expect(page.getByText('Explanation for UI Test Workflow')).toBeVisible()

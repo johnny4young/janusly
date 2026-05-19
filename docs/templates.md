@@ -132,6 +132,76 @@ Webhook → AI drafts a customer reply → `human_form` for a human agent to edi
 - **Expected output:** every Monday at 9am, a Slack message with a top-5 ranking of at-risk customers and one-line recommended actions per row.
 - **Failure path:** if the HTTP analytics endpoint is unreachable, the AI step receives an empty body and produces a fallback message. If the Slack post fails (rate limit / bad credential), the run lands `failed` for that node; the next Monday's run still fires per the cron.
 
+### `failed-workflow-recovery` — Failed workflow recovery → DLQ → patch → replay (Operations)
+
+`webhook` → `http` POST write-side (NO approval upstream, `Authorization: Bearer {{secret.BILLING_API_KEY}}` with the secret intentionally unbound) → `email.send` confirmation. The headline recovery demo — the run fails on the http node and the Recovery Center surfaces two suggestions (structural insert-approval + config swap_secret_ref). See [`docs/demos/failed-workflow-recovery.md`](demos/failed-workflow-recovery.md) for the full narrative.
+
+- **Required credentials:** none. The secret is intentionally unbound so the demo failure fires.
+- **Inputs schema:**
+  ```jsonc
+  {
+    "customer": "leah@example.com",
+    "amountUsd": 49.00
+  }
+  ```
+- **Expected output:** the workflow run lands `failed` on `charge` with a DLQ row whose `errorJson.message` is `Missing secret: BILLING_API_KEY`. Failure clustering normalizes that to `Missing secret: BILLING_API_KEY`. `/workflows/readiness` also reports `sensitive_action_missing_approval` for this workflow.
+- **Failure path:** this template IS the failure path. The Recovery Queue opens; the AI suggests inserting an `approval` node upstream of the http call (structural) AND swapping the secret reference to a real secret reference (config). Sandbox validation can prove the structural patch because dry-run skips the write-side POST. A live success replay requires the operator to also point the placeholder `billing.example.com` URL at a reachable billing sandbox.
+
+### `monthly-report-pdf` — Monthly metrics report → PDF → email (Operations)
+
+`schedule` (cron `0 9 1 * *` — 1st of each month at 9am) → `http` fetch metrics → AI summarize → `pdf.generate` → `email.send`. Showcases schedule + http + ai + pdf + email in a single workflow. See [`docs/demos/monthly-report-pdf.md`](demos/monthly-report-pdf.md) for the narrative.
+
+- **Required credentials:** none (mailer + object store come from env).
+- **Inputs:** none — the schedule trigger fires on cron.
+- **Expected output:** every month at 9am on the 1st, a PDF lands in the configured object store (S3 / local / noop) and an email goes out to `ops@example.com` with the PDF link.
+- **Failure path:** with the checked-in placeholder `analytics.example.com` URL, the http node can fail before downstream AI/PDF/email steps run; the run then lands in DLQ on `fetch_metrics`. Once the operator points the URL at a reachable analytics sandbox, PDF/email failures remain tool-envelope failures that are visible in node output and should be handled by downstream conditions when the demo needs branch-specific recovery.
+
+### `multi-agent-decision` — Multi-agent decision support (AI)
+
+`webhook` → `multi_agent` (3 sequential agents: optimist + skeptic + arbiter) → `email.send` with the final recommendation. Showcases the multi-agent debate primitive. See [`docs/demos/multi-agent-decision.md`](demos/multi-agent-decision.md) for the narrative.
+
+- **Required credentials:** none.
+- **Inputs schema:**
+  ```jsonc
+  {
+    "proposal": "Replace our self-hosted Postgres with a managed RDS instance for the analytics database."
+  }
+  ```
+- **Expected output:** the arbiter's `finalAnswer` is the 3-sentence final recommendation, mailed to `decisions@example.com` with the full debate context.
+- **Failure path:** without an LLM key, each agent's LLM call returns `{ mode: "fallback", aiError, response: <stub> }`. The agents still complete, the arbiter still writes (a stub) final answer, the email still sends. The AI fallback contract guarantees the workflow reaches `succeeded` even without a real LLM.
+
+### `mcp-notion-summary` — MCP Notion → AI summary → Slack (AI)
+
+`webhook` → `mcp_tool` (alias `notion-demo`, tool `pages.read`) → AI summarize → `slack.post` notify. Showcases Janusly as an MCP client. See [`docs/demos/mcp-notion-summary.md`](demos/mcp-notion-summary.md) for the narrative.
+
+- **Required credentials:** `slack_webhook`.
+- **Setup prerequisite:** an MCP connection with alias `notion-demo` must be wired in the admin MCP panel before running. The `pages.read` tool descriptor must be `enabled: true`. Without the connection, the mcp_tool node returns `{ ok: false, error: "connection not found" }` and the workflow lands `failed` on `read_page`.
+- **Inputs schema:**
+  ```jsonc
+  {
+    "pageId": "abc123def456"
+  }
+  ```
+- **Expected output:** a Slack message in the team channel with a 3-5 bullet summary of the Notion page's action items and decisions.
+- **Failure path:** mcp_tool failures (connection unreachable, descriptor disabled, rate limit hit) return `{ ok: false, error }` and the run lands `failed`. The Recovery Queue offers `add_retry` (transient) or `swap_connection` (alias points at a different connection).
+
+### `bulk-classify-loop` — Bulk customer classify → digest email (Data)
+
+`webhook` (batch of customers) → `loop` normalize per-customer summary lines → AI classify the entire batch in one grouped call → `email.send` digest. Showcases the loop primitive for fan-out aggregation and the scale-tier cost story. See [`docs/demos/bulk-classify-loop.md`](demos/bulk-classify-loop.md) for the narrative.
+
+- **Required credentials:** none.
+- **Inputs schema:**
+  ```jsonc
+  {
+    "customers": [
+      { "id": "c1", "email": "leah@example.com", "plan": "free" },
+      { "id": "c2", "email": "max@example.com", "plan": "team" }
+    ]
+  }
+  ```
+- **Expected output:** an email to `success@example.com` with a ranked list of customers and one-line reasoning per row.
+- **Failure path:** empty `customers` array → AI produces a fallback "no customers to classify" digest and the email still sends. Item shape drift (missing fields) → loop leaves placeholders intact in the rendered template; the AI sees the broken placeholder verbatim and classification quality drops. Recovery is upstream: validate the input schema at the webhook trigger.
+
 ## Adding a new template
 
 1. Append an entry to `workflowTemplates` in `apps/api/src/templates.ts`. The minimum shape:

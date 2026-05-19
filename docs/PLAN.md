@@ -805,6 +805,10 @@ The next public-facing demos should be:
 
 Each demo should show observability, human control, auditability, and recovery.
 
+#### §15.4 Status Update
+
+ENG-055 shipped the canonical demos with an expanded scope. Three flagship demos (matching the original list) target sales calls at 3-5 minutes each: the new `failed-workflow-recovery` template intentionally combines two failure modes (write-side without approval + missing-secret) so the Recovery Center demo exercises both structural and config patch envelopes in one workflow. Four supporting demos cover technical buyer breadth: `monthly-report-pdf` for cron + PDF + email, `multi-agent-decision` for 3-agent debate, `mcp-notion-summary` for the MCP client story, and `bulk-classify-loop` for the scale story. All seven have narrative docs in `docs/demos/` and e2e validation in `apps/web/e2e/demo-templates.spec.ts`.
+
 ---
 
 ## 16. Market differentiation plan — make Janusly unique and sellable

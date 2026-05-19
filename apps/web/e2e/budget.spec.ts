@@ -78,7 +78,7 @@ test('AI Studio budget block shows a dismissible Operations CTA', async ({ page 
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'AI Studio', exact: true }).click()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await page.getByRole('button', { name: 'Explain this flow', exact: true }).click()
 
   await expect(page.getByTestId('budget-blocked-banner')).toContainText('AI org budget exceeded')

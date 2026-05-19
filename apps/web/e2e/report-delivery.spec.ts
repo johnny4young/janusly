@@ -1,6 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test.use({ viewport: { width: 1440, height: 900 } })
+
+async function expandStepPaletteGroup(page: Page, name: RegExp) {
+  const group = page.getByRole('button', { name }).first()
+  if ((await group.count()) === 0) return
+  if ((await group.getAttribute('aria-expanded')) !== 'true') await group.click()
+}
 
 test('run history opens report delivery dialog and surfaces a credential error', async ({ page }) => {
   const workflowName = `E2E Report Delivery ${Date.now()}`
@@ -11,7 +17,8 @@ test('run history opens report delivery dialog and surfaces a credential error',
 
   await page.getByRole('button', { name: 'New', exact: true }).click()
   await expect(page.getByText('Describe the outcome. Janusly builds the flow.')).toBeVisible()
-  await page.getByLabel('Name').fill(workflowName)
+  await page.getByRole('textbox', { name: 'Name' }).fill(workflowName)
+  await expandStepPaletteGroup(page, /^Misc\b/)
   await page.getByRole('button', { name: /Do nothing/i }).click()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' })).toBeVisible()
 

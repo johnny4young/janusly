@@ -27,8 +27,11 @@ const PERSISTENCE_ONLY_REF = /{{\s*(?:secret|env)\.[^}]+\s*}}/gi;
 /**
  * Render every template in `outputsSpec` against `{ context, inputs }` and
  * return the resulting record. The keys are preserved verbatim; the values
- * are whatever `renderTemplate` returns for the template string (the
- * renderer coerces non-string lookups to strings).
+ * are whatever `renderTemplate` returns for the template string. A single
+ * template reference (`"{{x.y}}"`) preserves the resolved value's native
+ * type (number / array / object / boolean) so JSON-typed outputs survive
+ * intact; multi-reference / interpolated strings (`"hello {{name}}"`) are
+ * still coerced to strings.
  *
  * Returns `{}` for an empty spec — callers can treat that as "no projection
  * configured."
