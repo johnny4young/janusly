@@ -1,0 +1,5 @@
+{
+  "alertName": "API p95 above 800ms",
+  "service": "checkout-api",
+  "severity": "high"
+}

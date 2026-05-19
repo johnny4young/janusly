@@ -1,0 +1,6 @@
+{
+  "customer": "leah@example.com",
+  "orderId": "ord_8421",
+  "amountUsd": 49.00,
+  "reason": "Charged twice for the same order"
+}
