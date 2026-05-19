@@ -894,6 +894,8 @@ Initial ideal customer profiles:
 | Engineering/support teams | Incidents, customer bugs, and escalations require triage across Slack/GitHub/Linear. | “Turn incidents and escalations into explainable workflows with recovery built in.” |
 | AI builders/agencies | They build agents for clients but lack durable runtime, audit, and recovery. | “Ship client AI workflows with a runtime, visual ops, MCP, and recovery.” |
 
+**Operational long-form:** the sales-team operational doc — per-segment pain points, buyer/user, demo angle, objection handling, first outreach copy, success metric, plus a sales-motion overview and a persona-to-segment lookup table — lives in [`docs/marketing/icp.md`](marketing/icp.md). Downstream marketing tickets (ENG-066 landing, ENG-068 pricing, ENG-095 competitive) cite `icp.md` for segment definitions and §16.3 for the strategic seed.
+
 ### 16.4 Commercial templates
 
 Prioritize templates that sell a story:
