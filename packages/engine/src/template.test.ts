@@ -50,9 +50,23 @@ describe('renderTemplate', () => {
     expect(renderTemplate('payload {{context.http.output}}', scope)).toBe('payload {"statusCode":200}')
   })
 
-  it('recursively renders arrays and objects', () => {
+  it('recursively renders arrays and objects, preserving raw value types for single-reference strings', () => {
     const result = renderTemplate({ items: ['{{inputs.name}}', { code: '{{context.http.output.statusCode}}' }] }, scope)
-    expect(result).toEqual({ items: ['Ada', { code: '200' }] })
+    // Single-template-reference shape preserves the resolved value's
+    // native type — `statusCode: 200` (number) survives instead of being
+    // coerced to the string "200".
+    expect(result).toEqual({ items: ['Ada', { code: 200 }] })
+  })
+
+  it('preserves an array reference when the entire string is one template (single-ref shape)', () => {
+    const arrayScope = {
+      context: { trigger: { output: { customers: [{ id: 'c1' }, { id: 'c2' }] } } },
+      inputs: {},
+    }
+    expect(renderTemplate('{{context.trigger.output.customers}}', arrayScope)).toEqual([
+      { id: 'c1' },
+      { id: 'c2' },
+    ])
   })
 
   it('substitutes env and secret placeholders when available', () => {

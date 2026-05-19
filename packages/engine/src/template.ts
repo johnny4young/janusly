@@ -83,6 +83,32 @@ export function getByPath(source: unknown, path: string): unknown {
 
 function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionList: Set<string>): unknown {
   if (typeof value === 'string') {
+    // Single-template-reference shape (entire string is one `{{...}}`):
+    // return the resolved value as-is so arrays/objects/numbers/booleans
+    // survive intact. Without this, `loop.items: "{{context.x.items}}"`
+    // would receive a JSON-stringified array (then degrade via CSV-split).
+    // Multi-reference strings ("hello {{name}}") still flow through the
+    // string-substitution branch below.
+    const singleRef = value.match(/^\s*\{\{\s*([^}]+)\s*\}\}\s*$/);
+    if (singleRef) {
+      const expr = singleRef[1].trim();
+      if (expr.startsWith('secret.')) {
+        const secretName = expr.replace('secret.', '').toUpperCase();
+        const resolved = getSecret(secretName);
+        if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        return resolved;
+      }
+      if (expr.startsWith('env.')) {
+        const envName = expr.replace('env.', '').toUpperCase();
+        const resolved = process.env[envName] ?? '';
+        if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        return resolved;
+      }
+      const resolved = getByPath(scope, expr);
+      if (resolved == null) return '';
+      return resolved;
+    }
+
     return value.replace(/{{\s*([^}]+)\s*}}/g, (_, rawPath) => {
       const expr = String(rawPath).trim();
 
@@ -124,8 +150,20 @@ function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionL
   return value;
 }
 
-/** Render a value's template strings without tracking redactions (no secrets in scope). */
-export function renderTemplate<T>(value: T, scope: TemplateScope): T {
+/**
+ * Render a value's template strings without tracking redactions.
+ *
+ * Overloads honestly express the return type:
+ * - **string input** can return `unknown` — a single-template-reference
+ *   string (`"{{x}}"`) returns the resolved value's native type, which
+ *   could be a number, array, object, or boolean. Callers must narrow.
+ * - **object / array / primitive input** preserves its structural shape.
+ *   Nested single-ref strings inside the structure return raw values too,
+ *   but at the top level the return type matches the input type.
+ */
+export function renderTemplate(value: string, scope: TemplateScope): unknown;
+export function renderTemplate<T>(value: T, scope: TemplateScope): T;
+export function renderTemplate<T>(value: T, scope: TemplateScope): T | unknown {
   return renderTemplateInternal(value, scope, new Set()) as T;
 }
 
