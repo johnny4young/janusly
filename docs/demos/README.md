@@ -41,7 +41,7 @@ Every narrative follows the same skeleton:
 
 - **Landing-page copy** (`docs/marketing/landing-page.md`, future) — hero subcopy, problem statement, use-case cards, and security/control proof points are derived from the per-demo "story" sections.
 - **Sales calls** — the talk tracks here are the literal scripts.
-- **Recording scripts** (`docs/marketing/recording-scripts.md`, future) — bullet-by-bullet timing breakdowns will extend the talk tracks here into 3-5 minute recordings.
+- **Recording scripts** ([`docs/marketing/recording-scripts/`](../marketing/recording-scripts/)) — second-by-second timed beat sheets for the three flagship demos, with exact button labels, copy-pasteable setup commands, sample payloads, and failure-injection / recovery-moment sequences. Use these when filming a sales recording or onboarding a private-beta design partner.
 - **Private-beta MTTR experiment** — design partners walk through the three flagship demos before measuring their baseline; the post-flow surveys ask which demo moved them most.
 
 ## Adding a new demo

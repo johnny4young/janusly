@@ -809,6 +809,8 @@ Each demo should show observability, human control, auditability, and recovery.
 
 ENG-055 shipped the canonical demos with an expanded scope. Three flagship demos (matching the original list) target sales calls at 3-5 minutes each: the new `failed-workflow-recovery` template intentionally combines two failure modes (write-side without approval + missing-secret) so the Recovery Center demo exercises both structural and config patch envelopes in one workflow. Four supporting demos cover technical buyer breadth: `monthly-report-pdf` for cron + PDF + email, `multi-agent-decision` for 3-agent debate, `mcp-notion-summary` for the MCP client story, and `bulk-classify-loop` for the scale story. All seven have narrative docs in `docs/demos/` and e2e validation in `apps/web/e2e/demo-templates.spec.ts`.
 
+ENG-069 shipped recording-ready beat sheets for the three flagship demos in `docs/marketing/recording-scripts/` — each `MM:SS`-stamped with exact button labels, paired sample-payload JSON files in `assets/`, and a `pnpm seed:demos` idempotent seeder (no-op-if-exists by default, `--force` to reset) so a design partner or marketing recordist can spin up the demo environment in one command. Unblocks ENG-093 (private-beta MTTR experiment), which depended on both shipped templates AND recording-ready scripts.
+
 ---
 
 ## 16. Market differentiation plan — make Janusly unique and sellable
