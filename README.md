@@ -195,7 +195,7 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 
 | Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
-| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits a typed DAG via `generateObject({ schema: WorkflowSchema })` |
+| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits an Anthropic-safe typed DAG via `generateObject({ schema: AiGenerationWorkflowSchema })`, then the API re-validates it through the engine workflow gates |
 | Explain a workflow | `POST /ai/explain-workflow` | Generic placeholder | Bullet walkthrough |
 | Review a workflow for production-readiness | `POST /ai/review-workflow` | Deterministic readiness gate (`checkWorkflowReadiness`) | LLM semantic pass on top of the deterministic gate |
 | Run-level Q&A chat | `POST /ai/explain-run` + UI Runs tab | Deterministic summary (failures / retries / decisions / rollbacks) | Free-form answers |
