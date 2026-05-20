@@ -284,4 +284,287 @@ The explicit out-of-scope list, so neither sales nor founders accidentally over-
 - **No public-facing comparison pages.** This is the internal sales doc. `/compare/zapier`, `/compare/n8n`, and similar public landing pages are future web-implementation tickets, not part of this packet.
 - **No RFP boilerplate or vendor security questionnaire answers.** Compliance asks for specific answers; those belong to a separate enterprise-sales playbook.
 - **No competitive-intel monitoring process.** Watching competitor releases / pricing changes is an operational process owned by founders + sales, not a doc.
-- **No Spanish translation in this turn.** Tracked by ENG-110 as part of the marketing-stack bilingual sweep; `narrative.md`, `icp.md`, and `pricing.md` are bilingual today and this doc follows in a future `/janus-ship` turn using the same canonical single-file pattern. When the public-facing comparison page lands as a separate web ticket, the in-product surface localization happens there.
+- **No public-facing competitive-comparison page UI localization.** The public `/compare/*` web pages are a separate web-implementation ticket; their localization happens there. This internal sales doc IS bilingual (see the `Versión en español` block below); only the web-page surface is deferred.
+
+---
+
+## Versión en español
+
+La versión paralela en castellano del **paquete de posicionamiento competitivo** de Janusly. Misma estructura, mismas anclas, misma engineering reality. Nombres de competidores (Zapier, Make, n8n, Workato, Pipedream, Relay, Gumloop), nombres de archivos de demo (`failed-workflow-recovery`, `refund-triage`, `incident-triage`, `multi-agent-decision`, `mcp-notion-summary`), rutas (`POST /ai/patch-workflow`, `POST /dlq/validate-fix`, `POST /workflows/rollback`, etc.), tablas (`run_events`, `audit_logs`, `workflow_versions`, etc.), archivos de código (`RecoveryCenterPanel.tsx`, `packages/shared/src/error-signature.ts`), nombres de productos terceros (WorkOS, Anthropic, LangChain, Sustainable Use License, RecipeIQ), node types (`ai` / `agent` / `multi_agent` / `router_llm` / `agent_reflection` / `mcp_tool`), approachLabels (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`), audit-row names (`workflow.rolled_back`) y constantes OTel (`service.name="janusly"`, `eq(<table>.orgId, auth.orgId)`) quedan todos en inglés en ambos idiomas porque son identificadores, no texto traducible. El brand-mark "Janusly" tampoco se traduce.
+
+Vocabulario canónico, lifted de [`narrative.md`](narrative.md) Versión en español: `autoreparable`, `Centro de Recuperación`, `flujo` / `flujo de trabajo`, `operador`. Quedan en inglés como anglicismos técnicos aceptados del nicho: `sandbox`, `rollback`, `DAG`, `MTTR`, `self-host`, `MCP`, `connector`, `marketplace`, `no-code`, `code-first`, `code-step`, `event-source`, `human-in-the-loop`, `table stakes`, `AI-native`, `bolted-on`, `assistant-on-top`, `fair-code`, `error workflows` (término propio de n8n), `recipe` (término propio de Workato), `loop de recuperación`. Tono: `tú` informal, nunca `usted`. Tags de honestidad: `(en producción)` para lo que ya está shipped, `(roadmap)` para planeado, `(objetivo de empaquetado)` para diseño/contrato, `(caso a caso)` para operacional.
+
+**Tokens de la Sección C** (tabla comparativa) quedan literales en ambos idiomas:
+
+- `✓` = de primera clase / en producción.
+- `partial` = presente con calificadores — ver nota al pie correspondiente.
+- `—` = no presente.
+- `N` = no es su foco por diseño — la dimensión no es la apuesta del competidor (o cuando Janusly carga `N`, es lo que cedemos a propósito; ver Sección D).
+
+Los siete competidores (Zapier, Make, n8n, Workato, Pipedream, Relay, Gumloop) son **marcas registradas de terceros**. La versión española los nombra exactamente igual que la inglesa, sin glosario adicional.
+
+### Sección A — Cómo usar este doc
+
+Dos consumidores, dos caminos de lectura.
+
+- **Para ventas.** Escanea la **Sección F** (sub-bloque por competidor) antes de cualquier llamada donde el comprador mencionó al competidor X por nombre. Pre-carga el demo recomendado desde la **Sección G**. Usa las líneas de manejo de objeciones de F al pie de la letra — no improvises contra competidores durante una llamada en vivo.
+- **Para fundadores.** La **Sección C** (tabla comparativa) es el slide. La **Sección H** (principio de anti-posicionamiento recapitulado) es la línea de cierre del deck de ventas.
+
+**Las reglas de voz de [`narrative.md`](narrative.md) aplican.** Anti-posicionamiento no es desprecio — es respeto por el tiempo del comprador. Nunca nombramos lo que está *mal* en la competencia en copy customer-facing. Nombramos lo que SOMOS, y nombramos lo que NO SOMOS. Este doc interno es el único lugar donde el nombre de un competidor aparece junto a una oración analítica.
+
+**Tags de honestidad.** Cada afirmación de "dónde Janusly es más fuerte" está anclada en una ruta o feature en producción, citada en línea. Las capacidades que aún están en vuelo cargan un tag `(roadmap)` — ventas nunca sobre-promete. Donde la capacidad de un competidor es ambigua o se mueve rápido, la tabla comparativa usa `partial` en vez de `✓` y una nota al pie nombra el calificador.
+
+### Sección B — El principio de anti-posicionamiento
+
+La recuperación, no la amplitud de integraciones, es la cuña. La línea de PLAN §16.0 se mantiene verbatim:
+
+> Zapier gana en conteo de integraciones; Janusly gana en lo que pasa cuando una automatización falla en producción.
+
+Esa oración es toda la postura. Todo lo de abajo la cobra por competidor.
+
+**Lo que nunca afirmamos.** "Más integraciones que Zapier." "Más fácil que Zapier." "Más barato que Make." "Más flexible que n8n." Las cuatro son carreras que perdemos por diseño.
+
+**Lo que siempre afirmamos.** Runs observables, fallas explicadas, patches revisables, runs reproducibles, MTTR como métrica de registro.
+
+**Lo que nunca ponemos en copy customer-facing.** "Mejor que [competidor]." Esa frase está reservada a este doc interno. En un deck, en una landing page, en un email de ventas, en un podcast — nombramos lo que SOMOS (observable, explicable, revisable, reproducible) y lo que NO SOMOS (mejor UI de Zapier, n8n con AI, RPA genérico, agentes que hacen todo). El comprador infiere el resto. Esa es la postura.
+
+### Sección C — Tabla comparativa
+
+El grid para usar como slide. Las filas son las dimensiones de una plataforma de flujos AI; las columnas son los siete competidores nombrados en este paquete más Janusly. Las celdas usan `✓` (en producción, de primera clase), `partial` (presente con calificadores — ver nota al pie), `—` (no presente), y `N` ("no es su foco por diseño", usado donde la dimensión intencionalmente no es la apuesta del competidor). Donde Janusly carga `N`, cedemos esa dimensión a propósito — ver Sección D.
+
+| Dimensión | Zapier | Make | n8n | Workato | Pipedream | Relay | Gumloop | Janusly |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Runtime DAG observable | partial¹ | partial¹ | ✓ | ✓ | ✓ | partial¹ | partial¹ | ✓ |
+| Fallas explicadas por AI | — | — | — | — | — | — | — | ✓ |
+| AI patch suggestions (por nodo, con confidence score) | — | — | — | — | — | — | — | ✓ |
+| Replay en sandbox antes de save | — | — | — | partial² | — | — | — | ✓ |
+| Version rollback (un clic) | partial³ | partial³ | partial³ | ✓ | partial³ | — | — | ✓ |
+| Clustering por signature de falla | — | — | — | — | — | — | — | ✓ |
+| MTTR como métrica de primera clase | — | — | — | — | — | — | — | ✓ |
+| Self-host (full runtime) | — | — | ✓ | — | partial⁴ | — | — | ✓ |
+| SSO + SCIM (auth enterprise) | ✓ | ✓ | partial⁵ | ✓ | ✓ | partial⁵ | partial⁵ | ✓ |
+| Cliente + server MCP | — | — | partial⁶ | — | partial⁶ | partial⁶ | — | ✓ |
+| Scope multi-tenant a nivel de engine | partial⁷ | partial⁷ | partial⁷ | ✓ | partial⁷ | — | — | ✓ |
+| Audit log por acción | partial⁸ | partial⁸ | partial⁸ | ✓ | partial⁸ | — | — | ✓ |
+| Tamaño del catálogo de integraciones | ✓ (miles) | ✓ (miles) | partial (cientos) | ✓ (miles, enterprise) | ✓ (miles) | partial (curado) | partial (curado) | N |
+| Superficie primaria no-code | ✓ | ✓ | partial⁹ | ✓ | — | ✓ | ✓ | N |
+| Superficie primaria code-first | — | — | ✓ | partial¹⁰ | ✓ | — | — | partial¹¹ |
+| AI-native vs AI-bolted-on | bolted-on | bolted-on | bolted-on | assistant-on-top | bolted-on | AI-native | AI-native | AI-native |
+
+**Notas al pie (el calificador es la cuestión):**
+
+1. Existe vista visual de escenarios / pasos, pero no es un DAG con eventos de run estructurados, transiciones de ciclo de vida, ni trazas OTel etiquetadas con `service.name="janusly"` end-to-end.
+2. Workato tiene capacidades de recipe-test; no es un gate automatizado de "save solo si un replay con writes-skipped fue exitoso" como `POST /dlq/validate-fix` opera contra el run persistido.
+3. Existe historial de edición; "rollback a la versión N-1 en un clic, como una sola transacción con `workflow.rolled_back` en audit" — la shape de `POST /workflows/rollback` de Janusly — no es la misma operación.
+4. Las opciones de self-host varían por tier y no son full-runtime en el tier gratuito.
+5. El soporte de SSO varía por plan; SCIM Directory Sync típicamente queda gateado a tiers enterprise o ausente. Janusly entrega ambos vía WorkOS hoy (por la sección de auth de AGENTS.md).
+6. Capacidad relacionada con MCP vía nodos community, integraciones, o items de roadmap — no un node type de primera clase con write consent de dos flags + dry-run gating + buckets de rate-limit en Redis como opera el `mcp_tool` de Janusly.
+7. Aislamiento per-account / per-workspace existe a nivel de aplicación; "scope multi-tenant a nivel de engine enforced en cada query vía `eq(<table>.orgId, auth.orgId)`" — la postura de Janusly por AGENTS.md — no es el mismo commitment arquitectural.
+8. Existe algún logging / historial de actividad; "audit row por acción AI, por acción de recovery, por cambio de membership, por cambio de config" con el catálogo cerrado que mantiene Janusly no es lo mismo.
+9. n8n tiene un editor visual + el code node de JS; para cualquier flujo no trivial el code node típicamente aparece.
+10. Workato tiene un DSL de recipes pero la superficie típica es un builder visual guiado.
+11. La superficie primaria de Janusly es el editor visual de DAG + el Inspector. El DSL es JSON tipado por Zod; los operadores típicamente no lo escriben a mano.
+
+**Nota de honestidad sobre la fila de conteo de integraciones.** Zapier, Make, Workato y Pipedream mantienen catálogos crudos más grandes que lo que Janusly tendrá, por diseño. La tabla se lee como justa para que las filas donde Janusly gana se lean como creíbles. Ver Sección D para la lista explícita de lo que cedemos.
+
+### Sección D — Dónde Janusly intencionalmente no compite
+
+La lista "perdemos a propósito". Conocer la frontera es parte de la postura.
+
+- **Conteo de catálogo de integraciones.** Zapier, Make, Workato y Pipedream todos tienen catálogos crudos más grandes y los seguirán teniendo en el futuro previsible. Elegimos un set chico de integraciones relevantes a recuperación (Slack, GitHub, email, signed webhook, cliente + server MCP) por PLAN §16.5. Si la necesidad primaria de un comprador es "conectar 50 SaaS apps que ya funcionan", recomienda que se queden con Zapier o Make para esa superficie.
+- **UX no-code, friendly para usuarios no técnicos.** Zapier gana en "mi gerente de marketing construyó esto en 10 minutos". Janusly es para el builder técnico y el ops lead que realmente quiere leer el audit log. Si el usuario primario del comprador es un empleado no técnico construyendo automatizaciones one-off, recomienda Zapier o Gumloop.
+- **El punto de entrada hosted no-code más barato.** El tier gratuito de Zapier está optimizado para el comprador que quiere la forma más barata de hospedar la conexión de unas pocas SaaS apps. No cobramos por volumen de tasks — ver [`pricing.md`](pricing.md) para la postura de métrica de valor. Si "automatización hosted lo más barato posible" es el criterio de compra, esto no es un fit.
+- **Community / marketplace de templates más grande.** n8n y Zapier llevan años de ventaja en templates crowd-sourced. Janusly entrega 7 demos canónicos bajo [`docs/demos/`](../demos/) curados intencionalmente; no estamos compitiendo por llegar a un millón de templates de community.
+- **Deployment air-gapped on-prem.** Fuera de scope para v1 (nombrado explícitamente en los disparadores de descalificación de Etapa 2 de [`icp.md`](icp.md)). Workato gana esta categoría para enterprises compliance-heavy que requieren air-gap.
+
+Un "no educado" en cualquiera de las anteriores es la respuesta correcta de ventas. Descalificar rápido a un comprador de segmento equivocado respeta su tiempo y el nuestro.
+
+### Sección E — Disparadores de compra
+
+Los momentos en que un comprador deja un competidor y pivota hacia Janusly. Cada disparador lista la engineering reality que cumple el momento más el demo con el que liderar.
+
+- **Disparador 1: "Nuestra automatización se rompió a las 3am y no pudimos averiguar por qué."** — Centro de Recuperación (`RecoveryCenterPanel.tsx`) + `POST /ai/explain-run` produce una causa raíz en lenguaje natural anclada en `run_events`. Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
+- **Disparador 2: "Necesitamos un audit log por acción AI para compliance."** — scope multi-tenant en cada query (`eq(<table>.orgId, auth.orgId)`) + `audit_logs` por acción + rollback de `workflow_versions`. Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md) + [incident-triage](../demos/incident-triage.md).
+- **Disparador 3: "El demo de nuestro agente funciona pero producción se rompe constantemente."** — capa de recovery + `POST /dlq/validate-fix` replay en sandbox (gate de writes-skipped) + `POST /ai/patch-workflow` con alternativas con confidence-score. Demo: [multi-agent-decision](../demos/multi-agent-decision.md) + [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
+- **Disparador 4: "Probamos los error workflows de n8n; no explican nada."** — `POST /ai/patch-workflow` retorna 1-3 alternativas con `confidence` (0-100) y `approachLabel` (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
+- **Disparador 5: "Estamos teniendo sorpresas de costo AI en nuestros flujos."** — governance de presupuesto vía `GET /billing/budget` + caps per-org / per-workflow en `org_configs.ai.budget*` + `workflow_budgets` + chips de cost preview en AI Studio desde `@janusly/shared/src/llm-pricing`. Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md) (tour del dashboard de Operations).
+- **Disparador 6: "Nuestra agencia reescribe el mismo recovery glue por cada cliente."** — Janusly ES el recovery glue: DLQ + `errorJson` estructurado + replay en sandbox + version rollback + audit por acción + cliente MCP. Demo: [multi-agent-decision](../demos/multi-agent-decision.md) + [mcp-notion-summary](../demos/mcp-notion-summary.md).
+- **Disparador 7: "Compliance preguntó quién aprobó esta acción AI."** — `audit_logs` por acción + RBAC con roles custom vía per-org `org_roles` (catálogo de 17 permisos) + SSO vía WorkOS `(en producción)` + SCIM Directory Sync `(en producción)`. Demo: [incident-triage](../demos/incident-triage.md).
+
+Si un disparador es lo que el comprador acaba de decir en voz alta, salta al demo que corresponde. Si dos disparadores coinciden, el comprador es segment-fit — usa la tabla de persona-to-segment al final de [`icp.md`](icp.md) para elegir qué talk track traer.
+
+### Sección F — Sub-bloques por competidor
+
+Un bloque por competidor del AC; siete bloques en total. Cada bloque sigue la misma shape para que un vendedor pueda pattern-matchear en 30 segundos antes de una llamada.
+
+#### F.1 — Zapier
+
+> Lectura de una línea: el líder de catálogo de integraciones y la marca no-code-first para SMB. Catálogo masivo, UX friendly para gerentes de marketing, tier gratuito generoso.
+
+**Dónde son más fuertes.** Tamaño de catálogo (miles de connectors). UX no-code optimizada para no-ingenieros. Confianza de marca en el extremo SMB / single-marketer. Precio del tier gratuito. Años de templates contribuidos por la community. Features AI ("Zapier AI Actions", "Zapier Agents") agregados encima del runtime de integraciones.
+
+**Dónde Janusly es más fuerte.** Centro de Recuperación como home autenticado (`RecoveryCenterPanel.tsx`). Replay en sandbox antes de save (`POST /dlq/validate-fix`). `audit_logs` por acción. `workflow_versions` con rollback en un clic (`POST /workflows/rollback`). Scope multi-tenant enforced a nivel de engine (`eq(<table>.orgId, auth.orgId)` en cada query por AGENTS.md). AI como parte del runtime — los node types `ai` + `agent` + `multi_agent` + `router_llm` son de primera clase, no features de asistente.
+
+**Elige Zapier cuando.** La pregunta del equipo es "¿cuántas SaaS apps puedo conectar en 10 minutos?" — y audit / recovery / version rollback no son prioridades todavía. Usuario primario no técnico. Un budget que necesita el tier de base más barato posible.
+
+**Líneas de manejo de objeciones (lift de [`icp.md`](icp.md)).**
+
+- "Ya tengo Zapier." → *"Zapier es genial cuando tu pregunta es 'cómo conecto SaaS apps que ya funcionan'. Somos la capa a la que vienes cuando una de esas apps falla — Zapier no te ayuda cuando Stripe devuelve un 401 o tu API de billing rota una credencial. Probá nuestro demo de recovery por dos minutos; vas a ver la diferencia inmediatamente."*
+- "Zapier es más barato." → *"En el tier gratuito SMB, sí — y si el-más-barato-posible es el criterio, Zapier es la respuesta correcta. Cobramos para equipos que corren flujos donde 'lo más barato' ya no es la pregunta; 'auditable, recuperable, con rollback' lo es."*
+
+**Demo recomendado.** [failed-workflow-recovery](../demos/failed-workflow-recovery.md). Cierra la brecha inmediatamente en la cuña de recovery — el demo corre tanto una falla de missing-secret como una falla de write-side-without-approval end-to-end en 4 minutos.
+
+---
+
+#### F.2 — Make (formerly Integromat)
+
+> Lectura de una línea: Zapier con una UX más friendly para developers, escenarios con branching, iteradores y rutas error-handler. Mejor ergonomía dev que Zapier sin la profundidad de code-step de Pipedream o n8n.
+
+**Dónde son más fuertes.** Editor visual de escenarios con branching + iteradores. Rutas error-handler como patrón núcleo ("en error, hace X"). Friendly para developers comparado con Zapier — los operadores pueden leer la shape JSON de cada paso. Catálogo grande (miles de apps).
+
+**Dónde Janusly es más fuerte.** AI patch suggestions con confidence scores (`POST /ai/patch-workflow` retorna 1-3 alternativas con `approachLabel` + `confidence` 0-100) versus error handlers crudos que solo enrutan a un paso de fallback. Clustering por signature de falla (`packages/shared/src/error-signature.ts` + `GET /dlq/clusters` agrupan fallas repetidas para que el operador vea "47 flujos fallaron por la misma razón" en lugar de 47 filas). Cliente MCP como node type de primera clase. Rollup de MTTR (`GET /recovery/metrics`).
+
+**Elige Make cuando.** El equipo quiere un producto Zapier-shape más friendly para developers y los flujos AI-native no están en scope. El patrón "enrutar a un paso handler" del error path es suficiente y el equipo no le está pidiendo al AI que explique o repare la falla.
+
+**Líneas de manejo de objeciones.**
+
+- "Make tiene rutas error-handler." → *"Los error handlers enrutan el run a un path de fallback que escribiste de antemano. La recovery dialog de Janusly lee la falla, propone 1-3 patches con un confidence score por opción, valida el patch en un sandbox sin tocar el sistema real, y guarda una nueva versión con un clic. Shape diferente."*
+- "Nos gusta la UX de escenarios de Make." → *"Quédate con eso para los escenarios simples. Recovery es una pregunta separada — ¿cuándo querés AI en el loop sobre el fix, audit por acción, y version rollback como capacidad core? Ahí es donde estamos nosotros."*
+
+**Demo recomendado.** [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
+
+---
+
+#### F.3 — n8n
+
+> Lectura de una línea: engine de flujos self-host-friendly fair-code con code nodes de JS, community grande, error workflows. La elección default para builders técnicos que quieren self-host y flexibilidad DIY.
+
+**Dónde son más fuertes.** Licencia fair-code (Sustainable Use License). Code nodes de JS directamente en el flujo. Community grande de self-host y marketplace de templates community. Error workflows como patrón built-in. Las adiciones recientes de nodos AI / LangChain amplían significativamente la superficie AI (la tabla marca esto como `partial` porque es real pero bolted-on encima del engine existente, no AI-native).
+
+**Dónde Janusly es más fuerte.** Loop de recuperación como superficie de primera clase — Centro de Recuperación home (`RecoveryCenterPanel.tsx`) + DLQ + clustering por signature de falla — versus error-workflow-as-a-pattern. AI patch suggestions con `confidence` + `approachLabel` versus un code-node "hace algo en error". Version rollback como capacidad core (`POST /workflows/rollback` escribe una row `workflow.rolled_back` en audit en una sola transacción). Cliente Y server MCP (`packages/mcp-server` expone 15 tools read-only + una superficie de write `workflows.save` gated). OTel `service.name="janusly"` end-to-end a través de api + worker + engine.
+
+**Elige n8n cuando.** El equipo quiere escribir JS directamente en los nodos del flujo y está cómodo siendo dueño del runtime. El equipo ya estandarizó en n8n y el costo de migrar es alto. Self-host fair-code es un requisito duro.
+
+**Líneas de manejo de objeciones.**
+
+- "Ya hacemos self-host de n8n." → *"Quédate con eso para los flujos que ya cableaste. La cuña es lo que pasa cuando uno de esos flujos se rompe — la falla explicada por AI, el patch con un confidence score, la validación en sandbox antes de save, el rollback de versión en un clic. Esa es la capa de recovery que tus error workflows no cubren."*
+- "n8n tiene nodos AI ahora." → *"Los tienen — y los nodos funcionan. La diferencia arquitectural es dónde vive el AI: sus nodos AI son pasos del flujo; el nuestro es el engine. `POST /ai/patch-workflow` y `POST /ai/explain-run` y `POST /ai/review-workflow` son parte del runtime, no nodos que vos cableás a mano. Commitment diferente."*
+
+**Demo recomendado.** [failed-workflow-recovery](../demos/failed-workflow-recovery.md) + [multi-agent-decision](../demos/multi-agent-decision.md) (follow-up para builder técnico).
+
+---
+
+#### F.4 — Workato
+
+> Lectura de una línea: líder iPaaS enterprise con la librería de connectors más profunda y el asistente AI RecipeIQ. Motion de ventas enterprise, pricing enterprise, governance enterprise.
+
+**Dónde son más fuertes.** Catálogo de connectors enterprise grande. Motion de ventas large-enterprise y track record de procurement. Governance profundo, role-based access, postura multi-environment. RecipeIQ AI assistant para creación de recipes. Opciones de deployment on-prem para clientes compliance-heavy (Janusly cede esto — ver Sección D).
+
+**Dónde Janusly es más fuerte.** AI como parte del engine, no una capa asistente — `POST /ai/generate-workflow` (gramática backed por Anthropic), `POST /ai/patch-workflow` (envelopes de config por node-type + el envelope estructural `insert_approval_upstream` de AGENTS.md), los node types `ai` + `agent` + `multi_agent` + `router_llm` + `agent_reflection` de primera clase. Replay en sandbox antes de save (`POST /dlq/validate-fix` corre un replay con writes-skipped a través del mismo engine y solo gatea el save cuando el sandbox termina `succeeded`). Clustering por signature de falla. MTTR como métrica de registro. Postura de pricing mucho más simple (ver [`pricing.md`](pricing.md) — no lideramos con un mínimo enterprise de 6 cifras).
+
+**Elige Workato cuando.** Una Fortune 500 con 50+ SaaS systems enterprise y un budget de IT multi-millonario. Deployment air-gapped on-prem es un requisito duro. El comprador es un arquitecto enterprise, no un builder.
+
+**Líneas de manejo de objeciones.**
+
+- "Workato tiene RecipeIQ." → *"RecipeIQ te ayuda a escribir la recipe más rápido — se sienta encima del runtime. Somos una capa diferente: cuando la recipe corre en producción y se rompe, nuestro AI lee la falla, propone patches con confidence scores, valida en sandbox antes de save. Complementario al recipe authoring, no un reemplazo."*
+- "Workato es el estándar enterprise." → *"Lo es — y no estamos tratando de competir en conteo de connectors. La cuña es recovery y trust operacional para la parte AI-driven de tu portfolio de flujos. Si el dolor del comprador es 'nuestros flujos AI se rompen y no podemos operarlos', esa es nuestra categoría."*
+
+**Demo recomendado.** [incident-triage](../demos/incident-triage.md) — el demo para comprador engineering aterriza más limpio acá que la historia SMB del refund-triage.
+
+---
+
+#### F.5 — Pipedream
+
+> Lectura de una línea: workflow runner serverless event-driven code-first. Code steps de Node.js / Python / Go / Bash como unidad primaria. Tier gratuito generoso, librería grande de event-sources, marca centrada en developers.
+
+**Dónde son más fuertes.** Ergonomía de code-step a través de Node / Python / Go / Bash. Librería de event-sources atada a patrones de webhook para SaaS systems. Tier gratuito generoso para devs solos e indie builders. Las adiciones recientes de features AI amplían la superficie AI (la tabla marca esto como `partial`).
+
+**Dónde Janusly es más fuerte.** Centro de Recuperación versus retry config crudo — la superficie de operador para "qué pasó, por qué, qué hacer después" es un producto construido, no una vista de logs. Fallas explicadas por AI (`POST /ai/explain-run` produce una causa raíz en lenguaje natural anclada en `run_events`). Replay en sandbox antes de save. `audit_logs` por acción con la invariante de scope multi-tenant. Scope multi-tenant a nivel de engine (`eq(<table>.orgId, auth.orgId)` en cada query) para ventas B2B donde la data de un cliente no debe filtrarse cross-tenant.
+
+**Elige Pipedream cuando.** El comprador es un indie dev sin necesidad de compliance y quiere flexibilidad máxima de code. El workload primario son patrones event-source → code-step → llamada de API y "qué pasa si se rompe" es un problema developer-self-service.
+
+**Líneas de manejo de objeciones.**
+
+- "Pipedream es más rápido para flujos code-step." → *"Para flujos pure code-step, sí — están optimizados para eso. La pregunta es operar el flujo después del handoff: quién lee el audit log, quién revisa el patch cuando algo se rompe, quién prueba que el fix funcionó antes de save. Problema diferente."*
+- "Pipedream tiene un tier gratuito generoso." → *"Respuesta correcta para un indie dev. Una vez que el flujo está corriendo trabajo customer-facing y 'quién aprobó esta acción AI' se vuelve una pregunta real, el tier es el eje equivocado para optimizar."*
+
+**Demo recomendado.** [multi-agent-decision](../demos/multi-agent-decision.md) — el demo para comprador técnico AI cae bien en una audiencia code-first y muestra la capacidad multi-agent que Pipedream no tiene como concepto de primera clase.
+
+---
+
+#### F.6 — Relay
+
+> Lectura de una línea: workflow tool AI-native con UX limpia y énfasis en human-in-the-loop. Producto más joven, set de integraciones más chico, foco en la shape de flujo AI-first.
+
+**Dónde son más fuertes.** UX de builder AI-first limpia. El énfasis en human-approval aterriza bien en compradores preocupados por autonomía AI. Producto más joven significa menos decisiones legacy que defender.
+
+**Dónde Janusly es más fuerte.** Runtime DAG observable anclado en `run_events` + OTel `service.name="janusly"` end-to-end. Centro de Recuperación como home screen. Replay en sandbox (`POST /dlq/validate-fix`). Rollback de `workflow_versions`. Cliente + server MCP. Audit log por acción. Clustering por signature de falla. Misma shape fundamental de producto con una superficie de operador sustancialmente más profunda y los invariantes de engineering documentados en AGENTS.md. Scope multi-tenant a nivel de engine como commitment fundacional, no una línea de roadmap.
+
+**Elige Relay cuando.** El comprador quiere la superficie de flujo AI más simple posible y no necesita la profundidad de recovery / audit / replay. Sus flujos son net-new AI-first; no están migrando desde una plataforma existente más pesada.
+
+**Líneas de manejo de objeciones.**
+
+- "La UX de Relay es más limpia." → *"Para un flujo AI-first simple, lo es. La pregunta es cómo se ve la superficie el día después de que el flujo va a producción: cuando un paso falla, qué muestra la recovery dialog, qué hay en el audit log, podés hacer rollback a una versión. Ahí es donde la profundidad aparece."*
+- "Relay también tiene human approval." → *"Correcto — human approval como node es table stakes para nuestra categoría. Donde vamos más lejos es la recovery dialog: AI propone 1-3 patches con confidence scores, el sandbox valida antes de save, la versión se guarda con una row `workflow.rolled_back` disponible en audit para rollback en un clic. Mismo principio human-in-the-loop, más superficie."*
+
+**Demo recomendado.** [failed-workflow-recovery](../demos/failed-workflow-recovery.md) — muestra la profundidad de superficie de operador que el producto más chico no puede reproducir todavía.
+
+---
+
+#### F.7 — Gumloop
+
+> Lectura de una línea: builder drag-and-drop de flujos AI para no-ingenieros. La UX de builder AI más simple, tiempo a primer flujo más rápido, usuario primario no técnico.
+
+**Dónde son más fuertes.** UX de builder AI más simple en la categoría. Tiempo más rápido a primer flujo AI para un no-ingeniero. Friendly para equipos de marketing, motion de compra "lo construí en una tarde".
+
+**Dónde Janusly es más fuerte.** Centro de Recuperación como home screen. Replay en sandbox antes de save. Rollup de MTTR (`GET /recovery/metrics`) como métrica maestra. `audit_logs` por acción. RBAC vía per-org `org_roles` con el catálogo de 17 permisos. SSO vía WorkOS `(en producción)` y SCIM Directory Sync `(en producción)`. Somos para el operador que vive con el flujo en producción; Gumloop es para el prototipador.
+
+**Elige Gumloop cuando.** El equipo es no técnico y el criterio de compra es "demo de flujo AI para el viernes". El flujo es one-off, low-stakes, no customer-facing. Audit / recovery / RBAC no están en la lista del comprador.
+
+**Líneas de manejo de objeciones.**
+
+- "Gumloop es más fácil para empezar." → *"Correcto — para el primer flujo del día uno. La pregunta cambia el día 30: quién lee el audit log cuando finance pregunta, quién revisa el patch cuando se rompe, podés hacer rollback a la versión de la semana pasada. Esa es nuestra categoría."*
+- "No tenemos ingenieros." → *"Entonces no son segment-fit para nosotros hoy — y esa es una respuesta honesta. Somos para el builder técnico + el ops lead. Si no tenés ninguno de los dos roles en el equipo, Gumloop es mejor fit."*
+
+**Demo recomendado.** [failed-workflow-recovery](../demos/failed-workflow-recovery.md) + [incident-triage](../demos/incident-triage.md) — muestra tanto el loop de recovery COMO la profundidad de superficie de operador, después pregunta si el comprador tiene a alguien en el equipo que realmente lo usaría.
+
+---
+
+### Sección G — Mapa de demos
+
+El cheat sheet "el comprador mencionó al competidor X, pre-carga el demo Y". Usa esta tabla para armar la agenda de la llamada antes de marcar. Nombres de archivos de demo verbatim de [`docs/demos/`](../demos/).
+
+| El comprador mencionó | Liderar con | Demo de follow-up | Segmento canónico de [`icp.md`](icp.md) |
+| --- | --- | --- | --- |
+| Zapier | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | [refund-triage](../demos/refund-triage.md) | B2B startups with ops workflows |
+| Make (Integromat) | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | [refund-triage](../demos/refund-triage.md) | B2B startups with ops workflows |
+| n8n | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | [multi-agent-decision](../demos/multi-agent-decision.md) | Engineering/support teams |
+| Workato | [incident-triage](../demos/incident-triage.md) | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | Engineering/support teams |
+| Pipedream | [multi-agent-decision](../demos/multi-agent-decision.md) | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | AI builders/agencies |
+| Relay | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | [multi-agent-decision](../demos/multi-agent-decision.md) | AI builders/agencies |
+| Gumloop | [failed-workflow-recovery](../demos/failed-workflow-recovery.md) | [incident-triage](../demos/incident-triage.md) | Descalificar primero; si es segment-fit → B2B startups with ops workflows |
+
+Después de elegir el demo, confirma fit de segmento contra la tabla de persona-to-segment al final de [`icp.md`](icp.md). Si la persona en la llamada no aparece en esa tabla, fit de segmento es la primera conversación, no el demo.
+
+### Sección H — Principio de anti-posicionamiento, recapitulado
+
+La postura competitiva más creíble es la que nombra lo que SOMOS y deja que el comprador infiera el resto.
+
+- **Nombramos lo que SOMOS.** Runs observables. Fallas explicadas. Patches revisables. Runs reproducibles.
+- **Nombramos lo que NO SOMOS.** No una mejor UI de Zapier. No n8n con AI. No RPA genérico. No agentes que hacen todo.
+- **Nunca nombramos lo que está mal en la competencia por nombre en copy customer-facing.** Eso pertenece solo a este doc interno.
+
+Cuando el nombre de un competidor aparece en un deck, un email de ventas, una landing page o un podcast, la línea es: *"Somos una categoría diferente — somos para [nuestra lista SOMOS]. Si tu pregunta es [su fortaleza], ellos son una gran respuesta."* Después seguís.
+
+**La métrica de registro.** MTTR para automatizaciones fallidas. De horas a minutos, de minutos a segundos. Cada demo vuelve a ella; cada slide de business case la cita; cada medición de la beta privada (ENG-093) se ancla en ella. Es el número al que nos sostenemos, y es el número con el que le pedimos al comprador que nos mida.
+
+### Sección I — Lo que NO está en este doc
+
+La lista explícita de out-of-scope, para que ni ventas ni fundadores sobrecarguen este paquete accidentalmente:
+
+- **Sin montos en dólares.** Las comparaciones de pricing pertenecen a [`pricing.md`](pricing.md). Este doc nombra ventaja estructural; no nombra brechas de precio.
+- **Sin competitive intel en vivo.** Las capacidades de productos competidores pueden cambiar rápido. El doc nombra la shape estructural de cada competidor al momento de autoría, no conteos específicos de features que se vuelven stale. Las notas al pie usan calificadores ("miles de integraciones", "el líder de catálogo por tamaño") en lugar de números con fecha.
+- **Sin páginas de comparación public-facing.** Este es el doc interno de ventas. `/compare/zapier`, `/compare/n8n`, y landing pages públicas similares son tickets futuros de web-implementation, no parte de este paquete.
+- **Sin boilerplate de RFP ni respuestas a vendor security questionnaires.** Compliance pide respuestas específicas; esas pertenecen a un playbook de enterprise-sales separado.
+- **Sin proceso de competitive-intel monitoring.** Observar releases / cambios de pricing de competidores es un proceso operativo dueño de fundadores + ventas, no un doc.
+- **Sin localización UI de la página competitiva pública.** Este doc interno de ventas SÍ es bilingüe (es lo que estás leyendo); solo la superficie de las web pages `/compare/*` queda diferida a un ticket de web-implementation separado.
