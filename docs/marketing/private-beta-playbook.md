@@ -738,7 +738,7 @@ The founder updates this every Monday morning before the week's standing calls.
 - **Running the experiment itself.** This is the handbook of instruments. Running it is operational founder work — recruiting, scheduling, holding the calls, logging the notebook, writing the report.
 - **External-publishable artifacts.** Blog post, conference talk, case-study landing page, sales-deck slides — all downstream once Section H permissions are captured.
 - **Vendor-grade compliance documentation.** SOC2 attestations, DPA templates, security questionnaire libraries — different work stream. Use AGENTS.md internally as the source of operational truth if a partner asks, but do not send it as customer collateral and do not draft compliance docs inside this playbook.
-- **Per-region / per-locale recruitment.** v1 runs in English. Spanish-localized intake forms and surveys are a future ticket once we have Spanish-speaking design partners. The brand voice rules from `narrative.md` apply equally to both languages when that lands.
+- **Per-region / per-locale recruitment.** Recruitment runs in English in v1 (the founder owns the experiment in English; the partners run real workflows in English). Spanish-localized instruments (intake form, surveys, kickoff script, weekly report template, WTP conversation, exit interview) are shipping in the `Versión en español` block below — operators on the founder side who prefer Spanish can read every instrument in their language. The brand voice rules from `narrative.md` apply equally to both languages.
 - **Automation of the experiment notebook.** The founder maintains the notebook by hand (markdown file or spreadsheet). A bespoke "private-beta dashboard" UI is out of scope — the experiment is too small (3 partners × ~12 weeks) to justify tooling.
 - **Multi-cohort runs.** This is the playbook for the FIRST 3-partner cohort. If we run a second cohort (a tightening pass with different segments, a feature-gap-validation run, a regional expansion), the playbook gets a new section then — but the v1 path is one cohort, one publication, one v1 pricing decision.
 - **Modifying ENG-093's AC.** This playbook ENABLES ENG-093; it doesn't redefine the AC. ENG-093 stays Pending in the ROADMAP until the experiment actually runs and produces a report.
@@ -762,3 +762,758 @@ For future readers navigating back from this playbook to its downstream consumer
 | Section I published report | [`pricing.md`](pricing.md) Section G ("After ENG-093 closes" trigger), future blog post / conference talk |
 
 Every downstream consumer that exists today is listed. Future consumers (case-study landing page, blog post) get added to this table when they ship.
+
+---
+
+## Versión en español
+
+La versión paralela en castellano del **manual operacional de la beta privada** de Janusly. Misma estructura, mismas anclas, misma engineering reality. El experimento mismo se sigue corriendo en inglés en v1 (los partners hacen sus workflows en inglés; los consentimientos legales se firman en inglés); este bloque permite que un fundador u operador hispanohablante lea cada instrumento (intake form, encuestas, scripts, plantillas) en su propio idioma sin improvisar.
+
+Identificadores que quedan en inglés en ambos idiomas — son código o tokens canónicos, no texto traducible: rutas (`POST /ai/explain-run`, `POST /ai/patch-workflow`, `POST /dlq/validate-fix`, `POST /workflows/rollback`, `POST /dlq/replay`, `GET /recovery/metrics`, `GET /dlq/clusters`, `GET /billing/budget`, `GET /run/:id`, `GET /runs`, `GET /workflows`); tablas (`run_events`, `dead_letters`, `usage_events`, `audit_logs`, `workflow_versions`, `recovery_feedback`, `org_configs`, `workflow_budgets`); archivos de código (`packages/shared/src/error-signature.ts`, `RecoveryCenterPanel.tsx`, `packages/mcp-server`); env vars (`ANTHROPIC_API_KEY`, `BILLING_API_KEY`, `JANUSLY_*`, headers `x-org-id`, `x-user-id`, `NODE_ENV`); productos terceros (Postgres, Redis, BullMQ, React Flow, OpenTelemetry, OpenAI, Anthropic, WorkOS, Slack, GitHub, Resend, SendGrid, Loom, Calendly, Notion, Linear, Discord, Stripe, Zapier, Make, n8n, Workato, Pipedream, Relay, Gumloop, Tally, Typeform, Google Forms); demo filenames (`failed-workflow-recovery`, `refund-triage`, `incident-triage`, `multi-agent-decision`, `mcp-notion-summary`); siglas (MTTR, DLQ, MCP, OTel, RBAC, SSO, SCIM, SLA, BYO, OIDC, SAML, ICP, WTP, RFP, NPS, CSAT, KPI, OKR, DPA, SOC2, TAM); ticket IDs (ENG-093, ENG-095, ENG-068, ENG-109, ENG-110, ENG-069); constantes OTel (`service.name="janusly"`, `eq(<table>.orgId, auth.orgId)`); approachLabels (`add_retry`, `raise_timeout`, `swap_secret_ref`, `add_approval`, `fix_url`, `other`); node types (`ai`, `agent`, `multi_agent`, `router_llm`, `agent_reflection`, `mcp_tool`); el brand-mark "Janusly" tampoco se traduce.
+
+**Mail-merge tokens en inglés en ambos idiomas** (convención de `icp.md`): `[name]`, `[company]`, `[link]`, `[agency]`, `[role]`, `[workflow]`, `[date]`, `[Name]`, `[N]`, `[Founder name]`, `[Partner]`, `[#1 name]`, `[#2 name]`, `[Friday date]`, `[day/time]`, `[next week date]`.
+
+**Los 7 valores cerrados del enum `ErrorCategory` quedan en inglés verbatim en ambos idiomas** porque son identificadores de código de `packages/shared/src/error-signature.ts`: `secret_missing`, `http_error`, `network_timeout`, `ai_provider`, `parse_error`, `tool_input`, `unknown`. Traducirlos sería bug.
+
+**Los marcadores de tiempo del kickoff script (Sección E) quedan verbatim:** `0:00`, `5:00`, `15:00`, `25:00`, `45:00`, `55:00`, `60:00`. Mismas convenciones que usa el script en inglés.
+
+**Field names en plantillas (Sección F weekly-report, Sección I report skeleton) quedan en inglés en ambos idiomas** porque otros docs (en particular `pricing.md` Section G) los referencian por nombre: "MTTR delta", "Setup friction notes", "WTP signal", "MTTR baseline", "MTTR observed", "patch suggestions accepted", "production replays", "failure-category histogram".
+
+**Las 5 líneas de captura de permisos en Sección H se quedan verbatim en inglés** dentro del bloque de código. Son consentimientos legales que el partner firma en inglés. Solo la prosa de instrucciones alrededor se traduce. Esto significa que un partner hispanohablante lee las instrucciones en español pero firma su consentimiento en inglés — carve-out intencional por consistencia legal.
+
+Vocabulario canónico, lifted de [`narrative.md`](narrative.md) Versión en español: `autoreparable`, `Centro de Recuperación`, `flujo` / `flujo de trabajo`, `operador`. Quedan en inglés como anglicismos técnicos aceptados del nicho: `sandbox`, `rollback`, `DAG`, `MTTR`, `self-host`, `MCP`, `loop de recuperación`, `kickoff`, `discovery call`, `exit interview`, `intake form`, `weekly report`, `case study`, `setup friction`, `cohort`, `hand-off`, `pre-call`, `between-meeting`, `permission capture`, `success criteria`, `failure criteria`, `verdict`, `bands not points` (se renderiza como "rangos, no puntos exactos"), `data dura` / `data blanda`. Tono: `tú` informal, nunca `usted`. Tags de honestidad (no usados en este doc, pero reservados por consistencia con el stack): `(en producción)`, `(roadmap)`, `(objetivo de empaquetado)`, `(caso a caso)`.
+
+**El experimento mismo se corre en inglés.** Este bloque es para que un operador hispanohablante pueda leer cada instrumento en su idioma — no es una traducción del experimento. Los partners firman sus consentimientos en inglés; los reportes publicados (Sección I) se escriben en inglés. Si en algún momento corre una versión hispana del experimento (segundo cohort en LatAm, por ejemplo), los instrumentos en español están listos.
+
+### Sección A — Cómo usar este doc
+
+Dos consumidores, dos caminos de lectura.
+
+- **Fundador corriendo el primer cohort.** Lee top-to-bottom una vez antes de que empiece el reclutamiento. Durante el experimento, lift el instrumento específico verbatim (copy del intake form, líneas del kickoff script, preguntas de la encuesta) — nunca inventes sobre la marcha mid-call. El punto del manual es consistencia a través de los 3 partners.
+- **Operador futuro escalando más allá del primer cohort.** Trata la Sección L como índice; salta a la sección que coincide con lo que estás haciendo esta semana.
+
+**Las reglas de voz de [`narrative.md`](narrative.md) aplican.** Concreto sobre abstracto. Honesto sobre el hoy vs el destino. Engineering reality como prueba. Nunca desprecio. Las mismas reglas que gobiernan copy customer-facing gobiernan las encuestas y scripts acá — los partners leen cada palabra que el fundador escribe, y el trust empieza en la primera encuesta.
+
+**Regla de honestidad.** Cada claim de "medimos X" en este manual es respaldable en una tabla real del runtime de Janusly (`run_events`, `dead_letters`, `usage_events`, `audit_logs`). Nunca prometemos una métrica que no podemos capturar desde el runtime. Los números self-reported (baseline MTTR, estimaciones de toil del partner) están marcados explícitamente como data blanda en la metodología.
+
+**Lift verbatim, pero quedate flexible.** Formularios y encuestas (Secciones C, D, F) se liftean sin cambios. Conversaciones (Secciones E, G, H) están scripted pero la conversación va a donde tiene que ir — el script es la agenda, no el diálogo.
+
+### Sección B — Alcance y criterios de éxito
+
+Qué constituye "experimento completo":
+
+**Tamaño del cohort.** 3 design partners. Uno por segmento ICP si es posible (uno **B2B startups with ops workflows**, uno **Engineering/support teams**, uno **AI builders/agencies** — nombres de segmento liftados verbatim de [`icp.md`](icp.md)). Diversidad le gana al best-fit; mejor señal a través del ICP que 3 del mismo segmento.
+
+**Workload.** 3 flujos production-shaped reales por partner — su trabajo real, no los demos canónicos. Los demos juegan un rol solo en el onboarding de la semana 1.
+
+**Duración.** ~90 días desde install hasta exit interview. Desglose:
+- Semana 0: reclutamiento + intake.
+- Semana 1: llamadas de kickoff (60 min × 3 partners) + primer flujo cableado por partner.
+- Semanas 2–10: cadencia semanal (llamada recurrente de 30 min + reporte semanal por partner).
+- Semanas 6–8: conversación de willingness-to-pay por partner.
+- Semanas 11–12: exit interviews + captura de permisos.
+- Semanas 13–14: drafting del reporte interno.
+- Semanas 15–18: versión externa publicable (anonimizada según necesidad).
+
+**Criterios de éxito (el gate de "vamos a v1 pricing").** Los tres tienen que sostenerse:
+1. Al menos 2 de 3 partners muestran mejora de MTTR medible (baseline self-report vs mediana post-instalación medida).
+2. Al menos 2 de 3 partners dan una banda concreta de willingness-to-pay que mapea a uno de los candidatos de métrica de valor en [`pricing.md`](pricing.md) Section D (per-seat / per-recovered-run / per-AI-call).
+3. Setup friction por debajo del target de 60 minutos "primer recovered run" para al menos 2 de 3 partners (medido por el checklist de la kickoff call en Sección E).
+
+**Criterios de falla (el gate de "re-posicionamos antes de pricing").** Cualquiera de estos sosteniéndose es razón para pausar v1 pricing y revisitar el posicionamiento:
+1. Cero partners muestran mejora de MTTR medible → la cuña está mal; revisita PLAN §16.0 antes de publicar precios.
+2. Los 3 partners citan el mismo blocker de setup → arregla el blocker antes de re-correr el experimento.
+3. Los 3 partners pivotean a querer una shape de producto diferente al Centro de Recuperación → re-examina la decisión del product home (el AC de ENG-093 empodera este verdict explícitamente).
+
+**Línea de verdict para el reporte publicado.** O *"El Centro de Recuperación permanece como product home; sigue la recomendación de pricing v1"* o *"Re-posicionamos antes de pricing; esto es lo que aprendimos."* Ambos son outcomes válidos del experimento.
+
+### Sección C — Reclutamiento y calificación
+
+Cómo el fundador sourcea, califica y selecciona los 3 design partners.
+
+#### Channels
+
+En orden de prioridad:
+
+- **Warm introductions** desde advisors, investors y relaciones previas del fundador. La señal de más alta calidad; el intro-er ya vetó el segment fit.
+- **La red propia del fundador** (LinkedIn 1st-degree, ex-compañeros, communities en las que está el fundador). Segundo mejor.
+- **Cold outreach Stage 1** liftado de [`icp.md`](icp.md) — el cold email segment-específico + el LinkedIn DM copy están ya drafted ahí. La conversión más baja pero el alcance más amplio. No modifiques los templates de icp.md; corren este experimento sin cambios.
+
+Target: 15–25 conversaciones inbound para aterrizar 3 design partners. Planea para una accept rate del ~12% (el cruce segment-fit + disponibilidad + decision-maker overlap es raro).
+
+#### Qualification heuristics
+
+Un candidato es segment-fit si articula al menos UNO de los siete disparadores de compra de [`competitive-positioning.md`](competitive-positioning.md) Section E en sus propias palabras durante la primera conversación:
+
+1. "Nuestra automatización se rompió a las 3am y no pudimos averiguar por qué."
+2. "Necesitamos un audit log por acción AI para compliance."
+3. "El demo de nuestro agente funciona pero producción se rompe constantemente."
+4. "Probamos los error workflows de n8n; no explican nada."
+5. "Estamos teniendo sorpresas de costo AI en nuestros flujos."
+6. "Nuestra agencia reescribe el mismo recovery glue por cada cliente."
+7. "Compliance preguntó quién aprobó esta acción AI."
+
+Descalificadores (lifted de [`icp.md`](icp.md) Stage 2). Un "no" educado, sin excepciones:
+
+- "Aún no estamos shippeando AI a producción." → Etapa equivocada. Vuelve en 6 meses.
+- "Queremos una mejor UI de Zapier." → Categoría equivocada.
+- "Necesitamos un install on-prem / air-gapped." → Fuera de scope para v1.
+- "Estamos evaluando cinco vendors y necesitamos un RFP de 50 preguntas." → Etapa equivocada para un producto en private beta.
+
+#### Intake form template
+
+El formulario va a cada candidato antes de la qualification call. Copy-pasteable a Google Forms / Typeform / Tally / markdown plano. El fundador lee las respuestas antes de la llamada para que la llamada sea la conversación de discovery + selección, no de recolección de data.
+
+```
+Janusly private beta — design partner intake
+
+Gracias por el interés. Estamos eligiendo 3 design partners para una private beta de ~8-12 semanas de Janusly — el runtime de flujos AI con una superficie operativa centrada en recovery. Este formulario nos da lo que necesitamos para saber si el fit es correcto; respondemos en 3 días hábiles en cualquier dirección.
+
+1. Nombre de empresa, tu nombre, tu rol, tamaño del equipo.
+2. ¿Cuál de estos describe mejor a tu equipo? (elegir uno)
+   a) B2B startups with ops workflows (refunds, billing exceptions, escalations, support routing)
+   b) Engineering/support teams (incident triage, customer-bug workflows)
+   c) AI builders/agencies shippeando flujos AI a clientes
+   d) Ninguno de los anteriores (texto libre)
+3. ¿Cuál de estos resuena más con tu dolor actual? (multi-select; elige todos los que apliquen)
+   - Una automatización se rompió y no pudimos averiguar por qué
+   - Necesitamos un audit log por acción AI para compliance
+   - El demo de nuestro agente funciona pero producción se rompe constantemente
+   - Probamos los error workflows de nuestra herramienta existente y no explican nada
+   - Estamos teniendo sorpresas de costo AI en nuestros flujos
+   - Reescribimos el mismo recovery glue por proyecto / cliente
+   - Compliance preguntó quién aprobó una acción AI y no pudimos responder
+   - Ninguno de estos (texto libre)
+4. Aproximadamente, ¿cuántas fallas de automatización ve tu equipo por semana hoy? (estimación en texto libre)
+5. Cuando algo se rompe, ¿cuánto suele tardar en resolverse? (elegir uno)
+   <5 min / 5-30 min / 30 min-2 hr / 2-8 hr / 8-24 hr / >24 hr / no medimos
+6. ¿Qué herramienta(s) usas actualmente para el mismo trabajo? (multi-select)
+   Zapier / Make / n8n / Workato / Pipedream / Relay / Gumloop / herramienta interna casera / nada todavía / otra (texto libre)
+7. ¿Trackeas actualmente Mean Time To Recovery (MTTR) para fallas de workflow? (sí/no, luego texto libre si sí)
+8. Elige 3 flujos que correrías en Janusly durante la private beta. Por cada uno, danos una descripción de 1 oración. (texto libre, 3 entradas)
+9. Necesitamos una llamada de kickoff de 60 minutos + un check-in semanal de 30 minutos por 8-12 semanas. ¿Estás disponible para esa cadencia? (sí / sí con caveats / no)
+10. ¿Tienes constraints de compliance? (multi-select)
+    Ninguno / SSO requerido / SCIM requerido / retención de audit-log requerida / on-prem air-gapped requerido / otro (texto libre)
+11. ¿Quién decide si tu equipo convierte a Janusly pagado después de la beta? (tú mismo / alguien más — nómbrelos / no estoy seguro)
+12. ¿Algo más que deberíamos saber? (texto libre, opcional)
+
+Respondemos en 3 días hábiles. Si somos fit, el próximo paso es una discovery call de 30 minutos.
+```
+
+#### Acceptance rubric
+
+Una vez que entran suficientes intakes (target ~15–25), el fundador elige 3. Sesgar hacia:
+
+- **Diversidad de segmento.** Uno por segmento ICP es ideal. Si dos candidatos excelentes están en el mismo segmento, elige el que tiene el dolor más concreto (descripción específica de falla, no genérico "queremos mejores workflows").
+- **Decision-maker overlap.** Q11 (tú mismo vs alguien más). Si el usuario no es el comprador, la conversación de contrato en la semana 12 se va a stallear. Prefiere respuestas "tú mismo".
+- **Honestidad de disponibilidad.** Q9 "sí" le gana a "sí con caveats". Beta partners que no pueden hacer las llamadas dejan de reportar después de la semana 3.
+- **Concreción de workflow.** Los 3 flujos de Q8 deberían estar nombrados y descritos — "procesar refunds cuando dispara un webhook de Stripe" le gana a "corremos automatizaciones". Workflows vagos significan que el partner no sabe qué quiere probar.
+- **Honestidad de compliance.** Q10 "air-gapped" → un "no" educado. Q10 "SSO requerido" → sigue siendo fit (shippeamos SSO vía WorkOS hoy per AGENTS.md).
+
+Tres outcomes explícitos de "no" desde la rúbrica:
+- Requisito air-gapped.
+- "Ninguno de estos" en Q2 Y Q3.
+- Usuario-no-comprador (Q11) Y sin path para traer al comprador al kickoff.
+
+#### Pre-kickoff email template
+
+Sale dentro de las 24 horas de la selección. Incluye el calendar invite del kickoff y el link a la encuesta de baseline-MTTR.
+
+```
+Subject: Estás dentro — kickoff de la private beta de Janusly
+
+[Name],
+
+Bienvenido a la private beta de Janusly. Elegimos 3 design partners de [N] candidatos; tú eres uno de ellos.
+
+Algunas cosas rápidas:
+
+1. **Llamada de kickoff: 60 minutos.** Calendar invite adjunto para [date/time]. Instalamos Janusly juntos, recorremos el loop de recuperación, y cableamos tu primer workflow en vivo. Para el final de la llamada deberías tener un workflow corriendo y una falla recuperada en el board.
+
+2. **Antes de la llamada, por favor llena la encuesta de baseline.** Son 5 preguntas cortas sobre tu dolor actual de automatización — toma ~10 minutos. Link: [baseline-survey URL]. La necesitamos antes del kickoff para pre-cargar tus specifics.
+
+3. **Lo que necesitamos de ti durante la beta.** Un check-in semanal de 30 minutos por 8-12 semanas (agendamos el slot recurrente durante el kickoff). Un reporte semanal (un formulario corto, ~5 minutos para llenar). Una conversación de willingness-to-pay de 30 minutos alrededor de la semana 6-8. Un exit interview de 45 minutos al final.
+
+4. **Lo que recibes de nosotros.** El fundador (yo) en línea para cada conversación. Acceso completo gratis durante la beta. Influencia directa en la roadmap del producto. Sin compromiso de convertir a pagado — si no funciona, queremos saberlo tanto como queremos que funcione.
+
+5. **Cualquier cosa urgente antes del kickoff** → responde este email o me escribes por DM en [Slack/LinkedIn].
+
+Mirando hacia adelante para trabajar contigo.
+
+[Founder name]
+```
+
+### Sección D — Medición de baseline (survey pre-instalación + metodología)
+
+El instrumento que captura el estado "antes de Janusly" del partner. Corre antes de la kickoff call para que el fundador pueda pre-cargar los specifics del partner durante el install.
+
+#### Pre-install baseline survey
+
+Copy-pasteable. Mismo formato de delivery que el intake form (Google Forms / Typeform / Tally / markdown plano).
+
+```
+Janusly private beta — baseline survey
+
+Llenas esto antes de la kickoff call. Estimaciones honestas le ganan a números precisos — sabemos que probablemente no medís esto hoy; es exactamente por eso que corremos el experimento juntos.
+
+1. Para cada uno de los 3 workflows que correrás en Janusly durante la beta, danos:
+   - Nombre del workflow (corto, e.g. "refund webhook → approval → Stripe").
+   - Fuente del trigger (webhook / cron / manual / event de otro sistema).
+   - Conteo semanal esperado de runs (estimación aproximada).
+   - Tasa de falla esperada hoy (de 100 runs, ¿cuántos fallan?).
+
+2. Para cada uno de los mismos 3 workflows, estima el MTTR ACTUAL (tiempo desde "notamos que una automatización falló" hasta "la falla está resuelta y el workflow puede correr otra vez"). Usa estos buckets:
+   < 5 min  /  5-30 min  /  30 min - 2 hr  /  2-8 hr  /  8-24 hr  /  > 24 hr
+
+3. Para cada workflow, describe las últimas 3 fallas conocidas que recuerdes (1-2 oraciones cada una, descripción del partner en sus propias palabras). Ejemplo: "El webhook de Stripe devolvió un 401 porque la API key rotó y nadie actualizó el env var."
+
+4. Aproximadamente, ¿cuántas horas-ingeniero por semana gasta tu equipo en toil de automatización hoy? (Toil = triage manual de fallas, reintentos manuales, re-run manual de workflows rotos, paperwork alrededor de incidentes.) Estimación en texto libre, no se necesita número preciso.
+
+5. Termina esta oración: "Janusly valdría la pena pagarlo obviamente si ___." Una oración, en las propias palabras del partner.
+```
+
+#### Measurement methodology
+
+Lo que el fundador usa internamente para derivar los números publicados.
+
+**Baseline MTTR (el número "antes").**
+- Source: Pregunta 2 de la encuesta de baseline (self-reported del partner, bucketed).
+- Coding: cada bucket recibe un midpoint para aritmética (`<5min` → 3 / `5-30min` → 17 / `30min-2hr` → 75 / `2-8hr` → 300 / `8-24hr` → 960 / `>24hr` → 2880, en minutos).
+- Aggregation: la mediana a través de los 3 workflows del partner es el baseline partner-level; la mediana de 3 baselines partner-level es el baseline cohort-level.
+- **Esto es data blanda.** Self-reported, basada en memoria, no medida. El reporte publicado la nombra como data blanda con los rangos del estimado del partner mostrados al lado.
+
+**Post-install MTTR (el número "después").**
+- Source: el runtime mismo. Para cada falla post-instalación, la métrica actual de recovery de Janusly es `dead_letters.replayed_at` − `dead_letters.created_at` para filas con `status = "replayed"` (la misma shape que usa `GET /recovery/metrics` después de que `POST /dlq/replay` estampa la fila de DLQ tras un patch validado en sandbox).
+- Aggregation: mediana a través de todos los runs de recovery observados por partner; mediana de 3 medianas partner-level es el MTTR post-install cohort-level.
+- **Esto es data dura.** Capturada desde timestamps del runtime, con `run_events` disponible como timeline de soporte para la acción de recovery. El reporte publicado la nombra como data dura.
+
+**El delta antes/después.**
+- `mediana baseline (blanda)` menos `mediana post-install (dura)` por partner.
+- Delta del cohort: mediana de 3 deltas de partner.
+- Este es el número headline del reporte publicado. La sección de metodología nombra explícitamente la asimetría (blanda → dura) para que un lector pueda interpretar el número sin overclaim.
+
+**Setup friction.**
+- Source: kickoff call (Sección E). Checklist al final de la llamada — ¿pegamos el target de 60 minutos "primer recovered run"?
+- Coding: pass / partial-pass (recovered run aterriza en semana 1, no en el kickoff) / fail (recovered run no aterriza en semana 1).
+- Aggregation: 3-de-3 / 2-de-3 / 1-de-3 / 0-de-3 partners llegan al bar de pass.
+
+**Willingness to pay.**
+- Source: conversación de la Sección G, semana 6–8.
+- Output: banda per-partner por métrica de valor (per-seat / per-recovered-run / per-AI-call / otra). NO un número único — una banda.
+- Aggregation: patrón cross-partner, no mediana aritmética (3 data points no es suficiente para una mediana; nombramos el patrón).
+
+#### Failure-category coding scheme
+
+Cada falla observada (en los workflows del partner durante la beta) se bucketiza usando el `ErrorCategory` union propio del engine (`packages/shared/src/error-signature.ts`). El histograma de categorías del reporte publicado mapea 1:1 a la engineering reality — sin categorías acuñadas por marketing.
+
+Los 7 categorías cerradas:
+
+- `secret_missing` — referencia de credencial faltante o inválida (e.g. `BILLING_API_KEY` sin bindear, template `{{secret.X}}` referenciando un nombre que no existe).
+- `http_error` — respuesta non-2xx de un nodo HTTP o tool HTTP-using (4xx o 5xx; el engine no las separa en la signature hoy).
+- `network_timeout` — request nunca completó (sin respuesta dentro del timeout configurado).
+- `ai_provider` — el provider de LLM devolvió un error (quota, rate, output malformado, modelo desconocido).
+- `parse_error` — output no se pudo parsear (JSON.parse tiró, la validación de Zod rechazó).
+- `tool_input` — el tool fue llamado con input inválido (campo requerido faltante, type mismatch).
+- `unknown` — todo lo demás (el engine no pudo clasificar).
+
+El fundador loggea cada falla en el experiment notebook con `{ partnerId, workflowName, runId, category, failureSignature, recoveryActionTaken, MTTR_minutes }`. El reporte publicado muestra histogramas per-partner y per-cohort a través de estas 7 categorías.
+
+### Sección E — Onboarding (script de kickoff de 60 minutos)
+
+La primera llamada con cada partner. Meta: al minuto 60, el partner tiene Janusly corriendo localmente, un workflow cableado, un run exitoso en el board, y una falla recuperada en la timeline. Si fallamos el bar de 60 minutos, la métrica de "setup friction" de la Sección B registra un partial-pass para ese partner.
+
+#### Pre-call setup (checklist del fundador)
+
+- Las respuestas de intake + baseline survey del partner están abiertas en otra pestaña.
+- El recording script de `failed-workflow-recovery` ([`docs/marketing/recording-scripts/failed-workflow-recovery.md`](recording-scripts/failed-workflow-recovery.md)) está abierto como demo backbone.
+- El comando `pnpm seed:demos` (de ENG-069) está listo para correr en la máquina del partner vía screen-share.
+- Recording está encendido (con consentimiento del partner — pregunta en el primer minuto).
+
+#### Minute-by-minute script
+
+**Minutos 0–5: Context-set.**
+
+Talking points (lift verbatim, adapta al nombre del partner y respuestas Q2/Q3):
+
+> "Contexto rápido antes de instalar nada. Janusly está construido alrededor de una tesis simple: recovery, no conteo de integraciones, es la cuña. Las workflow tools fueron construidas para la era de las integraciones — connectors drag-and-drop. No fueron construidas para la pregunta 'qué pasa cuando el modelo devuelve nonsense, el secret expira, o un paso que funcionó ayer falla hoy?' Esa es la pregunta para la que construimos.
+>
+> Lo que hacemos hoy: instalamos Janusly juntos, recorremos el loop de recuperación en un template demo, después cableamos tu primer workflow real. Para el final de esta llamada deberías tener un workflow corriendo y una falla recuperada en el board. Ese es el target de 60 minutos.
+>
+> Lo que medimos durante la beta: Mean Time To Recovery para tus workflows reales. Ya tenemos tu baseline survey (el número self-reported de antes de hoy); medimos el MTTR post-instalación desde el runtime mismo. Ese es el experimento. ¿Suena bien?"
+
+**Minutos 5–15: Install.**
+
+Camina al partner por el Quick-start del README, condensado:
+
+1. `git clone` Janusly + `pnpm install`.
+2. Setea environment: `ANTHROPIC_API_KEY` (el partner pega la suya o usa modo BYO key). Auth en dev-mode no necesita setup adicional cuando Supabase está sin setear y `NODE_ENV !== "production"`; los headers `x-org-id: default` y `x-user-id: dev-user` ridean automáticamente desde la web.
+3. `pnpm dev` levanta Postgres + Redis vía Compose, corre migrations, después arranca api + worker + web en http://localhost:5173.
+4. En una segunda terminal, `pnpm seed:demos` escribe las tres credenciales canónicas de demo (idempotente — no-op si ya existen; `--force` resetea per ENG-069).
+5. Abre http://localhost:5173.
+
+**Friction watchpoints (el fundador narra en voz alta mientras el partner corre los comandos):**
+- Node 24 requerido (chequea `node --version`). Node más viejo → `nvm use 24` o `corepack enable`.
+- Docker requerido. Si el partner no tiene Docker → marca setup como `partial-pass` para la métrica de friction; pueden completar localmente con su propio Postgres + Redis pero no es un path de 60 minutos.
+- Anthropic key no seteada → las superficies AI degradan a fallback determinístico per AGENTS.md; el loop de recuperación funciona estructuralmente igual pero `POST /ai/explain-run` y `POST /ai/patch-workflow` devuelven `mode: "fallback"`. Documenta esto en las notas de friction.
+
+**Minutos 15–25: Walkthrough del loop de recuperación en el template demo.**
+
+Sigue el recording script de `failed-workflow-recovery`. Los beats:
+
+1. Abre el template `failed-workflow-recovery` en AI Studio.
+2. Sávalo, corrélo con el sample payload, y deja que la falla intencionalmente sin bindear `{{secret.BILLING_API_KEY}}` aterrice en DLQ.
+3. Abre el home del Centro de Recuperación; clickea el run fallido y muestra la causa raíz explicada por AI desde `POST /ai/explain-run`.
+4. Abre la recovery dialog; muestra las 1–3 patch suggestions de `POST /ai/patch-workflow` con confidence + approachLabel.
+5. Elige primero la suggestion estructural de approval. Clickea "Apply & validate" — `POST /dlq/validate-fix` corre el sandbox replay (writes-skipped per el dryRun gate de AGENTS.md). Sava la nueva versión.
+6. Re-corre el workflow patched, aprueba el nuevo human gate, y deja que el secret aún sin bindear falle otra vez.
+7. Re-abre la recovery dialog, elige la suggestion `swap_secret_ref`, valida el patch, y sava la siguiente versión.
+8. Para un cierre en verde-en-vivo, cablea el secret de reemplazo + endpoint sandbox de billing alcanzable, después clickea "Replay" vía `POST /dlq/replay`. Mira el workflow correr hasta verde.
+
+Prompt de observación del partner: "Camíname por lo que acabas de ver — ¿qué es diferente del failure path de tu herramienta actual?"
+
+**Minutos 25–45: Primer workflow real.**
+
+El partner elige el más simple de los 3 workflows de Q8 del intake. El fundador co-pilotea mientras el partner cablea.
+
+- New workflow → nombre de Q8 del intake.
+- Agrega el nodo de trigger (webhook / cron / manual según Q8 del intake).
+- Agrega los nodos de trabajo (HTTP / AI / tool steps).
+- Sava la primera versión.
+- Corre una vez exitosamente (el fundador ayuda a ajustar el test trigger payload si hace falta).
+- **Rómpelo intencionalmente.** Rota la credencial. Inyecta un 401. Dropea un campo requerido del trigger payload. La rotura debería coincidir con la shape de falla de Q3 del baseline survey ("las últimas 3 fallas") si es posible.
+- Abre el Centro de Recuperación → el propio workflow del partner aterriza en DLQ.
+- Camina por recovery: explain → patch → sandbox → apply → replay. El partner clickea; el fundador narra.
+
+**Minutos 45–55: Sus otros 2 workflows.**
+
+El partner nombra los 2 restantes de Q8 del intake. No los cableamos en vivo hoy — el partner se compromete a cablear el workflow #2 para el final de la semana 1 y el workflow #3 para el final de la semana 2. El fundador ofrece una sesión de wiring de 30 minutos si el partner se bloquea.
+
+**Minutos 55–60: Acuerdo de cadencia semanal.**
+
+- Elige el slot recurrente de 30 minutos (misma hora cada semana por 8–12 semanas).
+- Confirma la cadencia del weekly report (el partner llena el reporte para Friday EOD; el fundador lee antes de la llamada recurrente).
+- Setea el canal de comunicación para friction entre-meetings (canal de Slack / Discord / email thread — preferencia del partner).
+- Menciona la conversación de willingness-to-pay en semana 6–8 ("una conversación de 30 minutos sobre pricing — discovery, no negotiation").
+- Menciona el exit interview en semana 12 ("cierre de 45 minutos, capturamos lo que aprendimos juntos").
+
+#### Setup checklist (definición de "ready" al final del kickoff)
+
+La kickoff call cuenta como un `pass` en la métrica de setup-friction si al minuto 60 TODO lo siguiente es verdadero:
+
+- [ ] `pnpm dev` corriendo localmente (api + worker + web en http://localhost:5173).
+- [ ] Auth en dev-mode funcionando (el endpoint `/workflows` devuelve 200 con la org default).
+- [ ] Al menos un workflow cableado (el del partner, de Q8 del intake).
+- [ ] Al menos un run exitoso en ese workflow.
+- [ ] Al menos una falla recuperada en el mismo workflow (o el template demo si el workflow del partner no se pudo romper limpiamente de forma intencional).
+- [ ] Slot de cadencia semanal acordado y en el calendario.
+
+`partial-pass` = el workflow del partner se cablea para el final de la semana 1 (no al minuto 60). `fail` = el workflow del partner no se cablea para el final de la semana 1.
+
+#### Hand-off email template
+
+Dentro de las 24 horas del kickoff:
+
+```
+Subject: Recap del kickoff de Janusly + plan de semana 1
+
+[Name],
+
+Gran kickoff. Recap rápido y el plan de semana 1:
+
+Lo que está seteado hoy:
+- Janusly corriendo localmente vía `pnpm dev`
+- Workflow [#1 name] cableado, [N] runs exitosos, [M] falla(s) recuperada(s)
+- Anthropic key configurada (o: degradando a fallback — está bien para el loop de recuperación estructural)
+
+Plan de semana 1:
+- Cablear workflow [#2 name] para [Friday date]
+- Llenar el weekly report en [link]
+- Llamada recurrente: [day/time] empezando [next week date]
+
+Recursos que vas a necesitar:
+- README Quick-start (install de Janusly): [link al anchor del README]
+- Recording del loop de recuperación: [link a recording-scripts/failed-workflow-recovery.md]
+- Canal de Slack para friction: [link]
+
+Si algo te bloquea mid-week, mándame DM por Slack — respondo dentro de 4 horas hábiles. Bloqueadores serios: llamada el mismo día.
+
+Hablamos pronto.
+
+[Founder name]
+```
+
+### Sección F — Cadencia semanal
+
+El ritmo durante las semanas 2–10. Llamada recurrente + reporte semanal + protocolo entre-meetings.
+
+#### Standing 30-minute call agenda
+
+Misma estructura cada semana. El partner sabe qué esperar; el fundador no tiene que re-explicar el formato.
+
+- **Minutos 0–5: Wins / friction liderados por el partner.** El partner camina por lo que funcionó y lo que no desde la semana pasada. Open-ended; el fundador escucha, no interrumpe a menos que le pregunten.
+- **Minutos 5–15: Walk del runtime liderado por el fundador.** El fundador pone la timeline de runs del workflow del partner en screen-share: entradas de DLQ, acciones de recovery tomadas, MTTR observado esta semana. El fundador lee los números; el partner reacciona.
+- **Minutos 15–25: Próximo paso.** Elige qué cablear / arreglar / explorar a continuación. Puede ser un nuevo workflow, un nuevo node type, un nuevo feature (loop de feedback de recovery, cluster apply, rollback de versión). El fundador opcionalmente camina por una nueva superficie de producto en 5 minutos si es relevante.
+- **Minutos 25–30: Cierre.** Confirma la fecha de la próxima llamada. Confirma cualquier homework (e.g. "llenas el weekly report para Friday"). Canal de Slack para friction.
+
+#### Weekly-report template
+
+El partner lo llena para Friday EOD antes de la próxima llamada recurrente. Copy-pasteable en la misma herramienta de formularios que se usó para el intake.
+
+```
+Janusly weekly report — semana del [date]
+
+1. Workflows agregados o removidos esta semana:
+   (Texto libre. E.g. "Agregué 'churn-risk-followup' el martes. Removí 'old-refund-v1' — reemplazado por 'refund-triage-v2'.")
+
+2. Total runs esta semana, por workflow:
+   (Conteos aproximados. Puedes leerlos de `GET /runs` o ojear el dashboard.)
+
+3. Failures esta semana, por workflow:
+   (Conteos aproximados. Entradas de DLQ + run nodes fallidos.)
+
+4. Recovery actions taken:
+   - Patch suggestions accepted: [N]
+   - Patch suggestions rejected: [N]
+   - Sandbox validation runs: [N]
+   - Production replays: [N]
+   - Version rollbacks: [N]
+
+5. MTTR observado esta semana, por workflow:
+   (Por cada workflow donde corriste un recovery: minutos estimados de falla a recovered replay. No te preocupes por la precisión; rangos están bien.)
+
+6. Friction worth naming (1-3 items):
+   (Texto libre. Cualquier cosa que te frenó, te confundió, o se sintió clunky. Incluso "la dialog tomó 3 clicks en lugar de 1" es señal útil.)
+
+7. Surprise of the week:
+   (Una oración. Cualquier cosa que Janusly hizo esta semana que no esperabas — positiva O negativa. Aprendemos más de estas.)
+
+8. Confianza en continuar la beta (1-5):
+   (Solo desde semana 2 en adelante. 1 = "estoy considerando dejar la beta." 5 = "estoy adentro hasta el final.")
+```
+
+#### Founder's internal experiment notebook
+
+Por partner-semana, el fundador loggea:
+
+```
+Partner: [name]
+Week: [N]
+Workflows active: [count]
+Total runs observed: [count]
+DLQ entries observed: [count]
+Recovery actions:
+  - Suggestions accepted: [count]
+  - Suggestions rejected: [count]
+  - Sandbox validations: [count]
+  - Production replays: [count]
+  - Rollbacks: [count]
+MTTR samples this week (minutes):
+  [list, one per recovery run]
+Failure-category histogram this week:
+  secret_missing: [count]
+  http_error: [count]
+  network_timeout: [count]
+  ai_provider: [count]
+  parse_error: [count]
+  tool_input: [count]
+  unknown: [count]
+Accept-rate on patch suggestions: [%]
+Confidence (partner self-reported, Q8 of weekly): [1-5]
+Willingness-to-pay temperature (founder's read, 1-5): [1-5]
+Notes:
+  [free text observations]
+```
+
+Mantén esto en un archivo markdown o spreadsheet — una fila por (partner, semana). El reporte publicado agrega desde estas filas.
+
+#### Between-meeting protocol
+
+- **Canal de Slack por partner (o canal compartido #janusly-beta si los 3 partners están cómodos estando en la misma sala).** El fundador responde dentro de 4 horas hábiles durante el día de trabajo.
+- **Bloqueador serio = llamada el mismo día.** Definición de "serio": el partner no puede correr su workflow, el partner está considerando dejar la beta, el equipo de compliance del partner levantó una preocupación. Cualquier otra cosa puede esperar la llamada recurrente.
+- **Bug encontrado en Janusly = abre un issue.** El fundador hace triage y o arregla inline (política de collateral fix) o crea un ticket. El partner no tiene que esperar — el workaround sale del fundador el mismo día.
+- **Friction worth telegraphing = nómbrala en el weekly report.** El item 6 de la Sección F es el canal estructurado para friction non-blocking.
+
+### Sección G — Conversación de willingness-to-pay
+
+El instrumento de discovery de pricing. Correr entre las semanas 6 y 8 una vez que el partner haya experimentado el loop de recuperación resolviendo una falla real al menos una vez. Atado al "plan de release de pricing" de [`pricing.md`](pricing.md) Section G — esta conversación produce la data que convierte los candidatos de métrica de valor de pricing.md en números v1.
+
+#### Pre-conditions
+
+No corras esta conversación hasta que LAS tres se sostengan:
+
+- [ ] El partner ha aceptado al menos 3 patch suggestions en producción vía el Centro de Recuperación.
+- [ ] El MTTR delta es observable en al menos uno de los workflows del partner (mediana post-instalación < mediana self-reported de baseline).
+- [ ] El partner ha experimentado el loop de recuperación resolviendo una falla real (no-demo) al menos una vez.
+
+Si cualquier condición falta en semana 6, posponer a semana 7 u 8. Si sigue faltando en semana 8, corre la conversación pero nota en el reporte publicado que la señal de WTP de este partner es más débil (menos valor experimentado = menos habilidad para ponerle precio).
+
+#### Format
+
+**Conversación de 30 minutos, NO un Typeform.** Los números vienen de hablar, no de un slider. El fundador agenda una llamada dedicada, la enmarca como discovery (no negotiation), y deja que la conversación respire.
+
+#### Opening frame (lift verbatim)
+
+> "La llamada de hoy es diferente del check-in semanal. Vamos a hablar de pricing — pero es discovery, no negotiation. No te voy a cotizar un precio; no me vas a dar uno. Lo que quiero es tu lectura honesta de lo que vale Janusly para tu equipo. La data de esta conversación, combinada con la misma conversación de los otros dos design partners, es lo que vamos a usar para setear el pricing v1. Así que tus respuestas dan forma a lo que ven otros clientes — no a tu factura. ¿Suena bien?"
+
+#### Question script (open-ended; la conversación va a donde tiene que ir)
+
+1. **Replacement difficulty.** *"Lectura honesta: si Janusly desapareciera mañana, ¿cuál es el plan de tu equipo?"*
+   - Escucha por: "lo construiríamos nosotros mismos" (WTP alto — valoran el engineering ya hecho) / "volveríamos a [tool]" (WTP medio — valoran el upgrade pero tienen un fallback) / "viviríamos sin esto" (WTP bajo — re-examinar el valor).
+
+2. **Value metric preference (sin priming).** *"Si te dijera que vamos a cobrar por esto, ¿cuál es la primera métrica por la que querrías pagar — seats, recovered runs, AI calls, otra?"*
+   - **No listes las métricas primero.** Deja que las propongan. Después indaga: "¿Por qué esa? ¿Qué hay de las otras?"
+   - Los tres candidatos de [`pricing.md`](pricing.md) Section D son: per-seat, per-recovered-run, per-AI-call. Si nombran otra cosa, escríbela verbatim — es nueva señal para el reporte.
+
+3. **Unit value derivation.** *"Caminame por la matemática: ¿cuánto vale un single recovered run para tu equipo en minutos-ingeniero? Hace cuenta servilleta y dale en dólares."*
+   - Escucha por: su engineer-cost por hora × MTTR-ahorrado-por-recovery. Esto es la unit-economics propia del partner; el fundador no la suministra.
+
+4. **Price bands (no points).** *"¿Cuál es la banda en la que renovarías sin una escalation interna? ¿Cuál es la banda donde necesitarías ir a un dueño de presupuesto?"*
+   - **Siempre rangos, no puntos exactos.** Un punto ("$1500/mes") se siente como negotiation; un rango ("renovar bajo $2k, escalar arriba de $5k") se siente como discovery. El reporte publicado agrega rangos.
+
+5. **Competitive anchor.** *"Si estás pagando por [Zapier / n8n / Make / lo que sea que nombraron en Q6 del intake], ¿cuánto pagas hoy, y por qué?"*
+   - Ancla la intuición de precio del partner. Frecuentemente el data point más útil — el partner conoce la factura de su herramienta existente mejor de lo que conoce qué "debería" costar una nueva.
+
+6. **Billing cadence.** *"¿Contrato anual o mensual? ¿Por qué?"*
+   - Escucha por: preferencias de ciclo de presupuesto. Frecuentemente "anual pero con facturación trimestral" o "mensual hasta que confiemos, anual después."
+
+7. **Commitment lever.** *"Si te pedimos un commit de 12 meses al extremo bajo de tu banda, ¿qué quisieras a cambio?"*
+   - Saca a flote el palanca discount-por-commitment para futuros términos de deal. Escucha por: % de descuento, white-glove onboarding, feature custom, TAM nombrado.
+
+#### What the founder captures
+
+Por partner, un formulario llenado en el experiment notebook:
+
+```
+Partner: [name]
+WTP conversation date: [date]
+Pre-conditions met: [yes / partially]
+
+Replacement difficulty signal: [build ourselves / fall back to tool / live without]
+Preferred value metric: [per-seat / per-recovered-run / per-AI-call / other]
+  Why: [partner's own reason in 1-2 sentences]
+Unit value (their math): [their stated dollar-per-recovered-run or equivalent]
+Renew band: [low - high, no escalation]
+Escalate band: [low - high, requires budget owner]
+Competitive anchor: [what they pay today + per what + for which tool]
+Billing cadence preference: [annual / monthly / hybrid]
+Commitment lever: [what they'd want for a 12-month commit]
+Founder's read (1-5, gut call): [1-5]
+Verbatim quote worth keeping: [1 sentence in partner's own words]
+```
+
+#### What we never do in this conversation
+
+- **Cotizar un precio.** El instrumento es discovery, no negotiation. La respuesta existente de pricing.md Section G — *"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"* — sigue siendo la respuesta si el partner pregunta.
+- **Prometer un descuento.** Los términos de descuento vienen después, en el handoff exit-interview-to-paid o más tarde.
+- **Mostrarle pricing.md al partner.** Ese doc es contexto interno de ventas, no collateral de cliente.
+- **Comparar rangos entre partners durante la llamada.** Cada partner recibe una conversación fresca. La comparación cross-partner ocurre internamente en el reporte publicado.
+
+### Sección H — Exit interview (cierre de 90 días)
+
+Final de la beta. El momento conversion-o-churn + captura de permisos para todo lo que queremos usar externamente.
+
+#### Pre-meeting prep
+
+48 horas antes de la llamada de exit, el fundador le manda al partner un resumen de 1 página de la observación de los 90 días. El partner lo lee antes de la llamada para que la llamada sea reacción + permisos + decisión, no presentación de data.
+
+El template del resumen:
+
+```
+Janusly private beta — [Partner] 90-day summary
+
+Workflows wired during beta: [N]
+Total runs observed: [N]
+DLQ entries observed: [N]
+Recoveries via Recovery Center: [N]
+Patch suggestions accepted: [N] ([%] accept rate)
+Sandbox validations: [N]
+Production replays: [N]
+Version rollbacks: [N]
+
+MTTR baseline (your self-reported median, weeks 0): [N] minutes
+MTTR observed (engine-measured median, weeks 1-10): [N] minutes
+Delta: [N] minutes ([%] improvement)
+
+Top 3 failure categories observed:
+1. [category]: [N] failures
+2. [category]: [N] failures
+3. [category]: [N] failures
+
+Top quote of the beta (yours): "[partner quote from a weekly report]"
+Top friction of the beta: [friction item]
+Top surprise of the beta: [surprise from a weekly report]
+
+Tomorrow's exit interview will cover: case study, conversion-or-churn, permission capture. We'll keep it under 45 minutes.
+```
+
+#### 45-minute call agenda
+
+- **Minutos 0–10: Revisión del summary.** El fundador camina por el resumen. El partner corrige cualquier cosa que tergiverse su experiencia. Sesgo hacia escuchar sobre defender — la lectura del partner sobre la data es más importante que la nuestra.
+
+- **Minutos 10–20: Case study.** *"Si un amigo en otra empresa te preguntara sobre Janusly hoy, ¿qué le dirías?"* Escucha por el summary de 1-2 oraciones que daría el partner. Pregunta: *"¿Puedo citarte en eso? ¿Con o sin tu nombre? ¿Con o sin el número?"* — captura el permiso de case-study inline.
+
+- **Minutos 20–30: Decisión de conversion.** *"¿Qué tendría que ser verdad para que conviertas a un Janusly subscription pagado? Precio, feature, términos de contrato, compliance — ¿cuál es el gate?"* Escucha por: banda de pricing (la WTP de la Sección G debería coincidir), gap de feature (nombrado explícitamente), requerimiento de contrato (SSO / SCIM / DPA / SOC2), o "estamos in, solo manda el contrato."
+
+- **Minutos 30–35: Trigger de churn.** *"¿Qué tendría que ser verdad para que dejes Janusly? Honesto, en tus propias palabras."* Esta es la respuesta más importante de la llamada. Escríbela verbatim.
+
+- **Minutos 35–40: Asignación de presupuesto.** *"Si tuvieras $[X — la banda baja de su banda de la Sección G] ahora mismo para gastar en workflow tools, ¿cómo lo dividirías entre vendors? Janusly, [su herramienta existente], cualquier otra."* Escucha por: % de asignación. Un partner que pondría 100% en Janusly es un convert; 50/50 es coexist; <25% significa que somos un complemento, no un reemplazo.
+
+- **Minutos 40–45: La pregunta "qué deberíamos haber preguntado".** *"¿Algo que deberíamos haber preguntado y no preguntamos?"* Frecuentemente la pregunta más valiosa de la llamada. Free-form.
+
+#### Permission capture (explícito, escrito, en la llamada)
+
+Lee cada prompt en voz alta, captura la respuesta sí/no/anonimizada del partner verbatim. Manda un summary escrito dentro de las 24 horas para que el partner lo confirme por reply (protección legal para uso downstream en marketing). **Las 5 líneas de permiso adentro del bloque de código se quedan verbatim en inglés** — son consentimientos legales firmados en inglés.
+
+```
+Permission capture — [Partner] exit interview
+
+1. May we cite your MTTR-delta number in marketing?
+   [ ] Yes, with attribution to the company
+   [ ] Yes, anonymized as "an engineering team" or "a B2B startup"
+   [ ] No
+
+2. May we list your company logo on the Janusly landing page trust strip?
+   (This swaps the existing placeholder copy at landing-page.md line 134 / 402 for a real logo.)
+   [ ] Yes
+   [ ] No
+
+3. May we publish the failure-category breakdown observed in your workflows?
+   [ ] Yes, with attribution
+   [ ] Yes, anonymized
+   [ ] No
+
+4. May we publish a case-study page on your beta experience?
+   [ ] Yes, drafted by us, you approve before publication
+   [ ] Yes, anonymized
+   [ ] No
+
+5. May we use the verbatim quote you gave at minute 10–20 in marketing?
+   [ ] Yes, with attribution
+   [ ] Yes, anonymized
+   [ ] No
+
+Partner signature: ___________________
+Date: ___________________
+```
+
+#### Conversion-or-churn outcome
+
+Cada exit interview termina con uno de tres outcomes. El reporte publicado nombra cuáles 3 de 3 ocurrieron. Los tres son outcomes válidos del experimento.
+
+- **Outcome A: Convert.** El partner dice "estamos in." Handoff: manda un draft de contrato de 30 días dentro de las 48 horas, con términos anclados en la banda declarada de la Sección G. Si quieren un commit de 12 meses, aplica el lever de la pregunta 7 de la Sección G. Agenda la llamada kickoff-to-paid.
+- **Outcome B: Coexist.** El partner se queda en el tier gratuito sin commit pagado inmediato pero sin churn tampoco. Relación ongoing, sin contrato. Agenda un check-in trimestral para revisitar.
+- **Outcome C: Churn.** El partner no convierte y no continúa. Captura la respuesta del trigger de churn de los minutos 30–35 — eso es oro para el próximo experimento. Manda un email de agradecimiento + ofrecimiento de mantenerse en contacto.
+
+### Sección I — Plantilla de reporte de beta privada
+
+El deliverable nombrado en el AC de ENG-093: *"publicar un reporte de beta privada que decida si el Centro de Recuperación permanece como product home primario."*
+
+#### Format
+
+Publicación internal-first. Vive en `docs/marketing/private-beta-report.md` (creado por el trabajo FUTURO de ENG-093; este playbook entrega solo el template, no el reporte populado). La publicación externa (blog post, landing page de case study, deck) es downstream una vez que los permisos de Sección H se capturan.
+
+#### Required sections (the skeleton)
+
+1. **Executive summary.** Tres números y una oración de verdict.
+   - **MTTR delta (mediana del cohort):** [N] minutos baseline → [N] minutos observed = [%] mejora.
+   - **Success-criteria hits:** [3 / 3] o [2 / 3] o [1 / 3] partners pegaron los tres criterios de éxito de la Sección B.
+   - **Willingness-to-pay aggregate band:** [low – high] per [value metric].
+   - **Verdict:** *"El Centro de Recuperación permanece como product home primario; sigue la recomendación de pricing v1."* O *"Re-posicionamos antes de pricing; esto es lo que aprendimos."*
+
+2. **Cohort description.** 3 partners, nombrados o anonimizados según los permisos de la Sección H. Por cada uno: segmento ICP, tamaño de empresa, shape de workflow primario, cita de dolor de 1 oración.
+
+3. **Methodology.** Liftada verbatim de la Sección D de este playbook. El reporte cita el playbook para metodología en lugar de re-establecer todo el asunto.
+
+4. **Findings per partner.** Por cada uno de los 3 partners, una subsección de 1 página:
+   - Baseline MTTR (self-reported, data blanda, rango mostrado).
+   - Post-install MTTR (engine-measured, data dura, mediana mostrada).
+   - Failure-category distribution (el histograma de 7 categorías de la Sección D).
+   - Patch-suggestion accept rate (del experiment notebook).
+   - Willingness-to-pay band (output de la Sección G).
+   - Cita verbatim de 1 oración (con permiso de la Sección H).
+   - Outcome: convert / coexist / churn.
+
+5. **Cross-partner aggregate.** Los tres números del executive summary, con su derivación explicada. Muestra los inputs per-partner que alimentaron las medianas del cohort. Honestidad sobre N pequeño (3 data points; nombramos patrones, no significancia estadística).
+
+6. **Wedge verdict.** ¿Dice la data:
+   - "El Centro de Recuperación permanece como product home" (criterios de éxito de la Sección B cumplidos: ≥ 2 de 3 partners + ≥ 2 de 3 señales WTP + ≥ 2 de 3 setup friction passes)?
+   - O "Re-posicionamos antes de pricing" (cualquiera de los criterios de falla de la Sección B disparado)?
+
+7. **v1 pricing recommendation.** Métrica de valor específica (per-seat / per-recovered-run / per-AI-call / otra si la data sacó a flote una) + banda recomendada (low – high) + preferencia de cadencia de billing + shape del commitment-lever. Alimenta hacia adelante al trigger de pricing.md Section G de "Después de que ENG-093 cierre".
+
+8. **Open questions.** Lo que los 90 días no resolvieron. Candidatos para el próximo experimento (un segundo cohort, un deep-dive de un solo segmento, un run de feature-gap-validation, etc.). Honestidad sobre el límite de tamaño del cohort.
+
+9. **Permissions ledger.** Por partner, por tipo de artefacto, qué consentimiento se capturó. La referencia para cada uso externo de data de la beta downstream (landing page de case study, charla de conferencia, slide de ventas).
+
+#### Publication cadence
+
+- **Semanas 13–14:** draft del reporte interno. El fundador escribe; agrega desde el experiment notebook. Cross-check con cada partner antes de la publicación externa (el partner ve la sección sobre él primero).
+- **Semanas 15–18:** versión externa publicable. Anonimizada según necesidad per la Sección H. Vive en el mismo path; una variante `external/` strippea detalles identificatorios.
+- **Post-publicación:** logos / case studies / materiales de conferencia siguen el permiso individual del partner. Cada artefacto externo referencia el permissions ledger del reporte.
+
+### Sección J — Checklist operacional (cheat sheet "qué corre esta semana")
+
+Un summary scan-friendly que el fundador mantiene abierto durante la beta. Mismo rol que [`pricing.md`](pricing.md) Section I juega para ventas.
+
+```
+Janusly private beta — operational status
+
+Cohort: 3 partners
+Start date: ____
+Exit-interview date target: ____ (Start + 12 weeks)
+Internal-report publish target: ____ (Start + 14 weeks)
+External-publish target: ____ (Start + 18 weeks)
+
+Per-partner status:
+
+Partner 1: [name] | Segment: [icp segment] | Kickoff: [✓ pass / partial / fail]
+  Workflow 1 wired: [✓ / week N / pending]
+  Workflow 2 wired: [✓ / week N / pending]
+  Workflow 3 wired: [✓ / week N / pending]
+  WTP conversation done: [✓ week N / pending]
+  Exit interview done: [✓ / pending]
+  Outcome: [convert / coexist / churn / TBD]
+
+Partner 2: [...same structure...]
+Partner 3: [...same structure...]
+
+Success-criteria threshold tracking:
+  MTTR improvement ≥ 2 / 3: [on track / at risk / failed]
+  WTP signal ≥ 2 / 3: [on track / at risk / failed]
+  Setup friction pass ≥ 2 / 3: [✓ N partners passed / N pending / failed]
+
+Failure-criteria threshold tracking:
+  Zero MTTR improvement: [no / yes — reconsider wedge]
+  Shared setup blocker across 3: [no / yes — fix blocker name]
+  All 3 want different product shape: [no / yes — revisit PLAN §16.0]
+```
+
+El fundador actualiza esto cada lunes a la mañana antes de las llamadas recurrentes de la semana.
+
+### Sección K — Fuera de scope (lo que este playbook NO cubre)
+
+- **Correr el experimento mismo.** Esto es el manual de instrumentos. Correrlo es trabajo operacional del fundador — reclutar, agendar, sostener las llamadas, loggear el notebook, escribir el reporte.
+- **Artefactos externos publicables.** Blog post, charla de conferencia, landing page de case study, slides de sales deck — todo downstream una vez que los permisos de la Sección H se capturan.
+- **Documentación de compliance vendor-grade.** Atestaciones SOC2, templates de DPA, librerías de security questionnaires — work stream diferente. Usa AGENTS.md internamente como source of truth operativo si un partner pregunta, pero no lo mandes como collateral de cliente y no draftees docs de compliance adentro de este playbook.
+- **Per-region / per-locale recruitment.** El reclutamiento corre en inglés en v1 (el fundador es dueño del experimento en inglés; los partners corren workflows reales en inglés). Los instrumentos localizados al español están en este bloque `Versión en español` que estás leyendo — operadores del lado del fundador que prefieren español pueden leer cada instrumento en su idioma. Las reglas de voz de marca de `narrative.md` aplican por igual a ambos idiomas.
+- **Automatización del experiment notebook.** El fundador mantiene el notebook a mano (archivo markdown o spreadsheet). Una UI bespoke de "dashboard de private-beta" está fuera de scope — el experimento es muy chico (3 partners × ~12 semanas) para justificar tooling.
+- **Multi-cohort runs.** Esto es el playbook para el PRIMER cohort de 3 partners. Si corremos un segundo cohort (un pase de ajuste con segmentos diferentes, un run de feature-gap-validation, una expansión regional), el playbook gana una nueva sección entonces — pero el path v1 es un cohort, una publicación, una decisión de pricing v1.
+- **Modificar el AC de ENG-093.** Este playbook HABILITA ENG-093; no redefine el AC. ENG-093 sigue Pending en el ROADMAP hasta que el experimento corra y produzca un reporte.
+
+### Sección L — Cross-references (tabla de reverse-links)
+
+Para lectores futuros navegando de vuelta desde este playbook a sus consumidores downstream:
+
+| Sección en este playbook | Consumida por |
+| --- | --- |
+| Sección B success criteria + verdict | [`pricing.md`](pricing.md) Section G ("After ENG-093 closes") |
+| Sección C qualification heuristics | [`competitive-positioning.md`](competitive-positioning.md) Section E (the 7 buying triggers) |
+| Sección C intake form Q2 (segment self-id) | [`icp.md`](icp.md) (the 3 canonical segments) |
+| Sección D failure-category coding scheme | `packages/shared/src/error-signature.ts` (the 7-value `ErrorCategory` enum) |
+| Sección D measurement methodology | The published private-beta report (Sección I) |
+| Sección E demo backbone | [`recording-scripts/failed-workflow-recovery.md`](recording-scripts/failed-workflow-recovery.md) |
+| Sección G WTP conversation output | [`pricing.md`](pricing.md) Section G (v1 number selection) |
+| Sección H permission capture | [`landing-page.md`](landing-page.md) trust-strip (permiso de logo), landing page de case study (futuro) |
+| Sección I published report | [`pricing.md`](pricing.md) Section G (trigger "After ENG-093 closes"), futuro blog post / charla de conferencia |
+
+Cada consumidor downstream que existe hoy está listado. Los consumidores futuros (landing page de case study, blog post) se agregan a esta tabla cuando shippean.
