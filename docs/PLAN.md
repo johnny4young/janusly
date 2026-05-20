@@ -25,7 +25,7 @@ What's still missing to be "the one":
 5. **RL is a counter, not a full policy.** `routing_stats` tracks pulls and rewards and affects router scoring, but there is no Thompson-sampling / UCB / contextual-bandit policy across route, model, prompt, and retry choices.
 6. **Recovery is real but feedback learning is next.** Janusly now proposes patches, previews diffs, validates in sandbox, applies across clusters, and rolls back. It still needs operator feedback capture, calibrated confidence, A/B testing, and broader structural patches.
 7. **Trigger surface is still narrow.** Manual run, cron schedules, webhook, approval, and replay cover the MVP. Production workflows still need file events, email/calendar/message-queue triggers, and SaaS event subscriptions.
-8. **Distribution surface is thin.** HTTP API + local MCP are enough for development, but customers will want Node/Python SDKs, webhook receiver helpers, release bundles, and Terraform.
+8. **Distribution surface is thin.** HTTP API + local MCP are enough for development, but customers will want Node/Python SDKs, webhook receiver helpers, release bundles, and Terraform. The first concrete SDK slices are ENG-112 (TypeScript) and ENG-113 (Python + webhook helper).
 
 The plan is structured so each item below is independently shippable and individually adds value, even if the next ones never happen.
 
@@ -121,7 +121,7 @@ The client must preserve the existing `mode: "fallback" | "ai"` + `aiError` cont
 
 #### Phase B — Switch internals to `generateObject` for structured output (shipped)
 
-`/ai/generate-workflow` now calls `llm.generateObject({ schema: WorkflowSchema })` so the model returns a typed workflow object through the provider abstraction. The route still keeps `sanitizeAiWorkflow` after schema validation because the engine's expression grammar is stricter than a generic `z.string()`.
+`/ai/generate-workflow` now calls `llm.generateObject({ schema: AiGenerationWorkflowSchema })` so the model returns one of Janusly's capped, Anthropic-safe node shapes through the provider abstraction. The route still runs `sanitizeAiWorkflow`, `WorkflowSchema.safeParse`, and the workflow validator after schema validation because the engine's expression grammar and runtime contract are stricter than the AI-facing generation envelope.
 
 #### Phase C — Add provider config
 
@@ -385,7 +385,8 @@ Today `getRunMemory` returns events from the current run only. Real agents need:
 - **Procedural memory** — successful tool sequences for similar goals.
 
 Implementation:
-- New `memory_entries` table: `id, org_id, workflow_id?, run_id?, kind, content, embedding (vector), metadata (jsonb), created_at`. Use `pgvector`.
+- ENG-114 lands the privacy and retention policy first — see [`docs/memory-policy.md`](memory-policy.md) for the canonical doc covering eligibility, the two-flag opt-in consent model, per-kind retention, deletion/export, embedding provider posture, prompt-injection framing, the `org_configs.memory.*` catalog, audit actions, DPA language, and incident response. No runtime memory store ships before that policy is approved.
+- ENG-115 adds the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, content, embedding, metadata (jsonb), created_at, expires_at`. Schema follows the policy: per-row provider/model/dimension metadata, retention timestamps, no hardcoded vendor dimension. Use pgvector on Postgres 18 (the AGENTS.md stack baseline).
 - New domain helpers in `packages/domain/src/memory.ts`: `recallEpisodic({ workflowId, k })`, `recallSemantic({ query, k })`, `commitMemory(entry)`.
 - `agent` and `multi_agent` planners receive a `memorySnippets` array in the prompt context.
 - `vector_search` / `vector_upsert` nodes (§6.3) for explicit user-controlled memory.
@@ -410,10 +411,11 @@ Causal reasoning is already there. Use it: every time we change the policy, repl
 
 The `improvementEngine` already computes confidence and triggers rollback. Extend it:
 
-- **DLQ pattern detection**: cluster recent dead letters by error message + node type. If 5+ failures in 24h match the same pattern, auto-open a `workflow_improvement` row with a structured suggestion ("add retry with exponential backoff to node X", "add condition guard before node Y"). Surface in UI with one-click apply.
-- **A/B harness**: every saved version is a candidate. New endpoint `POST /workflows/{id}/ab-test` runs 50% on v3, 50% on v4 over the next M runs. Promote winner automatically on confidence > 70%, rollback on confidence < 30% (already the threshold).
+- **DLQ pattern detection**: cluster recent dead letters by error message + node type. If 5+ failures in 24h match the same pattern, auto-open a `workflow_improvement` row with a structured suggestion ("add retry with exponential backoff to node X", "add condition guard before node Y"). Surface in UI as an operator-reviewed apply path.
+- **Supervised auto-healing queue**: ENG-117 turns repeated DLQ patterns into queued, sandbox-validated recovery proposals. Production auto-apply remains off by default and requires explicit process + tenant flags, successful validation, loop breakers, a kill switch, and audit.
+- **A/B harness**: every saved version is a candidate. New endpoint `POST /workflows/{id}/ab-test` runs 50% on v3, 50% on v4 over the next M runs. The first version should recommend promotion on confidence > 70% and rollback on confidence < 30%; automatic promotion is a later guarded mode, not the default.
 - **Eval harness**: define golden inputs + expected outputs per workflow. CI gate that runs evals against any AI-driven node change.
-- **Continuous fine-tuning hook**: every successful run with high confidence becomes a training example (configurable opt-in per org). For OpenAI, this is `POST /v1/fine_tuning/jobs`. For Anthropic, currently human eval only. The plan flags this as opt-in only because of cost & data sensitivity.
+- **Training/export hook**: successful runs may become candidate evaluation or training examples only after the ENG-114 memory/privacy policy defines explicit opt-in, retention, deletion/export, and provider posture. Runtime memory and customer data are not training data by default; no provider-specific fine-tuning job is part of the current backlog.
 
 ### 7.4 Agent improvements (immediate)
 
@@ -424,7 +426,7 @@ The `improvementEngine` already computes confidence and triggers rollback. Exten
 
 ### 7.5 Prompt management (templates, versions, evals)
 
-- New `prompts` table: `id, org_id, name, version, content, model_default, created_at`. AI nodes reference `promptId` instead of inline strings.
+- ENG-111 owns the first PromptOps slice. New `prompts` + `prompt_versions` tables should be org-scoped, append-only by version, audited, and referenced from AI nodes without breaking existing inline prompts.
 - UI page: "Prompts" — browse, version, eval, fork.
 - Eval = run prompt against a goldens set, compare against a previous version.
 
@@ -588,14 +590,14 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 
 ### 10.4 SDKs
 
-- [ ] `@janusly/sdk` — a thin Node client over the HTTP API, types regenerated from the Zod contracts.
-- [ ] Python SDK (later): same surface, generated from an OpenAPI emitted from Zod.
-- [ ] Webhook receiver helper: a 20-line snippet someone can drop into Express/Fastify/Next.js to receive Janusly webhooks with HMAC verification.
+- [ ] ENG-112: `@janusly/sdk` — a thin TypeScript client over the HTTP API, types checked against the Zod/API contracts.
+- [ ] ENG-113: Python SDK — same core surface after the TypeScript SDK stabilizes.
+- [ ] ENG-113: Webhook receiver helper — a small FastAPI/plain-Python helper plus docs for receiving Janusly webhooks with HMAC verification.
 
 ### 10.5 Testing
 
 - [ ] Coverage report in CI; aim for 80% on `engine` and `domain`.
-- [ ] Property-based tests on `expression.ts` and `parseAiWorkflow` (use `fast-check`).
+- [ ] Property-based tests on `expression.ts` and the post-generation `sanitizeAiWorkflow` / workflow-validator path (use `fast-check`). The old `parseAiWorkflow` looser is gone.
 - [x] Vitest browser mode for the React Flow canvas — `<WorkflowCanvas>` covered locally and wired in CI via the `test_browser` job in `.github/workflows/ci.yml` (ENG-010 + ENG-015).
 - [x] LLM eval harness: ENG-018 adds `evals/generate-workflow.jsonl` and `pnpm evals` for `/ai/generate-workflow` shape checks.
 
@@ -618,7 +620,7 @@ Goal: provider freedom, cost visibility, MCP server stub.
 - AI provider abstraction migration (§4 phases A–C) shipped through `LlmClient`; supported MVP runtime is Anthropic-only while OpenAI remains registered for future verification.
 - `usage_events` instrumentation shipped: every LLM call writes one row with provider/model/tokens/cost metadata.
 - `@janusly/mcp-server` shipped with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) plus `workflows.validate`; writes stay disabled until consent/audit policy lands.
-- `/ai/generate-workflow` now uses `generateObject({ schema: WorkflowSchema })` plus a sanitize pass.
+- `/ai/generate-workflow` now uses `generateObject({ schema: AiGenerationWorkflowSchema })` plus a sanitize + engine-validation pass.
 - Drizzle migrations shipped in ENG-008: checked-in SQL migrations, real `pnpm migrate`, and API/worker fail-fast guards before boot.
 - GitHub Actions shipped in ENG-015: build + jsdom test, browser test, e2e, and high+ dependency audit.
 
@@ -648,6 +650,7 @@ Goal: workflows actually improve with use.
 - DLQ pattern detection → auto-suggested patches (§7.3).
 - A/B test endpoint + UI.
 - Run explainer: extend with "compared to past similar runs..." retrieval.
+- Current ticket split from the May 2026 improvement pass: ENG-114 memory policy, ENG-115 vector memory foundation, ENG-116 memory-assisted recovery suggestions, ENG-117 supervised auto-healing queue, ENG-118 stdio MCP sandbox hardening, ENG-119 targeted Replay Lab forks, and ENG-121 rate-limit degradation visibility.
 
 Definition of done: a workflow that fails 5x in a row triggers an AI-suggested patch in the UI; user approves; A/B test runs; winner auto-promotes.
 
@@ -656,6 +659,8 @@ Definition of done: a workflow that fails 5x in a row triggers an AI-suggested p
 Goal: comfortable to live in for a small ops team.
 
 - `@janusly/sdk` Node SDK.
+- Python SDK and webhook helper.
+- MTTR/value dashboard once ENG-093 produces private-beta data.
 - Per-org plan limits + soft delete + retention.
 - Storybook for UI components, accessibility audit pass.
 - Workflow folders + tags + search.
@@ -716,7 +721,7 @@ Independent of the strategy. Items marked **DONE** were applied alongside this p
 
 Open quick wins:
 
-- Convert `parseAiWorkflow`'s looser to a property-based test: 1000 random LLM-shaped inputs should never crash.
+- Add property-based tests for `expression.ts` and the post-generation sanitize/validate path. The old `parseAiWorkflow` looser was deleted, so the fuzzer should target the current guards instead of a removed pre-parser.
 
 These don't require strategic alignment and unblock everything later.
 
@@ -1025,3 +1030,44 @@ Roadmap implications:
 - ENG-094 extends MCP from "Janusly as a server" toward "safe external MCP tools as workflow steps" without opening arbitrary execution.
 - ENG-095 packages the market narrative against Zapier, Make, n8n, Workato, Pipedream, Relay, and Gumloop.
 - ENG-096..ENG-101 add the enterprise-auth path: shared `AuthContext`, hardened membership resolution, WorkOS SSO, SCIM, org auth policies, and fine-grained permissions.
+
+### 16.10 May 2026 product-improvement backlog
+
+The curated research plan lives in [`docs/proposals/20260520-product-improvement-plan.md`](proposals/20260520-product-improvement-plan.md). It is intentionally a planning input, not a source of truth for ticket status. The live ticket pool is `docs/ROADMAP.md` section 3b.
+
+Decisions from that pass:
+
+- Keep PromptOps, SDKs, provider-neutral embeddings/memory, supervised auto-healing, stdio MCP hardening, targeted Replay Lab forks, and an MTTR/value dashboard.
+- Modify auto-healing so production mutation is operator-reviewed by default and only auto-applies behind explicit process and tenant flags, sandbox validation, loop breakers, kill switch, and audit.
+- Modify memory so privacy, opt-in, retention, deletion/export, provider posture, and embedding metadata ship before durable cross-run recall.
+- Modify the MCP sandbox idea so it hardens stdio subprocesses without breaking hosted URL transports.
+- Modify ROI into an estimated value dashboard grounded in MTTR, usage, and configurable assumptions.
+- Reject reused `ENG-102`..`ENG-110` numbering, Express middleware, `reactflow` imports, inline hex implementation guidance, OpenAI-specific embedding assumptions, unsupervised production mutation, and Redis rate-limit fail-closed fallback.
+
+### 16.11 World-class product plan
+
+The world-class product plan lives in [`docs/proposals/20260520-world-class-product-plan.md`](proposals/20260520-world-class-product-plan.md). It is the strategic layer above the current roadmap, not a replacement for `docs/ROADMAP.md`.
+
+Core decision from that plan:
+
+> Janusly should become the recovery and control plane for AI workflows that matter in production.
+
+Execution implications:
+
+- Keep Recovery Center / MTTR as the wedge; do not chase raw integration count, generic RPA, or fully autonomous production mutation.
+- Treat technical operators at B2B SaaS and AI-service companies as the first commercial market: engineering/support teams first, AI builders/agencies second, B2B ops teams third once onboarding is smoother.
+- Promote the next candidate tickets after ENG-111..ENG-121 from the world-class plan in this order: recovery alerting, recovery ownership, incident handoff, workflow SLO policy, credential health, eval datasets, prompt/model experiments, solution packs, onboarding, API keys/webhooks, audit export, retention, managed-cloud ops, and compliance packet.
+- Measure progress by time to first recovered run, private-beta MTTR delta, validation pass rate for high-confidence suggestions, audit coverage, sandbox-before-save coverage, and completeness of evidence exports.
+
+### 16.12 World-class execution plan (May 20, 2026)
+
+The operationalized successor to §16.10 and §16.11 lives in [`docs/proposals/20260520-world-class-execution-plan.md`](proposals/20260520-world-class-execution-plan.md). It is a bridge document, not a replacement for `docs/ROADMAP.md`.
+
+What it does:
+
+- Validates ENG-111..ENG-121 against AGENTS.md invariants and shipped surfaces, with row-level refinements (prompt variables as data, pgvector via Postgres 18, explicit auto-healing loop breaker shape, stdio sandbox mechanism named).
+- Promotes the ENG-122..ENG-136 candidate backlog from §16.11 into ROADMAP-grade AC ready to enter §3b when each wave is approved.
+- Adds twelve net-new tickets (ENG-137..ENG-148) covering live SSE streaming, AI confidence calibration, workflow runbook/owner context, cross-workflow dependency view, anomaly detection, workflow-shape simulator, native Slack app with interactive approvals, embeddable recovery widget, PR-style change review, audit log search/export UI, OTLP exporter + Grafana dashboards, and a WCAG 2.1 AA accessibility gate.
+- Groups everything into four waves: (A) recovery operationality, (B) AI quality + distribution, (C) enterprise + measurement, (D) scale moats.
+
+The reason this exists as a third doc rather than an in-place edit to §16.10 or §16.11: the earlier plans answered "what could we ship" (curation) and "what must we become" (strategy). This one answers "in what order, with what AC, and what gaps must we close to call it world-class." It is meant to be read once per quarterly planning cycle and otherwise stay out of the way.

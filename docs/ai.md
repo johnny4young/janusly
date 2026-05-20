@@ -309,3 +309,17 @@ Janusly sends to the configured provider. The supported MVP deployment target is
 - `agent (planner: "openai")` — historical field name; at runtime it uses the configured provider. Sends the goal, the available tools list, and the loop history.
 
 Never put live PII or secrets in node outputs. Use `{{secret.NAME}}` so values are resolved at run time and never persisted in events.
+
+## 10. Memory privacy
+
+Cross-run memory (episodic / semantic / procedural recall) is governed by [`docs/memory-policy.md`](memory-policy.md). Key points:
+
+- Memory is **off by default**. Both a process flag (`JANUSLY_MEMORY_ENABLED=true`) AND a tenant flag (`org_configs.memory.enabled=true`) must be set.
+- Memory is **customer data**, not training data — not for Janusly, not for the embedding provider.
+- Eligible content is bounded (recovery rationales, deterministic run summaries, operator-tagged runbook fragments, post-acceptance patch rationales). Raw node outputs, secrets, and PII are explicitly NOT eligible.
+- Recalled memory is framed to the LLM as **data**, never as instructions — same posture as MCP tool descriptions in `composeGenerationSystemPrompt`.
+- Tenant isolation applies at every layer (org-scoped schema, org-scoped similarity ranking, org-scoped audit).
+- Retention is per-kind, with safe defaults and admin-configurable bounds.
+- Operators can delete memory per-entry, per-kind, or purge the entire org by revoking consent.
+
+See the policy doc for the full eligibility list, retention defaults, audit actions, DPA language, and incident-response procedure.
