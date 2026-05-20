@@ -38,6 +38,7 @@ import { evaluateExpression } from "./expression";
 import { executeTool, isToolWriteSide } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 import { appendEvent } from "./persistence";
+import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { mapInput } from "./template";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
@@ -548,8 +549,71 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   },
 
   ai: async (ctx) => {
-    const prompt = String(ctx.config.prompt ?? "Summarize workflow");
-    await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt: previewText(prompt), contextKeys: Object.keys(ctx.context) });
+    // PromptOps seam: when `config.promptRef` is set, resolve it via the
+    // registry resolver before any LLM call. The resolver throws typed
+    // errors (MissingPromptError / MissingVariableError /
+    // RecursivePromptIncludeError) BEFORE token spend; we surface those
+    // as `mode: "fallback"` per the AI-fallback contract.
+    const promptRefRaw = ctx.config.promptRef;
+    const hasPromptRef =
+      promptRefRaw &&
+      typeof promptRefRaw === "object" &&
+      typeof (promptRefRaw as { name?: unknown }).name === "string";
+    const hasInlinePrompt =
+      typeof ctx.config.prompt === "string" && ctx.config.prompt.length > 0;
+
+    if (hasPromptRef && hasInlinePrompt) {
+      await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt_config_ambiguous", {
+        message: "both prompt and promptRef are set; promptRef wins. Set only one.",
+      });
+    }
+
+    let prompt: string;
+    let resolvedPromptMeta: { name: string; version: number } | undefined;
+    if (hasPromptRef && ctx.orgId) {
+      const ref = promptRefRaw as { name: string; version?: number };
+      try {
+        const resolved = await resolvePromptRef({
+          orgId: ctx.orgId,
+          ref: { name: ref.name, version: ref.version },
+          nodeContext: {
+            variables:
+              ctx.config.variables && typeof ctx.config.variables === "object"
+                ? (ctx.config.variables as Record<string, unknown>)
+                : undefined,
+          },
+        });
+        prompt = resolved.resolvedText;
+        resolvedPromptMeta = { name: resolved.promptName, version: resolved.version };
+        await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt_resolved", {
+          promptName: resolved.promptName,
+          version: resolved.version,
+        });
+      } catch (error) {
+        const code =
+          (error as { code?: string }).code ?? "prompt_resolver_failure";
+        const message = error instanceof Error ? error.message : String(error);
+        await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt_resolver_failed", {
+          code,
+          message,
+        });
+        return {
+          status: "completed",
+          output: {
+            mode: "fallback",
+            aiError: code,
+            promptRef: { name: ref.name, version: ref.version ?? null },
+            error: message,
+            response: fallbackAiResponse(message, ctx.context),
+            contextKeys: Object.keys(ctx.context),
+          },
+        };
+      }
+    } else {
+      prompt = String(ctx.config.prompt ?? "Summarize workflow");
+    }
+
+    await appendEvent(ctx.runId, ctx.nodeId, "ai.prompt", { prompt: previewText(prompt), contextKeys: Object.keys(ctx.context), promptRef: resolvedPromptMeta });
     const llm = await getTenantLlmClient(ctx.orgId);
     // `config.model` accepts a bare model id ("gpt-4o-mini") OR a
     // `"<provider>/<model>"` spec ("anthropic/claude-haiku-4-5"); the

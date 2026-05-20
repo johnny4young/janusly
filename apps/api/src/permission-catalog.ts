@@ -38,7 +38,8 @@ export type PermissionCategory =
   | "members"
   | "org"
   | "plugins"
-  | "mcp";
+  | "mcp"
+  | "prompts";
 
 export type PermissionEntry = {
   key: string;
@@ -81,6 +82,9 @@ export const PERMISSION_CATALOG = [
   // mcp client connections
   { key: "mcp.connections.read", category: "mcp",       description: "View external MCP server connections + cached tool descriptors", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "mcp.connections.write",category: "mcp",       description: "Register / edit / delete external MCP server connections + enable per-tool descriptors", defaultRoles: ["admin"] },
+  // promptops registry
+  { key: "prompts.read",         category: "prompts",   description: "View prompts + versions in the PromptOps registry", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "prompts.write",        category: "prompts",   description: "Create prompts, append new versions, pin active version", defaultRoles: ["editor", "admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];
