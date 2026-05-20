@@ -18,7 +18,7 @@ import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { getRunComparison } from "@janusly/data/src/runComparisonRepo";
 import { db, runEvents, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { replayDecision } from "@janusly/domain";
-import { replayRunAsValidation } from "@janusly/engine/src/adapters/replay-lab";
+import { replayRunAsValidation, replayRunAsValidationFork } from "@janusly/engine/src/adapters/replay-lab";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { cancelRun } from "@janusly/engine/src/persistence";
 import { ResumeRunConflictError, resumeRun } from "@janusly/engine/src/resume-run";
@@ -396,6 +396,121 @@ export const runsRoutes: Route[] = [
       });
 
       return sendJson(res, { runId: replayRunId });
+    } },
+  // Targeted Replay Lab fork — re-run a workflow starting at one node
+  // instead of from scratch. Predecessors of the fork node are cloned
+  // from the source run's terminal state (status='succeeded' with
+  // stateJson copied) so the fork node can read upstream outputs without
+  // re-paying the cost of HTTP / AI / tool calls that already succeeded.
+  // Same `replayMode='validation'` flag as the whole-run replay-lab so
+  // the engine's dryRun gate skips write-side effects uniformly.
+  // Audit action `replay_lab.fork_started` distinguishes forks from
+  // whole-run replays at compliance read time.
+  { method: "POST", match: "/runs/replay-lab/fork", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const { orgConfig } = await orgLlmRuntime(auth.orgId);
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+
+      const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;
+      if (!sourceRunId) return sendJson(res, { error: "sourceRunId is required", code: "invalid_input" }, 400);
+
+      const forkNodeId = typeof body.forkNodeId === "string" ? body.forkNodeId : null;
+      if (!forkNodeId) return sendJson(res, { error: "forkNodeId is required", code: "invalid_input" }, 400);
+
+      // Defensive cap on inputOverride size — same shape as the audit
+      // metadata cap. Over-cap landings would balloon `run_nodes.stateJson`
+      // and `run_events.payload` later; reject up-front with a clear code.
+      if (body.inputOverride !== undefined) {
+        const overrideBytes = Buffer.byteLength(JSON.stringify(body.inputOverride), "utf8");
+        if (overrideBytes > 64_000) {
+          return sendJson(res, {
+            error: `inputOverride exceeds 64 KiB cap (${overrideBytes} bytes)`,
+            code: "override_too_large",
+          }, 422);
+        }
+      }
+
+      // Org-scope the source run. Cross-org / unknown id → 404 (no enumeration leak).
+      const sourceRows = await db.select().from(runs).where(and(eq(runs.id, sourceRunId), eq(runs.orgId, auth.orgId)));
+      const sourceRun = sourceRows[0];
+      if (!sourceRun) return sendJson(res, { error: "Source run not found", code: "not_found" }, 404);
+
+      // No nested forks — source run can't itself be a sandbox run.
+      if (sourceRun.replayMode) {
+        return sendJson(res, { error: "Source run is itself a sandbox run; cannot fork from it", code: "nested_replay_lab" }, 400);
+      }
+
+      // Resolve the workflow snapshot. v1 forks DO NOT accept a patched
+      // workflow — they replay the source's own snapshot at the fork node
+      // (patches go through the whole-run lab path so the patch validation
+      // covers the full DAG). If a future use case wants "fork + patch",
+      // it's a separate route.
+      const versionRows = await db
+        .select()
+        .from(workflowVersions)
+        .where(and(eq(workflowVersions.id, sourceRun.workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
+      const version = versionRows[0];
+      let snapshot: unknown = version?.dagJson;
+      if (!snapshot) {
+        const input = sourceRun.inputJson as Record<string, unknown> | null;
+        snapshot = input && typeof input === "object" ? input.workflow : null;
+      }
+      if (!snapshot) {
+        return sendJson(res, {
+          error: "Source run has no workflow snapshot available; cannot fork",
+          code: "no_workflow_snapshot",
+        }, 400);
+      }
+      const parsed = WorkflowSchema.safeParse(snapshot);
+      if (!parsed.success) {
+        return sendJson(res, {
+          error: `Source run snapshot failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+          code: "invalid_snapshot",
+        }, 400);
+      }
+      const workflow = parsed.data;
+
+      // Propagate trigger-time input so `{{input.*}}` references resolve
+      // to the same values the source run saw at predecessors.
+      const sourceInputJson = sourceRun.inputJson as Record<string, unknown> | null;
+      const triggerInput = sourceInputJson && typeof sourceInputJson === "object"
+        ? sourceInputJson.input
+        : undefined;
+
+      const result = await replayRunAsValidationFork({
+        orgId: auth.orgId,
+        sourceRunId,
+        workflow,
+        forkNodeId,
+        inputOverride: body.inputOverride,
+        input: triggerInput,
+        createdBy: auth.userId,
+      });
+
+      if (!result.ok) {
+        // Map adapter discriminated errors to HTTP codes. `fork_node_not_found`
+        // is a 422 (caller supplied a value the route accepted shape-wise
+        // but the workflow doesn't have that node). `predecessor_not_succeeded`
+        // is a 422 (we can't fork past an unreliable upstream).
+        return sendJson(res, {
+          error: result.message,
+          code: result.code,
+          details: "details" in result ? result.details : undefined,
+        }, 422);
+      }
+
+      await audit(auth.orgId, auth.userId, "replay_lab.fork_started", "run", sourceRunId, {
+        replayRunId: result.runId,
+        forkNodeId,
+        predecessorCount: result.predecessorCount,
+        hasOverride: body.inputOverride !== undefined,
+      });
+
+      return sendJson(res, {
+        runId: result.runId,
+        predecessorCount: result.predecessorCount,
+      });
     } },
   // Run comparison — per-node bundle the Replay Lab's comparison view
   // consumes. Both runs are org-scoped via `getRunComparison`; either
