@@ -150,10 +150,48 @@ export async function planAgentToolWithLLM(
 
   const goal = config.goal ?? "Choose the best tool for this workflow step.";
 
+  // PromptOps seam: when `config.systemPromptRef` is set AND we have an
+  // orgId, resolve the registry template and override the hardcoded
+  // planner system prompt below. The resolver throws on missing prompt /
+  // missing variable / recursion; we catch and fall back to the
+  // hardcoded prompt so the agent loop continues to make progress.
+  const defaultSystemPrompt =
+    "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON.";
+  let systemPrompt = defaultSystemPrompt;
+  const systemPromptRefRaw = config?.systemPromptRef;
+  if (
+    systemPromptRefRaw &&
+    typeof systemPromptRefRaw === "object" &&
+    typeof (systemPromptRefRaw as { name?: unknown }).name === "string" &&
+    telemetryContext?.orgId
+  ) {
+    const refIn = systemPromptRefRaw as { name: string; version?: number };
+    try {
+      // Lazy require so the planner doesn't pay the import cost on every
+      // call when no opt-in is set — the resolver pulls in the data
+      // package which transitively imports the drizzle client.
+      const { resolvePromptRef } = await import("./prompt-resolver");
+      const resolved = await resolvePromptRef({
+        orgId: telemetryContext.orgId,
+        ref: { name: refIn.name, version: refIn.version },
+        nodeContext: {
+          variables:
+            config?.variables && typeof config.variables === "object"
+              ? (config.variables as Record<string, unknown>)
+              : undefined,
+        },
+      });
+      systemPrompt = resolved.resolvedText;
+    } catch {
+      // Silent fallback to the hardcoded prompt. The agent loop keeps
+      // making progress; the operator can verify via the `prompt.*`
+      // audit rows whether their promptRef ever resolved successfully.
+    }
+  }
+
   try {
     const result = await llm.generateText({
-      system:
-        "You are a workflow agent planner. Select exactly one tool from availableTools, or return done=true if the goal is complete. Return only valid JSON.",
+      system: systemPrompt,
       prompt: JSON.stringify({
         goal,
         config,

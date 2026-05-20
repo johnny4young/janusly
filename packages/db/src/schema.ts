@@ -826,3 +826,82 @@ export const mcpToolDescriptors = pgTable(
     uniqueIndex("mcp_tool_descriptors_connection_name_idx").on(table.connectionId, table.name),
   ],
 );
+
+/**
+ * Org-scoped named prompt templates for the PromptOps registry.
+ *
+ * One row per `(orgId, name)`. The `pinned_version_id` nullable column points
+ * at the `prompt_versions.id` that should be treated as the "active" version
+ * when an `ai` / `agent` node references the prompt by name without an
+ * explicit version. When null, the resolver falls back to the latest
+ * published version (highest `version` integer).
+ *
+ * No foreign key to `prompt_versions` — same `workflow_versions` /
+ * `workflows` posture; orphaned rows tolerated. Multi-tenant scope enforced
+ * at the repo layer via `eq(prompts.orgId, orgId)` on every query.
+ *
+ * Adding a new prompt writes audit `prompt.created`; pinning a version
+ * writes `prompt.version_pinned` with `{ from, to }` metadata.
+ */
+export const prompts = pgTable(
+  "prompts",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull().default("default"),
+    name: text("name").notNull(),
+    description: text("description"),
+    // Nullable. `null` = resolver uses the latest published version.
+    // Set via `POST /prompts/:name/versions/:version/pin`.
+    pinnedVersionId: text("pinned_version_id"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("prompts_org_name_idx").on(table.orgId, table.name),
+    index("prompts_org_created_idx").on(table.orgId, table.createdAt.desc()),
+  ],
+);
+
+/**
+ * Append-only versions of each prompt. Version numbers are server-assigned
+ * (auto-incremented per-prompt) and monotonically increasing — no manual
+ * version setting by clients. Once published, a version is immutable; if a
+ * prompt needs to change, create a new version.
+ *
+ * `templateText` is the raw template body with `{{var.X}}` and
+ * `{{include.Y}}` substitution tokens. The resolver in
+ * `packages/engine/src/prompt-resolver.ts` is the single chokepoint that
+ * substitutes these — never read this column from a route handler or node
+ * executor directly.
+ *
+ * `variables` is a JSONB array of `PromptVariable` records (declared
+ * variable name, type, required flag, optional default). The resolver
+ * validates the calling node's context against these declarations BEFORE
+ * the LLM call so a missing-required variable surfaces without burning
+ * tokens.
+ *
+ * Adding a new version writes audit `prompt.version_created`.
+ */
+export const promptVersions = pgTable(
+  "prompt_versions",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull().default("default"),
+    promptId: text("prompt_id").notNull(),
+    version: integer("version").notNull(),
+    templateText: text("template_text").notNull(),
+    // `PromptVariable[]` — see `packages/shared/src/prompt-variables.ts`.
+    variables: jsonb("variables").notNull().default([]),
+    // Closed enum: 'draft' | 'published'. v1 ships every version as
+    // 'published' on create; the column is reserved for a future
+    // workflow-style draft-then-publish flow.
+    status: text("status").notNull().default("published"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("prompt_versions_org_prompt_version_idx").on(table.orgId, table.promptId, table.version),
+    index("prompt_versions_org_prompt_created_idx").on(table.orgId, table.promptId, table.createdAt.desc()),
+  ],
+);

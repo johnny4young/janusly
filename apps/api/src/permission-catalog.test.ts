@@ -14,13 +14,18 @@ import {
 } from "./permission-catalog";
 
 describe("PERMISSION_CATALOG", () => {
-  it("ships at least the documented v1 set (19 keys after the MCP-client extension)", () => {
-    expect(PERMISSION_CATALOG.length).toBeGreaterThanOrEqual(19);
+  it("ships at least the documented v1 set (21 keys after the PromptOps extension)", () => {
+    expect(PERMISSION_CATALOG.length).toBeGreaterThanOrEqual(21);
   });
 
   it("exposes the MCP-client connection permissions in the closed catalog", () => {
     expect(isPermission("mcp.connections.read")).toBe(true);
     expect(isPermission("mcp.connections.write")).toBe(true);
+  });
+
+  it("exposes PromptOps permissions in the closed catalog", () => {
+    expect(isPermission("prompts.read")).toBe(true);
+    expect(isPermission("prompts.write")).toBe(true);
   });
 
   it("has unique keys", () => {
