@@ -71,6 +71,7 @@ import { rolesRoutes } from "./routes/roles-routes";
 import { scimRoutes } from "./routes/scim-routes";
 import { ssoRoutes } from "./routes/sso-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
+import { promptsRoutes } from "./routes/prompts-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -101,6 +102,7 @@ export const routes: Route[] = [
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,
+  ...promptsRoutes,
   ...auditRoutes,
   ...recoveryRoutes,
   ...reportsRoutes,
