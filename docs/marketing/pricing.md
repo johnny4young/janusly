@@ -257,7 +257,7 @@ Single scan-friendly table. Useful as the at-a-glance reference for the future p
 
 La versión paralela en castellano del **referente canónico de empaquetado + métrica de valor** de Janusly. Misma estructura, mismas anclas, misma engineering reality. Las rutas (`POST /ai/patch-workflow`, `POST /ai/explain-run`), tablas (`recovery_feedback`, `usage_events`, `audit_logs`), nombres de tier (`Developer / Self-host`, `Team Cloud`, `Business`, `Enterprise`), identificadores de métrica (`per-seat`, `per-recovered-run`, `per-AI-call`) y nombres de productos terceros (Anthropic, WorkOS, Stripe, Slack, GitHub, Resend, SendGrid, Postgres, Redis, BullMQ, React Flow, OpenTelemetry, Zapier, n8n) quedan en inglés en ambos idiomas porque son identificadores, no texto traducible. El brand-mark "Janusly" tampoco se traduce.
 
-Vocabulario canónico, lifted de [`narrative.md`](narrative.md) Versión en español: `autoreparable`, `Centro de Recuperación`, `flujo` / `flujo de trabajo`, `operador`. Quedan en inglés como anglicismos técnicos aceptados: `sandbox`, `rollback`, `DAG`, `MTTR`, `self-host`, `MCP`. Tono: `tú` informal, nunca `usted`. Tags de honestidad: `(en producción)` para lo que ya está shipped, `(roadmap)` para planeado, `(objetivo de empaquetado)` para diseño/contrato, `(caso a caso)` para operacional.
+Vocabulario canónico, lifted de [`narrative.md`](narrative.md) Versión en español: `autoreparable`, `Centro de Recuperación`, `flujo` / `flujo de trabajo`, `operador`. Quedan en inglés como anglicismos técnicos aceptados: `sandbox`, `rollback`, `DAG`, `MTTR`, `self-host`, `MCP`. Tono: `tú` informal, nunca `usted`. Tags de honestidad: `(en producción)` para lo que ya está publicado, `(roadmap)` para planeado, `(objetivo de empaquetado)` para diseño/contrato, `(caso a caso)` para operacional.
 
 **Nota explícita "sin montos en dólares".** Este documento ship **estructura sin precios**. La razón: la data de la beta privada (ENG-093) es lo que ajusta los números reales; comprometernos a un precio sin data nos ancla al equivocado. Hasta que ENG-093 cierre, las conversaciones de venta responden "¿cuánto cuesta?" con `"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"` — guiado por el fit de segmento del discovery call + volumen de runs estimado desde [`icp.md`](icp.md).
 
@@ -268,7 +268,7 @@ La filosofía. Cada sección posterior se deriva de estos principios.
 - **La recuperación es la cuña, no el conteo de integraciones.** El AI Recovery Pack es un **add-on**, no un feature baseline, así que los clientes que compran la cuña reciben la cuña. Otras plataformas de workflow cobran por conteo de connectors; nosotros no.
 - **Self-host es full-runtime, pero el lenguaje de licencia queda sin decidir.** Todo excepto features de managed cloud y controles enterprise corre en self-host. Competimos siendo buenos, no gateando el loop de recuperación; no lo llames open-source/open-core hasta que la decisión de licencia cierre.
 - **La métrica de valor debe seguir el dolor del operador.** Un equipo que corre 50 incidentes/semana paga diferente que uno que corre 50.000 clasificaciones de clientes/semana. Proponemos 3 métricas candidatas (`per-seat`, `per-recovered-run`, `per-AI-call`) y nombramos cuál encaja mejor en cada tier.
-- **Honestidad entre el hoy y el destino.** Los tiers que shippeamos hoy llevan listas claras de features. Enterprise lleva una lista clara de features **más** tags explícitos `(en producción)` / `(roadmap)` para las partes aún no productionizadas. Misma convención que usa `narrative.md` para "somos honestos entre el hoy y el destino".
+- **Honestidad entre el hoy y el destino.** Los tiers que publicamos hoy llevan listas claras de features. Enterprise lleva una lista clara de features **más** tags explícitos `(en producción)` / `(roadmap)` para las partes aún no productionizadas. Misma convención que usa `narrative.md` para "somos honestos entre el hoy y el destino".
 - **Nunca `per-LLM-token`, `per-connector`, `per-workflow-step`.** Estas métricas atan al price card del provider (tokens de LLM a Anthropic), copian la cuña equivocada (conteo de connectors de Zapier), o son demasiado granulares para que el comprador prediga (`per-step`). Ver Sección D para la anti-lista completa.
 
 ### Sección B — Frontera free / self-host
@@ -323,7 +323,7 @@ El epicentro filosófico. El AC lo nombra explícitamente. La engineering realit
 - **Qué está incluido:** el runtime self-host completo según Sección B; Centro de Recuperación completo; editor DAG; tools de integración; cliente + server MCP; LLM bring-your-own-key.
 - **Qué NO está incluido:** runtime managed (el operador corre su propio Postgres / Redis); aislamiento de tenant org compartido; SSO; SCIM; mailer managed; object store managed; SLAs de uptime; billing del lado Janusly.
 - **Candidato a métrica de valor:** **free.** No gateamos el loop de recuperación. Punto.
-- **Caso de uso esperado:** un developer solo shippea un flujo en self-host, obtiene la experiencia completa del Centro de Recuperación gratis, choca con la frontera cuando quiere agregar compañeros o dejar de correr su propio Postgres.
+- **Caso de uso esperado:** un developer solo publica un flujo en self-host, obtiene la experiencia completa del Centro de Recuperación gratis, choca con la frontera cuando quiere agregar compañeros o dejar de correr su propio Postgres.
 - **Path de conversión:** developer choca con una necesidad de tamaño de equipo o infra managed → upgrade a Team Cloud.
 
 #### C.2 — Team Cloud
@@ -434,13 +434,13 @@ Nombrado explícitamente en el AC. Cada control lleva un tag de honestidad: `(en
 - **Ambientes dedicados aislados** — deployment managed cloud single-tenant (Postgres + Redis + worker + API separados por cliente Enterprise). `(objetivo de empaquetado; playbook de deployment y SLA siguen contract-scoped hasta productionizarse.)`
 - **VPC peering privado** — para clientes que requieren aislamiento a nivel de red entre su infraestructura y el managed cloud de Janusly. `(item de roadmap — disponible caso a caso para design partners hasta productionizarse; no prometer en la landing page.)`
 - **Soporte de cuenta nombrada + technical account manager (TAM)** — un humano nombrado asignado a la relación al firmar contrato. `(caso a caso; la persona nombrada es dueña de la relación a través de los renovales y es el path de escalation para issues de producción.)`
-- **Security review con POC nombrado** — cada cliente Enterprise obtiene un contacto de seguridad nombrado del lado Janusly para vendor security questionnaires, incidentes de seguridad y responses de auditoría. `(caso a caso; el turnaround del vendor-questionnaire se trackea como SLA.)`
+- **Security review con POC nombrado** — cada cliente Enterprise obtiene un contacto de seguridad nombrado del lado Janusly para vendor security questionnaires, incidentes de seguridad y responses de auditoría. `(caso a caso; el turnaround del vendor-questionnaire se mide como SLA.)`
 
 ### Sección G — Plan de release de pricing
 
 ¿Cuándo publicamos números reales? Atado al cierre de ENG-093.
 
-- **Hoy (ENG-068 shippea, sin números).** Las conversaciones de venta responden "¿cuánto?" con `"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"`. El fit de segmento del discovery call + volumen de runs estimado de `icp.md` es el input que nos deja nombrar un tier; el precio dentro de ese tier se negocia.
+- **Hoy (ENG-068 sale, sin números).** Las conversaciones de venta responden "¿cuánto?" con `"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"`. El fit de segmento del discovery call + volumen de runs estimado de `icp.md` es el input que nos deja nombrar un tier; el precio dentro de ese tier se negocia.
 - **Después de que ENG-093 cierre.** La data de MTTR de la beta privada + las señales de willingness-to-pay de los 3 design partners ajustan las bandas candidatas de `per-seat` y `per-recovered-run`. Elegimos el número v1 para Team Cloud + Business y publicamos en la página de pricing.
 - **Después de tener 10+ clientes pagando en Team Cloud.** Tenemos data de variancia suficiente para publicar un `per-seat` público para Team Cloud + Business con confianza. Enterprise se queda en "contact us" indefinidamente.
 - **Qué nunca publicamos público-facing.** Números de metering per-incident (negociados por contrato), costos unitarios de AI-call (atados a volatilidad del price card del provider), mínimos Enterprise (anclan mal las negociaciones).

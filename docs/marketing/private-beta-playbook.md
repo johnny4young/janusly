@@ -855,7 +855,7 @@ Un candidato es segment-fit si articula al menos UNO de los siete disparadores d
 
 Descalificadores (lifted de [`icp.md`](icp.md) Stage 2). Un "no" educado, sin excepciones:
 
-- "Aún no estamos shippeando AI a producción." → Etapa equivocada. Vuelve en 6 meses.
+- "Aún no estamos lanzando AI a producción." → Etapa equivocada. Vuelve en 6 meses.
 - "Queremos una mejor UI de Zapier." → Categoría equivocada.
 - "Necesitamos un install on-prem / air-gapped." → Fuera de scope para v1.
 - "Estamos evaluando cinco vendors y necesitamos un RFP de 50 preguntas." → Etapa equivocada para un producto en private beta.
@@ -873,7 +873,7 @@ Gracias por el interés. Estamos eligiendo 3 design partners para una private be
 2. ¿Cuál de estos describe mejor a tu equipo? (elegir uno)
    a) B2B startups with ops workflows (refunds, billing exceptions, escalations, support routing)
    b) Engineering/support teams (incident triage, customer-bug workflows)
-   c) AI builders/agencies shippeando flujos AI a clientes
+   c) AI builders/agencies lanzando flujos AI a clientes
    d) Ninguno de los anteriores (texto libre)
 3. ¿Cuál de estos resuena más con tu dolor actual? (multi-select; elige todos los que apliquen)
    - Una automatización se rompió y no pudimos averiguar por qué
@@ -908,7 +908,7 @@ Una vez que entran suficientes intakes (target ~15–25), el fundador elige 3. S
 - **Decision-maker overlap.** Q11 (tú mismo vs alguien más). Si el usuario no es el comprador, la conversación de contrato en la semana 12 se va a stallear. Prefiere respuestas "tú mismo".
 - **Honestidad de disponibilidad.** Q9 "sí" le gana a "sí con caveats". Beta partners que no pueden hacer las llamadas dejan de reportar después de la semana 3.
 - **Concreción de workflow.** Los 3 flujos de Q8 deberían estar nombrados y descritos — "procesar refunds cuando dispara un webhook de Stripe" le gana a "corremos automatizaciones". Workflows vagos significan que el partner no sabe qué quiere probar.
-- **Honestidad de compliance.** Q10 "air-gapped" → un "no" educado. Q10 "SSO requerido" → sigue siendo fit (shippeamos SSO vía WorkOS hoy per AGENTS.md).
+- **Honestidad de compliance.** Q10 "air-gapped" → un "no" educado. Q10 "SSO requerido" → sigue siendo fit (lanzamos SSO vía WorkOS hoy per AGENTS.md).
 
 Tres outcomes explícitos de "no" desde la rúbrica:
 - Requisito air-gapped.
@@ -1008,15 +1008,15 @@ Cada falla observada (en los workflows del partner durante la beta) se bucketiza
 
 Los 7 categorías cerradas:
 
-- `secret_missing` — referencia de credencial faltante o inválida (e.g. `BILLING_API_KEY` sin bindear, template `{{secret.X}}` referenciando un nombre que no existe).
+- `secret_missing` — referencia de credencial faltante o inválida (e.g. `BILLING_API_KEY` sin asignar, template `{{secret.X}}` referenciando un nombre que no existe).
 - `http_error` — respuesta non-2xx de un nodo HTTP o tool HTTP-using (4xx o 5xx; el engine no las separa en la signature hoy).
 - `network_timeout` — request nunca completó (sin respuesta dentro del timeout configurado).
 - `ai_provider` — el provider de LLM devolvió un error (quota, rate, output malformado, modelo desconocido).
-- `parse_error` — output no se pudo parsear (JSON.parse tiró, la validación de Zod rechazó).
+- `parse_error` — output no se pudo interpretar (JSON.parse tiró, la validación de Zod rechazó).
 - `tool_input` — el tool fue llamado con input inválido (campo requerido faltante, type mismatch).
 - `unknown` — todo lo demás (el engine no pudo clasificar).
 
-El fundador loggea cada falla en el experiment notebook con `{ partnerId, workflowName, runId, category, failureSignature, recoveryActionTaken, MTTR_minutes }`. El reporte publicado muestra histogramas per-partner y per-cohort a través de estas 7 categorías.
+El fundador registra cada falla en el experiment notebook con `{ partnerId, workflowName, runId, category, failureSignature, recoveryActionTaken, MTTR_minutes }`. El reporte publicado muestra histogramas per-partner y per-cohort a través de estas 7 categorías.
 
 ### Sección E — Onboarding (script de kickoff de 60 minutos)
 
@@ -1052,7 +1052,7 @@ Camina al partner por el Quick-start del README, condensado:
 5. Abre http://localhost:5173.
 
 **Friction watchpoints (el fundador narra en voz alta mientras el partner corre los comandos):**
-- Node 24 requerido (chequea `node --version`). Node más viejo → `nvm use 24` o `corepack enable`.
+- Node 24 requerido (revisa `node --version`). Node más viejo → `nvm use 24` o `corepack enable`.
 - Docker requerido. Si el partner no tiene Docker → marca setup como `partial-pass` para la métrica de friction; pueden completar localmente con su propio Postgres + Redis pero no es un path de 60 minutos.
 - Anthropic key no seteada → las superficies AI degradan a fallback determinístico per AGENTS.md; el loop de recuperación funciona estructuralmente igual pero `POST /ai/explain-run` y `POST /ai/patch-workflow` devuelven `mode: "fallback"`. Documenta esto en las notas de friction.
 
@@ -1061,11 +1061,11 @@ Camina al partner por el Quick-start del README, condensado:
 Sigue el recording script de `failed-workflow-recovery`. Los beats:
 
 1. Abre el template `failed-workflow-recovery` en AI Studio.
-2. Sávalo, corrélo con el sample payload, y deja que la falla intencionalmente sin bindear `{{secret.BILLING_API_KEY}}` aterrice en DLQ.
+2. Guárdalo, córrelo con el sample payload, y deja que la falla intencionalmente sin asignar `{{secret.BILLING_API_KEY}}` aterrice en DLQ.
 3. Abre el home del Centro de Recuperación; clickea el run fallido y muestra la causa raíz explicada por AI desde `POST /ai/explain-run`.
 4. Abre la recovery dialog; muestra las 1–3 patch suggestions de `POST /ai/patch-workflow` con confidence + approachLabel.
 5. Elige primero la suggestion estructural de approval. Clickea "Apply & validate" — `POST /dlq/validate-fix` corre el sandbox replay (writes-skipped per el dryRun gate de AGENTS.md). Sava la nueva versión.
-6. Re-corre el workflow patched, aprueba el nuevo human gate, y deja que el secret aún sin bindear falle otra vez.
+6. Re-corre el flujo parchado, aprueba el nuevo human gate, y deja que el secret aún sin asignar falle otra vez.
 7. Re-abre la recovery dialog, elige la suggestion `swap_secret_ref`, valida el patch, y sava la siguiente versión.
 8. Para un cierre en verde-en-vivo, cablea el secret de reemplazo + endpoint sandbox de billing alcanzable, después clickea "Replay" vía `POST /dlq/replay`. Mira el workflow correr hasta verde.
 
@@ -1193,7 +1193,7 @@ Janusly weekly report — semana del [date]
 
 #### Founder's internal experiment notebook
 
-Por partner-semana, el fundador loggea:
+Por partner-semana, el fundador registra:
 
 ```
 Partner: [name]
@@ -1492,7 +1492,7 @@ El fundador actualiza esto cada lunes a la mañana antes de las llamadas recurre
 
 ### Sección K — Fuera de scope (lo que este playbook NO cubre)
 
-- **Correr el experimento mismo.** Esto es el manual de instrumentos. Correrlo es trabajo operacional del fundador — reclutar, agendar, sostener las llamadas, loggear el notebook, escribir el reporte.
+- **Correr el experimento mismo.** Esto es el manual de instrumentos. Correrlo es trabajo operacional del fundador — reclutar, agendar, sostener las llamadas, registrar el notebook, escribir el reporte.
 - **Artefactos externos publicables.** Blog post, charla de conferencia, landing page de case study, slides de sales deck — todo downstream una vez que los permisos de la Sección H se capturan.
 - **Documentación de compliance vendor-grade.** Atestaciones SOC2, templates de DPA, librerías de security questionnaires — work stream diferente. Usa AGENTS.md internamente como source of truth operativo si un partner pregunta, pero no lo mandes como collateral de cliente y no draftees docs de compliance adentro de este playbook.
 - **Per-region / per-locale recruitment.** El reclutamiento corre en inglés en v1 (el fundador es dueño del experimento en inglés; los partners corren workflows reales en inglés). Los instrumentos localizados al español están en este bloque `Versión en español` que estás leyendo — operadores del lado del fundador que prefieren español pueden leer cada instrumento en su idioma. Las reglas de voz de marca de `narrative.md` aplican por igual a ambos idiomas.
@@ -1516,4 +1516,4 @@ Para lectores futuros navegando de vuelta desde este playbook a sus consumidores
 | Sección H permission capture | [`landing-page.md`](landing-page.md) trust-strip (permiso de logo), landing page de case study (futuro) |
 | Sección I published report | [`pricing.md`](pricing.md) Section G (trigger "After ENG-093 closes"), futuro blog post / charla de conferencia |
 
-Cada consumidor downstream que existe hoy está listado. Los consumidores futuros (landing page de case study, blog post) se agregan a esta tabla cuando shippean.
+Cada consumidor downstream que existe hoy está listado. Los consumidores futuros (landing page de case study, blog post) se agregan a esta tabla cuando salen.

@@ -421,7 +421,7 @@ If the page hosts forms, here are the full specs.
 
 **Párrafo de cierre (común):**
 
-> Janusly es la columna vertebral operativa para flujos con IA. Cada corrida es observable, cada falla produce una explicación estructurada, cada arreglo propuesto es revisable en un sandbox antes de tocar producción, y cada cambio puede replayearse con seguridad. El destino: un mundo donde correr un flujo con IA en producción tiene la misma confianza operativa que correr una base de datos.
+> Janusly es la columna vertebral operativa para flujos con IA. Cada corrida es observable, cada falla produce una explicación estructurada, cada arreglo propuesto es revisable en un sandbox antes de tocar producción, y cada cambio puede reproducirse con seguridad. El destino: un mundo donde correr un flujo con IA en producción tiene la misma confianza operativa que correr una base de datos.
 
 ---
 

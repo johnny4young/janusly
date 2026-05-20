@@ -135,9 +135,9 @@ Son las 3am. Le suena el teléfono al ingeniero de guardia. El flujo de billing 
 
 Abre la laptop, esperando el ritual de siempre: entrar al dashboard, escarbar entre stack traces, encontrar el paso roto, pinguear al equipo de plataforma, abrir un ticket, esperar volver a dormir antes de las 4. Media hora, mínimo. Tal vez una hora.
 
-Esta noche, el dashboard es Janusly. Ve el run fallido al tope del Centro de Recuperación. Hace click. El sistema ya escribió, en castellano simple, qué salió mal: *"El call a la API de billing falló porque el secret `BILLING_API_KEY` no está bindeado para este org. El call también es write-side y no tiene una puerta de aprobación humana arriba — que es por qué este tipo de falla no debería haber podido pasar en silencio."*
+Esta noche, el dashboard es Janusly. Ve el run fallido al tope del Centro de Recuperación. Hace click. El sistema ya escribió, en castellano simple, qué salió mal: *"El call a la API de billing falló porque el secret `BILLING_API_KEY` no está asignado para este org. El call también es write-side y no tiene una puerta de aprobación humana arriba — que es por qué este tipo de falla no debería haber podido pasar en silencio."*
 
-El ingeniero lee dos sugerencias. La primera es estructural — insertar un nodo de aprobación antes del call de billing para que esto no vuelva a dispararse a ciegas. La segunda es el fix inmediato — swap del secret al que el operador ya tiene bindeado. Hace click en **Apply & validate** (el botón se ve en español como *"Aplicar y validar"* — la UI ya está traducida). Janusly corre el flujo parcheado en un sandbox, sin tocar el sistema real de billing, y confirma que habría funcionado. Hace click en aplicar, aprueba el run en espera, y mira cómo corre hasta verde.
+El ingeniero lee dos sugerencias. La primera es estructural — insertar un nodo de aprobación antes del call de billing para que esto no vuelva a dispararse a ciegas. La segunda es el fix inmediato — swap del secret al que el operador ya tiene asignado. Hace click en **Apply & validate** (el botón se ve en español como *"Aplicar y validar"* — la UI ya está traducida). Janusly corre el flujo parcheado en un sandbox, sin tocar el sistema real de billing, y confirma que habría funcionado. Hace click en aplicar, aprueba el run en espera, y mira cómo corre hasta verde.
 
 Son las 3:04am. El ingeniero vuelve a dormir.
 
@@ -149,7 +149,7 @@ Para cualquiera que esté escribiendo nuevo copy de Janusly — landing pages, d
 
 - **Concreto sobre abstracto.** Una escena ("3am, flujo de billing, credencial rotada") aterriza mejor que un claim ("habilitamos flujos AI resilientes"). Cuando dudes, escribe la escena.
 - **Honestos sobre hoy vs destino.** Janusly **está siendo construido**. Decimos qué ship hoy (Centro de Recuperación, sugerencias de parche, validación en sandbox, version rollback) y qué es la dirección (la columna operativa de cada flujo AI que importa). Confundir ambas cosas erosiona la confianza.
-- **Engineering reality como prueba.** Cada claim de marca debería poder cobrarse en un path de ruta, un nombre de tabla, una feature ya shipped. Si una línea de marketing no se puede respaldar con algo que un developer puede señalar, es relleno. Sácala.
+- **Engineering reality como prueba.** Cada claim de marca debería poder cobrarse en un path de ruta, un nombre de tabla, una feature ya en producción. Si una línea de marketing no se puede respaldar con algo que un developer puede señalar, es relleno. Sácala.
 - **Nunca "la AI lo arregla todo".** El humano está en el loop. La AI propone; el operador decide. Cualquier línea que sugiera que Janusly es un auto-fix mágico está equivocada sobre el producto y sobre el posicionamiento. Detéctala y reescríbela.
 - **MTTR es la métrica de récord.** Cuando nombramos un número, es Tiempo Medio de Recuperación (MTTR) de automatizaciones fallidas. Otras métricas son interesantes; MTTR es la que medimos.
 - **El anti-posicionamiento se gana la confianza.** Decir lo que no somos (Zapier, n8n, RPA, agentes-que-hacen-todo) no es un golpe — es respeto al comprador que ya vio los cuatro. Mantenlo claro, nunca chistoso.
