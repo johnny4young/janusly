@@ -215,7 +215,7 @@ The explicit out-of-scope list. Tickets that take any of these on are separate.
 - **No checkout flow / signup-to-billing wiring.** Future ticket once a billing provider is chosen.
 - **No discount policy, no annual-vs-monthly markup, no referral program.** Pricing-operations territory; belongs to a follow-up ticket once v1 numbers are set.
 - **No EULA / contract templates / Master Services Agreement.** Legal team owns those.
-- **No Spanish translation.** The landing page is bilingual (ENG-066); the pricing page localization happens when the page is built. `pricing.md` stays English-only as the sales-team source of truth.
+- **No in-product pricing-page UI localization.** The landing page itself is bilingual (ENG-066); the in-product pricing-page localization happens when that page is built. This doc IS bilingual (see the `Versión en español` block at the end); the in-product surface is separate.
 - **No per-region pricing.** Regions are an Enterprise deployment topic, not a tier topic. Handled per Enterprise contract.
 
 ---
@@ -249,4 +249,241 @@ Single scan-friendly table. Useful as the at-a-glance reference for the future p
 | Named TAM + security POC | — | — | — | ✓ |
 | **AI Recovery Pack (managed add-on)** | — `(BYO key on self-host; no managed model spend)` | available as add-on | available as add-on | available as add-on |
 
-**Empty cell = not included.** **`✓` = included.** **`(shipped)` / `(roadmap)` tags are the honesty markers** for things at the engineering boundary.
+**`—` = not included.** **`✓` = included.** **`(shipped)` / `(roadmap)` tags are the honesty markers** for things at the engineering boundary.
+
+---
+
+## Versión en español
+
+La versión paralela en castellano del **referente canónico de empaquetado + métrica de valor** de Janusly. Misma estructura, mismas anclas, misma engineering reality. Las rutas (`POST /ai/patch-workflow`, `POST /ai/explain-run`), tablas (`recovery_feedback`, `usage_events`, `audit_logs`), nombres de tier (`Developer / Self-host`, `Team Cloud`, `Business`, `Enterprise`), identificadores de métrica (`per-seat`, `per-recovered-run`, `per-AI-call`) y nombres de productos terceros (Anthropic, WorkOS, Stripe, Slack, GitHub, Resend, SendGrid, Postgres, Redis, BullMQ, React Flow, OpenTelemetry, Zapier, n8n) quedan en inglés en ambos idiomas porque son identificadores, no texto traducible. El brand-mark "Janusly" tampoco se traduce.
+
+Vocabulario canónico, lifted de [`narrative.md`](narrative.md) Versión en español: `autoreparable`, `Centro de Recuperación`, `flujo` / `flujo de trabajo`, `operador`. Quedan en inglés como anglicismos técnicos aceptados: `sandbox`, `rollback`, `DAG`, `MTTR`, `self-host`, `MCP`. Tono: `tú` informal, nunca `usted`. Tags de honestidad: `(en producción)` para lo que ya está shipped, `(roadmap)` para planeado, `(objetivo de empaquetado)` para diseño/contrato, `(caso a caso)` para operacional.
+
+**Nota explícita "sin montos en dólares".** Este documento ship **estructura sin precios**. La razón: la data de la beta privada (ENG-093) es lo que ajusta los números reales; comprometernos a un precio sin data nos ancla al equivocado. Hasta que ENG-093 cierre, las conversaciones de venta responden "¿cuánto cuesta?" con `"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"` — guiado por el fit de segmento del discovery call + volumen de runs estimado desde [`icp.md`](icp.md).
+
+### Sección A — Principios de pricing
+
+La filosofía. Cada sección posterior se deriva de estos principios.
+
+- **La recuperación es la cuña, no el conteo de integraciones.** El AI Recovery Pack es un **add-on**, no un feature baseline, así que los clientes que compran la cuña reciben la cuña. Otras plataformas de workflow cobran por conteo de connectors; nosotros no.
+- **Self-host es full-runtime, pero el lenguaje de licencia queda sin decidir.** Todo excepto features de managed cloud y controles enterprise corre en self-host. Competimos siendo buenos, no gateando el loop de recuperación; no lo llames open-source/open-core hasta que la decisión de licencia cierre.
+- **La métrica de valor debe seguir el dolor del operador.** Un equipo que corre 50 incidentes/semana paga diferente que uno que corre 50.000 clasificaciones de clientes/semana. Proponemos 3 métricas candidatas (`per-seat`, `per-recovered-run`, `per-AI-call`) y nombramos cuál encaja mejor en cada tier.
+- **Honestidad entre el hoy y el destino.** Los tiers que shippeamos hoy llevan listas claras de features. Enterprise lleva una lista clara de features **más** tags explícitos `(en producción)` / `(roadmap)` para las partes aún no productionizadas. Misma convención que usa `narrative.md` para "somos honestos entre el hoy y el destino".
+- **Nunca `per-LLM-token`, `per-connector`, `per-workflow-step`.** Estas métricas atan al price card del provider (tokens de LLM a Anthropic), copian la cuña equivocada (conteo de connectors de Zapier), o son demasiado granulares para que el comprador prediga (`per-step`). Ver Sección D para la anti-lista completa.
+
+### Sección B — Frontera free / self-host
+
+El epicentro filosófico. El AC lo nombra explícitamente. La engineering reality (desde `AGENTS.md`) es la fuente.
+
+#### Qué corre en self-host (full-runtime, licencia TBD)
+
+- El runtime completo — Postgres + Redis + BullMQ + worker + API + web. Un `pnpm dev` levanta todo en <5 min.
+- DSL de flujos + editor DAG (canvas React Flow).
+- **Centro de Recuperación** — el feature headline. DLQ completo, clustering por signature de falla, validación en sandbox, rollback de versión. No gateamos el loop de recuperación.
+- Scoping multi-tenant a nivel de engine (una instancia self-host puede hospedar un solo org por diseño — el aislamiento multi-org cross-team es feature de Team Cloud, no del runtime).
+- Tools de integración — Slack, GitHub, email (vía keys Resend/SendGrid que provee el operador), webhook firmado.
+- Cliente LLM — el operador trae su propia key de Anthropic. OpenAI sigue registrado para verificación futura, no para uso productivo actual. El contrato AI-fallback funciona incluso sin key.
+- Cliente + server MCP.
+- Audit log por acción.
+- Trazas + metrics de OpenTelemetry (`service.name="janusly"`).
+
+#### Qué requiere Team Cloud o superior
+
+- Runtime managed — nosotros hospedamos Postgres + Redis + worker; el operador deja de ser SRE.
+- Org compartido con aislamiento multi-tenant cross-team (comportamiento multi-org real, no el self-host de un solo org).
+- Mailer managed (keys de Resend / SendGrid hospedadas por Janusly, no por el cliente).
+- Object store managed para artefactos PDF (S3 / R2 / similar hospedados por Janusly).
+- SLA de uptime (números concretos TBD por tier).
+- Billing central — una factura para el equipo.
+
+#### Qué requiere Business o superior
+
+- RBAC con roles custom + overrides de permisos (el feature de per-org custom-roles desde `AGENTS.md`).
+- Governance de presupuesto + budget gating por flujo.
+- Analytics del feedback de recuperación (rollups cross-workflow de patrones accept/reject).
+- Dashboards de Failure Cluster con agrupación cross-workflow.
+- Reporting de uso + costo por org / por flujo.
+- Overrides de rate limit por org.
+
+#### Qué requiere Enterprise
+
+- SSO (SAML / OIDC vía WorkOS) `(en producción)`.
+- SCIM Directory Sync `(en producción)`.
+- Ambientes dedicados aislados (managed cloud single-tenant — Postgres + Redis + worker + API separados por cliente Enterprise) `(objetivo de empaquetado; playbook de deployment/SLA siguen contract-scoped hasta productionizarse)`.
+- Políticas de retención custom sobre `audit_logs` / `run_events` / `usage_events` más allá de los defaults `(roadmap; PLAN §11 sigue tracking soft delete + ventanas de retención como inacabado)`.
+- VPC peering privado `(roadmap; disponible caso a caso para design partners hasta productionizarse)`.
+- Soporte de cuenta nombrada + technical account manager (TAM) `(caso a caso; humano nombrado asignado al firmar contrato)`.
+- Security review con POC nombrado `(caso a caso; turnaround del vendor-questionnaire tracked)`.
+
+### Sección C — Desglose tier por tier
+
+#### C.1 — Developer / Self-host
+
+- **Audiencia:** individuos técnicos + equipos chicos que operan su propia infra.
+- **Qué está incluido:** el runtime self-host completo según Sección B; Centro de Recuperación completo; editor DAG; tools de integración; cliente + server MCP; LLM bring-your-own-key.
+- **Qué NO está incluido:** runtime managed (el operador corre su propio Postgres / Redis); aislamiento de tenant org compartido; SSO; SCIM; mailer managed; object store managed; SLAs de uptime; billing del lado Janusly.
+- **Candidato a métrica de valor:** **free.** No gateamos el loop de recuperación. Punto.
+- **Caso de uso esperado:** un developer solo shippea un flujo en self-host, obtiene la experiencia completa del Centro de Recuperación gratis, choca con la frontera cuando quiere agregar compañeros o dejar de correr su propio Postgres.
+- **Path de conversión:** developer choca con una necesidad de tamaño de equipo o infra managed → upgrade a Team Cloud.
+
+#### C.2 — Team Cloud
+
+- **Audiencia:** B2B startups with ops workflows — **Segmento 1** de `icp.md` ("Founder / COO / VP Operations" como comprador, "Ops lead / finance ops / customer-support team lead" como usuario).
+- **Qué está incluido:** runtime managed (Janusly hospeda Postgres + Redis + worker), org compartido con miembros del equipo + aislamiento de tenant cross-team, mailer managed + object store managed, SLA básico de uptime, billing central (una factura para el equipo).
+- **Qué NO está incluido:** roles custom RBAC + overrides de permisos; SSO; SCIM; ambientes aislados; governance de presupuesto por flujo.
+- **Candidatos a métrica de valor:**
+  1. **`per-seat`** — anclado en la señal de retención de `icp.md` ("Ops lead abre Janusly ≥3 días/semana"). El comprador puede predecir el costo basado en tamaño de equipo.
+  2. **`per-recovered-run`** — anclado en la métrica maestra (MTTR para automatizaciones fallidas). Lee "pagas cuando te ahorramos toil." Riesgo: el comprador no puede predecir la cuenta hasta saber el volumen de fallas.
+  3. **`per-workflow-org` con runs bundled allowance** — tier flat por org con N runs incluidos; overage a costo unitario chico. Predecible para el comprador.
+  - **Recomendación v1: `per-seat` con runs allowance**, porque mapea más limpio a la señal de retención del Segmento 1 y es el más fácil de predecir.
+- **Banda de precio esperada:** placeholder "team-startup-friendly"; número final TBD post-ENG-093.
+
+#### C.3 — Business
+
+- **Audiencia:** Engineering/support teams + orgs ops más grandes — **Segmento 2** de `icp.md` + extensiones de escala del Segmento 1 (e.g., las personas Revenue ops / Enterprise ops del persona-table de `icp.md`).
+- **Qué está incluido:** Team Cloud + roles custom RBAC + overrides de permisos + governance de presupuesto (budget gating por flujo) + analytics del feedback de recuperación + dashboards de Failure Cluster + reporting de costo + overrides de rate-limit por org.
+- **Qué NO está incluido:** SSO; SCIM; ambientes aislados; VPC privado; TAM nombrado.
+- **Candidatos a métrica de valor:**
+  1. **`per-seat` con allowance de roles custom** — el `per-seat` de Team Cloud con un multiplier por uso de roles custom. El comprador paga más por más flexibilidad de equipo.
+  2. **`per-month-recovered-incidents`** — lee limpio a compradores de engineering ("X incidentes auto-triaged por mes = precio Y").
+  3. **Flat per-org con tiers de uso** — simple, pero no premia a usuarios heavy.
+  - **Recomendación v1: `per-seat` con allowance de roles custom + bandas de volumen de recovery.** Los compradores Business se preocupan tanto por tamaño de equipo como por throughput de recuperación; la métrica combinada hace que el contrato se sienta proporcional a ambos.
+
+#### C.4 — Enterprise
+
+- **Audiencia:** equipos compliance-heavy — finance, health, industrias reguladas. Orgs más grandes con procesos nombrados de procurement y security review.
+- **Qué está incluido:** Business + SSO `(en producción)` + SCIM `(en producción)` + ambientes aislados `(objetivo de empaquetado; contract-scoped hasta productionizarse)` + retención de auditoría custom `(roadmap)` + VPC peering privado `(roadmap)` + TAM nombrado + security review con POC nombrado.
+- **Qué NO está incluido:** cualquier cosa que no esté en la lista de features de arriba. Fine-tuning de modelos custom queda fuera de scope del empaquetado v1 hasta que exista un pull concreto del cliente.
+- **Candidatos a métrica de valor:**
+  1. **Contrato anual con banda de seats + banda de uso** — ceiling de costo predecible para el equipo de procurement del comprador; bandeado por seats + uso para que el uso heavy no reviente el presupuesto.
+  2. **Licencia de plataforma anual + `per-incident-recovered`** — fee fijo de plataforma + costo variable por recuperación. Riesgo: metering per-incident lee como nickel-and-dime a compradores compliance.
+  3. **Negociado custom** — cada contrato Enterprise es único de todos modos.
+  - **Recomendación v1: licencia de plataforma anual + banda de seats.** El metering per-incident lee mal para esta audiencia. Los compradores Enterprise prefieren "sabemos cuánto pagamos cada año" sobre "depende".
+
+#### C.5 — AI Recovery Pack (add-on, NO es un tier)
+
+- **Framing importante:** este es un **add-on managed de AI**, disponible en Team Cloud / Business / Enterprise. **NO** disponible standalone. Developer/Self-host mantiene las mismas superficies de recovery AI a través de modo bring-your-own-key, pero no obtiene model spend managed por Janusly, procurement de modelo, ni soporte AI managed.
+- **Qué está incluido:** el engine de patch suggestion AI (`POST /ai/patch-workflow`) + explicación de fallas AI (`POST /ai/explain-run`) + gating de validación en sandbox (`replayMode: "validation"`) + loop de feedback de recuperación (la tabla `recovery_feedback` alimentando de vuelta al prompt context) + acceso a modelos Anthropic vía el proxy managed de Janusly para tiers cloud.
+- **Qué NO está incluido:** fine-tuning de modelos custom, capacidad de inferencia dedicada, switching de provider de modelo a nivel per-call (el operador obtiene el modelo con el que Janusly tiene contrato).
+- **Candidatos a métrica de valor:**
+  1. **`per-AI-call`** — lee literal. Riesgo: ata el pricing al price card per-token de Anthropic; la volatilidad le filtra al cliente.
+  2. **`per-month-recoveries` con tag AI-mode** — anclado en valor del operador ("Janusly nos ahorró 12 outages este mes") en lugar de costo del provider.
+  3. **Add-on flat atado al tier base** — el más simple. Riesgo: no diferencia uso light vs heavy de AI.
+  - **Recomendación v1: `per-month-recoveries` con AI-mode.** Mapea directo al valor que el operador percibe. Desacopla nuestro pricing del price card de Anthropic.
+
+### Sección D — Candidatos a métrica de valor (análisis cross-cutting)
+
+Las mismas 3 métricas candidatas surgen a través de los tiers. Esta sección analiza los pros / contras de cada una y qué señala al comprador.
+
+#### Candidato 1 — `per-seat`
+
+- **Pros:** predecible, familiar (todo SaaS lo hace), fácil de pronosticar para el comprador, escala natural con la adopción del equipo.
+- **Contras:** desacopla costo de valor (un equipo de 10 seats que recupera 5 incidentes/semana paga lo mismo que uno de 10 seats que recupera 500/semana). Capa el upside en usuarios heavy.
+- **Qué señala:** "cobramos por acceso a la plataforma."
+- **Mejor fit:** capa base de Team Cloud + Business.
+
+#### Candidato 2 — `per-recovered-run`
+
+- **Pros:** mapea directo a la métrica maestra (MTTR para automatizaciones fallidas). Alinea precio con valor. La historia se escribe sola: "cobramos cuando te ahorramos toil."
+- **Contras:** los compradores no pueden predecir la cuenta hasta saber su volumen de fallas — y "no sabemos nuestro volumen de fallas todavía" es un estado común del comprador. Cuentas variables ponen nervioso a procurement.
+- **Qué señala:** "cobramos por outcomes, no por acceso."
+- **Mejor fit:** mid-tier Business (combinado con `per-seat`) y Enterprise (combinado con licencia de plataforma).
+
+#### Candidato 3 — `per-AI-call`
+
+- **Pros:** mapea el costo AI al valor AI. El comprador paga por los features AI que usa.
+- **Contras:** ata nuestro pricing a la volatilidad del price card de Anthropic. Anima a los compradores a evitar features AI. Lee granular y confuso.
+- **Qué señala:** "cobramos por compute AI."
+- **Mejor fit:** el add-on AI Recovery Pack (donde el uso AI ES el producto) — pero expresado como "`per-month-recoveries-with-AI-mode`" en lugar de `per-call` crudo, para desacoplar del precio del token.
+
+#### Matriz de recomendación (qué métrica encaja en qué tier)
+
+| Tier | Métrica de valor recomendada |
+| --- | --- |
+| Developer / Self-host | Free; sin métrica. |
+| Team Cloud | `per-seat` con runs bundled allowance. |
+| Business | `per-seat` con allowance de roles custom + bandas de volumen de recovery. |
+| Enterprise | Licencia de plataforma anual + banda de seats. |
+| AI Recovery Pack (add-on) | `per-month-recoveries` con tag AI-mode. |
+
+#### Qué evitamos explícitamente
+
+- **Pricing `per-connector`.** El modelo de Zapier. Cuña equivocada — no estamos vendiendo conteo de integraciones.
+- **Pricing `per-workflow-step`.** Demasiado granular para que los compradores predigan. Engineers construyendo DAGs van a resentir la métrica.
+- **Pricing `per-LLM-token`.** Ata nuestro pricing al price card del provider de LLM. Si Anthropic dobla su precio per-token de la noche a la mañana, nuestro pricing se rompe.
+- **Tier free con output watermarked / branded.** Abarata la marca por un lift de conversión chico.
+- **Pricing "Enterprise" en la página pública.** Enterprise es "contact us" por definición; publicar un número ancla mal la negociación.
+
+### Sección E — Mapa tier → segmento (cheat sheet de ventas)
+
+Para ventas: cuando un lead inbound tiene segmento identificado (vía el persona-to-segment table de `icp.md`), esta tabla mapea al tier recomendado + si vale upsell del AI Recovery Pack.
+
+| Segmento ICP | Tier recomendado | ¿Upsell del AI Recovery Pack? |
+| --- | --- | --- |
+| **B2B startups with ops workflows** (Segmento 1) | Team Cloud → Business cuando el equipo crece | Sí — el loop de recuperación de refund/billing se beneficia más de las patch suggestions AI |
+| **Engineering/support teams** (Segmento 2) | Business | Sí — el triage de incidentes se beneficia de la explicación AI y el clustering de patrones |
+| **AI builders/agencies** (Segmento 3) | Developer/Self-host para su propio org + Business para deployments de cliente | Mixto — los AI builders frecuentemente tienen sus propias keys de LLM para trabajo de cliente; ofrece el add-on, acepta "no" con elegancia |
+
+### Sección F — Controles enterprise a profundidad
+
+Nombrado explícitamente en el AC. Cada control lleva un tag de honestidad: `(en producción)`, `(roadmap)`, `(objetivo de empaquetado)`, o `(caso a caso)`.
+
+- **SSO vía WorkOS** — SAML, OIDC, enforced-SSO por org. `(en producción — ver sección de auth en AGENTS.md: flujo SSO WorkOS con state firmado por HMAC, protección de replay vía sso_state_nonces, membership JIT vía verified_domains / invitations / sso_connections.)`
+- **SCIM vía WorkOS Directory Sync** — `(en producción — 4 tablas: scim_directories / scim_user_state / scim_group_state / scim_processed_events; verificación de firma de webhook vía HMAC estilo Stripe; 3 guards de idempotencia (replay, out-of-order, resurrection).)`
+- **Ventanas custom de retención de auditoría** — más allá de la retención por defecto en `audit_logs` / `run_events` / `usage_events`. `(roadmap; PLAN §11 sigue tracking soft delete + ventanas de retención como inacabado.)`
+- **Ambientes dedicados aislados** — deployment managed cloud single-tenant (Postgres + Redis + worker + API separados por cliente Enterprise). `(objetivo de empaquetado; playbook de deployment y SLA siguen contract-scoped hasta productionizarse.)`
+- **VPC peering privado** — para clientes que requieren aislamiento a nivel de red entre su infraestructura y el managed cloud de Janusly. `(item de roadmap — disponible caso a caso para design partners hasta productionizarse; no prometer en la landing page.)`
+- **Soporte de cuenta nombrada + technical account manager (TAM)** — un humano nombrado asignado a la relación al firmar contrato. `(caso a caso; la persona nombrada es dueña de la relación a través de los renovales y es el path de escalation para issues de producción.)`
+- **Security review con POC nombrado** — cada cliente Enterprise obtiene un contacto de seguridad nombrado del lado Janusly para vendor security questionnaires, incidentes de seguridad y responses de auditoría. `(caso a caso; el turnaround del vendor-questionnaire se trackea como SLA.)`
+
+### Sección G — Plan de release de pricing
+
+¿Cuándo publicamos números reales? Atado al cierre de ENG-093.
+
+- **Hoy (ENG-068 shippea, sin números).** Las conversaciones de venta responden "¿cuánto?" con `"trabajaremos con tu equipo sobre el precio una vez que ambos conozcamos el workload"`. El fit de segmento del discovery call + volumen de runs estimado de `icp.md` es el input que nos deja nombrar un tier; el precio dentro de ese tier se negocia.
+- **Después de que ENG-093 cierre.** La data de MTTR de la beta privada + las señales de willingness-to-pay de los 3 design partners ajustan las bandas candidatas de `per-seat` y `per-recovered-run`. Elegimos el número v1 para Team Cloud + Business y publicamos en la página de pricing.
+- **Después de tener 10+ clientes pagando en Team Cloud.** Tenemos data de variancia suficiente para publicar un `per-seat` público para Team Cloud + Business con confianza. Enterprise se queda en "contact us" indefinidamente.
+- **Qué nunca publicamos público-facing.** Números de metering per-incident (negociados por contrato), costos unitarios de AI-call (atados a volatilidad del price card del provider), mínimos Enterprise (anclan mal las negociaciones).
+
+### Sección H — Lo que NO está en este doc
+
+La lista explícita de out-of-scope. Tickets que tomen cualquiera de estos son separados.
+
+- **Sin montos en dólares.** Per el AC ("sin sobre-complicar las ventas tempranas" + "sin implementación de billing requerida"); ENG-093 ajusta los números reales. Las conversaciones de venta nombran "tier" + "candidato a métrica de valor", no "$X / seat / mes".
+- **Sin implementación de Stripe / billing.** Dep baneada per `AGENTS.md`. ENG-068 es docs only. La implementación eventual de billing va a elegir Lago, un flujo de facturación hand-rolled, u otra opción no-Stripe.
+- **Sin flujo de checkout / wiring de signup-to-billing.** Ticket futuro una vez que se elija un provider de billing.
+- **Sin política de descuento, sin markup annual-vs-monthly, sin programa de referidos.** Territorio de pricing-operations; pertenece a un ticket follow-up una vez que los números v1 estén seteados.
+- **Sin EULA / templates de contrato / Master Services Agreement.** El equipo legal es dueño de esos.
+- **Sin localización UI de la página de pricing in-product.** La landing page en sí es bilingüe (ENG-066); la localización de la página de pricing in-product pasa cuando esa página se construya. Este doc SÍ es bilingüe (es lo que estás leyendo); la superficie in-product es separada.
+- **Sin pricing per-región.** Las regiones son un tema de deployment Enterprise, no un tema de tier. Manejado por contrato Enterprise.
+
+### Sección I — Tabla comparativa
+
+Tabla única scan-friendly. Útil como referencia at-a-glance para la futura landing page de pricing.
+
+| Feature | Developer / Self-host | Team Cloud | Business | Enterprise |
+| --- | --- | --- | --- | --- |
+| Runtime de flujos (Postgres + BullMQ) | ✓ (self-hosted) | ✓ (managed) | ✓ (managed) | ✓ (managed) |
+| Centro de Recuperación (DLQ, failure clusters, validación en sandbox, rollback de versión) | ✓ | ✓ | ✓ | ✓ |
+| Editor DAG (canvas React Flow) | ✓ | ✓ | ✓ | ✓ |
+| Tools de integración (Slack, GitHub, email, webhook) | ✓ | ✓ | ✓ | ✓ |
+| Cliente + server MCP | ✓ | ✓ | ✓ | ✓ |
+| Cliente LLM (bring-your-own-key en self-host) | ✓ (BYO key) | ✓ (BYO o managed) | ✓ (BYO o managed) | ✓ (BYO o managed) |
+| Audit log + trazas OpenTelemetry | ✓ | ✓ | ✓ | ✓ |
+| Org compartido con aislamiento de tenant cross-team | — | ✓ | ✓ | ✓ |
+| Mailer managed + object store | — | ✓ | ✓ | ✓ |
+| SLA de uptime | — | básico | upgraded | SLA nombrado en contrato |
+| Billing central | — | ✓ | ✓ | ✓ |
+| Roles custom RBAC + overrides de permisos | — | — | ✓ | ✓ |
+| Governance de presupuesto + budget gating por flujo | — | — | ✓ | ✓ |
+| Analytics del feedback de recuperación + dashboards de Failure Cluster | — | — | ✓ | ✓ |
+| Reporting de costo + uso | — | — | ✓ | ✓ |
+| SSO (SAML / OIDC vía WorkOS) | — | — | — | ✓ `(en producción)` |
+| SCIM Directory Sync | — | — | — | ✓ `(en producción)` |
+| Ambientes dedicados aislados | — | — | — | `(objetivo de empaquetado; contract-scoped)` |
+| Ventanas custom de retención de auditoría | — | — | — | `(roadmap)` |
+| VPC peering privado | — | — | — | `(roadmap)` |
+| TAM nombrado + POC de seguridad | — | — | — | ✓ |
+| **AI Recovery Pack (add-on managed)** | — `(BYO key en self-host; sin model spend managed)` | disponible como add-on | disponible como add-on | disponible como add-on |
+
+**`—` = no incluido.** **`✓` = incluido.** **Los tags `(en producción)` / `(roadmap)` son los marcadores de honestidad** para cosas en la frontera de engineering.
