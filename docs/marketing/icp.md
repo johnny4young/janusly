@@ -259,3 +259,263 @@ When an inbound lead's job title is on screen, use this table to pick the right 
 If a title is not on this table, the prospect is probably not segment-fit. Run a quick discovery to confirm, but the default is "polite no" rather than "force-fit one of the three segments."
 
 The "(narrative only)" tag means the demo has a narrative doc in [`docs/demos/`](../demos/) but no recording script yet — only the three flagship demos (incident-triage, refund-triage, failed-workflow-recovery) have second-by-second recording scripts under [`recording-scripts/`](recording-scripts/). For supporting demos, walk them live or send the narrative doc as pre-read.
+
+---
+
+## Versión en español
+
+La versión paralela en castellano. Misma estructura, mismos 3 segmentos canónicos, mismas líneas de objeción, mismas plantillas de outreach. Las reglas de vocabulario y voz están en [`narrative.md` Versión en español](narrative.md#versión-en-español); este doc las honra. Identificadores cross-cutting de la stack de ventas — los nombres canónicos de segmento (`B2B startups with ops workflows` / `Engineering/support teams` / `AI builders/agencies`), los demo filenames (`refund-triage`, `incident-triage`, `failed-workflow-recovery`, `multi-agent-decision`, `mcp-notion-summary`, `monthly-report-pdf`, `bulk-classify-loop`), los placeholders de mail-merge (`[name]`, `[company]`, `[link]`, `[agency]`), y los IDs de ticket (`ENG-068`, `ENG-093`) — quedan en inglés en ambos idiomas porque son identificadores, no texto traducible.
+
+---
+
+### Segmento 1 — B2B startups with ops workflows
+
+> Automatiza flujos de ops sin perder control cuando hay AI involucrada.
+
+El segmento de movimiento más rápido, con el dolor más fuerte. Compañías SaaS Series A–C, 20–200 empleados, donde el trabajo de ops, finance y support superó las hojas de cálculo pero nadie tiene tiempo de construir una plataforma de flujos desde cero.
+
+#### Pain points (en palabras del comprador)
+
+- "Las excepciones de billing me despiertan. Procesamos refunds en tres lugares — Stripe, nuestra herramienta interna, customer support — y los tres no se ponen de acuerdo sobre cuál es la fuente de verdad."
+- "Cada refund son los mismos cinco clicks. Mi líder de ops gasta 90 minutos por día en eso."
+- "Cuando algo se rompe a las 3am, el ingeniero de guardia pinguea al líder de ops, que pinguea al equipo de plataforma, que tiene que descubrir en qué thread de Slack quedó el último estado funcional. Media hora de toil antes de que alguien toque código."
+- "Probamos Zapier para lo simple. Funciona hasta que un paso falla — y ahí no tenemos idea qué falló, qué reintentamos, ni qué cambió."
+- "Necesitamos un audit trail de quién aprobó qué, porque finance pregunta en cierre de trimestre y hoy hacemos screenshots de Slack."
+
+#### Comprador y usuario
+
+- **Comprador (firma la PO):** Fundador / COO / VP de Operaciones. Es dueño del presupuesto de tooling de ops y siente el dolor en carne propia.
+- **Usuario (usa el producto a diario):** Líder de ops, finance ops associate, líder de customer-support. Construye / aprueba / monitorea flujos; arma los reportes de audit en cierre de trimestre.
+
+El comprador casi no usa el producto después del primer mes. El usuario es la señal de retención — si el líder de ops abre Janusly a diario, el contrato se renueva.
+
+#### Ángulo del demo
+
+- **Arranca con:** [`refund-triage.md`](recording-scripts/refund-triage.md) — la historia human-in-the-loop (webhook → AI summary → aprobación humana → webhook firmado a billing → email) es el match más cercano a lo que hacen manualmente hoy.
+- **Sigue con (si es técnico):** [`failed-workflow-recovery.md`](recording-scripts/failed-workflow-recovery.md) — el demo de la cuña. "Y acá ves qué pasa cuando el call a billing falla." Dos caminos de recuperación, validación en sandbox, replay.
+- **Salta:** los demos de AI builder (multi-agent, MCP) — irrelevantes para el dolor de este segmento.
+
+#### Manejo de objeciones
+
+- **"Ya tengo Zapier."** "Zapier es genial cuando la pregunta es '¿cómo conecto apps SaaS que ya funcionan?' Nosotros somos la capa a la que vas cuando una de esas apps falla — Zapier no te ayuda cuando Stripe devuelve un 401 o tu API de billing rota una credencial. Prueba nuestro demo de recovery por dos minutos; vas a ver la diferencia inmediatamente."
+- **"Los flujos AI son demasiado riesgosos para finance/billing."** "De acuerdo — por eso la puerta de aprobación humana es un nodo de primera clase, y cada parche pasa por validación en sandbox antes de tocar producción. La AI propone; tu líder de ops decide. No shippeamos 'autónomo' para nada de billing."
+- **"¿Mis ingenieros no pueden construir esto en un fin de semana?"** "Pueden construir el happy path en un fin de semana. La capa de recovery — DLQ, explicaciones de falla estructuradas, sandbox replay, audit log, version rollback — es la parte que toma seis meses y tres iteraciones. Ese trabajo ya lo hicimos nosotros."
+
+#### Copy del primer outreach
+
+**Cold email (3 párrafos):**
+
+> Subject: ¿90 minutos al día de toil con refunds?
+>
+> Hola [name] — vi que estás manejando ops en [company]. Hipótesis rápida: si tu equipo procesa refunds/excepciones de billing/escalaciones manualmente en tres herramientas distintas, probablemente estás perdiendo ~90 minutos al día de tiempo de un líder de ops. Y cuando algo se rompe a las 3am, pierdes media hora de un ingeniero también.
+>
+> Janusly es la plataforma de flujos AI recovery-first que construimos para este dolor exacto — tu líder de ops aprueba el call en un click, el webhook de billing se dispara con firma HMAC, y cuando falla (porque eventualmente va a fallar), la AI te muestra qué se rompió y ofrece un fix que puedes validar en un sandbox antes de reintentar.
+>
+> Grabación de 4 minutos del flujo refund-triage: [link to refund-triage recording]. ¿Vale 15 minutos para caminarlo juntos la próxima semana?
+
+**LinkedIn DM (2 oraciones):**
+
+> [name] — vi que estás manejando ops en [company]. Construimos una plataforma de flujos AI recovery-first para refunds / billing / escalaciones; el demo son 4 minutos y va a resonar inmediatamente o no va a resonar. ¿Te paso el link?
+
+#### Métrica de éxito
+
+- **Métrica principal:** Tiempo Medio de Recuperación (MTTR) de runs fallidos de billing/refund/escalación. Baseline ~30 min (triage manual); target <3 min (loop del Centro de Recuperación).
+- **Indicador adelantado:** Aprobaciones procesadas por hora de líder de ops. Baseline ~4/hora (click manual); target 30+/hora (aprobación en un click desde Janusly).
+- **Señal de retención:** El líder de ops abre Janusly ≥3 días/semana en el mes 2.
+
+---
+
+### Segmento 2 — Engineering/support teams
+
+> Convierte incidentes y escalaciones en flujos explicables con recovery construido adentro.
+
+Engineering managers, SREs y equipos de plataforma en compañías donde el volumen de reportes de bugs de clientes y alertas de infra superó al triage manual. Suele ser la misma compañía que el Segmento 1, pero el comprador es otra persona — el engineering manager en vez del COO.
+
+#### Pain points (en palabras del comprador)
+
+- "Cada incidente es el mismo triage: leer la alerta, encontrar el servicio afectado, abrir el issue en GitHub, pinguear al on-call, pegar el link en el canal de Slack correcto. Quince minutos de toil por incidente, y tenemos ocho a la semana."
+- "Nuestra rotación de on-call está quemada. La mitad de las páginas son paperwork que podría automatizarse, pero las herramientas tipo Zapier no manejan nuestro auth / nuestra infra / nuestro contexto."
+- "Cuando entra una escalación de customer-support, rebota entre tres ingenieros antes de que alguien la take ownership. Para entonces el cliente ya churneó."
+- "Intentamos construir tooling interno. La primera versión funcionó; en el momento que un paso empezó a fallar intermitentemente descubrimos que no teníamos historia de recovery ni audit log."
+- "No confiamos en la AI para actuar en producción todavía. Confiamos en que resuma, clasifique, redacte — pero el humano sigue siendo el que aprieta el botón."
+
+#### Comprador y usuario
+
+- **Comprador (firma la PO):** VP de Engineering / Engineering Manager / Director de Plataforma. Es dueño de la salud de la rotación de on-call, del presupuesto de SRE, y de las decisiones de tooling de plataforma.
+- **Usuario (usa el producto a diario):** SRE, ingeniero de on-call, developer de plataforma, líder de customer-support engineering. Cablean flujos, aprueban runs en el diálogo de recovery, leen el timeline a las 3am.
+
+El usuario acá es más técnico que en el Segmento 1 — va a inspeccionar el DAG del flujo, preguntar sobre el runtime, querer ver el schema del audit log. Trae el talk-track de engineering manager.
+
+#### Ángulo del demo
+
+- **Arranca con:** [`incident-triage.md`](recording-scripts/incident-triage.md) — webhook entra, AI summarize, issue en GitHub, notificación en Slack. La estructura espeja su tooling interno pero el paso de AI + el audit trail son nuevos para ellos.
+- **Sigue con:** [`failed-workflow-recovery.md`](recording-scripts/failed-workflow-recovery.md) — el demo de la cuña. Crítico para este segmento porque tienen un baseline alto de "intentamos construirlo"; el loop del Centro de Recuperación es la parte que su tooling interno no tenía.
+- **Salta:** Demos de multi-agent / MCP a menos que mencionen específicamente "estamos construyendo agents." Refund-triage también es prioridad más baja — no son los que aprueban refunds.
+
+#### Manejo de objeciones
+
+- **"Ya tenemos un runbook / un Lambda / un Slack bot para esto."** "Entonces tienes el happy path. Muéstrame qué pasa cuando el webhook de Slack te limita por rate, o cuando la credencial de GitHub rota — ¿tu runbook explica qué se rompió, o lees el stack trace? Nosotros somos la capa que cierra ese gap. El flujo que ya construiste sigue funcionando; Janusly lo envuelve con observabilidad + recovery."
+- **"¿En qué se diferencia esto de Temporal / Airflow / Inngest?"** "Esos son runtimes de flujos durables — fundación sólida. Nosotros también, pero el diferenciador es la superficie del operador: fallas AI-explicadas, parches AI-sugeridos con scores de confianza, validación en sandbox antes de guardar, version rollback en un click. Misma capa de runtime, más la capa de recovery encima."
+- **"No estamos listos para meter AI en el loop de on-call."** "Nosotros tampoco. La AI propone el fix; el humano revisa el diff, valida en un sandbox, y hace click en aplicar. No hay acción AI-autónoma contra producción en nuestro default. Si quieres autónomo después, los mismos primitivos lo soportan — pero la puerta es tuya para levantar."
+
+#### Copy del primer outreach
+
+**Cold email (3 párrafos):**
+
+> Subject: Ocho incidentes a la semana — ¿cuántos son paperwork?
+>
+> Hola [name] — engineering managers con los que hablé recientemente dicen algo así: "la mitad de las páginas de mi on-call son paperwork que podría automatizar, pero no confío en herramientas off-the-shelf con nuestro auth o nuestro contexto." ¿Es una lectura justa para [company]?
+>
+> Janusly es la plataforma de flujos AI que construimos para equipos de engineering que superaron Zapier pero no quieren seguir construyendo tooling interno para incident triage / routing de escalaciones / automatización de status page. El diferenciador es la capa de recovery — cuando un paso falla, la AI explica qué se rompió y propone un fix que puedes validar en un sandbox antes de guardar. Audit log por acción, version rollback en un click, multi-tenant scope en cada query.
+>
+> Grabación de 4 minutos del flujo de incident-triage: [link]. ¿Vale 15 minutos la próxima semana si resuena?
+
+**LinkedIn DM (2 oraciones):**
+
+> [name] — equipo de engineering en [company]. Construimos una plataforma de flujos AI con un runtime recovery-first; grabación de 4 min camina por el flujo de incident-triage. Si ya intentaste construir algo así internamente, la capa de recovery es probablemente la parte a la que no llegaste.
+
+#### Métrica de éxito
+
+- **Métrica principal:** Tiempo Medio de Recuperación (MTTR) de runs de flujos fallidos. Baseline ~45 min (paginar on-call, leer trace, redeploy, reintentar); target <3 min (loop del Centro de Recuperación).
+- **Indicador adelantado:** Incidentes auto-triajados por semana (sin paginar on-call). Baseline 0 (todo pagina); target 5+/semana.
+- **Señal de retención:** El SRE abre el Centro de Recuperación ≥1 vez por turno de on-call en el mes 2.
+
+---
+
+### Segmento 3 — AI builders/agencies
+
+> Shippea flujos AI de cliente con runtime, ops visual, MCP y recovery.
+
+Fundadores y tech leads en agencias de AI, AI-product startups, y consultoras que shippean flujos AI custom para clientes. Ellos escriben el código del agent; necesitan el runtime, el audit log, y la historia de recovery para sentirse cómodos poniendo el flujo de billing del cliente encima.
+
+#### Pain points (en palabras del comprador)
+
+- "Hice un demo de agent excelente para el cliente. Ahora quieren ponerlo en producción y me di cuenta de que no tengo nada — no runtime, no audit log, no manera de rollback cuando el modelo se porta mal."
+- "Cada cliente quiere 'AI pero governable.' Sigo escribiendo el mismo glue de recovery: retries, DLQ, replay, historia de versiones. Son seis semanas de trabajo por cliente y lo revendemos mal."
+- "MCP va a estar en todos lados en 12 meses. Quiero que los flujos de mi agencia consuman servidores MCP sin que yo tenga que cablear cada uno."
+- "Necesito mostrarle al cliente un timeline de run que no sea solo para ingenieros. Estoy cansado de pegar logs en Notion."
+- "Cuando el abogado del cliente pregunta '¿quién aprobó esta acción de AI?', quiero apuntarle a un audit log, no decir 'mmm, déjame chequear Slack.'"
+
+#### Comprador y usuario
+
+- **Comprador (firma la PO):** Fundador de la agencia / tech lead / VP de delivery. Gana en velocidad de go-live de cliente; su margen se achica cada semana de glue code que reescribe por proyecto.
+- **Usuario (usa el producto a diario):** AI engineer senior / solution architect / "la persona que shippeó el demo." Prototipa flujos, configura conexiones MCP, arma el dashboard de audit-log para el cliente.
+
+El usuario es el más técnico de los tres segmentos. Va a preguntar por el primitivo multi-agent, la abstracción del provider de LLM, el write-consent de MCP, y la forma del envelope estructural de patch. Trae el talk-track de comprador técnico-AI.
+
+#### Ángulo del demo
+
+- **Arranca con:** [`multi-agent-decision`](../demos/multi-agent-decision.md) — primitivo de debate de tres agents, timeline observable por agent. El framing "orquestación que Zapier y n8n no pueden reproducir" aterriza fuerte acá. Solo doc narrativo; no hay recording script todavía (solo los 3 flagships tienen recording scripts) — recórrelo en vivo o manda el narrativo como tarea para casa.
+- **Sigue con:** [`mcp-notion-summary`](../demos/mcp-notion-summary.md) — la historia del MCP client. Cablea una conexión una vez, cada flujo la usa. Diferenciador vs construir plumbing de MCP por-cliente. Después [`failed-workflow-recovery.md`](recording-scripts/failed-workflow-recovery.md) para el loop de recovery (este SÍ es un recording script — corre end-to-end).
+- **Salta:** Refund-triage e incident-triage son muy genéricos para este segmento — quieren ver los primitivos AI-native, no los casos de uso de SaaS-glue.
+
+#### Manejo de objeciones
+
+- **"Ya uso LangChain / LangGraph / un runtime custom."** "Esas son librerías — sólidas para prototipar. Nosotros somos el runtime de producción que las envuelve: estado de DAG persistente, audit estructurado, recovery AI-sugerido, version rollback. Quédate con tu código de agent; nosotros te damos la superficie para operarlo después del handoff al cliente."
+- **"El compliance del cliente no va a aprobar una plataforma de terceros manejando sus runs de AI."** "El multi-tenant scope está enforced en cada query, el audit log es por-org-fila-por-acción, el material de secret vive en env (guardamos solo el nombre de la env var, nunca el valor del secret), SSO/SCIM vía WorkOS. Si su equipo de compliance pregunta cosas específicas, tenemos respuestas."
+- **"¿Puedo white-label / embeber Janusly en el producto de mi agencia?"** "No en v1 — estamos enfocados en venta directa. Pero exponemos cada primitivo vía API y MCP; puedes construir dashboards del lado de la agencia que lean nuestro timeline de run. White-label es una conversación futura."
+
+#### Copy del primer outreach
+
+**Cold email (3 párrafos):**
+
+> Subject: ¿Seis semanas de glue de recovery por cliente?
+>
+> Hola [name] — líderes de agencias AI con los que hablé recientemente vienen diciendo lo mismo: "mis ingenieros shippean un demo excelente, después gastamos seis semanas por cliente escribiendo glue de retry / DLQ / audit / rollback porque el runtime del prototype no sobrevive producción." ¿Es una forma familiar para [agency]?
+>
+> Janusly es el runtime de producción de flujos AI que construimos para que eso deje de ser tu problema. Ops visual del DAG, estado de run persistente, audit log estructurado, parches AI-sugeridos con validación en sandbox, MCP client + server, primitivo multi-agent. Tus ingenieros escriben el código del agent; nosotros somos dueños de la superficie que el equipo de compliance del cliente te va a preguntar.
+>
+> Walkthrough corto del flujo de decisión multi-agent: [link to multi-agent narrative]. Si el glue de recovery es el cuello de botella de tu margen de delivery, vale 15 minutos.
+
+**LinkedIn DM (2 oraciones):**
+
+> [name] — líder de agencia AI en [agency]. Construimos el runtime de producción para el glue de recovery / audit / rollback que probablemente estás reescribiendo por cliente. Walkthrough corto de multi-agent; si no resuena el primer minuto, puedes cerrarlo.
+
+#### Métrica de éxito
+
+- **Métrica principal:** Tiempo-de-go-live-con-cliente con audit + recovery. Baseline ~6 semanas (glue custom por proyecto); target <1 semana (pon Janusly, configura org, shippea).
+- **Indicador adelantado:** Cantidad de orgs de cliente corriendo en Janusly con zero glue-code en el mes 2.
+- **Señal de retención:** La agencia usa Janusly para ≥2 proyectos de cliente dentro de los 90 días de firma.
+
+---
+
+### Resumen del motion de ventas
+
+Cómo un deal de Janusly se mueve de primer touch a contrato cerrado. Los números abajo son **hipótesis v1 a validar por ENG-093** (el experimento de private-beta MTTR con 3 design partners) — ajustar después de que aterricen los datos reales.
+
+#### Etapa 1 — Outreach en frío (día 0)
+
+Cold email o LinkedIn DM, según el copy específico de cada segmento arriba. Abre con un dolor que el segmento reconozca en su propio lenguaje. Cierra con el demo asset relevante (grabación de 4 minutos para flagships, narrativo de pre-lectura para demos de apoyo) como el único CTA. No presentes "charlemos" sin un asset concreto adjunto.
+
+**Hipótesis de tasa de respuesta:** 5–10% para warm cold (segmento-fit + individuo nombrado), 1–3% para spray-and-pray. Validar vía ENG-093.
+
+#### Etapa 2 — Llamada de discovery (15 min)
+
+Si el prospect responde, agenda una discovery de 15 minutos. Objetivos:
+
+1. Confirmar segmento-fit (la tabla persona-to-segment al final del doc es el cheat sheet en llamada).
+2. Identificar el dolor específico — excepciones de billing / incident triage / trabajo con clientes de agencia / otra cosa?
+3. Elegir el demo con el que arrancar basado en la respuesta (refund-triage / incident-triage / multi-agent + MCP).
+4. Bookear el demo para 4–7 días después (les da tiempo a invitar a su evaluador técnico).
+
+**Disqualification triggers** — caminar afuera amablemente:
+
+- "No estamos shippeando AI a producción todavía." → Etapa equivocada. Vuelve en 6 meses.
+- "Queremos una mejor UI de Zapier." → Categoría equivocada. Refiérelos a Zapier o n8n.
+- "Necesitamos un install on-prem / air-gapped." → Fuera de scope para v1. Agrégalos a una lista "future enterprise"; no sobrevendas.
+- "Estamos evaluando cinco vendors y necesitamos un RFP de 50 preguntas." → Etapa equivocada para un producto en private-beta. Declinar amablemente y pedir reconectar cuando hayan reducido a un shortlist.
+
+#### Etapa 3 — Demo + Q&A técnico (30 min)
+
+Corre el demo recomendado para el segmento (4–5 minutos) en vivo o pasa la versión grabada, después 25 minutos de Q&A. Cubre las 3 objeciones top del segmento desde la tarjeta del segmento. Manda un email de follow-up el mismo día con: (a) el link de la grabación o el narrativo de pre-lectura, (b) un recap de 2 párrafos de cómo Janusly mapea a su dolor específico, (c) el próximo paso (setup del trial).
+
+**Hipótesis de conversión demo-a-trial:** 30–50% para prospects calificados.
+
+#### Etapa 4 — Setup del trial (semana 2)
+
+Ayuda al prospect a cablear uno de sus flujos reales. El template flagship `failed-workflow-recovery` es el "lo primero que rompen a propósito" recomendado para que vean el loop del Centro de Recuperación end-to-end con sus propios datos.
+
+**Hipótesis de tiempo-al-primer-recovered-run:** 3–7 días desde el arranque del trial. El trial es "real" cuando su equipo usó el Centro de Recuperación para arreglar una falla real al menos una vez.
+
+#### Etapa 5 — Conversión (semana 3–6)
+
+Una vez que un recovery real pasó, el prospect o se vuelve campeón interno de Janusly o se churnea. Drivers de conversión:
+
+- El usuario (líder de ops / SRE / ingeniero de agencia) quiere seguir usándolo a diario.
+- El comprador (COO / VP Eng / fundador de agencia) vio la métrica de MTTR mejorar en un flujo real.
+- La conversación de contrato es sobre scope y precio, no sobre fit-de-categoría.
+
+**Hipótesis de tiempo-al-cierre:** ~30 días para startups B2B + equipos de engineering, ~45 días para AI builders/agencies (compliance check más largo). Validar vía ENG-093.
+
+#### Qué hacer cuando un deal se estanca
+
+- Estancado en Etapa 2 (no se bookeó demo después de la discovery): no creyeron que el demo iba a ser relevante. Re-pitch con un ángulo de demo más segmento-fit.
+- Estancado en Etapa 4 (trial cableado pero sin real-failure-recovery todavía): el usuario no intentó romperlo. Agenda una llamada de 30 min "rompamos un flujo a propósito juntos."
+- Estancado en Etapa 5 (recovery real pasó, pero no hay firma): precio es la fricción. Trae al fundador o a quien sea dueño del packaging de ENG-068.
+
+---
+
+### Mapa persona → segmento (cheat sheet en llamada)
+
+Cuando el job title de un lead inbound está en pantalla, usa esta tabla para elegir la tarjeta de segmento correcta antes de que arranque la llamada. Los nombres de persona en **negrita** están lifted verbatim de los campos `Audience` de los demos (ver [`docs/demos/`](../demos/)) — esos son los roles para los que cada demo fue escrito, así que el demo aterriza limpio. Títulos adyacentes en el mismo segmento (fundadores, VPs, ICs en la misma función organizacional) aparecen sin negrita y heredan el segmento + lead demo de la persona ancla.
+
+| Persona / job title | Canonical segment | Lead demo |
+| --- | --- | --- |
+| Fundador, COO, VP de Operaciones | B2B startups with ops workflows | refund-triage |
+| Líder de ops, finance ops associate | B2B startups with ops workflows | refund-triage |
+| Líder de customer-support | B2B startups with ops workflows | refund-triage |
+| **Líderes de revenue ops / finance ops / customer-support** | B2B startups with ops workflows | refund-triage → failed-workflow-recovery |
+| **Compradores de enterprise ops / finance ops / business analytics** | B2B startups with ops workflows (extensión enterprise) | [monthly-report-pdf](../demos/monthly-report-pdf.md) (solo narrativo) |
+| **Compradores de scale / data-volume / equipos de customer-success y growth** | B2B startups with ops workflows (extensión scale) | [bulk-classify-loop](../demos/bulk-classify-loop.md) (solo narrativo) |
+| VP de Engineering, Director de Plataforma | Engineering/support teams | incident-triage |
+| Engineering Manager, manager de on-call | Engineering/support teams | incident-triage |
+| **SRE / engineering managers de on-call / líderes de operaciones** | Engineering/support teams | incident-triage → failed-workflow-recovery |
+| Líder de customer-support engineering | Engineering/support teams | incident-triage |
+| Fundador de agencia, tech lead, VP de delivery | AI builders/agencies | [multi-agent-decision](../demos/multi-agent-decision.md) (solo narrativo) |
+| **AI builders / agencias / compradores técnico-AI** | AI builders/agencies | [multi-agent-decision](../demos/multi-agent-decision.md) → [mcp-notion-summary](../demos/mcp-notion-summary.md) |
+| Fundador de un AI-product startup | AI builders/agencies | [multi-agent-decision](../demos/multi-agent-decision.md) |
+| **AI builders / compradores de ecosistema / arquitectos técnicos evaluando MCP** | AI builders/agencies (ecosistema) | [mcp-notion-summary](../demos/mcp-notion-summary.md) (solo narrativo) |
+
+Si un título no está en esta tabla, el prospect probablemente no es segmento-fit. Corre una discovery rápida para confirmar, pero el default es "no amable" más que "forzar-fit con uno de los tres segmentos."
+
+El tag "(solo narrativo)" significa que el demo tiene un doc narrativo en [`docs/demos/`](../demos/) pero todavía no tiene recording script — solo los tres demos flagship (incident-triage, refund-triage, failed-workflow-recovery) tienen recording scripts segundo-a-segundo bajo [`recording-scripts/`](recording-scripts/). Para demos de apoyo, recórrelos en vivo o manda el doc narrativo como pre-lectura.
