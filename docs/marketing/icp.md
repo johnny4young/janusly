@@ -298,7 +298,7 @@ El comprador casi no usa el producto después del primer mes. El usuario es la s
 #### Manejo de objeciones
 
 - **"Ya tengo Zapier."** "Zapier es genial cuando la pregunta es '¿cómo conecto apps SaaS que ya funcionan?' Nosotros somos la capa a la que vas cuando una de esas apps falla — Zapier no te ayuda cuando Stripe devuelve un 401 o tu API de billing rota una credencial. Prueba nuestro demo de recovery por dos minutos; vas a ver la diferencia inmediatamente."
-- **"Los flujos AI son demasiado riesgosos para finance/billing."** "De acuerdo — por eso la puerta de aprobación humana es un nodo de primera clase, y cada parche pasa por validación en sandbox antes de tocar producción. La AI propone; tu líder de ops decide. No shippeamos 'autónomo' para nada de billing."
+- **"Los flujos AI son demasiado riesgosos para finance/billing."** "De acuerdo — por eso la puerta de aprobación humana es un nodo de primera clase, y cada parche pasa por validación en sandbox antes de tocar producción. La AI propone; tu líder de ops decide. No lanzamos 'autónomo' para nada de billing."
 - **"¿Mis ingenieros no pueden construir esto en un fin de semana?"** "Pueden construir el happy path en un fin de semana. La capa de recovery — DLQ, explicaciones de falla estructuradas, sandbox replay, audit log, version rollback — es la parte que toma seis meses y tres iteraciones. Ese trabajo ya lo hicimos nosotros."
 
 #### Copy del primer outreach
@@ -386,7 +386,7 @@ El usuario acá es más técnico que en el Segmento 1 — va a inspeccionar el D
 
 > Shippea flujos AI de cliente con runtime, ops visual, MCP y recovery.
 
-Fundadores y tech leads en agencias de AI, AI-product startups, y consultoras que shippean flujos AI custom para clientes. Ellos escriben el código del agent; necesitan el runtime, el audit log, y la historia de recovery para sentirse cómodos poniendo el flujo de billing del cliente encima.
+Fundadores y tech leads en agencias de AI, AI-product startups, y consultoras que lanzan flujos AI custom para clientes. Ellos escriben el código del agent; necesitan el runtime, el audit log, y la historia de recovery para sentirse cómodos poniendo el flujo de billing del cliente encima.
 
 #### Pain points (en palabras del comprador)
 
@@ -394,12 +394,12 @@ Fundadores y tech leads en agencias de AI, AI-product startups, y consultoras qu
 - "Cada cliente quiere 'AI pero governable.' Sigo escribiendo el mismo glue de recovery: retries, DLQ, replay, historia de versiones. Son seis semanas de trabajo por cliente y lo revendemos mal."
 - "MCP va a estar en todos lados en 12 meses. Quiero que los flujos de mi agencia consuman servidores MCP sin que yo tenga que cablear cada uno."
 - "Necesito mostrarle al cliente un timeline de run que no sea solo para ingenieros. Estoy cansado de pegar logs en Notion."
-- "Cuando el abogado del cliente pregunta '¿quién aprobó esta acción de AI?', quiero apuntarle a un audit log, no decir 'mmm, déjame chequear Slack.'"
+- "Cuando el abogado del cliente pregunta '¿quién aprobó esta acción de AI?', quiero apuntarle a un audit log, no decir 'mmm, déjame revisar Slack.'"
 
 #### Comprador y usuario
 
 - **Comprador (firma la PO):** Fundador de la agencia / tech lead / VP de delivery. Gana en velocidad de go-live de cliente; su margen se achica cada semana de glue code que reescribe por proyecto.
-- **Usuario (usa el producto a diario):** AI engineer senior / solution architect / "la persona que shippeó el demo." Prototipa flujos, configura conexiones MCP, arma el dashboard de audit-log para el cliente.
+- **Usuario (usa el producto a diario):** AI engineer senior / solution architect / "la persona que publicó el demo." Prototipa flujos, configura conexiones MCP, arma el dashboard de audit-log para el cliente.
 
 El usuario es el más técnico de los tres segmentos. Va a preguntar por el primitivo multi-agent, la abstracción del provider de LLM, el write-consent de MCP, y la forma del envelope estructural de patch. Trae el talk-track de comprador técnico-AI.
 
@@ -421,7 +421,7 @@ El usuario es el más técnico de los tres segmentos. Va a preguntar por el prim
 
 > Subject: ¿Seis semanas de glue de recovery por cliente?
 >
-> Hola [name] — líderes de agencias AI con los que hablé recientemente vienen diciendo lo mismo: "mis ingenieros shippean un demo excelente, después gastamos seis semanas por cliente escribiendo glue de retry / DLQ / audit / rollback porque el runtime del prototype no sobrevive producción." ¿Es una forma familiar para [agency]?
+> Hola [name] — líderes de agencias AI con los que hablé recientemente vienen diciendo lo mismo: "mis ingenieros lanzan un demo excelente, después gastamos seis semanas por cliente escribiendo glue de retry / DLQ / audit / rollback porque el runtime del prototype no sobrevive producción." ¿Es una forma familiar para [agency]?
 >
 > Janusly es el runtime de producción de flujos AI que construimos para que eso deje de ser tu problema. Ops visual del DAG, estado de run persistente, audit log estructurado, parches AI-sugeridos con validación en sandbox, MCP client + server, primitivo multi-agent. Tus ingenieros escriben el código del agent; nosotros somos dueños de la superficie que el equipo de compliance del cliente te va a preguntar.
 >
@@ -433,7 +433,7 @@ El usuario es el más técnico de los tres segmentos. Va a preguntar por el prim
 
 #### Métrica de éxito
 
-- **Métrica principal:** Tiempo-de-go-live-con-cliente con audit + recovery. Baseline ~6 semanas (glue custom por proyecto); target <1 semana (pon Janusly, configura org, shippea).
+- **Métrica principal:** Tiempo-de-go-live-con-cliente con audit + recovery. Baseline ~6 semanas (glue custom por proyecto); target <1 semana (pon Janusly, configura org, lanza).
 - **Indicador adelantado:** Cantidad de orgs de cliente corriendo en Janusly con zero glue-code en el mes 2.
 - **Señal de retención:** La agencia usa Janusly para ≥2 proyectos de cliente dentro de los 90 días de firma.
 
@@ -460,7 +460,7 @@ Si el prospect responde, agenda una discovery de 15 minutos. Objetivos:
 
 **Disqualification triggers** — caminar afuera amablemente:
 
-- "No estamos shippeando AI a producción todavía." → Etapa equivocada. Vuelve en 6 meses.
+- "No estamos lanzando AI a producción todavía." → Etapa equivocada. Vuelve en 6 meses.
 - "Queremos una mejor UI de Zapier." → Categoría equivocada. Refiérelos a Zapier o n8n.
 - "Necesitamos un install on-prem / air-gapped." → Fuera de scope para v1. Agrégalos a una lista "future enterprise"; no sobrevendas.
 - "Estamos evaluando cinco vendors y necesitamos un RFP de 50 preguntas." → Etapa equivocada para un producto en private-beta. Declinar amablemente y pedir reconectar cuando hayan reducido a un shortlist.
