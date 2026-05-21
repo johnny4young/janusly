@@ -653,6 +653,50 @@ export async function deleteExpiredMemory(
   return { entriesPurged: purged.length };
 }
 
+// ─── Consent-revocation bulk purge ──────────────────────────────────────────
+
+export type PurgeMemoryForOrgResult = {
+  entriesPurged: number;
+  kindsAffected: string[];
+};
+
+/**
+ * Unconditional org-scoped delete of every `memory_entries` row for the
+ * tenant. Sister to `deleteExpiredMemory({ orgId })` — same multi-tenant
+ * gate, but NO `retain_until` predicate. Used by the consent-revocation
+ * bulk-purge job: when an admin flips `memory.enabled` from `true` to
+ * `false`, policy promises every memory row for the org is purged
+ * within 7 days, regardless of per-row retention.
+ *
+ * Writes exactly one `memory.bulk.purged` audit row per call with
+ * `{ entriesPurged, kindsAffected }` metadata. The audit row is the
+ * canonical observable signal — absent rows in a window where a
+ * `memory.consent.revoked` fired 7 days earlier is the operator's
+ * "did the sweep actually run?" check.
+ *
+ * Idempotent: calling on an org with no rows is a no-op (still writes
+ * the audit row with `entriesPurged: 0` so the operator can confirm
+ * the handler executed; the cost is one extra audit insert per
+ * "nothing to purge" call, traded for the observability win).
+ */
+export async function purgeMemoryForOrg(orgId: string): Promise<PurgeMemoryForOrgResult> {
+  const purged = await db
+    .delete(memoryEntries)
+    .where(eq(memoryEntries.orgId, orgId))
+    .returning({
+      id: memoryEntries.id,
+      kind: memoryEntries.kind,
+    });
+
+  const kindsAffected = Array.from(new Set(purged.map((row) => row.kind))).sort();
+  await writeAudit(orgId, null, "memory.bulk.purged", null, null, {
+    entriesPurged: purged.length,
+    kindsAffected,
+  });
+
+  return { entriesPurged: purged.length, kindsAffected };
+}
+
 // ─── Audit + usage helpers (private) ─────────────────────────────────────────
 
 async function writeAudit(
