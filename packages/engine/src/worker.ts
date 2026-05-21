@@ -51,6 +51,10 @@ import {
   MEMORY_RETENTION_JOB_NAME,
   registerMemoryRetentionScheduler,
 } from "./memory-retention-scheduler";
+import {
+  handleMemoryBulkPurgeTrigger,
+  MEMORY_BULK_PURGE_JOB_NAME,
+} from "./memory-purge-scheduler";
 
 await assertMigrationsApplied();
 
@@ -173,6 +177,15 @@ export const worker = new Worker(
     }
     if (job.name === MEMORY_RETENTION_JOB_NAME) {
       await handleMemoryRetentionTrigger();
+      return;
+    }
+    // One-shot delayed job — scheduled on demand from the
+    // `memory.consent.revoked` audit specialization in
+    // `apps/api/src/routes/org-routes.ts`. No boot registration here:
+    // the schedule lives in Redis until it fires, the worker just
+    // dispatches when BullMQ delivers the matured job.
+    if (job.name === MEMORY_BULK_PURGE_JOB_NAME) {
+      await handleMemoryBulkPurgeTrigger(job.data);
       return;
     }
     const { runId, node, workflow } = validateJobData(job.data);

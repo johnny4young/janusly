@@ -49,7 +49,7 @@ import { generateEmbedding } from "@janusly/ai";
 import { isMemoryAllowed } from "./memoryConsent";
 import { listOrgConfig } from "./orgConfigRepo";
 import { getMemoryUsageRecorder } from "./memoryUsage";
-import { commitMemory, recallMemory, deleteExpiredMemory } from "./memoryEntriesRepo";
+import { commitMemory, recallMemory, deleteExpiredMemory, purgeMemoryForOrg } from "./memoryEntriesRepo";
 
 const generateEmbeddingMock = vi.mocked(generateEmbedding);
 const isMemoryAllowedMock = vi.mocked(isMemoryAllowed);
@@ -511,5 +511,55 @@ describe("deleteExpiredMemory — retention sweep", () => {
     const result = await deleteExpiredMemory({ orgId: "default" });
     expect(result.entriesPurged).toBe(0);
     expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("purgeMemoryForOrg — consent-revocation bulk purge", () => {
+  it("deletes every row for the org regardless of retain_until (past AND future)", async () => {
+    // Both rows ship back from the .returning() — same shape that production
+    // would yield, one with a long-past retain_until and one with a
+    // far-future retain_until. The contract is "no retain_until predicate"
+    // — the delete grabs both unconditionally.
+    const returning = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "past-entry", kind: "recovery_rationale" },
+        { id: "future-entry", kind: "run_summary" },
+      ]);
+    deleteWhereMock.mockReturnValue({ returning });
+    insertValuesMock.mockClear();
+
+    const result = await purgeMemoryForOrg("org-revoked");
+
+    expect(result.entriesPurged).toBe(2);
+    expect(result.kindsAffected).toEqual(["recovery_rationale", "run_summary"]);
+    expect(returning).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes a single memory.bulk.purged audit row with { entriesPurged, kindsAffected }", async () => {
+    const returning = vi
+      .fn()
+      .mockResolvedValue([
+        { id: "e1", kind: "recovery_rationale" },
+        { id: "e2", kind: "recovery_rationale" },
+        { id: "e3", kind: "patch_rationale" },
+      ]);
+    deleteWhereMock.mockReturnValue({ returning });
+    insertValuesMock.mockClear();
+
+    await purgeMemoryForOrg("org-revoked");
+
+    // Exactly one audit insert — not one per row, not one per kind.
+    expect(insertValuesMock).toHaveBeenCalledTimes(1);
+    expect(insertValuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: "org-revoked",
+        action: "memory.bulk.purged",
+        metadata: {
+          entriesPurged: 3,
+          kindsAffected: ["patch_rationale", "recovery_rationale"],
+        },
+      }),
+    );
   });
 });
