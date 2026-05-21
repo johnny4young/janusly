@@ -20,7 +20,15 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
     http: {} as never,
     email: {} as never,
     runs: {} as never,
-    mcp: { writeConsent: false, clientWriteConsent: true, clientRateLimitPerMin: 60, clientCommandAllowlist: "" },
+    mcp: {
+      writeConsent: false,
+      clientWriteConsent: true,
+      clientRateLimitPerMin: 60,
+      clientCommandAllowlist: "",
+      stdioMaxLifetimeMs: 600_000,
+      stdioMaxStderrBytes: 65_536,
+      stdioMaxVmKb: 524_288,
+    },
     integrations: {} as never,
     objectstore: {} as never,
   })),
@@ -31,6 +39,7 @@ vi.mock("./mcp-tool-executor", () => ({
   executeMcpTool: vi.fn(),
   readMcpClientWritesEnabled: vi.fn(() => true),
   resolveMcpClientRateLimitPerMin: vi.fn(() => 60),
+  resolveStdioSandboxConfig: vi.fn(() => ({ allowedCommands: ["node"], enforceLinuxUlimit: false })),
 }));
 
 import { executeMcpTool } from "./mcp-tool-executor";
