@@ -8,6 +8,10 @@
  */
 
 import { listOrgConfig, upsertOrgConfig, getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  cancelPendingMemoryPurge,
+  schedulePendingMemoryPurge,
+} from "@janusly/engine/src/memory-purge-scheduler";
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -64,10 +68,24 @@ export const orgRoutes: Route[] = [
         if (key === "memory.enabled" && typeof entry.value === "boolean" && previousMemoryEnabled !== null) {
           const newValue = entry.value;
           if (previousMemoryEnabled === false && newValue === true) {
+            // Re-grant path. We try to cancel any pending bulk-purge
+            // job BEFORE writing the granted audit so we can include
+            // the cancellation result in the audit metadata —
+            // operators reading the audit log see "consent re-granted
+            // + cancelled a pending purge" in one row. The cancel
+            // helper never throws; a Redis blip results in
+            // `pendingPurgeCancelled: false` which is fine because
+            // the purge handler re-checks `memory.enabled` at fire
+            // time and skips the actual purge anyway (defense in
+            // depth — safety lives in the handler).
+            const pendingPurgeCancelled = await cancelPendingMemoryPurge({
+              orgId: auth.orgId,
+            });
             try {
               await audit(auth.orgId, auth.userId, "memory.consent.granted", "org_config", key, {
                 previousValue: previousMemoryEnabled,
                 newValue,
+                pendingPurgeCancelled,
               });
             } catch (err) {
               console.warn("[org-config] memory consent audit write failed", err);
@@ -80,6 +98,15 @@ export const orgRoutes: Route[] = [
               });
             } catch (err) {
               console.warn("[org-config] memory consent audit write failed", err);
+            }
+            // Schedule the 7-day bulk purge AFTER the revoke audit so
+            // an audit-log reader sees the consent flip first. The
+            // helper is bounded + never throws, so awaiting it closes
+            // the crash-before-enqueue gap without letting a Redis
+            // outage break the config response.
+            const pendingPurgeScheduled = await schedulePendingMemoryPurge({ orgId: auth.orgId });
+            if (!pendingPurgeScheduled) {
+              console.warn("[org-config] pending memory purge was not scheduled", { orgId: auth.orgId });
             }
           }
         }
