@@ -1,5 +1,7 @@
 # Janusly Memory Privacy Policy
 
+> 🇬🇧 English: this document · 🇪🇸 Español: [`memory-policy-es.md`](memory-policy-es.md).
+
 > Status: canonical policy. Closing draft of ENG-114. Operationalizes the "AI
 > training data / memory opt-in policy" gate in `docs/ROADMAP.md` §3c.
 > Companion shipping work lives in ENG-115 (substrate) and ENG-116
@@ -128,13 +130,14 @@ and AI budgets — it is a deliberate symmetry, not a coincidence.
 | --- | --- | --- | --- | --- |
 | `recovery_rationale` | `/recovery/feedback` accept/reject | 180 days | 730 days | Stored with `approachLabel` + outcome + scrubbed rationale text. |
 | `run_summary` | Deterministic explain-run narrative on terminal success | 90 days | 365 days | Raw node outputs NOT included. |
-| `runbook_fragment` | Operator-tagged Markdown (ENG-139) | 365 days | unlimited (admin override) | Markdown subset shared with `pdf.generate`. |
+| `runbook_fragment` | Operator-tagged Markdown (ENG-139) | 365 days | 36,500 days (100-year effective cap) | Markdown subset shared with `pdf.generate`. |
 | `patch_rationale` | Post-acceptance recovery patch rationale | 365 days | 730 days | Rationale only — patched workflow JSON is NOT stored here (it lives in `workflow_versions`). |
 
-Retention defaults live in `org_configs.memory.retentionDaysByKind` as a JSON
-object validated against the closed-enum kinds and the per-kind maximum bounds.
-The retention job (ENG-133) processes memory entries identically to other
-retention-managed tables.
+Retention defaults live in `org_configs.memory.retentionDaysByKind` as a
+JSON-encoded string validated against the closed-enum kinds and the per-kind
+maximum bounds. Empty string means "use the defaults"; `{}` is also accepted
+and has the same effect. The retention job (ENG-133) processes memory entries
+identically to other retention-managed tables.
 
 ## 6. Deletion and export semantics
 
@@ -288,7 +291,7 @@ guards if they look like credentials.
 | --- | --- | --- | --- | --- |
 | `memory.enabled` | boolean | `false` | n/a | Tenant master switch. Required true (alongside `JANUSLY_MEMORY_ENABLED=true`) for any memory write. |
 | `memory.allowedKinds` | csv | `""` (empty = none) | closed-enum: `recovery_rationale,run_summary,runbook_fragment,patch_rationale` | Per-kind opt-in. Empty CSV with `memory.enabled=true` is a valid "memory feature on but no kinds active yet" state. |
-| `memory.retentionDaysByKind` | json | `{}` (use per-kind defaults) | each value in the per-kind maximum range from §5 | Validates closed-key set; rejects unknown kinds. |
+| `memory.retentionDaysByKind` | json string | `""` (use per-kind defaults; `{}` also accepted) | each value in the per-kind maximum range from §5 | Validates closed-key set; rejects unknown kinds. |
 | `memory.recallMaxEntries` | number | `8` | `1..32` | Hard cap on entries returned per recall. |
 | `memory.recallMaxBytes` | number | `8192` | `1024..65536` | Hard cap on total bytes returned per recall. |
 | `memory.embeddingProvider` | string | `""` (use env default) | closed-enum: `anthropic` (other providers are unverified, see AGENTS.md AI integration) | Future re-embedding work; not a runtime override today. |
@@ -344,15 +347,18 @@ appearing in a recall payload, retention job miss):
 
 ## 16. Approval log
 
-This document closes ENG-114 once:
+This document closes the engineering scope of ENG-114 once:
 
 - [ ] Product review (PM sign-off recorded in the ticket comments).
 - [ ] Legal review (DPA language in §10 confirmed by counsel).
 - [ ] Engineering review (one approver familiar with `org_configs` catalog and
   `safe-persist` chokepoint).
-- [ ] `docs/ROADMAP.md` §3c memory gate line updated to point here.
-- [ ] `docs/ai.md` §10 "Memory privacy notes" added pointing here.
-- [ ] `docs/PLAN.md` §7.1 updated to reference this doc.
+- [x] `docs/ROADMAP.md` §3c memory gate line updated to point here.
+- [x] `docs/ai.md` §10 "Memory privacy notes" added pointing here.
+- [x] `docs/PLAN.md` §7.1 updated to reference this doc.
+- [x] `org_configs.memory.*` catalog entries merged (`packages/data/src/orgConfigRepo.ts`).
+- [x] Spanish-language parity shipped (`docs/memory-policy-es.md`).
 
-When all checkboxes are signed, mark ENG-114 `Shipped` in §3b and unblock
-ENG-115.
+ENG-114 may be marked `Shipped` once the engineering checklist is complete.
+Enabling persistent runtime memory for customers remains blocked until the
+Product, Legal, and Engineering sign-off boxes above are checked.
