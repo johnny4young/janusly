@@ -193,6 +193,11 @@ async function recordFeedback(input: {
   approachLabel: string
   accepted: boolean
   comment?: string
+  /** LLM rationale for the suggestion. Passed on the apply-success path
+   *  so the api can synthesize a `patch_rationale` memory entry alongside
+   *  the `recovery_rationale` it always writes on accept. Cancel /
+   *  iterate paths omit it. */
+  rationale?: string
 }): Promise<void> {
   try {
     await api('/recovery/feedback', {
@@ -446,12 +451,15 @@ export function RecoveryDialog({
         // Operator → system feedback: Apply succeeded, so the operator
         // accepted this approach for THIS workflow. Future patch
         // suggestions for the same workflow will see this as accepted.
+        // Passing `rationale` lets the api seed a `patch_rationale`
+        // memory entry alongside the standard `recovery_rationale`.
         // Fire-and-forget: a feedback-write failure must not block the UX.
         void recordFeedback({
           deadLetterId: dlq.id,
           suggestionMode: suggestion.mode,
           approachLabel: selected.approachLabel,
           accepted: true,
+          rationale: selected.rationale,
         })
         return
       }
@@ -468,12 +476,16 @@ export function RecoveryDialog({
         preSaveBeforeSnapshot,
       })
       bumpPlatformVersion()
-      // Operator → system feedback: same as cluster mode above.
+      // Operator → system feedback: same as cluster mode above. The
+      // `rationale` here seeds the `patch_rationale` memory kind so
+      // future similar failures recall the LLM's explanation, not just
+      // the approachLabel.
       void recordFeedback({
         deadLetterId: dlq.id,
         suggestionMode: suggestion.mode,
         approachLabel: selected.approachLabel,
         accepted: true,
+        rationale: selected.rationale,
       })
     } catch (error) {
       setStep({
