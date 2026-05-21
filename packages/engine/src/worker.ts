@@ -46,6 +46,11 @@ import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 import { handleWaitResume } from "./wait-until";
 import { handleScheduleTrigger, replayAllScheduleEntries } from "./schedule-scheduler";
+import {
+  handleMemoryRetentionTrigger,
+  MEMORY_RETENTION_JOB_NAME,
+  registerMemoryRetentionScheduler,
+} from "./memory-retention-scheduler";
 
 await assertMigrationsApplied();
 
@@ -62,6 +67,21 @@ try {
   if (count > 0) console.log(`[schedule] replayed ${count} entries`);
 } catch (err) {
   console.error("[schedule] replay failed", err);
+}
+
+// Daily sweep that enforces per-row `retain_until` on the memory
+// substrate. Global (non-tenant) recurring job — first one in the
+// codebase, hence the `system:` id prefix. Cadence comes from
+// `JANUSLY_MEMORY_RETENTION_CRON` env with a `0 3 * * *` UTC default;
+// the helper validates + falls back to default on parse failure with
+// a warn log. Failure to register is logged-and-tolerated for the
+// same reason as the schedule replay above — a Redis blip at boot
+// must not block the worker from processing the rest of the queue.
+try {
+  const registered = await registerMemoryRetentionScheduler();
+  if (registered) console.log("[memory-retention] daily sweep scheduler registered");
+} catch (err) {
+  console.error("[memory-retention] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -149,6 +169,10 @@ export const worker = new Worker(
     }
     if (job.name === "schedule-trigger") {
       await handleScheduleTrigger(job.data, job.repeatJobKey);
+      return;
+    }
+    if (job.name === MEMORY_RETENTION_JOB_NAME) {
+      await handleMemoryRetentionTrigger();
       return;
     }
     const { runId, node, workflow } = validateJobData(job.data);
