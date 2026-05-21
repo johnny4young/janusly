@@ -8,11 +8,18 @@
  * deprioritize approaches the operator has already rejected.
  */
 
+import { commitMemory } from "@janusly/data/src/memoryEntriesRepo";
+import { isMemoryAllowed } from "@janusly/data/src/memoryConsent";
 import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
-import { RecoveryFeedbackBodySchema } from "../ai-patch-feedback";
+import {
+  composePatchRationaleContent,
+  composeRecoveryRationaleContent,
+  RecoveryFeedbackBodySchema,
+} from "../ai-patch-feedback";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { getDeadLetter } from "../dlq";
@@ -79,6 +86,96 @@ export const recoveryRoutes: Route[] = [
         suggestionMode: parsed.data.suggestionMode,
         accepted: parsed.data.accepted,
       });
+
+      // Memory-write side of the recovery loop. Fires ONLY when the
+      // operator accepts a suggestion AND the org has memory enabled.
+      // Two consent gates: (a) `isMemoryAllowed` short-circuit FIRST so
+      // memory-disabled orgs see byte-for-byte zero behavior change (no
+      // `commitMemory` call, no `usage_events` row, no `memory.*` audit
+      // pollution); (b) accept-only gate — rejections still land in
+      // `recovery_feedback` for the workflow-scoped `pastFeedbackSummary`
+      // path, but do not seed the substrate. A future product decision
+      // to also capture rejections is a one-line change (the catalog's
+      // `memory.allowedKinds` already supports per-kind opt-in).
+      //
+      // Memory writes are fire-and-forget via `Promise.allSettled` so a
+      // commitMemory failure NEVER breaks the feedback `{ ok: true }`
+      // response. The repo writes its own `memory.entry.failed` audit
+      // on failure paths; the route's `console.warn` provides the
+      // operator-traceable signal in the warn log.
+      if (parsed.data.accepted) {
+        const consent = await isMemoryAllowed(auth.orgId);
+        if (consent.allowed) {
+          const signature = (() => {
+            try {
+              const node = dlq.nodeJson as { type?: unknown; config?: { tool?: unknown } } | null;
+              const nodeType = typeof node?.type === "string" ? node.type : undefined;
+              const toolName = typeof node?.config?.tool === "string" ? node.config.tool : undefined;
+              return normalizeErrorSignature(dlq.errorJson, { nodeType, toolName }).signature;
+            } catch {
+              return "unknown";
+            }
+          })();
+          const recoveryContent = composeRecoveryRationaleContent({
+            approachLabel: parsed.data.approachLabel,
+            accepted: parsed.data.accepted,
+            comment: parsed.data.comment ?? null,
+            signature,
+          });
+          const patchContent = parsed.data.rationale
+            ? composePatchRationaleContent({
+                approachLabel: parsed.data.approachLabel,
+                rationale: parsed.data.rationale,
+              })
+            : null;
+          const commits: Promise<unknown>[] = [
+            commitMemory({
+              orgId: auth.orgId,
+              workflowId,
+              runId: dlq.runId ?? undefined,
+              kind: "recovery_rationale",
+              content: recoveryContent,
+              metadata: {
+                approachLabel: parsed.data.approachLabel,
+                accepted: parsed.data.accepted,
+                suggestionMode: parsed.data.suggestionMode,
+                deadLetterId: parsed.data.deadLetterId,
+              },
+            }),
+          ];
+          if (patchContent) {
+            commits.push(
+              commitMemory({
+                orgId: auth.orgId,
+                workflowId,
+                runId: dlq.runId ?? undefined,
+                kind: "patch_rationale",
+                content: patchContent,
+                metadata: {
+                  approachLabel: parsed.data.approachLabel,
+                  suggestionMode: parsed.data.suggestionMode,
+                  deadLetterId: parsed.data.deadLetterId,
+                },
+              }),
+            );
+          }
+          // `Promise.allSettled` never rejects by spec — a `.catch` here
+          // would be dead code. Inspect the per-commit results so an
+          // unexpected throw inside `commitMemory` (which would normally
+          // resolve to `{ ok: false, error }`) still surfaces in the warn
+          // log alongside the repo's own `memory.entry.failed` audit row.
+          void Promise.allSettled(commits).then((results) => {
+            for (const result of results) {
+              if (result.status === "rejected") {
+                console.warn("[recovery-feedback] memory commit threw", {
+                  deadLetterId: parsed.data.deadLetterId,
+                  reason: result.reason,
+                });
+              }
+            }
+          });
+        }
+      }
 
       return sendJson(res, { ok: true });
     } },

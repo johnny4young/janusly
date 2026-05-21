@@ -43,6 +43,15 @@ export const RecoveryFeedbackBodySchema = z.object({
   ]),
   accepted: z.boolean(),
   comment: z.string().max(2000).optional(),
+  // Optional LLM rationale text for the accepted suggestion. The
+  // recovery dialog passes it on the apply-success path so the route
+  // can synthesize a `patch_rationale` memory entry alongside the
+  // `recovery_rationale` it already writes. Cancel / iterate paths
+  // omit it; headless callers (MCP, CI) also omit it and consequently
+  // never seed the `patch_rationale` substrate. 2000-char cap mirrors
+  // `comment`'s DoS bound and matches the upstream-suggested rationale
+  // size from the patch envelope.
+  rationale: z.string().max(2000).optional(),
 });
 
 /** Max characters in the produced hint string. Truncated with a trailing `…` if exceeded. */
@@ -80,4 +89,76 @@ export function composeFeedbackHint(summary: FeedbackSummary[]): string {
   const joined = `Past operator decisions for this workflow: ${segments.join("; ")}.`;
   if (joined.length <= MAX_HINT_CHARS) return joined;
   return `${joined.slice(0, MAX_HINT_CHARS - 1).trimEnd()}…`;
+}
+
+// ─── Memory write helpers (consumed by /recovery/feedback) ─────────────────
+
+/** Hard cap on the rationale text inlined into the patch_rationale memory
+ *  content. The schema already caps at 2000; this is the per-line ceiling
+ *  before the embedding model gets the string. Long rationales get a
+ *  trailing `…`. */
+const MAX_RATIONALE_CHARS = 1_200;
+
+/** Hard cap on the failure signature segment in recovery_rationale content. */
+const MAX_SIGNATURE_CHARS = 120;
+
+/**
+ * Compose the `content` string for a `recovery_rationale` memory entry.
+ *
+ * The string is the durable record of one operator decision — what
+ * approach the LLM proposed (`approachLabel`), whether the operator
+ * accepted, the failure signature so the embedding model can match
+ * future failures with similar shapes, and the operator's optional
+ * comment. Re-scrubs via `scrubSecretShapes` even though the comment
+ * already passed write-time scrubbing in the feedback repo, because
+ * defense-in-depth before the embedding call is cheap and the signature
+ * could carry a fresh shape that wasn't in the regex at write time.
+ *
+ * Pure-functional so the test suite can pin the exact output.
+ */
+export function composeRecoveryRationaleContent(input: {
+  approachLabel: string;
+  accepted: boolean;
+  comment: string | null | undefined;
+  signature: string;
+}): string {
+  const verdict = input.accepted ? "operator accepted" : "operator rejected";
+  const scrubbedSignature = scrubSecretShapes(input.signature);
+  const signature = scrubbedSignature.length > MAX_SIGNATURE_CHARS
+    ? `${scrubbedSignature.slice(0, MAX_SIGNATURE_CHARS - 1).trimEnd()}…`
+    : scrubbedSignature;
+  const rawComment = input.comment?.trim();
+  let commentSegment = "(none)";
+  if (rawComment) {
+    const scrubbedComment = scrubSecretShapes(rawComment);
+    commentSegment = scrubbedComment.length > MAX_COMMENT_CHARS
+      ? `${scrubbedComment.slice(0, MAX_COMMENT_CHARS - 1).trimEnd()}…`
+      : scrubbedComment;
+  }
+  return (
+    `approachLabel=${input.approachLabel} — ${verdict}. ` +
+    `Failure signature: ${signature}. ` +
+    `Comment: ${commentSegment}`
+  );
+}
+
+/**
+ * Compose the `content` string for a `patch_rationale` memory entry.
+ *
+ * The LLM's own rationale text for an ACCEPTED suggestion. Used by the
+ * read-side (recall) so a future similar failure can recall the
+ * explanation the LLM gave in a past success, not just the
+ * approachLabel. Scrubbed + per-line bounded.
+ *
+ * Pure-functional.
+ */
+export function composePatchRationaleContent(input: {
+  approachLabel: string;
+  rationale: string;
+}): string {
+  const scrubbed = scrubSecretShapes(input.rationale.trim());
+  const trimmed = scrubbed.length > MAX_RATIONALE_CHARS
+    ? `${scrubbed.slice(0, MAX_RATIONALE_CHARS - 1).trimEnd()}…`
+    : scrubbed;
+  return `approachLabel=${input.approachLabel}. Rationale: ${trimmed}`;
 }
