@@ -1,0 +1,286 @@
+/**
+ * Pure-unit tests for the `org_configs` catalog: normalization, bounds,
+ * validators, and the `memory.*` family.
+ *
+ * These tests do NOT touch the DB. They exercise `normalizeOrgConfigValue`
+ * + `ORG_CONFIG_DEFINITIONS` directly. Importing the module exercises the
+ * boot-time `assertSafeOrgConfigDefinition` guard against every definition,
+ * so a missing `ALLOWED_CATEGORIES` entry would fail on import.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import type { OrgConfigDefinition } from "./orgConfigRepo";
+import { ORG_CONFIG_DEFINITIONS, normalizeOrgConfigValue } from "./orgConfigRepo";
+
+const findDef = (key: string): OrgConfigDefinition => {
+  const def = ORG_CONFIG_DEFINITIONS.find((d) => d.key === key);
+  if (!def) throw new Error(`catalog missing key: ${key}`);
+  return def;
+};
+
+describe("ORG_CONFIG_DEFINITIONS memory.* family", () => {
+  it("catalogues all 7 memory.* keys from the memory policy", () => {
+    const memoryKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("memory.")).map(
+      (d) => d.key,
+    );
+    expect(memoryKeys.sort()).toEqual(
+      [
+        "memory.enabled",
+        "memory.allowedKinds",
+        "memory.retentionDaysByKind",
+        "memory.recallMaxEntries",
+        "memory.recallMaxBytes",
+        "memory.embeddingProvider",
+        "memory.embeddingModel",
+      ].sort(),
+    );
+  });
+
+  it("registers every memory.* entry under the `memory` category", () => {
+    for (const def of ORG_CONFIG_DEFINITIONS) {
+      if (def.key.startsWith("memory.")) {
+        expect(def.category).toBe("memory");
+      }
+    }
+  });
+
+  it("declares safe defaults: disabled, no kinds, no retention overrides", () => {
+    expect(findDef("memory.enabled").defaultValue).toBe(false);
+    expect(findDef("memory.allowedKinds").defaultValue).toBe("");
+    expect(findDef("memory.retentionDaysByKind").defaultValue).toBe("");
+    expect(findDef("memory.embeddingProvider").defaultValue).toBe("");
+    expect(findDef("memory.embeddingModel").defaultValue).toBe("");
+  });
+
+  it("has NO env fallback on the tenant consent flag (mirrors mcp.writeConsent)", () => {
+    expect(findDef("memory.enabled").envKeys).toBeUndefined();
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.enabled", () => {
+  const def = findDef("memory.enabled");
+
+  it("accepts true / false", () => {
+    expect(normalizeOrgConfigValue(def, true)).toBe(true);
+    expect(normalizeOrgConfigValue(def, false)).toBe(false);
+  });
+
+  it("rejects non-boolean", () => {
+    expect(() => normalizeOrgConfigValue(def, "true")).toThrow(/must be a boolean/);
+    expect(() => normalizeOrgConfigValue(def, 1)).toThrow(/must be a boolean/);
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.allowedKinds CSV validator", () => {
+  const def = findDef("memory.allowedKinds");
+
+  it("accepts empty string (no kinds enabled)", () => {
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+    expect(normalizeOrgConfigValue(def, "   ")).toBe("");
+  });
+
+  it("accepts a single closed-enum kind", () => {
+    expect(normalizeOrgConfigValue(def, "recovery_rationale")).toBe("recovery_rationale");
+  });
+
+  it("accepts the full closed enum", () => {
+    const all = "recovery_rationale,run_summary,runbook_fragment,patch_rationale";
+    expect(normalizeOrgConfigValue(def, all)).toBe(all);
+  });
+
+  it("tolerates whitespace around CSV entries", () => {
+    expect(normalizeOrgConfigValue(def, " recovery_rationale , run_summary ")).toBe(
+      "recovery_rationale , run_summary",
+    );
+  });
+
+  it("rejects an unknown kind", () => {
+    expect(() => normalizeOrgConfigValue(def, "recovery_rationale,evil_kind")).toThrow(
+      /is not one of/,
+    );
+  });
+
+  it("rejects a misspelling", () => {
+    expect(() => normalizeOrgConfigValue(def, "recovery_rational")).toThrow(/is not one of/);
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.retentionDaysByKind JSON validator", () => {
+  const def = findDef("memory.retentionDaysByKind");
+
+  it("accepts empty (use per-kind defaults)", () => {
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+  });
+
+  it("accepts a valid kind=>days map", () => {
+    const json = '{"recovery_rationale":180,"run_summary":90}';
+    expect(normalizeOrgConfigValue(def, json)).toBe(json);
+  });
+
+  it("accepts empty JSON object {}", () => {
+    expect(normalizeOrgConfigValue(def, "{}")).toBe("{}");
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(() => normalizeOrgConfigValue(def, "{not-json}")).toThrow(/must be valid JSON/);
+  });
+
+  it("rejects JSON array (not an object)", () => {
+    expect(() => normalizeOrgConfigValue(def, "[180]")).toThrow(/must be a JSON object/);
+  });
+
+  it("rejects JSON null (not an object)", () => {
+    expect(() => normalizeOrgConfigValue(def, "null")).toThrow(/must be a JSON object/);
+  });
+
+  it("rejects unknown kind", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"evil_kind":30}')).toThrow(/is not one of/);
+  });
+
+  it("rejects non-integer days", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"recovery_rationale":1.5}')).toThrow(
+      /positive integer/,
+    );
+    expect(() => normalizeOrgConfigValue(def, '{"recovery_rationale":"180"}')).toThrow(
+      /positive integer/,
+    );
+  });
+
+  it("rejects zero / negative days", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"recovery_rationale":0}')).toThrow(
+      /positive integer/,
+    );
+    expect(() => normalizeOrgConfigValue(def, '{"recovery_rationale":-1}')).toThrow(
+      /positive integer/,
+    );
+  });
+
+  it("enforces the per-kind maximum from the memory policy", () => {
+    // recovery_rationale max is 730 days
+    expect(() => normalizeOrgConfigValue(def, '{"recovery_rationale":731}')).toThrow(/must be <=/);
+    // run_summary max is 365 days
+    expect(() => normalizeOrgConfigValue(def, '{"run_summary":366}')).toThrow(/must be <=/);
+    // runbook_fragment max is 36,500 days (100-year effective cap)
+    expect(() => normalizeOrgConfigValue(def, '{"runbook_fragment":36501}')).toThrow(/must be <=/);
+    // patch_rationale max is 730 days
+    expect(() => normalizeOrgConfigValue(def, '{"patch_rationale":731}')).toThrow(/must be <=/);
+  });
+
+  it("accepts each kind at its per-kind maximum", () => {
+    expect(normalizeOrgConfigValue(def, '{"recovery_rationale":730}')).toBeTruthy();
+    expect(normalizeOrgConfigValue(def, '{"run_summary":365}')).toBeTruthy();
+    expect(normalizeOrgConfigValue(def, '{"runbook_fragment":36500}')).toBeTruthy();
+    expect(normalizeOrgConfigValue(def, '{"patch_rationale":730}')).toBeTruthy();
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.recallMaxEntries bounds", () => {
+  const def = findDef("memory.recallMaxEntries");
+
+  it("uses default 8 from the memory policy", () => {
+    expect(def.defaultValue).toBe(8);
+  });
+
+  it("accepts in-range values", () => {
+    expect(normalizeOrgConfigValue(def, 1)).toBe(1);
+    expect(normalizeOrgConfigValue(def, 8)).toBe(8);
+    expect(normalizeOrgConfigValue(def, 32)).toBe(32);
+  });
+
+  it("rejects below minimum (1)", () => {
+    expect(() => normalizeOrgConfigValue(def, 0)).toThrow(/>= 1/);
+  });
+
+  it("rejects above maximum (32)", () => {
+    expect(() => normalizeOrgConfigValue(def, 33)).toThrow(/<= 32/);
+    expect(() => normalizeOrgConfigValue(def, 1000)).toThrow(/<= 32/);
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.recallMaxBytes bounds", () => {
+  const def = findDef("memory.recallMaxBytes");
+
+  it("uses default 8192 from the memory policy", () => {
+    expect(def.defaultValue).toBe(8192);
+  });
+
+  it("accepts in-range values", () => {
+    expect(normalizeOrgConfigValue(def, 1024)).toBe(1024);
+    expect(normalizeOrgConfigValue(def, 8192)).toBe(8192);
+    expect(normalizeOrgConfigValue(def, 65536)).toBe(65536);
+  });
+
+  it("rejects below minimum (1024)", () => {
+    expect(() => normalizeOrgConfigValue(def, 512)).toThrow(/>= 1024/);
+  });
+
+  it("rejects above maximum (65536)", () => {
+    expect(() => normalizeOrgConfigValue(def, 131072)).toThrow(/<= 65536/);
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.embeddingProvider allowedValues", () => {
+  const def = findDef("memory.embeddingProvider");
+
+  it("accepts empty (env-default fallback)", () => {
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+  });
+
+  it('accepts "anthropic"', () => {
+    expect(normalizeOrgConfigValue(def, "anthropic")).toBe("anthropic");
+  });
+
+  it("rejects providers outside the closed enum", () => {
+    expect(() => normalizeOrgConfigValue(def, "openai")).toThrow(/must be one of/);
+    expect(() => normalizeOrgConfigValue(def, "ollama")).toThrow(/must be one of/);
+  });
+});
+
+describe("normalizeOrgConfigValue — memory.embeddingModel", () => {
+  const def = findDef("memory.embeddingModel");
+
+  it("accepts empty (env-default fallback)", () => {
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+  });
+
+  it("accepts a model id", () => {
+    expect(normalizeOrgConfigValue(def, "voyage-3-large")).toBe("voyage-3-large");
+  });
+
+  it("rejects secret-shaped values (forbidden-value guard still applies)", () => {
+    expect(() =>
+      normalizeOrgConfigValue(def, "sk-ant-secret-token-abc123"),
+    ).toThrow(/secret-like/);
+    expect(() => normalizeOrgConfigValue(def, "ghp_secrettoken123456")).toThrow(/secret-like/);
+  });
+});
+
+describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
+  // Pre-existing keys without `validate:` must still normalize byte-for-byte.
+  // Pick a representative sample across types.
+  it("ai.timeoutMs (number with no validate hook) keeps existing bounds behaviour", () => {
+    const def = findDef("ai.timeoutMs");
+    expect(normalizeOrgConfigValue(def, 30_000)).toBe(30_000);
+    expect(() => normalizeOrgConfigValue(def, 0)).toThrow(/>= 1/);
+  });
+
+  it("ai.provider (string with allowedValues, no validate hook) keeps existing enum check", () => {
+    const def = findDef("ai.provider");
+    expect(normalizeOrgConfigValue(def, "openai")).toBe("openai");
+    expect(normalizeOrgConfigValue(def, "anthropic")).toBe("anthropic");
+    expect(() => normalizeOrgConfigValue(def, "unknown-vendor")).toThrow(/must be one of/);
+  });
+
+  it("mcp.writeConsent (boolean, no validate hook) keeps existing type check", () => {
+    const def = findDef("mcp.writeConsent");
+    expect(normalizeOrgConfigValue(def, true)).toBe(true);
+    expect(() => normalizeOrgConfigValue(def, "yes")).toThrow(/must be a boolean/);
+  });
+
+  it("auth.allowedEmailDomains (string with allowEmpty, no validate hook) accepts empty unchanged", () => {
+    const def = findDef("auth.allowedEmailDomains");
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+    expect(normalizeOrgConfigValue(def, "acme.com,partner.com")).toBe("acme.com,partner.com");
+  });
+});
