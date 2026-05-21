@@ -4,8 +4,8 @@
  * The process-level `.env` still owns infrastructure and secrets
  * (`DATABASE_URL`, `REDIS_URL`, provider API keys). This table is for
  * org-scoped runtime choices that can safely vary by tenant: LLM defaults,
- * AI limits, outbound HTTP bounds, email delivery posture, and workflow
- * execution policies.
+ * AI limits, outbound HTTP bounds, email delivery posture, workflow execution
+ * policies, and tenant opt-in flags for guarded features.
  *
  * Used by:
  * - `apps/api/src/index.ts` — `GET /org/config` and `POST /org/config`.
@@ -42,6 +42,13 @@ export type OrgConfigDefinition = {
    *  list-shaped keys where empty means "no restriction"). Defaults
    *  false so existing string keys still reject empty inputs. */
   allowEmpty?: boolean;
+  /** Optional post-normalization validator. Runs after the standard
+   *  pipeline (type check, trim, FORBIDDEN_CONFIG_VALUE_PATTERN,
+   *  allowedValues, min/max bounds, allowEmpty short-circuit). Throw
+   *  with a human-readable message to reject a value. Opt-in per
+   *  definition — existing keys without `validate:` keep their
+   *  behaviour byte-for-byte. */
+  validate?: (value: string | number | boolean) => void;
 };
 
 export type OrgConfigEntry = OrgConfigDefinition & {
@@ -104,7 +111,81 @@ export type OrgConfigSnapshot = {
   };
 };
 
-const ALLOWED_CATEGORIES = ["ai", "http", "email", "runs", "mcp", "integrations", "objectstore", "auth"] as const;
+const ALLOWED_CATEGORIES = [
+  "ai",
+  "http",
+  "email",
+  "runs",
+  "mcp",
+  "integrations",
+  "objectstore",
+  "auth",
+  "memory",
+] as const;
+
+/** Closed enum of memory kinds eligible for persistence. Mirrors the memory
+ *  policy's eligibility and retention tables. Used by `memory.allowedKinds`
+ *  (CSV) and `memory.retentionDaysByKind` (JSON keys). */
+const MEMORY_KINDS = [
+  "recovery_rationale",
+  "run_summary",
+  "runbook_fragment",
+  "patch_rationale",
+] as const;
+
+/** Per-kind maximum retention in days from the memory policy. */
+const MEMORY_RETENTION_MAX_DAYS: Record<(typeof MEMORY_KINDS)[number], number> = {
+  recovery_rationale: 730,
+  run_summary: 365,
+  // Admin-configurable runbook fragments still need a finite, auditable cap.
+  runbook_fragment: 36_500,
+  patch_rationale: 730,
+};
+
+function isMemoryKind(value: string): value is (typeof MEMORY_KINDS)[number] {
+  return (MEMORY_KINDS as readonly string[]).includes(value);
+}
+
+function validateMemoryAllowedKinds(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("memory.allowedKinds must be a string");
+  if (value === "") return;
+  const parts = value.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+  for (const part of parts) {
+    if (!isMemoryKind(part)) {
+      throw new Error(
+        `memory.allowedKinds entry "${part}" is not one of: ${MEMORY_KINDS.join(", ")}`,
+      );
+    }
+  }
+}
+
+function validateMemoryRetentionDaysByKind(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("memory.retentionDaysByKind must be a string");
+  if (value === "") return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("memory.retentionDaysByKind must be valid JSON");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("memory.retentionDaysByKind must be a JSON object");
+  }
+  for (const [key, days] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isMemoryKind(key)) {
+      throw new Error(
+        `memory.retentionDaysByKind key "${key}" is not one of: ${MEMORY_KINDS.join(", ")}`,
+      );
+    }
+    if (typeof days !== "number" || !Number.isInteger(days) || days <= 0) {
+      throw new Error(`memory.retentionDaysByKind["${key}"] must be a positive integer`);
+    }
+    const max = MEMORY_RETENTION_MAX_DAYS[key];
+    if (days > max) {
+      throw new Error(`memory.retentionDaysByKind["${key}"] must be <= ${max}`);
+    }
+  }
+}
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -415,6 +496,73 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 300,
     max: 86400,
   },
+  {
+    key: "memory.enabled",
+    category: "memory",
+    description:
+      "Tenant master switch for persistent cross-run memory. Required true (alongside JANUSLY_MEMORY_ENABLED=true at the process level) for any memory write. NO env fallback by design — each tenant must opt in explicitly via the admin API. Defaults to false (off). See docs/memory-policy.md.",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "memory.allowedKinds",
+    category: "memory",
+    description:
+      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateMemoryAllowedKinds,
+  },
+  {
+    key: "memory.retentionDaysByKind",
+    category: "memory",
+    description:
+      "JSON-encoded per-kind retention override (e.g. {\"recovery_rationale\":180,\"run_summary\":90}). Empty = use the per-kind defaults from docs/memory-policy.md. Each value is a positive integer day count bounded by the per-kind maximum from the policy table.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateMemoryRetentionDaysByKind,
+  },
+  {
+    key: "memory.recallMaxEntries",
+    category: "memory",
+    description:
+      "Hard cap on the number of memory entries returned per recall call. Range 1..32, default 8. See docs/memory-policy.md.",
+    valueType: "number",
+    defaultValue: 8,
+    min: 1,
+    max: 32,
+  },
+  {
+    key: "memory.recallMaxBytes",
+    category: "memory",
+    description:
+      "Hard cap on the total bytes returned per recall call. Range 1024..65536 (1 KiB..64 KiB), default 8192. See docs/memory-policy.md.",
+    valueType: "number",
+    defaultValue: 8_192,
+    min: 1_024,
+    max: 65_536,
+  },
+  {
+    key: "memory.embeddingProvider",
+    category: "memory",
+    description:
+      "Provider used to compute embeddings for memory entries. Closed enum: anthropic (other providers are unverified per AGENTS.md AI integration). Empty = use the env default. Future re-embedding work; not a runtime override today. See docs/memory-policy.md.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    allowedValues: ["anthropic"],
+  },
+  {
+    key: "memory.embeddingModel",
+    category: "memory",
+    description:
+      "Model id used to compute embeddings for memory entries. Empty = use the env default. Stored on each entry for explicit re-embedding when the provider/model changes. See docs/memory-policy.md.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -476,6 +624,7 @@ function parseStoredValue(value: unknown, fallback: string | number | boolean): 
 export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: unknown): string | number | boolean {
   if (definition.valueType === "boolean") {
     if (typeof value !== "boolean") throw new Error(`${definition.key} must be a boolean`);
+    if (definition.validate) definition.validate(value);
     return value;
   }
 
@@ -491,6 +640,7 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
     if (definition.max !== undefined && normalized > definition.max) {
       throw new Error(`${definition.key} must be <= ${definition.max}`);
     }
+    if (definition.validate) definition.validate(normalized);
     return normalized;
   }
 
@@ -500,7 +650,10 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
     // List-shaped keys (e.g. allowed-domain lists) opt-in to empty via
     // `allowEmpty: true` — empty means "no restriction" for those keys.
     // Existing string keys still reject empty inputs.
-    if (definition.allowEmpty) return "";
+    if (definition.allowEmpty) {
+      if (definition.validate) definition.validate("");
+      return "";
+    }
     throw new Error(`${definition.key} must be a non-empty string`);
   }
   if (FORBIDDEN_CONFIG_VALUE_PATTERN.test(normalized)) {
@@ -509,6 +662,7 @@ export function normalizeOrgConfigValue(definition: OrgConfigDefinition, value: 
   if (definition.allowedValues && !definition.allowedValues.includes(normalized)) {
     throw new Error(`${definition.key} must be one of: ${definition.allowedValues.join(", ")}`);
   }
+  if (definition.validate) definition.validate(normalized);
   return normalized;
 }
 
@@ -612,8 +766,8 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
 /**
  * Per-org authentication policy snapshot consumed by the auth resolver +
  * SSO callback. Narrow read by design — the membership resolver runs on
- * every authenticated request, so fetching the full 22-key snapshot
- * there would double the per-request query budget.
+ * every authenticated request, so fetching the full typed snapshot there would
+ * double the per-request query budget.
  *
  * `allowedEmailDomains` is parsed from the comma-separated string
  * (lowercased, trimmed, empty entries dropped). Empty list = no
