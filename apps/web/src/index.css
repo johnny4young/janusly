@@ -4956,7 +4956,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
     radial-gradient(circle at 80% 80%, color-mix(in srgb, var(--we-accent) 8%, transparent) 0%, transparent 50%),
     color-mix(in srgb, var(--we-ink) 55%, transparent);
   backdrop-filter: blur(4px);
-  z-index: 50;
+  z-index: 120;
   display: grid;
   place-items: center;
   padding: 24px;
