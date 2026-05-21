@@ -1,3 +1,13 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Force-patch a high-severity transitive advisory:
+#   fast-uri <= 3.1.0 path-traversal CVE (GHSA-q3j6-qgpj-74h6)
+# arriving via `@modelcontextprotocol/sdk > ajv > fast-uri`.
+# `pnpm audit --audit-level high` (the CI Dependency-audit gate) flags
+# this otherwise. Drop the override once `@modelcontextprotocol/sdk`
+# bumps its `ajv` to a version that depends on `fast-uri >= 3.1.1`
+# transitively.
+overrides:
+  fast-uri: ">=3.1.1"

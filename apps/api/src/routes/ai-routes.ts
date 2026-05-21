@@ -25,6 +25,7 @@ import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/work
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
 import { composeFeedbackHint } from "../ai-patch-feedback";
+import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
 import { listExposedMcpToolsForAi } from "@janusly/data/src/mcpConnectionsRepo";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
@@ -385,9 +386,31 @@ export const aiRoutes: Route[] = [
         ? composeFeedbackHint(await summarizePastFeedback(auth.orgId, failingWorkflowId))
         : "";
 
+      // Memory-assisted recovery: when org memory is enabled, recall a
+      // small bounded set of similar prior failures + accepted/rejected
+      // fixes scoped to the same org (and preferably workflow) and slip
+      // them into the prompt as DATA, not instructions. The helper
+      // short-circuits BEFORE any `recallMemory` invocation when memory
+      // is disabled, so memory-disabled orgs see zero new audit rows,
+      // zero new usage_events rows, and zero new DB reads against
+      // `memory_entries` — the "memory-disabled zero behavior change"
+      // invariant. When the substrate is empty (e.g. no past feedback
+      // has been committed yet), the helper returns an empty hint and
+      // the conditional spread below keeps the `extraContext` shape
+      // byte-for-byte identical to the pre-enrichment case.
+      const memoryHint = failingNode.success
+        ? await composeRecoveryMemoryHint({
+            orgId: auth.orgId,
+            workflowId: failingWorkflowId,
+            failingNode: { id: failingNode.data.id, type: failingNode.data.type },
+            errorEnvelope: dlq.errorJson,
+          })
+        : { snippets: "", hitCount: 0, recallOk: true };
+
       const extraContext: Record<string, unknown> = {
         ...(toolInputContract ? { toolInputContract } : {}),
         ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
+        ...(memoryHint.snippets ? { memorySnippets: memoryHint.snippets } : {}),
       };
 
       // Cast: the structural envelope's `suggestions` items have a
@@ -565,6 +588,19 @@ export const aiRoutes: Route[] = [
         // The audit row's `targetId` is the dlq id (already populated
         // above), so adding `runId` to metadata is the cross-reference.
         runId: dlq.runId,
+        // Memory enrichment counters (no raw content — the snippets
+        // string never lands in the audit row). `memoryHitCount` is
+        // the number of rendered entries (0 when memory is disabled,
+        // the substrate is empty, or every recall returned empty for
+        // any reason). `memoryRecallOk` flags whether the consent gate
+        // was passed: `false` means memory is disabled (process flag,
+        // tenant flag, or config_unavailable fail-closed); `true`
+        // means consent was allowed and the recall calls returned —
+        // for actual recall failure diagnosis, cross-reference the
+        // `memory.recall.failed` audit rows the repo writes per
+        // failure with the specific `reason`.
+        memoryHitCount: memoryHint.hitCount,
+        memoryRecallOk: memoryHint.recallOk,
       });
 
       return sendJson(res, withBudgetWarning(response, budgetGate));
