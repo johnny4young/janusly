@@ -49,7 +49,7 @@ import { waitUntilExecutor } from "./wait-until";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
 import { signResumeToken } from "./secrets";
-import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin } from "./mcp-tool-executor";
+import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin, resolveStdioSandboxConfig } from "./mcp-tool-executor";
 
 loadRootEnv();
 
@@ -772,7 +772,13 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       writeConsentProcess: readMcpClientWritesEnabled(),
       writeConsentTenant: orgConfig.mcp.clientWriteConsent,
       rateLimitPerMin: resolveMcpClientRateLimitPerMin(orgConfig.mcp.clientRateLimitPerMin),
-      onAudit: async ({ ok, error, latencyMs, writeSide }) => {
+      stdioSandbox: resolveStdioSandboxConfig(orgConfig.mcp),
+      onAudit: async ({ ok, error, latencyMs, writeSide, sandboxFailureCode, capturedStderrTail }) => {
+        // Always emit the per-call timeline event so the run timeline
+        // shows the outcome. Sandbox-driven kills get an extra
+        // `mcp.sandbox.terminated`-shaped event (in addition to the
+        // completed event) carrying the typed reason + redacted tail so
+        // operators see WHY the call ended without re-running the call.
         await appendEvent(ctx.runId, ctx.nodeId, "mcp_tool.completed", {
           connectionAlias,
           toolName,
@@ -780,7 +786,18 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           error,
           latencyMs,
           writeSide,
+          ...(sandboxFailureCode ? { sandboxFailureCode } : {}),
+          ...(capturedStderrTail ? { stderrTail: capturedStderrTail } : {}),
         });
+        if (sandboxFailureCode) {
+          await appendEvent(ctx.runId, ctx.nodeId, "mcp.sandbox.terminated", {
+            connectionAlias,
+            toolName,
+            reason: sandboxFailureCode,
+            stderrTail: capturedStderrTail ?? null,
+            writeSide,
+          });
+        }
       },
     });
     if (!envelope.ok) {

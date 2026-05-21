@@ -16,7 +16,15 @@ function snapshotWithConsent(consent: boolean) {
     http: {} as never,
     email: {} as never,
     runs: {} as never,
-    mcp: { writeConsent: consent, clientWriteConsent: false, clientRateLimitPerMin: 60, clientCommandAllowlist: "" },
+    mcp: {
+      writeConsent: consent,
+      clientWriteConsent: false,
+      clientRateLimitPerMin: 60,
+      clientCommandAllowlist: "",
+      stdioMaxLifetimeMs: 600_000,
+      stdioMaxStderrBytes: 65_536,
+      stdioMaxVmKb: 524_288,
+    },
     integrations: {} as never,
     objectstore: {} as never,
   } as Awaited<ReturnType<typeof getOrgConfigSnapshot>>;

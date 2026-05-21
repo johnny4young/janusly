@@ -53,6 +53,7 @@ import {
   withMcpClient,
   type McpClient,
 } from "@janusly/engine/src/mcp-client";
+import { resolveStdioSandboxConfig } from "@janusly/engine/src/mcp-tool-executor";
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { enforceRateLimit } from "../rate-limit";
@@ -107,7 +108,10 @@ async function resolveCommandAllowlist(orgId: string): Promise<string[]> {
   return allowlist;
 }
 
-function buildDiscoveryClient(connection: McpConnectionRow): McpClient | Promise<McpClient> {
+function buildDiscoveryClient(
+  connection: McpConnectionRow,
+  stdioSandbox: ReturnType<typeof resolveStdioSandboxConfig>,
+): McpClient | Promise<McpClient> {
   // Resolve env-refs once for the discovery hop. Missing env-refs
   // surface a GENERIC error at discovery time too — never echo the
   // env-var name. Same posture as the executor's resolution path so
@@ -129,7 +133,12 @@ function buildDiscoveryClient(connection: McpConnectionRow): McpClient | Promise
   }
   if (connection.transport === "stdio") {
     if (!connection.command) throw new Error("stdio connection missing command");
-    return createStdioMcpClient({ command: connection.command, args: connection.args ?? [], env });
+    return createStdioMcpClient({
+      command: connection.command,
+      args: connection.args ?? [],
+      env,
+      sandbox: stdioSandbox,
+    });
   }
   if (connection.transport === "sse") {
     if (!connection.url) throw new Error("sse connection missing url");
@@ -146,8 +155,14 @@ function buildDiscoveryClient(connection: McpConnectionRow): McpClient | Promise
 
 async function runDiscovery(connection: McpConnectionRow): Promise<{ ok: true; tools: number } | { ok: false; error: string }> {
   try {
+    // Resolve the spawn-time sandbox config from the org snapshot. The
+    // stdio branch of buildDiscoveryClient applies the allowlist re-check,
+    // ephemeral cwd, lifetime kill, stderr cap, and (Linux production
+    // only) ulimit -v wrap. URL transports ignore the payload.
+    const snapshot = await getOrgConfigSnapshot(connection.orgId);
+    const stdioSandbox = resolveStdioSandboxConfig(snapshot.mcp);
     const tools = await withMcpClient(
-      () => buildDiscoveryClient(connection),
+      () => buildDiscoveryClient(connection, stdioSandbox),
       (client) => client.listTools(),
     );
     const capped = tools.slice(0, MAX_DISCOVERY_TOOLS);
