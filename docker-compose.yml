@@ -11,7 +11,7 @@ services:
       - "6379:6379"
 
   postgres:
-    image: postgres:18-alpine
+    image: pgvector/pgvector:pg18
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -23,3 +23,53 @@ services:
       retries: 10
     ports:
       - "5432:5432"
+
+  # Self-hosted embeddings model for the memory substrate (bge-m3, 1024-dim).
+  # Dev brings this up automatically via scripts/run-dev.mjs. Production
+  # operators who keep memory disabled can omit `ollama` from their
+  # `docker compose up <services>` invocation. First boot pulls the bge-m3
+  # model (~1.2 GB) into the named volume; subsequent boots reuse the cache.
+  ollama:
+    image: ollama/ollama:latest
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        ollama serve &
+        OLLAMA_PID=$$!
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull "$${OLLAMA_EMBED_MODEL:-bge-m3}" || true
+        wait $$OLLAMA_PID
+    environment:
+      OLLAMA_EMBED_MODEL: bge-m3
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    # The healthcheck only flips `healthy` once the embed model is
+    # actually pulled into the volume — `ollama list` alone returns 0
+    # while the daemon is up but the model is still downloading, which
+    # would mislead `docker compose ps` into showing `healthy` before
+    # the service can answer an embedding call. The shell-form check
+    # below greps for the configured model name so the signal is
+    # honest. `start_period` is generous because the first-boot pull
+    # of bge-m3 (~1.2 GB) can take several minutes on a slow
+    # connection; subsequent boots reuse the cached weights and the
+    # check passes within seconds.
+    healthcheck:
+      # `$${...}` keeps the variable un-interpolated by Compose at parse time
+      # so it expands inside the container's shell against the running
+      # service's env — matching the entrypoint's behaviour above. With
+      # a single `$`, Compose would resolve from the HOST shell at parse
+      # time (usually unset → literal "bge-m3"), so an operator running
+      # a different embed model via env override would get a check that
+      # greps for the wrong model and never flips healthy.
+      test: ["CMD-SHELL", "ollama list | grep -q \"$${OLLAMA_EMBED_MODEL:-bge-m3}\""]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 600s
+
+volumes:
+  ollama_models:

@@ -58,3 +58,8 @@ export {
   getModelPrice,
   type ModelPrice,
 } from "./pricing";
+export {
+  generateEmbedding,
+  type EmbeddingResult,
+  type EmbeddingOptions,
+} from "./embeddings";

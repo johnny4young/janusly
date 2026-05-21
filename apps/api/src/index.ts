@@ -35,7 +35,8 @@
  */
 
 import { setUsageRecorder } from "@janusly/ai";
-import { recordEmailUsage, recordIntegrationUsage, recordMcpUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { recordEmailUsage, recordIntegrationUsage, recordMcpUsage, recordMemoryUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
+import { setMemoryUsageRecorder } from "@janusly/data/src/memoryUsage";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { setIntegrationUsageRecorder } from "@janusly/engine/src/integration-usage";
@@ -146,6 +147,7 @@ setEmailUsageRecorder(recordEmailUsage);
 setIntegrationUsageRecorder(recordIntegrationUsage);
 setMcpUsageRecorder(recordMcpUsage);
 setPdfUsageRecorder(recordPdfUsage);
+setMemoryUsageRecorder(recordMemoryUsage);
 
 // Wire the production AI cost budget checker. Every LLM call site
 // (6 /ai/* routes + 3 engine paths) gates through this checker before

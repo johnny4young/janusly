@@ -178,20 +178,35 @@ prevents memory rows from becoming PII attached to a deleted user.
 ## 7. Provider posture for embeddings
 
 - Embeddings are computed via the provider-neutral `@janusly/ai`
-  `LlmClient.generateEmbedding` surface (added in ENG-115). Default supported
-  provider is Anthropic for runtime, mirroring AGENTS.md's "Anthropic-only
-  until explicit new direction" posture.
-- The embedding provider, model name, and dimension are stored per memory row,
-  not per column. Schema does not encode a fixed dimension. A future provider
-  swap is explicit re-embedding work, not a silent schema migration.
-- Embedding failures (network, quota, malformed response) degrade to empty
-  recall. The caller receives no memory snippets and a structured warn
-  signal — never a 500.
+  `generateEmbedding` surface. The v1 embedding provider is
+  **self-hosted Ollama BGE-m3** (1024-dim multilingual model, MTEB top-3
+  retrieval) — zero per-token cost, runs as a sibling container in
+  `docker-compose.yml`, no sub-processor added to the DPA. AGENTS.md's
+  "Anthropic-only" rule applies to **LLM completions** specifically
+  (because of structured-output grammar requirements), not to
+  embeddings. Anthropic does not currently offer an embeddings endpoint
+  via the Vercel AI SDK, so embeddings are intentionally provider-distinct
+  from completions.
+- Operators may swap to a different embedding provider via
+  `org_configs.memory.embeddingProvider` (allowed: `ollama` / `voyage` /
+  `openai`); selecting `voyage` or `openai` adds that vendor to the
+  sub-processor schedule and requires a DPA addendum. The operator can
+  also point at an external Ollama instance via `OLLAMA_BASE_URL` env or
+  the per-tenant `memory.embeddingBaseUrl` catalog key.
+- The embedding provider, model name, and dimension are stored per memory
+  row. The pgvector column type is fixed at `vector(1024)` (BGE-m3's
+  native dimension); a future provider swap that produces a different
+  dimension is explicit re-embedding work, not a silent schema
+  migration.
+- Embedding failures (network, quota, malformed response, "no provider
+  configured") degrade to empty recall. The caller receives no memory
+  snippets and a structured warn signal (audited as
+  `memory.recall.failed`) — never a 500.
 - No customer memory content is ever sent to a provider with explicit
-  fine-tuning / training opt-in semantics enabled. The provider request is a
-  one-shot embedding call. If a provider later adds an explicit "use this for
-  training" flag (Anthropic does not have one as of this writing), the default
-  remains opt-out at the request layer.
+  fine-tuning / training opt-in semantics enabled. The provider request
+  is a one-shot embedding call. If a provider later adds an explicit
+  "use this for training" flag, the default remains opt-out at the
+  request layer.
 
 ## 8. Memory is customer data, not training data
 
@@ -308,6 +323,7 @@ by ENG-115+:
 - `memory.consent.granted` — tenant flag flipped to true.
 - `memory.consent.revoked` — tenant flag flipped to false.
 - `memory.entry.created` — emitted by `commitMemory` (no content in metadata, only `entryId`, `kind`, `bytes`).
+- `memory.entry.failed` — failed commit path before any memory row is written; metadata carries `reason`, `kind`, provider/model when known, and never raw content.
 - `memory.entry.deleted` — single-entry delete.
 - `memory.kind.purged` — per-kind purge.
 - `memory.bulk.purged` — org-level purge from consent revocation.

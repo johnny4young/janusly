@@ -385,9 +385,9 @@ Today `getRunMemory` returns events from the current run only. Real agents need:
 - **Procedural memory** — successful tool sequences for similar goals.
 
 Implementation:
-- ENG-114 lands the privacy and retention policy first — see [`docs/memory-policy.md`](memory-policy.md) for the canonical doc covering eligibility, the two-flag opt-in consent model, per-kind retention, deletion/export, embedding provider posture, prompt-injection framing, the `org_configs.memory.*` catalog, audit actions, DPA language, and incident response. No runtime memory store ships before that policy is approved.
-- ENG-115 adds the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, content, embedding, metadata (jsonb), created_at, expires_at`. Schema follows the policy: per-row provider/model/dimension metadata, retention timestamps, no hardcoded vendor dimension. Use pgvector on Postgres 18 (the AGENTS.md stack baseline).
-- New domain helpers in `packages/domain/src/memory.ts`: `recallEpisodic({ workflowId, k })`, `recallSemantic({ query, k })`, `commitMemory(entry)`.
+- ENG-114 landed the privacy and retention policy first — see [`docs/memory-policy.md`](memory-policy.md) for the canonical doc covering eligibility, the two-flag opt-in consent model, per-kind retention, deletion/export, embedding provider posture, prompt-injection framing, the `org_configs.memory.*` catalog, audit actions, DPA language, and incident response.
+- ENG-115 adds the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, scrubbed content, embedding, provider/model/dimension metadata, bounded metadata jsonb, created_at, retain_until`. v1 stores pgvector `vector(1024)` for the self-hosted BGE-m3 default and records provider/model/dimension per row so an operator-driven provider swap can re-embed explicitly instead of silently mixing shapes.
+- New data helpers in `packages/data/src/memoryEntriesRepo.ts`: `commitMemory(entry)`, `recallMemory({ orgId, kind?, query })`, and `deleteExpiredMemory({ orgId? })`.
 - `agent` and `multi_agent` planners receive a `memorySnippets` array in the prompt context.
 - `vector_search` / `vector_upsert` nodes (§6.3) for explicit user-controlled memory.
 
