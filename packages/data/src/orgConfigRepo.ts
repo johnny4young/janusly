@@ -81,6 +81,9 @@ export type OrgConfigSnapshot = {
     clientWriteConsent: boolean;
     clientRateLimitPerMin: number;
     clientCommandAllowlist: string;
+    stdioMaxLifetimeMs: number;
+    stdioMaxStderrBytes: number;
+    stdioMaxVmKb: number;
   };
   integrations: {
     slack: {
@@ -309,6 +312,36 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "",
     envKeys: ["JANUSLY_MCP_ALLOWED_COMMANDS"],
     allowEmpty: true,
+  },
+  {
+    key: "mcp.stdioMaxLifetimeMs",
+    category: "mcp",
+    description: "Max wall-clock lifetime in milliseconds for a stdio MCP child process. The sandbox layer kills the child (SIGTERM then SIGKILL after a short grace) past this. Range 60000..3600000 (1 min..1 h).",
+    valueType: "number",
+    defaultValue: 600_000,
+    envKeys: ["JANUSLY_MCP_STDIO_MAX_LIFETIME_MS"],
+    min: 60_000,
+    max: 3_600_000,
+  },
+  {
+    key: "mcp.stdioMaxStderrBytes",
+    category: "mcp",
+    description: "Max bytes of stderr the sandbox captures from a stdio MCP child before killing it. Captured stderr is secret-shape redacted before logging. Range 1024..1048576 (1 KiB..1 MiB).",
+    valueType: "number",
+    defaultValue: 65_536,
+    envKeys: ["JANUSLY_MCP_STDIO_MAX_STDERR_BYTES"],
+    min: 1024,
+    max: 1_048_576,
+  },
+  {
+    key: "mcp.stdioMaxVmKb",
+    category: "mcp",
+    description: "Max virtual-memory size (KB) enforced via Linux ulimit -v on stdio MCP children. Applied only on Linux when JANUSLY_MCP_SANDBOX_ENFORCE_LINUX is true; macOS / Windows ignore this value. Range 131072..4194304 (128 MiB..4 GiB).",
+    valueType: "number",
+    defaultValue: 524_288,
+    envKeys: ["JANUSLY_MCP_STDIO_MAX_VM_KB"],
+    min: 131_072,
+    max: 4_194_304,
   },
   {
     key: "slack.rateLimitPerMin",
@@ -552,6 +585,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       clientWriteConsent: readBoolean(values, "mcp.clientWriteConsent"),
       clientRateLimitPerMin: readNumber(values, "mcp.clientRateLimitPerMin"),
       clientCommandAllowlist: readString(values, "mcp.clientCommandAllowlist"),
+      stdioMaxLifetimeMs: readNumber(values, "mcp.stdioMaxLifetimeMs"),
+      stdioMaxStderrBytes: readNumber(values, "mcp.stdioMaxStderrBytes"),
+      stdioMaxVmKb: readNumber(values, "mcp.stdioMaxVmKb"),
     },
     integrations: {
       slack: {
@@ -681,6 +717,9 @@ export function applyOrgConfigToEnv(
     // `mcp.writeConsent` + `mcp.clientWriteConsent` have no env overlay by design — see the catalog definition.
     JANUSLY_MCP_CLIENT_RATE_LIMIT_PER_MIN: String(config.mcp.clientRateLimitPerMin),
     JANUSLY_MCP_ALLOWED_COMMANDS: config.mcp.clientCommandAllowlist,
+    JANUSLY_MCP_STDIO_MAX_LIFETIME_MS: String(config.mcp.stdioMaxLifetimeMs),
+    JANUSLY_MCP_STDIO_MAX_STDERR_BYTES: String(config.mcp.stdioMaxStderrBytes),
+    JANUSLY_MCP_STDIO_MAX_VM_KB: String(config.mcp.stdioMaxVmKb),
     JANUSLY_SLACK_RATE_LIMIT_PER_MIN: String(config.integrations.slack.rateLimitPerMin),
     JANUSLY_GITHUB_RATE_LIMIT_PER_MIN: String(config.integrations.github.rateLimitPerMin),
     JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN: String(config.integrations.webhook.rateLimitPerMin),

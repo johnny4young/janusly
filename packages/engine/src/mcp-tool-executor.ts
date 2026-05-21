@@ -53,6 +53,11 @@ import {
 } from "@janusly/data/src/mcpConnectionsRepo";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { createHttpMcpClient, createSseMcpClient, createStdioMcpClient, withMcpClient, type McpClient } from "./mcp-client";
+import {
+  McpSandboxCommandNotAllowedError,
+  McpSandboxLifetimeExceededError,
+  McpSandboxStderrExceededError,
+} from "./mcp-sandbox";
 import { getEngineRateLimiter } from "./rate-limit";
 import { getMcpUsageRecorder } from "./mcp-usage";
 
@@ -79,6 +84,19 @@ export type McpAuditCallback = (input: {
   error?: string;
   latencyMs: number;
   writeSide: boolean;
+  /**
+   * Sandbox-driven termination reason. Set only for stdio failures
+   * caused by allowlist rejection, lifetime kill, or stderr cap; null
+   * for SDK errors, isError responses, dry-run skips, and successes.
+   * Distinct from `error` so the audit row can branch deterministically.
+   */
+  sandboxFailureCode?: string | null;
+  /**
+   * Last 1024 chars of the redacted stderr tail captured from the stdio
+   * child. Already scrubbed by `scrubSecretShapes`. Null for sse / http
+   * transports + for any path where no stderr accumulated.
+   */
+  capturedStderrTail?: string | null;
 }) => void | Promise<void>;
 
 export type McpToolExecutorInput = {
@@ -111,20 +129,57 @@ export type McpToolExecutorInput = {
    */
   rateLimitPerMin: number;
   /**
+   * Stdio sandbox config. Required for stdio transports; ignored for
+   * sse / http (URL transports don't spawn a child). Caller resolves
+   * `allowedCommands` as the union of env CSV + tenant CSV, and the
+   * caps from `org_configs.mcp.stdio*` (with env fallbacks).
+   */
+  stdioSandbox: {
+    allowedCommands: string[];
+    maxLifetimeMs?: number;
+    maxStderrBytes?: number;
+    maxVmKb?: number;
+    enforceLinuxUlimit: boolean;
+  };
+  /**
    * Fires once per call (success or failure) so the route handler /
    * node executor can write run-level invocation metadata. The
-   * executor itself stays free of `@janusly/db` imports.
+   * executor itself stays free of `@janusly/db` imports. On
+   * sandbox-driven termination, the executor passes the redacted
+   * stderr tail + the typed reason so the audit row carries diagnostic
+   * context without leaking raw secret-shaped bytes.
    */
   onAudit?: McpAuditCallback;
 };
 
+/**
+ * Reason codes emitted in the `{ ok: false, error }` envelope when the
+ * stdio sandbox layer fires. Distinct from the existing free-form
+ * error strings so audit + UI surfaces can branch deterministically.
+ */
+export const SANDBOX_ERROR_CODES = {
+  COMMAND_REJECTED: "mcp_sandbox_command_rejected",
+  LIFETIME_EXCEEDED: "mcp_sandbox_lifetime_exceeded",
+  STDERR_EXCEEDED: "mcp_sandbox_stderr_exceeded",
+} as const;
+
 /** Pure entrypoint. Never throws — returns a typed envelope on every path. */
 export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpToolEnvelope> {
   const start = Date.now();
-  const audit = async (env: McpToolEnvelope) => {
+  const audit = async (
+    env: McpToolEnvelope,
+    extras: { sandboxFailureCode?: string | null; capturedStderrTail?: string | null } = {},
+  ) => {
     if (input.onAudit) {
       try {
-        await input.onAudit({ ok: env.ok, error: env.error, latencyMs: env.latencyMs, writeSide: env.writeSide });
+        await input.onAudit({
+          ok: env.ok,
+          error: env.error,
+          latencyMs: env.latencyMs,
+          writeSide: env.writeSide,
+          sandboxFailureCode: extras.sandboxFailureCode ?? null,
+          capturedStderrTail: extras.capturedStderrTail ?? null,
+        });
       } catch {
         // Audit writes must never break the tool path.
       }
@@ -287,34 +342,88 @@ export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpTo
 
   const timeoutMs = clampTimeout(input.timeoutMs);
 
-  // Build the transport-specific client and invoke.
+  // Build the transport-specific client and invoke. The sandbox layer
+  // exposes a snapshot helper (`getSandboxSnapshot`) the callback below
+  // reads BEFORE returning — the snapshot's redacted stderr tail flows
+  // through to the audit row on every path that involves a stdio child.
   let envelope: McpToolEnvelope;
+  let sandboxFailureCode: typeof SANDBOX_ERROR_CODES[keyof typeof SANDBOX_ERROR_CODES] | null = null;
+  let capturedStderrTail: string | null = null;
+
   try {
     envelope = await withMcpClient<McpToolEnvelope>(
-      () => buildClientForConnection(connection!, envForSpawn),
+      () => buildClientForConnection(connection!, envForSpawn, input.stdioSandbox),
       async (client) => {
-        const result = await client.callTool({ name: input.toolName, input: input.input ?? {}, timeoutMs });
-        const latencyMs = Date.now() - start;
-        const isError = typeof result.output.isError === "boolean" ? result.output.isError : false;
-        if (isError) {
-          const errText = typeof result.output.text === "string" ? result.output.text : "mcp tool returned isError=true";
-          return { ...envelopeBase, ok: false, error: scrubSecretShapes(errText).slice(0, 200), latencyMs };
+        try {
+          const result = await client.callTool({ name: input.toolName, input: input.input ?? {}, timeoutMs });
+          const latencyMs = Date.now() - start;
+          const isError = typeof result.output.isError === "boolean" ? result.output.isError : false;
+          // Snapshot BEFORE close (which runs in withMcpClient's finally).
+          // The buffer is preserved in the capture closure post-dispose,
+          // so reading it after close would also work, but doing it here
+          // keeps the data flow explicit.
+          const snap = client.getSandboxSnapshot?.();
+          if (snap) capturedStderrTail = snap.capturedStderr.slice(-1024);
+          if (isError) {
+            const errText = typeof result.output.text === "string" ? result.output.text : "mcp tool returned isError=true";
+            return { ...envelopeBase, ok: false, error: scrubSecretShapes(errText).slice(0, 200), latencyMs };
+          }
+          return { ...envelopeBase, ok: true, output: result.output, latencyMs };
+        } catch (innerErr) {
+          // Read the snapshot before re-throwing so the outer catch sees
+          // the captured tail. withMcpClient's finally will still close
+          // the client; the capture's getSnapshot stays callable.
+          const snap = client.getSandboxSnapshot?.();
+          if (snap) capturedStderrTail = snap.capturedStderr.slice(-1024);
+          throw innerErr;
         }
-        return { ...envelopeBase, ok: true, output: result.output, latencyMs };
       },
     );
   } catch (err) {
     const latencyMs = Date.now() - start;
-    const raw = err instanceof Error ? err.message : "mcp tool call failed";
-    // The SDK occasionally surfaces upstream URLs in error messages
-    // (mostly via fetchHttpTarget rejections). Truncate defensively
-    // to avoid leaking a URL fragment that contains a path-encoded
-    // secret — operators debug from latencyMs + the audit row, not
-    // the error message text.
-    envelope = { ...envelopeBase, ok: false, error: scrubSecretShapes(raw).slice(0, 200), latencyMs };
+
+    // Map typed sandbox errors to stable envelope codes. Free-form SDK
+    // errors keep the existing scrubbed-truncated treatment.
+    if (err instanceof McpSandboxCommandNotAllowedError) {
+      sandboxFailureCode = SANDBOX_ERROR_CODES.COMMAND_REJECTED;
+      envelope = {
+        ...envelopeBase,
+        ok: false,
+        error: `${SANDBOX_ERROR_CODES.COMMAND_REJECTED}: ${err.reason}`,
+        latencyMs,
+      };
+    } else if (err instanceof McpSandboxLifetimeExceededError) {
+      sandboxFailureCode = SANDBOX_ERROR_CODES.LIFETIME_EXCEEDED;
+      envelope = {
+        ...envelopeBase,
+        ok: false,
+        error: SANDBOX_ERROR_CODES.LIFETIME_EXCEEDED,
+        latencyMs,
+      };
+    } else if (err instanceof McpSandboxStderrExceededError) {
+      sandboxFailureCode = SANDBOX_ERROR_CODES.STDERR_EXCEEDED;
+      envelope = {
+        ...envelopeBase,
+        ok: false,
+        error: SANDBOX_ERROR_CODES.STDERR_EXCEEDED,
+        latencyMs,
+      };
+    } else {
+      const raw = err instanceof Error ? err.message : "mcp tool call failed";
+      // The SDK occasionally surfaces upstream URLs in error messages
+      // (mostly via fetchHttpTarget rejections). Truncate defensively
+      // to avoid leaking a URL fragment that contains a path-encoded
+      // secret — operators debug from latencyMs + the audit row, not
+      // the error message text.
+      envelope = { ...envelopeBase, ok: false, error: scrubSecretShapes(raw).slice(0, 200), latencyMs };
+    }
   }
 
-  await audit(envelope);
+  // The audit recorder + usage recorder both fire from the same shared
+  // helper. Sandbox-driven failures attach the redacted stderr tail
+  // and the typed reason code so compliance reads can distinguish
+  // operator-driven errors from sandbox kills.
+  await audit(envelope, { sandboxFailureCode, capturedStderrTail });
   return envelope;
 }
 
@@ -431,13 +540,18 @@ function deepJsonEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-async function buildClientForConnection(connection: McpConnectionRow, env: Record<string, string>): Promise<McpClient> {
+async function buildClientForConnection(
+  connection: McpConnectionRow,
+  env: Record<string, string>,
+  stdioSandbox: McpToolExecutorInput["stdioSandbox"],
+): Promise<McpClient> {
   if (connection.transport === "stdio") {
     if (!connection.command) throw new Error("stdio connection missing command");
     return createStdioMcpClient({
       command: connection.command,
       args: connection.args ?? [],
       env,
+      sandbox: stdioSandbox,
     });
   }
   if (connection.transport === "sse" || connection.transport === "http") {
@@ -502,4 +616,64 @@ export function resolveMcpClientRateLimitPerMin(tenantOverride: number | null, e
   const n = raw ? Number(raw) : NaN;
   if (Number.isFinite(n) && n > 0) return Math.floor(n);
   return 60;
+}
+
+/**
+ * Parse a comma-separated allowlist string into a trimmed string array.
+ * Empty entries are dropped. The union with the env-side value is the
+ * caller's responsibility — same shape as the registration-time
+ * `resolveCommandAllowlist` in `apps/api/src/routes/mcp-routes.ts`.
+ */
+export function parseCommandAllowlist(raw: string | undefined | null): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((p) => p.trim()).filter((p) => p.length > 0);
+}
+
+/**
+ * Resolve the stdio sandbox config for a single call. The caller passes
+ * the org's `org_configs.mcp` snapshot and the resolver applies env
+ * fallbacks for the allowlist + the enforce flag.
+ *
+ * Tenant override wins when the tenant allowlist is non-empty; falls
+ * back to the env CSV otherwise. Mirrors the registration-time
+ * `resolveCommandAllowlist` in `apps/api/src/routes/mcp-routes.ts`, so
+ * the spawn-time re-check sees the SAME allowlist the registration
+ * gate saw. The defense-in-depth is in the timing, not in a different
+ * source of truth.
+ *
+ * `enforceLinuxUlimit` defaults to true only on Linux production. The
+ * `JANUSLY_MCP_SANDBOX_ENFORCE_LINUX` env can force-enable on dev/test
+ * Linux (e.g. CI) or force-disable on production (e.g. a distroless
+ * image that lacks `/bin/sh`).
+ */
+export function resolveStdioSandboxConfig(
+  mcpConfig: {
+    clientCommandAllowlist: string;
+    stdioMaxLifetimeMs: number;
+    stdioMaxStderrBytes: number;
+    stdioMaxVmKb: number;
+  },
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): McpToolExecutorInput["stdioSandbox"] {
+  const tenantList = parseCommandAllowlist(mcpConfig.clientCommandAllowlist);
+  const envList = parseCommandAllowlist(env.JANUSLY_MCP_ALLOWED_COMMANDS);
+  // Tenant override wins when non-empty; otherwise fall through to env.
+  // Same precedence as the registration-time resolver so the spawn-time
+  // re-check evaluates an equivalent list.
+  const allowedCommands = tenantList.length > 0 ? tenantList : envList;
+
+  const enforceEnv = env.JANUSLY_MCP_SANDBOX_ENFORCE_LINUX;
+  let enforceLinuxUlimit: boolean;
+  if (enforceEnv === "true") enforceLinuxUlimit = true;
+  else if (enforceEnv === "false") enforceLinuxUlimit = false;
+  else enforceLinuxUlimit = platform === "linux" && env.NODE_ENV === "production";
+
+  return {
+    allowedCommands,
+    maxLifetimeMs: mcpConfig.stdioMaxLifetimeMs,
+    maxStderrBytes: mcpConfig.stdioMaxStderrBytes,
+    maxVmKb: mcpConfig.stdioMaxVmKb,
+    enforceLinuxUlimit,
+  };
 }

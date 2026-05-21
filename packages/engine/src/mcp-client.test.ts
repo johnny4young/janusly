@@ -4,11 +4,15 @@
  * stdio, SSRF gate for sse, timeout race, normalised output shape)
  * without spawning a real process or opening a real socket.
  */
+import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const stdioConstructorCalls: Array<Record<string, unknown>> = [];
 const sseConstructorCalls: Array<Record<string, unknown>> = [];
 const httpConstructorCalls: Array<Record<string, unknown>> = [];
+let stdioStderrStream: (NodeJS.ReadableStream & EventEmitter) | null = null;
+let callToolError: Error | null = null;
+let callToolGate: Promise<void> | null = null;
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class FakeClient {
@@ -25,6 +29,8 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
       };
     }
     async callTool(_params: unknown) {
+      if (callToolGate) await callToolGate;
+      if (callToolError) throw callToolError;
       return { content: [{ type: "text", text: "ok" }], isError: false };
     }
     async close() {
@@ -35,8 +41,12 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 
 vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
   StdioClientTransport: class StdioTransport {
+    stderr = stdioStderrStream;
     constructor(params: Record<string, unknown>) {
       stdioConstructorCalls.push(params);
+    }
+    async close() {
+      return;
     }
   },
 }));
@@ -67,22 +77,40 @@ vi.mock("./http-policy", () => ({
 }));
 
 import { createHttpMcpClient, createSseMcpClient, createStdioMcpClient, withMcpClient } from "./mcp-client";
+import { McpSandboxStderrExceededError } from "./mcp-sandbox";
 
 beforeEach(() => {
   stdioConstructorCalls.length = 0;
   sseConstructorCalls.length = 0;
   httpConstructorCalls.length = 0;
+  stdioStderrStream = null;
+  callToolError = null;
+  callToolGate = null;
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/** Sandbox config used by the existing whitelist tests. Allowlist is
+ * permissive so the spawn-time re-check passes; ulimit wrap is off so
+ * the test passes deterministically on any platform.
+ */
+const TEST_SANDBOX = {
+  allowedCommands: ["node", "uvx", "npx"],
+  enforceLinuxUlimit: false,
+};
+
 describe("createStdioMcpClient", () => {
-  it("builds the spawn env from a strict whitelist (PATH + provided refs only)", () => {
+  it("builds the spawn env from a strict whitelist (PATH + provided refs only)", async () => {
     vi.stubEnv("PATH", "/usr/bin");
     vi.stubEnv("DATABASE_URL", "postgres://secret/db");
-    createStdioMcpClient({ command: "node", args: ["./srv.js"], env: { TOKEN: "abc" } });
+    const client = createStdioMcpClient({
+      command: "node",
+      args: ["./srv.js"],
+      env: { TOKEN: "abc" },
+      sandbox: TEST_SANDBOX,
+    });
     expect(stdioConstructorCalls).toHaveLength(1);
     const params = stdioConstructorCalls[0]!;
     const env = params.env as Record<string, string>;
@@ -92,15 +120,84 @@ describe("createStdioMcpClient", () => {
     // Ensure the child can't read any other process env.
     expect(Object.keys(env)).toEqual(expect.arrayContaining(["PATH", "TOKEN"]));
     expect(Object.keys(env).length).toBe(2);
+    // Sandbox profile adds `cwd` + `stderr: 'pipe'` to the spawn params.
+    expect(params.cwd).toBeTypeOf("string");
+    expect((params.cwd as string)).toContain("janusly-mcp-");
+    expect(params.stderr).toBe("pipe");
+    await client.close(); // cleans up the ephemeral cwd dir.
   });
 
   it("can listTools through the wrapper", async () => {
-    const client = createStdioMcpClient({ command: "node", env: {} });
+    const client = createStdioMcpClient({
+      command: "node",
+      env: {},
+      sandbox: TEST_SANDBOX,
+    });
     const tools = await client.listTools();
     expect(tools).toEqual([
       { name: "echo", description: "Echo", inputSchema: { type: "object" } },
       { name: "missing", description: null, inputSchema: null },
     ]);
+    await client.close();
+  });
+
+  it("rejects at spawn time when the command is not in the allowlist (defense in depth)", () => {
+    // Even when the registration-time gate has passed, a tightened
+    // allowlist must fail-closed at spawn time. Asserts the SDK
+    // constructor is NEVER reached.
+    const callsBefore = stdioConstructorCalls.length;
+    expect(() =>
+      createStdioMcpClient({
+        command: "curl",
+        env: {},
+        sandbox: { allowedCommands: ["node"], enforceLinuxUlimit: false },
+      }),
+    ).toThrow(/not in allowlist/i);
+    expect(stdioConstructorCalls.length).toBe(callsBefore);
+  });
+
+  it("exposes the sandbox snapshot for stdio transports", async () => {
+    const client = createStdioMcpClient({
+      command: "node",
+      env: {},
+      sandbox: TEST_SANDBOX,
+    });
+    // Touch listTools so the connect hook fires and the snapshot path
+    // attaches. The mocked StdioClientTransport has no stderr stream, so
+    // the snapshot starts empty.
+    await client.listTools();
+    const snap = client.getSandboxSnapshot?.();
+    expect(snap).not.toBeNull();
+    expect(snap?.capturedStderr).toBe("");
+    expect(snap?.stderrTruncated).toBe(false);
+    expect(snap?.lifetimeExceeded).toBe(false);
+    await client.close();
+  });
+
+  it("maps stderr-cap transport closure to a typed sandbox stderr error", async () => {
+    stdioStderrStream = new EventEmitter() as NodeJS.ReadableStream & EventEmitter;
+    callToolError = new Error("transport closed");
+    let releaseCallTool!: () => void;
+    callToolGate = new Promise((resolve) => {
+      releaseCallTool = resolve;
+    });
+
+    const client = createStdioMcpClient({
+      command: "node",
+      env: {},
+      sandbox: { ...TEST_SANDBOX, maxStderrBytes: 1024 },
+    });
+
+    const pending = client.callTool({ name: "echo", input: {}, timeoutMs: 1000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    stdioStderrStream.emit("data", Buffer.from("x".repeat(2048)));
+    releaseCallTool();
+
+    await expect(pending).rejects.toBeInstanceOf(McpSandboxStderrExceededError);
+    const snap = client.getSandboxSnapshot?.();
+    expect(snap?.stderrExceeded).toBe(true);
+    expect(snap?.stderrTruncated).toBe(true);
     await client.close();
   });
 });
