@@ -180,7 +180,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
-  await run("docker", ["compose", "up", "-d", "redis", "postgres"]);
+  await run("docker", ["compose", "up", "-d", "redis", "postgres", "ollama"]);
   await waitForPostgres();
   await run("pnpm", ["migrate"]);
 

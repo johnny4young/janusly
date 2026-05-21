@@ -7,7 +7,7 @@
  * rate-limit posture for their org.
  */
 
-import { listOrgConfig, upsertOrgConfig } from "@janusly/data/src/orgConfigRepo";
+import { listOrgConfig, upsertOrgConfig, getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -30,6 +30,23 @@ export const orgRoutes: Route[] = [
       if (!key) return sendJson(res, { error: "key is required" }, 400);
       if (!Object.hasOwn(body, "value")) return sendJson(res, { error: "value is required" }, 400);
 
+      // Capture the previous value of `memory.enabled` BEFORE the
+      // upsert so we can detect a true/false flip and emit the
+      // dedicated consent audit row alongside the generic update.
+      // The memory policy requires a stable
+      // `memory.consent.granted` / `memory.consent.revoked` action
+      // (not just `org.config.updated`) so audit-log readers can
+      // filter the consent timeline cleanly.
+      let previousMemoryEnabled: boolean | null = null;
+      if (key === "memory.enabled") {
+        try {
+          const snapshot = await getOrgConfigSnapshot(auth.orgId);
+          previousMemoryEnabled = snapshot.memory.enabled;
+        } catch (err) {
+          console.warn("[org-config] failed to read previous memory.enabled", err);
+        }
+      }
+
       try {
         const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
         await audit(auth.orgId, auth.userId, "org.config.updated", "org_config", key, { key, value: entry.value });
@@ -42,6 +59,28 @@ export const orgRoutes: Route[] = [
             });
           } catch (err) {
             console.warn("[org-config] budget audit write failed", err);
+          }
+        }
+        if (key === "memory.enabled" && typeof entry.value === "boolean" && previousMemoryEnabled !== null) {
+          const newValue = entry.value;
+          if (previousMemoryEnabled === false && newValue === true) {
+            try {
+              await audit(auth.orgId, auth.userId, "memory.consent.granted", "org_config", key, {
+                previousValue: previousMemoryEnabled,
+                newValue,
+              });
+            } catch (err) {
+              console.warn("[org-config] memory consent audit write failed", err);
+            }
+          } else if (previousMemoryEnabled === true && newValue === false) {
+            try {
+              await audit(auth.orgId, auth.userId, "memory.consent.revoked", "org_config", key, {
+                previousValue: previousMemoryEnabled,
+                newValue,
+              });
+            } catch (err) {
+              console.warn("[org-config] memory consent audit write failed", err);
+            }
           }
         }
         return sendJson(res, entry);

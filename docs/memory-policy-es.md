@@ -196,24 +196,39 @@ conviertan en PII pegada a un usuario borrado.
 
 ## 7. Postura del proveedor para embeddings
 
-- Los embeddings se computan vía la superficie provider-neutral de
-  `@janusly/ai` `LlmClient.generateEmbedding` (agregada en ENG-115). El
-  proveedor por default soportado en runtime es Anthropic, reflejando la
-  postura "Anthropic-only hasta que haya nueva dirección explícita" de
-  AGENTS.md.
-- El proveedor de embedding, el nombre del modelo y la dimensión se guardan
-  por fila de memoria, no por columna. El schema no codifica una dimensión
-  fija. Un swap futuro de proveedor es trabajo explícito de re-embedding, no
-  una migración silenciosa de schema.
-- Los fallos de embedding (red, cuota, respuesta malformada) degradan a
-  recall vacío. El caller no recibe snippets de memoria y sí una señal de
-  warn estructurada — nunca un 500.
-- Ningún contenido de memoria de cliente se envía nunca a un proveedor con
-  semántica explícita de opt-in a fine-tuning / training habilitada. La
-  llamada al proveedor es un one-shot de embedding. Si un proveedor
-  agregara más adelante una flag explícita de "usar esto para training"
-  (Anthropic no la tiene al momento de escribir esto), el default permanece
-  en opt-out a nivel de la capa de request.
+- Los embeddings se computan vía la superficie provider-neutral
+  `generateEmbedding` de `@janusly/ai`. El proveedor de embeddings v1
+  es **Ollama BGE-m3 self-hosted** (modelo multilingüe de 1024
+  dimensiones, top-3 MTEB en retrieval) — cero costo por token,
+  corre como contenedor sibling en `docker-compose.yml`, sin
+  sub-procesador nuevo en el DPA. La regla "Anthropic-only" de
+  AGENTS.md aplica a **completions de LLM** específicamente (por los
+  requisitos de gramática de salida estructurada), no a embeddings.
+  Anthropic no ofrece actualmente un endpoint de embeddings vía el
+  Vercel AI SDK, así que embeddings son intencionalmente
+  provider-distintos de completions.
+- Los operadores pueden cambiar a otro proveedor de embedding vía
+  `org_configs.memory.embeddingProvider` (permitidos: `ollama` /
+  `voyage` / `openai`); seleccionar `voyage` u `openai` agrega ese
+  vendor al schedule de sub-procesadores y requiere addendum al DPA.
+  El operador también puede apuntar a una instancia externa de Ollama
+  vía la variable de entorno `OLLAMA_BASE_URL` o vía la clave
+  `memory.embeddingBaseUrl` del catálogo por tenant.
+- El proveedor de embedding, el nombre del modelo y la dimensión se
+  guardan por fila de memoria. El tipo de columna pgvector está fijo
+  en `vector(1024)` (la dimensión nativa de BGE-m3); un swap futuro
+  de proveedor que produzca una dimensión distinta es trabajo
+  explícito de re-embedding, no una migración silenciosa de schema.
+- Los fallos de embedding (red, cuota, respuesta malformada, "sin
+  proveedor configurado") degradan a recall vacío. El caller no
+  recibe snippets de memoria y sí una señal de warn estructurada
+  (auditada como `memory.recall.failed`) — nunca un 500.
+- Ningún contenido de memoria de cliente se envía nunca a un
+  proveedor con semántica explícita de opt-in a fine-tuning /
+  training habilitada. La llamada al proveedor es un one-shot de
+  embedding. Si un proveedor agregara más adelante una flag explícita
+  de "usar esto para training", el default permanece en opt-out a
+  nivel de la capa de request.
 
 ## 8. La memoria es dato del cliente, no dato de entrenamiento
 
@@ -336,6 +351,9 @@ catálogo) y son usadas por ENG-115+:
 - `memory.consent.revoked` — la flag del tenant se activó a false.
 - `memory.entry.created` — emitida por `commitMemory` (sin contenido en
   metadata, sólo `entryId`, `kind`, `bytes`).
+- `memory.entry.failed` — ruta de commit fallido antes de escribir una fila
+  de memoria; la metadata lleva `reason`, `kind`, proveedor/modelo cuando se
+  conocen, y nunca contenido crudo.
 - `memory.entry.deleted` — borrado de una entrada.
 - `memory.kind.purged` — purga por kind.
 - `memory.bulk.purged` — purga a nivel org por revocación de consentimiento.

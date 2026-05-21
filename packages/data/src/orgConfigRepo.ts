@@ -109,6 +109,9 @@ export type OrgConfigSnapshot = {
   objectstore: {
     provider: string;
   };
+  memory: {
+    enabled: boolean;
+  };
 };
 
 const ALLOWED_CATEGORIES = [
@@ -548,19 +551,29 @@ export const ORG_CONFIG_DEFINITIONS = [
     key: "memory.embeddingProvider",
     category: "memory",
     description:
-      "Provider used to compute embeddings for memory entries. Closed enum: anthropic (other providers are unverified per AGENTS.md AI integration). Empty = use the env default. Future re-embedding work; not a runtime override today. See docs/memory-policy.md.",
+      "Provider used to compute embeddings for memory entries. Closed enum: ollama (self-hosted, v1 default) / voyage / openai. Anthropic does not currently offer an embeddings endpoint; AGENTS.md's 'Anthropic-only' rule applies to LLM completions, not embeddings. Empty = use the env default (ollama). Stored on each entry for explicit re-embedding. See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
     allowEmpty: true,
-    allowedValues: ["anthropic"],
+    allowedValues: ["ollama", "voyage", "openai"],
   },
   {
     key: "memory.embeddingModel",
     category: "memory",
     description:
-      "Model id used to compute embeddings for memory entries. Empty = use the env default. Stored on each entry for explicit re-embedding when the provider/model changes. See docs/memory-policy.md.",
+      "Model id used to compute embeddings for memory entries. Empty = use the env default (bge-m3 when provider is ollama). Stored on each entry for explicit re-embedding when the provider/model changes. See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
+    allowEmpty: true,
+  },
+  {
+    key: "memory.embeddingBaseUrl",
+    category: "memory",
+    description:
+      "Base URL of the embedding service when the operator runs an external instance (e.g. a remote Ollama box). Empty = use the env default (OLLAMA_BASE_URL, defaulting to http://ollama:11434 inside Compose). This URL is operator-supplied infrastructure config and bypasses the SSRF guard for the embedding fetch by design — workflow-author content never influences which URL is hit.",
+    valueType: "string",
+    defaultValue: "",
+    envKeys: ["OLLAMA_BASE_URL"],
     allowEmpty: true,
   },
 ] as const satisfies readonly OrgConfigDefinition[];
@@ -759,6 +772,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     },
     objectstore: {
       provider: readString(values, "objectstore.provider"),
+    },
+    memory: {
+      enabled: readBoolean(values, "memory.enabled"),
     },
   };
 }

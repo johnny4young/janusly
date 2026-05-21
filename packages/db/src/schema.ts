@@ -37,7 +37,7 @@
  *   queries can rely on it without null guards.
  */
 
-import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
@@ -903,5 +903,65 @@ export const promptVersions = pgTable(
   (table) => [
     uniqueIndex("prompt_versions_org_prompt_version_idx").on(table.orgId, table.promptId, table.version),
     index("prompt_versions_org_prompt_created_idx").on(table.orgId, table.promptId, table.createdAt.desc()),
+  ],
+);
+
+/**
+ * Tenant-scoped vector memory store for the substrate.
+ *
+ * Persists episodic / semantic / procedural memory entries produced by
+ * downstream consumers (memory-assisted recovery suggestions, agent
+ * recall, etc.). Memory is off by default and gated by a two-flag
+ * consent posture: a process env (`JANUSLY_MEMORY_ENABLED=true`) AND a
+ * per-tenant `org_configs.memory.enabled` row. Both must be true for
+ * any commit; the eligibility / retention / scrubbing rules live in the
+ * canonical memory policy at `docs/memory-policy.md`.
+ *
+ * Embedding storage uses `pgvector`'s native `vector(N)` type — the
+ * dimension is fixed at table creation (1024 = bge-m3 native size).
+ * Per-row `embedding_provider` / `embedding_model` / `embedding_dimension`
+ * track which model produced each vector so the operator can re-embed
+ * on a future provider swap without ambiguity.
+ *
+ * Indexes:
+ * - `memory_entries_org_kind_created_idx` (composite btree, leads with
+ *   `org_id`) — recency scans within a tenant + kind.
+ * - `memory_entries_org_retain_until_idx` — drives the retention sweep.
+ * - The HNSW cosine index on `embedding` is emitted directly in the
+ *   migration (drizzle-kit does not generate `USING hnsw` syntax).
+ */
+export const memoryEntries = pgTable(
+  "memory_entries",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id"),
+    runId: text("run_id"),
+    // Closed enum validated at the repo layer: 'recovery_rationale' |
+    // 'run_summary' | 'runbook_fragment' | 'patch_rationale'.
+    kind: text("kind").notNull(),
+    // Already scrubbed via `scrubSecretShapes` at commit time;
+    // re-scrubbed at recall time as defense-in-depth.
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }).notNull(),
+    embeddingProvider: text("embedding_provider").notNull(),
+    embeddingModel: text("embedding_model").notNull(),
+    embeddingDimension: integer("embedding_dimension").notNull(),
+    // Bounded jsonb — `safePersistPayload` chokepoint capped at 8KB by
+    // the commit helper. Never store raw node outputs here.
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // Populated by the commit helper from per-kind retention defaults
+    // or per-tenant overrides; the retention sweep deletes rows where
+    // `retain_until <= now()`.
+    retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("memory_entries_org_kind_created_idx").on(
+      table.orgId,
+      table.kind,
+      table.createdAt.desc(),
+    ),
+    index("memory_entries_org_retain_until_idx").on(table.orgId, table.retainUntil),
   ],
 );

@@ -42,6 +42,7 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
     },
     integrations: {} as never,
     objectstore: {} as never,
+    memory: {} as never,
   })),
 }));
 
@@ -191,6 +192,7 @@ beforeEach(() => {
     },
     integrations: {} as never,
     objectstore: {} as never,
+    memory: {} as never,
   });
   vi.mocked(withMcpClient).mockReset();
   vi.mocked(withMcpClient).mockImplementation(async (factory, fn) => {
@@ -281,6 +283,7 @@ describe("POST /mcp/connections", () => {
       },
       integrations: {} as never,
       objectstore: {} as never,
+      memory: {} as never,
     });
     vi.mocked(getConnectionByAlias).mockResolvedValueOnce(null).mockResolvedValueOnce({ ...connectionRow, status: "active" });
     vi.mocked(createConnection).mockResolvedValueOnce(connectionRow);

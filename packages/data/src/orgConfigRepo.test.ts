@@ -20,7 +20,7 @@ const findDef = (key: string): OrgConfigDefinition => {
 };
 
 describe("ORG_CONFIG_DEFINITIONS memory.* family", () => {
-  it("catalogues all 7 memory.* keys from the memory policy", () => {
+  it("catalogues every memory.* key from the memory policy", () => {
     const memoryKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("memory.")).map(
       (d) => d.key,
     );
@@ -33,6 +33,7 @@ describe("ORG_CONFIG_DEFINITIONS memory.* family", () => {
         "memory.recallMaxBytes",
         "memory.embeddingProvider",
         "memory.embeddingModel",
+        "memory.embeddingBaseUrl",
       ].sort(),
     );
   });
@@ -227,13 +228,15 @@ describe("normalizeOrgConfigValue — memory.embeddingProvider allowedValues", (
     expect(normalizeOrgConfigValue(def, "")).toBe("");
   });
 
-  it('accepts "anthropic"', () => {
-    expect(normalizeOrgConfigValue(def, "anthropic")).toBe("anthropic");
+  it("accepts each provider in the closed enum", () => {
+    expect(normalizeOrgConfigValue(def, "ollama")).toBe("ollama");
+    expect(normalizeOrgConfigValue(def, "voyage")).toBe("voyage");
+    expect(normalizeOrgConfigValue(def, "openai")).toBe("openai");
   });
 
   it("rejects providers outside the closed enum", () => {
-    expect(() => normalizeOrgConfigValue(def, "openai")).toThrow(/must be one of/);
-    expect(() => normalizeOrgConfigValue(def, "ollama")).toThrow(/must be one of/);
+    expect(() => normalizeOrgConfigValue(def, "anthropic")).toThrow(/must be one of/);
+    expect(() => normalizeOrgConfigValue(def, "cohere")).toThrow(/must be one of/);
   });
 });
 
