@@ -7,6 +7,8 @@
   },
   "scripts": {
     "dev": "node scripts/run-dev.mjs",
+    "down": "docker compose down",
+    "clean": "docker compose down -v",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",

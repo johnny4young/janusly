@@ -262,3 +262,49 @@ export async function recordMcpUsage(record: McpUsageRecord): Promise<void> {
     },
   });
 }
+
+/**
+ * Sister writer for memory commit/recall calls. Same `usage_events`
+ * table (multi-tenant scope) with `metric: "memory.commit"` or
+ * `metric: "memory.recall"` and `quantity: 1` per call. Failure rows
+ * are written too (disabled-org, embedding-fault, etc.) so
+ * cost/observability dashboards include degraded paths.
+ *
+ * The record shape mirrors `packages/data/src/memoryUsage.ts:MemoryUsageRecord` —
+ * the sibling type lives next to the DI seam so this file stays the
+ * single chokepoint for the `usage_events` schema.
+ */
+type MemoryUsageRecordShape = {
+  metric: "memory.commit" | "memory.recall";
+  orgId: string;
+  kind?: string;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingDimension: number | null;
+  runId?: string;
+  workflowId?: string;
+  ok: boolean;
+  error?: string;
+  latencyMs: number;
+};
+
+export async function recordMemoryUsage(record: MemoryUsageRecordShape): Promise<void> {
+  await db.insert(usageEvents).values({
+    id: crypto.randomUUID(),
+    orgId: record.orgId,
+    userId: null,
+    runId: record.runId ?? null,
+    metric: record.metric,
+    quantity: 1,
+    metadata: {
+      kind: record.kind ?? null,
+      embeddingProvider: record.embeddingProvider,
+      embeddingModel: record.embeddingModel,
+      embeddingDimension: record.embeddingDimension,
+      ok: record.ok,
+      error: record.error ?? null,
+      latencyMs: record.latencyMs,
+      workflowId: record.workflowId ?? null,
+    },
+  });
+}
