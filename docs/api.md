@@ -268,12 +268,21 @@ data: [{"id":"...","type":"node.succeeded",...}]
 
 ### `POST /resume`
 
-Resumes a run that's `waiting` on an `approval` or `webhook` node. Requires `editor` role.
+Resumes a run that's `waiting` on an `approval`, `webhook`, or `human_form` node. Requires `editor` role.
 
 **Request**
 ```json
-{ "runId": "12aff2ba-...", "nodeId": "human_approval" }
+{
+  "runId": "12aff2ba-...",
+  "nodeId": "human_form_1",
+  "input": { "approved": true },
+  "resumeToken": "engine-signed-human-form-token"
+}
 ```
+
+`input` is captured as the resumed node output for `webhook` and
+`human_form` nodes. `resumeToken` is required for `human_form` and optional
+for `approval` nodes.
 
 **Response 200**
 ```json
@@ -533,3 +542,49 @@ Last 100 audit events for the org (newest first).
 ```
 
 Sources from the `usage_events` table.
+
+---
+
+## TypeScript SDK
+
+A typed Node.js client wraps the routes above. It ships with the monorepo
+as the workspace-private package `@janusly/sdk` under
+[`packages/sdk-node/`](../packages/sdk-node/). It follows the repo's Node
+24 source-package baseline, has zero runtime dependencies, and exposes a
+resource-style API:
+
+```typescript
+import { JanuslyClient } from "@janusly/sdk";
+
+const client = new JanuslyClient({
+  baseUrl: "https://api.janusly.example.com",
+  orgId: "acme",
+  auth: { kind: "service-token", token: process.env.JANUSLY_TOKEN! },
+});
+
+const { runId } = await client.runs.start({ workflowId: "wf-incident", input: { ticketId: "T-42" } });
+
+for await (const event of client.runs.streamEvents(runId)) {
+  console.log(event.type, event.nodeId);
+  if (event.type === "node.failed") break;
+}
+```
+
+Surface highlights:
+
+- **`client.runs.*`** — start saved workflows, list the current capped runs page as an async iterator, get details, poll until terminal, stream events (async iterator), resume `human_form` / `approval` nodes with engine-signed resume tokens.
+- **`client.reports.exportRunExplain(runId, { format })`** — download the run-explain artefact (markdown or JSON) with the suggested filename from `Content-Disposition`.
+- **`client.recovery.getMetrics({ windowDays })`** — operations rollup (success rate, MTTR, p95 latency, approvals pending, replay rate, cost).
+- **`client.webhooks.verifySignature({ body, signatureHeader, secret })`** — Stripe-style HMAC-SHA256 verifier for inbound Janusly webhooks (`x-janusly-signature: t=<unix-seconds>,v1=<hex>` over `${t}.${body}`). Uses `crypto.timingSafeEqual` + ±5-min clock-skew tolerance.
+
+Two auth modes: **service-token** (sends `Authorization: Bearer <token>` + `x-user-id` defaulting to `"sdk-user"`) and **caller-supplied bearer** (Authorization only, identity carried in the token). `x-org-id` is always sent.
+
+Typed error hierarchy: `JanuslyApiError` base + `JanuslyAuthError` (401/403) + `JanuslyValidationError` (400/422 with `code` + `params`) + `JanuslyRateLimitError` (429, carries `retryAfterSeconds`) + `JanuslyServerError` (5xx) + `JanuslyTimeoutError` (polling deadline) + `JanuslyWebhookSignatureError`. Consumers `instanceof` instead of switching on `statusCode`.
+
+Optional config-level affordances: structured `logger` hook, opt-in `retry` layer (default OFF; respects `Retry-After` on 429s), per-call `{ signal, headers, timeoutMs }` options on every method. AbortSignals propagate everywhere via `AbortSignal.any` composition.
+
+See [`packages/sdk-node/README.md`](../packages/sdk-node/README.md) for the
+full documentation: 6 worked use cases (stream events, poll until
+terminal, list the capped runs page, resume human_form, export reports,
+verify webhooks with Express raw-body handler), error handling, best
+practices, and TypeScript notes.

@@ -83,6 +83,9 @@ packages/
   ai         -> provider-neutral LLM surfaces + deterministic fallback
   db         -> drizzle schema + idempotent bootstrap
   shared     -> Zod 4 contracts for the workflow DSL
+  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24+ source package, zero runtime deps,
+                resource-style API + async iterators + opt-in retries +
+                webhook signature verifier — see `packages/sdk-node/README.md`)
 ```
 
 The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter @janusly/engine dev`.
