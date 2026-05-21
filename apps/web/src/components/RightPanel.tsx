@@ -30,6 +30,7 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 import { OperationsPanel } from './OperationsPanel'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
+import { ReplayLabForkDialog } from './ReplayLabForkDialog'
 import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
@@ -1314,6 +1315,11 @@ function RunsPanel({
   // while non-null and the source run id stays around as state until the
   // operator dismisses the dialog.
   const [labSourceRun, setLabSourceRun] = useState<RunSummary | null>(null)
+  // Replay Lab Fork target node id — set when the operator clicks a
+  // per-node "Fork at <nodeId>" button. The dialog mounts overlay-style
+  // against the active run; on success it switches the active run id
+  // to the new fork run and unmounts.
+  const [forkTargetNodeId, setForkTargetNodeId] = useState<string | null>(null)
   // Report-delivery source — set when the operator clicks "Send" next
   // to the Export action. Dialog mounts overlay-style while non-null.
   const [deliveryRun, setDeliveryRun] = useState<RunSummary | null>(null)
@@ -1327,6 +1333,15 @@ function RunsPanel({
   const isActiveRunCancellable = Boolean(
     activeRunId && onCancelActiveRun && (!activeRun || !isTerminalRunStatus(activeRun.status)),
   )
+
+  // Fork-eligible nodes: only terminal node states (succeeded / failed)
+  // are forkable, and only when the source run itself is terminal and
+  // NOT already a sandbox replay. The server enforces both invariants
+  // too — this UI gate just hides the action so the operator doesn't
+  // click into a guaranteed 4xx.
+  const forkableNodes = (activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status))
+    ? runNodes.filter(node => node.status === 'succeeded' || node.status === 'failed')
+    : []
 
   return (
     <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
@@ -1455,6 +1470,30 @@ function RunsPanel({
         </section>
       )}
 
+      {forkableNodes.length > 0 && (
+        <section className="panel-card action-card">
+          <div>
+            <strong>{t('replayLab.fork.sectionKicker')}</strong>
+            <p className="helper-text">{t('replayLab.fork.sectionDescription')}</p>
+          </div>
+          {forkableNodes.map(node => (
+            <button
+              key={node.nodeId}
+              type="button"
+              className="small-command"
+              onClick={() => setForkTargetNodeId(node.nodeId)}
+              data-testid={`fork-in-lab-${node.nodeId}`}
+            >
+              <GitBranch size={12} aria-hidden="true" />
+              {' '}
+              {node.status === 'succeeded'
+                ? t('replayLab.fork.buttonStatusSucceeded', { nodeId: node.nodeId })
+                : t('replayLab.fork.buttonStatusFailed', { nodeId: node.nodeId })}
+            </button>
+          ))}
+        </section>
+      )}
+
       <RunExplainChat runId={activeRunId} />
 
       <DeadLettersPanel
@@ -1530,6 +1569,18 @@ function RunsPanel({
             createdAt: labSourceRun.createdAt ?? null,
           }}
           onClose={() => setLabSourceRun(null)}
+        />
+      )}
+
+      {forkTargetNodeId && activeRun && (
+        <ReplayLabForkDialog
+          sourceRun={{
+            id: activeRun.id,
+            status: activeRun.status,
+            createdAt: activeRun.createdAt ?? null,
+          }}
+          forkNodeId={forkTargetNodeId}
+          onClose={() => setForkTargetNodeId(null)}
         />
       )}
 
