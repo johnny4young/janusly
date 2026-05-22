@@ -39,7 +39,8 @@ export type PermissionCategory =
   | "org"
   | "plugins"
   | "mcp"
-  | "prompts";
+  | "prompts"
+  | "auto-healing";
 
 export type PermissionEntry = {
   key: string;
@@ -82,6 +83,9 @@ export const PERMISSION_CATALOG = [
   // mcp client connections
   { key: "mcp.connections.read", category: "mcp",       description: "View external MCP server connections + cached tool descriptors", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "mcp.connections.write",category: "mcp",       description: "Register / edit / delete external MCP server connections + enable per-tool descriptors", defaultRoles: ["admin"] },
+  // supervised auto-healing decisions
+  { key: "autohealing.read",     category: "auto-healing", description: "View pending supervised auto-healing decisions",                                  defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "autohealing.decide",   category: "auto-healing", description: "Apply or decline a pending auto-healing decision; trigger ad-hoc scans (admin only)", defaultRoles: ["editor", "admin"] },
   // promptops registry
   { key: "prompts.read",         category: "prompts",   description: "View prompts + versions in the PromptOps registry", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "prompts.write",        category: "prompts",   description: "Create prompts, append new versions, pin active version", defaultRoles: ["editor", "admin"] },

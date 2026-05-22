@@ -12,6 +12,7 @@ import { downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
+import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 import { RecoveryDialog } from './RecoveryDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
@@ -65,6 +66,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   return (
     <>
       <FailureClustersCard />
+      <AutoHealingPendingCard />
       <section className="panel-card">
       <div className="split-row">
         <div>

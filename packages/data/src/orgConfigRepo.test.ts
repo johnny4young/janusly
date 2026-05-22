@@ -259,6 +259,81 @@ describe("normalizeOrgConfigValue — memory.embeddingModel", () => {
   });
 });
 
+describe("ORG_CONFIG_DEFINITIONS autoHealing.* family", () => {
+  it("catalogues every supervised auto-healing key", () => {
+    const autoHealingKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("autoHealing.")).map(
+      (d) => d.key,
+    );
+    expect(autoHealingKeys.sort()).toEqual(
+      [
+        "autoHealing.enabled",
+        "autoHealing.autoApply",
+        "autoHealing.maxAttemptsPerSignature",
+        "autoHealing.loopWindowDays",
+      ].sort(),
+    );
+  });
+
+  it("registers every autoHealing.* entry under the `auto-healing` category", () => {
+    for (const def of ORG_CONFIG_DEFINITIONS) {
+      if (def.key.startsWith("autoHealing.")) {
+        expect(def.category).toBe("auto-healing");
+      }
+    }
+  });
+
+  it("keeps both tenant consent flags disabled by default with no env fallback", () => {
+    expect(findDef("autoHealing.enabled").defaultValue).toBe(false);
+    expect(findDef("autoHealing.enabled").envKeys).toBeUndefined();
+    expect(findDef("autoHealing.autoApply").defaultValue).toBe(false);
+    expect(findDef("autoHealing.autoApply").envKeys).toBeUndefined();
+  });
+});
+
+describe("normalizeOrgConfigValue — autoHealing.enabled / autoApply", () => {
+  it("accepts true / false and rejects non-boolean values", () => {
+    for (const key of ["autoHealing.enabled", "autoHealing.autoApply"]) {
+      const def = findDef(key);
+      expect(normalizeOrgConfigValue(def, true)).toBe(true);
+      expect(normalizeOrgConfigValue(def, false)).toBe(false);
+      expect(() => normalizeOrgConfigValue(def, "true")).toThrow(/must be a boolean/);
+      expect(() => normalizeOrgConfigValue(def, 1)).toThrow(/must be a boolean/);
+    }
+  });
+});
+
+describe("normalizeOrgConfigValue — autoHealing.maxAttemptsPerSignature bounds", () => {
+  const def = findDef("autoHealing.maxAttemptsPerSignature");
+
+  it("uses default 3 and accepts the 1..10 range", () => {
+    expect(def.defaultValue).toBe(3);
+    expect(normalizeOrgConfigValue(def, 1)).toBe(1);
+    expect(normalizeOrgConfigValue(def, 3)).toBe(3);
+    expect(normalizeOrgConfigValue(def, 10)).toBe(10);
+  });
+
+  it("rejects values outside 1..10", () => {
+    expect(() => normalizeOrgConfigValue(def, 0)).toThrow(/>= 1/);
+    expect(() => normalizeOrgConfigValue(def, 11)).toThrow(/<= 10/);
+  });
+});
+
+describe("normalizeOrgConfigValue — autoHealing.loopWindowDays bounds", () => {
+  const def = findDef("autoHealing.loopWindowDays");
+
+  it("uses default 14 and accepts the 1..90 range", () => {
+    expect(def.defaultValue).toBe(14);
+    expect(normalizeOrgConfigValue(def, 1)).toBe(1);
+    expect(normalizeOrgConfigValue(def, 14)).toBe(14);
+    expect(normalizeOrgConfigValue(def, 90)).toBe(90);
+  });
+
+  it("rejects values outside 1..90", () => {
+    expect(() => normalizeOrgConfigValue(def, 0)).toThrow(/>= 1/);
+    expect(() => normalizeOrgConfigValue(def, 91)).toThrow(/<= 90/);
+  });
+});
+
 describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
   // Pre-existing keys without `validate:` must still normalize byte-for-byte.
   // Pick a representative sample across types.

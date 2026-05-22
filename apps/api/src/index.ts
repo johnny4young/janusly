@@ -73,6 +73,8 @@ import { scimRoutes } from "./routes/scim-routes";
 import { ssoRoutes } from "./routes/sso-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
+import { autoHealingRoutes } from "./routes/auto-healing-routes";
+import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -108,6 +110,7 @@ export const routes: Route[] = [
   ...recoveryRoutes,
   ...reportsRoutes,
   ...aiRoutes,
+  ...autoHealingRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
@@ -178,6 +181,7 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
         else resolve();
       });
     });
+    await shutdownAutoHealing();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);
@@ -196,3 +200,9 @@ process.once("SIGINT", (signal) => {
 });
 
 server.listen(PORT, () => console.log(`API running on port ${PORT}`));
+
+// Bring up the supervised auto-healing background subsystem. Skips
+// entirely when JANUSLY_AUTO_HEALING_ENABLED is not "true" — zero
+// Redis writes, zero Worker. The boot is fire-and-forget; bootstrap
+// failures log internally and never break the API process.
+void bootstrapAutoHealing();
