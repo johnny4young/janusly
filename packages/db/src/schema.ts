@@ -965,3 +965,101 @@ export const memoryEntries = pgTable(
     index("memory_entries_org_retain_until_idx").on(table.orgId, table.retainUntil),
   ],
 );
+
+/**
+ * Supervised auto-healing decision ledger.
+ *
+ * One row per (orgId, deadLetterId) lifecycle: a background scanner
+ * picks repeated DLQ failures grouped by normalized signature, asks
+ * the existing LLM patch helper for a fix, runs the fix through the
+ * existing sandbox-validation gate, and parks the result here for
+ * either an operator decision OR (if the org has opted into both the
+ * process-level and tenant-level auto-apply flags) an automatic
+ * production replay. Manual review is the default; auto-apply is the
+ * separate opt-in.
+ *
+ * Multi-tenant scope: `orgId` leads every index. The pending-list
+ * query, the loop-breaker count query, and the idempotency check are
+ * all single-index lookups.
+ *
+ * `signature` is the normalized failure signature captured at
+ * diagnose time; the loop-breaker counts prior `auto_healing_runs`
+ * rows for the same `(orgId, signature)` across the configured
+ * window so a patch that fails to stabilize the failure does not
+ * loop forever. `validationSignature` is captured at validation
+ * outcome time so the watcher's signature-changed defense can
+ * compare like-for-like.
+ *
+ * `status` is the source of truth for the apply race — both the
+ * operator decision route AND the auto-apply watcher run a CAS-style
+ * `UPDATE … WHERE status = 'validated'`, so only one writer wins.
+ *
+ * `loopAttemptCount` is captured ONCE at diagnose time and never
+ * recomputed, so the audit log can trace why a candidate was
+ * declined under `loop_breaker_tripped` even after the underlying
+ * count moves on.
+ */
+export const autoHealingRuns = pgTable(
+  "auto_healing_runs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    // The normalized failure signature from `normalizeErrorSignature`
+    // — the loop-breaker + idempotency dimension.
+    signature: text("signature").notNull(),
+    // Closed enum validated at the repo layer:
+    // 'diagnosed' | 'proposed' | 'validating' | 'validated' |
+    // 'validation_failed' | 'applied' | 'declined' | 'failed'.
+    status: text("status").notNull(),
+    // The merged workflow snapshot from the apply-config or
+    // apply-structural patch helper. `safePersistPayload`-wrapped at
+    // insert.
+    proposedPatchJson: jsonb("proposed_patch_json"),
+    // The LLM's self-reported approach label (closed enum: add_retry /
+    // raise_timeout / swap_secret_ref / add_approval / fix_url /
+    // other). Used for grouping in the audit log + `recovery_feedback`.
+    approachLabel: text("approach_label"),
+    // 0–100 confidence from the suggestion envelope.
+    confidence: integer("confidence"),
+    // The sandbox `runs.id`; nullable until the validate step lands.
+    validationRunId: text("validation_run_id"),
+    // Captured at validation outcome time so the signature-changed
+    // defense can compare like-for-like. Nullable when validation
+    // succeeded (no error to normalize).
+    validationSignature: text("validation_signature"),
+    // 'auto' / '<userId>' / 'system_decline_<reason>'; nullable until
+    // decision. The audit row's userId mirrors this column.
+    decisionActor: text("decision_actor"),
+    // Closed enum: loop_breaker_tripped / budget_exceeded /
+    // validation_failed / signature_changed / auto_apply_disabled /
+    // manual_review / signature_already_resolved / validation_timeout.
+    declineReason: text("decline_reason"),
+    // Captured once at diagnose time so the audit log can trace why
+    // a candidate was declined even after the underlying count moves
+    // on.
+    loopAttemptCount: integer("loop_attempt_count").notNull(),
+    // Open bag for future fields; `safePersistPayload`-wrapped at
+    // insert.
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Pending-decision list query (status='validated', recency-ordered).
+    index("auto_healing_runs_org_status_created_idx").on(
+      table.orgId,
+      table.status,
+      table.createdAt.desc(),
+    ),
+    // Loop-breaker count query (count rows for (orgId, signature)
+    // inside the loop window).
+    index("auto_healing_runs_org_signature_created_idx").on(
+      table.orgId,
+      table.signature,
+      table.createdAt.desc(),
+    ),
+    // Idempotency check: "did we already auto-heal this DLQ row?"
+    index("auto_healing_runs_org_dlq_idx").on(table.orgId, table.deadLetterId),
+  ],
+);

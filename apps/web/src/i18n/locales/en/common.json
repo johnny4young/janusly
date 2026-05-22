@@ -1715,5 +1715,22 @@
   "recoveryCenter.empty.body": "Your Recovery Center will fill in as workflows run. Start with a recipe or draft a flow in AI Studio — the first run flips the page into the live view.",
   "recoveryCenter.empty.openStudio": "Open AI Studio",
   "recoveryCenter.empty.browseRecipes": "Browse Recipes",
-  "recoveryCenter.empty.metricsUnavailableFallback": "Recovery metrics unavailable"
+  "recoveryCenter.empty.metricsUnavailableFallback": "Recovery metrics unavailable",
+
+  "autoHealing.card.kicker": "Supervised auto-healing",
+  "autoHealing.card.title": "Pending decisions",
+  "autoHealing.card.subtitle": "Patches the system proposed for repeated failures. Review and apply or decline.",
+  "autoHealing.card.loading": "Loading auto-healing decisions…",
+  "autoHealing.card.empty": "No auto-healing decisions pending.",
+  "autoHealing.action.apply": "Apply",
+  "autoHealing.action.decline": "Decline",
+  "autoHealing.confidence": "{{value}}% confidence",
+  "autoHealing.error.load": "Could not load auto-healing decisions.",
+  "autoHealing.error.decide": "Could not record the decision.",
+  "autoHealing.approach.add_retry": "Add retry",
+  "autoHealing.approach.raise_timeout": "Raise timeout",
+  "autoHealing.approach.swap_secret_ref": "Swap secret",
+  "autoHealing.approach.add_approval": "Add approval",
+  "autoHealing.approach.fix_url": "Fix URL",
+  "autoHealing.approach.other": "Other"
 }

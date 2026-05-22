@@ -112,6 +112,12 @@ export type OrgConfigSnapshot = {
   memory: {
     enabled: boolean;
   };
+  autoHealing: {
+    enabled: boolean;
+    autoApply: boolean;
+    maxAttemptsPerSignature: number;
+    loopWindowDays: number;
+  };
 };
 
 const ALLOWED_CATEGORIES = [
@@ -124,6 +130,7 @@ const ALLOWED_CATEGORIES = [
   "objectstore",
   "auth",
   "memory",
+  "auto-healing",
 ] as const;
 
 /** Closed enum of memory kinds eligible for persistence. Mirrors the memory
@@ -576,6 +583,42 @@ export const ORG_CONFIG_DEFINITIONS = [
     envKeys: ["OLLAMA_BASE_URL"],
     allowEmpty: true,
   },
+  {
+    key: "autoHealing.enabled",
+    category: "auto-healing",
+    description:
+      "Tenant master switch for supervised auto-healing. Required true (alongside JANUSLY_AUTO_HEALING_ENABLED=true at the process level) for the background scanner to consider this org's DLQ rows. NO env fallback by design — each tenant must opt in explicitly via the admin API. Defaults to false (off); the scanner skips every step before reading the recent DLQ window.",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "autoHealing.autoApply",
+    category: "auto-healing",
+    description:
+      "Tenant opt-in for automatic application of validated patches without operator click. Required true (alongside JANUSLY_AUTO_HEALING_AUTO_APPLY=true at the process level) for the watcher's auto-apply branch to fire. Independent of autoHealing.enabled — both apply only when the master gate is also on. Defaults to false; the watcher leaves validated rows pending operator decision.",
+    valueType: "boolean",
+    defaultValue: false,
+  },
+  {
+    key: "autoHealing.maxAttemptsPerSignature",
+    category: "auto-healing",
+    description:
+      "Loop-breaker ceiling: the same normalized failure signature can be auto-healed at most this many times inside the loop window. The count is over prior auto_healing_runs rows for (orgId, signature) and is captured at diagnose time. Range 1..10, default 3.",
+    valueType: "number",
+    defaultValue: 3,
+    min: 1,
+    max: 10,
+  },
+  {
+    key: "autoHealing.loopWindowDays",
+    category: "auto-healing",
+    description:
+      "Loop-breaker window in days: prior auto_healing_runs rows for (orgId, signature) older than this are not counted against the per-signature cap. Range 1..90, default 14.",
+    valueType: "number",
+    defaultValue: 14,
+    min: 1,
+    max: 90,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -775,6 +818,12 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     },
     memory: {
       enabled: readBoolean(values, "memory.enabled"),
+    },
+    autoHealing: {
+      enabled: readBoolean(values, "autoHealing.enabled"),
+      autoApply: readBoolean(values, "autoHealing.autoApply"),
+      maxAttemptsPerSignature: readNumber(values, "autoHealing.maxAttemptsPerSignature"),
+      loopWindowDays: readNumber(values, "autoHealing.loopWindowDays"),
     },
   };
 }
