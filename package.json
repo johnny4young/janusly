@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "node scripts/run-dev.mjs",
+    "dev:doctor": "node scripts/dev-doctor.mjs",
     "down": "docker compose down",
     "clean": "docker compose down -v",
     "build": "pnpm -r build",

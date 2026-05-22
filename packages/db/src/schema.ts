@@ -1070,3 +1070,85 @@ export const autoHealingRuns = pgTable(
     index("auto_healing_runs_org_dlq_idx").on(table.orgId, table.deadLetterId),
   ],
 );
+
+/**
+ * Org-scoped recovery alerting policy. Operator-declared rules that fan
+ * out a signal (DLQ insert, budget block, limiter degradation, SLO breach,
+ * stalled approval, failure-cluster threshold crossed) into one or more
+ * channels (slack / webhook / email / github) using existing credentials.
+ *
+ * `trigger` is validated against the closed enum in
+ * `@janusly/shared/src/alert-policy:ALERT_TRIGGERS` at the application
+ * layer (NOT a DB CHECK — same posture as `mcp_connections.transport`).
+ * `parameters` is per-trigger Zod-validated via the dispatch table in
+ * the same shared module before insert.
+ *
+ * Multi-tenant scope: every read carries `eq(alertPolicies.orgId, orgId)`
+ * EXCEPT for `limiter.degraded` policies which intentionally use the
+ * `"system"` sentinel orgId (mirrors the `rate_limit.degraded` audit
+ * convention — limiter degradation is operator-side infrastructure, not
+ * tenant data).
+ */
+export const alertPolicies = pgTable(
+  "alert_policies",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    trigger: text("trigger").notNull(),
+    parameters: jsonb("parameters").notNull().default({}),
+    channels: jsonb("channels").notNull(),
+    cooldownSeconds: integer("cooldown_seconds").notNull().default(900),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("alert_policies_org_name_idx").on(table.orgId, table.name),
+    index("alert_policies_org_trigger_enabled_idx").on(
+      table.orgId,
+      table.trigger,
+      table.enabled,
+    ),
+  ],
+);
+
+/**
+ * One row per alert dispatch attempt (success OR per-channel failure). Backs
+ * both the cooldown lookup (latest row per `(orgId, policyId, dedupeKey)`
+ * vs `now() - cooldownSeconds`) AND the `GET /alerts/recent` operator feed.
+ *
+ * Suppression rows (cooldown skips) do NOT live here — they fire the
+ * `alert.policy.suppressed` audit only, keeping this table compact even
+ * under chatty policies.
+ *
+ * `dedupeKey` is computed per-trigger by `buildDedupeKey` in
+ * `packages/engine/src/alerts/dedupe-key.ts`. `outcome` is the closed enum
+ * `delivered | delivery_failed` validated at the Zod layer.
+ */
+export const alertDispatches = pgTable(
+  "alert_dispatches",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    policyId: text("policy_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    outcome: text("outcome").notNull(),
+    channelResults: jsonb("channel_results").notNull(),
+    triggerPayload: jsonb("trigger_payload").notNull(),
+  },
+  (table) => [
+    index("alert_dispatches_org_policy_dedupe_idx").on(
+      table.orgId,
+      table.policyId,
+      table.dedupeKey,
+      table.dispatchedAt.desc(),
+    ),
+    index("alert_dispatches_org_dispatched_idx").on(
+      table.orgId,
+      table.dispatchedAt.desc(),
+    ),
+  ],
+);

@@ -21,6 +21,8 @@ import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 import { CredentialHealthCard } from './CredentialHealthCard'
+import { AlertPoliciesPanel } from './AlertPoliciesPanel'
+import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { getResolvedLocale, tRecoveryMetricRationale, useT } from '../i18n'
 
@@ -223,6 +225,10 @@ export function OperationsPanel() {
           <PermissionGrantsPanel />
 
           <CredentialHealthCard />
+
+          <AlertPoliciesPanel />
+
+          <RecentAlertsCard />
 
           <McpConnectionsPanel />
         </>
