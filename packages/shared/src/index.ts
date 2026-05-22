@@ -9,6 +9,7 @@
  */
 
 export * from './workflow'
+export * from './workflow-slo'
 export * from './status'
 export * from './iso-duration'
 export * from './prompt-variables'

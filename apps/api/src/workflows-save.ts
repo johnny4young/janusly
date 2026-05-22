@@ -177,6 +177,10 @@ export async function saveWorkflowVersion(args: {
           .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, orgId)))
           .orderBy(desc(workflowVersions.version));
         const computedVersion = (existingVersions[0]?.version ?? 0) + 1;
+        // Carry forward the prior version's SLO so the operator does not
+        // have to re-declare it on every workflow edit. A dedicated
+        // setWorkflowSlo route writes to the latest version in place.
+        const inheritedSloJson = existingVersions[0]?.sloJson ?? null;
 
         const existingWorkflow = await tx.select().from(workflows)
           .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)));
@@ -195,6 +199,7 @@ export async function saveWorkflowVersion(args: {
           workflowId,
           version: computedVersion,
           dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName },
+          sloJson: inheritedSloJson,
           createdBy: userId,
         });
 

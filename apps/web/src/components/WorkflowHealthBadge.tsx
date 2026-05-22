@@ -45,10 +45,38 @@ type HealthBreakdownEntry = {
   rationaleMeta?: Record<string, string | number | boolean>
 }
 
+type SloMetric =
+  | 'successRatePercent'
+  | 'mttrSeconds'
+  | 'p95DurationMs'
+  | 'budgetBlocksPerWindow'
+  | 'stuckWaitingNodesMax'
+
+type WorkflowSloBlock = {
+  slo: {
+    successRatePercent: number | null
+    mttrSeconds: number | null
+    p95DurationMs: number | null
+    budgetBlocksPerWindow: number | null
+    stuckWaitingNodesMax: number | null
+    windowDays: 7 | 14 | 30
+  }
+  breaches: Record<SloMetric, boolean> & { anyBreach: boolean }
+}
+
 type HealthScore = {
   score: number
   status: 'healthy' | 'warn' | 'unhealthy'
   breakdown: Record<HealthCategory, HealthBreakdownEntry>
+  slo?: WorkflowSloBlock | null
+}
+
+const SLO_METRIC_LABEL_KEYS: Record<SloMetric, string> = {
+  successRatePercent: 'badges.slo.metric.successRatePercent',
+  mttrSeconds: 'badges.slo.metric.mttrSeconds',
+  p95DurationMs: 'badges.slo.metric.p95DurationMs',
+  budgetBlocksPerWindow: 'badges.slo.metric.budgetBlocksPerWindow',
+  stuckWaitingNodesMax: 'badges.slo.metric.stuckWaitingNodesMax',
 }
 
 const CATEGORY_LABEL_KEYS: Record<HealthCategory, string> = {
@@ -126,6 +154,9 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
   const summaryLabel = showLabel ? t('badges.health.label', { score: result.score }) : `${result.score}`
   const localisedStatus = t(STATUS_LABEL_KEYS[result.status] as never) as string
 
+  const sloBreaching = result.slo?.breaches.anyBreach === true
+  const sloLabel = t('badges.slo.breachPill') as string
+
   return (
     <div className={`we-readiness-badge we-readiness-badge--${severity}`}>
       <button
@@ -138,6 +169,15 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
         <Activity size={14} aria-hidden="true" />
         <span>{summaryLabel}</span>
       </button>
+      {sloBreaching && (
+        <span
+          className="we-readiness-badge__slo-pill"
+          aria-label={t('badges.slo.breachAria') as string}
+          title={sloLabel}
+        >
+          {sloLabel}
+        </span>
+      )}
       {expanded && (
         <ul className="we-readiness-badge__issues">
           {(Object.keys(result.breakdown) as HealthCategory[]).map((category) => {
@@ -153,6 +193,37 @@ export function WorkflowHealthBadge({ workflowId, showLabel = true }: WorkflowHe
               </li>
             )
           })}
+          {result.slo ? (() => {
+            const sloBlock = result.slo
+            return (
+              <li className={`we-readiness-issue we-readiness-issue--${sloBreaching ? 'fail' : 'pass'}`}>
+                <strong className="we-readiness-issue__code">
+                  {t('badges.slo.sectionTitle', { windowDays: sloBlock.slo.windowDays }) as string}
+                </strong>
+                <ul className="we-readiness-badge__slo-list">
+                  {(Object.keys(SLO_METRIC_LABEL_KEYS) as SloMetric[]).map((metric) => {
+                    const target = sloBlock.slo[metric]
+                    if (target === null) return null
+                    const breaching = sloBlock.breaches[metric]
+                    const metricLabel = t(SLO_METRIC_LABEL_KEYS[metric] as never) as string
+                    return (
+                      <li
+                        key={metric}
+                        className={`we-readiness-badge__slo-row we-readiness-badge__slo-row--${breaching ? 'breach' : 'pass'}`}
+                      >
+                        <span>{metricLabel}</span>
+                        <span>
+                          {breaching
+                            ? (t('badges.slo.metricBreach', { target }) as string)
+                            : (t('badges.slo.metricPass', { target }) as string)}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </li>
+            )
+          })() : null}
         </ul>
       )}
     </div>
