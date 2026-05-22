@@ -50,3 +50,16 @@ export async function getCredentialByName(
     );
   return rows[0] ?? null;
 }
+
+/**
+ * List every credential row for an org. Used by the readiness sidecar
+ * + the credential-health snapshot to build a per-org `name → secret_ref`
+ * map without N+1 lookups. Multi-tenant scope enforced by the
+ * ``eq(credentials.orgId, orgId)`` predicate; no helper bypasses it.
+ */
+export async function listCredentialsForOrg(orgId: string): Promise<Credential[]> {
+  return db
+    .select()
+    .from(credentials)
+    .where(eq(credentials.orgId, orgId));
+}

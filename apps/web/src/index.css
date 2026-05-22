@@ -7861,3 +7861,96 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
     animation: none !important;
   }
 }
+
+/* Credential health card — surfaces broken / stale credentials and
+ * MCP connections inside OperationsPanel. The card is observability-
+ * only: no admin actions live here; rediscover stays in the existing
+ * McpConnectionsPanel. Severity tinted left border mirrors the
+ * existing .we-ops-metric-card pattern. */
+.we-ops-credential-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.we-ops-credential-card__section + .we-ops-credential-card__section {
+  margin-top: 4px;
+}
+
+.we-ops-credential-card__section-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--we-text-2);
+  margin: 0 0 6px;
+}
+
+.we-ops-credential-card__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-ops-credential-card__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--we-line);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--we-surface-muted);
+  font-size: 12px;
+  color: var(--we-text-1);
+}
+
+.we-ops-credential-card__row--healthy { border-left-color: var(--we-success); }
+.we-ops-credential-card__row--warn { border-left-color: var(--we-warning); }
+.we-ops-credential-card__row--unhealthy { border-left-color: var(--we-danger); }
+
+.we-ops-credential-card__row-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-ops-credential-card__row-meta {
+  color: var(--we-text-2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-ops-credential-card__row-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.we-ops-credential-card__row-status--healthy { color: var(--we-success); }
+.we-ops-credential-card__row-status--warn { color: var(--we-warning); }
+.we-ops-credential-card__row-status--unhealthy { color: var(--we-danger); }
+
+.we-ops-credential-card__empty {
+  font-size: 12px;
+  color: var(--we-text-2);
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--we-line);
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .we-ops-credential-card__row {
+    grid-template-columns: 1fr;
+  }
+}
