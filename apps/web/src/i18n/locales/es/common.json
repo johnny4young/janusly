@@ -633,6 +633,13 @@
   "operations.cost.col.tokens": "Tokens",
   "operations.cost.col.calls": "Llamadas",
 
+  "operations.rateLimiter.label": "Limitador de solicitudes",
+  "operations.rateLimiter.healthy": "Limitador de solicitudes saludable",
+  "operations.rateLimiter.degraded_one": "Limitador de solicitudes degradado — {{count}} grupo sin aplicar el límite. El tráfico sigue permitido.",
+  "operations.rateLimiter.degraded_other": "Limitador de solicitudes degradado — {{count}} grupos sin aplicar el límite. El tráfico sigue permitido.",
+  "operations.rateLimiter.degradedBucketsTooltip": "Grupos degradados: {{buckets}}",
+  "operations.rateLimiter.copyHint": "No bloquea solicitudes — distinto de un corte por presupuesto.",
+
   "scim.heading": "Sincronización de directorio SCIM",
   "scim.loading": "Cargando directorios SCIM…",
   "scim.list.aria": "Directorios SCIM conectados",

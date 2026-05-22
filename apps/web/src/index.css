@@ -5822,6 +5822,51 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   color: var(--we-text-1);
 }
 
+/* Rate-limiter degradation status chip — surfaces a Redis blip without
+ * raising it to a top-level banner. Operator copy explicitly says
+ * "Traffic still allowed" so it never gets confused with the budget
+ * blocked banner ("AI workflow budget exceeded — blocked"). */
+.we-ops-rate-limiter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-muted);
+  color: var(--we-text-1);
+  max-width: 100%;
+}
+
+.we-ops-rate-limiter-chip--healthy {
+  border-color: var(--we-success);
+  color: var(--we-success);
+}
+
+.we-ops-rate-limiter-chip--degraded {
+  border-color: var(--we-warning);
+  background: color-mix(in srgb, var(--we-warning) 12%, transparent);
+  color: var(--we-text-1);
+}
+
+.we-ops-rate-limiter-chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.we-ops-rate-limiter-chip--healthy .we-ops-rate-limiter-chip__dot {
+  background: var(--we-success);
+}
+
+.we-ops-rate-limiter-chip--degraded .we-ops-rate-limiter-chip__dot {
+  background: var(--we-warning);
+}
+
 /* ----------------- Recovery dialog -------------------------------------- */
 
 .we-recovery-dialog {
