@@ -23,6 +23,25 @@ import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { getResolvedLocale, tRecoveryMetricRationale, useT } from '../i18n'
 
+/** Public ``/health`` rate-limiter payload — matches
+ *  ``RateLimiterPublicHealth`` from ``@janusly/data/src/rate-limit-degradation``
+ *  byte-for-byte. Truncated server-side so internal Redis error text +
+ *  bucket keys never reach the public route. */
+type RateLimiterHealth = {
+  healthy: boolean
+  degradedBuckets: Array<{
+    bucket: string
+    errorCount: number
+    firstObservedAt: string
+    lastObservedAt: string
+  }>
+}
+
+type HealthPayload = {
+  ok: boolean
+  rateLimiter?: RateLimiterHealth
+}
+
 type MetricSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
 type RecoveryMetric = {
@@ -59,6 +78,13 @@ export function OperationsPanel() {
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Rate-limiter health is fetched in parallel with metrics on the
+  // existing platformVersion tick. The chip stays mounted regardless
+  // of metrics state so a Redis blip during the loading window still
+  // surfaces. We deliberately do NOT propagate /health failures into
+  // `error` — the chip degrades silently when the call fails (a 404
+  // on an older API replica would otherwise mask the metrics surface).
+  const [rateLimiterHealth, setRateLimiterHealth] = useState<RateLimiterHealth | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -78,6 +104,22 @@ export function OperationsPanel() {
     return () => { cancelled = true }
   }, [platformVersion, t])
 
+  useEffect(() => {
+    let cancelled = false
+    api('/health')
+      .then((payload) => {
+        if (cancelled) return
+        const health = (payload as HealthPayload).rateLimiter
+        setRateLimiterHealth(health ?? null)
+      })
+      .catch(() => {
+        // Silent degrade — the chip is observability, not load-bearing.
+        if (cancelled) return
+        setRateLimiterHealth(null)
+      })
+    return () => { cancelled = true }
+  }, [platformVersion])
+
   return (
     <div className="panel-stack">
       <div className="panel-heading">
@@ -88,6 +130,10 @@ export function OperationsPanel() {
         </div>
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
       </div>
+
+      {rateLimiterHealth && (
+        <RateLimiterStatusChip health={rateLimiterHealth} />
+      )}
 
       {error && (
         <section className="panel-card">
@@ -179,6 +225,50 @@ export function OperationsPanel() {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * Status chip surfacing Redis-backed rate-limiter degradation. Mounted
+ * inside ``OperationsPanel``; two states:
+ *
+ * - **Healthy** (default): subtle green chip, copy: "Rate limiter healthy".
+ * - **Degraded**: amber chip, copy: "Rate limiter degraded — N bucket(s)
+ *   failing open. Traffic still allowed." Tooltip lists the affected
+ *   bucket names.
+ *
+ * The "Traffic still allowed" framing intentionally distinguishes this
+ * non-blocking signal from ``BudgetBlockedBanner`` ("AI workflow budget
+ * exceeded — blocked"). Operators reading both surfaces should never
+ * confuse a Redis blip with a hard budget block.
+ */
+function RateLimiterStatusChip({ health }: { health: RateLimiterHealth }) {
+  const { t } = useT()
+  if (health.healthy) {
+    return (
+      <span
+        className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--healthy"
+        role="status"
+        aria-label={t('operations.rateLimiter.label') as string}
+      >
+        <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
+        <span>{t('operations.rateLimiter.healthy')}</span>
+      </span>
+    )
+  }
+  const bucketCount = health.degradedBuckets.length
+  const bucketNames = health.degradedBuckets.map((b) => b.bucket).join(', ')
+  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames }) as string
+  return (
+    <span
+      className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--degraded"
+      role="status"
+      aria-label={t('operations.rateLimiter.label') as string}
+      title={tooltip}
+    >
+      <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
+      <span>{t('operations.rateLimiter.degraded', { count: bucketCount })}</span>
+    </span>
   )
 }
 

@@ -633,6 +633,13 @@
   "operations.cost.col.tokens": "Tokens",
   "operations.cost.col.calls": "Calls",
 
+  "operations.rateLimiter.label": "Rate limiter",
+  "operations.rateLimiter.healthy": "Rate limiter healthy",
+  "operations.rateLimiter.degraded_one": "Rate limiter degraded — {{count}} bucket failing open. Traffic still allowed.",
+  "operations.rateLimiter.degraded_other": "Rate limiter degraded — {{count}} buckets failing open. Traffic still allowed.",
+  "operations.rateLimiter.degradedBucketsTooltip": "Degraded buckets: {{buckets}}",
+  "operations.rateLimiter.copyHint": "Non-blocking — distinct from a hard budget block.",
+
   "scim.heading": "SCIM directory sync",
   "scim.loading": "Loading SCIM directories…",
   "scim.list.aria": "Connected SCIM directories",
