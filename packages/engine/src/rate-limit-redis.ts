@@ -15,6 +15,10 @@
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
 import { createRateLimiter, type RateLimitOptions } from "@janusly/data/src/rate-limit";
+import {
+  recordRateLimiterError,
+  recordRateLimiterRecovery,
+} from "@janusly/data/src/rate-limit-degradation";
 
 loadRootEnv();
 
@@ -37,7 +41,15 @@ function getRedis(): IORedis {
 
 function getLimiter(): ReturnType<typeof createRateLimiter> {
   if (!limiter) {
-    limiter = createRateLimiter(getRedis());
+    // Worker-side hooks mirror the API wiring so engine Redis blips
+    // (during email / integration / MCP tool calls) flow into the
+    // SAME process-local degradation tracker the API replicas use.
+    // The snapshot is per-process — operators polling each replica's
+    // ``/health`` see that replica's view.
+    limiter = createRateLimiter(getRedis(), {
+      onRedisError: recordRateLimiterError,
+      onRedisSuccess: recordRateLimiterRecovery,
+    });
   }
   return limiter;
 }

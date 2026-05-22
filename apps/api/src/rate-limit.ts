@@ -19,6 +19,10 @@
  */
 
 import { createRateLimiter, type RateLimitOptions } from "@janusly/data/src/rate-limit";
+import {
+  recordRateLimiterError,
+  recordRateLimiterRecovery,
+} from "@janusly/data/src/rate-limit-degradation";
 
 export {
   createRateLimiter,
@@ -31,7 +35,17 @@ let productionLimiter: ReturnType<typeof createRateLimiter> | null = null;
 async function getProductionRateLimiter() {
   if (!productionLimiter) {
     const { redis } = await import("./redis");
-    productionLimiter = createRateLimiter(redis);
+    // Production hooks feed the in-memory degradation tracker.
+    // ``onRedisError`` increments the per-bucket counter and writes
+    // a ``(bucket, day)``-deduped audit row; ``onRedisSuccess`` clears
+    // the in-memory state and writes a one-shot recovery audit when a
+    // previously-degraded bucket sees its first healthy round-trip.
+    // Both are best-effort — the tracker NEVER throws, but the
+    // limiter's ``fireHook`` wrapper is the load-bearing safety net.
+    productionLimiter = createRateLimiter(redis, {
+      onRedisError: recordRateLimiterError,
+      onRedisSuccess: recordRateLimiterRecovery,
+    });
   }
   return productionLimiter;
 }

@@ -86,4 +86,39 @@ describe('<OperationsPanel />', () => {
       expect(screen.getByText(/Recovery metrics unavailable — service down/i)).toBeInTheDocument()
     })
   })
+
+  it('renders the rate-limiter chip in the healthy state when /health reports no degraded buckets', async () => {
+    stubApiByPath({
+      '/recovery/metrics': metricsPayload,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPanel />)
+
+    expect(await screen.findByText('Rate limiter healthy')).toBeInTheDocument()
+  })
+
+  it('renders the degraded chip with bucket count + tooltip when /health reports degraded buckets', async () => {
+    stubApiByPath({
+      '/recovery/metrics': metricsPayload,
+      '/health': {
+        ok: true,
+        rateLimiter: {
+          healthy: false,
+          degradedBuckets: [
+            { bucket: 'ai', errorCount: 4, firstObservedAt: '2026-05-21T20:00:00.000Z', lastObservedAt: '2026-05-21T20:05:00.000Z' },
+            { bucket: 'email.send', errorCount: 1, firstObservedAt: '2026-05-21T20:02:00.000Z', lastObservedAt: '2026-05-21T20:02:00.000Z' },
+          ],
+        },
+      },
+    })
+
+    render(<OperationsPanel />)
+
+    const chip = await screen.findByText(/Rate limiter degraded — 2 buckets failing open\. Traffic still allowed\./i)
+    expect(chip).toBeInTheDocument()
+    // Tooltip on the chip's outer span — defense-in-depth that
+    // operators get the bucket names without clicking through.
+    expect(chip.closest('[role="status"]')).toHaveAttribute('title', 'Degraded buckets: ai, email.send')
+  })
 })
