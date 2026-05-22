@@ -41,7 +41,8 @@ export type PermissionCategory =
   | "mcp"
   | "prompts"
   | "auto-healing"
-  | "credentials";
+  | "credentials"
+  | "alerts";
 
 export type PermissionEntry = {
   key: string;
@@ -51,7 +52,7 @@ export type PermissionEntry = {
 };
 
 /**
- * Closed catalog of permission keys. v1 ships 19 keys across 10
+ * Closed catalog of permission keys. Currently 21 keys across 11
  * categories. Mirrors the action categories exposed by the API surface
  * today.
  */
@@ -93,6 +94,9 @@ export const PERMISSION_CATALOG = [
   // credentials health + admin CRUD
   { key: "credentials.read",     category: "credentials", description: "View credentials + credential / MCP connection health", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "credentials.write",    category: "credentials", description: "Register / edit / delete credentials",                  defaultRoles: ["admin"] },
+  // recovery alerting policies
+  { key: "alerts.read",          category: "alerts",      description: "View alert policies and recently fired alerts",         defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "alerts.write",         category: "alerts",      description: "Create / edit / delete recovery alerting policies",     defaultRoles: ["admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];

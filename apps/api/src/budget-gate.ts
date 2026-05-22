@@ -34,6 +34,7 @@ import { and, desc, eq, gte } from "drizzle-orm";
 
 import { auditLogs, db } from "@janusly/db";
 import { checkBudget } from "@janusly/engine/src/budget";
+import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
 import type { BudgetCheckResult } from "@janusly/shared/src/budget-types";
 
 import { audit } from "./audit";
@@ -84,6 +85,22 @@ export async function gateBudget(input: GateBudgetInput): Promise<GateBudgetOutc
     } catch (err) {
       console.warn("[budget-gate] exceeded audit write failed", err);
     }
+
+    // Fire the recovery-alerting hook so subscribed policies fan out via
+    // Slack / webhook / email / GitHub. The DI seam is a no-op when no
+    // dispatcher is registered. Never throws on caller.
+    void recordAlertEvent({
+      orgId: input.orgId,
+      trigger: "budget.blocked",
+      payload: {
+        scope: envelope.resolvedScope,
+        workflowId: input.workflowId ?? null,
+        monthlyUsdSpent: envelope.monthlyUsdSpent,
+        monthlyUsdLimit: envelope.monthlyUsdLimit,
+        action: input.action,
+      },
+    });
+
     return { envelope, blocked: true };
   }
 

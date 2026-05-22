@@ -13,6 +13,8 @@
 
 import { db } from "@janusly/db";
 import { deadLetters } from "@janusly/db";
+import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "../safe-persist";
 import type { DeadLetterInput, QueueAdapter } from "../core/types";
 
@@ -51,6 +53,21 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
       runId: input.runId,
       nodeId: input.node.id,
       attempt: input.attempt,
+    });
+
+    // Fire the recovery-alerting event hook. The DI seam in `@janusly/data`
+    // is a no-op when no dispatcher is registered; production wiring in
+    // `apps/api/src/alerts-bootstrap.ts` and `packages/engine/src/worker.ts`
+    // registers `dispatchAlert` so subscribed policies fan out via Slack /
+    // webhook / email / GitHub. Never blocks the DLQ insert.
+    void recordAlertEvent({
+      orgId: input.orgId,
+      trigger: "dlq.entry_created",
+      payload: {
+        runId: input.runId,
+        nodeId: input.node.id,
+        errorSignature: normalizeErrorSignature(input.error, { nodeType: input.node.type }).signature,
+      },
     });
   }
 }

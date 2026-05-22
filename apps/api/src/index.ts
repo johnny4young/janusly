@@ -75,6 +75,8 @@ import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
 import { autoHealingRoutes } from "./routes/auto-healing-routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
+import { alertsRoutes } from "./routes/alerts-routes";
+import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -111,6 +113,7 @@ export const routes: Route[] = [
   ...reportsRoutes,
   ...aiRoutes,
   ...autoHealingRoutes,
+  ...alertsRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
@@ -182,6 +185,7 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
       });
     });
     await shutdownAutoHealing();
+    await shutdownAlerts();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);
@@ -206,3 +210,9 @@ server.listen(PORT, () => console.log(`API running on port ${PORT}`));
 // Redis writes, zero Worker. The boot is fire-and-forget; bootstrap
 // failures log internally and never break the API process.
 void bootstrapAutoHealing();
+
+// Boot the recovery alerting subsystem. Always registers the in-process
+// dispatcher DI seam (so DLQ inserts + budget block + limiter degraded
+// hooks can reach it). The periodic scanner Worker only boots when
+// `JANUSLY_ALERTS_ENABLED=true`.
+void bootstrapAlerts();
