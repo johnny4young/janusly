@@ -1715,5 +1715,22 @@
   "recoveryCenter.empty.body": "Tu Centro de recuperación se llenará a medida que los flujos se ejecuten. Empieza con una receta o diseña un flujo en AI Studio — la primera ejecución activa la vista en vivo.",
   "recoveryCenter.empty.openStudio": "Abrir AI Studio",
   "recoveryCenter.empty.browseRecipes": "Explorar recetas",
-  "recoveryCenter.empty.metricsUnavailableFallback": "Métricas de recuperación no disponibles"
+  "recoveryCenter.empty.metricsUnavailableFallback": "Métricas de recuperación no disponibles",
+
+  "autoHealing.card.kicker": "Auto-curación supervisada",
+  "autoHealing.card.title": "Decisiones pendientes",
+  "autoHealing.card.subtitle": "Parches que el sistema propuso para fallas repetidas. Revisa y aplica o rechaza.",
+  "autoHealing.card.loading": "Cargando decisiones de auto-curación…",
+  "autoHealing.card.empty": "No hay decisiones de auto-curación pendientes.",
+  "autoHealing.action.apply": "Aplicar",
+  "autoHealing.action.decline": "Rechazar",
+  "autoHealing.confidence": "{{value}}% de confianza",
+  "autoHealing.error.load": "No se pudieron cargar las decisiones de auto-curación.",
+  "autoHealing.error.decide": "No se pudo registrar la decisión.",
+  "autoHealing.approach.add_retry": "Agregar reintento",
+  "autoHealing.approach.raise_timeout": "Aumentar tiempo de espera",
+  "autoHealing.approach.swap_secret_ref": "Cambiar secreto",
+  "autoHealing.approach.add_approval": "Agregar aprobación",
+  "autoHealing.approach.fix_url": "Corregir URL",
+  "autoHealing.approach.other": "Otro"
 }
