@@ -40,6 +40,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 
 import { db, auditLogs } from "@janusly/db";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
+import { recordAlertEvent } from "./alert-dispatch";
 
 /** Per-bucket state held in-memory while the bucket is degraded. */
 type DegradationState = {
@@ -306,6 +307,20 @@ async function writeDegradedAudit(input: {
         bucket: input.bucket,
         firstObservedAt: input.firstObservedAt,
         lastObservedKey: input.key,
+        lastError: input.message,
+      },
+    });
+
+    // Fire the recovery-alerting hook so subscribed system-org policies can
+    // fan out via Slack / webhook / email. Uses the `system` sentinel orgId
+    // (mirrors the audit row's scoping). The DI seam is a no-op when no
+    // dispatcher is registered.
+    void recordAlertEvent({
+      orgId: SYSTEM_ORG_ID,
+      trigger: "limiter.degraded",
+      payload: {
+        bucket: input.bucket,
+        firstObservedAt: input.firstObservedAt,
         lastError: input.message,
       },
     });
