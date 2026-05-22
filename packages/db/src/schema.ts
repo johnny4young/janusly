@@ -112,6 +112,13 @@ export const workflowVersions = pgTable(
     workflowId: text("workflow_id").notNull(),
     version: integer("version").notNull(),
     dagJson: jsonb("dag_json").notNull(),
+    /**
+     * Per-workflow SLO declaration. Closed-key shape validated by
+     * `WorkflowSloSchema` in `@janusly/shared/src/workflow-slo`.
+     * Carried forward from the previous version on every save unless
+     * the save body explicitly overrides it.
+     */
+    sloJson: jsonb("slo_json"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },

@@ -67,6 +67,9 @@ export async function rollbackWorkflowVersion(input: {
         },
       },
     },
+    // Rolling back the DAG does not roll back the operator's reliability
+    // contract — keep the current SLO attached to the new version.
+    sloJson: latest.sloJson ?? null,
     createdBy: input.createdBy,
   });
 

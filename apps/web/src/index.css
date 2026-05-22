@@ -4919,6 +4919,60 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   border: 1px solid var(--we-success-border-25);
 }
 
+.we-readiness-badge__slo-pill {
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+  border: 1px solid var(--we-danger-border-25);
+  white-space: nowrap;
+}
+
+.we-readiness-badge__slo-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+}
+
+.we-readiness-badge__slo-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.we-readiness-badge__slo-row--breach {
+  color: var(--we-danger);
+}
+
+.we-readiness-badge__slo-row--pass {
+  color: var(--we-text-2);
+}
+
+.we-slo-panel {
+  margin-top: 12px;
+}
+
+.we-slo-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.we-slo-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .we-readiness-issue__code {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 11px;

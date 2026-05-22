@@ -263,3 +263,58 @@ describe('computeWorkflowHealth — overall rollup', () => {
     expect(after.score).toBeLessThan(before.score)
   })
 })
+
+describe('computeWorkflowHealth — SLO evaluation', () => {
+  it('returns slo: null when no SLO is declared', () => {
+    const result = computeWorkflowHealth({
+      workflow: noopWorkflow,
+      readiness: cleanReadiness,
+      signals: { ...baseSignals, totalRuns: 20, successCount: 20 },
+    })
+    expect(result.slo).toBeNull()
+  })
+
+  it('attaches breach booleans when SLO is declared', () => {
+    const result = computeWorkflowHealth({
+      workflow: noopWorkflow,
+      readiness: cleanReadiness,
+      signals: { ...baseSignals, totalRuns: 20, successCount: 18, p95LatencyMs: 4_000 },
+      slo: {
+        successRatePercent: 95,
+        mttrSeconds: null,
+        p95DurationMs: 10_000,
+        budgetBlocksPerWindow: null,
+        stuckWaitingNodesMax: null,
+        windowDays: 7,
+      },
+    })
+    expect(result.slo).not.toBeNull()
+    expect(result.slo?.breaches.successRatePercent).toBe(true)
+    expect(result.slo?.breaches.p95DurationMs).toBe(false)
+    expect(result.slo?.breaches.anyBreach).toBe(true)
+  })
+
+  it('SLO presence does not change the numeric score', () => {
+    const signals = { ...baseSignals, totalRuns: 20, successCount: 18 }
+    const without = computeWorkflowHealth({
+      workflow: noopWorkflow,
+      readiness: cleanReadiness,
+      signals,
+    })
+    const withSlo = computeWorkflowHealth({
+      workflow: noopWorkflow,
+      readiness: cleanReadiness,
+      signals,
+      slo: {
+        successRatePercent: 99,
+        mttrSeconds: null,
+        p95DurationMs: null,
+        budgetBlocksPerWindow: null,
+        stuckWaitingNodesMax: null,
+        windowDays: 7,
+      },
+    })
+    expect(withSlo.score).toBe(without.score)
+    expect(withSlo.status).toBe(without.status)
+  })
+})
