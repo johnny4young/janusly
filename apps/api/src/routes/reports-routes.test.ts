@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   auditMock,
   buildRunExplainReportMock,
+  composeRecoveryMetricsMock,
+  collectRecoveryMetricsSignalsMock,
+  getOrgConfigSnapshotMock,
   selectRowsBox,
   sendJsonMock,
   resWriteHeadMock,
@@ -12,6 +15,9 @@ const {
 } = vi.hoisted(() => ({
   auditMock: vi.fn(),
   buildRunExplainReportMock: vi.fn(),
+  composeRecoveryMetricsMock: vi.fn(),
+  collectRecoveryMetricsSignalsMock: vi.fn(),
+  getOrgConfigSnapshotMock: vi.fn(),
   selectRowsBox: { rows: [] as unknown[][] },
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
   resWriteHeadMock: vi.fn(),
@@ -76,6 +82,18 @@ vi.mock("@janusly/engine/src/run-explain-report", () => ({
   buildRunExplainReport: buildRunExplainReportMock,
 }));
 
+vi.mock("@janusly/engine/src/recovery-metrics", () => ({
+  composeRecoveryMetrics: composeRecoveryMetricsMock,
+}));
+
+vi.mock("@janusly/data/src/recoveryMetricsRepo", () => ({
+  collectRecoveryMetricsSignals: collectRecoveryMetricsSignalsMock,
+}));
+
+vi.mock("@janusly/data/src/orgConfigRepo", () => ({
+  getOrgConfigSnapshot: getOrgConfigSnapshotMock,
+}));
+
 vi.mock("@janusly/engine/src/tool-registry", () => ({
   executeTool: executeToolMock,
 }));
@@ -117,6 +135,10 @@ function reportsRoute() {
 
 function deliverRoute() {
   return reportsRoutes[1]!;
+}
+
+function valueDashboardRoute() {
+  return reportsRoutes[2]!;
 }
 
 /** Build a Node-`http`-shaped request that yields a JSON body via the
@@ -164,16 +186,63 @@ const baseReport = {
   },
 };
 
+const valueSignals = {
+  runStatusCounts: { succeeded: 8, failed: 2, cancelled: 0 },
+  mttrDurations: [60_000],
+  approvalsPending: 1,
+  costByProvider: [],
+  p95LatencyMs: 12_000,
+  replayOutcomes: { totalEntries: 2, replayedSuccess: 2, replayedAndReopened: 0 },
+  resolvedClusters: { totalClusters: 4, totalEntries: 9, capped: false },
+};
+
+const valueAssumptions = {
+  hourlyCost: 80,
+  minutesSavedPerRecovery: 45,
+  baselineMttrSeconds: 1800,
+};
+
+const valueMetrics = {
+  successRate: { value: 80, display: "80%", severity: "healthy", rationale: "8 of 10 runs succeeded." },
+  mttr: { value: 60_000, display: "1m", severity: "healthy", rationale: "Recovered quickly." },
+  p95Latency: { value: 12_000, display: "12s", severity: "neutral", rationale: "Within bounds." },
+  approvalsPending: { value: 1, display: "1", severity: "neutral", rationale: "One approval pending." },
+  replayRate: { value: 100, display: "100%", severity: "healthy", rationale: "Both replays succeeded." },
+  costThisWindow: { value: 12.34, display: "$12.34", severity: "neutral", rationale: "AI spend this window.", providers: [] },
+  clustersResolved: {
+    value: 4,
+    display: "4 clusters",
+    severity: "healthy",
+    rationale: "4 distinct signatures resolved.",
+    totalEntries: 9,
+    capped: false,
+  },
+  valueEstimate: {
+    hoursSaved: 3,
+    dollarSaved: 240,
+    mttrDeltaSeconds: 1740,
+    assumptions: valueAssumptions,
+  },
+  windowDays: 30,
+  terminalRuns: 10,
+};
+
 beforeEach(() => {
   selectRowsBox.rows = [];
   auditMock.mockReset();
   buildRunExplainReportMock.mockReset();
+  composeRecoveryMetricsMock.mockReset();
+  collectRecoveryMetricsSignalsMock.mockReset();
+  getOrgConfigSnapshotMock.mockReset();
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
   resEndMock.mockReset();
   executeToolMock.mockReset();
   enforceRateLimitMock.mockReset();
   buildRunExplainReportMock.mockReturnValue(baseReport);
+  collectRecoveryMetricsSignalsMock.mockResolvedValue(valueSignals);
+  getOrgConfigSnapshotMock.mockResolvedValue({ value: valueAssumptions });
+  composeRecoveryMetricsMock.mockReturnValue(valueMetrics);
 });
 
 describe("/reports/run-explain — happy path", () => {
@@ -403,6 +472,78 @@ describe("/reports/run-explain — rejection paths", () => {
       404,
     );
     expect(buildRunExplainReportMock).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("/reports/value-dashboard — export", () => {
+  it("declares a viewer GET route that matches the value-dashboard path", () => {
+    const route = valueDashboardRoute();
+    expect(route.method).toBe("GET");
+    expect(route.role).toBe("viewer");
+    expect(typeof route.match).toBe("function");
+    expect((route.match as (url: string) => boolean)("/reports/value-dashboard?format=markdown")).toBe(true);
+  });
+
+  it("returns Markdown with estimate formula, attachment headers, and audit row", async () => {
+    await valueDashboardRoute().handler({
+      req: { url: "/reports/value-dashboard?windowDays=30&format=markdown" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(collectRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 30);
+    expect(getOrgConfigSnapshotMock).toHaveBeenCalledWith("org-1");
+    expect(composeRecoveryMetricsMock).toHaveBeenCalledWith(valueSignals, 30, valueAssumptions);
+    expect(resWriteHeadMock).toHaveBeenCalledTimes(1);
+    const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("text/markdown; charset=utf-8");
+    expect(headers["Content-Disposition"]).toContain("janusly-value-dashboard-org-1-");
+    expect(headers["Content-Disposition"]).toContain("-30d.md");
+    const markdown = resEndMock.mock.calls[0]![0] as string;
+    expect(markdown).toContain("Estimate based on operator-supplied assumptions");
+    expect(markdown).toContain("dollarSaved = hoursSaved");
+    expect(markdown).toContain("Engineer hourly cost: $80.00");
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "report.value_dashboard.exported",
+      "org",
+      "org-1",
+      { format: "markdown", windowDays: 30 },
+    );
+  });
+
+  it("returns the JSON payload with the same metrics envelope", async () => {
+    await valueDashboardRoute().handler({
+      req: { url: "/reports/value-dashboard?windowDays=7&format=json" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(collectRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 7);
+    const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["Content-Disposition"]).toContain("-7d.json");
+    const body = JSON.parse(resEndMock.mock.calls[0]![0] as string) as { org: { orgId: string; windowDays: number }; metrics: unknown };
+    expect(body.org).toMatchObject({ orgId: "org-1", windowDays: 7 });
+    expect(body.metrics).toEqual(valueMetrics);
+  });
+
+  it("rejects unknown formats before querying metrics or writing audit", async () => {
+    await valueDashboardRoute().handler({
+      req: { url: "/reports/value-dashboard?format=pdf" } as never,
+      res: makeRes() as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ error: expect.stringContaining("Unknown format") }),
+      400,
+    );
+    expect(collectRecoveryMetricsSignalsMock).not.toHaveBeenCalled();
+    expect(getOrgConfigSnapshotMock).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
   });
 });

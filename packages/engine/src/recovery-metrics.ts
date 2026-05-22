@@ -36,7 +36,9 @@ export type RecoveryMetricRationaleCode =
   | "approvals.blocked"
   | "replay.empty"
   | "replay.summary"
-  | "cost.summary";
+  | "cost.summary"
+  | "clusters_resolved.empty"
+  | "clusters_resolved.summary";
 
 /** Per-provider/model row inside the cost breakdown. */
 export type CostProviderRow = {
@@ -64,6 +66,18 @@ export type ReplayOutcomeCounts = {
   replayedAndReopened: number;
 };
 
+/**
+ * Distinct-failure-signature counts the repo derives from
+ * `dead_letters` rows in the window with `status IN (replayed, resolved)`.
+ * `capped: true` means the underlying scan hit the row cap and the
+ * `totalClusters` count is bounded by whatever fit.
+ */
+export type ResolvedClustersCounts = {
+  totalClusters: number;
+  totalEntries: number;
+  capped: boolean;
+};
+
 /** Raw signals the data repo returns; the rollup converts to `RecoveryMetrics`. */
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCounts;
@@ -73,6 +87,7 @@ export type RecoveryMetricsSignals = {
   costByProvider: CostProviderRow[];
   p95LatencyMs: number | null;
   replayOutcomes: ReplayOutcomeCounts;
+  resolvedClusters: ResolvedClustersCounts;
 };
 
 /** Single metric card payload surfaced to the UI. */
@@ -85,6 +100,40 @@ export type RecoveryMetric = {
   rationaleMeta?: Record<string, string | number | boolean>;
 };
 
+/**
+ * Operator-supplied assumptions that drive the Value Dashboard's
+ * estimate formulas. Every dollar / hour surface labeled as estimate
+ * in the UI traces back to these knobs.
+ */
+export type ValueAssumptions = {
+  /** Engineer hourly cost (USD-equivalent). Pure assumption — never measured. */
+  hourlyCost: number;
+  /** Minutes a human would otherwise spend per resolved failure. Operator-supplied. */
+  minutesSavedPerRecovery: number;
+  /**
+   * Pre-Janusly MTTR baseline (seconds). `0` is the sentinel for
+   * "baseline not measured yet" — the dashboard renders the "Before"
+   * slot as "Awaiting private-beta data" until set.
+   */
+  baselineMttrSeconds: number;
+};
+
+/**
+ * Value Dashboard rollup. Computed from `resolvedClusters` × the
+ * three operator-supplied `ValueAssumptions`. Every numeric in this
+ * block is an ESTIMATE; the UI labels them as such, the export
+ * Markdown spells out the formula plainly.
+ *
+ * `mttrDeltaSeconds` is null when the baseline is unset (0 sentinel)
+ * OR when the platform's measured MTTR is unavailable.
+ */
+export type ValueEstimate = {
+  hoursSaved: number;
+  dollarSaved: number;
+  mttrDeltaSeconds: number | null;
+  assumptions: ValueAssumptions;
+};
+
 /** Full UI-friendly rollup returned by `composeRecoveryMetrics`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
@@ -93,6 +142,8 @@ export type RecoveryMetrics = {
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
   costThisWindow: RecoveryMetric & { providers: CostProviderRow[] };
+  clustersResolved: RecoveryMetric & { totalEntries: number; capped: boolean };
+  valueEstimate: ValueEstimate;
   windowDays: number;
   /** Total terminal runs (succeeded + failed + cancelled) — useful as the denominator for downstream per-workflow rollups. */
   terminalRuns: number;
@@ -120,10 +171,57 @@ function displayProvider(provider: string): string {
   return PROVIDER_DISPLAY_NAMES[provider.toLowerCase()] ?? provider;
 }
 
+/** Default assumptions when the org has not customised `value.*`. Match the
+ *  catalog defaults in `packages/data/src/orgConfigRepo.ts`. */
+export const DEFAULT_VALUE_ASSUMPTIONS: ValueAssumptions = {
+  hourlyCost: 50,
+  minutesSavedPerRecovery: 30,
+  baselineMttrSeconds: 0,
+};
+
+/**
+ * Compute the value-savings estimate from a cluster count + the
+ * platform's measured MTTR (in seconds) + operator assumptions.
+ *
+ * Pure function — exported so the export route + tests can call it
+ * directly without spinning up the full rollup.
+ *
+ * Formula:
+ *   hoursSaved  = clustersResolved * minutesSavedPerRecovery / 60
+ *   dollarSaved = hoursSaved * hourlyCost
+ *   mttrDelta   = baselineMttrSeconds > 0 && mttrSeconds != null
+ *                   ? baselineMttrSeconds - mttrSeconds
+ *                   : null
+ *
+ * `baselineMttrSeconds === 0` is the sentinel for "operator has not
+ * measured a pre-Janusly baseline yet"; in that case `mttrDeltaSeconds`
+ * is `null` and the UI renders "Awaiting private-beta data".
+ */
+export function estimateValueSavings(
+  clustersResolved: number,
+  measuredMttrSeconds: number | null,
+  assumptions: ValueAssumptions,
+): ValueEstimate {
+  const safeClusters = Math.max(0, clustersResolved);
+  const hoursSaved = safeClusters * assumptions.minutesSavedPerRecovery / 60;
+  const dollarSaved = hoursSaved * assumptions.hourlyCost;
+  const mttrDeltaSeconds =
+    assumptions.baselineMttrSeconds > 0 && measuredMttrSeconds != null
+      ? assumptions.baselineMttrSeconds - measuredMttrSeconds
+      : null;
+  return {
+    hoursSaved,
+    dollarSaved,
+    mttrDeltaSeconds,
+    assumptions,
+  };
+}
+
 /** Compose the UI-friendly metrics object from raw repo signals. */
 export function composeRecoveryMetrics(
   signals: RecoveryMetricsSignals,
   windowDays: number,
+  assumptions: ValueAssumptions = DEFAULT_VALUE_ASSUMPTIONS,
 ): RecoveryMetrics {
   const successRate = computeSuccessRate(signals.runStatusCounts);
   const mttr = computeMttr(signals.mttrDurations);
@@ -131,6 +229,12 @@ export function composeRecoveryMetrics(
   const approvalsPending = computeApprovals(signals.approvalsPending);
   const replayRate = computeReplayRate(signals.replayOutcomes);
   const costThisWindow = computeCost(signals.costByProvider, windowDays);
+  const clustersResolved = computeClustersResolved(signals.resolvedClusters);
+  const valueEstimate = estimateValueSavings(
+    signals.resolvedClusters.totalClusters,
+    mttr.value != null ? Math.round(mttr.value / 1000) : null,
+    assumptions,
+  );
   const terminalRuns =
     signals.runStatusCounts.succeeded +
     signals.runStatusCounts.failed +
@@ -143,8 +247,42 @@ export function composeRecoveryMetrics(
     approvalsPending,
     replayRate,
     costThisWindow,
+    clustersResolved,
+    valueEstimate,
     windowDays,
     terminalRuns,
+  };
+}
+
+function computeClustersResolved(
+  counts: ResolvedClustersCounts,
+): RecoveryMetric & { totalEntries: number; capped: boolean } {
+  const total = counts.totalClusters;
+  const display = counts.capped ? `≥ ${total} clusters` : `${total} ${total === 1 ? "cluster" : "clusters"}`;
+  if (total === 0) {
+    return {
+      value: 0,
+      display: "0 clusters",
+      severity: "neutral",
+      rationale: "No failure clusters resolved in this window.",
+      rationaleCode: "clusters_resolved.empty",
+      totalEntries: counts.totalEntries,
+      capped: counts.capped,
+    };
+  }
+  return {
+    value: total,
+    display,
+    severity: "healthy",
+    rationale: `${total} distinct failure ${total === 1 ? "signature" : "signatures"} resolved (${counts.totalEntries} ${counts.totalEntries === 1 ? "entry" : "entries"}).`,
+    rationaleCode: "clusters_resolved.summary",
+    rationaleMeta: {
+      distinctSignatures: total,
+      totalEntries: counts.totalEntries,
+      capped: counts.capped,
+    },
+    totalEntries: counts.totalEntries,
+    capped: counts.capped,
   };
 }
 

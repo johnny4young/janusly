@@ -15,6 +15,9 @@ import { z } from "zod";
 
 import { auditLogs, db, runEvents, runNodes, runs } from "@janusly/db";
 import { buildRunExplainReport, type RunExplainReport } from "@janusly/engine/src/run-explain-report";
+import { composeRecoveryMetrics, type RecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
+import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
+import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { executeTool } from "@janusly/engine/src/tool-registry";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
@@ -688,4 +691,154 @@ export const reportsRoutes: Route[] = [
         deliveryId: outcome.deliveryId,
       });
     } },
+
+  // GET /reports/value-dashboard?windowDays=N&format=markdown|json
+  // Operator-facing MTTR + value rollup. Same data the in-app dashboard
+  // renders, packaged as a downloadable artefact for sharing with a
+  // stakeholder ("here's what the platform recovered for us this month").
+  // Multi-tenant scoped on `auth.orgId` — no enumeration of other orgs.
+  // Every export writes a `report.value_dashboard.exported` audit row.
+  { method: "GET", match: (url) => url.startsWith("/reports/value-dashboard"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
+      const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
+      const formatRaw = (url.searchParams.get("format") ?? "markdown").toLowerCase();
+      if (formatRaw !== "markdown" && formatRaw !== "json") {
+        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "markdown" or "json".` }, 400);
+      }
+      const format = formatRaw as "markdown" | "json";
+
+      const [signals, snapshot] = await Promise.all([
+        collectRecoveryMetricsSignals(auth.orgId, windowDays),
+        getOrgConfigSnapshot(auth.orgId),
+      ]);
+      const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
+
+      await audit(auth.orgId, auth.userId, "report.value_dashboard.exported", "org", auth.orgId, {
+        format,
+        windowDays,
+      });
+
+      const { asciiFilename, utf8Filename } = buildValueDashboardFilename({
+        orgId: auth.orgId,
+        windowDays,
+        exportedAt: new Date(),
+        format,
+      });
+
+      if (format === "json") {
+        const body = {
+          org: {
+            orgId: auth.orgId,
+            exportedAt: new Date().toISOString(),
+            windowDays,
+          },
+          metrics,
+        };
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          ...corsHeaders(res),
+        });
+        res.end(JSON.stringify(body));
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        ...corsHeaders(res),
+      });
+      res.end(buildValueDashboardMarkdown({
+        orgId: auth.orgId,
+        windowDays,
+        metrics,
+        exportedAt: new Date(),
+      }));
+    } },
 ];
+
+/**
+ * Filename builder for the value-dashboard export. Pattern:
+ *   janusly-value-dashboard-<orgIdShort>-<YYYY-MM-DD>-<windowDays>d.<ext>
+ *
+ * Mirrors `buildReportFilename` for the run-explain report. The orgId
+ * is shortened to 8 chars — operators recognise their own org without
+ * needing the full UUID, and the date + window combo disambiguates the
+ * same org's repeated exports.
+ */
+function buildValueDashboardFilename(args: {
+  orgId: string;
+  windowDays: number;
+  exportedAt: Date;
+  format: "markdown" | "json";
+}): { asciiFilename: string; utf8Filename: string } {
+  const orgSlug = slugify(args.orgId.slice(0, 8)) || "org";
+  const datePart = args.exportedAt.toISOString().slice(0, 10);
+  const ext = args.format === "json" ? "json" : "md";
+  const base = `janusly-value-dashboard-${orgSlug}-${datePart}-${args.windowDays}d.${ext}`;
+  return { asciiFilename: base, utf8Filename: base };
+}
+
+/**
+ * Render the value-dashboard report as Markdown. Header carries the
+ * "Estimate based on operator-supplied assumptions" disclaimer. The
+ * assumptions section lists the three knobs the operator configured AND
+ * spells the formula out plainly so a CFO reading the document knows
+ * exactly how the numbers were derived. No precision claims.
+ */
+function buildValueDashboardMarkdown(args: {
+  orgId: string;
+  windowDays: number;
+  metrics: RecoveryMetrics;
+  exportedAt: Date;
+}): string {
+  const { metrics, windowDays, exportedAt } = args;
+  const lines: string[] = [];
+  lines.push(`# Value Dashboard — last ${windowDays} days`);
+  lines.push("");
+  lines.push("> **Estimate based on operator-supplied assumptions.** The numbers below ARE NOT accounting — they are projections from the assumptions the operator set in Org Config.");
+  lines.push("");
+  lines.push(`_Exported: ${exportedAt.toISOString()}_`);
+  lines.push("");
+  lines.push("## Recovery metrics");
+  lines.push("");
+  lines.push(`- **Success rate**: ${metrics.successRate.display} — ${metrics.successRate.rationale}`);
+  lines.push(`- **MTTR (measured)**: ${metrics.mttr.display} — ${metrics.mttr.rationale}`);
+  lines.push(`- **p95 latency**: ${metrics.p95Latency.display} — ${metrics.p95Latency.rationale}`);
+  lines.push(`- **Approvals pending**: ${metrics.approvalsPending.display} — ${metrics.approvalsPending.rationale}`);
+  lines.push(`- **Replay rate**: ${metrics.replayRate.display} — ${metrics.replayRate.rationale}`);
+  lines.push(`- **AI spend**: ${metrics.costThisWindow.display} — ${metrics.costThisWindow.rationale}`);
+  lines.push(`- **Clusters resolved**: ${metrics.clustersResolved.display} (${metrics.clustersResolved.totalEntries} ${metrics.clustersResolved.totalEntries === 1 ? "entry" : "entries"}${metrics.clustersResolved.capped ? "; scan was capped" : ""})`);
+  lines.push("");
+  lines.push("## Value estimate");
+  lines.push("");
+  const ve = metrics.valueEstimate;
+  lines.push(`- **Hours saved (estimate)**: ${ve.hoursSaved.toFixed(2)} hours`);
+  lines.push(`- **Dollars saved (estimate)**: $${ve.dollarSaved.toFixed(2)}`);
+  if (ve.mttrDeltaSeconds != null) {
+    const sign = ve.mttrDeltaSeconds >= 0 ? "−" : "+";
+    lines.push(`- **MTTR delta vs baseline**: ${sign}${Math.abs(ve.mttrDeltaSeconds)} seconds (baseline ${ve.assumptions.baselineMttrSeconds}s)`);
+  } else {
+    lines.push("- **MTTR delta vs baseline**: awaiting private-beta baseline (`value.baselineMttrSeconds` is unset).");
+  }
+  lines.push("");
+  lines.push("## Assumptions");
+  lines.push("");
+  lines.push(`- _Estimate based on operator-supplied assumptions._`);
+  lines.push(`- Engineer hourly cost: $${ve.assumptions.hourlyCost.toFixed(2)} (USD-equivalent)`);
+  lines.push(`- Minutes saved per resolved failure: ${ve.assumptions.minutesSavedPerRecovery}`);
+  lines.push(`- Pre-Janusly MTTR baseline: ${ve.assumptions.baselineMttrSeconds === 0 ? "unset" : `${ve.assumptions.baselineMttrSeconds}s`}`);
+  lines.push("");
+  lines.push("### Formula");
+  lines.push("");
+  lines.push("```");
+  lines.push("hoursSaved  = clustersResolved × minutesSavedPerRecovery / 60");
+  lines.push("dollarSaved = hoursSaved × hourlyCost");
+  lines.push("```");
+  lines.push("");
+  return lines.join("\n");
+}

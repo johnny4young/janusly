@@ -1732,5 +1732,21 @@
   "autoHealing.approach.swap_secret_ref": "Swap secret",
   "autoHealing.approach.add_approval": "Add approval",
   "autoHealing.approach.fix_url": "Fix URL",
-  "autoHealing.approach.other": "Other"
+  "autoHealing.approach.other": "Other",
+
+  "recoveryCenter.value.kicker": "Value dashboard",
+  "recoveryCenter.value.title": "MTTR & dollar savings",
+  "recoveryCenter.value.subtitle": "Estimated impact based on operator-supplied assumptions. Not accounting.",
+  "recoveryCenter.value.privateBetaPending": "Run a workflow to see the value dashboard fill in.",
+  "recoveryCenter.value.mttrBefore.label": "MTTR before",
+  "recoveryCenter.value.mttrBefore.empty": "Awaiting private-beta data",
+  "recoveryCenter.value.mttrAfter.label": "MTTR after",
+  "recoveryCenter.value.mttrDelta.label": "MTTR delta",
+  "recoveryCenter.value.clustersResolved.label": "Clusters resolved",
+  "recoveryCenter.value.hoursSaved.label": "Hours saved",
+  "recoveryCenter.value.dollarSaved.label": "Dollars saved",
+  "recoveryCenter.value.estimateBadge": "estimate",
+  "recoveryCenter.value.estimateTooltip": "Estimate based on operator-supplied assumptions. Not accounting.",
+  "recoveryCenter.value.export.markdown": "Markdown",
+  "recoveryCenter.value.export.json": "JSON"
 }

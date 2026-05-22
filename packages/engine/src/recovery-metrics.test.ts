@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   composeRecoveryMetrics,
+  estimateValueSavings,
   formatDurationMs,
+  DEFAULT_VALUE_ASSUMPTIONS,
   type RecoveryMetricsSignals,
 } from "./recovery-metrics";
 
@@ -13,6 +15,7 @@ function baseSignals(partial: Partial<RecoveryMetricsSignals> = {}): RecoveryMet
     costByProvider: [],
     p95LatencyMs: null,
     replayOutcomes: { totalEntries: 0, replayedSuccess: 0, replayedAndReopened: 0 },
+    resolvedClusters: { totalClusters: 0, totalEntries: 0, capped: false },
     ...partial,
   };
 }
@@ -155,5 +158,96 @@ describe("formatDurationMs — direct unit checks", () => {
     expect(formatDurationMs(1_400)).toBe("1.4s");
     expect(formatDurationMs(192_000)).toBe("3m 12s");
     expect(formatDurationMs(3_900_000)).toBe("1h 5m");
+  });
+});
+
+describe("estimateValueSavings — formula correctness", () => {
+  it("computes hoursSaved + dollarSaved from the operator assumptions", () => {
+    // 10 clusters × 30 min / 60 × $50/hr = $250 saved (5 hours)
+    const result = estimateValueSavings(10, 60, DEFAULT_VALUE_ASSUMPTIONS);
+    expect(result.hoursSaved).toBe(5);
+    expect(result.dollarSaved).toBe(250);
+  });
+
+  it("zero clusters → zero savings (the empty-state contract)", () => {
+    const result = estimateValueSavings(0, 60, DEFAULT_VALUE_ASSUMPTIONS);
+    expect(result.hoursSaved).toBe(0);
+    expect(result.dollarSaved).toBe(0);
+  });
+
+  it("treats baselineMttrSeconds === 0 as 'unset' (mttrDelta null)", () => {
+    const result = estimateValueSavings(5, 60, DEFAULT_VALUE_ASSUMPTIONS);
+    expect(result.mttrDeltaSeconds).toBeNull();
+    expect(result.assumptions.baselineMttrSeconds).toBe(0);
+  });
+
+  it("computes mttrDelta when baseline is set and measured MTTR is available", () => {
+    const result = estimateValueSavings(5, 60, {
+      ...DEFAULT_VALUE_ASSUMPTIONS,
+      baselineMttrSeconds: 1800, // 30-min manual baseline
+    });
+    expect(result.mttrDeltaSeconds).toBe(1740); // 1800 - 60 = 1740s
+  });
+
+  it("returns null mttrDelta when measuredMttrSeconds is null (no replays yet)", () => {
+    const result = estimateValueSavings(5, null, {
+      ...DEFAULT_VALUE_ASSUMPTIONS,
+      baselineMttrSeconds: 1800,
+    });
+    expect(result.mttrDeltaSeconds).toBeNull();
+  });
+
+  it("negative clustersResolved is clamped to zero (defense against bad input)", () => {
+    const result = estimateValueSavings(-5, 60, DEFAULT_VALUE_ASSUMPTIONS);
+    expect(result.hoursSaved).toBe(0);
+    expect(result.dollarSaved).toBe(0);
+  });
+});
+
+describe("composeRecoveryMetrics — clustersResolved + valueEstimate", () => {
+  it("zero clusters → neutral severity, empty rationale code", () => {
+    const result = composeRecoveryMetrics(baseSignals(), 30);
+    expect(result.clustersResolved.value).toBe(0);
+    expect(result.clustersResolved.severity).toBe("neutral");
+    expect(result.clustersResolved.rationaleCode).toBe("clusters_resolved.empty");
+    expect(result.valueEstimate.hoursSaved).toBe(0);
+    expect(result.valueEstimate.dollarSaved).toBe(0);
+  });
+
+  it("positive clusters → healthy severity, populated rationaleMeta", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ resolvedClusters: { totalClusters: 7, totalEntries: 23, capped: false } }),
+      30,
+    );
+    expect(result.clustersResolved.value).toBe(7);
+    expect(result.clustersResolved.severity).toBe("healthy");
+    expect(result.clustersResolved.display).toBe("7 clusters");
+    expect(result.clustersResolved.rationaleCode).toBe("clusters_resolved.summary");
+    expect(result.clustersResolved.rationaleMeta).toMatchObject({
+      distinctSignatures: 7,
+      totalEntries: 23,
+      capped: false,
+    });
+  });
+
+  it("capped scan renders 'at-least' display", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ resolvedClusters: { totalClusters: 50, totalEntries: 10_000, capped: true } }),
+      30,
+    );
+    expect(result.clustersResolved.display).toBe("≥ 50 clusters");
+    expect(result.clustersResolved.capped).toBe(true);
+  });
+
+  it("valueEstimate populated from custom assumptions", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ resolvedClusters: { totalClusters: 10, totalEntries: 30, capped: false } }),
+      30,
+      { hourlyCost: 100, minutesSavedPerRecovery: 60, baselineMttrSeconds: 0 },
+    );
+    expect(result.valueEstimate.hoursSaved).toBe(10); // 10 × 60 / 60
+    expect(result.valueEstimate.dollarSaved).toBe(1000); // 10 × $100
+    expect(result.valueEstimate.mttrDeltaSeconds).toBeNull(); // baseline unset
+    expect(result.valueEstimate.assumptions.hourlyCost).toBe(100);
   });
 });

@@ -334,6 +334,80 @@ describe("normalizeOrgConfigValue — autoHealing.loopWindowDays bounds", () => 
   });
 });
 
+describe("ORG_CONFIG_DEFINITIONS value.* family", () => {
+  it("catalogues every value-dashboard key", () => {
+    const valueKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("value.")).map(
+      (d) => d.key,
+    );
+    expect(valueKeys.sort()).toEqual(
+      [
+        "value.hourlyCost",
+        "value.minutesSavedPerRecovery",
+        "value.baselineMttrSeconds",
+      ].sort(),
+    );
+  });
+
+  it("registers every value.* entry under the `value` category", () => {
+    for (const def of ORG_CONFIG_DEFINITIONS) {
+      if (def.key.startsWith("value.")) {
+        expect(def.category).toBe("value");
+      }
+    }
+  });
+
+  it("uses 0 as the baselineMttrSeconds sentinel (no env fallback)", () => {
+    const def = findDef("value.baselineMttrSeconds");
+    expect(def.defaultValue).toBe(0);
+    expect(def.envKeys).toBeUndefined();
+  });
+});
+
+describe("normalizeOrgConfigValue — value.hourlyCost bounds", () => {
+  const def = findDef("value.hourlyCost");
+
+  it("uses default 50 and accepts the 0..2000 range", () => {
+    expect(def.defaultValue).toBe(50);
+    expect(normalizeOrgConfigValue(def, 0)).toBe(0);
+    expect(normalizeOrgConfigValue(def, 50)).toBe(50);
+    expect(normalizeOrgConfigValue(def, 2000)).toBe(2000);
+  });
+
+  it("rejects values outside 0..2000", () => {
+    expect(() => normalizeOrgConfigValue(def, -1)).toThrow(/>= 0/);
+    expect(() => normalizeOrgConfigValue(def, 2001)).toThrow(/<= 2000/);
+  });
+
+  it("preserves fractional dollars (does not silently floor $125.75 to $125)", () => {
+    // Without fractional: true the normalizer Math.floors integers, biasing
+    // the dollar-saved estimate. Catalog flips it on; this pin guards against
+    // a regression that re-removes the flag.
+    expect(normalizeOrgConfigValue(def, 125.75)).toBe(125.75);
+    expect(normalizeOrgConfigValue(def, 0.5)).toBe(0.5);
+  });
+});
+
+describe("normalizeOrgConfigValue — value.minutesSavedPerRecovery / baselineMttrSeconds bounds", () => {
+  it("minutesSavedPerRecovery accepts 0..480 (default 30)", () => {
+    const def = findDef("value.minutesSavedPerRecovery");
+    expect(def.defaultValue).toBe(30);
+    expect(normalizeOrgConfigValue(def, 0)).toBe(0);
+    expect(normalizeOrgConfigValue(def, 480)).toBe(480);
+    expect(() => normalizeOrgConfigValue(def, -1)).toThrow(/>= 0/);
+    expect(() => normalizeOrgConfigValue(def, 481)).toThrow(/<= 480/);
+  });
+
+  it("baselineMttrSeconds accepts 0..86400 (default 0)", () => {
+    const def = findDef("value.baselineMttrSeconds");
+    expect(def.defaultValue).toBe(0);
+    expect(normalizeOrgConfigValue(def, 0)).toBe(0);
+    expect(normalizeOrgConfigValue(def, 3600)).toBe(3600);
+    expect(normalizeOrgConfigValue(def, 86_400)).toBe(86_400);
+    expect(() => normalizeOrgConfigValue(def, -1)).toThrow(/>= 0/);
+    expect(() => normalizeOrgConfigValue(def, 86_401)).toThrow(/<= 86400/);
+  });
+});
+
 describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
   // Pre-existing keys without `validate:` must still normalize byte-for-byte.
   // Pick a representative sample across types.

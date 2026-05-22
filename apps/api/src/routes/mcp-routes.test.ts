@@ -44,6 +44,7 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
     objectstore: {} as never,
     memory: {} as never,
     autoHealing: {} as never,
+    value: {} as never,
   })),
 }));
 
@@ -195,6 +196,7 @@ beforeEach(() => {
     objectstore: {} as never,
     memory: {} as never,
     autoHealing: {} as never,
+    value: {} as never,
   });
   vi.mocked(withMcpClient).mockReset();
   vi.mocked(withMcpClient).mockImplementation(async (factory, fn) => {
@@ -287,6 +289,7 @@ describe("POST /mcp/connections", () => {
       objectstore: {} as never,
       memory: {} as never,
     autoHealing: {} as never,
+    value: {} as never,
     });
     vi.mocked(getConnectionByAlias).mockResolvedValueOnce(null).mockResolvedValueOnce({ ...connectionRow, status: "active" });
     vi.mocked(createConnection).mockResolvedValueOnce(connectionRow);

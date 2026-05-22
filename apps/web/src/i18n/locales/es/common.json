@@ -1732,5 +1732,21 @@
   "autoHealing.approach.swap_secret_ref": "Cambiar secreto",
   "autoHealing.approach.add_approval": "Agregar aprobación",
   "autoHealing.approach.fix_url": "Corregir URL",
-  "autoHealing.approach.other": "Otro"
+  "autoHealing.approach.other": "Otro",
+
+  "recoveryCenter.value.kicker": "Panel de valor",
+  "recoveryCenter.value.title": "MTTR y ahorro estimado",
+  "recoveryCenter.value.subtitle": "Impacto estimado con los supuestos del operador. No es contabilidad.",
+  "recoveryCenter.value.privateBetaPending": "Ejecuta un flujo para que el panel de valor empiece a llenarse.",
+  "recoveryCenter.value.mttrBefore.label": "MTTR antes",
+  "recoveryCenter.value.mttrBefore.empty": "Esperando datos de beta privada",
+  "recoveryCenter.value.mttrAfter.label": "MTTR ahora",
+  "recoveryCenter.value.mttrDelta.label": "Diferencia de MTTR",
+  "recoveryCenter.value.clustersResolved.label": "Grupos resueltos",
+  "recoveryCenter.value.hoursSaved.label": "Horas ahorradas",
+  "recoveryCenter.value.dollarSaved.label": "Dólares ahorrados",
+  "recoveryCenter.value.estimateBadge": "estimado",
+  "recoveryCenter.value.estimateTooltip": "Estimado con los supuestos del operador. No es contabilidad.",
+  "recoveryCenter.value.export.markdown": "Markdown",
+  "recoveryCenter.value.export.json": "JSON"
 }
