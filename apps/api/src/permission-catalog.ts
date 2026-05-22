@@ -40,7 +40,8 @@ export type PermissionCategory =
   | "plugins"
   | "mcp"
   | "prompts"
-  | "auto-healing";
+  | "auto-healing"
+  | "credentials";
 
 export type PermissionEntry = {
   key: string;
@@ -89,6 +90,9 @@ export const PERMISSION_CATALOG = [
   // promptops registry
   { key: "prompts.read",         category: "prompts",   description: "View prompts + versions in the PromptOps registry", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "prompts.write",        category: "prompts",   description: "Create prompts, append new versions, pin active version", defaultRoles: ["editor", "admin"] },
+  // credentials health + admin CRUD
+  { key: "credentials.read",     category: "credentials", description: "View credentials + credential / MCP connection health", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "credentials.write",    category: "credentials", description: "Register / edit / delete credentials",                  defaultRoles: ["admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];

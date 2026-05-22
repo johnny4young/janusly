@@ -38,7 +38,12 @@ import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
-import { checkRollbackAvailability, mergeReadiness } from "../readiness-helpers";
+import {
+  checkRollbackAvailability,
+  getCredentialReadinessIssues,
+  mergeReadiness,
+  productionSecretRefResolver,
+} from "../readiness-helpers";
 import type { Route } from "../routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
@@ -219,8 +224,11 @@ export const workflowsRoutes: Route[] = [
       }
       const parsed = WorkflowSchema.parse(candidate);
       const baseResult = checkWorkflowReadiness(parsed);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsed.id);
-      const merged = mergeReadiness(baseResult, rollbackIssues);
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, parsed.id),
+        getCredentialReadinessIssues(auth.orgId, parsed, productionSecretRefResolver),
+      ]);
+      const merged = mergeReadiness(baseResult, [...rollbackIssues, ...credentialIssues]);
       return sendJson(res, merged);
     } },
 
@@ -288,8 +296,11 @@ export const workflowsRoutes: Route[] = [
       }
 
       const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
-      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, workflowId),
+        getCredentialReadinessIssues(auth.orgId, parsedWorkflow.data, productionSecretRefResolver),
+      ]);
+      const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
 
       // Before/after signal collection in parallel — each side reuses the
       // same query plan with a single new `lt`/`gte` predicate on the
@@ -461,8 +472,11 @@ export const workflowsRoutes: Route[] = [
       // score higher on safety in the health badge than the readiness
       // badge admits.
       const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
-      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, workflowId),
+        getCredentialReadinessIssues(auth.orgId, parsedWorkflow.data, productionSecretRefResolver),
+      ]);
+      const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
       const signals = await collectHealthSignals(auth.orgId, workflowId);
       const health = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals });
       return sendJson(res, health);
