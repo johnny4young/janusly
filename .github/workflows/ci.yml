@@ -137,3 +137,26 @@ jobs:
 
       - name: Audit (fails on HIGH+)
         run: pnpm audit --audit-level high
+
+  test_sdk_python:
+    name: SDK (Python) tests
+    runs-on: ubuntu-latest
+    # First Python package in the monorepo — runs alongside the Node lanes
+    # in parallel but in its own job so a Python failure never blocks the
+    # rest of CI from reporting status.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: packages/sdk-python/pyproject.toml
+
+      - name: Install (editable + dev deps)
+        working-directory: packages/sdk-python
+        run: pip install -e ".[dev]"
+
+      - name: Test (pytest)
+        working-directory: packages/sdk-python
+        run: pytest -q
