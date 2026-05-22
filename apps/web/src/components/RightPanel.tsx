@@ -24,6 +24,7 @@ import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
+import { WorkflowSloPanel } from './WorkflowSloPanel'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
@@ -135,6 +136,7 @@ export function RightPanel(props: RightPanelProps) {
         onUpdateEdgeCondition={props.onUpdateEdgeCondition}
       />
       <VersionHistoryPanel />
+      <WorkflowSloPanel />
     </PanelChrome>
   )
   if (props.tab === 'templates') return <TemplatesPanel templates={props.templates} onUseTemplate={props.onUseTemplate} />

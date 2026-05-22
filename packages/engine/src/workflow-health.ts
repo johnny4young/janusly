@@ -32,7 +32,8 @@
  * future tuning is one place to look.
  */
 
-import type { Workflow } from "@janusly/shared";
+import type { Workflow, WorkflowSlo, WorkflowSloBreaches } from "@janusly/shared";
+import { evaluateWorkflowSlo } from "@janusly/shared";
 import type { ReadinessResult } from "./workflow-readiness";
 
 /** Six categories the score rolls up. */
@@ -74,6 +75,14 @@ export type HealthBreakdown = Record<HealthCategory, HealthBreakdownEntry>;
 /** Top-level rollup — `healthy` ≥ 80, `warn` ≥ 60, `unhealthy` < 60. */
 export type HealthStatus = "healthy" | "warn" | "unhealthy";
 
+/** SLO evaluation block carried alongside the score. `null` when the
+ *  workflow has no SLO declared; otherwise per-metric breach booleans
+ *  plus the operator-declared targets the UI renders for context. */
+export type HealthSloBlock = {
+  slo: WorkflowSlo;
+  breaches: WorkflowSloBreaches;
+};
+
 /** The full score response, including the input signals echoed back so
  *  UI surfaces can display "27 / 30 successful runs" without re-querying. */
 export type HealthScore = {
@@ -82,6 +91,10 @@ export type HealthScore = {
   status: HealthStatus;
   breakdown: HealthBreakdown;
   signals: HealthSignals;
+  /** Present when the caller supplied a declared SLO. The block carries
+   *  both the declared targets and the resolved breach booleans so the
+   *  UI can render the pill + tooltip without a second fetch. */
+  slo?: HealthSloBlock | null;
 };
 
 /** Run-time signals collected from the persistence layer. The data repo
@@ -179,8 +192,13 @@ export function computeWorkflowHealth(input: {
   workflow: Workflow;
   readiness: ReadinessResult;
   signals: HealthSignals;
+  /** Optional SLO declaration. When present, `evaluateWorkflowSlo` runs
+   *  against the same signals and the result is attached to the response
+   *  as `slo: { slo, breaches }`. The breach booleans do not change the
+   *  numeric score; alerting subscribers consume them independently. */
+  slo?: WorkflowSlo | null;
 }): HealthScore {
-  const { workflow, readiness, signals } = input;
+  const { workflow, readiness, signals, slo } = input;
 
   const reliability = computeReliability(signals);
   const safety = computeSafety(readiness);
@@ -207,11 +225,16 @@ export function computeWorkflowHealth(input: {
     breakdown.aiRisk.score * BREAKDOWN_WEIGHTS.aiRisk,
   );
 
+  const sloBlock: HealthSloBlock | null = slo
+    ? { slo, breaches: evaluateWorkflowSlo(slo, signals) }
+    : null;
+
   return {
     score: overall,
     status: rollupStatus(overall),
     breakdown,
     signals,
+    slo: sloBlock,
   };
 }
 
