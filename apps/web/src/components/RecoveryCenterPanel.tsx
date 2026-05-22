@@ -65,6 +65,7 @@ import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { BrandMark } from './BrandMark'
+import { ValueDashboardSection } from './ValueDashboardSection'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
@@ -81,12 +82,30 @@ type RecoveryMetric = {
   rationaleMeta?: Record<string, string | number | boolean>
 }
 
+type ClustersResolvedMetric = RecoveryMetric & {
+  totalEntries: number
+  capped: boolean
+}
+
+type ValueEstimate = {
+  hoursSaved: number
+  dollarSaved: number
+  mttrDeltaSeconds: number | null
+  assumptions: {
+    hourlyCost: number
+    minutesSavedPerRecovery: number
+    baselineMttrSeconds: number
+  }
+}
+
 type RecoveryMetrics = {
   successRate: RecoveryMetric
   mttr: RecoveryMetric
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
+  clustersResolved?: ClustersResolvedMetric
+  valueEstimate?: ValueEstimate
   windowDays: number
   terminalRuns: number
 }
@@ -704,6 +723,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           <BudgetTile onOpenTab={props.onOpenTab} />
         </aside>
       </div>
+
+      <ValueDashboardSection
+        mttrMs={metrics?.mttr.value ?? null}
+        mttrDisplay={metrics?.mttr.display ?? '—'}
+        clustersResolved={metrics?.clustersResolved}
+        valueEstimate={metrics?.valueEstimate}
+        windowDays={metrics?.windowDays ?? 30}
+        terminalRunsZero={(metrics?.terminalRuns ?? 0) === 0}
+      />
 
       {metricsError && !metricsLoading && (
         <p className="we-recovery-center-error" role="status">
