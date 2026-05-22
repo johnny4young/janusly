@@ -26,13 +26,15 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
-import { and, asc, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 const DEFAULT_WINDOW_DAYS = 30;
 const RUN_STATUS_ROW_CAP = 10_000;
 const MTTR_SAMPLE_CAP = 1_000;
 const USAGE_ROW_CAP = 10_000;
 const EVENT_ROW_CAP = 5_000;
+const RESOLVED_CLUSTERS_ROW_CAP = 10_000;
 
 export type RunStatusCountsRepo = {
   succeeded: number;
@@ -58,6 +60,26 @@ export type ReplayOutcomeCountsRepo = {
 };
 
 /**
+ * Per-window count of distinct failure signatures that flipped from `open`
+ * to a closed status (`replayed` / `resolved`). Drives the Value Dashboard's
+ * "clusters resolved" metric + the hours-saved / dollars-saved estimate.
+ *
+ * `totalEntries` is the raw row count (informational, surfaced as
+ * "M entries across N distinct signatures" in the UI). `totalClusters`
+ * is the distinct count and is the load-bearing input to the estimate
+ * formula.
+ *
+ * When the scan hits the row cap, `capped: true` and the UI renders
+ * `>= cap` instead of an exact count — the same pattern other queries
+ * here use.
+ */
+export type ResolvedClustersRepo = {
+  totalClusters: number;
+  totalEntries: number;
+  capped: boolean;
+};
+
+/**
  * Raw signals consumed by the engine's `composeRecoveryMetrics`. Field
  * names + shape match `RecoveryMetricsSignals` there — both modules
  * declare the type so neither layer has to depend on the other.
@@ -69,6 +91,7 @@ export type RecoveryMetricsSignals = {
   costByProvider: CostProviderRowRepo[];
   p95LatencyMs: number | null;
   replayOutcomes: ReplayOutcomeCountsRepo;
+  resolvedClusters: ResolvedClustersRepo;
 };
 
 /** Collect raw recovery-metrics signals for one org over a rolling window. */
@@ -85,6 +108,7 @@ export async function collectRecoveryMetricsSignals(
     costByProvider,
     p95LatencyMs,
     replayOutcomes,
+    resolvedClusters,
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
     queryMttrDurations(orgId, since),
@@ -92,6 +116,7 @@ export async function collectRecoveryMetricsSignals(
     queryCostByProvider(orgId, since),
     queryP95Latency(orgId, since),
     queryReplayOutcomes(orgId, since),
+    queryFailureClustersResolved(orgId, since),
   ]);
 
   return {
@@ -101,6 +126,7 @@ export async function collectRecoveryMetricsSignals(
     costByProvider,
     p95LatencyMs,
     replayOutcomes,
+    resolvedClusters,
   };
 }
 
@@ -281,4 +307,63 @@ async function queryReplayOutcomes(orgId: string, since: Date): Promise<ReplayOu
     else counts.replayedAndReopened += row.count ?? 0;
   }
   return counts;
+}
+
+/**
+ * Count of distinct failure signatures that flipped from `open` to a closed
+ * status (`replayed` or `resolved`) inside the window. Group-by happens in
+ * JS — pgvector / pg-extension functions for signature normalization don't
+ * exist; the existing `normalizeErrorSignature` helper is the chokepoint and
+ * lives in `@janusly/shared`.
+ *
+ * Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. Bounded at
+ * `RESOLVED_CLUSTERS_ROW_CAP`; past the cap, the result is capped and
+ * downstream rollup labels the count as "≥ cap" in the UI.
+ *
+ * NOTE: the cap is on the row count, not the cluster count. An org with
+ * many entries per signature gets a true cluster count even when capped,
+ * because the distinct-signature math runs over whatever rows came back.
+ * For true scale move to pre-aggregated signatures (a future ticket).
+ */
+export async function queryFailureClustersResolved(
+  orgId: string,
+  since: Date,
+): Promise<ResolvedClustersRepo> {
+  const rows = await db
+    .select({
+      nodeId: deadLetters.nodeId,
+      nodeJson: deadLetters.nodeJson,
+      errorJson: deadLetters.errorJson,
+    })
+    .from(deadLetters)
+    .where(and(
+      eq(deadLetters.orgId, orgId),
+      gte(deadLetters.createdAt, since),
+      inArray(deadLetters.status, ["replayed", "resolved"]),
+    ))
+    .limit(RESOLVED_CLUSTERS_ROW_CAP + 1);
+
+  const capped = rows.length > RESOLVED_CLUSTERS_ROW_CAP;
+  const sample = capped ? rows.slice(0, RESOLVED_CLUSTERS_ROW_CAP) : rows;
+
+  const signatures = new Set<string>();
+  for (const row of sample) {
+    // Derive nodeType + toolName from `nodeJson` so the normalizer's
+    // signature is identical to what the failure-clusters surface
+    // computes — same string for the same failure, regardless of which
+    // query produced it.
+    const node = (row.nodeJson as { type?: string; config?: { tool?: string } } | null) ?? null;
+    const sig = normalizeErrorSignature(row.errorJson, {
+      nodeId: row.nodeId,
+      nodeType: node?.type,
+      toolName: node?.config?.tool,
+    });
+    signatures.add(sig.signature);
+  }
+
+  return {
+    totalClusters: signatures.size,
+    totalEntries: sample.length,
+    capped,
+  };
 }

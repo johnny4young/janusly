@@ -10,6 +10,7 @@
 
 import { commitMemory } from "@janusly/data/src/memoryEntriesRepo";
 import { isMemoryAllowed } from "@janusly/data/src/memoryConsent";
+import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
@@ -37,8 +38,15 @@ export const recoveryRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      const signals = await collectRecoveryMetricsSignals(auth.orgId, windowDays);
-      const metrics = composeRecoveryMetrics(signals, windowDays);
+      // Read the value-dashboard assumptions in parallel with the
+      // metrics signals. The rollup is fully additive — clients that
+      // don't read `valueEstimate` / `clustersResolved` get the same
+      // shape as before plus the new fields, byte-for-byte back-compat.
+      const [signals, snapshot] = await Promise.all([
+        collectRecoveryMetricsSignals(auth.orgId, windowDays),
+        getOrgConfigSnapshot(auth.orgId),
+      ]);
+      const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
       return sendJson(res, metrics);
     } },
 

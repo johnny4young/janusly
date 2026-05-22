@@ -118,6 +118,11 @@ export type OrgConfigSnapshot = {
     maxAttemptsPerSignature: number;
     loopWindowDays: number;
   };
+  value: {
+    hourlyCost: number;
+    minutesSavedPerRecovery: number;
+    baselineMttrSeconds: number;
+  };
 };
 
 const ALLOWED_CATEGORIES = [
@@ -131,6 +136,7 @@ const ALLOWED_CATEGORIES = [
   "auth",
   "memory",
   "auto-healing",
+  "value",
 ] as const;
 
 /** Closed enum of memory kinds eligible for persistence. Mirrors the memory
@@ -619,6 +625,37 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 1,
     max: 90,
   },
+  {
+    key: "value.hourlyCost",
+    category: "value",
+    description:
+      "Operator-supplied 'engineer hourly cost' assumption used by the Value Dashboard's dollar-savings estimate. Pure assumption: Janusly never measures payroll. Range 0..2000, default 50 (USD-equivalent; currency formatting is locale-driven on the client). Fractional values supported so $125.75 doesn't silently truncate to $125. Every dollar surface in the UI carries an 'estimate' badge linking back to this knob.",
+    valueType: "number",
+    defaultValue: 50,
+    min: 0,
+    max: 2000,
+    fractional: true,
+  },
+  {
+    key: "value.minutesSavedPerRecovery",
+    category: "value",
+    description:
+      "Operator-supplied 'minutes saved per resolved failure' assumption used by the Value Dashboard. Drives hours-saved + dollar-saved estimates via clustersResolved * value / 60 * hourlyCost. Range 0..480, default 30. Tune to match the operator's manual-triage baseline measured during the private-beta MTTR experiment.",
+    valueType: "number",
+    defaultValue: 30,
+    min: 0,
+    max: 480,
+  },
+  {
+    key: "value.baselineMttrSeconds",
+    category: "value",
+    description:
+      "Operator-supplied 'pre-Janusly MTTR' baseline (seconds) used by the Value Dashboard's before/after comparison. Default 0 is the sentinel for 'baseline not measured yet' — the dashboard renders 'Awaiting private-beta data' in the 'Before' slot until the operator sets a real value (typically after the discovery call with a design partner). Range 0..86400 (one day).",
+    valueType: "number",
+    defaultValue: 0,
+    min: 0,
+    max: 86_400,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -824,6 +861,11 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       autoApply: readBoolean(values, "autoHealing.autoApply"),
       maxAttemptsPerSignature: readNumber(values, "autoHealing.maxAttemptsPerSignature"),
       loopWindowDays: readNumber(values, "autoHealing.loopWindowDays"),
+    },
+    value: {
+      hourlyCost: readNumber(values, "value.hourlyCost"),
+      minutesSavedPerRecovery: readNumber(values, "value.minutesSavedPerRecovery"),
+      baselineMttrSeconds: readNumber(values, "value.baselineMttrSeconds"),
     },
   };
 }
