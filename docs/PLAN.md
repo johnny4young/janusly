@@ -591,8 +591,8 @@ Each case is concrete enough that we could ship it as a recipe. The first three 
 ### 10.4 SDKs
 
 - [x] ENG-112: `@janusly/sdk` — workspace-private TypeScript source package over the HTTP API; DTOs are hand-typed against the current route/docs surface with package build + tests as the guard.
-- [ ] ENG-113: Python SDK — same core surface after the TypeScript SDK stabilizes.
-- [ ] ENG-113: Webhook receiver helper — a small FastAPI/plain-Python helper plus docs for receiving Janusly webhooks with HMAC verification.
+- [x] ENG-113: Python SDK — same core surface after the TypeScript SDK stabilizes.
+- [x] ENG-113: Webhook receiver helper — a small FastAPI/plain-Python helper plus docs for receiving Janusly webhooks with HMAC verification.
 
 ### 10.5 Testing
 
