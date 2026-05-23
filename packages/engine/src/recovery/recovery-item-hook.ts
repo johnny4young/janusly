@@ -29,6 +29,7 @@ import {
   resolveRecoveryItem,
 } from "@janusly/data/src/recoveryItemsRepo";
 import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
+import { getRecoveryItemSeverityDefault } from "@janusly/data/src/recovery-item-severity-default";
 
 import { safePersistPayload } from "../safe-persist";
 
@@ -84,11 +85,21 @@ export async function createRecoveryItemForDeadLetter(
   try {
     const enabled = await isAutoCreateEnabled(input.orgId);
     if (!enabled) return;
+    // Per-workflow severity default: when the workflow's metadata row
+    // declares one, use it instead of the repo's hardcoded 'p3'. Failures
+    // (Postgres blip, missing seam) degrade to null so the existing
+    // default applies. SLA target derives from severity inside
+    // `createRecoveryItem`, so a p1 default automatically tightens the
+    // timer without the operator touching each incident.
+    const severityDefault = input.workflowId
+      ? await getRecoveryItemSeverityDefault(input.orgId, input.workflowId)
+      : null;
     const { item, wasCreated } = await createRecoveryItem({
       orgId: input.orgId,
       deadLetterId: input.deadLetterId,
       workflowId: input.workflowId ?? null,
       createdBy: input.createdBy,
+      ...(severityDefault ? { severity: severityDefault } : {}),
     });
     if (!wasCreated) return;
 

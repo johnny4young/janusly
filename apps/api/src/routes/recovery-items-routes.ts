@@ -48,6 +48,7 @@ import {
   setWaitingExternalRecoveryItem,
 } from "@janusly/data/src/recoveryItemsRepo";
 import { listHandoffsForItem } from "@janusly/data/src/recoveryItemHandoffsRepo";
+import { getWorkflowMetadata } from "@janusly/data/src/workflowMetadataRepo";
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -256,7 +257,34 @@ export const recoveryItemsRoutes: Route[] = [
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
       if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
-      const result = await assignOwnerRecoveryItem(auth.orgId, id, { owner: body.data.owner });
+
+      // Default-owner integration: when the operator omits `owner` AND
+      // the item is linked to a workflow, fall back to the workflow's
+      // primary owner (the first entry in workflow_metadata.owners).
+      // Operator-supplied owners always win; the default only fills
+      // omitted/null input. Failures degrade silently — the assign still
+      // runs with `owner: null` so the operator can retry from the UI.
+      let owner = body.data.owner ?? null;
+      let defaultedFromMetadata = false;
+      if (owner === null && current.workflowId) {
+        try {
+          const metadata = await getWorkflowMetadata(auth.orgId, current.workflowId);
+          const primary = metadata?.owners?.[0];
+          if (primary && primary.length > 0) {
+            owner = primary;
+            defaultedFromMetadata = true;
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("[recovery-items] default-owner lookup failed", {
+            orgId: auth.orgId,
+            workflowId: current.workflowId,
+            err,
+          });
+        }
+      }
+
+      const result = await assignOwnerRecoveryItem(auth.orgId, id, { owner });
       if (!result) {
         const { code, body: errBody } = statusCodeFromTransition(current.status);
         return sendJson(res, errBody, code);
@@ -264,8 +292,9 @@ export const recoveryItemsRoutes: Route[] = [
       await audit(auth.orgId, auth.userId, "recovery.item.assigned", "recovery-item", id, {
         before: { owner: result.before.owner },
         after: { owner: result.after.owner },
+        defaultedFromMetadata,
       });
-      return sendJson(res, { item: result.after });
+      return sendJson(res, { item: result.after, defaultedFromMetadata });
     },
   },
   {
