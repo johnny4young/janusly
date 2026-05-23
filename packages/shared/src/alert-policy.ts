@@ -30,6 +30,8 @@ export const ALERT_TRIGGERS = [
   'limiter.degraded',
   'workflow.slo_breach',
   'approval.stalled',
+  'recovery_item.created',
+  'recovery_item.sla_breached',
 ] as const
 
 export const AlertTriggerSchema = z.enum(ALERT_TRIGGERS)
@@ -78,6 +80,20 @@ export const AlertParamsApprovalStalledSchema = z
   })
   .strict()
 
+export const AlertParamsRecoveryItemCreatedSchema = z
+  .object({
+    severities: z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).max(4).optional(),
+    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+  })
+  .strict()
+
+export const AlertParamsRecoveryItemSlaBreachedSchema = z
+  .object({
+    severities: z.array(z.enum(['p1', 'p2', 'p3', 'p4'])).max(4).optional(),
+    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+  })
+  .strict()
+
 /**
  * Per-trigger parameters dispatch table. Caller picks the schema by the
  * value of `policy.trigger` then runs `.safeParse(policy.parameters)`.
@@ -89,6 +105,8 @@ export const ALERT_PARAMS_SCHEMAS = {
   'limiter.degraded': AlertParamsLimiterDegradedSchema,
   'workflow.slo_breach': AlertParamsWorkflowSloBreachSchema,
   'approval.stalled': AlertParamsApprovalStalledSchema,
+  'recovery_item.created': AlertParamsRecoveryItemCreatedSchema,
+  'recovery_item.sla_breached': AlertParamsRecoveryItemSlaBreachedSchema,
 } as const satisfies Record<AlertTrigger, z.ZodTypeAny>
 
 export type AlertParamsByTrigger = {
@@ -98,6 +116,8 @@ export type AlertParamsByTrigger = {
   'limiter.degraded': z.infer<typeof AlertParamsLimiterDegradedSchema>
   'workflow.slo_breach': z.infer<typeof AlertParamsWorkflowSloBreachSchema>
   'approval.stalled': z.infer<typeof AlertParamsApprovalStalledSchema>
+  'recovery_item.created': z.infer<typeof AlertParamsRecoveryItemCreatedSchema>
+  'recovery_item.sla_breached': z.infer<typeof AlertParamsRecoveryItemSlaBreachedSchema>
 }
 
 // ---------- channels ----------

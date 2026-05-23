@@ -210,6 +210,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
       orgId: 'test-org',
+      workflowId: 'wf-1',
       node,
       attempt: 1,
     }))

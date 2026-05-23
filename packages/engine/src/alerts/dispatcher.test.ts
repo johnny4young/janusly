@@ -111,6 +111,22 @@ describe("matchesPolicyFilter", () => {
     expect(matchesPolicyFilter(policy, { stalledMinutes: 29 })).toBe(false);
   });
 
+  it("recovery item triggers apply workflowIds whitelist", () => {
+    const createdPolicy = makePolicy({
+      trigger: "recovery_item.created",
+      parameters: { workflowIds: ["wf_critical"] },
+    });
+    const slaPolicy = makePolicy({
+      trigger: "recovery_item.sla_breached",
+      parameters: { workflowIds: ["wf_critical"] },
+    });
+
+    expect(matchesPolicyFilter(createdPolicy, { workflowId: "wf_critical" })).toBe(true);
+    expect(matchesPolicyFilter(createdPolicy, { workflowId: "wf_other" })).toBe(false);
+    expect(matchesPolicyFilter(slaPolicy, { workflowId: "wf_critical" })).toBe(true);
+    expect(matchesPolicyFilter(slaPolicy, { workflowId: "wf_other" })).toBe(false);
+  });
+
   it("failure_cluster.threshold filters by its declared window", () => {
     const policy = makePolicy({
       trigger: "failure_cluster.threshold",
