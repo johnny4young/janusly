@@ -376,6 +376,36 @@ describe("webhook.send", () => {
     expect(headers["x-janusly-signature"]).toBeUndefined();
   });
 
+  it("ignores reserved custom headers while keeping safe idempotency headers", async () => {
+    vi.stubEnv("WEBHOOK_SIGNING_SECRET", "supers3cret");
+    credentialMock.mockResolvedValueOnce(credentialRow({
+      name: "partner-webhook", kind: "webhook_secret", secretRef: "WEBHOOK_SIGNING_SECRET",
+    }));
+    fetchMock.mockResolvedValueOnce({ statusCode: 200, ok: true, body: "{}", headers: {} });
+
+    await executeTool(
+      "webhook.send",
+      {
+        credential: "partner-webhook",
+        url: "https://partner.example.com/hooks",
+        payload: { x: 1 },
+        headers: {
+          Authorization: "Bearer should-not-send",
+          "X-Janusly-Signature": "fake-signature",
+          "X-Idempotency-Key": "recovery_item_1",
+        },
+      },
+      {},
+      { orgId: "org-1" },
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = (init as { headers: Record<string, string> }).headers;
+    expect(headers.authorization).toBeUndefined();
+    expect(headers["x-janusly-signature"]).toMatch(/^t=\d+,v1=[a-f0-9]{64}$/);
+    expect(headers["x-idempotency-key"]).toBe("recovery_item_1");
+  });
+
   it("maps fetchHttpTarget rejection (SSRF / DNS) to a clean envelope", async () => {
     vi.stubEnv("WEBHOOK_SIGNING_SECRET", "supers3cret");
     credentialMock.mockResolvedValueOnce(credentialRow({

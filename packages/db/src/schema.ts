@@ -1204,3 +1204,55 @@ export const recoveryItems = pgTable(
     index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
   ],
 );
+
+/**
+ * Cross-team incident handoff log — one row per
+ * `(orgId, recoveryItemId, destination)` triple. Powers the
+ * idempotency contract of the recovery handoff route: a second handoff
+ * to the same destination doesn't duplicate (slack: cooldown no-op;
+ * github: append a comment to the existing issue; linear / webhook:
+ * receiver dedupes by `idempotencyKey` header).
+ *
+ * `externalId` captures the persistent reference the upstream system
+ * returned on the first dispatch (github issueNumber, future Slack
+ * threadTs, custom webhook receipt id). `externalUrl` is the
+ * operator-clickable deep link rendered in the drawer after a successful
+ * handoff.
+ *
+ * Multi-tenant scope on every read via `eq(recoveryItemHandoffs.orgId, orgId)`.
+ * The unique index on `(orgId, recoveryItemId, destination)` makes
+ * `upsertHandoff` safe even when two operators click "Handoff" at the
+ * same moment — Postgres serialises the INSERT ON CONFLICT.
+ */
+export const recoveryItemHandoffs = pgTable(
+  "recovery_item_handoffs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    recoveryItemId: text("recovery_item_id").notNull(),
+    destination: text("destination").notNull(),
+    credentialName: text("credential_name").notNull(),
+    externalId: text("external_id"),
+    externalUrl: text("external_url"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    lastOutcome: text("last_outcome").notNull(),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    lastLatencyMs: integer("last_latency_ms"),
+    dispatchCount: integer("dispatch_count").notNull().default(1),
+    firstDispatchedAt: timestamp("first_dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    lastDispatchedAt: timestamp("last_dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by"),
+  },
+  (table) => [
+    uniqueIndex("recovery_item_handoffs_org_item_dest_idx").on(
+      table.orgId,
+      table.recoveryItemId,
+      table.destination,
+    ),
+    index("recovery_item_handoffs_org_lastdispatched_idx").on(
+      table.orgId,
+      table.lastDispatchedAt.desc(),
+    ),
+  ],
+);

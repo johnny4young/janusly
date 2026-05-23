@@ -1914,5 +1914,27 @@
   "recoveryItems.toast.transitionOk": "Recovery item updated",
   "recoveryItems.toast.transitionFailed": "Transition failed",
   "recoveryItems.toast.commentAdded": "Comment added",
-  "recoveryItems.toast.commentFailed": "Comment failed"
+  "recoveryItems.toast.commentFailed": "Comment failed",
+
+  "recoveryHandoff.heading": "Handoff",
+  "recoveryHandoff.destinations.slack": "Slack",
+  "recoveryHandoff.destinations.linear": "Linear",
+  "recoveryHandoff.destinations.github": "GitHub",
+  "recoveryHandoff.destinations.webhook": "Webhook",
+  "recoveryHandoff.action.open": "New handoff",
+  "recoveryHandoff.action.submit": "Send",
+  "recoveryHandoff.form.destination": "Destination",
+  "recoveryHandoff.form.credential": "Credential",
+  "recoveryHandoff.form.pickCredential": "— pick a credential —",
+  "recoveryHandoff.form.githubOwner": "GitHub owner",
+  "recoveryHandoff.form.githubRepo": "GitHub repo",
+  "recoveryHandoff.form.url": "Destination URL",
+  "recoveryHandoff.form.urlPlaceholder": "https://hooks.example.com/incident",
+  "recoveryHandoff.openExternal": "Open",
+  "recoveryHandoff.dispatchCount_one": "Handed off {{count}}×",
+  "recoveryHandoff.dispatchCount_other": "Handed off {{count}}×",
+  "recoveryHandoff.toast.delivered": "Handoff delivered",
+  "recoveryHandoff.toast.failed": "Handoff failed",
+  "recoveryHandoff.toast.alreadyDispatched": "Already handed off recently — no new message sent",
+  "recoveryHandoff.toast.skipped": "Handoff skipped (sandbox replay)"
 }
