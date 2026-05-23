@@ -1914,5 +1914,27 @@
   "recoveryItems.toast.transitionOk": "Incidente actualizado",
   "recoveryItems.toast.transitionFailed": "La transición falló",
   "recoveryItems.toast.commentAdded": "Comentario agregado",
-  "recoveryItems.toast.commentFailed": "El comentario falló"
+  "recoveryItems.toast.commentFailed": "El comentario falló",
+
+  "recoveryHandoff.heading": "Entrega",
+  "recoveryHandoff.destinations.slack": "Slack",
+  "recoveryHandoff.destinations.linear": "Linear",
+  "recoveryHandoff.destinations.github": "GitHub",
+  "recoveryHandoff.destinations.webhook": "Webhook",
+  "recoveryHandoff.action.open": "Nueva entrega",
+  "recoveryHandoff.action.submit": "Enviar",
+  "recoveryHandoff.form.destination": "Destino",
+  "recoveryHandoff.form.credential": "Credencial",
+  "recoveryHandoff.form.pickCredential": "— elige una credencial —",
+  "recoveryHandoff.form.githubOwner": "Propietario de GitHub",
+  "recoveryHandoff.form.githubRepo": "Repositorio de GitHub",
+  "recoveryHandoff.form.url": "URL de destino",
+  "recoveryHandoff.form.urlPlaceholder": "https://hooks.example.com/incident",
+  "recoveryHandoff.openExternal": "Abrir",
+  "recoveryHandoff.dispatchCount_one": "Enviado {{count}} vez",
+  "recoveryHandoff.dispatchCount_other": "Enviado {{count}} veces",
+  "recoveryHandoff.toast.delivered": "Entrega enviada",
+  "recoveryHandoff.toast.failed": "La entrega falló",
+  "recoveryHandoff.toast.alreadyDispatched": "Ya se envió hace poco — no se mandó un mensaje nuevo",
+  "recoveryHandoff.toast.skipped": "Entrega omitida (reejecución de prueba)"
 }
