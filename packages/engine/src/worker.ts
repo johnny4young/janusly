@@ -157,6 +157,18 @@ setRecoveryItemCreator(async (event) => {
 });
 console.log("[recovery-item] creator registered (worker)");
 
+// Per-workflow severity-default resolver — worker shares the same seam
+// so DLQ inserts on either process produce the right severity. The
+// resolver reads `workflow_metadata` via the data repo and degrades to
+// null on read failure inside the DI seam.
+const { setRecoveryItemSeverityDefault } = await import("@janusly/data/src/recovery-item-severity-default");
+const { getWorkflowMetadata } = await import("@janusly/data/src/workflowMetadataRepo");
+setRecoveryItemSeverityDefault(async (orgId, workflowId) => {
+  const metadata = await getWorkflowMetadata(orgId, workflowId);
+  return metadata?.severityDefault ?? null;
+});
+console.log("[recovery-item] severity-default resolver registered (worker)");
+
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),
   new BullMQQueueAdapter(),

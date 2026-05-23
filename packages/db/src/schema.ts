@@ -1256,3 +1256,48 @@ export const recoveryItemHandoffs = pgTable(
     ),
   ],
 );
+
+/**
+ * Per-workflow metadata layer — owners, runbook Markdown, description,
+ * tags, Slack / Linear coordinates, default severity. One row per
+ * `(orgId, workflowId)` triple. The unique index makes the metadata
+ * upsert idempotent; the secondary index supports an "updated recently"
+ * admin feed without scanning the whole table.
+ *
+ * Powers the "About this workflow" panel in the Recovery dialog and the
+ * default-owner / default-severity integrations the recovery_item
+ * subsystem consults when a row is created from a DLQ entry or reassigned.
+ *
+ * Multi-tenant scope on every read via `eq(workflowMetadata.orgId, orgId)`.
+ * Operator-supplied content (runbookMarkdown, description) flows through
+ * the safe Markdown subset before display.
+ */
+export const workflowMetadata = pgTable(
+  "workflow_metadata",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Closed array of user ids — operators who own this workflow. First entry = primary. */
+    owners: jsonb("owners").$type<string[]>().notNull().default([]),
+    /** Operator-supplied free-form Markdown (closed subset; 32 KiB cap enforced at write). */
+    runbookMarkdown: text("runbook_markdown"),
+    /** Short human-readable description. */
+    description: text("description"),
+    /** Operator-chosen labels (closed bounded array). */
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** Slack channel reference like `#alerts-prod` — bare string, no URL construction server-side. */
+    slackChannel: text("slack_channel"),
+    /** Linear project URL (https://linear.app/...) OR slug. */
+    linearProject: text("linear_project"),
+    /** Closed-enum severity default (`p1`/`p2`/`p3`/`p4`); nullable means engine fallback applies. */
+    severityDefault: text("severity_default"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workflow_metadata_org_workflow_idx").on(table.orgId, table.workflowId),
+    index("workflow_metadata_org_updated_idx").on(table.orgId, table.updatedAt.desc()),
+  ],
+);

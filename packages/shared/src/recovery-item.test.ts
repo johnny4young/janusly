@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AcknowledgeBodySchema,
   ALLOWED_PRE_STATES,
+  AssignOwnerBodySchema,
   CommentBodySchema,
   EscalateBodySchema,
   MAX_COMMENTS_PER_ITEM,
@@ -127,6 +128,11 @@ describe('body schemas', () => {
   it('ReopenBodySchema accepts empty body and optional comment', () => {
     expect(ReopenBodySchema.safeParse({}).success).toBe(true)
     expect(ReopenBodySchema.safeParse({ comment: 'reverted' }).success).toBe(true)
+  })
+
+  it('AssignOwnerBodySchema accepts an omitted owner for workflow metadata defaulting', () => {
+    expect(AssignOwnerBodySchema.safeParse({}).success).toBe(true)
+    expect(AssignOwnerBodySchema.safeParse({ owner: null }).success).toBe(true)
   })
 
   it('CommentBodySchema enforces body length cap', () => {

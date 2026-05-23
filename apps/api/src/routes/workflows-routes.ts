@@ -22,6 +22,7 @@ import {
   deadLetters,
   runs,
   workflows,
+  workflowMetadata,
   workflowVersions,
 } from "@janusly/db";
 import { collectHealthSignals, DEFAULT_HEALTH_WINDOW_DAYS } from "@janusly/data/src/workflowHealthRepo";
@@ -239,6 +240,7 @@ export const workflowsRoutes: Route[] = [
         console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
       }
       await db.delete(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)));
+      await db.delete(workflowMetadata).where(and(eq(workflowMetadata.workflowId, workflowId), eq(workflowMetadata.orgId, auth.orgId)));
       await db.delete(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
 
       await audit(auth.orgId, auth.userId, "workflow.deleted", "workflow", workflowId, {});

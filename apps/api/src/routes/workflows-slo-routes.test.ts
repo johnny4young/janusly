@@ -42,12 +42,16 @@ vi.mock("@janusly/engine/src/workflow-health", async (importOriginal) => {
 });
 
 const workflowsOwnedLimitMock = vi.fn();
+const deleteMock = vi.hoisted(() => vi.fn(() => ({
+  where: vi.fn(),
+})));
 
 vi.mock("@janusly/db", () => ({
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
+          0: { id: "wf-1" },
           orderBy: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })),
           limit: workflowsOwnedLimitMock,
         })),
@@ -55,10 +59,11 @@ vi.mock("@janusly/db", () => ({
     })),
     insert: vi.fn(),
     update: vi.fn(),
-    delete: vi.fn(),
+    delete: deleteMock,
     transaction: vi.fn(),
   },
   workflows: { id: "id_col", orgId: "org_col" },
+  workflowMetadata: { orgId: "org_col", workflowId: "wf_col" },
   workflowVersions: { id: "id_col", orgId: "org_col", workflowId: "wf_col", version: "ver_col", dagJson: "dag_col" },
   runs: { id: "id_col" },
   deadLetters: { id: "id_col" },
@@ -78,6 +83,7 @@ import { workflowsRoutes } from "./workflows-routes";
 import { sendJson, readJson } from "../http";
 import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
+import { workflowMetadata } from "@janusly/db";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);
@@ -108,6 +114,7 @@ beforeEach(() => {
   readJsonMock.mockReset();
   setWorkflowSloMock.mockReset();
   workflowsOwnedLimitMock.mockReset();
+  deleteMock.mockClear();
   sendJsonMock.mockClear();
   auditMock.mockClear();
 });
@@ -205,5 +212,15 @@ describe("POST /workflows/:id/slo handler", () => {
     expect(setWorkflowSloMock).toHaveBeenCalledWith("org-1", "wf-1", null);
     const auditMeta = auditMock.mock.calls[0]?.[5] as { previousSlo: WorkflowSlo | null };
     expect(auditMeta.previousSlo).toEqual(validSlo);
+  });
+});
+
+describe("DELETE /workflows/:id handler", () => {
+  it("cleans per-workflow metadata when hard-deleting a workflow", async () => {
+    mockWorkflowOwned(true);
+    await callRoute("DELETE", "/workflows/wf-1", {});
+
+    expect(deleteMock).toHaveBeenCalledWith(workflowMetadata);
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
   });
 });

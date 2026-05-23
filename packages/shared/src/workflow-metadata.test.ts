@@ -1,0 +1,131 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  UpsertWorkflowMetadataBodySchema,
+  WORKFLOW_METADATA_OWNERS_MAX,
+  WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
+  WORKFLOW_METADATA_TAGS_MAX,
+  WorkflowMetadataSchema,
+} from './workflow-metadata'
+
+describe('WorkflowMetadataSchema — happy path', () => {
+  it('accepts an empty object (every field optional)', () => {
+    const parsed = WorkflowMetadataSchema.safeParse({})
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.owners).toEqual([])
+      expect(parsed.data.tags).toEqual([])
+    }
+  })
+
+  it('accepts the fully populated form', () => {
+    const result = WorkflowMetadataSchema.safeParse({
+      owners: ['user-alpha', 'user-beta'],
+      runbookMarkdown: '# Runbook\n\n1. Step one\n2. Step two',
+      description: 'Daily ACH batch run',
+      tags: ['billing', 'critical'],
+      slackChannel: '#payouts-alerts',
+      linearProject: 'acme/payouts',
+      severityDefault: 'p1',
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts a linear.app URL for linearProject', () => {
+    expect(
+      WorkflowMetadataSchema.safeParse({ linearProject: 'https://linear.app/acme/project/PAY' }).success,
+    ).toBe(true)
+  })
+})
+
+describe('WorkflowMetadataSchema — size caps', () => {
+  it('rejects runbook over 32 KiB', () => {
+    const huge = 'x'.repeat(WORKFLOW_METADATA_RUNBOOK_MAX_BYTES + 1)
+    expect(WorkflowMetadataSchema.safeParse({ runbookMarkdown: huge }).success).toBe(false)
+  })
+
+  it('rejects runbook over 32 KiB by UTF-8 bytes', () => {
+    const huge = '€'.repeat(Math.floor(WORKFLOW_METADATA_RUNBOOK_MAX_BYTES / 3) + 1)
+    expect(WorkflowMetadataSchema.safeParse({ runbookMarkdown: huge }).success).toBe(false)
+  })
+
+  it(`rejects more than ${WORKFLOW_METADATA_OWNERS_MAX} owners`, () => {
+    const owners = Array.from({ length: WORKFLOW_METADATA_OWNERS_MAX + 1 }, (_, i) => `u${i}`)
+    expect(WorkflowMetadataSchema.safeParse({ owners }).success).toBe(false)
+  })
+
+  it(`rejects more than ${WORKFLOW_METADATA_TAGS_MAX} tags`, () => {
+    const tags = Array.from({ length: WORKFLOW_METADATA_TAGS_MAX + 1 }, (_, i) => `t${i}`)
+    expect(WorkflowMetadataSchema.safeParse({ tags }).success).toBe(false)
+  })
+
+  it('rejects an empty-string owner', () => {
+    expect(WorkflowMetadataSchema.safeParse({ owners: [''] }).success).toBe(false)
+  })
+
+  it('rejects an empty-string tag', () => {
+    expect(WorkflowMetadataSchema.safeParse({ tags: [''] }).success).toBe(false)
+  })
+})
+
+describe('WorkflowMetadataSchema — slackChannel', () => {
+  it('accepts a #channel-name with hyphens', () => {
+    expect(WorkflowMetadataSchema.safeParse({ slackChannel: '#alerts-prod' }).success).toBe(true)
+  })
+
+  it('rejects a channel id paste (channels/C12345)', () => {
+    expect(WorkflowMetadataSchema.safeParse({ slackChannel: 'channels/C12345' }).success).toBe(false)
+  })
+
+  it('rejects a missing # prefix', () => {
+    expect(WorkflowMetadataSchema.safeParse({ slackChannel: 'alerts-prod' }).success).toBe(false)
+  })
+})
+
+describe('WorkflowMetadataSchema — linearProject', () => {
+  it('rejects a non-linear.app URL', () => {
+    expect(
+      WorkflowMetadataSchema.safeParse({ linearProject: 'https://notion.so/acme/payouts' }).success,
+    ).toBe(false)
+  })
+
+  it('rejects a slug with a path separator (workspace/project/subpath)', () => {
+    expect(WorkflowMetadataSchema.safeParse({ linearProject: 'acme/payouts/sub' }).success).toBe(false)
+  })
+})
+
+describe('WorkflowMetadataSchema — severityDefault', () => {
+  it('accepts p1-p4', () => {
+    for (const s of ['p1', 'p2', 'p3', 'p4'] as const) {
+      expect(WorkflowMetadataSchema.safeParse({ severityDefault: s }).success).toBe(true)
+    }
+  })
+
+  it('rejects unknown severities', () => {
+    expect(WorkflowMetadataSchema.safeParse({ severityDefault: 'p5' }).success).toBe(false)
+    expect(WorkflowMetadataSchema.safeParse({ severityDefault: 'critical' }).success).toBe(false)
+  })
+
+  it('accepts null (explicit clear)', () => {
+    expect(WorkflowMetadataSchema.safeParse({ severityDefault: null }).success).toBe(true)
+  })
+})
+
+describe('WorkflowMetadataSchema — strict (no extra keys)', () => {
+  it('rejects unknown top-level fields', () => {
+    expect(WorkflowMetadataSchema.safeParse({ extra: 'nope' }).success).toBe(false)
+  })
+})
+
+describe('UpsertWorkflowMetadataBodySchema', () => {
+  it('wraps metadata inside { metadata: ... }', () => {
+    const result = UpsertWorkflowMetadataBodySchema.safeParse({
+      metadata: { owners: ['alpha'] },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects a bare metadata payload at the top level', () => {
+    expect(UpsertWorkflowMetadataBodySchema.safeParse({ owners: ['alpha'] }).success).toBe(false)
+  })
+})
