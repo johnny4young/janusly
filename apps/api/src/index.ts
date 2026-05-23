@@ -81,6 +81,8 @@ import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
 import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { setRecoveryItemCreator } from "@janusly/data/src/recovery-item-creator";
+import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
+import { registerWorkflowMetadataSeverityResolver } from "./workflow-metadata-bootstrap";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -120,6 +122,7 @@ export const routes: Route[] = [
   ...alertsRoutes,
   ...recoveryItemsRoutes,
   ...recoveryHandoffRoutes,
+  ...workflowMetadataRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
@@ -235,3 +238,10 @@ setRecoveryItemCreator(async (event) => {
     errorSignature: event.errorSignature,
   });
 });
+
+// Register the per-workflow severity-default resolver so DLQ inserts
+// produce recovery_items at the right severity automatically (workflows
+// of money default to p1; batch defaults to p4). Failures degrade to
+// null inside the DI seam and the engine falls back to its hardcoded
+// 'p3' default.
+registerWorkflowMetadataSeverityResolver();

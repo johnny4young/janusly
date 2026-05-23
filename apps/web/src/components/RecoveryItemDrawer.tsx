@@ -27,6 +27,7 @@ import {
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
+import { WorkflowAboutCard } from './WorkflowAboutCard'
 
 export type RecoveryItemDrawerData = {
   id: string
@@ -37,6 +38,8 @@ export type RecoveryItemDrawerData = {
   slaTargetAtIso: string
   resolutionReason: RecoveryItemResolutionReason | null
   comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
+  /** Linked workflow id (when the incident came from a saved workflow run). */
+  workflowId?: string | null
 }
 
 type Props = {
@@ -396,6 +399,8 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           </button>
         </div>
       )}
+
+      {item.workflowId && <WorkflowAboutCard workflowId={item.workflowId} />}
 
       <div className="we-recovery-item-drawer__handoff" data-testid="recovery-item-handoff">
         <h4>

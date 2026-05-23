@@ -7961,6 +7961,12 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   color: var(--we-muted);
 }
 
+.we-pill--ghost {
+  background: transparent;
+  border: 1px solid var(--we-line);
+  color: var(--we-muted);
+}
+
 .we-pill--cobalt {
   background: var(--we-primary-soft);
   border: 1px solid color-mix(in srgb, var(--we-primary) 28%, transparent);
@@ -8031,6 +8037,34 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .we-recovery-item-badge__sla {
   border-radius: 999px;
   padding: 2px 6px;
+}
+
+.we-recovery-item-badge__sev {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  padding: 2px 7px;
+}
+
+.we-recovery-item-badge__sev--p1 {
+  background: var(--we-danger-soft);
+  color: var(--we-danger);
+}
+
+.we-recovery-item-badge__sev--p2 {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+}
+
+.we-recovery-item-badge__sev--p3 {
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.we-recovery-item-badge__sev--p4 {
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
 }
 
 .we-recovery-item-badge__sla--green {
@@ -8216,6 +8250,203 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   min-height: 54px;
   padding: 8px 9px;
   resize: vertical;
+}
+
+.we-workflow-about-card {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.we-workflow-about-card h4 {
+  color: var(--we-ink);
+  font-size: 13px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.we-workflow-about-card__description {
+  color: var(--we-ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.we-workflow-about-card__owners,
+.we-workflow-about-card__severity,
+.we-workflow-about-card__links,
+.we-workflow-about-card__runbook {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-workflow-about-card__owner-list,
+.we-workflow-about-card__tags,
+.we-workflow-about-card__link-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.we-workflow-about-card__owner-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-workflow-about-card__owner-list li {
+  align-items: center;
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 8px 3px 4px;
+}
+
+.we-workflow-about-card__owner-avatar {
+  align-items: center;
+  background: var(--we-primary-soft);
+  border-radius: 999px;
+  color: var(--we-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
+}
+
+.we-workflow-about-card__owner-name {
+  color: var(--we-ink);
+  font-size: 12px;
+  font-weight: 650;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-workflow-about-card__owner-overflow {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-workflow-about-card__link-row code {
+  background: var(--we-surface-muted);
+  border-radius: 6px;
+  color: var(--we-ink);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.we-workflow-about-card__link-row a {
+  align-items: center;
+  color: var(--we-primary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
+.we-workflow-about-card__runbook-body {
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.we-workflow-about-card__runbook-body h1,
+.we-workflow-about-card__runbook-body h2,
+.we-workflow-about-card__runbook-body h3,
+.we-workflow-about-card__runbook-body p,
+.we-workflow-about-card__runbook-body ul,
+.we-workflow-about-card__runbook-body ol,
+.we-workflow-about-card__runbook-body pre {
+  margin: 0 0 8px;
+}
+
+.we-workflow-about-card__runbook-body h1,
+.we-workflow-about-card__runbook-body h2,
+.we-workflow-about-card__runbook-body h3 {
+  color: var(--we-ink);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.we-workflow-about-card__runbook-body p,
+.we-workflow-about-card__runbook-body li {
+  color: var(--we-ink-soft);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.we-workflow-about-card__runbook-body ul,
+.we-workflow-about-card__runbook-body ol {
+  padding-left: 18px;
+}
+
+.we-workflow-about-card__runbook-body pre {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  color: var(--we-ink);
+  overflow-x: auto;
+  padding: 8px;
+}
+
+.we-workflow-about-card__runbook-body a {
+  color: var(--we-primary);
+  font-weight: 650;
+}
+
+.we-workflow-metadata-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.we-workflow-metadata-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.we-workflow-metadata-panel .we-field {
+  color: var(--we-muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+}
+
+.we-workflow-metadata-panel .we-field textarea {
+  min-height: 156px;
+  resize: vertical;
+}
+
+.we-helper-text--error {
+  color: var(--we-danger);
+  font-weight: 700;
+}
+
+.we-workflow-metadata-panel__actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .we-permissions-role-card {

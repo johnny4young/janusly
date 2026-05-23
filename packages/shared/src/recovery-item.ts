@@ -152,7 +152,7 @@ export const CommentBodySchema = z
 
 export const AssignOwnerBodySchema = z
   .object({
-    owner: z.string().min(1).max(200).nullable(),
+    owner: z.string().min(1).max(200).nullable().optional(),
   })
   .strict()
 
