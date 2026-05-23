@@ -26,6 +26,10 @@ import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
 import { getDeadLetter, isDeadLetterStatus, listDeadLetters, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
+import {
+  autoResolveRecoveryItemFromReplay,
+  createRecoveryItemForDeadLetter,
+} from "@janusly/engine/src/recovery/recovery-item-hook";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -92,6 +96,17 @@ export const dlqRoutes: Route[] = [
 
       await markDeadLetterResolved(auth.orgId, id);
       await audit(auth.orgId, auth.userId, "dlq.resolved", "dlq", id);
+
+      // Auto-close the recovery_item linked to this DLQ row (no-op when
+      // no item exists). Manual DLQ resolve is not a replay, so keep the
+      // linked recovery item's resolution reason honest.
+      await autoResolveRecoveryItemFromReplay({
+        orgId: auth.orgId,
+        deadLetterId: id,
+        actor: auth.userId,
+        resolutionReason: "accepted_loss",
+        via: "dlq_resolve",
+      });
 
       return sendJson(res, { ok: true });
     } },
@@ -212,12 +227,26 @@ export const dlqRoutes: Route[] = [
         }
 
         try {
+          const workflow = WorkflowSchema.parse(item.workflowJson);
           await dlqReplay.replayDeadLetter({
             runId: item.runId,
-            workflow: WorkflowSchema.parse(item.workflowJson),
+            workflow,
             node: NodeSchema.parse(item.nodeJson),
           });
           await markDeadLetterReplayed(auth.orgId, id);
+          // Ensure the recovery_item exists (idempotent) so the cluster
+          // accounts for it AND auto-close it because the replay succeeded.
+          await createRecoveryItemForDeadLetter({
+            orgId: auth.orgId,
+            deadLetterId: id,
+            createdBy: auth.userId,
+            workflowId: workflow.id ?? null,
+          });
+          await autoResolveRecoveryItemFromReplay({
+            orgId: auth.orgId,
+            deadLetterId: id,
+            actor: auth.userId,
+          });
           await audit(auth.orgId, auth.userId, "recovery.cluster_apply", "dlq", id, {
             clusterSignature,
             sequenceIndex: i,
@@ -250,6 +279,13 @@ export const dlqRoutes: Route[] = [
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
         await audit(auth.orgId, auth.userId, "dlq.replayed", "dlq", body.deadLetterId);
+
+        // Auto-close the recovery_item linked to this DLQ row, if any.
+        await autoResolveRecoveryItemFromReplay({
+          orgId: auth.orgId,
+          deadLetterId: body.deadLetterId,
+          actor: auth.userId,
+        });
 
         return sendJson(res, { ok: true });
       }

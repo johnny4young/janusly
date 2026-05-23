@@ -69,7 +69,7 @@ export const PERMISSION_CATALOG = [
   { key: "dlq.replay",           category: "dlq",       description: "Replay a dead-lettered run/node",          defaultRoles: ["editor", "admin"] },
   // recovery
   { key: "recovery.read",        category: "recovery",  description: "View recovery metrics + delta",            defaultRoles: ["viewer", "editor", "admin"] },
-  { key: "recovery.write",       category: "recovery",  description: "Submit recovery feedback",                 defaultRoles: ["editor", "admin"] },
+  { key: "recovery.write",       category: "recovery",  description: "Submit recovery feedback, manage recovery items (acknowledge / resolve / comment / escalate)", defaultRoles: ["editor", "admin"] },
   // reports
   { key: "reports.read",         category: "reports",   description: "Download run-explain reports",             defaultRoles: ["viewer", "editor", "admin"] },
   { key: "reports.deliver",      category: "reports",   description: "Deliver run-explain via Slack / GitHub / webhook", defaultRoles: ["editor", "admin"] },

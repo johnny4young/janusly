@@ -118,6 +118,9 @@ export type OrgConfigSnapshot = {
     maxAttemptsPerSignature: number;
     loopWindowDays: number;
   };
+  recovery: {
+    autoCreateItems: boolean;
+  };
   value: {
     hourlyCost: number;
     minutesSavedPerRecovery: number;
@@ -136,6 +139,7 @@ const ALLOWED_CATEGORIES = [
   "auth",
   "memory",
   "auto-healing",
+  "recovery",
   "value",
 ] as const;
 
@@ -626,6 +630,14 @@ export const ORG_CONFIG_DEFINITIONS = [
     max: 90,
   },
   {
+    key: "recovery.autoCreateItems",
+    category: "recovery",
+    description:
+      "Tenant switch for automatic recovery item creation when a DLQ row is inserted. Defaults to true so the ownership workflow is on for existing tenants; operators can disable it per org through the closed org config catalog.",
+    valueType: "boolean",
+    defaultValue: true,
+  },
+  {
     key: "value.hourlyCost",
     category: "value",
     description:
@@ -861,6 +873,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       autoApply: readBoolean(values, "autoHealing.autoApply"),
       maxAttemptsPerSignature: readNumber(values, "autoHealing.maxAttemptsPerSignature"),
       loopWindowDays: readNumber(values, "autoHealing.loopWindowDays"),
+    },
+    recovery: {
+      autoCreateItems: readBoolean(values, "recovery.autoCreateItems"),
     },
     value: {
       hourlyCost: readNumber(values, "value.hourlyCost"),

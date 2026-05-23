@@ -151,6 +151,19 @@ export function matchesPolicyFilter(
       }
       return true;
     }
+    case "recovery_item.created":
+    case "recovery_item.sla_breached": {
+      const p = params as Partial<AlertParamsByTrigger["recovery_item.created"]>;
+      if (Array.isArray(p.severities) && p.severities.length > 0) {
+        const severity = typeof payload.severity === "string" ? payload.severity : "";
+        if (!p.severities.includes(severity as never)) return false;
+      }
+      if (Array.isArray(p.workflowIds) && p.workflowIds.length > 0) {
+        const workflowId = typeof payload.workflowId === "string" ? payload.workflowId : "";
+        if (!p.workflowIds.includes(workflowId)) return false;
+      }
+      return true;
+    }
     default:
       return true;
   }

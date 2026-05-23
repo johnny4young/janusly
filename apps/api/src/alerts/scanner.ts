@@ -1,15 +1,17 @@
 /**
- * Periodic scanner for the three state-driven alert triggers:
+ * Periodic scanner for the four state-driven alert triggers:
  *   - `failure_cluster.threshold` — re-cluster recent failure samples and
  *     fire when a cluster's frequency crosses the policy's `minFrequency`.
  *   - `workflow.slo_breach` — re-evaluate SLO breaches per workflow with
  *     `slo_json IS NOT NULL`.
  *   - `approval.stalled` — find `run_nodes` waiting for human approval
  *     longer than `policy.parameters.stalledMinutes`.
+ *   - `recovery_item.sla_breached` — find open recovery items past their
+ *     SLA target.
  *
  * Event-driven triggers (`dlq.entry_created`, `budget.blocked`,
- * `limiter.degraded`) fire in-process via the DI seam and do NOT use this
- * scanner.
+ * `limiter.degraded`, `recovery_item.created`) fire in-process via the DI
+ * seam and do NOT use this scanner.
  *
  * Bootstrap behaviour:
  *   - Registered as a single deterministic BullMQ scheduler
@@ -32,6 +34,7 @@ import {
 import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
+import { listOpenItemsWithBreachedSla } from "@janusly/data/src/recoveryItemsRepo";
 import {
   getEnabledPoliciesByTrigger,
   listOrgIdsWithEnabledPolicies,
@@ -111,6 +114,7 @@ async function runOrgScan(orgId: string): Promise<void> {
   await scanFailureClusters(orgId);
   await scanWorkflowSloBreaches(orgId);
   await scanStalledApprovals(orgId);
+  await scanRecoveryItemSlaBreaches(orgId);
 }
 
 // ─── failure_cluster.threshold ─────────────────────────────────────────────
@@ -296,6 +300,38 @@ async function scanStalledApprovals(orgId: string): Promise<void> {
         nodeId: row.nodeId,
         workflowId: row.workflowId,
         stalledMinutes,
+      },
+    });
+  }
+}
+
+// ─── recovery_item.sla_breached ────────────────────────────────────────────
+
+async function scanRecoveryItemSlaBreaches(orgId: string): Promise<void> {
+  const policies = await getEnabledPoliciesByTrigger(orgId, "recovery_item.sla_breached");
+  if (policies.length === 0) return;
+
+  let breached: Awaited<ReturnType<typeof listOpenItemsWithBreachedSla>>;
+  try {
+    breached = await listOpenItemsWithBreachedSla(orgId);
+  } catch (err) {
+    console.warn("[alerts] listOpenItemsWithBreachedSla failed", { orgId, err });
+    return;
+  }
+
+  for (const item of breached) {
+    await dispatchAlert({
+      orgId,
+      trigger: "recovery_item.sla_breached",
+      payload: {
+        itemId: item.id,
+        deadLetterId: item.deadLetterId,
+        workflowId: item.workflowId,
+        severity: item.severity,
+        status: item.status,
+        owner: item.owner,
+        slaTargetAtIso: item.slaTargetAt.toISOString(),
+        breachedBySeconds: Math.max(0, Math.floor((Date.now() - item.slaTargetAt.getTime()) / 1000)),
       },
     });
   }

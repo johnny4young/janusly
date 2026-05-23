@@ -115,6 +115,8 @@ export type DeadLetterInput = {
   runId: string;
   /** Org that owns the failed run. Required for multi-tenant DLQ reads. */
   orgId: string;
+  /** Saved workflow id when the run can be tied back to workflow_versions. */
+  workflowId?: string | null;
   workflow: Workflow;
   node: WorkflowNode;
   attempt: number;

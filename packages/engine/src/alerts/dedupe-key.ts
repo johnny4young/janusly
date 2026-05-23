@@ -6,7 +6,7 @@
  * into one alert (with cooldown), but two events on the same trigger with
  * different root causes still fire separately.
  *
- * Six branches, one per trigger. Pure function — no I/O, easy to unit test.
+ * One branch per trigger. Pure function — no I/O, easy to unit test.
  */
 
 import type { AlertTrigger } from "@janusly/shared";
@@ -56,6 +56,14 @@ export function buildDedupeKey(trigger: AlertTrigger, payload: Record<string, un
       const nodeId = asString(payload.nodeId);
       if (!runId || !nodeId) return NO_KEY;
       return `approval:${runId}:${nodeId}`;
+    }
+    case "recovery_item.created": {
+      const deadLetterId = asString(payload.deadLetterId);
+      return deadLetterId ? `item:${deadLetterId}` : NO_KEY;
+    }
+    case "recovery_item.sla_breached": {
+      const itemId = asString(payload.itemId);
+      return itemId ? `sla:${itemId}` : NO_KEY;
     }
     default:
       return NO_KEY;
