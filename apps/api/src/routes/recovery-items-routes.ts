@@ -47,6 +47,7 @@ import {
   setInProgressRecoveryItem,
   setWaitingExternalRecoveryItem,
 } from "@janusly/data/src/recoveryItemsRepo";
+import { listHandoffsForItem } from "@janusly/data/src/recoveryItemHandoffsRepo";
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -111,7 +112,8 @@ export const recoveryItemsRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "id required" }, 400);
       const item = await getRecoveryItemById(auth.orgId, id);
       if (!item) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
-      return sendJson(res, { item });
+      const handoffs = await listHandoffsForItem(auth.orgId, id);
+      return sendJson(res, { item, handoffs });
     },
   },
   {

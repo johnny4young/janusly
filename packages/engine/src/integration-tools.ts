@@ -143,6 +143,34 @@ const githubCreateIssueOutput = z.object({
 });
 
 // ──────────────────────────────────────────────────────────────────────────
+// Tool: github.add_issue_comment
+// ──────────────────────────────────────────────────────────────────────────
+
+const githubAddIssueCommentInput = z.object({
+  /** Stored GitHub credential name (kind: `github_token`). */
+  credential: z.string().min(1),
+  /** Repository owner (user or org). */
+  owner: z.string().min(1),
+  /** Repository name. */
+  repo: z.string().min(1),
+  /** Existing issue number returned by a prior `github.create_issue`. */
+  issueNumber: z.number().int().min(1),
+  /** Comment body in Markdown. */
+  body: z.string().min(1).max(64_000),
+});
+
+const githubAddIssueCommentOutput = z.object({
+  ok: z.boolean(),
+  /** GitHub-assigned comment id (numeric). Populated when `ok === true`. */
+  commentId: z.number().optional(),
+  /** Comment URL (html_url from GitHub's response). */
+  commentUrl: z.string().optional(),
+  statusCode: z.number().optional(),
+  error: z.string().optional(),
+  latencyMs: z.number(),
+});
+
+// ──────────────────────────────────────────────────────────────────────────
 // Tool: webhook.send
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -155,6 +183,24 @@ const webhookSendInput = z.object({
   payload: z.record(z.string(), z.unknown()),
   /** Optional header name override; defaults to `x-janusly-signature`. */
   signatureHeader: z.string().optional(),
+  /**
+   * Optional extra request headers (e.g., `X-Idempotency-Key`). Capped at
+   * 10 entries; each header value capped at 200 chars; CR/LF rejected
+   * (defense against header-splitting via operator input). The
+   * `Authorization` / `X-Janusly-Signature` headers are reserved for the
+   * tool itself and any override here is ignored at execute time.
+   */
+  headers: z
+    .record(
+      z.string().min(1).max(60),
+      z
+        .string()
+        .min(1)
+        .max(200)
+        .refine((value) => !/[\r\n]/.test(value), "header value cannot contain CR/LF"),
+    )
+    .refine((value) => Object.keys(value).length <= 10, "max 10 custom headers")
+    .optional(),
 });
 
 const webhookSendOutput = z.object({
@@ -168,7 +214,11 @@ const webhookSendOutput = z.object({
 // Shared executor scaffolding
 // ──────────────────────────────────────────────────────────────────────────
 
-export type IntegrationToolName = "slack.post" | "github.create_issue" | "webhook.send";
+export type IntegrationToolName =
+  | "slack.post"
+  | "github.create_issue"
+  | "github.add_issue_comment"
+  | "webhook.send";
 
 type FireRecorderInput = {
   orgId: string;
@@ -502,6 +552,124 @@ export const githubCreateIssueTool = {
   },
 };
 
+export const githubAddIssueCommentTool = {
+  name: "github.add_issue_comment" as const,
+  description: "Append a Markdown comment to an existing GitHub issue using a stored PAT credential.",
+  inputSchema: githubAddIssueCommentInput,
+  outputSchema: githubAddIssueCommentOutput,
+  inputExample: {
+    credential: "bot-github",
+    owner: "janusly",
+    repo: "demo",
+    issueNumber: 42,
+    body: "Update on this incident…",
+  },
+  writeSide: true as const,
+  async execute(
+    input: z.infer<typeof githubAddIssueCommentInput>,
+    _context: Record<string, unknown>,
+    executionContext: {
+      orgId?: string;
+      runId?: string;
+      nodeId?: string;
+      workflowId?: string;
+      integrations?: { github?: { rateLimitPerMin?: number } };
+    },
+  ): Promise<z.infer<typeof githubAddIssueCommentOutput>> {
+    const start = Date.now();
+    const rateLimitPerMin = executionContext.integrations?.github?.rateLimitPerMin
+      ?? envPositiveInt("JANUSLY_GITHUB_RATE_LIMIT_PER_MIN", 60);
+
+    const gate = await gateIntegrationCall({
+      orgId: executionContext.orgId,
+      tool: "github.add_issue_comment",
+      credentialKind: "github_token",
+      credentialName: input.credential,
+      rateLimitPerMin,
+    });
+    if (!gate.ok) {
+      const latencyMs = Date.now() - start;
+      if (executionContext.orgId) {
+        await fireIntegrationRecorder({
+          orgId: executionContext.orgId,
+          tool: "github.add_issue_comment",
+          credentialName: input.credential,
+          executionContext,
+          ok: false,
+          error: gate.error,
+          latencyMs,
+        });
+      }
+      return { ok: false, error: gate.error, latencyMs };
+    }
+
+    const url = `https://api.github.com/repos/${encodeURIComponent(input.owner)}/${encodeURIComponent(input.repo)}/issues/${input.issueNumber}/comments`;
+
+    const result = await fetchHttpTarget(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "accept": "application/vnd.github+json",
+        "authorization": `Bearer ${gate.credentialSecret}`,
+        "user-agent": "janusly-mcp-integration",
+        "x-github-api-version": "2022-11-28",
+      },
+      body: JSON.stringify({ body: input.body }),
+    }).catch((err: unknown) => ({
+      statusCode: 0,
+      ok: false as const,
+      body: "",
+      headers: {} as Record<string, string>,
+      __error: err instanceof Error ? err.message : "network error",
+    }));
+
+    const latencyMs = Date.now() - start;
+    const errorFromThrow = (result as { __error?: string }).__error;
+    if (errorFromThrow) {
+      await fireIntegrationRecorder({
+        orgId: executionContext.orgId!,
+        tool: "github.add_issue_comment",
+        credentialName: input.credential,
+        executionContext,
+        ok: false,
+        error: errorFromThrow,
+        latencyMs,
+      });
+      return { ok: false, error: errorFromThrow, latencyMs };
+    }
+
+    if (result.statusCode === 201) {
+      const parsed = safeParseJson(result.body);
+      const commentId = typeof parsed?.id === "number" ? parsed.id : undefined;
+      const commentUrl = typeof parsed?.html_url === "string" ? parsed.html_url : undefined;
+      await fireIntegrationRecorder({
+        orgId: executionContext.orgId!,
+        tool: "github.add_issue_comment",
+        credentialName: input.credential,
+        executionContext,
+        ok: true,
+        statusCode: result.statusCode,
+        latencyMs,
+      });
+      return { ok: true, commentId, commentUrl, statusCode: result.statusCode, latencyMs };
+    }
+
+    const parsed = safeParseJson(result.body);
+    const message = typeof parsed?.message === "string" ? parsed.message : `github responded ${result.statusCode}`;
+    await fireIntegrationRecorder({
+      orgId: executionContext.orgId!,
+      tool: "github.add_issue_comment",
+      credentialName: input.credential,
+      executionContext,
+      ok: false,
+      statusCode: result.statusCode,
+      error: message,
+      latencyMs,
+    });
+    return { ok: false, statusCode: result.statusCode, error: message, latencyMs };
+  },
+};
+
 export const webhookSendTool = {
   name: "webhook.send" as const,
   description: "POST a signed JSON payload to an external URL with an HMAC-SHA256 signature header.",
@@ -556,12 +724,26 @@ export const webhookSendTool = {
     const signature = signWebhookPayload(gate.credentialSecret, serialized, unixSeconds);
     const headerName = (input.signatureHeader ?? DEFAULT_WEBHOOK_SIGNATURE_HEADER).toLowerCase();
 
+    // Merge operator-supplied extra headers (e.g., X-Idempotency-Key for
+    // Linear / generic receivers) on TOP of the always-sent
+    // content-type + signature. Reserved keys (content-type,
+    // authorization, and the resolved signature header) cannot be
+    // overridden — the Zod input schema caps quantity + per-value length
+    // and rejects CR/LF to keep this seam from becoming a header-injection
+    // vector.
+    const merged: Record<string, string> = { "content-type": "application/json" };
+    if (input.headers) {
+      for (const [key, value] of Object.entries(input.headers)) {
+        const lower = key.toLowerCase();
+        if (lower === "content-type" || lower === "authorization" || lower === headerName) continue;
+        merged[lower] = value;
+      }
+    }
+    merged[headerName] = signature;
+
     const result = await fetchHttpTarget(input.url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        [headerName]: signature,
-      },
+      headers: merged,
       body: serialized,
     }).catch((err: unknown) => ({
       // The destination URL is operator-supplied (not a credential); the

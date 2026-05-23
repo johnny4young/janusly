@@ -78,6 +78,7 @@ import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootst
 import { alertsRoutes } from "./routes/alerts-routes";
 import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
 import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
+import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { setRecoveryItemCreator } from "@janusly/data/src/recovery-item-creator";
 import { recoveryRoutes } from "./routes/recovery-routes";
@@ -118,6 +119,7 @@ export const routes: Route[] = [
   ...autoHealingRoutes,
   ...alertsRoutes,
   ...recoveryItemsRoutes,
+  ...recoveryHandoffRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
