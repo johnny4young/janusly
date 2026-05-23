@@ -246,6 +246,7 @@ export class WorkflowRuntime {
         await this.queue.enqueueDeadLetter({
           runId,
           orgId: metadata?.orgId ?? "default",
+          workflowId: metadata?.workflowId ?? input.workflow.id ?? null,
           workflow: input.workflow,
           node,
           attempt,

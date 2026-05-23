@@ -123,6 +123,23 @@ describe('ALERT_PARAMS_SCHEMAS', () => {
     })
     expect(bad.success).toBe(false)
   })
+
+  it('recovery_item.created accepts an empty filter and severity arrays', () => {
+    expect(ALERT_PARAMS_SCHEMAS['recovery_item.created'].safeParse({}).success).toBe(true)
+    expect(
+      ALERT_PARAMS_SCHEMAS['recovery_item.created'].safeParse({ severities: ['p1', 'p2'] }).success,
+    ).toBe(true)
+    expect(
+      ALERT_PARAMS_SCHEMAS['recovery_item.created'].safeParse({ severities: ['unknown'] }).success,
+    ).toBe(false)
+  })
+
+  it('recovery_item.sla_breached accepts a severities filter', () => {
+    expect(ALERT_PARAMS_SCHEMAS['recovery_item.sla_breached'].safeParse({}).success).toBe(true)
+    expect(
+      ALERT_PARAMS_SCHEMAS['recovery_item.sla_breached'].safeParse({ severities: ['p1'] }).success,
+    ).toBe(true)
+  })
 })
 
 describe('ALERT_CHANNEL_PARAMS_SCHEMAS', () => {

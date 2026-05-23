@@ -1152,3 +1152,55 @@ export const alertDispatches = pgTable(
     ),
   ],
 );
+
+/**
+ * Org-scoped recovery incident — one row per open DLQ failure, the
+ * operational vertebra over the Recovery Center. Tracks `owner` +
+ * `severity` (p1/p2/p3/p4) + `slaTargetAt` + lifecycle `status` + append-
+ * only `comments` so operators can coordinate without leaving the panel.
+ *
+ * Lifecycle state machine enforced at the data layer via CAS-style
+ * `UPDATE … WHERE status IN (allowed_pre_states)` — concurrent
+ * operator-click vs auto-apply can't double-apply (mirror of
+ * `recordDecision` in `autoHealingRepo.ts`).
+ *
+ * Multi-tenant scope: every read carries `eq(recoveryItems.orgId, orgId)`.
+ * One item per `(orgId, deadLetterId)` — the unique index makes
+ * `createRecoveryItem` idempotent so cluster-apply fan-out can call it N
+ * times safely.
+ *
+ * Closure path: either `/dlq/replay` succeeds (auto-close with
+ * `resolutionReason: sandbox_replay_succeeded`) or the operator explicitly
+ * resolves with a closed-enum reason. Comments live in jsonb as
+ * `Array<{ id, authorUserId, body, createdAt }>` and are append-only via
+ * the repo helper (cap 200).
+ */
+export const recoveryItems = pgTable(
+  "recovery_items",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    workflowId: text("workflow_id"),
+    owner: text("owner"),
+    severity: text("severity").notNull().default("p3"),
+    status: text("status").notNull().default("open"),
+    slaTargetAt: timestamp("sla_target_at", { withTimezone: true }).notNull(),
+    resolutionReason: text("resolution_reason"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    comments: jsonb("comments").notNull().default([]),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_items_org_dlq_idx").on(table.orgId, table.deadLetterId),
+    index("recovery_items_org_status_sla_idx").on(
+      table.orgId,
+      table.status,
+      table.slaTargetAt,
+    ),
+    index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
+  ],
+);

@@ -142,6 +142,21 @@ const { dispatchAlert } = await import("./alerts/dispatcher");
 setAlertDispatcher(dispatchAlert);
 console.log("[alerts] dispatcher registered (worker)");
 
+// Recovery-ownership creator. Worker is the primary DLQ writer, so the
+// creator MUST be registered here to catch every worker-side insert.
+const { setRecoveryItemCreator } = await import("@janusly/data/src/recovery-item-creator");
+const { createRecoveryItemForDeadLetter } = await import("./recovery/recovery-item-hook");
+setRecoveryItemCreator(async (event) => {
+  await createRecoveryItemForDeadLetter({
+    orgId: event.orgId,
+    deadLetterId: event.deadLetterId,
+    createdBy: event.createdBy ?? "system",
+    workflowId: event.workflowId,
+    errorSignature: event.errorSignature,
+  });
+});
+console.log("[recovery-item] creator registered (worker)");
+
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),
   new BullMQQueueAdapter(),

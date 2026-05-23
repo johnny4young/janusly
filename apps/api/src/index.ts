@@ -77,6 +77,9 @@ import { autoHealingRoutes } from "./routes/auto-healing-routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
 import { alertsRoutes } from "./routes/alerts-routes";
 import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
+import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
+import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
+import { setRecoveryItemCreator } from "@janusly/data/src/recovery-item-creator";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -114,6 +117,7 @@ export const routes: Route[] = [
   ...aiRoutes,
   ...autoHealingRoutes,
   ...alertsRoutes,
+  ...recoveryItemsRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
@@ -216,3 +220,16 @@ void bootstrapAutoHealing();
 // hooks can reach it). The periodic scanner Worker only boots when
 // `JANUSLY_ALERTS_ENABLED=true`.
 void bootstrapAlerts();
+
+// Register the recovery_item creator so the DLQ adapter fires
+// `recovery_item.created` events when items appear. The seam is silently
+// no-op when the per-org `recovery.autoCreateItems` is false.
+setRecoveryItemCreator(async (event) => {
+  await createRecoveryItemForDeadLetter({
+    orgId: event.orgId,
+    deadLetterId: event.deadLetterId,
+    createdBy: event.createdBy ?? "system",
+    workflowId: event.workflowId,
+    errorSignature: event.errorSignature,
+  });
+});

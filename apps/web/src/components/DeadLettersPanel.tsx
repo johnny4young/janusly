@@ -6,15 +6,17 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
-import { downloadFromApi } from '../api'
+import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 import { RecoveryDialog } from './RecoveryDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
+import { RecoveryItemBadge, type RecoveryItemBadgeData } from './RecoveryItemBadge'
+import { RecoveryItemDrawer, type RecoveryItemDrawerData } from './RecoveryItemDrawer'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 
 /** Web-side `dead_letters` row shape (matches the API's response). */
@@ -52,6 +54,55 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const { t } = useT()
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
+  const [recoveryItems, setRecoveryItems] = useState<
+    Array<RecoveryItemBadgeData & RecoveryItemDrawerData>
+  >([])
+  const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
+  const platformVersion = useWorkflowStore((s) => s.platformVersion)
+
+  useEffect(() => {
+    let cancelled = false
+    api('/recovery/items?limit=200')
+      .then((resp: { items?: Array<{
+        id: string
+        deadLetterId: string
+        owner: string | null
+        severity: 'p1' | 'p2' | 'p3' | 'p4'
+        status: string
+        slaTargetAt: string
+        resolutionReason: string | null
+        comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
+      }> }) => {
+        if (cancelled) return
+        const hydrated = (resp?.items ?? []).map((it) => ({
+          id: it.id,
+          deadLetterId: it.deadLetterId,
+          owner: it.owner,
+          severity: it.severity,
+          status: it.status as RecoveryItemBadgeData['status'],
+          slaTargetAtIso: it.slaTargetAt,
+          resolutionReason: (it.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
+          comments: it.comments ?? [],
+        }))
+        setRecoveryItems(hydrated)
+      })
+      .catch(() => {
+        if (!cancelled) setRecoveryItems([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [platformVersion])
+
+  const recoveryByDeadLetterId = useMemo(() => {
+    const map = new Map<string, RecoveryItemBadgeData & RecoveryItemDrawerData>()
+    for (const it of recoveryItems) map.set(it.deadLetterId, it)
+    return map
+  }, [recoveryItems])
+
+  const openRecoveryItem = openRecoveryItemId
+    ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
+    : null
   const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
@@ -123,12 +174,25 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
                       <span className={`we-list-row__pill we-list-row__pill--${severity === 'danger' ? 'danger' : severity === 'success' ? 'success' : 'cobalt'}`}>
                         {formatStatusLabel(item.status)}
                       </span>
+                      <RecoveryItemBadge
+                        item={recoveryByDeadLetterId.get(item.id) ?? null}
+                        onOpen={() => {
+                          const ri = recoveryByDeadLetterId.get(item.id)
+                          if (ri) setOpenRecoveryItemId(ri.id)
+                        }}
+                      />
                     </div>
                   </div>
                 </li>
               )
             })}
           </ul>
+        )}
+        {openRecoveryItem && (
+          <RecoveryItemDrawer
+            item={openRecoveryItem}
+            onClose={() => setOpenRecoveryItemId(null)}
+          />
         )}
       </div>
 

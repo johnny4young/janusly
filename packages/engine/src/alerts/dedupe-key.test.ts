@@ -49,4 +49,18 @@ describe("buildDedupeKey", () => {
     ).toBe("approval:run_1:approval-1");
     expect(buildDedupeKey("approval.stalled", { runId: "run_1" })).toBe("__none__");
   });
+
+  it("recovery_item.created keys by deadLetterId so multi-fire from the same DLQ collapses", () => {
+    expect(
+      buildDedupeKey("recovery_item.created", { deadLetterId: "dl_123" }),
+    ).toBe("item:dl_123");
+    expect(buildDedupeKey("recovery_item.created", {})).toBe("__none__");
+  });
+
+  it("recovery_item.sla_breached keys by itemId (items can re-breach after reopen)", () => {
+    expect(
+      buildDedupeKey("recovery_item.sla_breached", { itemId: "ri_99" }),
+    ).toBe("sla:ri_99");
+    expect(buildDedupeKey("recovery_item.sla_breached", {})).toBe("__none__");
+  });
 });
