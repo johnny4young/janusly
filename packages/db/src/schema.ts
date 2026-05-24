@@ -37,6 +37,7 @@
  *   queries can rely on it without null guards.
  */
 
+import { sql } from "drizzle-orm";
 import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
@@ -272,7 +273,20 @@ export const usageEvents = pgTable(
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("usage_events_org_metric_idx").on(table.orgId, table.metric)],
+  (table) => [
+    index("usage_events_org_metric_idx").on(table.orgId, table.metric),
+    // Composite for the billing + value-dashboard hot paths that
+    // filter (orgId, metric='llm.completion', createdAt >= since)
+    // LIMIT N. Without the createdAt column in the index, the plan
+    // degrades to scan-then-sort once the table crosses ~100k rows.
+    // The generated migration must use CREATE INDEX CONCURRENTLY (hand-
+    // patched — drizzle's index() builder emits the blocking variant).
+    index("usage_events_org_metric_created_idx").on(
+      table.orgId,
+      table.metric,
+      table.createdAt.desc(),
+    ),
+  ],
 );
 
 export const credentials = pgTable(
@@ -315,7 +329,17 @@ export const auditLogs = pgTable(
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc())],
+  (table) => [
+    index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // GIN over the jsonb metadata column for containment lookups
+    // such as the rate-limit-degradation dedup gate
+    // (`metadata @> '{"bucket":"..."}'`). jsonb_path_ops keeps the
+    // index ~30% narrower than the default jsonb_ops opclass; we
+    // do not need `?` / `?|` queries today. The production rollout
+    // SQL must add the `jsonb_path_ops` opclass by hand — drizzle's
+    // .using('gin', ...) does not emit it.
+    index("audit_logs_metadata_gin_idx").using("gin", table.metadata),
+  ],
 );
 
 /**
@@ -1068,6 +1092,15 @@ export const autoHealingRuns = pgTable(
     ),
     // Idempotency check: "did we already auto-heal this DLQ row?"
     index("auto_healing_runs_org_dlq_idx").on(table.orgId, table.deadLetterId),
+    // Partial index for the watcher / CAS hot path that filters
+    // (orgId, status='validated'). The 3-col composite above covers
+    // the same query but spans every status value; a partial over
+    // only the validated rows is ~10× smaller and stays in
+    // shared_buffers under hot load. The generated migration must
+    // use CREATE INDEX CONCURRENTLY (hand-patched).
+    index("auto_healing_runs_org_validated_idx")
+      .on(table.orgId)
+      .where(sql`${table.status} = 'validated'`),
   ],
 );
 

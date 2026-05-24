@@ -1,0 +1,39 @@
+-- Production pre-deploy script for the hot-path indexes added by
+-- the sibling `migration.sql`. The drizzle-kit migrate runner wraps
+-- every migration in a transaction, which prevents CREATE INDEX
+-- CONCURRENTLY (Postgres rejects it with error 25001 inside a tx).
+-- So the runner uses plain CREATE INDEX with IF NOT EXISTS — which
+-- would acquire a ShareLock on each table for the full build time
+-- in a live production database.
+--
+-- Operator playbook for production deploys:
+--
+--   1. Connect to the production database via psql in autocommit
+--      mode (NOT inside `BEGIN/COMMIT`). Example:
+--      psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f production-rollout.sql
+--   2. Each CREATE INDEX CONCURRENTLY runs in its own non-blocking
+--      transaction. Reads and writes against the target table stay
+--      available; only DDL on the same table is blocked.
+--   3. After all three indexes report `CREATE INDEX`, run the
+--      regular `pnpm migrate` as part of the deploy. The
+--      IF NOT EXISTS guards inside the migration short-circuit and
+--      the migration row is recorded in __drizzle_migrations
+--      without re-building anything.
+--   4. If any CONCURRENTLY build fails midway, Postgres leaves the
+--      index in state INVALID. Recovery:
+--         (a) verify with the catalog query
+--             SELECT indexrelid::regclass, indisvalid
+--             FROM pg_index WHERE NOT indisvalid;
+--             (CREATE INDEX CONCURRENTLY IF NOT EXISTS is a NO-OP
+--             against an existing-but-INVALID index — the catalog row
+--             already exists, so re-running would silently leave the
+--             broken index in place.)
+--         (b) drop the broken index:
+--             DROP INDEX CONCURRENTLY IF EXISTS "<index_name>";
+--         (c) re-run this file. The deploy is safe to retry.
+--
+-- This file is NOT executed by drizzle-kit migrate — it lives next
+-- to the migration purely as documentation + executable runbook.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "audit_logs_metadata_gin_idx" ON "audit_logs" USING gin ("metadata" jsonb_path_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "auto_healing_runs_org_validated_idx" ON "auto_healing_runs" ("org_id") WHERE "status" = 'validated';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "usage_events_org_metric_created_idx" ON "usage_events" ("org_id","metric","created_at" DESC NULLS LAST);
