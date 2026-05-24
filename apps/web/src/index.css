@@ -525,6 +525,46 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   grid-template-columns: 56px 1fr;
 }
 
+/* Contextual main slot. When the workspace renders an admin / read-only
+   tab that does NOT need the React Flow canvas (Operations, Credentials,
+   Members, Templates, Marketplace, Runs, MultiAgent, Workflows list, Reasoning),
+   the same component that would otherwise live in the right rail is
+   mounted in the full main slot wrapped in `<div data-layout="contextual">`.
+   This rule centers + pads the content to a comfortable max-width so the
+   panels gain breathing room without stretching edge-to-edge on wide
+   monitors. The token `--we-content-max-width` is shared with the
+   Recovery Center hero so future admin pages can opt into the same width
+   ceiling. */
+:root {
+  --we-content-max-width: 1280px;
+}
+
+.workspace-main > [data-layout="contextual"] {
+  max-width: var(--we-content-max-width);
+  margin: 0 auto;
+  padding: 32px 48px;
+  width: 100%;
+}
+
+/* Tablet (≤1100px): the workspace grid drops to a 260px sidebar + 1fr
+   main with no right column. At that width 48px of side padding feels
+   heavy — step it down to 24px so the panels keep useful content width
+   on common laptop viewports (1024-1100). */
+@media (max-width: 1100px) {
+  .workspace-main > [data-layout="contextual"] {
+    padding: 28px 24px;
+  }
+}
+
+/* Mobile (≤760px): the workspace stacks to a single column. The
+   sidebar rides above the main area and the contextual wrapper needs
+   minimal padding so the content owns the viewport edge to edge. */
+@media (max-width: 760px) {
+  .workspace-main > [data-layout="contextual"] {
+    padding: 16px;
+  }
+}
+
 .workspace-sidebar,
 .workspace-panel {
   min-height: 0;
