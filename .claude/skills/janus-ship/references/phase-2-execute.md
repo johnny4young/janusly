@@ -76,7 +76,9 @@ When a gate fails:
 
 When `docker compose up` was started during the work (smoke or e2e), run `docker compose down` before final staging. Never leave containers running.
 
-**Verification artifacts are NOT cleaned up.** Screenshots and logs the agent created during verification — Playwright e2e dumps in `test-results/` / `playwright-report/`, MCP browser screenshots in `.playwright-mcp/`, manual-smoke curl captures, `tail -n` log dumps written to disk — stay on disk until the human deletes them. The reviewer reads those files as part of the PR review to confirm the UI rendered as claimed. Compose teardown applies ONLY to running containers, not to the artifact directories.
+**Verification artifacts land under `output/janus-ship/eng-NNN/`, never under `/tmp`.** Throwaway scripts the agent creates during PHASE 2 verification — psql seed SQL, EXPLAIN ANALYZE capture files, JS-reference comparison snippets, tsx integration verifiers, curl response captures, `tail -n` log dumps — go in a per-ticket folder under the repo's `output/janus-ship/eng-NNN/` directory (create on demand). `output/` is gitignored so the repo stays clean, but the files persist across reboots and are visible in the editor's file tree so the human reviewer can read them without remembering paths. Use short filenames (`smoke.sql`, `live-verify.ts`, `output.txt`) — the per-ticket folder already disambiguates. **Do NOT delete** any of these files at the end of the turn; the human deletes them.
+
+Playwright e2e dumps in `test-results/` / `playwright-report/`, MCP browser screenshots in `.playwright-mcp/`, and any image saved during a manual smoke follow the same rule — stay on disk until the human deletes them. Compose teardown applies ONLY to running containers, not to the artifact directories.
 
 ## Step 7 — Final stage
 
