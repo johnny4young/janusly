@@ -76,6 +76,8 @@ When a gate fails:
 
 When `docker compose up` was started during the work (smoke or e2e), run `docker compose down` before final staging. Never leave containers running.
 
+**Verification artifacts are NOT cleaned up.** Screenshots and logs the agent created during verification — Playwright e2e dumps in `test-results/` / `playwright-report/`, MCP browser screenshots in `.playwright-mcp/`, manual-smoke curl captures, `tail -n` log dumps written to disk — stay on disk until the human deletes them. The reviewer reads those files as part of the PR review to confirm the UI rendered as claimed. Compose teardown applies ONLY to running containers, not to the artifact directories.
+
 ## Step 7 — Final stage
 
 Stage explicitly, never `git add -A` or `git add .`:
