@@ -2,12 +2,45 @@ packages:
   - "apps/*"
   - "packages/*"
 
-# Force-patch a high-severity transitive advisory:
-#   fast-uri <= 3.1.0 path-traversal CVE (GHSA-q3j6-qgpj-74h6)
-# arriving via `@modelcontextprotocol/sdk > ajv > fast-uri`.
-# `pnpm audit --audit-level high` (the CI Dependency-audit gate) flags
-# this otherwise. Drop the override once `@modelcontextprotocol/sdk`
-# bumps its `ajv` to a version that depends on `fast-uri >= 3.1.1`
-# transitively.
+# Force-patch transitive advisories that `pnpm audit` flags. The
+# `dep_audit` CI job (.github/workflows/ci.yml) runs `pnpm audit
+# --audit-level moderate`; every entry below either clears a specific
+# advisory or aligns a stale transitive to its current patch range.
+# Each entry should name the advisory, the parent chain that pulls it
+# in, and the condition for removing the override. Residual advisories
+# that cannot be overridden (e.g. peer-dep-locked transitives) live in
+# SECURITY.md instead.
 overrides:
+  # fast-uri <= 3.1.0 path-traversal CVE (GHSA-q3j6-qgpj-74h6) via
+  # @modelcontextprotocol/sdk > ajv > fast-uri. Drop once
+  # @modelcontextprotocol/sdk bumps its ajv to a version that depends
+  # on fast-uri >= 3.1.1 transitively.
   fast-uri: ">=3.1.1"
+  # hono cache-middleware XSS (advisory threshold >= 4.12.18). Arrives
+  # via @modelcontextprotocol/sdk > @hono/node-server > hono. The sdk's
+  # peer range is ^4.11.4, so this patch bump is in-range. Drop once
+  # the sdk's tree pulls hono >= 4.12.18 directly.
+  hono: ">=4.12.18"
+  # ws uninitialized memory disclosure (threshold >= 8.20.1). Arrives
+  # via openai > ws (peer). Drop once openai bumps its peer floor.
+  ws: ">=8.20.1"
+  # qs prototype-pollution-adjacent advisory (threshold 6.15.2).
+  # Arrives via express > body-parser > qs. Drop once express bumps.
+  qs: ">=6.15.2"
+  # ip-address parser hardening (threshold 10.2.0). Arrives via
+  # @modelcontextprotocol/sdk > express-rate-limit > ip-address. Drop
+  # once express-rate-limit bumps.
+  ip-address: ">=10.2.0"
+
+# Audit ignores for advisories that cannot be cleared via overrides
+# (e.g. peer-dep-locked transitives). Every entry MUST have a matching
+# section in SECURITY.md with the parent chain, the why-it-is-safe
+# rationale, the upstream blocker, and a revisit trigger. Adding an
+# ignore without a SECURITY.md entry is a security regression — review
+# rejects it.
+auditConfig:
+  ignoreGhsas:
+    # uuid <11.1.1 buffer bounds check via @opentelemetry/exporter-
+    # jaeger > jaeger-client > uuid. Janusly does not call uuid with a
+    # caller-provided buf; the vector does not apply. See SECURITY.md.
+    - "GHSA-w5hq-g745-h8pq"

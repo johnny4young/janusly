@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@janusly/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.105.0",
+    "@supabase/supabase-js": "^2.106.1",
     "@xyflow/react": "^12.10.2",
     "i18next": "^26.2.0",
     "lucide-react": "^1.11.0",

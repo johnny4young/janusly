@@ -135,8 +135,8 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Audit (fails on HIGH+)
-        run: pnpm audit --audit-level high
+      - name: Audit (fails on MODERATE+)
+        run: pnpm audit --audit-level moderate
 
   test_sdk_python:
     name: SDK (Python) tests
