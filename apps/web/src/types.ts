@@ -112,6 +112,28 @@ export type McpToolDescriptor = {
 export type AiMode = 'ai' | 'fallback' | 'error'
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
+
+/**
+ * Tabs that NEED the React Flow canvas mounted as their main slot. Today
+ * this is only the AI Studio (drag-and-drop authoring) and the Inspector
+ * (node-click selection mirrored from the canvas). Every other tab is
+ * configuration / admin / read-only and benefits from full main-slot
+ * width without the DAG sitting behind it.
+ *
+ * The `home` tab is its own dedicated branch (`RecoveryCenterPanel`) and
+ * is NOT considered a canvas tab — it owns the full slot independently.
+ *
+ * Adding a new tab that needs the canvas means appending to this tuple;
+ * every other tab gains the contextual full-width layout for free.
+ */
+export const CANVAS_TABS = ['copilot', 'inspector'] as const
+
+export type CanvasTab = (typeof CANVAS_TABS)[number]
+
+/** Closed type-guard. The `as readonly string[]` cast keeps the runtime
+ *  check honest while the type predicate keeps callers strict. */
+export const isCanvasTab = (tab: ActiveTab): tab is CanvasTab =>
+  (CANVAS_TABS as readonly string[]).includes(tab)
 /**
  * JSON-Schema-subset describing one input field on a workflow's declared
  * `inputs` shape. Mirrors `WorkflowInputSchemaShape` in `@janusly/shared`.
