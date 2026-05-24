@@ -75,6 +75,14 @@ import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
 import { autoHealingRoutes } from "./routes/auto-healing-routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
+import { alertsRoutes } from "./routes/alerts-routes";
+import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
+import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
+import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
+import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
+import { setRecoveryItemCreator } from "@janusly/data/src/recovery-item-creator";
+import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
+import { registerWorkflowMetadataSeverityResolver } from "./workflow-metadata-bootstrap";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
@@ -111,6 +119,10 @@ export const routes: Route[] = [
   ...reportsRoutes,
   ...aiRoutes,
   ...autoHealingRoutes,
+  ...alertsRoutes,
+  ...recoveryItemsRoutes,
+  ...recoveryHandoffRoutes,
+  ...workflowMetadataRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];
@@ -182,6 +194,7 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
       });
     });
     await shutdownAutoHealing();
+    await shutdownAlerts();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);
@@ -206,3 +219,29 @@ server.listen(PORT, () => console.log(`API running on port ${PORT}`));
 // Redis writes, zero Worker. The boot is fire-and-forget; bootstrap
 // failures log internally and never break the API process.
 void bootstrapAutoHealing();
+
+// Boot the recovery alerting subsystem. Always registers the in-process
+// dispatcher DI seam (so DLQ inserts + budget block + limiter degraded
+// hooks can reach it). The periodic scanner Worker only boots when
+// `JANUSLY_ALERTS_ENABLED=true`.
+void bootstrapAlerts();
+
+// Register the recovery_item creator so the DLQ adapter fires
+// `recovery_item.created` events when items appear. The seam is silently
+// no-op when the per-org `recovery.autoCreateItems` is false.
+setRecoveryItemCreator(async (event) => {
+  await createRecoveryItemForDeadLetter({
+    orgId: event.orgId,
+    deadLetterId: event.deadLetterId,
+    createdBy: event.createdBy ?? "system",
+    workflowId: event.workflowId,
+    errorSignature: event.errorSignature,
+  });
+});
+
+// Register the per-workflow severity-default resolver so DLQ inserts
+// produce recovery_items at the right severity automatically (workflows
+// of money default to p1; batch defaults to p4). Failures degrade to
+// null inside the DI seam and the engine falls back to its hardcoded
+// 'p3' default.
+registerWorkflowMetadataSeverityResolver();

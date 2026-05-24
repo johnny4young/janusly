@@ -29,6 +29,7 @@ function snapshotWithConsent(consent: boolean) {
     objectstore: {} as never,
     memory: {} as never,
     autoHealing: {} as never,
+    recovery: {} as never,
     value: {} as never,
   } as Awaited<ReturnType<typeof getOrgConfigSnapshot>>;
 }

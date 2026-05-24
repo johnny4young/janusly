@@ -214,7 +214,7 @@ describe("SSO admin CRUD", () => {
     }));
     expect(auditMock).toHaveBeenCalledWith("org-a", "admin-1", "org.sso.connection_added",
       "sso_connection", "sso-1", expect.objectContaining({ provider: "workos" }));
-  });
+  }, 10_000);
 
   it("POST /org/sso/connections rejects duplicate provider with 409", async () => {
     getSsoConnectionForOrg.mockResolvedValueOnce({

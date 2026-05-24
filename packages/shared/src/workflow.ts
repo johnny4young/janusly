@@ -94,8 +94,14 @@ export const EdgeSchema = z.object({
   condition: z.string().trim().min(1).optional(),
 });
 
-/** Free-form descriptive metadata; `tags` defaults to `[]` so callers always see an array. */
-export const WorkflowMetadataSchema = z.object({
+/**
+ * Inline JSON-shaped descriptive metadata that lives on each workflow's
+ * serialized form (`description`, `tags`). Distinct from the operational
+ * metadata layer (owners + runbook + slackChannel etc.) that lives in
+ * the `workflow_metadata` table and is keyed by `(orgId, workflowId)`.
+ * `tags` defaults to `[]` so callers always see an array.
+ */
+export const WorkflowJsonMetadataSchema = z.object({
   description: z.string().trim().optional(),
   tags: z.array(z.string().trim().min(1)).default([]),
 }).default({ tags: [] });
@@ -170,7 +176,7 @@ export const WorkflowSchema = z.object({
   dslVersion: z.literal(workflowDslVersion).default(workflowDslVersion),
   id: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).optional(),
-  metadata: WorkflowMetadataSchema.optional(),
+  metadata: WorkflowJsonMetadataSchema.optional(),
   inputs: WorkflowInputSchema.optional(),
   outputs: WorkflowOutputsSchema.optional(),
   nodes: z.array(NodeSchema),
@@ -184,7 +190,7 @@ export type WorkflowNode = z.infer<typeof NodeSchema>;
 /** Single workflow edge, fully parsed. */
 export type WorkflowEdge = z.infer<typeof EdgeSchema>;
 /** Parsed metadata block with defaulted `tags`. */
-export type WorkflowMetadata = z.infer<typeof WorkflowMetadataSchema>;
+export type WorkflowJsonMetadata = z.infer<typeof WorkflowJsonMetadataSchema>;
 /** Closed set of JSON-Schema-subset primitive types. */
 export type WorkflowInputType = z.infer<typeof WorkflowInputTypeSchema>;
 /** Output-projection map (output-name → template string). */

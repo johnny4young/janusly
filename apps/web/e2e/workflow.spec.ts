@@ -25,6 +25,7 @@ test('dev session can create, save, run, and reopen a workflow', async ({ page }
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: 'Flows' }).click()
@@ -56,5 +57,6 @@ test('human form pauses a run, validates input, and resumes with submitted outpu
   await page.getByRole('button', { name: /Submit form/i }).click()
 
   await expect(page.getByText(/Form .* submitted/)).toBeVisible()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 })

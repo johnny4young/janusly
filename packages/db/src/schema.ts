@@ -112,6 +112,13 @@ export const workflowVersions = pgTable(
     workflowId: text("workflow_id").notNull(),
     version: integer("version").notNull(),
     dagJson: jsonb("dag_json").notNull(),
+    /**
+     * Per-workflow SLO declaration. Closed-key shape validated by
+     * `WorkflowSloSchema` in `@janusly/shared/src/workflow-slo`.
+     * Carried forward from the previous version on every save unless
+     * the save body explicitly overrides it.
+     */
+    sloJson: jsonb("slo_json"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -1061,5 +1068,236 @@ export const autoHealingRuns = pgTable(
     ),
     // Idempotency check: "did we already auto-heal this DLQ row?"
     index("auto_healing_runs_org_dlq_idx").on(table.orgId, table.deadLetterId),
+  ],
+);
+
+/**
+ * Org-scoped recovery alerting policy. Operator-declared rules that fan
+ * out a signal (DLQ insert, budget block, limiter degradation, SLO breach,
+ * stalled approval, failure-cluster threshold crossed) into one or more
+ * channels (slack / webhook / email / github) using existing credentials.
+ *
+ * `trigger` is validated against the closed enum in
+ * `@janusly/shared/src/alert-policy:ALERT_TRIGGERS` at the application
+ * layer (NOT a DB CHECK — same posture as `mcp_connections.transport`).
+ * `parameters` is per-trigger Zod-validated via the dispatch table in
+ * the same shared module before insert.
+ *
+ * Multi-tenant scope: every read carries `eq(alertPolicies.orgId, orgId)`
+ * EXCEPT for `limiter.degraded` policies which intentionally use the
+ * `"system"` sentinel orgId (mirrors the `rate_limit.degraded` audit
+ * convention — limiter degradation is operator-side infrastructure, not
+ * tenant data).
+ */
+export const alertPolicies = pgTable(
+  "alert_policies",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    trigger: text("trigger").notNull(),
+    parameters: jsonb("parameters").notNull().default({}),
+    channels: jsonb("channels").notNull(),
+    cooldownSeconds: integer("cooldown_seconds").notNull().default(900),
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("alert_policies_org_name_idx").on(table.orgId, table.name),
+    index("alert_policies_org_trigger_enabled_idx").on(
+      table.orgId,
+      table.trigger,
+      table.enabled,
+    ),
+  ],
+);
+
+/**
+ * One row per alert dispatch attempt (success OR per-channel failure). Backs
+ * both the cooldown lookup (latest row per `(orgId, policyId, dedupeKey)`
+ * vs `now() - cooldownSeconds`) AND the `GET /alerts/recent` operator feed.
+ *
+ * Suppression rows (cooldown skips) do NOT live here — they fire the
+ * `alert.policy.suppressed` audit only, keeping this table compact even
+ * under chatty policies.
+ *
+ * `dedupeKey` is computed per-trigger by `buildDedupeKey` in
+ * `packages/engine/src/alerts/dedupe-key.ts`. `outcome` is the closed enum
+ * `delivered | delivery_failed` validated at the Zod layer.
+ */
+export const alertDispatches = pgTable(
+  "alert_dispatches",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    policyId: text("policy_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    outcome: text("outcome").notNull(),
+    channelResults: jsonb("channel_results").notNull(),
+    triggerPayload: jsonb("trigger_payload").notNull(),
+  },
+  (table) => [
+    index("alert_dispatches_org_policy_dedupe_idx").on(
+      table.orgId,
+      table.policyId,
+      table.dedupeKey,
+      table.dispatchedAt.desc(),
+    ),
+    index("alert_dispatches_org_dispatched_idx").on(
+      table.orgId,
+      table.dispatchedAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * Org-scoped recovery incident — one row per open DLQ failure, the
+ * operational vertebra over the Recovery Center. Tracks `owner` +
+ * `severity` (p1/p2/p3/p4) + `slaTargetAt` + lifecycle `status` + append-
+ * only `comments` so operators can coordinate without leaving the panel.
+ *
+ * Lifecycle state machine enforced at the data layer via CAS-style
+ * `UPDATE … WHERE status IN (allowed_pre_states)` — concurrent
+ * operator-click vs auto-apply can't double-apply (mirror of
+ * `recordDecision` in `autoHealingRepo.ts`).
+ *
+ * Multi-tenant scope: every read carries `eq(recoveryItems.orgId, orgId)`.
+ * One item per `(orgId, deadLetterId)` — the unique index makes
+ * `createRecoveryItem` idempotent so cluster-apply fan-out can call it N
+ * times safely.
+ *
+ * Closure path: either `/dlq/replay` succeeds (auto-close with
+ * `resolutionReason: sandbox_replay_succeeded`) or the operator explicitly
+ * resolves with a closed-enum reason. Comments live in jsonb as
+ * `Array<{ id, authorUserId, body, createdAt }>` and are append-only via
+ * the repo helper (cap 200).
+ */
+export const recoveryItems = pgTable(
+  "recovery_items",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    workflowId: text("workflow_id"),
+    owner: text("owner"),
+    severity: text("severity").notNull().default("p3"),
+    status: text("status").notNull().default("open"),
+    slaTargetAt: timestamp("sla_target_at", { withTimezone: true }).notNull(),
+    resolutionReason: text("resolution_reason"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    comments: jsonb("comments").notNull().default([]),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_items_org_dlq_idx").on(table.orgId, table.deadLetterId),
+    index("recovery_items_org_status_sla_idx").on(
+      table.orgId,
+      table.status,
+      table.slaTargetAt,
+    ),
+    index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
+  ],
+);
+
+/**
+ * Cross-team incident handoff log — one row per
+ * `(orgId, recoveryItemId, destination)` triple. Powers the
+ * idempotency contract of the recovery handoff route: a second handoff
+ * to the same destination doesn't duplicate (slack: cooldown no-op;
+ * github: append a comment to the existing issue; linear / webhook:
+ * receiver dedupes by `idempotencyKey` header).
+ *
+ * `externalId` captures the persistent reference the upstream system
+ * returned on the first dispatch (github issueNumber, future Slack
+ * threadTs, custom webhook receipt id). `externalUrl` is the
+ * operator-clickable deep link rendered in the drawer after a successful
+ * handoff.
+ *
+ * Multi-tenant scope on every read via `eq(recoveryItemHandoffs.orgId, orgId)`.
+ * The unique index on `(orgId, recoveryItemId, destination)` makes
+ * `upsertHandoff` safe even when two operators click "Handoff" at the
+ * same moment — Postgres serialises the INSERT ON CONFLICT.
+ */
+export const recoveryItemHandoffs = pgTable(
+  "recovery_item_handoffs",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    recoveryItemId: text("recovery_item_id").notNull(),
+    destination: text("destination").notNull(),
+    credentialName: text("credential_name").notNull(),
+    externalId: text("external_id"),
+    externalUrl: text("external_url"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    lastOutcome: text("last_outcome").notNull(),
+    lastStatusCode: integer("last_status_code"),
+    lastError: text("last_error"),
+    lastLatencyMs: integer("last_latency_ms"),
+    dispatchCount: integer("dispatch_count").notNull().default(1),
+    firstDispatchedAt: timestamp("first_dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    lastDispatchedAt: timestamp("last_dispatched_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by"),
+  },
+  (table) => [
+    uniqueIndex("recovery_item_handoffs_org_item_dest_idx").on(
+      table.orgId,
+      table.recoveryItemId,
+      table.destination,
+    ),
+    index("recovery_item_handoffs_org_lastdispatched_idx").on(
+      table.orgId,
+      table.lastDispatchedAt.desc(),
+    ),
+  ],
+);
+
+/**
+ * Per-workflow metadata layer — owners, runbook Markdown, description,
+ * tags, Slack / Linear coordinates, default severity. One row per
+ * `(orgId, workflowId)` triple. The unique index makes the metadata
+ * upsert idempotent; the secondary index supports an "updated recently"
+ * admin feed without scanning the whole table.
+ *
+ * Powers the "About this workflow" panel in the Recovery dialog and the
+ * default-owner / default-severity integrations the recovery_item
+ * subsystem consults when a row is created from a DLQ entry or reassigned.
+ *
+ * Multi-tenant scope on every read via `eq(workflowMetadata.orgId, orgId)`.
+ * Operator-supplied content (runbookMarkdown, description) flows through
+ * the safe Markdown subset before display.
+ */
+export const workflowMetadata = pgTable(
+  "workflow_metadata",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    /** Closed array of user ids — operators who own this workflow. First entry = primary. */
+    owners: jsonb("owners").$type<string[]>().notNull().default([]),
+    /** Operator-supplied free-form Markdown (closed subset; 32 KiB cap enforced at write). */
+    runbookMarkdown: text("runbook_markdown"),
+    /** Short human-readable description. */
+    description: text("description"),
+    /** Operator-chosen labels (closed bounded array). */
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** Slack channel reference like `#alerts-prod` — bare string, no URL construction server-side. */
+    slackChannel: text("slack_channel"),
+    /** Linear project URL (https://linear.app/...) OR slug. */
+    linearProject: text("linear_project"),
+    /** Closed-enum severity default (`p1`/`p2`/`p3`/`p4`); nullable means engine fallback applies. */
+    severityDefault: text("severity_default"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workflow_metadata_org_workflow_idx").on(table.orgId, table.workflowId),
+    index("workflow_metadata_org_updated_idx").on(table.orgId, table.updatedAt.desc()),
   ],
 );

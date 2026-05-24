@@ -41,7 +41,12 @@ import { renderHtmlToPdf, renderMarkdownToPdf } from "./pdf-renderer";
 import { getEngineRateLimiter } from "./rate-limit";
 import { getEmailUsageRecorder } from "./email-usage";
 import { getPdfUsageRecorder } from "./pdf-usage";
-import { githubCreateIssueTool, slackPostTool, webhookSendTool } from "./integration-tools";
+import {
+  githubAddIssueCommentTool,
+  githubCreateIssueTool,
+  slackPostTool,
+  webhookSendTool,
+} from "./integration-tools";
 
 /**
  * Public-facing tool metadata returned by `listTools()` for the AI Studio.
@@ -943,6 +948,7 @@ const tools = {
   }),
   "slack.post": defineTool(slackPostTool),
   "github.create_issue": defineTool(githubCreateIssueTool),
+  "github.add_issue_comment": defineTool(githubAddIssueCommentTool),
   "webhook.send": defineTool(webhookSendTool),
   "text.uppercase": defineTool({
     name: "text.uppercase",
