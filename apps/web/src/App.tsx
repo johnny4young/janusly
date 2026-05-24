@@ -42,6 +42,7 @@ import { api } from './api'
 import { formatStatusLabel, getNodeHelper, getNodeLabel } from './constants'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import { isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { useT } from './i18n'
 
@@ -696,6 +697,59 @@ export default function App() {
   const queueCount = 0
   const isConnected = streamStatus === 'connected'
 
+  // Extracted once so the same element instance can render in either the
+  // canvas-tab right rail OR — for non-canvas tabs — directly in the
+  // full-width main slot via `<div data-layout="contextual">…</div>`. At
+  // any given render only one of the two branches mounts, so React's
+  // reconciliation will remount on layout switch (same behavior we'd get
+  // from duplicating the JSX literal in both places).
+  const rightPanelElement = (
+    <RightPanel
+      tab={activeTab}
+      events={events}
+      eventsHasMore={eventsHasMore}
+      onLoadOlderEvents={loadOlderEvents}
+      runNodes={runNodes}
+      selectedNode={selectedNode}
+      selectedEdge={selectedEdge}
+      validationIssues={validationIssues}
+      tools={tools}
+      templates={templates}
+      credentials={credentials}
+      runs={runs}
+      activeRunId={runId}
+      deadLetters={deadLetters}
+      usage={usage}
+      aiHealth={aiHealth}
+      currentWorkflowName={currentWorkflowName}
+      currentWorkflowInputs={currentWorkflowInputs}
+      currentWorkflowOutputs={currentWorkflowOutputs}
+      onOpenWorkflow={openWorkflow}
+      onUseTemplate={(workflow) => {
+        hydrateWorkflow(workflow)
+        setValidationIssues([])
+        setActiveTab('inspector')
+      }}
+      onInstallPlugin={installPlugin}
+      onCreateCredential={createCredential}
+      onOpenRun={openRun}
+      onRefreshPlatform={refreshPlatform}
+      onUpdateNodeConfig={updateSelectedNodeConfig}
+      onUpdateNodeType={updateSelectedNodeType}
+      onUpdateEdgeCondition={updateEdgeCondition}
+      onApproveNode={approveNode}
+      onSubmitHumanForm={submitHumanForm}
+      onReplayNode={replayNode}
+      onCancelActiveRun={cancelActiveRun}
+      onReplayDeadLetter={replayDeadLetter}
+      onResolveDeadLetter={resolveDeadLetter}
+      onGenerateWorkflow={generateWorkflow}
+      onExplainWorkflow={explainWorkflow}
+      onReviewWorkflow={reviewWorkflow}
+      onOpenTab={setActiveTab}
+    />
+  )
+
   return (
     <Layout
       header={
@@ -768,82 +822,52 @@ export default function App() {
           onStart={startWorkflow}
         />
       }
-      main={
-        activeTab === 'home' ? (
-          <RecoveryCenterPanel
-            runs={runs}
-            runNodes={runNodes}
-            deadLetters={deadLetters}
-            activeRunId={runId}
-            onOpenTab={setActiveTab}
-            onOpenRun={openRun}
-            onApproveNode={approveNode}
-            onSubmitHumanForm={submitHumanForm}
-          />
-        ) : (
-          <WorkflowCanvas
-            nodes={visibleNodes}
-            edges={visibleEdges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={connect}
-            onNodeClick={(_, node) => {
-              selectNode(node.id)
-              setActiveTab('inspector')
-            }}
-            onEdgeClick={(_, edge) => {
-              selectEdge(edge.id)
-              setActiveTab('inspector')
-            }}
-          />
-        )
-      }
-      panel={activeTab === 'home' ? null : (
-        <RightPanel
-          tab={activeTab}
-          events={events}
-          eventsHasMore={eventsHasMore}
-          onLoadOlderEvents={loadOlderEvents}
-          runNodes={runNodes}
-          selectedNode={selectedNode}
-          selectedEdge={selectedEdge}
-          validationIssues={validationIssues}
-          tools={tools}
-          templates={templates}
-          credentials={credentials}
-          runs={runs}
-          activeRunId={runId}
-          deadLetters={deadLetters}
-          usage={usage}
-          aiHealth={aiHealth}
-          currentWorkflowName={currentWorkflowName}
-          currentWorkflowInputs={currentWorkflowInputs}
-          currentWorkflowOutputs={currentWorkflowOutputs}
-          onOpenWorkflow={openWorkflow}
-          onUseTemplate={(workflow) => {
-            hydrateWorkflow(workflow)
-            setValidationIssues([])
-            setActiveTab('inspector')
-          }}
-          onInstallPlugin={installPlugin}
-          onCreateCredential={createCredential}
-          onOpenRun={openRun}
-          onRefreshPlatform={refreshPlatform}
-          onUpdateNodeConfig={updateSelectedNodeConfig}
-          onUpdateNodeType={updateSelectedNodeType}
-          onUpdateEdgeCondition={updateEdgeCondition}
-          onApproveNode={approveNode}
-          onSubmitHumanForm={submitHumanForm}
-          onReplayNode={replayNode}
-          onCancelActiveRun={cancelActiveRun}
-          onReplayDeadLetter={replayDeadLetter}
-          onResolveDeadLetter={resolveDeadLetter}
-          onGenerateWorkflow={generateWorkflow}
-          onExplainWorkflow={explainWorkflow}
-          onReviewWorkflow={reviewWorkflow}
-          onOpenTab={setActiveTab}
-        />
-      )}
+      main={(() => {
+        // Three-branch layout dispatch:
+        //  - `home` owns the full main slot via `RecoveryCenterPanel`
+        //    (no canvas, no right panel) — its own dedicated surface.
+        //  - Canvas tabs (AI Studio + Inspector) keep the React Flow
+        //    canvas in main and the right panel as the contextual rail.
+        //  - Every other tab is admin / configuration / read-only and
+        //    benefits from the full main-slot width — the same
+        //    `RightPanel` content renders inside a `data-layout="contextual"`
+        //    wrapper that the CSS centers + pads to `--we-content-max-width`.
+        if (activeTab === 'home') {
+          return (
+            <RecoveryCenterPanel
+              runs={runs}
+              runNodes={runNodes}
+              deadLetters={deadLetters}
+              activeRunId={runId}
+              onOpenTab={setActiveTab}
+              onOpenRun={openRun}
+              onApproveNode={approveNode}
+              onSubmitHumanForm={submitHumanForm}
+            />
+          )
+        }
+        if (isCanvasTab(activeTab)) {
+          return (
+            <WorkflowCanvas
+              nodes={visibleNodes}
+              edges={visibleEdges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={connect}
+              onNodeClick={(_, node) => {
+                selectNode(node.id)
+                setActiveTab('inspector')
+              }}
+              onEdgeClick={(_, edge) => {
+                selectEdge(edge.id)
+                setActiveTab('inspector')
+              }}
+            />
+          )
+        }
+        return <div data-layout="contextual">{rightPanelElement}</div>
+      })()}
+      panel={isCanvasTab(activeTab) ? rightPanelElement : null}
       overlay={
         <>
           <BudgetBlockedBanner onOpenTab={setActiveTab} />

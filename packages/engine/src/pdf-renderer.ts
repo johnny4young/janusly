@@ -40,6 +40,22 @@
 
 import PDFDocument from "pdfkit";
 import { Parser } from "htmlparser2";
+import {
+  MAX_BLOCKS,
+  MAX_TOKENS_PER_BLOCK,
+  parseMarkdownBlocks,
+  substituteVariables,
+  type Block,
+  type InlineStyle,
+  type InlineToken,
+  type TableCell,
+} from "@janusly/shared/src/markdown-subset";
+
+// Re-export the hoisted symbols so existing consumers (and the colocated
+// test file) keep their import paths. The runtime + behavior come from
+// `@janusly/shared/src/markdown-subset`.
+export { parseMarkdownBlocks, substituteVariables };
+export type { Block, InlineStyle, InlineToken, TableCell };
 
 /* --------------------------------- public --------------------------------- */
 
@@ -74,22 +90,6 @@ export type RenderHtmlToPdfResult = {
 const MAX_TEMPLATE_BYTES = 200_000;
 const MAX_HTML_NEST_DEPTH = 32;
 const MAX_TABLE_COLSPAN = 16;
-const MAX_BLOCKS = 5_000;
-const MAX_TOKENS_PER_BLOCK = 2_000;
-
-/**
- * Substitute `{{name}}` placeholders against the variables map. Unknown
- * placeholders are left untouched so operators spot the typo in the
- * rendered PDF rather than silently consuming it.
- */
-export function substituteVariables(template: string, variables: Record<string, string | number | boolean> = {}): string {
-  return template.replace(/{{\s*([a-zA-Z0-9_.-]+)\s*}}/g, (match, name) => {
-    if (Object.prototype.hasOwnProperty.call(variables, name)) {
-      return String(variables[name]);
-    }
-    return match;
-  });
-}
 
 export async function renderMarkdownToPdf(input: RenderMarkdownToPdfInput): Promise<RenderMarkdownToPdfResult> {
   enforceTemplateSize(input.template);
@@ -133,152 +133,6 @@ async function renderBlocksToPdf(blocks: Block[], title: string | undefined): Pr
 
   const buffer = Buffer.concat(chunks);
   return { buffer, contentLength: buffer.length };
-}
-
-/* ---------------------------- shared block model -------------------------- */
-
-export type InlineStyle = "plain" | "bold" | "italic" | "code";
-
-export type InlineToken =
-  | { text: string; style: InlineStyle }
-  | { text: string; style: "link"; href: string };
-
-export type TableCell = {
-  tokens: InlineToken[];
-  isHeader: boolean;
-  colspan: number;
-};
-
-export type Block =
-  | { kind: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; tokens: InlineToken[] }
-  | { kind: "paragraph"; tokens: InlineToken[] }
-  | { kind: "list"; ordered: boolean; items: InlineToken[][] }
-  | { kind: "rule" }
-  | { kind: "code"; lines: string[] }
-  | { kind: "table"; rows: TableCell[][]; headerRowCount: number };
-
-/* ------------------------- minimal Markdown parser ------------------------ */
-
-function parseMarkdownBlocks(source: string): Block[] {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
-  const blocks: Block[] = [];
-  let i = 0;
-
-  function pushBlock(block: Block): void {
-    if (blocks.length >= MAX_BLOCKS) {
-      throw new Error(`pdf template exceeds ${MAX_BLOCKS} block elements`);
-    }
-    blocks.push(block);
-  }
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (/^\s*$/.test(line)) {
-      i += 1;
-      continue;
-    }
-
-    if (/^---+\s*$/.test(line)) {
-      pushBlock({ kind: "rule" });
-      i += 1;
-      continue;
-    }
-
-    if (line.startsWith("```")) {
-      const codeLines: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i += 1;
-      }
-      if (i < lines.length) i += 1;
-      pushBlock({ kind: "code", lines: codeLines });
-      continue;
-    }
-
-    const headingMatch = line.match(/^(#{1,3})\s+(.+?)\s*$/);
-    if (headingMatch) {
-      const level = headingMatch[1].length as 1 | 2 | 3;
-      pushBlock({ kind: "heading", level, tokens: tokenizeMarkdownInline(headingMatch[2]) });
-      i += 1;
-      continue;
-    }
-
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: InlineToken[][] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        items.push(tokenizeMarkdownInline(lines[i].replace(/^\s*[-*]\s+/, "")));
-        i += 1;
-      }
-      pushBlock({ kind: "list", ordered: false, items });
-      continue;
-    }
-
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: InlineToken[][] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(tokenizeMarkdownInline(lines[i].replace(/^\s*\d+\.\s+/, "")));
-        i += 1;
-      }
-      pushBlock({ kind: "list", ordered: true, items });
-      continue;
-    }
-
-    const paragraphLines: string[] = [line];
-    i += 1;
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !isBlockBoundary(lines[i])) {
-      paragraphLines.push(lines[i]);
-      i += 1;
-    }
-    pushBlock({ kind: "paragraph", tokens: tokenizeMarkdownInline(paragraphLines.join(" ")) });
-  }
-
-  return blocks;
-}
-
-function isBlockBoundary(line: string): boolean {
-  return (
-    /^#{1,3}\s+/.test(line) ||
-    /^\s*[-*]\s+/.test(line) ||
-    /^\s*\d+\.\s+/.test(line) ||
-    /^---+\s*$/.test(line) ||
-    line.startsWith("```")
-  );
-}
-
-/**
- * Tokenize a Markdown text run into `plain` / `bold` (`**…**`) / `italic`
- * (`*…*`) inline tokens. Used at parse time so the renderer doesn't have
- * to know about Markdown syntax.
- */
-function tokenizeMarkdownInline(text: string): InlineToken[] {
-  const tokens: InlineToken[] = [];
-  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*)/g;
-  let lastIndex = 0;
-  for (const match of text.matchAll(pattern)) {
-    const idx = match.index ?? 0;
-    if (idx > lastIndex) {
-      tokens.push({ text: text.slice(lastIndex, idx), style: "plain" });
-    }
-    const raw = match[0];
-    if (raw.startsWith("**")) {
-      tokens.push({ text: raw.slice(2, -2), style: "bold" });
-    } else {
-      tokens.push({ text: raw.slice(1, -1), style: "italic" });
-    }
-    lastIndex = idx + raw.length;
-  }
-
-  if (lastIndex < text.length) {
-    tokens.push({ text: text.slice(lastIndex), style: "plain" });
-  }
-
-  if (tokens.length === 0) {
-    tokens.push({ text, style: "plain" });
-  }
-
-  return tokens;
 }
 
 /* ----------------------------- HTML walker ------------------------------- */

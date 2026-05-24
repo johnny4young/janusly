@@ -133,6 +133,42 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 setBudgetChecker(productionBudgetChecker);
 console.log("[budget] checker registered (worker)");
 
+// Register the recovery-alerting dispatcher so DLQ inserts inside this
+// worker process can fire alerts immediately (event-driven path). The
+// scanner Worker for state-driven triggers lives in the API process; this
+// registration only handles the in-process event hand-off.
+const { setAlertDispatcher } = await import("@janusly/data/src/alert-dispatch");
+const { dispatchAlert } = await import("./alerts/dispatcher");
+setAlertDispatcher(dispatchAlert);
+console.log("[alerts] dispatcher registered (worker)");
+
+// Recovery-ownership creator. Worker is the primary DLQ writer, so the
+// creator MUST be registered here to catch every worker-side insert.
+const { setRecoveryItemCreator } = await import("@janusly/data/src/recovery-item-creator");
+const { createRecoveryItemForDeadLetter } = await import("./recovery/recovery-item-hook");
+setRecoveryItemCreator(async (event) => {
+  await createRecoveryItemForDeadLetter({
+    orgId: event.orgId,
+    deadLetterId: event.deadLetterId,
+    createdBy: event.createdBy ?? "system",
+    workflowId: event.workflowId,
+    errorSignature: event.errorSignature,
+  });
+});
+console.log("[recovery-item] creator registered (worker)");
+
+// Per-workflow severity-default resolver — worker shares the same seam
+// so DLQ inserts on either process produce the right severity. The
+// resolver reads `workflow_metadata` via the data repo and degrades to
+// null on read failure inside the DI seam.
+const { setRecoveryItemSeverityDefault } = await import("@janusly/data/src/recovery-item-severity-default");
+const { getWorkflowMetadata } = await import("@janusly/data/src/workflowMetadataRepo");
+setRecoveryItemSeverityDefault(async (orgId, workflowId) => {
+  const metadata = await getWorkflowMetadata(orgId, workflowId);
+  return metadata?.severityDefault ?? null;
+});
+console.log("[recovery-item] severity-default resolver registered (worker)");
+
 const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),
   new BullMQQueueAdapter(),

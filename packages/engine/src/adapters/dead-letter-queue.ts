@@ -13,6 +13,9 @@
 
 import { db } from "@janusly/db";
 import { deadLetters } from "@janusly/db";
+import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
+import { recordRecoveryItemCreationEvent } from "@janusly/data/src/recovery-item-creator";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "../safe-persist";
 import type { DeadLetterInput, QueueAdapter } from "../core/types";
 
@@ -33,8 +36,10 @@ const DLQ_PAYLOAD_NO_TRUNCATE = Number.POSITIVE_INFINITY;
 export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
   /** Insert one row capturing the full failed job payload. */
   async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
+    const deadLetterId = crypto.randomUUID();
+    const workflowId = input.workflowId ?? input.workflow.id ?? null;
     await db.insert(deadLetters).values({
-      id: crypto.randomUUID(),
+      id: deadLetterId,
       orgId: input.orgId,
       runId: input.runId,
       nodeId: input.node.id,
@@ -51,6 +56,36 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
       runId: input.runId,
       nodeId: input.node.id,
       attempt: input.attempt,
+    });
+
+    // Fire the recovery-alerting event hook. The DI seam in `@janusly/data`
+    // is a no-op when no dispatcher is registered; production wiring in
+    // `apps/api/src/alerts-bootstrap.ts` and `packages/engine/src/worker.ts`
+    // registers `dispatchAlert` so subscribed policies fan out via Slack /
+    // webhook / email / GitHub. Never blocks the DLQ insert.
+    const errorSignature = normalizeErrorSignature(input.error, { nodeType: input.node.type }).signature;
+
+    void recordAlertEvent({
+      orgId: input.orgId,
+      trigger: "dlq.entry_created",
+      payload: {
+        runId: input.runId,
+        nodeId: input.node.id,
+        workflowId,
+        errorSignature,
+      },
+    });
+
+    // Recovery-ownership: fire the seam that lets the api-side helper
+    // create a `recovery_items` row idempotently. The api-side helper
+    // honours `org_configs.recovery.autoCreateItems` and also fires the
+    // `recovery_item.created` alert event when the row is genuinely new.
+    void recordRecoveryItemCreationEvent({
+      orgId: input.orgId,
+      deadLetterId,
+      workflowId,
+      errorSignature,
+      createdBy: "system",
     });
   }
 }

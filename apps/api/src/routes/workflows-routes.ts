@@ -22,15 +22,18 @@ import {
   deadLetters,
   runs,
   workflows,
+  workflowMetadata,
   workflowVersions,
 } from "@janusly/db";
 import { collectHealthSignals, DEFAULT_HEALTH_WINDOW_DAYS } from "@janusly/data/src/workflowHealthRepo";
+import { getWorkflowSlo, setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
 import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
 import { computeWorkflowHealth, MIN_RUNS_FOR_DELTA } from "@janusly/engine/src/workflow-health";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { WorkflowSchema } from "@janusly/shared";
+import { WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
+import { z } from "zod";
 
 import { audit } from "../audit";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
@@ -38,7 +41,12 @@ import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
-import { checkRollbackAvailability, mergeReadiness } from "../readiness-helpers";
+import {
+  checkRollbackAvailability,
+  getCredentialReadinessIssues,
+  mergeReadiness,
+  productionSecretRefResolver,
+} from "../readiness-helpers";
 import type { Route } from "../routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
@@ -152,6 +160,52 @@ export const workflowsRoutes: Route[] = [
         sourceVersion: result.sourceVersion,
       });
     } },
+  // POST /workflows/:id/slo — declare or update the workflow's SLO. Admin-only.
+  // Writes the SLO blob onto the latest workflow_versions row in place via
+  // `setWorkflowSlo`; the save chokepoint copies it forward to every
+  // subsequent version. Body: `{ slo: WorkflowSlo | null }` where `null`
+  // clears the declaration.
+  { method: "POST",
+    match: (url) => {
+      if (!url.startsWith("/workflows/")) return false;
+      const rest = url.slice("/workflows/".length).split("?")[0];
+      const segments = rest.split("/");
+      return segments.length === 2 && segments[1] === "slo" && segments[0].length > 0;
+    },
+    role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = url.pathname.slice("/workflows/".length).split("/")[0];
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+
+      // Multi-tenant gate first — same enumeration-safe shape the sibling
+      // DELETE /workflows/:id and GET /workflows/health routes use.
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = z.object({ slo: WorkflowSloSchema.nullable() }).safeParse(body);
+      if (!parsed.success) {
+        return sendJson(res, {
+          error: "Invalid SLO body",
+          issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+        }, 400);
+      }
+
+      const result = await setWorkflowSlo(auth.orgId, workflowId, parsed.data.slo);
+      if (!result) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+
+      await audit(auth.orgId, auth.userId, "workflow.slo.set", "workflow", workflowId, {
+        slo: parsed.data.slo,
+        previousSlo: result.previousSlo,
+        versionId: result.versionId,
+      });
+      return sendJson(res, { workflowId, slo: parsed.data.slo, versionId: result.versionId });
+    } },
   // DELETE /workflows/:id — hard-deletes the workflow + every persisted
   // version + every cron-driven schedule entry (and its BullMQ
   // scheduler). Runs and audit rows stay; their `workflow_version_id`
@@ -186,6 +240,7 @@ export const workflowsRoutes: Route[] = [
         console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
       }
       await db.delete(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)));
+      await db.delete(workflowMetadata).where(and(eq(workflowMetadata.workflowId, workflowId), eq(workflowMetadata.orgId, auth.orgId)));
       await db.delete(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
 
       await audit(auth.orgId, auth.userId, "workflow.deleted", "workflow", workflowId, {});
@@ -219,8 +274,11 @@ export const workflowsRoutes: Route[] = [
       }
       const parsed = WorkflowSchema.parse(candidate);
       const baseResult = checkWorkflowReadiness(parsed);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsed.id);
-      const merged = mergeReadiness(baseResult, rollbackIssues);
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, parsed.id),
+        getCredentialReadinessIssues(auth.orgId, parsed, productionSecretRefResolver),
+      ]);
+      const merged = mergeReadiness(baseResult, [...rollbackIssues, ...credentialIssues]);
       return sendJson(res, merged);
     } },
 
@@ -288,8 +346,11 @@ export const workflowsRoutes: Route[] = [
       }
 
       const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
-      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, workflowId),
+        getCredentialReadinessIssues(auth.orgId, parsedWorkflow.data, productionSecretRefResolver),
+      ]);
+      const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
 
       // Before/after signal collection in parallel — each side reuses the
       // same query plan with a single new `lt`/`gte` predicate on the
@@ -299,8 +360,13 @@ export const workflowsRoutes: Route[] = [
         collectHealthSignals(auth.orgId, workflowId, windowDays, { side: "after", cutoffVersion: afterVersion }),
       ]);
 
-      const before = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: beforeSignals });
-      const after = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: afterSignals });
+      // Same SLO declaration applies to both sides — the operator's
+      // current contract is what they expect the workflow to satisfy
+      // regardless of which historical run window we're scoring.
+      const sloEntry = await getWorkflowSlo(auth.orgId, workflowId);
+      const declaredSlo = sloEntry?.slo ?? null;
+      const before = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: beforeSignals, slo: declaredSlo });
+      const after = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals: afterSignals, slo: declaredSlo });
 
       // Run-status counter — distinct from `after.signals.totalRuns`
       // because the health rollup counts only terminal runs. The counter
@@ -461,10 +527,21 @@ export const workflowsRoutes: Route[] = [
       // score higher on safety in the health badge than the readiness
       // badge admits.
       const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
-      const rollbackIssues = await checkRollbackAvailability(auth.orgId, workflowId);
-      const readiness = mergeReadiness(baseReadiness, rollbackIssues);
-      const signals = await collectHealthSignals(auth.orgId, workflowId);
-      const health = computeWorkflowHealth({ workflow: parsedWorkflow.data, readiness, signals });
+      const [rollbackIssues, credentialIssues] = await Promise.all([
+        checkRollbackAvailability(auth.orgId, workflowId),
+        getCredentialReadinessIssues(auth.orgId, parsedWorkflow.data, productionSecretRefResolver),
+      ]);
+      const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
+      const [signals, sloEntry] = await Promise.all([
+        collectHealthSignals(auth.orgId, workflowId),
+        getWorkflowSlo(auth.orgId, workflowId),
+      ]);
+      const health = computeWorkflowHealth({
+        workflow: parsedWorkflow.data,
+        readiness,
+        signals,
+        slo: sloEntry?.slo ?? null,
+      });
       return sendJson(res, health);
     } },
 ];

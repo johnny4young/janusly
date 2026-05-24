@@ -334,6 +334,40 @@ describe("normalizeOrgConfigValue — autoHealing.loopWindowDays bounds", () => 
   });
 });
 
+describe("ORG_CONFIG_DEFINITIONS recovery.* family", () => {
+  it("catalogues every recovery ownership key", () => {
+    const recoveryKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("recovery.")).map(
+      (d) => d.key,
+    );
+    expect(recoveryKeys).toEqual(["recovery.autoCreateItems"]);
+  });
+
+  it("registers every recovery.* entry under the `recovery` category", () => {
+    for (const def of ORG_CONFIG_DEFINITIONS) {
+      if (def.key.startsWith("recovery.")) {
+        expect(def.category).toBe("recovery");
+      }
+    }
+  });
+
+  it("defaults automatic item creation on with no env fallback", () => {
+    const def = findDef("recovery.autoCreateItems");
+    expect(def.defaultValue).toBe(true);
+    expect(def.envKeys).toBeUndefined();
+  });
+});
+
+describe("normalizeOrgConfigValue — recovery.autoCreateItems", () => {
+  const def = findDef("recovery.autoCreateItems");
+
+  it("accepts true / false and rejects non-boolean values", () => {
+    expect(normalizeOrgConfigValue(def, true)).toBe(true);
+    expect(normalizeOrgConfigValue(def, false)).toBe(false);
+    expect(() => normalizeOrgConfigValue(def, "true")).toThrow(/must be a boolean/);
+    expect(() => normalizeOrgConfigValue(def, 1)).toThrow(/must be a boolean/);
+  });
+});
+
 describe("ORG_CONFIG_DEFINITIONS value.* family", () => {
   it("catalogues every value-dashboard key", () => {
     const valueKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("value.")).map(

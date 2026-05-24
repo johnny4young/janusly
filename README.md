@@ -326,3 +326,45 @@ pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
 pnpm --filter @janusly/web test:watch   # Vitest watch
 ```
+
+---
+
+## Glossary
+
+Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md`](AGENTS.md) / [`docs/`](docs/)).
+
+| Acronym | Stands for | What it means in Janusly |
+| --- | --- | --- |
+| **AI** | Artificial Intelligence | Anything routed through an LLM provider (Anthropic by default). Every AI surface has a deterministic non-AI fallback. |
+| **API** | Application Programming Interface | The HTTP control plane in `apps/api` (plain Node `http`, no framework). |
+| **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in auto-healing `recordDecision` so concurrent operator-click vs auto-apply can't double-apply (loser returns 409). |
+| **CRUD** | Create / Read / Update / Delete | Basic record-level operations against a resource (e.g. workflows, members, credentials). |
+| **CSS** | Cascading Style Sheets | The design system is hand-written CSS in `apps/web/src/index.css` (Tailwind 4 CSS-first via `@theme {}`). |
+| **DAG** | Directed Acyclic Graph | The workflow shape: nodes + edges, no cycles. The engine executes nodes in topological order. |
+| **DI** | Dependency Injection | The "seam" pattern used to keep `@janusly/engine` DB-agnostic — `setBudgetChecker`, `setUsageRecorder`, `setEngineRateLimiter`, `setIntegrationUsageRecorder`, `setEmailUsageRecorder`, `setPdfUsageRecorder`, `setMcpUsageRecorder`. Wired to the real implementations from `@janusly/data` at API + worker boot. |
+| **DLQ** | Dead Letter Queue | Where a node lands after exhausting its `retryPolicy.maxAttempts`. Surfaced in the Recovery Center for triage / replay. |
+| **DSL** | Domain-Specific Language | The Zod 4 workflow schema in `@janusly/shared` — the typed contract that defines what a Janusly workflow can be. |
+| **HMAC** | Hash-based Message Authentication Code | Symmetric-key signing primitive. Janusly uses HMAC-SHA256 for `human_form` resume tokens, the Janusly SSO session token (`x-janusly-session`), `webhook.send` outbound bodies (`X-Janusly-Signature: t=…,v1=…`), and the WorkOS / SCIM inbound webhook signature check. |
+| **HTTP** | HyperText Transfer Protocol | The wire protocol for the control-plane API and for outbound `http` nodes (which go through the SSRF-guarded `fetchHttpTarget` chokepoint). |
+| **JIT** | Just-In-Time | The membership-provisioning seam in `apps/api/src/auth.ts`: a brand-new SSO user with no `org_members` row but a matching `verified_domains` or pending `invitations` row gets a row written *during* the auth resolution path (or right before, in the SSO callback) so the resolver finds them at step 1 on the next request. |
+| **JSON** | JavaScript Object Notation | The serialization format for workflow definitions, node configs, run state, and API request/response bodies. |
+| **JWT** | JSON Web Token | The token shape Supabase issues for app login; the API verifies it on every request when Supabase mode is on. |
+| **LLM** | Large Language Model | The model behind every AI surface. Provider-neutral via `LlmClient`; production posture is Anthropic-only (`claude-haiku-4-5-20251001`). |
+| **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the supported runtime. |
+| **MCP** | Model Context Protocol | The Anthropic-defined protocol for exposing tools to LLM clients. Janusly ships an MCP server (`packages/mcp-server`) and consumes external MCP servers as `mcp_tool` workflow nodes. |
+| **MFA** | Multi-Factor Authentication | A marker flag on `org_configs.auth.mfaRequired`. **Informational only** — Janusly warn-logs server-side when set, but actual enforcement happens at the IdP (Okta / Azure AD carry the claim, Supabase does not). |
+| **MTTR** | Mean Time To Recovery | The north-star metric: how long from a failed automation to that automation working again. Surfaced on `GET /recovery/metrics` and as an SLO threshold field (`mttrSeconds`). |
+| **MVP** | Minimum Viable Product | The current shipping scope — Anthropic-only LLM support, single recovery loop, no cross-provider verification yet. |
+| **OTEL** | OpenTelemetry | The tracing / metrics stack. Tracer + Meter carry `service.name="janusly"`; Prometheus exporter is wired in. |
+| **p95** | 95th percentile | Latency notation: 95% of runs / nodes finish at or below this duration. Surfaced on the workflow health rollup, the recovery metrics dashboard, and as an SLO threshold (`p95DurationMs`). |
+| **PNPM** | Performant Node Package Manager | The package manager used at the monorepo root (pinned to `pnpm@10` via `packageManager`). |
+| **RL** | Reinforcement Learning | The decision-engine layer that updates `routing_stats` after every node outcome and shifts future router scoring. |
+| **RPA** | Robotic Process Automation | Click-record desktop automation (UiPath / Automation Anywhere shape). Janusly is *not* this — it operates AI workflows, not desktop scripts. |
+| **SCIM** | System for Cross-domain Identity Management | The IdP-side standard for pushing user / group lifecycle into a SaaS. Janusly consumes SCIM through WorkOS Directory Sync via `POST /webhooks/workos/directory`, normalizing events into `org_members` upserts / deactivations. |
+| **SDK** | Software Development Kit | The first-party clients: `packages/sdk-node` (`@janusly/sdk`) and `packages/sdk-python` (`janusly` on PyPI). |
+| **SLO** | Service Level Objective | The per-workflow reliability contract (success rate %, p95 duration, MTTR seconds, etc.) persisted on `workflow_versions.slo_json`. Breaches surface on `GET /workflows/health` and in the Inspector's SLO panel; they do *not* change the numeric health score, they are an orthogonal alert signal. |
+| **SSO** | Single Sign-On | The "log in once with my company IdP" flow. Janusly's SSO is WorkOS-backed: `GET /auth/sso/start` → IdP → `GET /auth/sso/callback` issues the `x-janusly-session` HMAC token. Per-org `enforced_sso: true` rejects non-SSO modes outside dev. |
+| **SSRF** | Server-Side Request Forgery | The attack class where a workflow author tricks the engine into hitting an internal endpoint (e.g. `169.254.169.254` AWS metadata). Defence is the `fetchHttpTarget` / `validateHttpTarget` chokepoint plus DNS-pinning the validated IP onto the actual TCP connect via an `undici.Agent`. |
+| **TTL** | Time To Live | How long a token / cache entry stays valid. Applies to the SSO session token (default 8h, range `300..86400` via `org_configs.auth.sessionTtlSeconds`), the SSO state token (10 min), the `human_form` resume token (7 days), the Anthropic prompt cache (5 min), and the consent-revocation memory purge delay (default 7 days). |
+| **UI** | User Interface | The React 19 + Vite 8 + React Flow Studio app in `apps/web`. |
+| **URL** | Uniform Resource Locator | Endpoint addresses; outbound URLs in workflows are SSRF-validated before connect via a DNS-pinned `undici.Agent`. |

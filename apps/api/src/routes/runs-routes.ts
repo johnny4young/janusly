@@ -34,7 +34,12 @@ import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } f
 import { asRecord, corsHeaders, readJson, sendEvent, sendJson } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
-import { checkRollbackAvailability, mergeReadiness } from "../readiness-helpers";
+import {
+  checkRollbackAvailability,
+  getCredentialReadinessIssues,
+  mergeReadiness,
+  productionSecretRefResolver,
+} from "../readiness-helpers";
 import type { Route } from "../routes";
 
 export const runsRoutes: Route[] = [
@@ -194,8 +199,11 @@ export const runsRoutes: Route[] = [
       // workflow_versions rows to count).
       if (process.env.JANUSLY_PRODUCTION_MODE === "true") {
         const baseReadiness = checkWorkflowReadiness(parsedWorkflow);
-        const rollbackIssues = await checkRollbackAvailability(auth.orgId, parsedWorkflow.id);
-        const readiness = mergeReadiness(baseReadiness, rollbackIssues);
+        const [rollbackIssues, credentialIssues] = await Promise.all([
+          checkRollbackAvailability(auth.orgId, parsedWorkflow.id),
+          getCredentialReadinessIssues(auth.orgId, parsedWorkflow, productionSecretRefResolver),
+        ]);
+        const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
         if (readiness.status === "fail") {
           return sendJson(res, { error: "Workflow not production-ready", readiness }, 422);
         }
