@@ -37,6 +37,7 @@ export type ApiErrorCode =
   | "invitation_pending_exists"
   | "member_exists"
   | "member_not_found"
+  | "self_membership_modification"
   // roles
   | "role_in_use"
   | "role_already_exists"
