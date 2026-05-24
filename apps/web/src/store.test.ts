@@ -194,4 +194,16 @@ describe('useWorkflowStore', () => {
     expect(state.eventsHasMore).toBe(false)
     expect(state.streamStatus).toBe('idle')
   })
+
+  // Non-canvas tab transitions. The layout dispatcher in App.tsx mounts
+  // the workspace contents in the main slot for these (instead of the
+  // React Flow canvas), so we pin a handful of representative tabs to
+  // guard against accidental enum drift.
+  it.each(['operations', 'members', 'credentials'] as const)(
+    'setActiveTab accepts the non-canvas tab "%s"',
+    (tab) => {
+      useWorkflowStore.getState().setActiveTab(tab)
+      expect(useWorkflowStore.getState().activeTab).toBe(tab)
+    },
+  )
 })

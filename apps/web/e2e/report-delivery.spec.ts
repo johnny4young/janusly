@@ -24,6 +24,7 @@ test('run history opens report delivery dialog and surfaces a credential error',
 
   await page.getByRole('button', { name: 'Run', exact: true }).click()
   await expect(page.getByText(/Run started:/)).toBeVisible()
+  await page.getByRole('button', { name: /^AI Studio\b/ }).click()
   await expect(page.locator('.workflow-node').filter({ hasText: 'Do nothing' }).filter({ hasText: 'Done' })).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: 'Runs', exact: true }).click()
