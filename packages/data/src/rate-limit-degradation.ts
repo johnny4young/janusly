@@ -290,7 +290,7 @@ async function writeDegradedAudit(input: {
           eq(auditLogs.orgId, SYSTEM_ORG_ID),
           eq(auditLogs.action, "rate_limit.degraded"),
           gte(auditLogs.createdAt, since),
-          sql`${auditLogs.metadata} ->> 'bucket' = ${input.bucket}`,
+          sql`${auditLogs.metadata} @> ${JSON.stringify({ bucket: input.bucket })}::jsonb`,
         ),
       )
       .limit(1);
