@@ -45,6 +45,7 @@
   "apiErrors.invitation_pending_exists": "An invitation is already pending for {{email}}",
   "apiErrors.member_exists": "A member with email {{email}} already exists in this org",
   "apiErrors.member_not_found": "Member not found",
+  "apiErrors.self_membership_modification": "You cannot modify your own membership",
   "apiErrors.role_in_use": "Cannot delete this role — {{membersAffected}} member(s) still use it",
   "apiErrors.role_already_exists": "A role named \"{{name}}\" already exists",
   "apiErrors.role_not_found": "Role not found",

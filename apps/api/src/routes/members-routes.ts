@@ -30,7 +30,7 @@ import { isRole } from "../permissions";
 import type { Route } from "../routes";
 
 export const membersRoutes: Route[] = [
-  { method: "GET", match: "/members",
+  { method: "GET", match: "/members", role: "viewer", permission: "members.read",
     handler: async ({ res, auth }) => {
       const rows = await db.select().from(orgMembers).where(eq(orgMembers.orgId, auth.orgId));
       return sendJson(res, rows);
@@ -102,6 +102,22 @@ export const membersRoutes: Route[] = [
       const userId = typeof body.userId === "string" ? body.userId : "";
       const roleName = typeof body.role === "string" ? body.role.trim() : "";
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
+      // Block the actor from mutating their own membership row. Without
+      // this guard an admin can demote themselves to viewer and lock the
+      // org out unrecoverably (no remaining admin to escalate the role
+      // back). Audit the attempt with the raw operator intent so security
+      // review sees both successful and blocked self-modifications.
+      if (userId === auth.userId) {
+        await audit(auth.orgId, auth.userId, "member.self_modification_blocked", "member", userId, {
+          action: "role_set",
+          attemptedRole: typeof body.role === "string" ? body.role : null,
+        });
+        return sendJson(
+          res,
+          errorEnvelope("self_membership_modification", "Cannot modify your own membership"),
+          400,
+        );
+      }
       // Accept built-in roles OR custom roles defined for this org.
       const accepted = isRole(roleName)
         ? roleName
@@ -120,6 +136,20 @@ export const membersRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const userId = url.searchParams.get("userId");
       if (!userId) return sendJson(res, { error: "userId is required" }, 400);
+      // Block self-removal — see the matching guard on POST /members/role
+      // for the lock-out rationale. The audit row carries `action: "remove"`
+      // so the closed-enum `metadata.action` field distinguishes the two
+      // surfaces in security review.
+      if (userId === auth.userId) {
+        await audit(auth.orgId, auth.userId, "member.self_modification_blocked", "member", userId, {
+          action: "remove",
+        });
+        return sendJson(
+          res,
+          errorEnvelope("self_membership_modification", "Cannot modify your own membership"),
+          400,
+        );
+      }
       await db.delete(orgMembers).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
       await audit(auth.orgId, auth.userId, "member.removed", "member", userId);
       return sendJson(res, { ok: true });
