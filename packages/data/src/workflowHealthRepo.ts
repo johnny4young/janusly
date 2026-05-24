@@ -36,7 +36,7 @@
 
 import { db } from "@janusly/db";
 import { runs, runEvents, deadLetters, usageEvents, workflowVersions } from "@janusly/db";
-import { and, asc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 
 /**
  * Optional version-cutoff filter for `collectHealthSignals`. Used by the
@@ -128,7 +128,7 @@ export async function collectHealthSignals(
     countRetryEvents(runIds),
     countOpenDeadLetters(orgId, runIds),
     sumUsage(orgId, runIds),
-    computeP95Latency(runIds),
+    computeP95Latency(runIds, windowDays),
   ]);
 
   // 3. Distinct version count for the workflow — independent of the run
@@ -208,39 +208,63 @@ async function sumUsage(orgId: string, runIds: string[]): Promise<{ totalCostUsd
   return { totalCostUsd, totalTokens };
 }
 
-async function computeP95Latency(runIds: string[]): Promise<number | null> {
+/**
+ * Compute p95 of per-run latency (MAX(createdAt) - MIN(createdAt) per
+ * run, milliseconds) across the supplied `runIds`, using Postgres
+ * `PERCENTILE_CONT` so the whole computation lives in one round-trip
+ * instead of pulling every `run_events` row into the API process.
+ *
+ * Returns `null` for sample sizes below 5 (matches the engine's
+ * `MIN_RUNS_FOR_DELTA` neutral-default floor; preserves the legacy JS
+ * implementation's short-circuit). The inner row scan is bounded by
+ * `windowDays * 1440 * 2` — a defensive "two events per minute is the
+ * worst-case rate; past that the workflow is broken" ceiling.
+ *
+ * @internal Exported for unit tests; not part of the public repo surface.
+ *           Production callers go through `collectHealthSignals`.
+ */
+export async function computeP95Latency(
+  runIds: string[],
+  windowDays: number,
+): Promise<number | null> {
   if (runIds.length < 5) return null;
-  // The `node.succeeded`-event timestamp on the run's terminal node is
-  // close enough to "run finished" for this rollup; using runs.createdAt
-  // → max(run_events.createdAt) keeps the math in one query.
-  const rows = await db
-    .select({
-      runId: runEvents.runId,
-      createdAt: runEvents.createdAt,
-    })
-    .from(runEvents)
-    .where(inArray(runEvents.runId, runIds))
-    .orderBy(asc(runEvents.createdAt));
+  // Defensive ceiling on the row fan-in. Worst-case shape is two events
+  // per minute per run; past `windowDays * 1440 * 2` rows the workflow
+  // is misbehaving and the rollup is meaningless anyway. The LIMIT
+  // applies at the inner scan so Postgres reads at most this many rows
+  // before grouping.
+  const rowCap = windowDays * 1440 * 2;
 
-  // Map each runId to (firstEvent, lastEvent) timestamps.
-  const range = new Map<string, { first: number; last: number }>();
-  for (const event of rows) {
-    if (!event.createdAt) continue;
-    const ts = event.createdAt.getTime();
-    const prev = range.get(event.runId);
-    if (!prev) {
-      range.set(event.runId, { first: ts, last: ts });
-    } else {
-      prev.last = ts;
-    }
-  }
+  // Per-run latency uses MAX(createdAt) - MIN(createdAt) — the same
+  // metric the legacy JS path measured: span from first to last event
+  // recorded for the run. PERCENTILE_CONT interpolates between adjacent
+  // samples per the SQL standard (the prior JS implementation did
+  // nearest-rank); for typical latency distributions the two values
+  // agree within a few percent. If strict nearest-rank parity is ever
+  // required, swap to PERCENTILE_DISC — single-word change.
+  // postgres-js returns a RowList (array-like) directly from execute;
+  // access [0] not .rows[0].
+  // The inner subquery aliases `run_events.run_id` / `run_events.created_at`
+  // as the local `capped.run_id` / `capped.created_at`; outer scopes
+  // reference the unqualified column names since the table reference
+  // is only in scope inside the LIMIT'd subquery.
+  const rows = await db.execute<{ p95_ms: string | number | null }>(sql`
+    SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)::int AS p95_ms
+    FROM (
+      SELECT EXTRACT(EPOCH FROM (MAX(created_at) - MIN(created_at))) * 1000 AS duration_ms
+      FROM (
+        SELECT ${runEvents.runId} AS run_id, ${runEvents.createdAt} AS created_at
+        FROM ${runEvents}
+        WHERE ${inArray(runEvents.runId, runIds)}
+        LIMIT ${rowCap}
+      ) capped
+      GROUP BY run_id
+      HAVING MAX(created_at) > MIN(created_at)
+    ) per_run
+    HAVING COUNT(*) >= 5
+  `);
 
-  const durations = Array.from(range.values()).map((entry) => entry.last - entry.first).filter((ms) => ms > 0);
-  if (durations.length < 5) return null;
-  durations.sort((a, b) => a - b);
-  // Nearest-rank percentile, 0-indexed: for length N the p95 sits at
-  // ceil(N * 0.95) - 1. Using floor(N * 0.95) returned the max (p100) at
-  // sizes where N * 0.95 is an integer (20, 40, 100 …).
-  const index = Math.max(0, Math.ceil(durations.length * 0.95) - 1);
-  return durations[Math.min(index, durations.length - 1)];
+  const row = rows[0];
+  if (!row || row.p95_ms === null || row.p95_ms === undefined) return null;
+  return typeof row.p95_ms === "string" ? Number(row.p95_ms) : row.p95_ms;
 }
