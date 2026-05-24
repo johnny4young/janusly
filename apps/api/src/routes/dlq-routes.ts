@@ -69,8 +69,11 @@ export const dlqRoutes: Route[] = [
       const result = await findClusterMembers(auth.orgId, signature, windowDays, limit);
       return sendJson(res, { ...result, windowDays });
     } },
-  // DLQ
-  { method: "GET", match: (url) => url.startsWith("/dlq"),
+  // DLQ — viewer gate is symmetric with `/dlq/clusters` and
+  // `/dlq/cluster-members` above; omitting `role:` lets any
+  // authenticated caller (e.g. service token without an `org_members`
+  // row) reach the handler.
+  { method: "GET", match: (url) => url.startsWith("/dlq"), role: "viewer",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const id = url.searchParams.get("id");
