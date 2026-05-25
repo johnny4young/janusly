@@ -42,9 +42,10 @@ The full classifier is in [`references/fix-policy.md`](references/fix-policy.md)
 1. **Orient.** Read `git status`, `git diff --cached --stat`, `.git/COMMIT_EDITMSG` if present. Identify the ENG-NNN the diff claims to attack. Validate against `docs/ROADMAP.md` §3b: does the ticket exist, was Status `Pending`/`Partial` before, does the diff scope fit?
 2. **Align against the approved plan.** When a plan from `janus-ship` PHASE 1 is in the chat, compare. Files outside the plan are scope creep (report). Missing files the plan flagged required (test, doc, sync entry) are findings (report).
 3. **Run cheap gates.** `bash .claude/skills/janus-review/scripts/run-gates.sh` (add `--e2e` only when the diff touches end-to-end user-facing surface). The script wraps `pnpm build` + `pnpm test` (+ optional `pnpm test:e2e`) into a single PASS/FAIL summary that paste-fits into the report's Gates section. When `--e2e` runs, guarantee `docker compose down` at the end.
-4. **Run review skills in parallel** on the staged diff:
-   - `typescript-react-reviewer` for `apps/web/**`.
-   - `node` for `apps/api/**`, `packages/engine/**`, `packages/ai/**`, `packages/data/**`, `packages/db/**`, `scripts/**`, `vite*.config.*`.
+4. **Run review skills on the staged diff.** Dispatch is contract, not preference — both skills are invoked via the `Skill` tool (NOT the `Agent` tool); the `Skill` tool loads each rubric into THIS conversation so the audit runs with full diff context.
+   - `Skill({ skill: "typescript-react-reviewer", args: "..." })` whenever the diff touches `apps/web/**`.
+   - `Skill({ skill: "node", args: "..." })` whenever the diff touches `apps/api/**`, `packages/engine/**`, `packages/ai/**`, `packages/data/**`, `packages/db/**`, `scripts/**`, or `vite*.config.*`.
+   - Both fire when both surfaces are touched. The `feature-dev:code-reviewer` agent is OPTIONAL on top (independent loop, useful when implementer-bias risk is real) — NEVER a substitute. Substituting the agent because the skill name "sounds like a `subagent_type`" is non-compliance: the agent does not load the same rubric, so coverage diverges.
 5. **Run Janusly-specific checks** for the surfaces the diff touched. The full catalogue (multi-tenant, AI fallback, engine atomicity, audit logs, cross-panel reactivity, pagination, web deps, Tailwind, Vite, Zod, SSRF, tests, banned deps, doc sync) is in [`references/janusly-checks.md`](references/janusly-checks.md).
 6. **Smoke** when the diff is user-facing. Bring up Compose + api + worker + web with dev headers `x-org-id: default` / `x-user-id: dev-user`, exercise happy path + one error path, verify `mode: "ai"` / `mode: "fallback"` for AI surfaces, tear Compose down at the end.
 7. **Print the report** in the chat, following the section order in [`references/report-template.md`](references/report-template.md). End with a single Conventional Commits message that covers staged + unstaged together.
@@ -68,6 +69,7 @@ When ROADMAP and PLAN disagree on Status, ROADMAP wins. When AGENTS.md and PLAN 
 - **Single bucket for fixes:** every real-bug fix goes under "Bugs fixed inline" in the report. No severity split.
 - **Two buckets for findings:** real bugs are fixed; design / AC / security questions are reported under "Design / scope findings — NOT fixed".
 - **No AI co-authorship in the suggested commit.** No `Co-Authored-By: Claude`, no "Generated with Claude Code", no watermarks.
+- **Review skill dispatch is mandatory and tool-specific.** `typescript-react-reviewer` runs via `Skill({ skill: "typescript-react-reviewer", args: "..." })` on every diff touching `apps/web/**`. `node` runs via `Skill({ skill: "node", args: "..." })` on every backend-touching diff. Both fire when both surfaces are touched. The `feature-dev:code-reviewer` agent is ADDITIVE — never a substitute. If the `Skill` tool fails for a real reason, STOP and surface that to the user instead of silently swapping in the agent.
 - **One commit, one story.** The suggested message covers staged + unstaged together. Do not offer a split version.
 - **Smoke seed:** dev mode auth uses `x-org-id: default` / `x-user-id: dev-user`. Production uses Supabase JWT. Never invent credentials.
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -44,6 +44,9 @@ function mockBudgetApi() {
 
 describe('<BudgetSettingsPanel />', () => {
   beforeEach(() => {
+    // Cancel any pending bumpPlatformVersion timer left by a prior
+    // test so the 100ms debounce can't bleed across cases.
+    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [], budgetBlocked: null }, true)
   })
@@ -88,7 +91,10 @@ describe('<BudgetSettingsPanel />', () => {
         body: JSON.stringify({ key: 'ai.budgetMonthlyUsd', value: 33 }),
       }))
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    // bumpPlatformVersion is debounced (100ms trailing edge) — assert
+    // via waitFor so the timer fires under real wallclock during the
+    // poll window.
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('rejects fractional warning thresholds before saving', async () => {

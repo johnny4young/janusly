@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -52,6 +52,9 @@ const TOOLS_FOR_CONN_1 = {
 }
 
 beforeEach(() => {
+  // Cancel any pending bumpPlatformVersion timer left by a prior test
+  // so the 100ms debounce can't bleed across cases.
+  __resetBumpCoalesceForTests()
   vi.mocked(api).mockReset()
   useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
 })
@@ -130,7 +133,7 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('submits a stdio create-connection form and bumps platformVersion on success', async () => {
@@ -156,7 +159,7 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('submits an http create-connection form with the url transport payload', async () => {
@@ -187,6 +190,6 @@ describe('<McpConnectionsPanel />', () => {
         }),
       )
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 })

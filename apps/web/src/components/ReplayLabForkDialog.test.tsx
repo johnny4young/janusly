@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from '../api'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { ReplayLabForkDialog } from './ReplayLabForkDialog'
 
 vi.mock('../api', async (importOriginal) => {
@@ -23,6 +23,9 @@ const forkResponse = { runId: 'fork-run-id', predecessorCount: 2 }
 
 describe('<ReplayLabForkDialog />', () => {
   beforeEach(() => {
+    // Cancel any pending bumpPlatformVersion timer left by a prior
+    // test so the 100ms debounce can't bleed across cases.
+    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, runId: null, platformVersion: 0, toasts: [] }, true)
   })
@@ -68,7 +71,10 @@ describe('<ReplayLabForkDialog />', () => {
 
     // Store side effects fired: active run id switched + platform version bumped.
     expect(useWorkflowStore.getState().runId).toBe('fork-run-id')
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    // bumpPlatformVersion is debounced (100ms trailing edge) — assert
+    // via waitFor so the timer fires under real wallclock during the
+    // poll window.
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('parses the textarea as JSON and forwards it as inputOverride when valid', async () => {
