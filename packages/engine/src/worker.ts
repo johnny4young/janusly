@@ -55,6 +55,16 @@ import {
   handleMemoryBulkPurgeTrigger,
   MEMORY_BULK_PURGE_JOB_NAME,
 } from "./memory-purge-scheduler";
+import {
+  AUDIT_LOGS_RETENTION_JOB_NAME,
+  handleAuditLogsRetentionTrigger,
+  registerAuditLogsRetentionScheduler,
+} from "./audit-logs-retention-scheduler";
+import {
+  handleScimEventsRetentionTrigger,
+  registerScimEventsRetentionScheduler,
+  SCIM_EVENTS_RETENTION_JOB_NAME,
+} from "./scim-events-retention-scheduler";
 
 await assertMigrationsApplied();
 
@@ -86,6 +96,24 @@ try {
   if (registered) console.log("[memory-retention] daily sweep scheduler registered");
 } catch (err) {
   console.error("[memory-retention] scheduler registration failed", err);
+}
+
+// Two sibling retention sweeps for append-only tables that would
+// otherwise grow unbounded (audit_logs ~10k rows/day, scim_processed_events
+// ~10k events/day). Same `system:` id convention + never-throws shape as
+// the memory-retention scheduler above; env knobs documented in
+// AGENTS.md "Retention sweeps".
+try {
+  const registered = await registerAuditLogsRetentionScheduler();
+  if (registered) console.log("[audit-logs-retention] daily sweep scheduler registered");
+} catch (err) {
+  console.error("[audit-logs-retention] scheduler registration failed", err);
+}
+try {
+  const registered = await registerScimEventsRetentionScheduler();
+  if (registered) console.log("[scim-events-retention] daily sweep scheduler registered");
+} catch (err) {
+  console.error("[scim-events-retention] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -213,6 +241,14 @@ export const worker = new Worker(
     }
     if (job.name === MEMORY_RETENTION_JOB_NAME) {
       await handleMemoryRetentionTrigger();
+      return;
+    }
+    if (job.name === AUDIT_LOGS_RETENTION_JOB_NAME) {
+      await handleAuditLogsRetentionTrigger();
+      return;
+    }
+    if (job.name === SCIM_EVENTS_RETENTION_JOB_NAME) {
+      await handleScimEventsRetentionTrigger();
       return;
     }
     // One-shot delayed job — scheduled on demand from the
