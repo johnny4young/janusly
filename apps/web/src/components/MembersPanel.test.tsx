@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { MembersPanel } from './MembersPanel'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
@@ -29,6 +29,9 @@ function setupApi(opts: { roles?: unknown; members?: unknown[] }) {
 
 describe('<MembersPanel /> dynamic role list', () => {
   beforeEach(() => {
+    // Cancel any pending bumpPlatformVersion timer left by a prior
+    // test so the 100ms debounce can't bleed across cases.
+    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
   })
@@ -78,7 +81,7 @@ describe('<MembersPanel /> dynamic role list', () => {
         }),
       )
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('bumps platformVersion after changing a member role', async () => {
@@ -96,7 +99,7 @@ describe('<MembersPanel /> dynamic role list', () => {
         expect.objectContaining({ method: 'POST', body: expect.stringContaining('editor') }),
       )
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
   it('bumps platformVersion after removing a member', async () => {
@@ -111,6 +114,6 @@ describe('<MembersPanel /> dynamic role list', () => {
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/members?userId=user-1', { method: 'DELETE' })
     })
-    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 })

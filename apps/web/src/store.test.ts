@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useWorkflowStore } from './store'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from './store'
 
 const initialState = useWorkflowStore.getState()
 
@@ -157,12 +157,10 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
-  it('bumpPlatformVersion increments by one', () => {
-    expect(useWorkflowStore.getState().platformVersion).toBe(0)
-    useWorkflowStore.getState().bumpPlatformVersion()
-    useWorkflowStore.getState().bumpPlatformVersion()
-    expect(useWorkflowStore.getState().platformVersion).toBe(2)
-  })
+  // bumpPlatformVersion coalesce behavior is covered in the dedicated
+  // `useWorkflowStore.bumpPlatformVersion (coalesce)` describe block
+  // below — it uses fake timers to assert the 100ms trailing-edge
+  // collapse without relying on real wallclock timing inside this case.
 
   it('stores and clears the latest budget block envelope', () => {
     useWorkflowStore.getState().setBudgetBlocked({
@@ -206,4 +204,49 @@ describe('useWorkflowStore', () => {
       expect(useWorkflowStore.getState().activeTab).toBe(tab)
     },
   )
+})
+
+describe('useWorkflowStore.bumpPlatformVersion (coalesce)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    useWorkflowStore.setState({ platformVersion: 0 })
+    __resetBumpCoalesceForTests()
+  })
+
+  afterEach(() => {
+    __resetBumpCoalesceForTests()
+    vi.useRealTimers()
+  })
+
+  it('collapses multiple bumps within the 100ms window into ONE increment', () => {
+    const bump = useWorkflowStore.getState().bumpPlatformVersion
+    for (let i = 0; i < 5; i += 1) bump()
+    // No increment yet — trailing edge has not fired.
+    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    vi.advanceTimersByTime(100)
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
+
+  it('each bump resets the trailing edge — extending the window keeps the count at zero', () => {
+    const bump = useWorkflowStore.getState().bumpPlatformVersion
+    bump()
+    vi.advanceTimersByTime(50)
+    bump()
+    vi.advanceTimersByTime(50)
+    // 100ms wallclock has elapsed but only 50ms since the LAST bump.
+    // Trailing edge has NOT fired yet.
+    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    vi.advanceTimersByTime(50)
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
+
+  it('a single bump fires exactly one increment after the window elapses', () => {
+    useWorkflowStore.getState().bumpPlatformVersion()
+    expect(useWorkflowStore.getState().platformVersion).toBe(0)
+    vi.advanceTimersByTime(100)
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+    // No follow-up tick should fire — the timer is one-shot per bump cluster.
+    vi.advanceTimersByTime(1000)
+    expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
 })
