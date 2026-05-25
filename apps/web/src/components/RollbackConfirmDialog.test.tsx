@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
-import { useWorkflowStore } from '../store'
+import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 
@@ -34,6 +34,9 @@ const target = {
 
 describe('<RollbackConfirmDialog />', () => {
   beforeEach(() => {
+    // Cancel any pending bumpPlatformVersion timer left by a prior
+    // test so the 100ms debounce can't bleed across cases.
+    __resetBumpCoalesceForTests()
     vi.mocked(api).mockReset()
     useWorkflowStore.setState({ ...initialState, toasts: [], platformVersion: 0 }, true)
   })
@@ -65,8 +68,11 @@ describe('<RollbackConfirmDialog />', () => {
       body: JSON.stringify({ workflowId: 'wf_rollback', sourceVersionId: 'version_3' }),
     }))
 
+    // bumpPlatformVersion is debounced (100ms trailing edge) — assert
+    // via waitFor so the timer fires under real wallclock during the
+    // poll window.
+    await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(platformVersionBefore + 1))
     const state = useWorkflowStore.getState()
-    expect(state.platformVersion).toBe(platformVersionBefore + 1)
     expect(state.toasts.some((toast) => /Rolled back to v3 as v6/i.test(toast.message) && toast.tone === 'success')).toBe(true)
     // hydrateWorkflow swaps currentWorkflowId to the rolled-back DAG's id
     expect(state.currentWorkflowId).toBe('wf_rollback')

@@ -11,6 +11,19 @@
  * - Dev-header values match `apps/api/src/auth.ts`'s expected
  *   header names. Don't drift.
  * - JSON body assumed; binary uploads aren't supported here.
+ * - **In-flight dedup is part of the contract.** Two callers issuing
+ *   the same `(scope, method, path, body)` tuple while a request is in
+ *   flight (and for up to `DEDUP_TTL_MS` after it resolves) share ONE
+ *   network round-trip and receive the same payload object. Scope covers
+ *   active org + locale + Janusly session token + Supabase access token
+ *   because every one of those headers can change the server response.
+ *   The Supabase JWT especially carries the user identity — without it
+ *   in the key, a fast logout/login within the TTL window could serve
+ *   the prior user's response to the new caller. Skipped when the caller
+ *   passes an `AbortSignal` (sharing a Promise across abort intents
+ *   would silently drop one fetch). For mutating verbs this collapses
+ *   an accidental double-click within the window into a single
+ *   mutation — intentional double-click prevention.
  */
 
 import { getActiveOrg, getSessionToken, supabase } from './auth'
@@ -18,6 +31,60 @@ import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001'
+
+/**
+ * Window during which a resolved (or rejected) in-flight request is
+ * still shared with subsequent callers. Picked at 500ms so a burst of
+ * panel useEffects firing inside the same React tick (the common
+ * `platformVersion`-bump trigger pattern) collapse to one fetch
+ * without holding onto stale data across slow navigations.
+ */
+const DEDUP_TTL_MS = 500
+
+type InFlightEntry = { promise: Promise<unknown>; expiresAt: number }
+const inFlight = new Map<string, InFlightEntry>()
+
+type ApiRequestScope = {
+  activeOrg: string
+  resolvedLocale: string
+  sessionToken: string | null
+  /**
+   * Supabase Bearer JWT (when the user is in Supabase mode, i.e. no
+   * SSO session token). Carries the user identity end-to-end — a
+   * different access_token means a different user / refreshed token
+   * and must NOT share a cached response with the prior call.
+   * `null` in SSO mode (sessionToken takes over) and in dev mode
+   * (no Supabase configured).
+   */
+  supabaseAccessToken: string | null
+}
+
+/**
+ * Build a stable key for the in-flight map. Returns null when the
+ * body shape can't be reduced to a string (FormData, Blob, etc.) —
+ * the caller treats null as "skip dedup, fall through to a fresh
+ * fetch". Functions / BigInt / circular refs reach JSON.stringify on
+ * a Record body and the try/catch covers that too.
+ */
+function dedupKey(scope: ApiRequestScope, method: string, path: string, body: BodyInit | null | undefined): string | null {
+  try {
+    let serialized: string
+    if (body === undefined || body === null) {
+      serialized = ''
+    } else if (typeof body === 'string') {
+      serialized = body
+    } else {
+      // Non-string BodyInit (FormData, Blob, ArrayBuffer,
+      // URLSearchParams, ReadableStream). The web app uses JSON bodies
+      // exclusively today, so this branch is defensive — bail out and
+      // let the fresh fetch run.
+      return null
+    }
+    return `${scope.activeOrg}:${scope.resolvedLocale}:${scope.sessionToken ?? ''}:${scope.supabaseAccessToken ?? ''}:${method}:${path}:${serialized}`
+  } catch {
+    return null
+  }
+}
 
 /**
  * Thrown by `api()` when the server returns a non-2xx body. Carries
@@ -54,17 +121,83 @@ export class ApiError extends Error {
  * declares typed `inputs` and the payload doesn't satisfy them — the
  * run-input form needs to surface those errors next to the right field
  * rather than losing them in a toast. Other 400 bodies still throw.
+ *
+ * Dedup behavior: identical `(scope, method, path, body)` tuples
+ * issued while a request is in flight share that fetch and resolve
+ * from the same Promise; after the underlying fetch settles (success
+ * OR failure) the entry stays shareable for `DEDUP_TTL_MS` and is then
+ * evicted. Pass `options.signal` to bypass dedup when caller-specific
+ * abort semantics matter.
  */
-export async function api(path: string, options: RequestInit = {}) {
+export async function api(path: string, options: RequestInit = {}): Promise<unknown> {
+  const method = (options.method ?? 'GET').toUpperCase()
+  const hasSignal = options.signal !== undefined && options.signal !== null
+  const sessionToken = getSessionToken()
+  // Resolve the Supabase JWT BEFORE building the cache key so user
+  // identity is part of the dedup tuple. In Supabase v2 the hot path
+  // resolves synchronously from the in-memory cache (no network round
+  // trip), so the extra `await` costs microseconds. SSO mode + dev
+  // mode skip this branch entirely.
+  const supabaseAccessToken = !sessionToken && supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
+    : null
+  const requestScope: ApiRequestScope = {
+    activeOrg: getActiveOrg(),
+    resolvedLocale: getResolvedLocale(),
+    sessionToken,
+    supabaseAccessToken,
+  }
+  const key = hasSignal ? null : dedupKey(requestScope, method, path, options.body)
+
+  if (key !== null) {
+    const cached = inFlight.get(key)
+    if (cached !== undefined && cached.expiresAt > Date.now()) {
+      return cached.promise
+    }
+  }
+
+  const promise = doApiFetch(path, options, requestScope)
+
+  if (key !== null) {
+    const entry: InFlightEntry = { promise, expiresAt: Number.POSITIVE_INFINITY }
+    inFlight.set(key, entry)
+    // Settle the TTL once the request resolves OR rejects. The catch
+    // swallow only protects the chained .finally — the original
+    // rejection still surfaces to every awaiter via the shared
+    // Promise above.
+    promise
+      .catch(() => undefined)
+      .finally(() => {
+        entry.expiresAt = Date.now() + DEDUP_TTL_MS
+        // Schedule a single eviction so the map doesn't accumulate
+        // stale entries across the SPA's lifetime. Identity check
+        // protects a NEW entry that may have replaced this one during
+        // the TTL window.
+        setTimeout(() => {
+          const current = inFlight.get(key)
+          if (current === entry) inFlight.delete(key)
+        }, DEDUP_TTL_MS)
+      })
+  }
+
+  return promise
+}
+
+/**
+ * Internal helper — the actual auth resolution + fetch + envelope
+ * handling that used to live directly inside `api()`. Extracted so
+ * the dedup wrapper can cache the resulting Promise without changing
+ * the existing behavior.
+ */
+async function doApiFetch(path: string, options: RequestInit, requestScope: ApiRequestScope): Promise<unknown> {
   // SSO-issued Janusly session token wins over Supabase JWT — when the
   // user logged in via WorkOS, the callback set this localStorage entry
   // and the API's `extractJanuslySession` provider reads it as the 4th
-  // auth mode.
-  const sessionToken = getSessionToken()
-  const session = !sessionToken && supabase
-    ? await supabase.auth.getSession()
-    : { data: { session: null } }
-  const token = session.data.session?.access_token
+  // auth mode. Both tokens were resolved into `requestScope` by the
+  // outer `api()` so the cache key and these headers see the same
+  // snapshot (no second `supabase.auth.getSession()` call here).
+  const sessionToken = requestScope.sessionToken
+  const token = requestScope.supabaseAccessToken
 
   // `x-org-id` ships on every request — it's the scope hint the API
   // resolver uses to pick a membership when the user belongs to multiple
@@ -74,7 +207,7 @@ export async function api(path: string, options: RequestInit = {}) {
   // signed payload already carries orgId.
   const headers = {
     'Content-Type': 'application/json',
-    'x-org-id': getActiveOrg(),
+    'x-org-id': requestScope.activeOrg,
     // The API's AI helpers (`/ai/patch-workflow`, `/ai/suggest-improvement`,
     // `/ai/explain-workflow`, `/ai/explain-run`, `/ai/review-workflow`)
     // read this header (`apps/api/src/locale.ts:localeFromRequest`) and
@@ -82,7 +215,7 @@ export async function api(path: string, options: RequestInit = {}) {
     // system prompt so the operator-facing free-form fields (rationale,
     // explanation, message) come back in the user's UI locale. Other
     // routes ignore the header.
-    'Accept-Language': getResolvedLocale(),
+    'Accept-Language': requestScope.resolvedLocale,
     ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
     ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
     ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
@@ -139,11 +272,27 @@ function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
 }
 
 /**
+ * Test-only: clear the in-flight dedup map. Tests that simulate
+ * sequential cases without advancing fake timers past `DEDUP_TTL_MS`
+ * call this in `afterEach` so a previous case's cached entry doesn't
+ * bleed into the next one.
+ *
+ * @internal — not part of the public surface; production code never
+ * imports this.
+ */
+export function __resetInFlightForTests(): void {
+  inFlight.clear()
+}
+
+/**
  * Download a file from the API using the same auth resolution as
  * `api()`. The API's `Content-Disposition: attachment; filename=...`
  * header carries the suggested filename; if the caller passes
  * `filename`, it overrides that. The Blob + anchor click pattern
  * sidesteps the browser's "open in tab" default for text MIME types.
+ *
+ * Deliberately NOT dedup-wrapped — downloads are intentional
+ * user-initiated actions, two clicks should produce two downloads.
  */
 export async function downloadFromApi(path: string, filename?: string): Promise<void> {
   const sessionToken = getSessionToken()

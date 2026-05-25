@@ -14,7 +14,10 @@
  * - `bumpPlatformVersion()` is the cross-panel reactivity hook. Every
  *   server-mutating action (save, run start, terminal run, member
  *   invite/remove, DLQ replay) must call it so independent panels see the
- *   change.
+ *   change. Calls within `BUMP_COALESCE_MS` (100ms) collapse to ONE
+ *   subscriber notification via trailing-edge debounce — a chained
+ *   mutation that fires N internal bumps still triggers one refresh
+ *   wave across the ~20 subscribers.
  * - `mergeEvents(events)` deduplicates by id and re-sorts by `(createdAt,
  *   id)`. It's the path polling uses; `setEvents` is the hard-replace path
  *   that resets the cursor. Don't conflate the two.
@@ -108,6 +111,16 @@ type WorkflowStore = {
   clearBudgetBlocked: () => void
   bumpPlatformVersion: () => void
 }
+
+/**
+ * Trailing-edge debounce window for `bumpPlatformVersion()`. Bumps
+ * arriving within this window reset the timer; the final fire does ONE
+ * `set(...)`. 100ms is below the perceptible threshold for
+ * user-initiated mutations (~6 frames at 60Hz) and collapses bursts
+ * from chained mutations into a single refresh wave.
+ */
+const BUMP_COALESCE_MS = 100
+let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 
 const initialNodes: WorkflowGraphNode[] = [
   { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } },
@@ -313,7 +326,29 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     setTimeout(() => get().removeToast(id), 3500)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
-  bumpPlatformVersion: () => set((state) => ({ platformVersion: state.platformVersion + 1 })),
+  bumpPlatformVersion: () => {
+    if (pendingBumpTimer !== null) clearTimeout(pendingBumpTimer)
+    pendingBumpTimer = setTimeout(() => {
+      pendingBumpTimer = null
+      set((state) => ({ platformVersion: state.platformVersion + 1 }))
+    }, BUMP_COALESCE_MS)
+  },
   setBudgetBlocked: (envelope) => set({ budgetBlocked: envelope }),
   clearBudgetBlocked: () => set({ budgetBlocked: null }),
 }))
+
+/**
+ * Test-only: cancel any pending coalesced bump and reset the module
+ * timer state. Tests using `vi.useFakeTimers()` call this in
+ * `afterEach` so a previous case's queued bump doesn't fire into the
+ * next one.
+ *
+ * @internal — not part of the public surface; production code never
+ * imports this.
+ */
+export function __resetBumpCoalesceForTests(): void {
+  if (pendingBumpTimer !== null) {
+    clearTimeout(pendingBumpTimer)
+    pendingBumpTimer = null
+  }
+}
