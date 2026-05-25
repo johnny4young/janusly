@@ -52,15 +52,77 @@ export async function deleteProcessedEvent(input: { eventId: string }): Promise<
   await db.execute(sql`DELETE FROM scim_processed_events WHERE event_id = ${input.eventId}`);
 }
 
+export const DEFAULT_SCIM_EVENTS_PRUNE_BATCH_SIZE = 10_000;
+export const DEFAULT_SCIM_EVENTS_PRUNE_MAX_BATCHES = 1_000;
+
+export type PruneOldProcessedEventsInput = {
+  /** Drop rows with `processed_at` strictly older than this date. */
+  olderThan: Date;
+  /** Rows per DELETE batch. Default 10_000. */
+  batchSize?: number;
+  /** Hard upper bound on iterations so a misconfigured cutoff
+   *  cannot spin forever. Default 1_000 → 10M-row sweep ceiling. */
+  maxBatches?: number;
+};
+
+export type PruneOldProcessedEventsResult = {
+  /** Total rows removed across all batches. */
+  rowsDeleted: number;
+  /** ISO timestamp of the cutoff used (`input.olderThan` echoed back). */
+  cutoffAt: string;
+  /** Wallclock duration of the entire sweep including all batches. */
+  runtimeMs: number;
+  /** True if the loop exited because `maxBatches` was reached — more
+   *  rows may still be expired; next fire continues. */
+  cappedByMaxBatches: boolean;
+};
+
 /**
- * Delete records older than `olderThan`. Future cron will call this
- * to keep the table bounded at scale; v1 does not run it
- * automatically (10k events/day x 365 days = ~3.65M rows/year is
- * acceptable for the first wave of enterprise customers).
+ * Purge SCIM dedup rows older than `olderThan`, batched. The
+ * `scim_processed_events_processed_at_idx` index (on
+ * `processed_at`) accelerates the inner SELECT so each round-trip
+ * removes at most `batchSize` rows in a short transaction.
+ *
+ * Returns the aggregate count + timing. The scheduler caller writes
+ * one `scim.event_log.retention.purged` system-sentinel audit row per
+ * fire with the returned metadata.
  */
-export async function pruneOldProcessedEvents(input: { olderThan: Date }): Promise<number> {
-  const result = await db.execute(
-    sql`DELETE FROM scim_processed_events WHERE processed_at < ${input.olderThan}`,
-  );
-  return Number((result as unknown as { rowCount?: number }).rowCount ?? 0);
+export async function pruneOldProcessedEvents(
+  input: PruneOldProcessedEventsInput,
+): Promise<PruneOldProcessedEventsResult> {
+  const batchSize = input.batchSize ?? DEFAULT_SCIM_EVENTS_PRUNE_BATCH_SIZE;
+  const maxBatches = input.maxBatches ?? DEFAULT_SCIM_EVENTS_PRUNE_MAX_BATCHES;
+  const cutoffAt = input.olderThan.toISOString();
+  const startedAt = Date.now();
+
+  let rowsDeleted = 0;
+  let cappedByMaxBatches = false;
+  for (let i = 0; i < maxBatches; i += 1) {
+    // postgres-js doesn't auto-serialize JS Date objects in bound
+    // params — pass the ISO string + `::timestamptz` cast so Postgres
+    // does the conversion server-side.
+    const result = await db.execute<{ event_id: string }>(sql`
+      DELETE FROM ${scimProcessedEvents}
+      WHERE ${scimProcessedEvents.eventId} IN (
+        SELECT ${scimProcessedEvents.eventId} FROM ${scimProcessedEvents}
+        WHERE ${scimProcessedEvents.processedAt} < ${cutoffAt}::timestamptz
+        LIMIT ${batchSize}
+      )
+      RETURNING ${scimProcessedEvents.eventId}
+    `);
+    const deletedThisBatch = result.length;
+    rowsDeleted += deletedThisBatch;
+    // Ordering is load-bearing: the early-return MUST precede the
+    // cap-flag set. A sweep that happens to finish exactly on the last
+    // iteration with a short batch is NOT capped — there were no more
+    // expired rows. Reversing the two `if`s would mis-report
+    // `cappedByMaxBatches: true` in that edge case.
+    if (deletedThisBatch < batchSize) {
+      return { rowsDeleted, cutoffAt, runtimeMs: Date.now() - startedAt, cappedByMaxBatches };
+    }
+    if (i === maxBatches - 1) {
+      cappedByMaxBatches = true;
+    }
+  }
+  return { rowsDeleted, cutoffAt, runtimeMs: Date.now() - startedAt, cappedByMaxBatches };
 }
