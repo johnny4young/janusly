@@ -3062,6 +3062,43 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .workflow-node[data-status="failed"],
 .workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
 
+/* Custom React Flow edge — selection state rides on the data-selected
+ * attribute set by `WorkflowEdge.tsx`, so the upstream `visibleEdges`
+ * memo doesn't need to rebuild inline style objects per render.
+ *
+ * Selectors include the `path` element + RF's class + our class to
+ * outrank `@xyflow/react`'s defaults. RF ships
+ * `.react-flow__edge.selected .react-flow__edge-path` at specificity
+ * 0,0,3,0 — class-only combinations tie it and lose on load order
+ * (RF's stylesheet is bundled after ours via Vite). Adding the `path`
+ * element selector adds one tag weight so our rules win at 0,0,2,1
+ * (base, against RF's 0,0,1,0) and 0,0,3,1 (selected, against RF's
+ * 0,0,3,0). Without it the edge renders as RF's default 1px grey →
+ * grey-on-select instead of faint 1.8px → cobalt 2.8px on selection. */
+path.react-flow__edge-path.we-edge {
+  stroke: var(--we-faint);
+  stroke-width: 1.8px;
+  transition: stroke-width 80ms ease-out, stroke 80ms ease-out;
+}
+path.react-flow__edge-path.we-edge[data-selected="true"] {
+  stroke: var(--we-primary);
+  stroke-width: 2.8px;
+}
+.we-edge-label {
+  position: absolute;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 4px;
+  color: var(--we-text-secondary);
+  font-size: 11px;
+  padding: 2px 6px;
+  pointer-events: all;
+}
+.we-edge-label[data-selected="true"] {
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
 .workflow-node-head {
   align-items: center;
   display: grid;

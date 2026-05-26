@@ -11,6 +11,7 @@ import { Activity, Boxes, Bot, CheckCircle2, ClipboardList, GitBranch, Layers3, 
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { formatStatusLabel, getNodeConfigSummary, getNodeHelper, getNodeLabel } from '../constants'
+import { useT } from '../i18n'
 import type { WorkflowGraphNode } from '../types'
 
 const nodeIcons: Record<string, React.ReactNode> = {
@@ -33,6 +34,13 @@ const nodeIcons: Record<string, React.ReactNode> = {
 
 /** Render one workflow step on the canvas with icon, label, summary, and status pill. */
 export function WorkflowStepNode({ data, selected }: NodeProps<WorkflowGraphNode>) {
+  // Subscribe to locale changes so `getNodeLabel` / `getNodeHelper` /
+  // `getNodeConfigSummary` re-resolve through the i18next runtime
+  // after a language toggle. The upstream `visibleNodes` memo
+  // intentionally does NOT carry `i18n.language` in its dep array —
+  // making the leaf component the locale reactivity boundary keeps
+  // the canvas projection identity stable across toggles.
+  useT()
   const status = data.status ?? 'pending'
   const type = data.type
   const title = data.label || getNodeLabel(type)
