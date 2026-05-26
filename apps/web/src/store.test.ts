@@ -34,12 +34,15 @@ beforeEach(() => {
 })
 
 describe('useWorkflowStore', () => {
-  it('addNode appends a node with its preset config and uppercase label', () => {
+  it('addNode appends a node with its preset config and an empty label (leaf component resolves)', () => {
     useWorkflowStore.getState().addNode('http')
     const { nodes } = useWorkflowStore.getState()
     expect(nodes).toHaveLength(1)
     expect(nodes[0].data.type).toBe('http')
-    expect(nodes[0].data.label).toBe('HTTP')
+    // `data.label` stays empty so `WorkflowStepNode` resolves it via
+    // `getNodeLabel('http')` at render time — keeps locale toggles
+    // out of the upstream `visibleNodes` memo dep array.
+    expect(nodes[0].data.label).toBe('')
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
   })
 
@@ -63,6 +66,13 @@ describe('useWorkflowStore', () => {
     expect(state.edges[0].target).toBe('b')
     expect(state.edges[0].animated).toBe(true)
     expect(state.runId).toBeNull()
+    // `data.label` stays empty after hydration — the canvas component
+    // resolves the human label via `getNodeLabel(type)` at render
+    // time. Regression-pin: a writer that reintroduces
+    // `String(type).toUpperCase()` would shadow the locale-correct
+    // label and the e2e tests would fail.
+    expect(state.nodes[0].data.label).toBe('')
+    expect(state.nodes[1].data.label).toBe('')
   })
 
   it('getWorkflowJson serializes the graph back to the DAG contract', () => {
@@ -91,7 +101,10 @@ describe('useWorkflowStore', () => {
     const state = useWorkflowStore.getState()
     expect(state.nodes[0].data.type).toBe('approval')
     expect(state.nodes[0].data.config).toEqual({ message: 'Please approve this workflow step.' })
-    expect(state.nodes[0].data.label).toBe('APPROVAL')
+    // `data.label` stays empty after a type swap — the canvas component
+    // resolves the new label via `getNodeLabel('approval')` at render
+    // time, so the upstream visibleNodes memo doesn't carry locale deps.
+    expect(state.nodes[0].data.label).toBe('')
   })
 
   it('updateSelectedNodeConfig only mutates the selected node', () => {

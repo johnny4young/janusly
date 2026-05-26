@@ -122,9 +122,13 @@ type WorkflowStore = {
 const BUMP_COALESCE_MS = 100
 let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 
+// `data.label` is intentionally empty — `WorkflowStepNode` resolves
+// the human label via `getNodeLabel(type)` at render time, which
+// re-evaluates through the i18n runtime on locale toggles. Leaving
+// the field empty lets the OR-fallback (`data.label || ...`) kick in.
 const initialNodes: WorkflowGraphNode[] = [
-  { id: '1', position: { x: 0, y: 0 }, data: { label: 'HTTP', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: '2', position: { x: 260, y: 90 }, data: { label: 'MULTI_AGENT', type: 'multi_agent', config: getNodePreset('multi_agent') } },
+  { id: '1', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
+  { id: '2', position: { x: 260, y: 90 }, data: { label: '', type: 'multi_agent', config: getNodePreset('multi_agent') } },
 ]
 
 const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
@@ -195,7 +199,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       nodes: state.nodes.concat({
         id,
         position: { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
-        data: { label: type.toUpperCase(), type, config: getNodePreset(type) },
+        // Leave `data.label` empty so the canvas component resolves the
+        // human label via `getNodeLabel(type)` at render time.
+        data: { label: '', type, config: getNodePreset(type) },
       })
     }))
   },
@@ -209,7 +215,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       nodes: (workflow.nodes ?? []).map((node, index) => ({
         id: node.id,
         position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
-        data: { label: String(node.type).toUpperCase(), type: node.type, config: node.config ?? {} },
+        // `data.label` stays empty; `WorkflowStepNode` resolves the
+        // human label via `getNodeLabel(type)` so a locale toggle
+        // re-renders the leaf without re-projecting the full graph.
+        data: { label: '', type: node.type, config: node.config ?? {} },
       })),
       edges: (workflow.edges ?? []).map((edge, index) => ({
         id: `e${index}`,
@@ -284,7 +293,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     if (!selectedNodeId) return
     set((state) => ({
       nodes: state.nodes.map((node) => node.id === selectedNodeId
-        ? { ...node, data: { label: type.toUpperCase(), type, config: getNodePreset(type) } }
+        // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
+        // empty so the canvas resolves it via `getNodeLabel(type)`.
+        ? { ...node, data: { label: '', type, config: getNodePreset(type) } }
         : node)
     }))
   },

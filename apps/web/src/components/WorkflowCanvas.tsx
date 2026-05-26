@@ -13,6 +13,7 @@ import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/reac
 import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
+import { workflowEdgeTypes } from './WorkflowEdge'
 import { useT } from '../i18n'
 import '@xyflow/react/dist/style.css'
 
@@ -42,6 +43,7 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
         nodes={nodes}
         edges={edges}
         nodeTypes={workflowNodeTypes}
+        edgeTypes={workflowEdgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
