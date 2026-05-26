@@ -20,17 +20,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import {
-  CheckCircle2,
-  Clock,
-  DollarSign,
-  Gauge,
-  Plug,
-  RefreshCw,
-  ShieldCheck,
-  Users,
-  Zap,
-} from 'lucide-react'
+import { Gauge, Plug, RefreshCw, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
@@ -42,7 +32,9 @@ import { CredentialHealthCard } from './CredentialHealthCard'
 import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
-import { getResolvedLocale, tRecoveryMetricRationale, useT } from '../i18n'
+import { VitalSignsStrip } from './VitalSignsStrip'
+import { buildOperationsTiles } from './operations-tiles'
+import { getResolvedLocale, useT } from '../i18n'
 
 /** Public ``/health`` rate-limiter payload — matches
  *  ``RateLimiterPublicHealth`` from ``@janusly/data/src/rate-limit-degradation``
@@ -221,7 +213,6 @@ export function OperationsPage() {
     </div>
   )
 }
-
 function OperationsHeader({
   metrics,
   loading,
@@ -260,39 +251,7 @@ function OperationsHeader({
       )}
 
       {!error && metrics && (
-        <div className="we-ops-grid" data-testid="operations-metric-strip">
-          <MetricCard
-            icon={<CheckCircle2 size={14} aria-hidden="true" />}
-            label={t('operations.metric.successRate') as string}
-            metric={metrics.successRate}
-            progressValue={metrics.successRate.value}
-          />
-          <MetricCard
-            icon={<RefreshCw size={14} aria-hidden="true" />}
-            label={t('operations.metric.mttr') as string}
-            metric={metrics.mttr}
-          />
-          <MetricCard
-            icon={<Zap size={14} aria-hidden="true" />}
-            label={t('operations.metric.p95') as string}
-            metric={metrics.p95Latency}
-          />
-          <MetricCard
-            icon={<Users size={14} aria-hidden="true" />}
-            label={t('operations.metric.approvals') as string}
-            metric={metrics.approvalsPending}
-          />
-          <MetricCard
-            icon={<Clock size={14} aria-hidden="true" />}
-            label={t('operations.metric.replayRate') as string}
-            metric={metrics.replayRate}
-          />
-          <MetricCard
-            icon={<DollarSign size={14} aria-hidden="true" />}
-            label={t('operations.metric.cost') as string}
-            metric={metrics.costThisWindow}
-          />
-        </div>
+        <VitalSignsStrip tiles={buildOperationsTiles(metrics, t)} />
       )}
     </header>
   )
@@ -470,38 +429,5 @@ function RateLimiterStatusChip({ health }: { health: RateLimiterHealth }) {
       <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
       <span>{t('operations.rateLimiter.degraded', { count: bucketCount })}</span>
     </span>
-  )
-}
-
-function MetricCard({
-  icon,
-  label,
-  metric,
-  progressValue,
-}: {
-  icon: React.ReactNode
-  label: string
-  metric: RecoveryMetric
-  /** When set (0–100), renders a thin progress bar tinted by the metric's severity. */
-  progressValue?: number | null
-}) {
-  return (
-    <section className={`panel-card we-ops-metric-card we-ops-metric-card--${metric.severity}`}>
-      <div className="we-ops-metric-card__head">
-        <span className="we-ops-metric-card__icon" aria-hidden="true">{icon}</span>
-        <span className="section-kicker we-ops-metric-card__label">{label}</span>
-      </div>
-      <div className="we-ops-metric-card__value">{metric.display}</div>
-      {typeof progressValue === 'number' && progressValue !== null && (
-        <div className="we-ops-progress" role="presentation">
-          <span className="we-ops-progress__rail" />
-          <span
-            className={`we-ops-progress__fill we-ops-progress__fill--${metric.severity}`}
-            style={{ width: `${Math.max(0, Math.min(100, progressValue))}%` }}
-          />
-        </div>
-      )}
-      <p className="helper-text we-ops-metric-card__rationale">{tRecoveryMetricRationale(metric)}</p>
-    </section>
   )
 }
