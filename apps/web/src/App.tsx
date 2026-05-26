@@ -21,7 +21,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from './Layout'
-import { MarkerType } from '@xyflow/react'
 import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { CommandPalette } from './components/CommandPalette'
@@ -39,7 +38,8 @@ import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } 
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
-import { formatStatusLabel, getNodeHelper, getNodeLabel } from './constants'
+import { formatStatusLabel } from './constants'
+import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { isCanvasTab } from './types'
@@ -141,7 +141,7 @@ export default function App() {
     bumpPlatformVersion,
   } = useWorkflowStore()
 
-  const { t, i18n } = useT()
+  const { t } = useT()
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
@@ -342,42 +342,23 @@ export default function App() {
     return new Map(runNodes.map(node => [node.nodeId, node.status]))
   }, [runNodes])
 
-  const visibleNodes = useMemo<WorkflowGraphNode[]>(() => {
-    return nodes.map(node => {
-      const status = nodeStatusMap.get(node.id) ?? 'pending'
-      const hasValidationError = validationIssues.some(issue => issue.nodeId === node.id)
-      const isSelected = selectedNodeId === node.id
-
-      return {
-        ...node,
-        type: 'workflowStep',
-        data: {
-          ...node.data,
-          label: getNodeLabel(node.data.type),
-          helper: getNodeHelper(node.data.type),
-          status,
-          hasValidationError,
-        },
-        selected: isSelected,
-      }
-    })
-  }, [i18n.language, nodeStatusMap, nodes, selectedNodeId, validationIssues])
-
-  const visibleEdges = useMemo<WorkflowGraphEdge[]>(() => {
-    return edges.map(edge => ({
-      ...edge,
-      animated: Boolean(edge.data?.condition),
-      label: edge.data?.condition ? t('canvas.edge.condition') : edge.label,
-      style: {
-        stroke: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
-        strokeWidth: selectedEdgeId === edge.id ? 2.8 : 1.8,
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: selectedEdgeId === edge.id ? 'var(--we-primary)' : 'var(--we-faint)',
-      },
-    }))
-  }, [edges, selectedEdgeId, t])
+  // Pure projections delegated to `./canvas-projections`. The memos
+  // depend ONLY on structural inputs — locale-dependent rendering
+  // (node label / helper, conditional-edge label) lives inside the
+  // leaf components `WorkflowStepNode` and `WorkflowEdge`, both
+  // subscribed to language changes via `useT()`. Result: a locale
+  // toggle re-renders the leaf components without re-projecting the
+  // full graph; a `platformVersion` bump that doesn't actually change
+  // the edge list lets React Flow skip downstream work via identity
+  // comparison.
+  const visibleNodes = useMemo<WorkflowGraphNode[]>(
+    () => projectVisibleNodes(nodes, nodeStatusMap, validationIssues, selectedNodeId),
+    [nodes, nodeStatusMap, selectedNodeId, validationIssues],
+  )
+  const visibleEdges = useMemo<WorkflowGraphEdge[]>(
+    () => projectVisibleEdges(edges, selectedEdgeId),
+    [edges, selectedEdgeId],
+  )
 
   const validateWorkflow = useCallback(async () => {
     try {
