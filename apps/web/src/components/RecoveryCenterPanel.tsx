@@ -66,6 +66,8 @@ import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { BrandMark } from './BrandMark'
 import { ValueDashboardSection } from './ValueDashboardSection'
+import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
+import { useAnimatedNumber, usePrefersReducedMotion } from '../hooks/useAnimatedNumber'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
@@ -205,126 +207,6 @@ function HealthRing({ score }: { score: number | null }) {
       </div>
     </div>
   )
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// useAnimatedNumber — rAF-driven count-up. Snaps when reduced-motion is on.
-// ─────────────────────────────────────────────────────────────────────────
-
-function usePrefersReducedMotion(): boolean {
-  const [prefersReduced, setPrefersReduced] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setPrefersReduced(mq.matches)
-    const handler = (event: MediaQueryListEvent) => setPrefersReduced(event.matches)
-    if (typeof mq.addEventListener === 'function') {
-      mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
-    }
-    // Older Safari quirk — addListener / removeListener still works.
-    mq.addListener(handler)
-    return () => mq.removeListener(handler)
-  }, [])
-  return prefersReduced
-}
-
-function useAnimatedNumber(target: number, durationMs: number, snap: boolean): number {
-  const [value, setValue] = useState(snap ? target : 0)
-  const rafRef = useRef<number | null>(null)
-  const startRef = useRef<number | null>(null)
-  const startValueRef = useRef<number>(0)
-
-  useEffect(() => {
-    if (snap || !Number.isFinite(target)) {
-      setValue(target)
-      return
-    }
-    startValueRef.current = value
-    startRef.current = null
-    const step = (timestamp: number) => {
-      if (startRef.current === null) startRef.current = timestamp
-      const elapsed = timestamp - startRef.current
-      const t = Math.min(1, elapsed / durationMs)
-      // Cubic ease-out.
-      const eased = 1 - Math.pow(1 - t, 3)
-      const next = startValueRef.current + (target - startValueRef.current) * eased
-      setValue(next)
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(step)
-      } else {
-        rafRef.current = null
-      }
-    }
-    rafRef.current = requestAnimationFrame(step)
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
-    }
-    // value intentionally excluded from deps — we re-anchor each target change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target, durationMs, snap])
-
-  return value
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// RecoveryCenterMetric — large display cell in the four-cell strip.
-// ─────────────────────────────────────────────────────────────────────────
-
-function RecoveryCenterMetric({
-  label,
-  display,
-  numericValue,
-  severity,
-  icon,
-  rationale,
-  onClick,
-  testId,
-}: {
-  label: string
-  display: string
-  /** When defined, the value count-ups from 0; otherwise we render display verbatim. */
-  numericValue: number | null
-  severity: MetricSeverity
-  icon: React.ReactNode
-  rationale: string
-  onClick: () => void
-  testId: string
-}) {
-  const { t } = useT()
-  const snap = usePrefersReducedMotion()
-  const target = numericValue ?? 0
-  const animated = useAnimatedNumber(target, 600, snap)
-  const showAnimated = numericValue !== null && Number.isFinite(numericValue)
-  const rendered = showAnimated ? formatAnimatedValue(animated, display) : display
-  return (
-    <button
-      type="button"
-      className="we-recovery-center-metric"
-      data-severity={severity}
-      onClick={onClick}
-      aria-label={t('recoveryCenter.metric.aria', { label, display, rationale })}
-      data-testid={testId}
-    >
-      <span className="we-recovery-center-metric__icon" aria-hidden="true">{icon}</span>
-      <span className="we-recovery-center-metric__label">{label}</span>
-      <span className="we-recovery-center-metric__value">{rendered}</span>
-      <span className="we-recovery-center-metric__rationale">{rationale}</span>
-    </button>
-  )
-}
-
-/** Format the count-up value using the SAME suffix the API supplied in `display`.
- *  Keeps "12m" / "98%" / "$1.42" / "—" stable while letting the integer animate. */
-function formatAnimatedValue(animated: number, display: string): string {
-  // "—" is the absence sentinel; never animate.
-  if (display === '—') return display
-  const trailing = display.match(/[^\d.-].*$/)?.[0] ?? ''
-  const leading = display.match(/^[^\d-]+/)?.[0] ?? ''
-  const hasFraction = display.includes('.')
-  const rounded = hasFraction ? animated.toFixed(1) : Math.round(animated).toString()
-  return `${leading}${rounded}${trailing}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -614,49 +496,81 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     && (clusters?.clusters.length ?? 0) === 0
     && totalRuns === 0
 
+  const failuresLabel = t('recoveryCenter.metric.failures.label') as string
+  const failuresDisplay = openDeadLetters.length === 0 ? '0' : String(openDeadLetters.length)
+  const failuresRationale = openDeadLetters.length === 0
+    ? t('recoveryCenter.metric.failures.rationaleEmpty') as string
+    : t('recoveryCenter.metric.failures.rationale') as string
+  const homeTiles: VitalSignsTile[] = [
+    {
+      icon: <AlertTriangle size={14} aria-hidden="true" />,
+      label: failuresLabel,
+      display: failuresDisplay,
+      numericValue: openDeadLetters.length,
+      severity: openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn',
+      rationale: failuresRationale,
+      ariaLabel: t('recoveryCenter.metric.aria', { label: failuresLabel, display: failuresDisplay, rationale: failuresRationale }) as string,
+      onClick: () => props.onOpenTab('runs'),
+      testId: 'recovery-center-metric-failures',
+    },
+  ]
+  // Append the three computed tiles. Each pushes a fully-formed VitalSignsTile;
+  // the inline composition keeps the rich aria-label (label + display + rationale)
+  // the legacy RecoveryCenterMetric provided to screen readers.
+  const mttrLabel = t('recoveryCenter.metric.mttr.label') as string
+  const mttrDisplay = metrics?.mttr.display ?? '—'
+  const mttrRationale = metrics?.mttr
+    ? tRecoveryMetricRationale(metrics.mttr)
+    : t('recoveryCenter.metric.mttr.rationaleFallback') as string
+  homeTiles.push({
+    icon: <RefreshCw size={14} aria-hidden="true" />,
+    label: mttrLabel,
+    display: mttrDisplay,
+    numericValue: metrics?.mttr.value ?? null,
+    severity: metrics?.mttr.severity ?? 'neutral',
+    rationale: mttrRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-mttr',
+  })
+  const approvalsLabel = t('recoveryCenter.metric.approvals.label') as string
+  const approvalsDisplay = waitingNodes.length === 0 ? '0' : String(waitingNodes.length)
+  const approvalsRationale = waitingNodes.length === 0
+    ? t('recoveryCenter.metric.approvals.rationaleEmpty') as string
+    : t('recoveryCenter.metric.approvals.rationale') as string
+  homeTiles.push({
+    icon: <Users size={14} aria-hidden="true" />,
+    label: approvalsLabel,
+    display: approvalsDisplay,
+    numericValue: waitingNodes.length,
+    severity: waitingNodes.length === 0 ? 'healthy' : 'warn',
+    rationale: approvalsRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: approvalsLabel, display: approvalsDisplay, rationale: approvalsRationale }) as string,
+    onClick: () => props.onOpenTab('runs'),
+    testId: 'recovery-center-metric-approvals',
+  })
+  const replayLabel = t('recoveryCenter.metric.replay.label') as string
+  const replayDisplay = metrics?.replayRate.display ?? '—'
+  const replayRationale = metrics?.replayRate
+    ? tRecoveryMetricRationale(metrics.replayRate)
+    : t('recoveryCenter.metric.replay.rationaleFallback') as string
+  homeTiles.push({
+    icon: <Zap size={14} aria-hidden="true" />,
+    label: replayLabel,
+    display: replayDisplay,
+    numericValue: metrics?.replayRate.value ?? null,
+    severity: metrics?.replayRate.severity ?? 'neutral',
+    rationale: replayRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: replayLabel, display: replayDisplay, rationale: replayRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-replay',
+  })
   const metricStrip = (
-    <section className="we-recovery-center-strip" aria-label={t('recoveryCenter.metricStripAria')}>
-      <RecoveryCenterMetric
-        label={t('recoveryCenter.metric.failures.label')}
-        display={openDeadLetters.length === 0 ? '0' : String(openDeadLetters.length)}
-        numericValue={openDeadLetters.length}
-        severity={openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn'}
-        icon={<AlertTriangle size={16} aria-hidden="true" />}
-        rationale={openDeadLetters.length === 0 ? t('recoveryCenter.metric.failures.rationaleEmpty') : t('recoveryCenter.metric.failures.rationale')}
-        onClick={() => props.onOpenTab('runs')}
-        testId="recovery-center-metric-failures"
-      />
-      <RecoveryCenterMetric
-        label={t('recoveryCenter.metric.mttr.label')}
-        display={metrics?.mttr.display ?? '—'}
-        numericValue={metrics?.mttr.value ?? null}
-        severity={metrics?.mttr.severity ?? 'neutral'}
-        icon={<RefreshCw size={16} aria-hidden="true" />}
-        rationale={metrics?.mttr ? tRecoveryMetricRationale(metrics.mttr) : t('recoveryCenter.metric.mttr.rationaleFallback')}
-        onClick={() => props.onOpenTab('operations')}
-        testId="recovery-center-metric-mttr"
-      />
-      <RecoveryCenterMetric
-        label={t('recoveryCenter.metric.approvals.label')}
-        display={waitingNodes.length === 0 ? '0' : String(waitingNodes.length)}
-        numericValue={waitingNodes.length}
-        severity={waitingNodes.length === 0 ? 'healthy' : 'warn'}
-        icon={<Users size={16} aria-hidden="true" />}
-        rationale={waitingNodes.length === 0 ? t('recoveryCenter.metric.approvals.rationaleEmpty') : t('recoveryCenter.metric.approvals.rationale')}
-        onClick={() => props.onOpenTab('runs')}
-        testId="recovery-center-metric-approvals"
-      />
-      <RecoveryCenterMetric
-        label={t('recoveryCenter.metric.replay.label')}
-        display={metrics?.replayRate.display ?? '—'}
-        numericValue={metrics?.replayRate.value ?? null}
-        severity={metrics?.replayRate.severity ?? 'neutral'}
-        icon={<Zap size={16} aria-hidden="true" />}
-        rationale={metrics?.replayRate ? tRecoveryMetricRationale(metrics.replayRate) : t('recoveryCenter.metric.replay.rationaleFallback')}
-        onClick={() => props.onOpenTab('operations')}
-        testId="recovery-center-metric-replay"
-      />
-    </section>
+    <VitalSignsStrip
+      tiles={homeTiles}
+      ariaLabel={t('recoveryCenter.metricStripAria') as string}
+      testId="recovery-center-metric-strip"
+    />
   )
 
   // Operator chat surface (left, 1.7fr) + live status rail (right, 1fr).
