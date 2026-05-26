@@ -29,7 +29,7 @@ import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
 import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { AiCopilotPanel } from './AiCopilotPanel'
-import { OperationsPanel } from './OperationsPanel'
+import { OperationsPage } from './OperationsPage'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { ReplayLabForkDialog } from './ReplayLabForkDialog'
@@ -116,7 +116,7 @@ export function RightPanel(props: RightPanelProps) {
       <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
     </PanelChrome>
   )
-  if (props.tab === 'operations') return <OperationsPanel />
+  if (props.tab === 'operations') return <OperationsPage />
   if (props.tab === 'members') return (
     <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
       <MembersPanel />
