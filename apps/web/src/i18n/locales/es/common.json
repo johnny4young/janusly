@@ -667,6 +667,17 @@
   "operations.rateLimiter.degradedBucketsTooltip": "Grupos degradados: {{buckets}}",
   "operations.rateLimiter.copyHint": "No bloquea solicitudes — distinto de un corte por presupuesto.",
 
+  "operations.section.railLabel": "Secciones de Operations",
+  "operations.section.attentionDot": "Requiere atención",
+  "operations.section.overview.label": "Resumen",
+  "operations.section.overview.helper": "Métricas principales y clusters de fallos recurrentes.",
+  "operations.section.reliability.label": "Confiabilidad",
+  "operations.section.reliability.helper": "Políticas de alerta, entregas recientes y el presupuesto de IA.",
+  "operations.section.access.label": "Acceso",
+  "operations.section.access.helper": "Políticas de auth, directorio SCIM y permisos por rol.",
+  "operations.section.integrations.label": "Integraciones",
+  "operations.section.integrations.helper": "Salud de credenciales y servidores MCP externos.",
+
   "operations.credentialHealth.kicker": "Infraestructura",
   "operations.credentialHealth.title": "Salud de credenciales",
   "operations.credentialHealth.intro": "Credenciales y conexiones MCP usadas por los flujos. Los problemas aparecen aquí antes de que una ejecución falle.",

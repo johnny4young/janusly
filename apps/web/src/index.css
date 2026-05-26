@@ -6305,6 +6305,121 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   background: var(--we-warning);
 }
 
+/* ==========================================================================
+   Operations page — sticky vertical sub-tab rail + active-only content
+   column. Replaces the legacy `OperationsPanel` vertical stack. Only the
+   active sub-tab's cards mount, so per-refresh API traffic on this page
+   drops from ~9 calls (every card self-fetched) to ~2-3 (header metrics +
+   active tab).
+   ========================================================================== */
+.we-operations-page {
+  display: grid;
+  gap: 16px;
+}
+
+.we-operations-header {
+  display: grid;
+  gap: 12px;
+}
+
+.we-operations-page__body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.we-operations-page__content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.we-operations-rail {
+  position: sticky;
+  /* The app shell has a 56px top header; sticking the rail just below
+     keeps the tabs in view as the operator scrolls a long card list. */
+  top: 16px;
+  align-self: start;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface);
+  padding: 6px;
+}
+
+.we-operations-rail > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.we-operations-rail__tab {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--we-text-2);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 80ms ease-out, color 80ms ease-out, border-color 80ms ease-out;
+}
+
+.we-operations-rail__tab:hover {
+  background: var(--we-faint-soft, color-mix(in srgb, var(--we-faint) 25%, transparent));
+  color: var(--we-text-1);
+}
+
+.we-operations-rail__tab:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-operations-rail__tab[data-active="true"] {
+  background: color-mix(in srgb, var(--we-primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--we-primary) 30%, transparent);
+  color: var(--we-text-1);
+}
+
+.we-operations-rail__icon {
+  display: inline-grid;
+  place-items: center;
+  color: var(--we-primary);
+}
+
+.we-operations-rail__label {
+  letter-spacing: 0;
+}
+
+/* Attention dot — fires on the sub-tabs whose signal sources are at the
+   header level (Overview: any unhealthy metric; Reliability: limiter
+   degraded or budget blocked). The `data-severity` attribute mirrors the
+   `.panel-card[data-severity]` vocabulary so the colour story stays
+   consistent across the design system. */
+.we-operations-rail__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--we-warning);
+}
+
+.we-operations-rail__dot[data-severity="danger"] {
+  background: var(--we-danger);
+}
+
+.we-operations-rail__dot[data-severity="warning"] {
+  background: var(--we-warning);
+}
+
 /* ----------------- Recovery dialog -------------------------------------- */
 
 .we-recovery-dialog {
