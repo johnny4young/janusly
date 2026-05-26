@@ -606,6 +606,18 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
+/* Severity stripe — opt-in via `data-severity` on a card. Lets an operator
+   scan a long stack and immediately see which surface needs attention. v1 keeps
+   the vocabulary tight (`danger` + `warning`) matching the existing tokens.
+   Reusing the existing `--we-danger` / `--we-warning` paints keeps the design
+   system consistent with `.we-list-row[data-severity]` and `.we-recovery-center-tile[data-severity]`.
+   Targets both `.panel-card` and `.we-card` because they share the same base
+   border-shape rule above and both are used as top-level operational surfaces. */
+.panel-card[data-severity="danger"],
+.we-card[data-severity="danger"] { border-left: 3px solid var(--we-danger); }
+.panel-card[data-severity="warning"],
+.we-card[data-severity="warning"] { border-left: 3px solid var(--we-warning); }
+
 .sidebar-section { padding: 14px; }
 .we-card { padding: 14px; }
 
@@ -2023,6 +2035,55 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .we-allclear__copy { display: grid; gap: 2px; }
 .we-allclear__copy strong { font-size: 13px; color: var(--we-success); font-weight: 700; letter-spacing: -0.01em; }
 .we-allclear__copy span { font-size: 12px; color: var(--we-ink-soft); line-height: 1.45; }
+
+/* Shared empty-state shape used across operational surfaces (DLQ empty,
+   no clusters, no alerts, etc). Caller supplies the icon + copy; the layout
+   stays uniform so the operator recognizes "nothing here" at a glance. */
+.we-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  text-align: center;
+}
+
+.we-empty-state__icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: var(--we-faint);
+  color: var(--we-ink-soft);
+  display: grid;
+  place-items: center;
+}
+
+.we-empty-state__icon > svg {
+  width: 28px;
+  height: 28px;
+}
+
+.we-empty-state__copy {
+  display: grid;
+  gap: 4px;
+  max-width: 360px;
+}
+
+.we-empty-state__kicker {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--we-text-1);
+  letter-spacing: -0.01em;
+}
+
+.we-empty-state__body {
+  font-size: 12px;
+  color: var(--we-text-2);
+  line-height: 1.5;
+}
+
+.we-empty-state__cta {
+  margin-top: 4px;
+}
 
 /* ==========================================================================
    Command palette — Cmd+K modal. Glass backdrop, lifted card, keyboard

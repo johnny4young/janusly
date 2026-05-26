@@ -90,7 +90,7 @@ describe('<RecentAlertsCard />', () => {
     render(<RecentAlertsCard />)
 
     await waitFor(() => {
-      expect(screen.getByText(/No alerts fired yet/i)).toBeInTheDocument()
+      expect(screen.getByTestId('recent-alerts-empty')).toBeInTheDocument()
     })
   })
 
