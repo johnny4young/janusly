@@ -667,6 +667,17 @@
   "operations.rateLimiter.degradedBucketsTooltip": "Degraded buckets: {{buckets}}",
   "operations.rateLimiter.copyHint": "Non-blocking — distinct from a hard budget block.",
 
+  "operations.section.railLabel": "Operations sections",
+  "operations.section.attentionDot": "Needs attention",
+  "operations.section.overview.label": "Overview",
+  "operations.section.overview.helper": "Headline metrics and recurring failure clusters.",
+  "operations.section.reliability.label": "Reliability",
+  "operations.section.reliability.helper": "Alert policies, recent dispatches, and the AI budget.",
+  "operations.section.access.label": "Access",
+  "operations.section.access.helper": "Auth policies, SCIM directory, and per-role permissions.",
+  "operations.section.integrations.label": "Integrations",
+  "operations.section.integrations.helper": "Credential health and external MCP servers.",
+
   "operations.credentialHealth.kicker": "Infrastructure",
   "operations.credentialHealth.title": "Credential health",
   "operations.credentialHealth.intro": "Credentials and MCP connections used by workflows. Issues surface here before a run fails.",
