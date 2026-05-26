@@ -134,6 +134,39 @@ export type CanvasTab = (typeof CANVAS_TABS)[number]
  *  check honest while the type predicate keeps callers strict. */
 export const isCanvasTab = (tab: ActiveTab): tab is CanvasTab =>
   (CANVAS_TABS as readonly string[]).includes(tab)
+
+/**
+ * Decides how the App shell mounts the canvas + contextual slot for the
+ * given tab. Three closed states:
+ *
+ * - `home`: canvas is NOT in the DOM (the home page owns the full main
+ *   slot via `RecoveryCenterPanel`). Users who only ever visit the home
+ *   page never pay the React Flow runtime cost.
+ * - Canvas tab (`copilot` / `inspector`): canvas mounted AND visible;
+ *   contextual slot is NOT rendered (the right rail handles the panel).
+ * - Any other tab: canvas mounted but HIDDEN via `display: none` so the
+ *   root-level `<ReactFlowProvider>` retains viewport state across the
+ *   navigation; the contextual main slot renders alongside.
+ *
+ * Returning a small struct (vs three boolean call sites) keeps the dispatcher
+ * inside `App.tsx` legible and lets a unit test cover every tab cheaply.
+ */
+export type CanvasVisibility = {
+  /** True when the canvas wrapper element exists in the DOM. */
+  mounted: boolean
+  /** True when the canvas is visible (one of `CANVAS_TABS`). */
+  visible: boolean
+  /** True when the contextual main slot should render alongside the canvas. */
+  contextualSlot: boolean
+}
+
+export function getCanvasVisibility(activeTab: ActiveTab): CanvasVisibility {
+  if (activeTab === 'home') {
+    return { mounted: false, visible: false, contextualSlot: false }
+  }
+  const canvas = isCanvasTab(activeTab)
+  return { mounted: true, visible: canvas, contextualSlot: !canvas }
+}
 /**
  * JSON-Schema-subset describing one input field on a workflow's declared
  * `inputs` shape. Mirrors `WorkflowInputSchemaShape` in `@janusly/shared`.

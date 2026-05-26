@@ -42,7 +42,7 @@ import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { DeadLetter } from './components/DeadLettersPanel'
 import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
-import { isCanvasTab } from './types'
+import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { useT } from './i18n'
 
@@ -804,16 +804,19 @@ export default function App() {
         />
       }
       main={(() => {
-        // Three-branch layout dispatch:
-        //  - `home` owns the full main slot via `RecoveryCenterPanel`
-        //    (no canvas, no right panel) — its own dedicated surface.
-        //  - Canvas tabs (AI Studio + Inspector) keep the React Flow
-        //    canvas in main and the right panel as the contextual rail.
-        //  - Every other tab is admin / configuration / read-only and
-        //    benefits from the full main-slot width — the same
-        //    `RightPanel` content renders inside a `data-layout="contextual"`
-        //    wrapper that the CSS centers + pads to `--we-content-max-width`.
-        if (activeTab === 'home') {
+        // Layout dispatch driven by `getCanvasVisibility(activeTab)`:
+        //  - `home` (mounted: false) owns the full main slot via
+        //    `RecoveryCenterPanel` — no canvas in the DOM at all.
+        //  - Canvas tabs (mounted: true, visible: true) mount the canvas
+        //    wrapper visibly; the contextual rail does not render
+        //    because the right panel takes its place.
+        //  - Every other tab (mounted: true, visible: false) keeps the
+        //    canvas mounted but hidden via `display: none`. The
+        //    root-level `<ReactFlowProvider>` (see `main.tsx`) holds the
+        //    React Flow viewport state — destroying the wrapper would
+        //    reset zoom + pan on every navigation back to the editor.
+        const visibility = getCanvasVisibility(activeTab)
+        if (!visibility.mounted) {
           return (
             <RecoveryCenterPanel
               runs={runs}
@@ -827,26 +830,34 @@ export default function App() {
             />
           )
         }
-        if (isCanvasTab(activeTab)) {
-          return (
-            <WorkflowCanvas
-              nodes={visibleNodes}
-              edges={visibleEdges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={connect}
-              onNodeClick={(_, node) => {
-                selectNode(node.id)
-                setActiveTab('inspector')
-              }}
-              onEdgeClick={(_, edge) => {
-                selectEdge(edge.id)
-                setActiveTab('inspector')
-              }}
-            />
-          )
-        }
-        return <div data-layout="contextual">{rightPanelElement}</div>
+        return (
+          <>
+            <div
+              className="workspace-canvas-wrapper"
+              data-canvas-visible={visibility.visible ? 'true' : 'false'}
+              data-testid="workspace-canvas-wrapper"
+            >
+              <WorkflowCanvas
+                nodes={visibleNodes}
+                edges={visibleEdges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={connect}
+                onNodeClick={(_, node) => {
+                  selectNode(node.id)
+                  setActiveTab('inspector')
+                }}
+                onEdgeClick={(_, edge) => {
+                  selectEdge(edge.id)
+                  setActiveTab('inspector')
+                }}
+              />
+            </div>
+            {visibility.contextualSlot && (
+              <div data-layout="contextual">{rightPanelElement}</div>
+            )}
+          </>
+        )
       })()}
       panel={isCanvasTab(activeTab) ? rightPanelElement : null}
       overlay={
