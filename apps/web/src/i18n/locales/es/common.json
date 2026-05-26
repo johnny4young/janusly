@@ -1969,5 +1969,16 @@
   "workflowMetadata.action.expandRunbook": "Ver runbook completo",
   "workflowMetadata.action.collapseRunbook": "Contraer runbook",
   "workflowMetadata.toast.saved": "Información del workflow guardada",
-  "workflowMetadata.toast.saveFailed": "No se pudo guardar la información"
+  "workflowMetadata.toast.saveFailed": "No se pudo guardar la información",
+
+  "emptyState.alerts.kicker": "Sin alertas recientes",
+  "emptyState.alerts.body": "Nada se disparó en esta ventana. Las nuevas entregas aparecen aquí cuando una política captura un evento que coincide.",
+  "emptyState.clusters.kicker": "Sin fallos recurrentes",
+  "emptyState.clusters.body": "Janusly agrupa errores repetidos aquí. La lista permanece tranquila cuando la ventana no tiene clusters que merezcan atención.",
+  "emptyState.dlq.kicker": "La cola de recuperación está limpia",
+  "emptyState.dlq.body": "Ningún handoff fallido coincide con el filtro activo. Los reintentados y resueltos aparecen en sus propias pestañas.",
+  "emptyState.members.kicker": "Solo tú por aquí",
+  "emptyState.members.body": "Invita a alguien del equipo por correo para compartir el acceso. Elige el rol más pequeño que le permita hacer su trabajo.",
+  "emptyState.credentials.kicker": "Sin credenciales configuradas",
+  "emptyState.credentials.body": "Agrega una credencial en Credentials para habilitar Slack, GitHub y tools de MCP. Los chequeos de salud aparecen aquí cuando lo hagas."
 }

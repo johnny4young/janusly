@@ -16,8 +16,9 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { AlertTriangle, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import { RecoveryDialog } from './RecoveryDialog'
 import type { DeadLetter } from './DeadLettersPanel'
@@ -214,13 +215,26 @@ export function FailureClustersCard() {
     return (
       <section className="panel-card">
         <div className="section-kicker">{t('clusters.heading')}</div>
-        <p className="helper-text">{t('clusters.empty', { days: windowDays })}</p>
+        <EmptyState
+          icon={<CheckCircle2 />}
+          kicker={t('emptyState.clusters.kicker') as string}
+          body={t('emptyState.clusters.body') as string}
+          testId="clusters-empty"
+        />
       </section>
     )
   }
 
+  const cardSeverity: 'danger' | 'warning' | undefined = clusters.some(
+    (c) => severityForCategory(c.category) === 'fail',
+  )
+    ? 'danger'
+    : clusters.some((c) => severityForCategory(c.category) === 'warn')
+      ? 'warning'
+      : undefined
+
   return (
-    <section className="panel-card">
+    <section className="panel-card" data-severity={cardSeverity}>
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('clusters.heading')}</div>

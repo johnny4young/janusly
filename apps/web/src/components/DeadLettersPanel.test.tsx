@@ -83,6 +83,25 @@ describe('<DeadLettersPanel />', () => {
     expect(screen.queryByTestId('dlq-row-open-2')).toBeNull()
   })
 
+  it('keeps the card warning stripe when open rows exist outside the active filter', async () => {
+    const rows = [
+      mockDeadLetter('open-1', { status: 'open' }),
+      mockDeadLetter('replayed-1', { status: 'replayed' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-open-1')).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByLabelText(/dlq\.show|show/i), { target: { value: 'replayed' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-replayed-1')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Recovery queue').closest('section')).toHaveAttribute('data-severity', 'warning')
+  })
+
   it('clicking a DLQ row updates the inspector selection state', async () => {
     const rows = [
       mockDeadLetter('a', { status: 'open' }),

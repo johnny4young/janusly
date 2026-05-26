@@ -1969,5 +1969,16 @@
   "workflowMetadata.action.expandRunbook": "Show full runbook",
   "workflowMetadata.action.collapseRunbook": "Collapse runbook",
   "workflowMetadata.toast.saved": "Workflow metadata saved",
-  "workflowMetadata.toast.saveFailed": "Couldn't save workflow metadata"
+  "workflowMetadata.toast.saveFailed": "Couldn't save workflow metadata",
+
+  "emptyState.alerts.kicker": "No recent alerts",
+  "emptyState.alerts.body": "Nothing fired in this window. New deliveries land here as policies catch matching events.",
+  "emptyState.clusters.kicker": "No recurring failures",
+  "emptyState.clusters.body": "Janusly groups repeated errors here. The list stays quiet when the window has no clusters worth surfacing.",
+  "emptyState.dlq.kicker": "Recovery queue is clear",
+  "emptyState.dlq.body": "No failed handoffs match the active filter. Retried and resolved entries appear under their own tabs.",
+  "emptyState.members.kicker": "Only you here so far",
+  "emptyState.members.body": "Invite a teammate by email to share access. Pick the smallest role that lets them do their job.",
+  "emptyState.credentials.kicker": "No credentials wired yet",
+  "emptyState.credentials.body": "Add a credential under Credentials to power Slack, GitHub, and MCP tools. Health checks land here once you do."
 }

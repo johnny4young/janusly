@@ -17,8 +17,9 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { ShieldCheck } from 'lucide-react'
+import { KeyRound, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 
@@ -140,8 +141,21 @@ export function CredentialHealthCard() {
 
   const isEmpty = payload.credentials.length === 0 && payload.mcpConnections.length === 0
 
+  const credentialSeverities = payload.credentials.map(severityForCredential)
+  const mcpSeverities = payload.mcpConnections.map(severityForMcp)
+  const cardSeverity: 'danger' | 'warning' | undefined =
+    credentialSeverities.includes('unhealthy') || mcpSeverities.includes('unhealthy')
+      ? 'danger'
+      : credentialSeverities.includes('warn') || mcpSeverities.includes('warn')
+        ? 'warning'
+        : undefined
+
   return (
-    <section className="panel-card we-ops-credential-card" aria-label={t('operations.credentialHealth.title') as string}>
+    <section
+      className="panel-card we-ops-credential-card"
+      data-severity={cardSeverity}
+      aria-label={t('operations.credentialHealth.title') as string}
+    >
       <div className="panel-heading">
         <div className="panel-heading-copy">
           <div className="section-kicker">{t('operations.credentialHealth.kicker')}</div>
@@ -152,7 +166,12 @@ export function CredentialHealthCard() {
       </div>
 
       {isEmpty && (
-        <p className="we-ops-credential-card__empty">{t('operations.credentialHealth.empty')}</p>
+        <EmptyState
+          icon={<KeyRound />}
+          kicker={t('emptyState.credentials.kicker') as string}
+          body={t('emptyState.credentials.body') as string}
+          testId="credentials-empty"
+        />
       )}
 
       {payload.credentials.length > 0 && (

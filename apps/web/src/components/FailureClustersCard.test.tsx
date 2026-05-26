@@ -45,7 +45,7 @@ describe('<FailureClustersCard />', () => {
 
     render(<FailureClustersCard />)
 
-    expect(await screen.findByText('No recurring failures in the last 7 days.')).toBeInTheDocument()
+    expect(await screen.findByTestId('clusters-empty')).toBeInTheDocument()
   })
 
   it('renders an error state when the cluster endpoint fails', async () => {

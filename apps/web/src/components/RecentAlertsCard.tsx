@@ -11,8 +11,9 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, BellOff } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
 
@@ -75,8 +76,18 @@ export function RecentAlertsCard(): React.ReactElement {
     }
   }, [platformVersion])
 
+  const cardSeverity: 'warning' | undefined = items.some(
+    (item) => item.outcome === 'delivery_failed',
+  )
+    ? 'warning'
+    : undefined
+
   return (
-    <section className="we-card we-recent-alerts" aria-label={t('alerts.recent.title')}>
+    <section
+      className="we-card we-recent-alerts"
+      data-severity={cardSeverity}
+      aria-label={t('alerts.recent.title')}
+    >
       <div className="we-card__header">
         <h3>
           <Bell size={16} aria-hidden /> {t('alerts.recent.title')}
@@ -85,7 +96,12 @@ export function RecentAlertsCard(): React.ReactElement {
       <div className="we-recent-alerts__list" data-testid="recent-alerts-list">
         {loading && <div className="we-list-row--empty">{t('common.loading')}</div>}
         {!loading && items.length === 0 && (
-          <div className="we-list-row--empty">{t('alerts.recent.empty')}</div>
+          <EmptyState
+            icon={<BellOff />}
+            kicker={t('emptyState.alerts.kicker') as string}
+            body={t('emptyState.alerts.body') as string}
+            testId="recent-alerts-empty"
+          />
         )}
         {!loading &&
           items.map((item) => (
