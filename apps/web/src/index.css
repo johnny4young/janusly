@@ -1042,6 +1042,20 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
     linear-gradient(135deg, var(--we-surface) 0%, var(--we-surface-muted) 100%);
 }
 
+/* Hidden-but-mounted canvas wrapper — used by the App dispatcher when the
+   active tab is not one of the canvas tabs (`copilot` / `inspector`). The
+   canvas DOM stays in the tree so React Flow's viewport state (zoom + pan)
+   survives the navigation; CSS hides it from the layout. The visible state
+   inherits the `.canvas-frame` layout for free because the inner
+   `WorkflowCanvas` keeps that class on its root. */
+.workspace-canvas-wrapper {
+  height: 100%;
+}
+
+.workspace-canvas-wrapper[data-canvas-visible="false"] {
+  display: none;
+}
+
 .canvas-toolbar {
   align-items: center;
   background: var(--we-surface-glass);

@@ -7,6 +7,7 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { ReactFlowProvider } from '@xyflow/react'
 import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import './index.css'
@@ -24,9 +25,18 @@ initI18n(resolveAppLanguage(stored))
 bootTheme()
 
 void import('./App').then(({ default: App }) => {
+  // The `<ReactFlowProvider>` lives at the app root so the canvas's viewport
+  // (zoom / pan) survives `inspector → operations → inspector` navigation.
+  // Inside the provider, the `App.tsx` dispatcher keeps the canvas DOM
+  // mounted on every non-home tab — visible on canvas tabs, hidden via
+  // `display: none` on non-canvas tabs. Tearing the canvas wrapper down on
+  // each navigation would destroy the provider's per-canvas state and reset
+  // zoom + pan to defaults.
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <App />
+      <ReactFlowProvider>
+        <App />
+      </ReactFlowProvider>
     </React.StrictMode>
   )
 })
