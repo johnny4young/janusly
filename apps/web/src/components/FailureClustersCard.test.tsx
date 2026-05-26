@@ -58,6 +58,51 @@ describe('<FailureClustersCard />', () => {
     })
   })
 
+  it('caps the samples list to the first 50 with a show-more toggle when a cluster has more', async () => {
+    // Use short padded ids so the first-12-char slice the component
+    // renders (`runId.slice(0, 12)`) still distinguishes samples.
+    // Example index 1 → "run-00000001-x", sliced to "run-00000001".
+    const samples = Array.from({ length: 75 }, (_, i) => ({
+      source: 'dead_letter' as const,
+      id: `dlq-${i + 1}`,
+      runId: `run-${String(i + 1).padStart(8, '0')}-x`,
+    }))
+    vi.mocked(api).mockResolvedValueOnce({
+      totalSamples: 75,
+      windowDays: 30,
+      clusters: [{
+        signature: 'HTTP 401 on http node',
+        category: 'http_error',
+        frequency: 75,
+        affectedWorkflows: [{ workflowId: 'wf', workflowName: 'Flow', count: 75 }],
+        firstSeen: '2026-01-01T10:00:00.000Z',
+        lastSeen: '2026-01-01T11:00:00.000Z',
+        suggestedOwner: 'workflow_author',
+        samples,
+      }],
+    })
+
+    render(<FailureClustersCard />)
+
+    // Expand the cluster so the samples list is in the DOM.
+    fireEvent.click(await screen.findByRole('button', { name: /HTTP 401 on http node/i }))
+
+    // First 50 samples render; the 51st is NOT in the DOM yet.
+    expect(screen.getByText('run-00000001…')).toBeInTheDocument()
+    expect(screen.getByText('run-00000050…')).toBeInTheDocument()
+    expect(screen.queryByText('run-00000051…')).toBeNull()
+
+    // The toggle reveals the rest. Label includes the remaining count.
+    const toggle = screen.getByTestId('cluster-samples-toggle-HTTP 401 on http node')
+    expect(toggle).toHaveTextContent(/25/)
+    fireEvent.click(toggle)
+
+    expect(screen.getByText('run-00000051…')).toBeInTheDocument()
+    expect(screen.getByText('run-00000075…')).toBeInTheDocument()
+    // Label flips to "Show fewer".
+    expect(screen.getByTestId('cluster-samples-toggle-HTTP 401 on http node')).toHaveTextContent(/fewer/i)
+  })
+
   it('falls back to a still-open DLQ member when the representative is stale', async () => {
     const staleDlq = {
       id: 'dlq-stale',

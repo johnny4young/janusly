@@ -76,6 +76,11 @@ type ClusterRecoveryState =
 
 const MIN_FREQUENCY_FOR_BULK_RECOVER = 2
 
+/** Initial sample count shown inside an expanded cluster — operators
+ *  can opt-in to all via the show-more button. Capping the default
+ *  avoids unbounded DOM growth on clusters with many recent samples. */
+const SAMPLES_PREVIEW_LIMIT = 50
+
 const CATEGORY_KEYS: Record<ClusterCategory, string> = {
   secret_missing: 'clusters.category.secret_missing',
   http_error: 'clusters.category.http_error',
@@ -111,6 +116,10 @@ export function FailureClustersCard() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  // Per-cluster opt-in for showing more than the first
+  // SAMPLES_PREVIEW_LIMIT entries. Keyed by `cluster.signature` to
+  // match the existing `expanded` dict shape.
+  const [showAllSamples, setShowAllSamples] = useState<Record<string, boolean>>({})
   const [recovery, setRecovery] = useState<ClusterRecoveryState | null>(null)
 
   const openClusterRecovery = async (cluster: FailureCluster) => {
@@ -278,13 +287,25 @@ export function FailureClustersCard() {
                   <div className="we-cluster-row__section">
                     <div className="field-label">{t('clusters.recent')}</div>
                     <ul className="we-cluster-row__samples">
-                      {cluster.samples.map((sample) => (
+                      {(showAllSamples[cluster.signature] ? cluster.samples : cluster.samples.slice(0, SAMPLES_PREVIEW_LIMIT)).map((sample) => (
                         <li key={`${sample.source}:${sample.id}`}>
                           <code>{sample.runId.slice(0, 12)}…</code>
                           <span className="helper-text">{sample.source === 'dead_letter' ? t('clusters.dlq') : t('clusters.failedRun')}</span>
                         </li>
                       ))}
                     </ul>
+                    {cluster.samples.length > SAMPLES_PREVIEW_LIMIT && (
+                      <button
+                        type="button"
+                        className="link-button"
+                        data-testid={`cluster-samples-toggle-${cluster.signature}`}
+                        onClick={() => setShowAllSamples((prev) => ({ ...prev, [cluster.signature]: !prev[cluster.signature] }))}
+                      >
+                        {showAllSamples[cluster.signature]
+                          ? t('clusters.showFewerSamples')
+                          : t('clusters.showMoreSamples', { count: cluster.samples.length - SAMPLES_PREVIEW_LIMIT })}
+                      </button>
+                    )}
                   </div>
                   {cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
                     && cluster.samples.some((s) => s.source === 'dead_letter') && (

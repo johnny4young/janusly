@@ -3099,6 +3099,17 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   color: var(--we-primary);
 }
 
+/* Virtualized list container — used by `useVirtualList`. Becomes the
+ * scroll surface for unbounded operator lists (DLQ rows + future
+ * panels). `overscroll-behavior: contain` prevents the scroll chain
+ * from propagating to the outer page when the user scrolls past the
+ * panel's ends. */
+.we-virtual-list {
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .workflow-node-head {
   align-items: center;
   display: grid;

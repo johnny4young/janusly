@@ -18,6 +18,18 @@ import { ReplayLabDialog } from './ReplayLabDialog'
 import { RecoveryItemBadge, type RecoveryItemBadgeData } from './RecoveryItemBadge'
 import { RecoveryItemDrawer, type RecoveryItemDrawerData } from './RecoveryItemDrawer'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
+import { useVirtualList } from '../hooks/useVirtualList'
+
+/** Row PITCH in CSS pixels for the virtualized DLQ list — the full
+ *  distance from one row's top to the next row's top in the flex
+ *  flow. That's the visual height of `.we-list-row` (~48px) PLUS the
+ *  `gap: 6px` `.we-list` applies between flex children. Using row
+ *  pitch (54px) instead of just the row height keeps the windowing
+ *  math aligned with the actual scroll surface — otherwise the
+ *  spacer undercounts by `(items.length - 1) × 6px` and the operator
+ *  can't reach the bottom of long lists. Tune here if either value
+ *  changes (row chrome height or `.we-list`'s gap). */
+const DLQ_ROW_HEIGHT = 54
 
 /** Web-side `dead_letters` row shape (matches the API's response). */
 export type DeadLetter = {
@@ -116,6 +128,27 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
 
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
 
+  // Virtualize the filtered list. With 100-200 rows in the Recovery
+  // Center, mounting every row as a real `<li>` costs hundreds of ms
+  // of reconciliation per `platformVersion` bump. The hook renders a
+  // 15-row window in the visible viewport plus overscan; jsdom + SSR
+  // get all rows via the 0-height fallback so tests stay simple.
+  const {
+    containerRef: virtualContainerRef,
+    visibleItems: visibleDeadLetters,
+    totalHeight: virtualTotalHeight,
+    startOffset: virtualStartOffset,
+  } = useVirtualList({
+    items: filtered,
+    rowHeight: DLQ_ROW_HEIGHT,
+    // Reset scroll on filter swap, NOT on every parent refetch — the
+    // `platformVersion`-driven refetch produces a new `deadLetters`
+    // reference even when the content is identical, and resetting
+    // scroll there would jump the operator's view to row 0 on every
+    // bump. The filter signal is the real "visible set changed" cue.
+    resetScrollKey: status,
+  })
+
   return (
     <>
       <FailureClustersCard />
@@ -152,43 +185,47 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           </div>
         )}
         {filtered.length > 0 && (
-          <ul className="we-list">
-            {filtered.map(item => {
-              const severity = item.status === 'open' ? 'danger' : item.status === 'replayed' ? 'success' : 'cobalt'
-              return (
-                <li key={item.id}>
-                  <div
-                    className="we-list-row"
-                    data-clickable="true"
-                    data-severity={severity}
-                    data-testid={`dlq-row-${item.id}`}
-                    onClick={() => setSelectedId(item.id)}
-                  >
-                    <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
-                    <div className="we-list-row__body">
-                      <strong>{item.nodeId}</strong>
-                      <small>
-                        {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
-                        {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
-                      </small>
-                    </div>
-                    <div className="we-list-row__meta">
-                      <span className={`we-list-row__pill we-list-row__pill--${severity === 'danger' ? 'danger' : severity === 'success' ? 'success' : 'cobalt'}`}>
-                        {formatStatusLabel(item.status)}
-                      </span>
-                      <RecoveryItemBadge
-                        item={recoveryByDeadLetterId.get(item.id) ?? null}
-                        onOpen={() => {
-                          const ri = recoveryByDeadLetterId.get(item.id)
-                          if (ri) setOpenRecoveryItemId(ri.id)
-                        }}
-                      />
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+          <div ref={virtualContainerRef} className="we-virtual-list" data-testid="dlq-virtual-list">
+            <div style={{ height: virtualTotalHeight, position: 'relative' }}>
+              <ul className="we-list" style={{ transform: `translateY(${virtualStartOffset}px)` }}>
+                {visibleDeadLetters.map(({ item }) => {
+                  const severity = item.status === 'open' ? 'danger' : item.status === 'replayed' ? 'success' : 'cobalt'
+                  return (
+                    <li key={item.id}>
+                      <div
+                        className="we-list-row"
+                        data-clickable="true"
+                        data-severity={severity}
+                        data-testid={`dlq-row-${item.id}`}
+                        onClick={() => setSelectedId(item.id)}
+                      >
+                        <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
+                        <div className="we-list-row__body">
+                          <strong>{item.nodeId}</strong>
+                          <small>
+                            {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
+                            {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
+                          </small>
+                        </div>
+                        <div className="we-list-row__meta">
+                          <span className={`we-list-row__pill we-list-row__pill--${severity === 'danger' ? 'danger' : severity === 'success' ? 'success' : 'cobalt'}`}>
+                            {formatStatusLabel(item.status)}
+                          </span>
+                          <RecoveryItemBadge
+                            item={recoveryByDeadLetterId.get(item.id) ?? null}
+                            onOpen={() => {
+                              const ri = recoveryByDeadLetterId.get(item.id)
+                              if (ri) setOpenRecoveryItemId(ri.id)
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          </div>
         )}
         {openRecoveryItem && (
           <RecoveryItemDrawer

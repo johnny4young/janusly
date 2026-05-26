@@ -933,6 +933,9 @@
   "clusters.relative.minutes": "hace {{count}}m",
   "clusters.relative.hours": "hace {{count}}h",
   "clusters.relative.days": "hace {{count}}d",
+  "clusters.showMoreSamples_one": "Mostrar {{count}} muestra más",
+  "clusters.showMoreSamples_other": "Mostrar {{count}} muestras más",
+  "clusters.showFewerSamples": "Mostrar menos muestras",
 
   "aiCopilot.healthOn": "IA conectada",
   "aiCopilot.healthOff": "Modo local activo",
