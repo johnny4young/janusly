@@ -11,6 +11,7 @@ import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-rea
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
+import { EmptyState } from './EmptyState'
 import { FailureClustersCard } from './FailureClustersCard'
 import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 import { RecoveryDialog } from './RecoveryDialog'
@@ -126,6 +127,9 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     return deadLetters.filter(item => item.status === status)
   }, [deadLetters, status])
 
+  const hasOpenEntry = deadLetters.some((item) => item.status === 'open')
+  const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
+
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
 
   // Virtualize the filtered list. With 100-200 rows in the Recovery
@@ -153,7 +157,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     <>
       <FailureClustersCard />
       <AutoHealingPendingCard />
-      <section className="panel-card">
+      <section className="panel-card" data-severity={cardSeverity}>
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('dlq.kicker')}</div>
@@ -176,13 +180,12 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
 
       <div className="panel-list">
         {filtered.length === 0 && (
-          <div className="we-allclear" data-testid="dlq-empty">
-            <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
-            <div className="we-allclear__copy">
-              <strong>{t('dlq.empty')}</strong>
-              <span>{t('dlq.emptyHelper')}</span>
-            </div>
-          </div>
+          <EmptyState
+            icon={<CircleCheck />}
+            kicker={t('emptyState.dlq.kicker') as string}
+            body={t('emptyState.dlq.body') as string}
+            testId="dlq-empty"
+          />
         )}
         {filtered.length > 0 && (
           <div ref={virtualContainerRef} className="we-virtual-list" data-testid="dlq-virtual-list">

@@ -14,6 +14,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { CircleCheck, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole } from '../types'
 import { tApiError, useT } from '../i18n'
@@ -177,13 +178,12 @@ export function MembersPanel() {
       </section>
 
       {members.length === 0 && (
-        <div className="we-allclear" data-testid="members-empty">
-          <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
-          <div className="we-allclear__copy">
-            <strong>{t('members.empty')}</strong>
-            <span>{t('members.emptyHelper')}</span>
-          </div>
-        </div>
+        <EmptyState
+          icon={<CircleCheck />}
+          kicker={t('emptyState.members.kicker') as string}
+          body={t('emptyState.members.body') as string}
+          testId="members-empty"
+        />
       )}
 
       {members.length > 0 && (
