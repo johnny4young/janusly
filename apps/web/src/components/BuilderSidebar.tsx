@@ -4,7 +4,7 @@
  * Replicates `ui_kits/studio/sidebar.html` from the design system zip:
  * (1) workflow header card (name + env chip + status row + 4-col action
  * strip), (2) AI-mode one-line strip, (3) search input, (4) grouped views
- * with collapse/expand state (Pinned / Build / Run / Workspace),
+ * with collapse/expand state (Pinned / Build / Run),
  * (5) pinned step palette + categorized step palette (AI / Flow control /
  * Human-in-the-loop / Tools & integrations / Misc), (6) bottom utility
  * strip with connection live indicator.
@@ -129,11 +129,25 @@ type NavItem = {
 }
 
 type NavGroup = {
-  key: 'pinned' | 'build' | 'run' | 'workspace'
+  key: 'pinned' | 'build' | 'run'
   labelKey: string
   items: NavItem[]
 }
 
+/** Three nav groups: Pinned (home shortcut), Build (authoring + discovery —
+ *  Templates/Marketplace live here because they're the surfaces an operator
+ *  uses to FIND the building blocks of a workflow), Run (operate-the-org —
+ *  Credentials/Members live here because they're runtime config, not authoring).
+ *
+ *  Adding a new tab means deciding which group it conceptually belongs to:
+ *  - "authoring or discovery" → Build
+ *  - "production-runtime config or admin" → Run
+ *  - "always-accessible shortcut" → Pinned
+ *
+ *  Adding a fourth group is a bigger UX call — three groups is the comfortable
+ *  ceiling for a vertical sidebar (PagerDuty / Vercel / Linear all converge
+ *  here). Re-evaluate only when an 11-item group emerges with no clean
+ *  sub-categorization. */
 const NAV_GROUPS: NavGroup[] = [
   {
     key: 'pinned',
@@ -149,6 +163,8 @@ const NAV_GROUPS: NavGroup[] = [
       { tab: 'copilot', labelKey: 'sidebar.nav.copilot.label', helperKey: 'sidebar.nav.copilot.helper', icon: <Sparkles size={13} />, meta: '⌘2' },
       { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
       { tab: 'inspector', labelKey: 'sidebar.nav.inspector.label', helperKey: 'sidebar.nav.inspector.helper', icon: <GitBranch size={13} /> },
+      { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },
+      { tab: 'marketplace', labelKey: 'sidebar.nav.marketplace.label', helperKey: 'sidebar.nav.marketplace.helper', icon: <Boxes size={13} /> },
     ],
   },
   {
@@ -158,16 +174,8 @@ const NAV_GROUPS: NavGroup[] = [
       { tab: 'runs', labelKey: 'sidebar.nav.runs.label', helperKey: 'sidebar.nav.runs.helper', icon: <Activity size={13} /> },
       { tab: 'multiAgent', labelKey: 'sidebar.nav.multiAgent.label', helperKey: 'sidebar.nav.multiAgent.helper', icon: <Layers3 size={13} /> },
       { tab: 'operations', labelKey: 'sidebar.nav.operations.label', helperKey: 'sidebar.nav.operations.helper', icon: <Gauge size={13} /> },
-    ],
-  },
-  {
-    key: 'workspace',
-    labelKey: 'sidebar.group.workspace',
-    items: [
-      { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },
-      { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },
-      { tab: 'marketplace', labelKey: 'sidebar.nav.marketplace.label', helperKey: 'sidebar.nav.marketplace.helper', icon: <Boxes size={13} /> },
       { tab: 'credentials', labelKey: 'sidebar.nav.credentials.label', helperKey: 'sidebar.nav.credentials.helper', icon: <KeyRound size={13} /> },
+      { tab: 'members', labelKey: 'sidebar.nav.members.label', helperKey: 'sidebar.nav.members.helper', icon: <Users size={13} /> },
     ],
   },
 ]
@@ -188,6 +196,13 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   misc: <Network size={11} />,
 }
 
+/** Closed sets of keys we accept from persisted state. Any value outside
+ *  the set (stale group from a previous version, hand-edited gibberish) is
+ *  silently dropped on read so the UI never tries to render or toggle a key
+ *  that doesn't exist in the current `NAV_GROUPS` / `NODE_CATEGORIES`. */
+const VALID_GROUP_KEYS = new Set<string>(NAV_GROUPS.map((g) => g.key))
+const VALID_CATEGORY_KEYS = new Set<string>(Object.keys(NODE_CATEGORIES))
+
 function loadStoredState(): StoredState {
   const fallback: StoredState = { openGroups: DEFAULT_OPEN_GROUPS, openCategories: DEFAULT_OPEN_CATEGORIES, collapsed: false }
   try {
@@ -195,8 +210,12 @@ function loadStoredState(): StoredState {
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as Partial<StoredState>
     return {
-      openGroups: Array.isArray(parsed.openGroups) ? parsed.openGroups : DEFAULT_OPEN_GROUPS,
-      openCategories: Array.isArray(parsed.openCategories) ? parsed.openCategories : DEFAULT_OPEN_CATEGORIES,
+      openGroups: Array.isArray(parsed.openGroups)
+        ? parsed.openGroups.filter((k): k is string => typeof k === 'string' && VALID_GROUP_KEYS.has(k))
+        : DEFAULT_OPEN_GROUPS,
+      openCategories: Array.isArray(parsed.openCategories)
+        ? parsed.openCategories.filter((k): k is string => typeof k === 'string' && VALID_CATEGORY_KEYS.has(k))
+        : DEFAULT_OPEN_CATEGORIES,
       collapsed: parsed.collapsed === true,
     }
   } catch {
