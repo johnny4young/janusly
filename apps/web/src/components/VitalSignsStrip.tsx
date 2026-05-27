@@ -24,7 +24,8 @@
  */
 
 import React from 'react'
-import { useAnimatedNumber, usePrefersReducedMotion } from '../hooks/useAnimatedNumber'
+import { useAnimatedNumber } from '../hooks/useAnimatedNumber'
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 export type VitalSignsTileSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
 
