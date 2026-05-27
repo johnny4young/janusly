@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { KeyRound, ShieldCheck } from 'lucide-react'
+import { Info, KeyRound, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
@@ -149,6 +149,8 @@ export function CredentialHealthCard() {
       : credentialSeverities.includes('warn') || mcpSeverities.includes('warn')
         ? 'warning'
         : undefined
+  const aboutSectionLabel = t('common.aboutSection') as string
+  const intro = t('operations.credentialHealth.intro') as string
 
   return (
     <section
@@ -159,8 +161,17 @@ export function CredentialHealthCard() {
       <div className="panel-heading">
         <div className="panel-heading-copy">
           <div className="section-kicker">{t('operations.credentialHealth.kicker')}</div>
-          <h3 style={{ margin: 0 }}>{t('operations.credentialHealth.title')}</h3>
-          <p className="helper-text">{t('operations.credentialHealth.intro')}</p>
+          <div className="we-heading-with-info">
+            <h3 style={{ margin: 0 }}>{t('operations.credentialHealth.title')}</h3>
+            <span
+              className="we-info-icon"
+              role="img"
+              aria-label={`${aboutSectionLabel}: ${intro}`}
+              title={intro}
+            >
+              <Info size={14} aria-hidden="true" />
+            </span>
+          </div>
         </div>
         <span className="panel-heading-icon"><ShieldCheck size={16} aria-hidden="true" /></span>
       </div>
