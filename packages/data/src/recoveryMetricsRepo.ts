@@ -367,3 +367,5 @@ export async function queryFailureClustersResolved(
     capped,
   };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

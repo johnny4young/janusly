@@ -902,6 +902,11 @@ const tools = {
       return { ok: false, provider: result.provider, error: result.error };
     },
   }),
+  /**
+   * Invariant (AGENTS.md "HTTP/SSRF"): `http.request` must use
+   * `fetchHttpTarget`, whose pinned undici Agent prevents DNS rebinding.
+   * A direct `fetch()` bypasses SSRF protection for untrusted URLs.
+   */
   "http.request": defineTool({
     name: "http.request",
     description: "Make an HTTP request to an external API.",

@@ -231,6 +231,10 @@ export async function schedulePendingMemoryPurge(input: {
  * "consent re-granted, by the way a pending purge was cancelled" (or
  * the false case: "no pending purge to cancel, either because none
  * was scheduled or the cancel failed").
+ *
+ * Invariant (AGENTS.md "Consent-revocation bulk purge"): callers MUST
+ * await this before the `memory.consent.granted` audit row so the returned
+ * boolean can accurately populate `pendingPurgeCancelled`.
  */
 export async function cancelPendingMemoryPurge(input: {
   orgId: string;

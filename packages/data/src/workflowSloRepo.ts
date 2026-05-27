@@ -62,3 +62,5 @@ export async function setWorkflowSlo(
     .where(and(eq(workflowVersions.orgId, orgId), eq(workflowVersions.id, existing.versionId)));
   return { versionId: existing.versionId, previousSlo: existing.slo };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

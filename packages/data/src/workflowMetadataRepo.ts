@@ -137,3 +137,5 @@ export async function upsertWorkflowMetadata(
   if (!record) throw new Error("workflow_metadata row missing immediately after upsert");
   return { record, previous };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

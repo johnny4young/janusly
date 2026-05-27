@@ -189,6 +189,10 @@ export async function markNodeQueued(runId: string, nodeId: string, attempt = 1)
  * `pending`. Returns `true` on success, `false` when another worker
  * already claimed. This invariant must not be replaced with a non-atomic
  * read-then-write.
+ *
+ * Invariant (AGENTS.md "Concurrency"): this conditional UPDATE is the
+ * only multi-worker double-claim guard; racing workers get true/false
+ * from the same atomic write. No read-then-write refactors.
  */
 export async function tryClaimNodeForQueue(runId: string, nodeId: string, attempt = 1): Promise<boolean> {
   const claimed = await db.update(runNodes)

@@ -137,3 +137,5 @@ export async function revokeSsoConnection(
 ): Promise<SsoConnectionRow | null> {
   return updateSsoConnection({ id: input.id, orgId: input.orgId, status: "revoked" });
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

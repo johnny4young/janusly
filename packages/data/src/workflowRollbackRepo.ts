@@ -81,3 +81,5 @@ export async function rollbackWorkflowVersion(input: {
     newVersion: nextVersion,
   };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

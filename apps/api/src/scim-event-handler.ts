@@ -186,9 +186,12 @@ export async function handleScimEvent(input: {
     }
   } catch (err) {
     try {
+      // Invariant (AGENTS.md "SCIM directory sync"): release the dedup
+      // claim on handler throws so WorkOS retries are not mistaken for
+      // already-processed events after a transient DB failure.
       await deps.deleteProcessedEvent({ eventId: event.id });
     } catch {
-      // Best-effort release; swallow secondary failures.
+      // Secondary release failure swallowed; original error rethrows below.
     }
     throw err;
   }
