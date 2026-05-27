@@ -25,6 +25,7 @@
    21. Failure clusters card
    22. Workflow version diff
    23. Operations dashboard
+   24. Accessibility primitives
    ========================================================================== */
 
 /* ==========================================================================
@@ -8944,5 +8945,27 @@ button.we-ops-metric-card--button {
 @media (max-width: 760px) {
   .we-ops-credential-card__row {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ==========================================================================
+   24. Accessibility primitives
+   ========================================================================== */
+
+/* Universal motion-off for users who opt in via OS settings. Component-level
+   @media (prefers-reduced-motion: reduce) blocks remain for surfaces that
+   need a stronger override (e.g. animation: none) — this universal block
+   only collapses durations so layout-essential transforms (React Flow pan,
+   inertial scroll) still run, just instantly. The !important is load-bearing
+   because the universal selector has zero specificity and would otherwise
+   lose to any class-scoped transition declaration. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

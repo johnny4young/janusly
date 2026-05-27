@@ -32,6 +32,7 @@ import {
 import { AuthProvider, isSupabaseConfigured } from '../auth'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
+import { requestOperationsSection } from './OperationsPage'
 import {
   type DensityPreference,
   type ThemePreference,
@@ -256,7 +257,14 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
                 <KeyRound size={11} aria-hidden="true" />
                 <span>{t('userMenu.ai.rotateKey')}</span>
               </button>
-              <button type="button" onClick={() => { onOpenTab?.('operations'); setOpen(false) }}>
+              <button
+                type="button"
+                onClick={() => {
+                  requestOperationsSection('reliability')
+                  onOpenTab?.('operations')
+                  setOpen(false)
+                }}
+              >
                 <DollarSign size={11} aria-hidden="true" />
                 <span>{t('userMenu.ai.setBudget')}</span>
               </button>

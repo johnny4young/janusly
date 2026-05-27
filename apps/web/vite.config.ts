@@ -3,13 +3,17 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
   },
   build: {
-    sourcemap: true,
+    // Sourcemaps in dev + staging so error tracking + DX stay good; off in
+    // production because inline .map files roughly double the JS bundle size
+    // shipped to the browser on the first cold load. Future error-tracking
+    // sidecar can flip this to 'hidden' to emit .map files without inlining.
+    sourcemap: mode !== 'production',
     rollupOptions: {
       output: {
         manualChunks: (id) => {
@@ -31,4 +35,4 @@ export default defineConfig({
     exclude: ['src/**/*.browser.test.{ts,tsx}', 'node_modules/**'],
     css: true,
   },
-})
+}))

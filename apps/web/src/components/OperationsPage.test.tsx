@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { OperationsPage } from './OperationsPage'
+import { OperationsPage, requestOperationsSection } from './OperationsPage'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -148,6 +149,22 @@ describe('<OperationsPage />', () => {
     expect(screen.getByTestId('stub-McpConnectionsPanel')).toBeInTheDocument()
     expect(screen.getByTestId('operations-rail-tab-integrations')).toHaveAttribute('aria-current', 'page')
     // Overview cards are NOT mounted because we hydrated to integrations.
+    expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
+  })
+
+  it('honors external section requests while already mounted', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage />)
+
+    await screen.findByTestId('stub-FailureClustersCard')
+    act(() => requestOperationsSection('reliability'))
+
+    await screen.findByTestId('stub-BudgetSettingsPanel')
+    expect(screen.getByTestId('operations-rail-tab-reliability')).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
   })
 
