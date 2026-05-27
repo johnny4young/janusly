@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Coins, Save, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
@@ -231,6 +231,8 @@ export function BudgetSettingsPanel() {
   const orgBudgetDisabled = useMemo(() => {
     return Number(form.monthlyUsd) === 0;
   }, [form.monthlyUsd]);
+  const aboutSectionLabel = t("common.aboutSection") as string;
+  const budgetIntro = t("budget.intro") as string;
 
   return (
     <section className="panel-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
@@ -238,8 +240,17 @@ export function BudgetSettingsPanel() {
         <span className="we-budget-settings__icon" aria-hidden="true"><Coins size={18} /></span>
         <div>
           <div className="section-kicker">{t("budget.kicker")}</div>
-          <h2 id="budget-settings-heading">{t("budget.heading")}</h2>
-          <p className="helper-text">{t("budget.intro")}</p>
+          <div className="we-heading-with-info">
+            <h2 id="budget-settings-heading">{t("budget.heading")}</h2>
+            <span
+              className="we-info-icon"
+              role="img"
+              aria-label={`${aboutSectionLabel}: ${budgetIntro}`}
+              title={budgetIntro}
+            >
+              <Info size={14} aria-hidden="true" />
+            </span>
+          </div>
         </div>
       </div>
 
