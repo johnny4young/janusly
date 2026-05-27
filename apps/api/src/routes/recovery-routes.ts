@@ -23,6 +23,7 @@ import {
 } from "../ai-patch-feedback";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -60,7 +61,7 @@ export const recoveryRoutes: Route[] = [
   // capture their own decisions.
   { method: "POST", match: "/recovery/feedback", role: "editor",
     handler: async ({ req, res, auth }) => {
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: 120 });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.recovery });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = RecoveryFeedbackBodySchema.safeParse(body);
       if (!parsed.success) {

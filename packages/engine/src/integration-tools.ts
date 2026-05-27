@@ -43,6 +43,7 @@ import { createHmac } from "node:crypto";
 import { z } from "zod";
 
 import { getCredentialByName } from "@janusly/data/src/credentialsRepo";
+import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { fetchHttpTarget } from "./http-policy";
 import { getIntegrationUsageRecorder } from "./integration-usage";
 import { getEngineRateLimiter } from "./rate-limit";
@@ -290,7 +291,7 @@ async function gateIntegrationCall(args: {
   if (limiter) {
     try {
       await limiter(`tool.${args.tool}`, args.orgId, {
-        windowMs: 60_000,
+        windowMs: RATE_LIMIT_WINDOW_MS,
         max: args.rateLimitPerMin,
       });
     } catch (err) {

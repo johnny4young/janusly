@@ -31,6 +31,7 @@ import { isTerminalRunStatus } from "@janusly/shared/src/status";
 import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
+import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendEvent, sendJson } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
@@ -314,7 +315,7 @@ export const runsRoutes: Route[] = [
   { method: "POST", match: "/runs/replay-lab", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;
@@ -417,7 +418,7 @@ export const runsRoutes: Route[] = [
   { method: "POST", match: "/runs/replay-lab/fork", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;

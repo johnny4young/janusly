@@ -24,6 +24,7 @@ import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
 import { getDeadLetter, isDeadLetterStatus, listDeadLetters, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
 import {
@@ -124,7 +125,7 @@ export const dlqRoutes: Route[] = [
   { method: "POST", match: "/dlq/validate-fix", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
@@ -187,7 +188,7 @@ export const dlqRoutes: Route[] = [
   { method: "POST", match: "/dlq/cluster-apply", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const clusterSignature = typeof body.clusterSignature === "string" ? body.clusterSignature : null;
