@@ -538,6 +538,15 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
    ceiling. */
 :root {
   --we-content-max-width: 1280px;
+  /* Density tokens — Linear-inspired compact density adopted across
+     row-shaped surfaces (lists, cluster rows, recovery item badges,
+     helper text). Headings keep their current sizing because 13px on
+     h3 would break the visual hierarchy; only body + metadata text
+     wires to the density tokens. Inputs also keep their 36px height
+     to respect touch-target minimums on mobile. */
+  --we-density-row: 32px;
+  --we-density-body: 13px;
+  --we-density-meta: 12px;
 }
 
 .workspace-main > [data-layout="contextual"] {
@@ -652,7 +661,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .helper-text {
   color: var(--we-muted);
-  font-size: 12px;
+  font-size: var(--we-density-meta);
   line-height: 1.45;
   margin: 6px 0 0;
 }
@@ -1142,6 +1151,34 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .panel-card h3 {
   font-size: 16px;
   line-height: 1.2;
+}
+
+/* Generic wrapper for "heading + info icon" pairs. Inline-flex with a
+   baseline anchor so the icon aligns with the heading's text baseline
+   regardless of the heading level. Paired with `.we-info-icon` below. */
+.we-heading-with-info {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Heading-adjacent info icon — surfaces a card's long-form description on
+   hover (native `title=""`) and to screen readers (aria-label). Used in
+   Operations cards where the inline description was demoted after learning. */
+.we-info-icon {
+  align-items: center;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--we-muted);
+  cursor: help;
+  display: inline-flex;
+  justify-content: center;
+  padding: 2px;
+  transition: color 120ms ease, background 120ms ease;
+}
+.we-info-icon:hover {
+  background: var(--we-surface-2);
+  color: var(--we-text-1);
 }
 
 .list-card {
@@ -1758,6 +1795,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   grid-template-columns: auto 1fr auto;
   gap: 12px;
   align-items: center;
+  min-height: var(--we-density-row);
   padding: 10px 12px;
   border: 1px solid var(--we-line);
   border-radius: 8px;
@@ -1787,7 +1825,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .we-list-row__sig {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--we-density-meta);
   color: var(--we-muted);
   background: var(--we-surface-muted);
   padding: 4px 7px;
@@ -5600,6 +5638,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   gap: 10px;
   align-items: center;
   width: 100%;
+  min-height: var(--we-density-row);
   padding: 10px 12px;
   background: transparent;
   border: 0;
@@ -8212,7 +8251,7 @@ button.we-ops-metric-card--button {
   gap: 5px;
   justify-content: flex-end;
   max-width: 100%;
-  min-height: 30px;
+  min-height: var(--we-density-row);
   min-width: 0;
   padding: 4px 6px;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
@@ -8229,7 +8268,7 @@ button.we-ops-metric-card--button {
 .we-recovery-item-badge__sla {
   align-items: center;
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--we-density-meta);
   font-weight: 650;
   gap: 4px;
   line-height: 1.2;
