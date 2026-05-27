@@ -35,6 +35,7 @@ import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/share
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { enforceRateLimit } from "../rate-limit";
 import { asRecord, readJson, sendJson } from "../http";
 import { db } from "@janusly/db";
@@ -206,7 +207,7 @@ export const autoHealingRoutes: Route[] = [
     permission: "autohealing.decide",
     handler: async ({ res, auth }) => {
       try {
-        await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: 30 });
+        await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.autoHealingDecide });
       } catch (err) {
         return sendJson(res, { error: (err as Error).message }, 429);
       }

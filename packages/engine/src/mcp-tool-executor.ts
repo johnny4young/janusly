@@ -52,6 +52,7 @@ import {
   type McpToolDescriptorRow,
 } from "@janusly/data/src/mcpConnectionsRepo";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
+import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { createHttpMcpClient, createSseMcpClient, createStdioMcpClient, withMcpClient, type McpClient } from "./mcp-client";
 import {
   McpSandboxCommandNotAllowedError,
@@ -329,7 +330,7 @@ export async function executeMcpTool(input: McpToolExecutorInput): Promise<McpTo
   if (limiter) {
     try {
       await limiter(`mcp_client.${connection.alias}.${input.toolName}`, input.orgId, {
-        windowMs: 60_000,
+        windowMs: RATE_LIMIT_WINDOW_MS,
         max: effectiveRateLimit,
       });
     } catch (err) {

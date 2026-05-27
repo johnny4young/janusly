@@ -29,6 +29,7 @@
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import {
@@ -437,7 +438,7 @@ export const mcpRoutes: Route[] = [
       // operators reacting to upstream version bumps, low enough to
       // keep a malicious admin from using it as a DoS amplifier.
       try {
-        await enforceRateLimit(auth.orgId, { name: "mcp.rediscover", windowMs: 60_000, max: 10 });
+        await enforceRateLimit(auth.orgId, { name: "mcp.rediscover", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.mcpRediscover });
       } catch (err) {
         const message = err instanceof Error ? err.message : "rate limit exceeded";
         return sendJson(res, { error: message }, 429);
