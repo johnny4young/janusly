@@ -67,7 +67,8 @@ import { t as runtimeT } from '../i18n/runtime'
 import { BrandMark } from './BrandMark'
 import { ValueDashboardSection } from './ValueDashboardSection'
 import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
-import { useAnimatedNumber, usePrefersReducedMotion } from '../hooks/useAnimatedNumber'
+import { useAnimatedNumber } from '../hooks/useAnimatedNumber'
+import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Types / data shapes — mirror the API envelopes the existing panels read.
