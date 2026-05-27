@@ -347,3 +347,5 @@ export async function resolveActiveVersion(
   if (!latest[0]) return null;
   return { prompt: promptRow[0], version: latest[0] };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

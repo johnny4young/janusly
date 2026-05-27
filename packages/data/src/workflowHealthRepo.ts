@@ -268,3 +268,5 @@ export async function computeP95Latency(
   if (!row || row.p95_ms === null || row.p95_ms === undefined) return null;
   return typeof row.p95_ms === "string" ? Number(row.p95_ms) : row.p95_ms;
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

@@ -219,3 +219,5 @@ export async function listEnabledPoliciesForOrgAndTrigger(
 
 /** Re-export `desc` so callers can sort by `updatedAt` without re-importing. */
 export { desc };
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

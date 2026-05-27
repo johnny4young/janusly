@@ -155,3 +155,5 @@ export async function recordFire(orgId: string, id: string, runId: string): Prom
     .set({ lastRunAt: new Date(), lastRunId: runId })
     .where(and(eq(scheduleEntries.orgId, orgId), eq(scheduleEntries.id, id)));
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

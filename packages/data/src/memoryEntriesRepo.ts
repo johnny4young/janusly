@@ -824,3 +824,5 @@ function fireUsageRecorder(input: FireUsageInput): void {
 // ─── Re-export the embedding result type so consumers don't need the AI barrel ─
 
 export type { EmbeddingResult };
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

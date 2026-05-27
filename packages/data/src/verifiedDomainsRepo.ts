@@ -83,3 +83,5 @@ export async function listVerifiedDomains(orgId: string): Promise<VerifiedDomain
     .where(eq(verifiedDomains.orgId, orgId));
   return rows.map(mapRow);
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

@@ -11,6 +11,10 @@
  * it's effectively a tenancy lookup and is the ONLY caller permitted
  * to read across orgs.
  *
+ * Join key invariant (AGENTS.md "SCIM directory sync"): SCIM ops join
+ * `org_members` on `(orgId, lower(email))`, not `(orgId, userId)`,
+ * because SSO later rewrites legacy email placeholders to provider IDs.
+ *
  * Used by:
  * - `apps/api/src/routes/scim-routes.ts` (admin CRUD + webhook entry).
  * - `apps/api/src/scim-event-handler.ts` (sync timestamp).
@@ -151,3 +155,5 @@ export async function recordScimDirectorySync(input: { id: string; orgId: string
     .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(scimDirectories.id, input.id), eq(scimDirectories.orgId, input.orgId)));
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

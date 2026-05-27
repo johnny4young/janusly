@@ -105,3 +105,5 @@ export async function upsertWorkflowBudget(input: WorkflowBudgetUpsertInput): Pr
   if (!row) throw new Error("workflow budget vanished after insert");
   return row;
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

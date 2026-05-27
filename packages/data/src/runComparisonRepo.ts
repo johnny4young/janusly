@@ -218,3 +218,5 @@ function summarize(row: typeof runs.$inferSelect): RunComparisonRunSummary {
     createdAt: row.createdAt ?? null,
   };
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
