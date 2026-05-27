@@ -198,3 +198,5 @@ export async function upsertHandoff(input: UpsertHandoffInput): Promise<Recovery
   if (!row) throw new Error("handoff row missing immediately after upsert");
   return row;
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

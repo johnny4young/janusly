@@ -204,3 +204,5 @@ export async function upsertMembershipByEmail(input: {
   if (!created) throw new Error("org_members row vanished after email-upsert insert");
   return mapRow(created);
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

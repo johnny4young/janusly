@@ -548,6 +548,11 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     return { status: "completed", output: { decision, reason, input } };
   },
 
+  /**
+   * Invariant (AGENTS.md "AI integration"): SDK/quota/network
+   * errors must return `{ mode: "fallback", aiError, response }`.
+   * Throwing here bypasses the AI fallback safety net into retry/DLQ.
+   */
   ai: async (ctx) => {
     // PromptOps seam: when `config.promptRef` is set, resolve it via the
     // registry resolver before any LLM call. The resolver throws typed

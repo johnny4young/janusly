@@ -49,3 +49,5 @@ export async function listWorkflowImprovements(orgId: string, workflowId: string
     .where(and(eq(workflowImprovements.orgId, orgId), eq(workflowImprovements.workflowId, workflowId)))
     .orderBy(desc(workflowImprovements.createdAt));
 }
+
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
