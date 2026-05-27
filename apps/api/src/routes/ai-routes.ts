@@ -24,6 +24,7 @@ import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type Review
 import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/workflow-readiness";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
+import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
@@ -63,7 +64,7 @@ export const aiRoutes: Route[] = [
       // Only the org-level budget gate applies on this path.
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.workflow.generated" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!llm) {
         return sendJson(res, withBudgetWarning({
@@ -151,7 +152,7 @@ export const aiRoutes: Route[] = [
       const explainWorkflowIdEarly = workflow && typeof workflow === "object" && "id" in (workflow as object) && typeof (workflow as { id?: unknown }).id === "string" ? (workflow as { id: string }).id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowIdEarly, action: "ai.workflow.explained" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       if (!llm) {
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
@@ -200,7 +201,7 @@ export const aiRoutes: Route[] = [
       const reviewWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: reviewWorkflowIdEarly, action: "ai.workflow.reviewed" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const parsed = WorkflowSchema.safeParse(candidate);
       if (!parsed.success) {
         const issues = parsed.error.issues.map((issue) => ({
@@ -287,7 +288,7 @@ export const aiRoutes: Route[] = [
       // still spend on the load. Org-level here is the right cut.
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.workflow.patch_suggested" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
 
       // Multi-tenant gate via the existing repo helper.
       const dlq = await getDeadLetter(auth.orgId, deadLetterId);
@@ -628,7 +629,7 @@ export const aiRoutes: Route[] = [
       const suggestWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: suggestWorkflowIdEarly, action: "ai.workflow.improvement_suggested" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
 
       const parsed = WorkflowSchema.safeParse(candidate);
       if (!parsed.success) {
@@ -778,7 +779,7 @@ export const aiRoutes: Route[] = [
       // matches the recovery-path posture for /ai/patch-workflow.
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, action: "ai.run.explained" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
-      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: 60_000, max: orgConfig.ai.rateLimitPerMin });
+      await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);

@@ -29,6 +29,7 @@ import { z } from "zod";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { RE2 } from "re2-wasm";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
+import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { getByPath } from "./template";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
 import { streamCsvSummary } from "./csv-stream";
@@ -749,7 +750,7 @@ const tools = {
       const limiter = getEngineRateLimiter();
       if (limiter) {
         try {
-          await limiter("tool.pdf.generate", orgId, { windowMs: 60_000, max: rateLimitPerMin });
+          await limiter("tool.pdf.generate", orgId, { windowMs: RATE_LIMIT_WINDOW_MS, max: rateLimitPerMin });
         } catch (err) {
           const error = err instanceof Error ? err.message : "Rate limit exceeded";
           const latencyMs = Date.now() - start;
@@ -849,7 +850,7 @@ const tools = {
       // holds and the workflow run doesn't fail.
       if (orgId && limiter) {
         try {
-          await limiter("email.send", orgId, { windowMs: 60_000, max: rateLimitPerMin });
+          await limiter("email.send", orgId, { windowMs: RATE_LIMIT_WINDOW_MS, max: rateLimitPerMin });
         } catch (err) {
           const error = err instanceof Error ? err.message : "Rate limit exceeded";
           await fireEmailRecorder({

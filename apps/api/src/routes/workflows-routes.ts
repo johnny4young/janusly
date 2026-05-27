@@ -37,6 +37,7 @@ import { z } from "zod";
 
 import { audit } from "../audit";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
+import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "../mcp-consent";
@@ -93,7 +94,7 @@ export const workflowsRoutes: Route[] = [
         }
         await enforceRateLimit(auth.orgId, {
           name: mcpRateLimitBucket("workflows.save"),
-          windowMs: 60_000,
+          windowMs: RATE_LIMIT_WINDOW_MS,
           max: 60,
         });
       }

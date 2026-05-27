@@ -22,6 +22,7 @@ import { executeTool } from "@janusly/engine/src/tool-registry";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
 import { audit } from "../audit";
+import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
@@ -143,13 +144,11 @@ const deliverRequestSchema = z
   });
 
 /** Cap below Slack's per-block 3000-char limit; leaves headroom for the header + footer. */
-const SLACK_TEXT_MAX = 2500;
+const SLACK_TEXT_MAX = HTTP_CAPS.SLACK_BLOCK_CHARS;
 /** Outer route-level rate-limit bucket. Inner per-tool bucket (`tool.<name>`) is enforced inside the chokepoint. */
 const REPORTS_DELIVER_RATE_LIMIT_BUCKET = "reports.deliver";
-/** Outer-bucket default — 60/min/org. Matches the `"ai"` route family default. */
+/** Outer-bucket default — 60/min/org for report delivery. */
 const REPORTS_DELIVER_RATE_LIMIT_PER_MIN = 60;
-/** Window length matches the limiter's standard 60s rolling window. */
-const REPORTS_DELIVER_RATE_LIMIT_WINDOW_MS = 60_000;
 
 /**
  * Build the Slack-bound text body from the report's structured JSON.
@@ -630,7 +629,7 @@ export const reportsRoutes: Route[] = [
       try {
         await enforceRateLimit(auth.orgId, {
           name: REPORTS_DELIVER_RATE_LIMIT_BUCKET,
-          windowMs: REPORTS_DELIVER_RATE_LIMIT_WINDOW_MS,
+          windowMs: RATE_LIMIT_WINDOW_MS,
           max: REPORTS_DELIVER_RATE_LIMIT_PER_MIN,
         });
       } catch (err) {

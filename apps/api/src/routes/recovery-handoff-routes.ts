@@ -35,6 +35,7 @@ import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import { audit } from "../audit";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -42,7 +43,6 @@ import { dispatchHandoff, composeAppendMessage } from "../recovery-handoff-dispa
 import type { Route } from "../routes";
 
 const HANDOFF_RATE_LIMIT_BUCKET = "reports.deliver";
-const HANDOFF_RATE_LIMIT_WINDOW_MS = 60_000;
 const HANDOFF_RATE_LIMIT_MAX = 60;
 
 function idFromUrl(url: string | undefined): string | null {
@@ -102,7 +102,7 @@ export const recoveryHandoffRoutes: Route[] = [
       // Org-scoped rate limit BEFORE any DB / executeTool spend.
       await enforceRateLimit(auth.orgId, {
         name: HANDOFF_RATE_LIMIT_BUCKET,
-        windowMs: HANDOFF_RATE_LIMIT_WINDOW_MS,
+        windowMs: RATE_LIMIT_WINDOW_MS,
         max: HANDOFF_RATE_LIMIT_MAX,
       });
 

@@ -22,6 +22,8 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { TOLERANCE_WINDOWS_SEC } from "./constants";
+
 export type WebhookVerificationResult =
   | { valid: true }
   | {
@@ -35,7 +37,7 @@ export type WebhookVerificationResult =
       | "signature_mismatch";
   };
 
-const DEFAULT_TOLERANCE_SECONDS = 300; // ±5 minutes
+const DEFAULT_TOLERANCE_SECONDS = TOLERANCE_WINDOWS_SEC.WEBHOOK_SIGNATURE;
 
 /**
  * Verify a `WorkOS-Signature` header against the raw request body.
