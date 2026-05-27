@@ -1,48 +1,26 @@
 /**
- * Shared count-up animation hooks. `useAnimatedNumber` is an rAF-driven
- * cubic-ease-out interpolation from the current rendered value to a new
- * target, with `usePrefersReducedMotion` as the standard kill switch.
+ * rAF-driven count-up animation. Returns the live interpolated value as it
+ * animates from the current rendered value toward `target` over `durationMs`
+ * with a cubic-ease-out curve. `snap` is the kill switch — when true (or
+ * when `target` is non-finite), returns `target` immediately and skips the
+ * animation.
  *
  * Used by `HealthRing` in the home dashboard and by the cross-surface
  * `VitalSignsStrip` so a "12 failures" tile counts up from 0 instead of
- * snapping. Reduced-motion users (`prefers-reduced-motion: reduce`)
- * see the final value immediately — no opt-out by the call site.
+ * snapping. Reduced-motion users should pass `usePrefersReducedMotion()`
+ * (sibling hook) as the `snap` argument — call sites own the policy, not
+ * this hook.
+ *
+ * Invariants:
+ * - Each `target` change re-anchors from the current rendered value so a
+ *   fast navigation that updates the target mid-animation stays smooth.
+ * - Cleanup on unmount cancels the pending `requestAnimationFrame`.
+ * - `snap=true` returns `target` synchronously on the next render; no rAF
+ *   is scheduled.
  */
 
 import { useEffect, useRef, useState } from 'react'
 
-/**
- * Tracks `prefers-reduced-motion: reduce`. Returns true when the user has
- * asked the OS to suppress non-essential animation. Defensive against
- * non-browser execution (SSR, test setup without jsdom matchMedia) — returns
- * false in that case rather than throwing.
- */
-export function usePrefersReducedMotion(): boolean {
-  const [prefersReduced, setPrefersReduced] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setPrefersReduced(mq.matches)
-    const handler = (event: MediaQueryListEvent) => setPrefersReduced(event.matches)
-    if (typeof mq.addEventListener === 'function') {
-      mq.addEventListener('change', handler)
-      return () => mq.removeEventListener('change', handler)
-    }
-    // Older Safari quirk — addListener / removeListener still works.
-    mq.addListener(handler)
-    return () => mq.removeListener(handler)
-  }, [])
-  return prefersReduced
-}
-
-/**
- * rAF-driven count-up. Returns the live interpolated value as it animates
- * toward `target` over `durationMs`. When `snap` is true (or `target` is
- * non-finite), returns `target` immediately and skips the animation.
- *
- * Each `target` change re-anchors from the current rendered value, so a
- * fast user navigation that updates the target mid-animation stays smooth.
- */
 export function useAnimatedNumber(target: number, durationMs: number, snap: boolean): number {
   const [value, setValue] = useState(snap ? target : 0)
   const rafRef = useRef<number | null>(null)
