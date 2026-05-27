@@ -6,8 +6,8 @@ test('mobile workspace remains usable without horizontal overflow', async ({ pag
   await page.goto('/')
 
   await expect(page.getByRole('button', { name: /^AI Studio\b/ })).toBeVisible()
-  const workspaceGroup = page.getByRole('button', { name: /^Workspace\b/ })
-  if (await workspaceGroup.getAttribute('aria-expanded') !== 'true') await workspaceGroup.click()
+  // Connections (Credentials) now lives under the Run group, which is
+  // default-open — no explicit group toggle needed.
   await expect(page.getByRole('button', { name: /^Connections\b/ })).toBeVisible()
 
   await page.getByRole('button', { name: 'Runs', exact: true }).click()

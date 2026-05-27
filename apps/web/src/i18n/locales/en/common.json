@@ -353,7 +353,6 @@
   "sidebar.group.pinned": "Pinned",
   "sidebar.group.build": "Build",
   "sidebar.group.run": "Run",
-  "sidebar.group.workspace": "Workspace",
   "sidebar.palette.pinned": "Add step · pinned",
   "sidebar.category.ai": "AI",
   "sidebar.category.flow": "Flow control",
