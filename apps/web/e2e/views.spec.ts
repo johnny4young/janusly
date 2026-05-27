@@ -16,8 +16,9 @@ const views = [
 test('workspace views can be opened independently', async ({ page }) => {
   await page.goto('/')
 
-  const workspaceGroup = page.getByRole('button', { name: /^Workspace\b/ })
-  if (await workspaceGroup.getAttribute('aria-expanded') !== 'true') await workspaceGroup.click()
+  // No explicit group expansion needed — the three sidebar groups
+  // (Pinned / Build / Run) are all default-open on a fresh context,
+  // and every nav item this spec touches lives under one of them.
 
   for (const view of views) {
     const button =
