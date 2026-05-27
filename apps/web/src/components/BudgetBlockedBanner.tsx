@@ -5,8 +5,9 @@
  * The store records the most recent 402 envelope under `budgetBlocked`
  * (set by the API wrapper in `api.ts`). When set, this banner renders
  * above the canvas with the MTD spend, the limit, and a CTA that
- * switches the active tab to `operations` (where `BudgetSettingsPanel`
- * lives). Dismissible via the X button, which clears the store slot.
+ * switches the active tab to Operations > Reliability (where
+ * `BudgetSettingsPanel` lives). Dismissible via the X button, which
+ * clears the store slot.
  *
  * Used by `App.tsx` — mounted unconditionally; renders null when no
  * envelope is set.
@@ -17,6 +18,7 @@ import { Coins, ShieldAlert, X } from 'lucide-react'
 import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
 import { Trans, useT } from '../i18n'
+import { requestOperationsSection } from './OperationsPage'
 
 export type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number
@@ -60,6 +62,7 @@ export function BudgetBlockedBanner({ onOpenTab }: { onOpenTab: (tab: ActiveTab)
           type="button"
           className="command-button command-button-primary"
           onClick={() => {
+            requestOperationsSection('reliability')
             onOpenTab('operations')
             clear()
           }}

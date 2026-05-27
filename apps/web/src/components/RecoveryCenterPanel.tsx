@@ -65,6 +65,7 @@ import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { BrandMark } from './BrandMark'
+import { requestOperationsSection } from './OperationsPage'
 import { ValueDashboardSection } from './ValueDashboardSection'
 import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
 import { useAnimatedNumber } from '../hooks/useAnimatedNumber'
@@ -1385,7 +1386,10 @@ function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void }) {
         <button
           type="button"
           className="we-recovery-center-tile__link"
-          onClick={() => onOpenTab('operations')}
+          onClick={() => {
+            requestOperationsSection('reliability')
+            onOpenTab('operations')
+          }}
           data-testid="recovery-center-budget-open-settings"
         >
           {hasBudget ? t('recoveryCenter.budget.openSettings') : t('recoveryCenter.budget.setBudget')} <ChevronRight size={14} aria-hidden="true" />
