@@ -89,9 +89,10 @@ type RecoveryMetrics = {
  *  a new `<XxxSection />` wrapper + a matching `section === '<name>' && …`
  *  branch in `OperationsPage`'s body + a row in `RAIL_ITEMS` + i18n keys. */
 const SUB_SECTIONS = ['overview', 'reliability', 'access', 'integrations'] as const
-type OpsSection = typeof SUB_SECTIONS[number]
+export type OpsSection = typeof SUB_SECTIONS[number]
 
 const STORAGE_KEY = 'janusly:operations:section'
+const SECTION_REQUEST_EVENT = 'janusly:operations:section-request'
 
 function isSection(value: unknown): value is OpsSection {
   return typeof value === 'string' && (SUB_SECTIONS as readonly string[]).includes(value)
@@ -113,6 +114,11 @@ function persistSection(section: OpsSection): void {
   } catch {
     // ignore; persistence is convenience, not load-bearing.
   }
+}
+
+export function requestOperationsSection(section: OpsSection): void {
+  persistSection(section)
+  window.dispatchEvent(new CustomEvent(SECTION_REQUEST_EVENT, { detail: section }))
 }
 
 type SignalSummary = {
@@ -141,6 +147,15 @@ export function OperationsPage() {
   useEffect(() => {
     persistSection(section)
   }, [section])
+
+  useEffect(() => {
+    const handleSectionRequest = (event: Event) => {
+      const next = event instanceof CustomEvent ? event.detail : null
+      if (isSection(next)) setSection(next)
+    }
+    window.addEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
+    return () => window.removeEventListener(SECTION_REQUEST_EVENT, handleSectionRequest)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
