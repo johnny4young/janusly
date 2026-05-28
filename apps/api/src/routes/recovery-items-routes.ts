@@ -47,6 +47,8 @@ import {
   setInProgressRecoveryItem,
   setWaitingExternalRecoveryItem,
   listHandoffsForItem,
+  listRecoveryItemChildren,
+  countRecoveryItemChildren,
   getWorkflowMetadata,
 } from "@janusly/data";
 
@@ -115,6 +117,26 @@ export const recoveryItemsRoutes: Route[] = [
       if (!item) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
       const handoffs = await listHandoffsForItem(auth.orgId, id);
       return sendJson(res, { item, handoffs });
+    },
+  },
+  {
+    // Child DLQ occurrences attached to this incident during a failure
+    // storm (debounce). Powers the "N occurrences" drawer. Org-gated via
+    // the parent lookup so a cross-org id leaks nothing.
+    method: "GET",
+    match: (url) => /^\/recovery\/items\/[^/?]+\/children$/.test(url.split("?")[0] ?? ""),
+    role: "viewer",
+    permission: "recovery.read",
+    handler: async ({ req, res, auth }) => {
+      const id = idFromUrl(req.url, "children");
+      if (!id) return sendJson(res, { error: "id required" }, 400);
+      const item = await getRecoveryItemById(auth.orgId, id);
+      if (!item) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      const [children, total] = await Promise.all([
+        listRecoveryItemChildren(auth.orgId, id),
+        countRecoveryItemChildren(auth.orgId, id),
+      ]);
+      return sendJson(res, { children, total });
     },
   },
   {

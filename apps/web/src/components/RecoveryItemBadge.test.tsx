@@ -10,6 +10,7 @@ function makeItem(overrides: Partial<RecoveryItemBadgeData> = {}): RecoveryItemB
     severity: 'p2',
     status: 'acknowledged',
     slaTargetAtIso: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+    occurrenceCount: 1,
     ...overrides,
   }
 }
@@ -42,5 +43,12 @@ describe('<RecoveryItemBadge />', () => {
   it('does not render the SLA timer for resolved items', () => {
     render(<RecoveryItemBadge item={makeItem({ status: 'resolved' })} />)
     expect(screen.queryByTestId('recovery-item-sla')).toBeNull()
+  })
+
+  it('shows the occurrence count pill only during a failure storm (count > 1)', () => {
+    const { rerender } = render(<RecoveryItemBadge item={makeItem({ occurrenceCount: 1 })} />)
+    expect(screen.queryByTestId('recovery-item-occurrences')).toBeNull()
+    rerender(<RecoveryItemBadge item={makeItem({ occurrenceCount: 12 })} />)
+    expect(screen.getByTestId('recovery-item-occurrences').textContent).toMatch(/12/)
   })
 })
