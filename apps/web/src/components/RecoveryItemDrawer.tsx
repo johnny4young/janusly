@@ -40,6 +40,25 @@ export type RecoveryItemDrawerData = {
   comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
   /** Linked workflow id (when the incident came from a saved workflow run). */
   workflowId?: string | null
+  /** Number of DLQ failures collapsed into this incident by debounce. 1 means a single failure. */
+  occurrenceCount: number
+  /** ISO timestamp of the most recent occurrence — drives the "last seen" subtitle. */
+  lastOccurredAtIso: string
+}
+
+/** A child DLQ occurrence attached to this incident during a failure storm. */
+type OccurrenceChild = { id: string; deadLetterId: string; occurredAt: string }
+
+/** Compact relative-time label (narrow, locale-aware) for occurrence timestamps. */
+function formatRelativeTime(iso: string): string {
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return ''
+  const deltaMin = Math.round((ts - Date.now()) / 60_000)
+  const abs = Math.abs(deltaMin)
+  const rtf = new Intl.RelativeTimeFormat(getResolvedLocale(), { numeric: 'auto', style: 'narrow' })
+  if (abs < 60) return rtf.format(deltaMin, 'minute')
+  if (abs < 60 * 24) return rtf.format(Math.round(deltaMin / 60), 'hour')
+  return rtf.format(Math.round(deltaMin / 60 / 24), 'day')
 }
 
 type Props = {
@@ -57,6 +76,27 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
   const [commentDraft, setCommentDraft] = useState('')
   const [resolveOpen, setResolveOpen] = useState(false)
   const [resolveReason, setResolveReason] = useState<RecoveryItemResolutionReason>('fixed_by_patch')
+
+  // Child-occurrence drawer (debounce). Lazy-fetched on first expand so the
+  // network round-trip only happens for storms the operator chooses to inspect.
+  const [occurrencesOpen, setOccurrencesOpen] = useState(false)
+  const [children, setChildren] = useState<OccurrenceChild[] | null>(null)
+  const [childrenError, setChildrenError] = useState(false)
+
+  useEffect(() => {
+    if (!occurrencesOpen || children !== null) return
+    let cancelled = false
+    api(`/recovery/items/${item.id}/children`)
+      .then((resp: { children?: OccurrenceChild[] }) => {
+        if (!cancelled) setChildren(resp?.children ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setChildrenError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [occurrencesOpen, children, item.id])
 
   const canAcknowledge = item.status === 'open' || item.status === 'reopened'
   const canInProgress = item.status === 'acknowledged' || item.status === 'waiting_external'
@@ -288,6 +328,57 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           <dd>{new Date(item.slaTargetAtIso).toLocaleString(getResolvedLocale())}</dd>
         </div>
       </dl>
+
+      {item.occurrenceCount > 1 && (
+        <div className="we-recovery-occurrences" data-testid="recovery-item-occurrences-section">
+          <div className="we-recovery-occurrences__summary">
+            <span className="we-pill we-pill--amber" data-testid="recovery-item-occurrences-badge">
+              {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}
+            </span>
+            <span className="we-recovery-occurrences__lastseen">
+              {t('recoveryItems.occurrences.lastSeen', { when: formatRelativeTime(item.lastOccurredAtIso) })}
+            </span>
+            <button
+              type="button"
+              className="we-btn we-btn--ghost we-btn--sm"
+              onClick={() => setOccurrencesOpen((v) => !v)}
+              aria-expanded={occurrencesOpen}
+              data-testid="recovery-item-occurrences-toggle"
+            >
+              {t(occurrencesOpen ? 'recoveryItems.occurrences.hide' : 'recoveryItems.occurrences.show')}
+            </button>
+          </div>
+          {occurrencesOpen && (
+            <div className="we-recovery-occurrences__list" data-testid="recovery-item-occurrences-list">
+              {childrenError ? (
+                <p className="we-recovery-occurrences__empty">{t('recoveryItems.occurrences.loadError')}</p>
+              ) : children === null ? (
+                <p className="we-recovery-occurrences__empty">{t('common.loading')}</p>
+              ) : children.length === 0 ? (
+                <p className="we-recovery-occurrences__empty">{t('recoveryItems.occurrences.empty')}</p>
+              ) : (
+                <ul>
+                  {children.map((c) => (
+                    <li
+                      key={c.id}
+                      className="we-recovery-occurrences__entry"
+                      aria-label={
+                        t('recoveryItems.occurrences.entryAria', {
+                          id: c.deadLetterId,
+                          when: formatRelativeTime(c.occurredAt),
+                        }) as string
+                      }
+                    >
+                      <code>{c.deadLetterId}</code>
+                      <span>{new Date(c.occurredAt).toLocaleString(getResolvedLocale())}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="we-recovery-item-drawer__actions" data-testid="recovery-item-drawer-actions">
         {canAcknowledge && (

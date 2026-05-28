@@ -22,6 +22,8 @@ export type RecoveryItemBadgeData = {
   severity: RecoveryItemSeverity
   status: RecoveryItemStatus
   slaTargetAtIso: string
+  /** Number of DLQ failures collapsed into this incident by the debounce window. 1 means a single failure. */
+  occurrenceCount: number
 }
 
 type Props = {
@@ -92,6 +94,14 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       >
         {t(`recoveryItems.status.${item.status}`)}
       </span>
+      {item.occurrenceCount > 1 && (
+        <span
+          className="we-pill we-pill--amber"
+          data-testid="recovery-item-occurrences"
+        >
+          {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}
+        </span>
+      )}
       {item.owner && (
         <span className="we-recovery-item-badge__owner" title={item.owner}>
           <User size={12} aria-hidden /> {item.owner}

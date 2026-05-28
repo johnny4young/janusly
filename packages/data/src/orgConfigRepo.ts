@@ -121,6 +121,7 @@ export type OrgConfigSnapshot = {
   };
   recovery: {
     autoCreateItems: boolean;
+    debounceWindowSeconds: number;
   };
   value: {
     hourlyCost: number;
@@ -649,6 +650,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: true,
   },
   {
+    key: "recovery.debounceWindowSeconds",
+    category: "recovery",
+    description:
+      "Failure-storm debounce window. A new DLQ entry sharing (orgId, workflowId, errorSignature) with a still-open recovery item whose last occurrence is within this many seconds attaches as a child occurrence instead of spawning a new incident. Default 300; recommended operating range 30..3600; 0 disables debounce (one item per DLQ row). Non-zero values below 30 are clamped up to 30 by the engine.",
+    valueType: "number",
+    defaultValue: 300,
+    min: 0,
+    max: 3600,
+  },
+  {
     key: "value.hourlyCost",
     category: "value",
     description:
@@ -888,6 +899,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     },
     recovery: {
       autoCreateItems: readBoolean(values, "recovery.autoCreateItems"),
+      debounceWindowSeconds: readNumber(values, "recovery.debounceWindowSeconds"),
     },
     value: {
       hourlyCost: readNumber(values, "value.hourlyCost"),

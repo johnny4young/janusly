@@ -29,11 +29,22 @@ import {
   resolveRecoveryItem,
   recordAlertEvent,
   getRecoveryItemSeverityDefault,
+  findOpenRecoveryItemForDebounce,
+  attachDeadLetterToRecoveryItem,
 } from "@janusly/data";
 
 import { safePersistPayload } from "../safe-persist";
 
 const AUDIT_METADATA_MAX_BYTES = 64_000;
+
+/**
+ * Debounce window clamp. A configured value of 0 disables debounce
+ * entirely (one incident per DLQ row); any non-zero value is clamped into
+ * this range so a typo like `5` can't collapse genuinely-distinct failures
+ * and a huge value can't keep a stale incident absorbing forever.
+ */
+const DEBOUNCE_MIN_SECONDS = 30;
+const DEBOUNCE_MAX_SECONDS = 3_600;
 
 /** Inline audit writer. Mirrors `apps/api/src/audit.ts` byte-for-byte. */
 async function writeAuditRow(input: {
@@ -60,13 +71,24 @@ async function writeAuditRow(input: {
   }
 }
 
-/** Read the per-org toggle `recovery.autoCreateItems`; defaults to `true` when unset. */
-async function isAutoCreateEnabled(orgId: string): Promise<boolean> {
+/** The two per-org recovery toggles this hook consults, read in one snapshot fetch. */
+type RecoveryHookConfig = { autoCreate: boolean; debounceWindowSeconds: number };
+
+/**
+ * Read `recovery.autoCreateItems` + `recovery.debounceWindowSeconds` in a
+ * single snapshot fetch. On any read failure we default to auto-create ON
+ * (the ownership workflow is the safe default) and debounce OFF (never
+ * wrongly group failures when we can't read the window).
+ */
+async function getRecoveryHookConfig(orgId: string): Promise<RecoveryHookConfig> {
   try {
     const snapshot = await getOrgConfigSnapshot(orgId);
-    return snapshot.recovery.autoCreateItems;
+    return {
+      autoCreate: snapshot.recovery.autoCreateItems,
+      debounceWindowSeconds: snapshot.recovery.debounceWindowSeconds,
+    };
   } catch {
-    return true;
+    return { autoCreate: true, debounceWindowSeconds: 0 };
   }
 }
 
@@ -83,8 +105,57 @@ export async function createRecoveryItemForDeadLetter(
   input: CreateRecoveryItemForDeadLetterInput,
 ): Promise<void> {
   try {
-    const enabled = await isAutoCreateEnabled(input.orgId);
-    if (!enabled) return;
+    const config = await getRecoveryHookConfig(input.orgId);
+    if (!config.autoCreate) return;
+
+    // Failure-storm debounce: when a still-open incident shares the
+    // (orgId, workflowId, errorSignature) key and its last occurrence is
+    // within the configured window, record this DLQ row as a child
+    // occurrence of that incident instead of spawning a new one. The
+    // alert is intentionally skipped on the attach path so a storm pages
+    // the operator once, not once per repetition. window <= 0 disables;
+    // a signature-less failure can't be grouped.
+    if (config.debounceWindowSeconds > 0 && input.errorSignature) {
+      const windowSeconds = Math.min(
+        Math.max(config.debounceWindowSeconds, DEBOUNCE_MIN_SECONDS),
+        DEBOUNCE_MAX_SECONDS,
+      );
+      const notBefore = new Date(Date.now() - windowSeconds * 1_000);
+      const parent = await findOpenRecoveryItemForDebounce({
+        orgId: input.orgId,
+        workflowId: input.workflowId ?? null,
+        errorSignature: input.errorSignature,
+        notBefore,
+      });
+      if (parent) {
+        // Defensive: a re-invocation for the SAME DLQ row would otherwise
+        // attach the row to the very incident it created. The incident
+        // already represents this failure — nothing to bump.
+        if (parent.deadLetterId === input.deadLetterId) return;
+        const attached = await attachDeadLetterToRecoveryItem({
+          orgId: input.orgId,
+          recoveryItemId: parent.id,
+          deadLetterId: input.deadLetterId,
+        });
+        if (attached) {
+          await writeAuditRow({
+            orgId: input.orgId,
+            userId: input.createdBy,
+            action: "recovery.item.occurrence_attached",
+            targetType: "recovery-item",
+            targetId: parent.id,
+            metadata: {
+              deadLetterId: input.deadLetterId,
+              occurrenceCount: attached.occurrenceCount,
+              errorSignature: input.errorSignature,
+              workflowId: input.workflowId ?? null,
+            },
+          });
+        }
+        return;
+      }
+    }
+
     // Per-workflow severity default: when the workflow's metadata row
     // declares one, use it instead of the repo's hardcoded 'p3'. Failures
     // (Postgres blip, missing seam) degrade to null so the existing
@@ -99,6 +170,7 @@ export async function createRecoveryItemForDeadLetter(
       deadLetterId: input.deadLetterId,
       workflowId: input.workflowId ?? null,
       createdBy: input.createdBy,
+      errorSignature: input.errorSignature ?? null,
       ...(severityDefault ? { severity: severityDefault } : {}),
     });
     if (!wasCreated) return;

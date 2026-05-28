@@ -1223,6 +1223,14 @@ export const recoveryItems = pgTable(
     resolvedBy: text("resolved_by"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     comments: jsonb("comments").notNull().default([]),
+    // Debounce / failure-storm grouping. The normalized error signature is
+    // the match key (alongside orgId + workflowId) for collapsing repeated
+    // failures into one incident; the counters track how big the storm got
+    // and when it started / last fired.
+    errorSignature: text("error_signature"),
+    occurrenceCount: integer("occurrence_count").notNull().default(1),
+    firstOccurredAt: timestamp("first_occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    lastOccurredAt: timestamp("last_occurred_at", { withTimezone: true }).notNull().defaultNow(),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1235,6 +1243,55 @@ export const recoveryItems = pgTable(
       table.slaTargetAt,
     ),
     index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
+    // Backs the debounce lookup: find a recent open item with the same
+    // (orgId, workflowId, errorSignature) to attach a new occurrence to.
+    index("recovery_items_org_wf_sig_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.errorSignature,
+    ),
+  ],
+);
+
+/**
+ * Child occurrences attached to a `recovery_items` parent during a failure
+ * storm. When a new DLQ entry arrives with the same
+ * `(orgId, workflowId, errorSignature)` as a still-open parent whose last
+ * occurrence is within the org's debounce window, the entry is recorded
+ * here instead of spawning a fresh incident — so one storm reads as one
+ * incident with an occurrence count, not N identical incidents.
+ *
+ * Child rows have NO independent lifecycle: resolving the parent closes the
+ * incident for every attached occurrence. The `id` PK + the unique index on
+ * `(recoveryItemId, deadLetterId)` make the attach idempotent (a replayed
+ * DLQ insert is a no-op), mirroring `recovery_items`' own
+ * `onConflictDoNothing` pattern.
+ *
+ * Cascade posture: orphan-tolerant by design (consistent with the rest of
+ * the recovery subsystem). The attachment trail is left intact for
+ * forensics even after the parent resolves; rows are removed only by an
+ * explicit purge, never by a parent transition.
+ *
+ * Multi-tenant scope on every read via `eq(recoveryItemChildren.orgId, orgId)`.
+ */
+export const recoveryItemChildren = pgTable(
+  "recovery_item_children",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    recoveryItemId: text("recovery_item_id").notNull(),
+    deadLetterId: text("dead_letter_id").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_item_children_item_dlq_idx").on(
+      table.recoveryItemId,
+      table.deadLetterId,
+    ),
+    index("recovery_item_children_item_occurred_idx").on(
+      table.recoveryItemId,
+      table.occurredAt.desc(),
+    ),
   ],
 );
 

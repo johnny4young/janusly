@@ -8457,6 +8457,69 @@ button.we-ops-metric-card--button {
   overflow-wrap: anywhere;
 }
 
+.we-recovery-occurrences {
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.we-recovery-occurrences__summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.we-recovery-occurrences__lastseen {
+  color: var(--we-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.we-recovery-occurrences__summary .we-btn {
+  margin-left: auto;
+}
+
+.we-recovery-occurrences__list {
+  margin-top: 8px;
+}
+
+.we-recovery-occurrences__list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.we-recovery-occurrences__entry {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.we-recovery-occurrences__entry code {
+  color: var(--we-ink);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.we-recovery-occurrences__entry span {
+  color: var(--we-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.we-recovery-occurrences__empty {
+  color: var(--we-muted);
+  font-size: 12px;
+  margin: 0;
+}
+
 .we-recovery-item-drawer__escalate {
   border-left: 1px solid var(--we-line);
   padding-left: 8px;
