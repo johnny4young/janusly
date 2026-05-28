@@ -47,6 +47,7 @@ import { SENSITIVE_KEY_PATTERN } from "@janusly/shared/src/sensitive-keys";
 import { isMemoryAllowed } from "./memoryConsent";
 import { getMemoryUsageRecorder, type MemoryUsageMetric } from "./memoryUsage";
 import { listOrgConfig, type OrgConfigEntry } from "./orgConfigRepo";
+import { withAuditTx } from "./audit-tx";
 
 // ─── Closed sets shared with the policy + catalog ───────────────────────────
 
@@ -198,7 +199,8 @@ export type CommitMemoryError =
   | "config_unavailable"
   | "embedding_failed"
   | "content_empty"
-  | "metadata_too_large";
+  | "metadata_too_large"
+  | "persist_failed";
 
 const MAX_METADATA_BYTES = 8 * 1024;
 const MEMORY_EMBEDDING_DIMENSION = 1024;
@@ -358,30 +360,67 @@ export async function commitMemory(input: CommitMemoryInput): Promise<CommitMemo
   const retainUntil = new Date(Date.now() + retainDays * 24 * 60 * 60 * 1000);
   const entryId = crypto.randomUUID();
 
-  await db.insert(memoryEntries).values({
-    id: entryId,
-    orgId: input.orgId,
-    workflowId: input.workflowId ?? null,
-    runId: input.runId ?? null,
-    kind: input.kind,
-    content: scrubbedContent,
-    embedding: embedding.embedding,
-    embeddingProvider: embedding.provider,
-    embeddingModel: embedding.model,
-    embeddingDimension: embedding.dimension,
-    metadata: metadataValue,
-    retainUntil,
+  // Persist entry + audit row atomically. If audit fails, rollback so
+  // a memory_entries row can never exist without its `memory.entry.created`
+  // audit trail (the failure modes are Postgres blips, constraint
+  // violations, and DB connection drops). The {ok:false,error} envelope
+  // means we never throw past this point; usage + the best-effort
+  // commit-failed audit fire OUTSIDE the tx on rollback to surface the
+  // observability signal.
+  const bytes = Buffer.byteLength(scrubbedContent, "utf8");
+  const txResult = await withAuditTx(async (tx, audit) => {
+    await tx.insert(memoryEntries).values({
+      id: entryId,
+      orgId: input.orgId,
+      workflowId: input.workflowId ?? null,
+      runId: input.runId ?? null,
+      kind: input.kind,
+      content: scrubbedContent,
+      embedding: embedding.embedding,
+      embeddingProvider: embedding.provider,
+      embeddingModel: embedding.model,
+      embeddingDimension: embedding.dimension,
+      metadata: metadataValue,
+      retainUntil,
+    });
+    await audit({
+      orgId: input.orgId,
+      userId: null,
+      action: "memory.entry.created",
+      targetType: "memory_entry",
+      targetId: entryId,
+      metadata: {
+        kind: input.kind,
+        bytes,
+        embeddingProvider: embedding.provider,
+        embeddingModel: embedding.model,
+        embeddingDimension: embedding.dimension,
+        workflowId: input.workflowId,
+        runId: input.runId,
+      },
+    });
   });
 
-  await writeEntryCreatedAudit(input.orgId, entryId, {
-    kind: input.kind,
-    bytes: Buffer.byteLength(scrubbedContent, "utf8"),
-    embeddingProvider: embedding.provider,
-    embeddingModel: embedding.model,
-    embeddingDimension: embedding.dimension,
-    workflowId: input.workflowId,
-    runId: input.runId,
-  });
+  if (!txResult.ok) {
+    await writeCommitFailedAudit(input.orgId, "persist_failed", {
+      kind: input.kind,
+      error: txResult.error,
+    });
+    fireUsageRecorder({
+      metric: "memory.commit",
+      orgId: input.orgId,
+      kind: input.kind,
+      embeddingProvider: embedding.provider,
+      embeddingModel: embedding.model,
+      embeddingDimension: embedding.dimension,
+      workflowId: input.workflowId,
+      runId: input.runId,
+      ok: false,
+      error: "persist_failed",
+      latencyMs: Date.now() - startedAt,
+    });
+    return { ok: false, error: "persist_failed" };
+  }
 
   fireUsageRecorder({
     metric: "memory.commit",

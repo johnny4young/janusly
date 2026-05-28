@@ -37,6 +37,44 @@ vi.mock("@janusly/data/src/orgMembersRepo", () => ({
   upsertMembership: (...args: unknown[]) => upsertMembership(...args),
 }));
 
+// Mock withAuditTx so the SSO callback's atomic membership+audit pair
+// runs without touching a real Postgres `db.transaction`. The mock
+// runs the handler with a fake tx + a fake audit fn that proxies to
+// the existing `audit` mock so the test assertions on audit metadata
+// still fire. Failures bubble through the same { ok, error } envelope
+// the real helper returns.
+vi.mock("@janusly/data/src/audit-tx", () => ({
+  withAuditTx: async (handler: (tx: unknown, txAudit: (input: unknown) => Promise<void>) => Promise<unknown>) => {
+    const tx = {};
+    const txAudit = async (rawInput: unknown) => {
+      const input = rawInput as {
+        orgId: string;
+        userId: string | null;
+        action: string;
+        targetType?: string | null;
+        targetId?: string | null;
+        metadata?: unknown;
+      };
+      // Delegate to the test's `auditMock` with the legacy positional
+      // signature so existing assertions on calls[i][2] / [3] / [5] hold.
+      auditMock(
+        input.orgId,
+        input.userId,
+        input.action,
+        input.targetType ?? null,
+        input.targetId ?? null,
+        input.metadata,
+      );
+    };
+    try {
+      const result = await handler(tx, txAudit);
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+}));
+
 // Auth policy narrow-read mock. Returns "no policy set" defaults unless a
 // test overrides — keeps the existing 9 SSO tests passing through the
 // new policy gate.
@@ -348,11 +386,17 @@ describe("/auth/sso/callback", () => {
     const webBaseUrl = (process.env.JANUSLY_WEB_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
     expect(target).toContain(`${webBaseUrl}/auth/sso/complete`);
     expect(target).toContain("#janusly_session=");
-    expect(upsertMembership).toHaveBeenCalledWith(expect.objectContaining({
-      orgId: "org-a",
-      userId: "user-sso-1",
-      email: "alice@acme.com",
-    }));
+    expect(upsertMembership).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: "org-a",
+        userId: "user-sso-1",
+        email: "alice@acme.com",
+      }),
+      // SSO callback wraps upsert + audit in withAuditTx and passes a tx
+      // handle as the second argument so the upsert participates in the
+      // surrounding transaction.
+      expect.anything(),
+    );
     expect(auditMock).toHaveBeenCalledWith("org-a", "user-sso-1", "auth.sso.login",
       "sso_connection", "sso-1", expect.objectContaining({ via: "workos" }));
   });

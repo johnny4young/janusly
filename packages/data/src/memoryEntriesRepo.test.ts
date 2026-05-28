@@ -16,17 +16,31 @@ const insertValuesMock = vi.fn();
 const deleteWhereMock = vi.fn();
 const selectMock = vi.fn();
 
-vi.mock("@janusly/db", () => ({
-  db: {
+vi.mock("@janusly/db", () => {
+  // commitMemory now routes the memory_entries insert + audit through
+  // `withAuditTx`, which calls `db.transaction(callback)`. The mocked
+  // transaction simply invokes the callback with a `tx` handle that
+  // delegates `.insert(...).values(...)` to the SAME mocks the existing
+  // assertions read — so per-test assertions on `insertValuesMock` keep
+  // working byte-identically.
+  const txHandle = {
     insert: vi.fn(() => ({ values: insertValuesMock })),
     select: vi.fn(() => selectMock()),
-    delete: vi.fn(() => ({
-      where: deleteWhereMock,
-    })),
-  },
-  memoryEntries: { orgId: "org_id_col", kind: "kind_col", retainUntil: "retain_until_col", embedding: "embedding_col", id: "id_col" },
-  auditLogs: { id: "id_col" },
-}));
+    delete: vi.fn(() => ({ where: deleteWhereMock })),
+  };
+  return {
+    db: {
+      insert: vi.fn(() => ({ values: insertValuesMock })),
+      select: vi.fn(() => selectMock()),
+      delete: vi.fn(() => ({
+        where: deleteWhereMock,
+      })),
+      transaction: vi.fn(async (cb: (tx: typeof txHandle) => Promise<unknown>) => cb(txHandle)),
+    },
+    memoryEntries: { orgId: "org_id_col", kind: "kind_col", retainUntil: "retain_until_col", embedding: "embedding_col", id: "id_col" },
+    auditLogs: { id: "id_col" },
+  };
+});
 
 vi.mock("@janusly/ai", () => ({
   generateEmbedding: vi.fn(),

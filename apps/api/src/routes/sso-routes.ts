@@ -42,6 +42,7 @@ import {
 } from "@janusly/data/src/ssoConnectionsRepo";
 import { consumeSsoNonce, recordSsoNonce } from "@janusly/data/src/ssoStateNoncesRepo";
 import { upsertMembership } from "@janusly/data/src/orgMembersRepo";
+import { withAuditTx } from "@janusly/data/src/audit-tx";
 import { signSignedToken, verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "../audit";
@@ -298,23 +299,44 @@ export const ssoRoutes: Route[] = [
         );
       }
 
-      await upsertMembership({
-        orgId,
-        userId: profile.id,
-        email: profile.email,
-        role: "viewer",
+      // Atomic membership + login audit. Failure here rolls back the
+      // org_members upsert so we never leave a member without their
+      // login audit trail (the breakage mode is a Postgres blip
+      // between the two writes). Failure surfaces as a 500 to the
+      // caller; WorkOS' SSO callback is one-shot per state nonce
+      // already, so the user retries by re-initiating SSO.
+      const txResult = await withAuditTx(async (tx, txAudit) => {
+        await upsertMembership({
+          orgId,
+          userId: profile.id,
+          email: profile.email,
+          role: "viewer",
+        }, tx);
+        await txAudit({
+          orgId,
+          userId: profile.id,
+          action: "auth.sso.login",
+          targetType: "sso_connection",
+          targetId: sso.id,
+          metadata: {
+            via: "workos",
+            connectionId: sso.providerConnectionId,
+            email: profile.email,
+          },
+        });
       });
+      if (!txResult.ok) {
+        await audit(orgId, profile.id, "auth.sso.callback_failed", "sso_connection", sso.id, {
+          reason: "membership_persist_failed",
+          detail: txResult.error,
+        });
+        return sendJson(res, { error: "membership_persist_failed" }, 500);
+      }
 
       const sessionToken = signSignedToken({
         purpose: SSO_SESSION_PURPOSE,
         payload: { orgId, userId: profile.id, email: profile.email },
         ttlSeconds: policyDecision.sessionTtlSeconds,
-      });
-
-      await audit(orgId, profile.id, "auth.sso.login", "sso_connection", sso.id, {
-        via: "workos",
-        connectionId: sso.providerConnectionId,
-        email: profile.email,
       });
 
       const redirectTarget = `${webBaseUrl.replace(/\/$/, "")}/auth/sso/complete#janusly_session=${encodeURIComponent(sessionToken)}`;
