@@ -13,7 +13,7 @@ import {
   schedulePendingMemoryPurge,
 } from "@janusly/engine/src/memory-purge-scheduler";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -53,14 +53,14 @@ export const orgRoutes: Route[] = [
 
       try {
         const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
-        await audit(auth.orgId, auth.userId, "org.config.updated", "org_config", key, { key, value: entry.value });
+        await auditAction(auth, "org.config.updated", { targetType: "org_config", targetId: key, metadata: { key, value: entry.value } });
         if (AI_BUDGET_CONFIG_KEYS.has(key)) {
           try {
-            await audit(auth.orgId, auth.userId, "billing.budget.configured", "org_config", key, {
+            await auditAction(auth, "billing.budget.configured", { targetType: "org_config", targetId: key, metadata: {
               scope: "org",
               key,
               value: entry.value,
-            });
+            } });
           } catch (err) {
             console.warn("[org-config] budget audit write failed", err);
           }
@@ -82,20 +82,20 @@ export const orgRoutes: Route[] = [
               orgId: auth.orgId,
             });
             try {
-              await audit(auth.orgId, auth.userId, "memory.consent.granted", "org_config", key, {
+              await auditAction(auth, "memory.consent.granted", { targetType: "org_config", targetId: key, metadata: {
                 previousValue: previousMemoryEnabled,
                 newValue,
                 pendingPurgeCancelled,
-              });
+              } });
             } catch (err) {
               console.warn("[org-config] memory consent audit write failed", err);
             }
           } else if (previousMemoryEnabled === true && newValue === false) {
             try {
-              await audit(auth.orgId, auth.userId, "memory.consent.revoked", "org_config", key, {
+              await auditAction(auth, "memory.consent.revoked", { targetType: "org_config", targetId: key, metadata: {
                 previousValue: previousMemoryEnabled,
                 newValue,
-              });
+              } });
             } catch (err) {
               console.warn("[org-config] memory consent audit write failed", err);
             }

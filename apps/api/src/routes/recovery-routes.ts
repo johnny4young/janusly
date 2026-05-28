@@ -21,7 +21,7 @@ import {
   composeRecoveryRationaleContent,
   RecoveryFeedbackBodySchema,
 } from "../ai-patch-feedback";
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
@@ -90,11 +90,11 @@ export const recoveryRoutes: Route[] = [
         comment: parsed.data.comment ?? null,
       });
 
-      await audit(auth.orgId, auth.userId, "recovery.feedback", "dead_letter", parsed.data.deadLetterId, {
+      await auditAction(auth, "recovery.feedback", { targetType: "dead_letter", targetId: parsed.data.deadLetterId, metadata: {
         approachLabel: parsed.data.approachLabel,
         suggestionMode: parsed.data.suggestionMode,
         accepted: parsed.data.accepted,
-      });
+      } });
 
       // Memory-write side of the recovery loop. Fires ONLY when the
       // operator accepts a suggestion AND the org has memory enabled.

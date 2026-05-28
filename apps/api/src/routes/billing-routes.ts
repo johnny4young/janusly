@@ -26,7 +26,7 @@ import {
 } from "@janusly/data/src/workflowBudgetsRepo";
 import { db, workflows } from "@janusly/db";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { asRecord, readJson, sendJson } from "../http";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import type { Route } from "../routes";
@@ -115,14 +115,14 @@ export const billingRoutes: Route[] = [
         updatedBy: auth.userId,
       });
 
-      await audit(auth.orgId, auth.userId, "billing.budget.configured", "workflow", workflowId, {
+      await auditAction(auth, "billing.budget.configured", { targetType: "workflow", targetId: workflowId, metadata: {
         scope: "workflow",
         workflowId,
         before: before
           ? { monthlyUsd: before.monthlyUsd, warnPercent: before.warnPercent, policy: before.policy }
           : null,
         after: { monthlyUsd: row.monthlyUsd, warnPercent: row.warnPercent, policy: row.policy },
-      });
+      } });
 
       return sendJson(res, row);
     } },

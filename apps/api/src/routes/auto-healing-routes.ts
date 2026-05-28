@@ -33,7 +33,7 @@ import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { enforceRateLimit } from "../rate-limit";
@@ -175,9 +175,9 @@ export const autoHealingRoutes: Route[] = [
       }
 
       if (!accepted) {
-        await audit(auth.orgId, auth.userId, "auto_healing.decline.manual", "auto_healing_run", id, {
+        await auditAction(auth, "auto_healing.decline.manual", { targetType: "auto_healing_run", targetId: id, metadata: {
           decisionActor: auth.userId,
-        });
+        } });
         return sendJson(res, { ok: true, accepted: false });
       }
 
@@ -217,7 +217,7 @@ export const autoHealingRoutes: Route[] = [
       void runOrgScan(auth.orgId).catch((err) => {
         console.error("[auto-healing] on-demand scan failed", { orgId: auth.orgId, err });
       });
-      await audit(auth.orgId, auth.userId, "auto_healing.scan.triggered", undefined, undefined, {});
+      await auditAction(auth, "auto_healing.scan.triggered");
       return sendJson(res, { ok: true });
     },
   },

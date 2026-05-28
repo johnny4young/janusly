@@ -283,7 +283,7 @@ describe("/reports/run-explain — happy path", () => {
       "report.run_explain.exported",
       "run",
       "run_abc",
-      { format: "markdown", recoveryAuditFound: false },
+      expect.objectContaining({ format: "markdown", recoveryAuditFound: false }),
     );
   });
 
@@ -384,7 +384,7 @@ describe("/reports/run-explain — happy path", () => {
       "report.run_explain.exported",
       "run",
       "run_abc",
-      { format: "json", recoveryAuditFound: false },
+      expect.objectContaining({ format: "json", recoveryAuditFound: false }),
     );
   });
 
@@ -418,7 +418,7 @@ describe("/reports/run-explain — happy path", () => {
       "report.run_explain.exported",
       "run",
       "run_abc",
-      { format: "markdown", recoveryAuditFound: true },
+      expect.objectContaining({ format: "markdown", recoveryAuditFound: true }),
     );
   });
 });
@@ -510,7 +510,7 @@ describe("/reports/value-dashboard — export", () => {
       "report.value_dashboard.exported",
       "org",
       "org-1",
-      { format: "markdown", windowDays: 30 },
+      expect.objectContaining({ format: "markdown", windowDays: 30 }),
     );
   });
 

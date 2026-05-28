@@ -31,7 +31,7 @@ import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_
 import { listExposedMcpToolsForAi } from "@janusly/data/src/mcpConnectionsRepo";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema, AiPatchStructuralEnvelope, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema, type AiPatchStructuralSuggestion } from "../ai-schemas";
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendJson } from "../http";
@@ -120,7 +120,7 @@ export const aiRoutes: Route[] = [
         });
 
         const workflow = sanitizeAiWorkflow(promotion.workflow);
-        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", workflow.id, {
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: workflow.id, metadata: {
           mode: "ai",
           model: result.model,
           provider: result.provider,
@@ -131,11 +131,11 @@ export const aiRoutes: Route[] = [
           // and schedule are the only wired families today; future
           // families add a new key here without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
-        });
+        } });
         return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await audit(auth.orgId, auth.userId, "ai.workflow.generated", "ai", fallbackWorkflow?.id, { mode: "fallback", error: message });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
@@ -172,11 +172,11 @@ export const aiRoutes: Route[] = [
           modelHint: modelOverride,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
         });
-        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "ai", model: result.model, provider: result.provider });
+        await auditAction(auth, "ai.workflow.explained", { targetType: "ai", metadata: { mode: "ai", model: result.model, provider: result.provider } });
         return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, explanation: result.text }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await audit(auth.orgId, auth.userId, "ai.workflow.explained", "ai", undefined, { mode: "fallback", error: message });
+        await auditAction(auth, "ai.workflow.explained", { targetType: "ai", metadata: { mode: "fallback", error: message } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
@@ -215,13 +215,13 @@ export const aiRoutes: Route[] = [
         // must record success AND fallback per the AGENTS.md AI-fallback
         // contract. Without this, "shape invalid" requests leave no
         // operator audit trail.
-        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", undefined, { mode: "fallback", reason: "invalid_workflow_shape" });
+        await auditAction(auth, "ai.workflow.reviewed", { targetType: "ai", metadata: { mode: "fallback", reason: "invalid_workflow_shape" } });
         return sendJson(res, withBudgetWarning({ mode: "fallback", aiError: "Workflow shape invalid", review: { status: "fail", issues } }, budgetGate));
       }
 
       const workflow = parsed.data;
       if (!llm) {
-        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", reason: "no_llm_configured" });
+        await auditAction(auth, "ai.workflow.reviewed", { targetType: "ai", targetId: workflow.id, metadata: { mode: "fallback", reason: "no_llm_configured" } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           review: buildReviewFallback(workflow),
@@ -248,17 +248,17 @@ export const aiRoutes: Route[] = [
           sanitizeAiReview(result.object as ReviewFindings, workflow),
           buildReviewFallback(workflow),
         );
-        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, {
+        await auditAction(auth, "ai.workflow.reviewed", { targetType: "ai", targetId: workflow.id, metadata: {
           mode: "ai",
           model: result.model,
           provider: result.provider,
           totalIssues: review.issues.length,
           blockingCount: review.issues.filter((issue) => issue.severity === "fail").length,
-        });
+        } });
         return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, review }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI review failed";
-        await audit(auth.orgId, auth.userId, "ai.workflow.reviewed", "ai", workflow.id, { mode: "fallback", error: message });
+        await auditAction(auth, "ai.workflow.reviewed", { targetType: "ai", targetId: workflow.id, metadata: { mode: "fallback", error: message } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
@@ -572,7 +572,7 @@ export const aiRoutes: Route[] = [
         };
       }
 
-      await audit(auth.orgId, auth.userId, "ai.workflow.patch_suggested", "dlq", deadLetterId, {
+      await auditAction(auth, "ai.workflow.patch_suggested", { targetType: "dlq", targetId: deadLetterId, metadata: {
         mode: response.mode,
         model: response.model,
         provider: response.provider,
@@ -602,7 +602,7 @@ export const aiRoutes: Route[] = [
         // failure with the specific `reason`.
         memoryHitCount: memoryHint.hitCount,
         memoryRecallOk: memoryHint.recallOk,
-      });
+      } });
 
       return sendJson(res, withBudgetWarning(response, budgetGate));
     } },
@@ -633,10 +633,10 @@ export const aiRoutes: Route[] = [
 
       const parsed = WorkflowSchema.safeParse(candidate);
       if (!parsed.success) {
-        await audit(auth.orgId, auth.userId, "ai.workflow.improvement_suggested", "ai", undefined, {
+        await auditAction(auth, "ai.workflow.improvement_suggested", { targetType: "ai", metadata: {
           mode: "fallback",
           reason: "invalid_workflow_shape",
-        });
+        } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: "Workflow shape invalid",
@@ -752,7 +752,7 @@ export const aiRoutes: Route[] = [
         };
       }
 
-      await audit(auth.orgId, auth.userId, "ai.workflow.improvement_suggested", "ai", workflow.id, {
+      await auditAction(auth, "ai.workflow.improvement_suggested", { targetType: "ai", targetId: workflow.id, metadata: {
         mode: response.mode,
         model: response.model,
         provider: response.provider,
@@ -760,7 +760,7 @@ export const aiRoutes: Route[] = [
         suggestionsCount: response.suggestions.length,
         topApproachLabel: response.suggestions[0]?.approachLabel,
         focusProvided: typeof focus === "string" && focus.trim().length > 0,
-      });
+      } });
 
       return sendJson(res, withBudgetWarning(response, budgetGate));
     } },
@@ -803,12 +803,12 @@ export const aiRoutes: Route[] = [
         // See `/ai/patch-workflow` for the locale propagation rationale.
         locale: localeFromRequest(req),
       });
-      await audit(auth.orgId, auth.userId, "ai.run.explained", "run", runId, {
+      await auditAction(auth, "ai.run.explained", { targetType: "run", targetId: runId, metadata: {
         mode: result.mode,
         model: result.model,
         provider: result.provider,
         aiError: result.aiError,
-      });
+      } });
       return sendJson(res, withBudgetWarning(result, budgetGate));
     } },
 ];
