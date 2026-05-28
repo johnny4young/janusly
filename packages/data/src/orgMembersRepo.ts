@@ -22,6 +22,8 @@
 import { and, eq } from "drizzle-orm";
 import { db, orgMembers } from "@janusly/db";
 
+import type { DbOrTx } from "./audit-tx";
+
 export type OrgMemberRow = {
   id: string;
   orgId: string;
@@ -96,9 +98,16 @@ export async function upsertMembership(
     role: string;
     invitedBy?: string | null;
   },
+  /**
+   * Optional transaction handle. Pass the `tx` from `withAuditTx` when
+   * the upsert must roll back together with an `audit_logs` write (e.g.
+   * the SSO callback's membership upsert + `auth.sso.login` audit).
+   * Defaults to the module-level `db` for non-transactional callers.
+   */
+  dbOrTx: DbOrTx = db,
 ): Promise<OrgMemberRow> {
   const id = crypto.randomUUID();
-  const [row] = await db
+  const [row] = await dbOrTx
     .insert(orgMembers)
     .values({
       id,

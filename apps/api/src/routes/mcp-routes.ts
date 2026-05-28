@@ -303,6 +303,19 @@ export const mcpRoutes: Route[] = [
         createdBy: auth.userId,
       });
 
+      // Intentionally NON-atomic. The natural transaction shape for a
+      // create-connection request would wrap createConnection +
+      // runDiscovery + audit in a single `db.transaction`, but
+      // runDiscovery performs network I/O (child process spawn for
+      // stdio, HTTP for sse/http transports). Holding a Postgres tx
+      // open across that I/O would block a connection-pool slot for
+      // the full discovery window and can deadlock under load. The
+      // connection row is the operator-visible authority — its
+      // `status: "pending"` already signals "discovery in progress",
+      // and the rediscover route can replay if either discovery or
+      // the trailing audit fails. A future refactor could move tool
+      // persistence out of runDiscovery and wrap the DB writes in a
+      // tx after the network call returns.
       const discovery = await runDiscovery(connection);
       await audit(auth.orgId, auth.userId, "mcp.connection.created", "mcp_connection", connection.id, {
         alias,
