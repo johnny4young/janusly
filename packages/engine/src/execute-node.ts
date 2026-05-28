@@ -16,9 +16,11 @@
  */
 
 import { nodeRegistry } from "./node-registry";
+import { NODE_CONFIG_SCHEMAS } from "./node-configs";
 import { getRunContext, getRunMetadata, getRunReplayMode } from "./persistence";
 import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
+import type { NodeType } from "@janusly/shared/src/workflow";
 
 /**
  * Run one node end-to-end: look up org/context, render templates with
@@ -68,12 +70,23 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
 
   let result: Awaited<ReturnType<typeof executor>>;
   try {
+    // Inner refinement: validate the (post-template) config against the
+    // per-node-type schema before invoking the executor. Catches typos /
+    // type mismatches the API-boundary WorkflowSchema's opaque
+    // `z.record(z.string(), z.unknown())` lets through. A parse failure
+    // throws here and rides the same catch below so the error message
+    // flows through `redactError` (the standard chokepoint) — no
+    // ZodError path / message escapes without redaction. Unknown node
+    // types fall through to the loose post-template config (the
+    // dispatcher errored above if no executor matched).
+    const configSchema = NODE_CONFIG_SCHEMAS[node.type as NodeType];
+    const parsedConfig = configSchema ? configSchema.parse(resolvedConfig) : resolvedConfig;
     result = await executor({
       runId,
       nodeId: node.id,
       orgId,
       workflowId,
-      config: resolvedConfig,
+      config: parsedConfig,
       context,
       redactedValues,
       dryRun,
