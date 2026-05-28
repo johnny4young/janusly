@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
@@ -6,6 +6,9 @@ RUN corepack enable
 
 COPY package.json pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
+# apps/web depends on the @janusly/shared workspace package, so its manifests
+# must be present for pnpm to resolve the `workspace:*` link at install time.
+COPY packages ./packages
 
 RUN pnpm install
 
@@ -13,7 +16,12 @@ COPY . .
 
 RUN pnpm --filter @janusly/web build
 
-RUN npm install -g serve
+# Static file server, installed globally through pnpm so the image stays
+# package-manager-consistent (no npm in a pnpm repo). pnpm places global
+# binaries under PNPM_HOME, which must be on PATH for `serve` to resolve.
+ENV PNPM_HOME="/usr/local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN pnpm add -g serve
 
 EXPOSE 3000
 
