@@ -11,8 +11,7 @@
  *   the exact job payload — don't trim fields here.
  */
 
-import { db } from "@janusly/db";
-import { deadLetters } from "@janusly/db";
+import { db, deadLetters } from "@janusly/db";
 import {
   recordAlertEvent,
   recordRecoveryItemCreationEvent,

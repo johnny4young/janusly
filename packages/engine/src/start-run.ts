@@ -17,8 +17,7 @@
  *   readers honest about which runs came from saved DAGs.
  */
 
-import { db } from "@janusly/db";
-import { runs, runNodes, runEvents } from "@janusly/db";
+import { db, runs, runNodes, runEvents } from "@janusly/db";
 import { enqueueNode } from "./queue";
 import { markNodeQueued, appendEvent } from "./persistence";
 import { safePersistPayload } from "./safe-persist";

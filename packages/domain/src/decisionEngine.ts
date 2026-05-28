@@ -126,7 +126,7 @@ export async function decide(input: DecisionInput): Promise<DecisionOutput> {
   let scored = candidatePool.map((candidate) =>
     scoreCandidate(candidate, input.preferences),
   );
-  // 🔥 RL ADJUSTMENT
+  // Bias scores by historical reinforcement counters before ranking.
   scored = applyRlAdjustments(scored, input.rlStats, {
     enabled: true,
     influence: 0.1,

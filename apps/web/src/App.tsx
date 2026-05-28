@@ -113,6 +113,7 @@ export default function App() {
     selectedEdgeId,
     currentWorkflowId,
     currentWorkflowName,
+    currentWorkflowSaved,
     currentWorkflowInputs,
     currentWorkflowOutputs,
     streamStatus,
@@ -124,6 +125,7 @@ export default function App() {
     hydrateWorkflow,
     getWorkflowJson,
     newWorkflow,
+    markWorkflowSaved,
     selectNode,
     selectEdge,
     updateSelectedNodeConfig,
@@ -394,13 +396,14 @@ export default function App() {
       const workflow = getWorkflowJson()
       const result = await api('/workflows/save', { method: 'POST', body: JSON.stringify(workflow) }) as { version?: number }
       if (typeof result.version === 'number') setCurrentWorkflowVersion(result.version)
+      markWorkflowSaved()
       addToast(t('toasts.savedVersion', { version: result.version ?? '?' }), 'success')
       bumpPlatformVersion()
       await refreshPlatform()
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.saveFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, t, validateWorkflow])
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, markWorkflowSaved, refreshPlatform, t, validateWorkflow])
 
   /**
    * Internal helper: send the actual `POST /start` request with an optional
@@ -761,7 +764,7 @@ export default function App() {
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
               <WorkflowReadinessBadge />
-              <WorkflowHealthBadge workflowId={currentWorkflowId ?? undefined} />
+              <WorkflowHealthBadge workflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined} />
             </div>
             <button
               type="button"

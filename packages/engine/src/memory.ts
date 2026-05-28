@@ -8,8 +8,7 @@
  * `multi_agent` nodes) to give the planner access to prior steps.
  */
 
-import { db } from "@janusly/db";
-import { runEvents } from "@janusly/db";
+import { db, runEvents } from "@janusly/db";
 import { asc, eq } from "drizzle-orm";
 
 /** One memory entry, lifted from a `run_events` row. */

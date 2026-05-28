@@ -59,7 +59,11 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
-  const workflowId = explicit ?? storeWorkflowId
+  const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
+  // With no explicit id this panel targets the current draft — but only once
+  // it has been saved. An unsaved draft has no server row, so the health/SLO
+  // lookup would 404; an explicit id always resolves.
+  const workflowId = explicit ?? (storeWorkflowSaved ? storeWorkflowId : undefined)
   const [slo, setSlo] = useState<WorkflowSlo>(DEFAULT_SLO)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)

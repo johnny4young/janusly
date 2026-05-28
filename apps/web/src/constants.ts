@@ -192,13 +192,15 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
   return t('nodeSummary.fallback') as string
 }
 
+/** Status strings we ship UI labels for — mirrors the `status.*` i18n keys. */
+const KNOWN_STATUSES: ReadonlySet<string> = new Set([
+  'draft', 'pending', 'queued', 'running', 'waiting', 'skipped',
+  'succeeded', 'failed', 'cancelled', 'open', 'replayed', 'resolved',
+])
+
 /** Human label for a node/run status string (e.g. `"running"` → `"Running"`). */
 export function formatStatusLabel(status: string): string {
-  const KNOWN: ReadonlySet<string> = new Set([
-    'draft', 'pending', 'queued', 'running', 'waiting', 'skipped',
-    'succeeded', 'failed', 'cancelled', 'open', 'replayed', 'resolved',
-  ])
-  if (KNOWN.has(status)) return t(`status.${status}` as never) as string
+  if (KNOWN_STATUSES.has(status)) return t(`status.${status}` as never) as string
   return status.replaceAll('_', ' ')
 }
 

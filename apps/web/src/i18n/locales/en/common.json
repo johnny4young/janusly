@@ -233,7 +233,7 @@
   "layout.openMenu": "Open user menu",
   "layout.closeMenu": "Close menu",
 
-  "workflow.sampleName": "UI Test Workflow",
+  "workflow.sampleName": "Sample workflow",
   "workflow.defaultName": "Untitled Workflow",
 
   "canvas.edge.condition": "condition",

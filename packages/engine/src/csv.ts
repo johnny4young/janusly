@@ -35,7 +35,7 @@ const BOM = "﻿";
 export function parseCsv(input: string, hasHeader = true): Array<Record<string, string>> | string[][] {
   const stripped = input.startsWith(BOM) ? input.slice(BOM.length) : input;
   const rows = parseRows(stripped);
-  if (rows.length === 0) return hasHeader ? [] : [];
+  if (rows.length === 0) return [];
   if (!hasHeader) return rows;
   const [header, ...body] = rows;
   return body.map((row) => {

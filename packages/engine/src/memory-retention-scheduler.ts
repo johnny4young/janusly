@@ -39,9 +39,7 @@
  *   mixes tenants.
  */
 
-import {
-  deleteExpiredMemory,
-} from "@janusly/data";
+import { deleteExpiredMemory } from "@janusly/data";
 
 import { workflowQueue } from "./queue";
 import { validateCronExpression } from "./schedule";
