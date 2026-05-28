@@ -6391,6 +6391,61 @@ button.we-ops-metric-card--button {
   background: var(--we-warning);
 }
 
+/* Live-run stream status pill — green when the SSE stream is connected,
+   amber when the poll-loop fallback is the active updater. Mirrors the
+   rate-limiter chip; the live dot pulses to read as "real time". */
+.we-run-stream-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--we-line);
+  background: var(--we-surface-muted);
+  color: var(--we-text-1);
+}
+
+.we-run-stream-chip--live {
+  border-color: var(--we-success);
+  color: var(--we-success);
+}
+
+.we-run-stream-chip--fallback {
+  border-color: var(--we-warning);
+  color: var(--we-warning);
+}
+
+.we-run-stream-chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.we-run-stream-chip--live .we-run-stream-chip__dot {
+  background: var(--we-success);
+  animation: we-run-stream-pulse 1.6s ease-in-out infinite;
+}
+
+.we-run-stream-chip--fallback .we-run-stream-chip__dot {
+  background: var(--we-warning);
+}
+
+@keyframes we-run-stream-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-run-stream-chip--live .we-run-stream-chip__dot {
+    animation: none;
+  }
+}
+
 /* ==========================================================================
    Operations page — sticky vertical sub-tab rail + active-only content
    column. Replaces the legacy `OperationsPanel` vertical stack. Only the

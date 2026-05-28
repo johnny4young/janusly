@@ -666,6 +666,9 @@
   "operations.rateLimiter.degraded_other": "Rate limiter degraded — {{count}} buckets failing open. Traffic still allowed.",
   "operations.rateLimiter.degradedBucketsTooltip": "Degraded buckets: {{buckets}}",
   "operations.rateLimiter.copyHint": "Non-blocking — distinct from a hard budget block.",
+  "runStream.label": "Live run connection",
+  "runStream.live": "Live",
+  "runStream.polling": "Polling",
 
   "operations.section.railLabel": "Operations sections",
   "operations.section.attentionDot": "Needs attention",

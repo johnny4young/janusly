@@ -53,6 +53,7 @@ import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
+import { closeRunStreamHub, registerRunEventPublisher } from "./run-stream";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -180,6 +181,13 @@ setMemoryUsageRecorder(recordMemoryUsage);
 setBudgetChecker(productionBudgetChecker);
 console.log("[budget] checker registered (api)");
 
+// Bridge the engine's run-event seam to Redis PUBLISH so the live-run SSE
+// stream can fan events to connected clients. Both the API (run.started /
+// run.cancelled) and the worker (node lifecycle + terminal flips) publish;
+// the API process is also the subscriber that streams to browsers.
+registerRunEventPublisher();
+console.log("[run-stream] publisher registered (api)");
+
 let shutdownStarted = false;
 
 async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
@@ -202,6 +210,7 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
     });
     await shutdownAutoHealing();
     await shutdownAlerts();
+    await closeRunStreamHub();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);
