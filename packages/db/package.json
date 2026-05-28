@@ -16,13 +16,13 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "drizzle-orm": "^1.0.0-rc.1",
+    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
     "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "@types/node": "^24.12.2",
-    "drizzle-kit": "^1.0.0-rc.1",
+    "@types/node": "^25.9.1",
+    "drizzle-kit": "1.0.0-rc.4-ca0f029",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.7"
   }
 }

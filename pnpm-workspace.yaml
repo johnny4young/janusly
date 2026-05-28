@@ -31,6 +31,12 @@ overrides:
   # @modelcontextprotocol/sdk > express-rate-limit > ip-address. Drop
   # once express-rate-limit bumps.
   ip-address: ">=10.2.0"
+  # ioredis dedup (not an advisory). bullmq pins ioredis to an exact older
+  # patch (5.10.1) while the app's direct deps track 5.11.0. Two physical
+  # ioredis copies make a Redis instance from one line fail BullMQ's
+  # `ConnectionOptions` type (type-identity mismatch in queue.ts/worker.ts).
+  # Align everything to a single copy. Drop once bullmq's pin reaches it.
+  ioredis: ">=5.11.0"
 
 # Audit ignores for advisories that cannot be cleared via overrides
 # (e.g. peer-dep-locked transitives). Every entry MUST have a matching
