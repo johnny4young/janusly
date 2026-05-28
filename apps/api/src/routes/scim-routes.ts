@@ -25,6 +25,7 @@
  */
 
 import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, readRawBody, sendJson } from "../http";
 import {
@@ -100,11 +101,11 @@ export const scimRoutes: Route[] = [
         directoryType,
         defaultRole,
       });
-      await audit(auth.orgId, auth.userId, "org.scim.directory_attached", "scim_directory", row.id, {
+      await auditAction(auth, "org.scim.directory_attached", { targetType: "scim_directory", targetId: row.id, metadata: {
         providerDirectoryId,
         directoryType: directoryType ?? null,
         defaultRole,
-      });
+      } });
       return sendJson(res, row);
     },
   },
@@ -133,7 +134,7 @@ export const scimRoutes: Route[] = [
       const existing = await getScimDirectoryById({ id, orgId: auth.orgId });
       if (!existing) return sendJson(res, { error: "SCIM directory not found" }, 404);
       const updated = await updateScimDirectory({ id, orgId: auth.orgId, ...updates });
-      await audit(auth.orgId, auth.userId, "org.scim.directory_updated", "scim_directory", id, updates);
+      await auditAction(auth, "org.scim.directory_updated", { targetType: "scim_directory", targetId: id, metadata: updates });
       return sendJson(res, updated);
     },
   },
@@ -148,7 +149,7 @@ export const scimRoutes: Route[] = [
       const existing = await getScimDirectoryById({ id, orgId: auth.orgId });
       if (!existing) return sendJson(res, { error: "SCIM directory not found" }, 404);
       await revokeScimDirectory({ id, orgId: auth.orgId });
-      await audit(auth.orgId, auth.userId, "org.scim.directory_revoked", "scim_directory", id, {});
+      await auditAction(auth, "org.scim.directory_revoked", { targetType: "scim_directory", targetId: id });
       return sendJson(res, { ok: true });
     },
   },

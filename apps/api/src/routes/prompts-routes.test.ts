@@ -129,7 +129,7 @@ describe("POST /prompts", () => {
       "prompt.created",
       "prompt",
       "prompt-1",
-      { name: "incident_summary" },
+      expect.objectContaining({ name: "incident_summary" }),
     );
     expect(sendJson).toHaveBeenLastCalledWith(expect.anything(), { prompt: promptRow }, 201);
   });
@@ -177,7 +177,7 @@ describe("POST /prompts/:name/versions", () => {
       "prompt.version_created",
       "prompt_version",
       "version-1",
-      { name: "incident_summary", version: 1, promptId: "prompt-1" },
+      expect.objectContaining({ name: "incident_summary", version: 1, promptId: "prompt-1" }),
     );
     expect(sendJson).toHaveBeenLastCalledWith(expect.anything(), { version: versionRow }, 201);
   });
@@ -208,12 +208,12 @@ describe("POST /prompts/:name/versions/:version/pin", () => {
       "prompt.version_pinned",
       "prompt",
       "prompt-1",
-      {
+      expect.objectContaining({
         name: "incident_summary",
         version: 1,
         from: null,
         to: "version-1",
-      },
+      }),
     );
     expect(sendJson).toHaveBeenLastCalledWith(expect.anything(), { prompt: updatedPrompt });
   });

@@ -33,7 +33,7 @@ import {
 } from "@janusly/data/src/recoveryItemHandoffsRepo";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
-import { audit } from "../audit";
+import { auditAction, type AuditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
@@ -68,7 +68,7 @@ async function isValidationRun(orgId: string, runId: string | null): Promise<boo
   return rows[0]?.replayMode === "validation";
 }
 
-function auditAction(destination: RecoveryHandoffDestination): string {
+function recoveryHandoffAction(destination: RecoveryHandoffDestination): AuditAction {
   return `recovery.handoff.${destination}`;
 }
 
@@ -120,7 +120,7 @@ export const recoveryHandoffRoutes: Route[] = [
 
       // Dry-run gate: sandbox replays MUST NOT page the team channel.
       if (await isValidationRun(auth.orgId, deadLetter.runId)) {
-        await audit(auth.orgId, auth.userId, auditAction(body.destination), "recovery-item", recoveryItemId, {
+        await auditAction(auth, recoveryHandoffAction(body.destination), { targetType: "recovery-item", targetId: recoveryItemId, metadata: {
           recoveryItemId,
           deadLetterId: item.deadLetterId,
           destination: body.destination,
@@ -135,7 +135,7 @@ export const recoveryHandoffRoutes: Route[] = [
           externalUrl: existing?.externalUrl ?? null,
           skipped: true,
           reason: "validation_run",
-        });
+        } });
         return sendJson(res, {
           ok: false,
           skipped: true,
@@ -154,7 +154,7 @@ export const recoveryHandoffRoutes: Route[] = [
         existing.lastOutcome === "delivered" &&
         isSlackHandoffCoolingDown(existing.lastDispatchedAt)
       ) {
-        await audit(auth.orgId, auth.userId, auditAction("slack"), "recovery-item", recoveryItemId, {
+        await auditAction(auth, recoveryHandoffAction("slack"), { targetType: "recovery-item", targetId: recoveryItemId, metadata: {
           recoveryItemId,
           deadLetterId: item.deadLetterId,
           destination: "slack",
@@ -170,7 +170,7 @@ export const recoveryHandoffRoutes: Route[] = [
           externalUrl: existing.externalUrl,
           cooldownSeconds: SLACK_HANDOFF_COOLDOWN_SECONDS,
           lastDispatchedAtIso: existing.lastDispatchedAt.toISOString(),
-        });
+        } });
         return sendJson(res, {
           ok: true,
           alreadyDispatched: true,
@@ -248,7 +248,7 @@ export const recoveryHandoffRoutes: Route[] = [
         createdBy: auth.userId,
       });
 
-      await audit(auth.orgId, auth.userId, auditAction(body.destination), "recovery-item", recoveryItemId, {
+      await auditAction(auth, recoveryHandoffAction(body.destination), { targetType: "recovery-item", targetId: recoveryItemId, metadata: {
         recoveryItemId,
         deadLetterId: item.deadLetterId,
         destination: body.destination,
@@ -262,7 +262,7 @@ export const recoveryHandoffRoutes: Route[] = [
         externalId: handoff.externalId,
         externalUrl: handoff.externalUrl,
         commentId: result.commentId ?? null,
-      });
+      } });
 
       return sendJson(res, {
         ok: result.ok,

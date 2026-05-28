@@ -115,7 +115,7 @@ describe("POST /org/config memory consent", () => {
       "memory.consent.revoked",
       "org_config",
       "memory.enabled",
-      { previousValue: true, newValue: false },
+      expect.objectContaining({ previousValue: true, newValue: false }),
     );
     expect(schedulePendingMemoryPurgeMock).toHaveBeenCalledWith({ orgId: "org-1" });
     const revokeAuditOrder = auditMock.mock.invocationCallOrder[1];
@@ -141,7 +141,7 @@ describe("POST /org/config memory consent", () => {
       "memory.consent.granted",
       "org_config",
       "memory.enabled",
-      { previousValue: false, newValue: true, pendingPurgeCancelled: true },
+      expect.objectContaining({ previousValue: false, newValue: true, pendingPurgeCancelled: true }),
     );
     const cancelOrder = cancelPendingMemoryPurgeMock.mock.invocationCallOrder[0];
     const grantAuditOrder = auditMock.mock.invocationCallOrder[1];

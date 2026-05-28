@@ -46,6 +46,7 @@ import { withAuditTx } from "@janusly/data/src/audit-tx";
 import { signSignedToken, verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import {
@@ -117,11 +118,11 @@ export const ssoRoutes: Route[] = [
         providerConnectionId,
         enforcedSso,
       });
-      await audit(auth.orgId, auth.userId, "org.sso.connection_added", "sso_connection", row.id, {
+      await auditAction(auth, "org.sso.connection_added", { targetType: "sso_connection", targetId: row.id, metadata: {
         provider: row.provider,
         providerConnectionId: row.providerConnectionId,
         enforcedSso: row.enforcedSso,
-      });
+      } });
       return sendJson(res, row);
     } },
   { method: "POST", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin",
@@ -148,7 +149,7 @@ export const ssoRoutes: Route[] = [
       const existing = await getSsoConnectionById({ id, orgId: auth.orgId });
       if (!existing) return sendJson(res, { error: "SSO connection not found" }, 404);
       const updated = await updateSsoConnection({ id, orgId: auth.orgId, ...updates });
-      await audit(auth.orgId, auth.userId, "org.sso.connection_updated", "sso_connection", id, updates);
+      await auditAction(auth, "org.sso.connection_updated", { targetType: "sso_connection", targetId: id, metadata: updates });
       return sendJson(res, updated);
     } },
   { method: "DELETE", match: (url) => /^\/org\/sso\/connections\/[^/]+$/.test(url), role: "admin",
@@ -159,7 +160,7 @@ export const ssoRoutes: Route[] = [
       const existing = await getSsoConnectionById({ id, orgId: auth.orgId });
       if (!existing) return sendJson(res, { error: "SSO connection not found" }, 404);
       await revokeSsoConnection({ id, orgId: auth.orgId });
-      await audit(auth.orgId, auth.userId, "org.sso.connection_revoked", "sso_connection", id, {});
+      await auditAction(auth, "org.sso.connection_revoked", { targetType: "sso_connection", targetId: id });
       return sendJson(res, { ok: true });
     } },
 

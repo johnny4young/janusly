@@ -35,7 +35,7 @@ import {
 } from "@janusly/data/src/promptsRepo";
 import { PromptVariablesSchema, type PromptVariable } from "@janusly/shared";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -100,9 +100,9 @@ export const promptsRoutes: Route[] = [
         description: typeof description === "string" ? description : undefined,
         createdBy: auth.userId,
       });
-      await audit(auth.orgId, auth.userId, "prompt.created", "prompt", created.id, {
+      await auditAction(auth, "prompt.created", { targetType: "prompt", targetId: created.id, metadata: {
         name: created.name,
-      });
+      } });
       return sendJson(res, { prompt: created }, 201);
     },
   },
@@ -207,11 +207,11 @@ export const promptsRoutes: Route[] = [
         variables,
         createdBy: auth.userId,
       });
-      await audit(auth.orgId, auth.userId, "prompt.version_created", "prompt_version", created.id, {
+      await auditAction(auth, "prompt.version_created", { targetType: "prompt_version", targetId: created.id, metadata: {
         name: prompt.name,
         version: created.version,
         promptId: prompt.id,
-      });
+      } });
       return sendJson(res, { version: created }, 201);
     },
   },
@@ -244,12 +244,12 @@ export const promptsRoutes: Route[] = [
       if (!result) {
         return sendJson(res, { error: "version not found", code: "not_found" }, 404);
       }
-      await audit(auth.orgId, auth.userId, "prompt.version_pinned", "prompt", prompt.id, {
+      await auditAction(auth, "prompt.version_pinned", { targetType: "prompt", targetId: prompt.id, metadata: {
         name: prompt.name,
         version: versionNum,
         from: result.previousVersionId,
         to: result.prompt.pinnedVersionId,
-      });
+      } });
       return sendJson(res, { prompt: result.prompt });
     },
   },

@@ -30,7 +30,7 @@ import {
   upsertWorkflowMetadata,
 } from "@janusly/data/src/workflowMetadataRepo";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
@@ -121,11 +121,11 @@ export const workflowMetadataRoutes: Route[] = [
         actorUserId: auth.userId,
       });
 
-      await audit(auth.orgId, auth.userId, "workflow.metadata.set", "workflow", workflowId, {
+      await auditAction(auth, "workflow.metadata.set", { targetType: "workflow", targetId: workflowId, metadata: {
         before: previous,
         after: record,
         workflowId,
-      });
+      } });
 
       return sendJson(res, { workflowId, metadata: record });
     },

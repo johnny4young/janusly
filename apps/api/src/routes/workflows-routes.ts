@@ -35,12 +35,12 @@ import { WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { z } from "zod";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
-import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "../mcp-consent";
+import { isMcpWriteAllowed, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
 import {
   checkRollbackAvailability,
@@ -126,10 +126,7 @@ export const workflowsRoutes: Route[] = [
         version: result.version,
         attempts: result.attempts,
       };
-      if (auth.source === "mcp") {
-        Object.assign(auditMetadata, mcpAuditMetadata(auth));
-      }
-      await audit(auth.orgId, auth.userId, "workflow.saved", "workflow", result.workflowId, auditMetadata);
+      await auditAction(auth, "workflow.saved", { targetType: "workflow", targetId: result.workflowId, metadata: auditMetadata });
       return sendJson(res, {
         workflowId: result.workflowId,
         versionId: result.versionId,
@@ -153,7 +150,7 @@ export const workflowsRoutes: Route[] = [
       if (!result.ok) {
         return sendJson(res, { error: "Source version not found" }, 404);
       }
-      await audit(auth.orgId, auth.userId, "workflow.rolled_back", "workflow", workflowId, rollbackAuditMetadata(result));
+      await auditAction(auth, "workflow.rolled_back", { targetType: "workflow", targetId: workflowId, metadata: rollbackAuditMetadata(result) });
       return sendJson(res, {
         workflowId,
         versionId: result.versionId,
@@ -200,11 +197,11 @@ export const workflowsRoutes: Route[] = [
       const result = await setWorkflowSlo(auth.orgId, workflowId, parsed.data.slo);
       if (!result) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
-      await audit(auth.orgId, auth.userId, "workflow.slo.set", "workflow", workflowId, {
+      await auditAction(auth, "workflow.slo.set", { targetType: "workflow", targetId: workflowId, metadata: {
         slo: parsed.data.slo,
         previousSlo: result.previousSlo,
         versionId: result.versionId,
-      });
+      } });
       return sendJson(res, { workflowId, slo: parsed.data.slo, versionId: result.versionId });
     } },
   // DELETE /workflows/:id — hard-deletes the workflow + every persisted
@@ -244,7 +241,7 @@ export const workflowsRoutes: Route[] = [
       await db.delete(workflowMetadata).where(and(eq(workflowMetadata.workflowId, workflowId), eq(workflowMetadata.orgId, auth.orgId)));
       await db.delete(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
 
-      await audit(auth.orgId, auth.userId, "workflow.deleted", "workflow", workflowId, {});
+      await auditAction(auth, "workflow.deleted", { targetType: "workflow", targetId: workflowId });
       return sendJson(res, { workflowId, ok: true });
     } },
 
