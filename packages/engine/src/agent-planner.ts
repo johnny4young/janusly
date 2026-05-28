@@ -23,6 +23,7 @@
 import { loadRootEnv } from "@janusly/db";
 import { getLlmClient, type LlmClient } from "@janusly/ai";
 import { checkBudget } from "./budget";
+import type { AgentNodeConfig } from "./node-configs";
 
 loadRootEnv();
 
@@ -56,11 +57,11 @@ const availableTools = [
   }
 ];
 
-export function planAgentTool(config: any, context: Record<string, any>): AgentPlan {
+export function planAgentTool(config: AgentNodeConfig, context: Record<string, unknown>): AgentPlan {
   if (config.tool) {
     return {
       tool: config.tool,
-      input: config.input ?? {},
+      input: (config.input as Record<string, unknown> | undefined) ?? {},
       reason: "Explicit tool selected by node config",
     };
   }
@@ -104,8 +105,8 @@ export function planAgentTool(config: any, context: Record<string, any>): AgentP
 }
 
 export async function planAgentToolWithLLM(
-  config: any,
-  context: Record<string, any>,
+  config: AgentNodeConfig,
+  context: Record<string, unknown>,
   history: AgentLoopStep[] = [],
   /**
    * Optional LLM injection — mainly for tests. When omitted, the function
