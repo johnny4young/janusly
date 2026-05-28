@@ -1,14 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
+import { RecoveryCenterPanel } from './RecoveryCenterPanel'
 import {
-  RecoveryCenterPanel,
   buildGreeting,
   computeRecommendedActions,
   humanizeAge,
   readErrorSignature,
   type RecommendedActionSignals,
-} from './RecoveryCenterPanel'
+} from './recovery-center/helpers'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
