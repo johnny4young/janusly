@@ -50,7 +50,7 @@ import {
 import { listHandoffsForItem } from "@janusly/data/src/recoveryItemHandoffsRepo";
 import { getWorkflowMetadata } from "@janusly/data/src/workflowMetadataRepo";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -134,10 +134,10 @@ export const recoveryItemsRoutes: Route[] = [
         const { code, body: errBody } = statusCodeFromTransition(current.status);
         return sendJson(res, errBody, code);
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.acknowledged", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.acknowledged", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, owner: result.before.owner, severity: result.before.severity },
         after: { status: result.after.status, owner: result.after.owner, severity: result.after.severity },
-      });
+      } });
       return sendJson(res, { item: result.after });
     },
   },
@@ -158,10 +158,10 @@ export const recoveryItemsRoutes: Route[] = [
         const { code, body: errBody } = statusCodeFromTransition(current.status);
         return sendJson(res, errBody, code);
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.in_progress", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.in_progress", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, owner: result.before.owner },
         after: { status: result.after.status, owner: result.after.owner },
-      });
+      } });
       return sendJson(res, { item: result.after });
     },
   },
@@ -190,10 +190,10 @@ export const recoveryItemsRoutes: Route[] = [
           body: body.data.comment,
         });
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.waiting_external", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.waiting_external", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, owner: result.before.owner },
         after: { status: result.after.status, owner: result.after.owner },
-      });
+      } });
       return sendJson(res, { item: result.after });
     },
   },
@@ -237,11 +237,11 @@ export const recoveryItemsRoutes: Route[] = [
         });
       }
       const escalation = isSeverityEscalation(result.before.severity, result.after.severity);
-      await audit(auth.orgId, auth.userId, "recovery.item.escalated", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.escalated", { targetType: "recovery-item", targetId: id, metadata: {
         before: { severity: result.before.severity, slaTargetAt: result.before.slaTargetAt.toISOString() },
         after: { severity: result.after.severity, slaTargetAt: result.after.slaTargetAt.toISOString() },
         isEscalation: escalation,
-      });
+      } });
       return sendJson(res, { item: result.after, isEscalation: escalation });
     },
   },
@@ -289,11 +289,11 @@ export const recoveryItemsRoutes: Route[] = [
         const { code, body: errBody } = statusCodeFromTransition(current.status);
         return sendJson(res, errBody, code);
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.assigned", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.assigned", { targetType: "recovery-item", targetId: id, metadata: {
         before: { owner: result.before.owner },
         after: { owner: result.after.owner },
         defaultedFromMetadata,
-      });
+      } });
       return sendJson(res, { item: result.after, defaultedFromMetadata });
     },
   },
@@ -325,11 +325,11 @@ export const recoveryItemsRoutes: Route[] = [
           body: body.data.comment,
         });
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.resolved", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.resolved", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, resolutionReason: result.before.resolutionReason },
         after: { status: result.after.status, resolutionReason: result.after.resolutionReason },
         resolutionReason: body.data.resolutionReason,
-      });
+      } });
       return sendJson(res, { item: result.after });
     },
   },
@@ -358,10 +358,10 @@ export const recoveryItemsRoutes: Route[] = [
           body: body.data.comment,
         });
       }
-      await audit(auth.orgId, auth.userId, "recovery.item.reopened", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.reopened", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, resolutionReason: result.before.resolutionReason },
         after: { status: result.after.status, resolutionReason: result.after.resolutionReason },
-      });
+      } });
       return sendJson(res, { item: result.after });
     },
   },
@@ -392,10 +392,10 @@ export const recoveryItemsRoutes: Route[] = [
         );
       }
       const bodyPreview = body.data.body.slice(0, 200);
-      await audit(auth.orgId, auth.userId, "recovery.item.commented", "recovery-item", id, {
+      await auditAction(auth, "recovery.item.commented", { targetType: "recovery-item", targetId: id, metadata: {
         commentId: result.ok ? result.comment.id : null,
         bodyPreview,
-      });
+      } });
       return sendJson(res, { comment: result.ok ? result.comment : null });
     },
   },

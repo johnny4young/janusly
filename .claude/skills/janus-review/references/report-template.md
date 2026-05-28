@@ -22,6 +22,7 @@ Print the report in chat at the end of the review, in this exact section order. 
     - typescript-react-reviewer → N findings (real bugs fixed inline; design ones listed below)
     - node → N findings (idem)
     - UI smoke → ran / not run (reason)
+    - UI evidence → when the reviewer changed a UI/UX surface, list the PNGs under output/review/<ticketname>/ (e.g. output/review/eng-042/web-en-<surface>.png). Omit the line only when the reviewer made no UI/UX change.
     - Compose down at the end → yes / does not apply
 
 ## Section 3 — Bugs fixed inline

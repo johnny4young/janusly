@@ -25,7 +25,7 @@
  * `org.role.created`, `org.role.updated`, `org.role.deleted`.
  */
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
@@ -223,11 +223,11 @@ export const rolesRoutes: Route[] = [
         grantedPermissions: parsed.permissions,
         createdBy: auth.userId,
       });
-      await audit(auth.orgId, auth.userId, "org.role.created", "org_role", created.id, {
+      await auditAction(auth, "org.role.created", { targetType: "org_role", targetId: created.id, metadata: {
         name,
         inheritsFrom,
         grantedPermissions: parsed.permissions,
-      });
+      } });
       return sendJson(res, created);
     },
   },
@@ -335,14 +335,14 @@ export const rolesRoutes: Route[] = [
       const previousInheritsFrom = existing && !isBuiltinTarget && inheritsFrom !== undefined && inheritsFrom !== existing.inheritsFrom
         ? existing.inheritsFrom
         : undefined;
-      await audit(auth.orgId, auth.userId, action, "org_role", savedRow?.id ?? "", {
+      await auditAction(auth, action, { targetType: "org_role", targetId: savedRow?.id ?? "", metadata: {
         name,
         grantedPermissions: permissions,
         inheritsFrom,
         previousInheritsFrom,
         description: description ?? undefined,
         coerced: coercedFloor.length > 0 ? coercedFloor : undefined,
-      });
+      } });
       return sendJson(res, savedRow);
     },
   },
@@ -365,7 +365,7 @@ export const rolesRoutes: Route[] = [
           return sendJson(res, { error: "no override exists for this built-in role" }, 404);
         }
         await deleteOrgRole({ orgId: auth.orgId, name });
-        await audit(auth.orgId, auth.userId, "org.permissions.override_cleared", "org_role", existing.id, { name });
+        await auditAction(auth, "org.permissions.override_cleared", { targetType: "org_role", targetId: existing.id, metadata: { name } });
         return sendJson(res, { ok: true, reverted: true });
       }
 
@@ -387,10 +387,10 @@ export const rolesRoutes: Route[] = [
         );
       }
       await deleteOrgRole({ orgId: auth.orgId, name });
-      await audit(auth.orgId, auth.userId, "org.role.deleted", "org_role", existing.id, {
+      await auditAction(auth, "org.role.deleted", { targetType: "org_role", targetId: existing.id, metadata: {
         name,
         inheritsFrom: existing.inheritsFrom,
-      });
+      } });
       return sendJson(res, { ok: true });
     },
   },

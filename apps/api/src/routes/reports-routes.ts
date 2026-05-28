@@ -21,7 +21,7 @@ import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { executeTool } from "@janusly/engine/src/tool-registry";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -517,10 +517,10 @@ export const reportsRoutes: Route[] = [
           : null,
       });
 
-      await audit(auth.orgId, auth.userId, "report.run_explain.exported", "run", runId, {
+      await auditAction(auth, "report.run_explain.exported", { targetType: "run", targetId: runId, metadata: {
         format: formatRaw,
         recoveryAuditFound: matchingAudit !== null,
-      });
+      } });
 
       // Resolve a human-readable workflow name from the run's
       // `inputJson.workflow.name` snapshot (set by `startRun` for both
@@ -619,7 +619,7 @@ export const reportsRoutes: Route[] = [
       };
 
       const writeAuditRow = async (fields: AuditFields): Promise<void> => {
-        await audit(auth.orgId, auth.userId, "report.run_explain.delivered", "run", runId, fields);
+        await auditAction(auth, "report.run_explain.delivered", { targetType: "run", targetId: runId, metadata: fields });
       };
       const auditFormat = destination.kind === "webhook" ? "json" : "markdown";
 
@@ -714,10 +714,10 @@ export const reportsRoutes: Route[] = [
       ]);
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
 
-      await audit(auth.orgId, auth.userId, "report.value_dashboard.exported", "org", auth.orgId, {
+      await auditAction(auth, "report.value_dashboard.exported", { targetType: "org", targetId: auth.orgId, metadata: {
         format,
         windowDays,
-      });
+      } });
 
       const { asciiFilename, utf8Filename } = buildValueDashboardFilename({
         orgId: auth.orgId,

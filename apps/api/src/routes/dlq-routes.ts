@@ -22,7 +22,7 @@ import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
 import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
@@ -99,7 +99,7 @@ export const dlqRoutes: Route[] = [
       if (typeof id !== "string") return sendJson(res, { error: "id is required" }, 400);
 
       await markDeadLetterResolved(auth.orgId, id);
-      await audit(auth.orgId, auth.userId, "dlq.resolved", "dlq", id);
+      await auditAction(auth, "dlq.resolved", { targetType: "dlq", targetId: id });
 
       // Auto-close the recovery_item linked to this DLQ row (no-op when
       // no item exists). Manual DLQ resolve is not a replay, so keep the
@@ -171,9 +171,9 @@ export const dlqRoutes: Route[] = [
         createdBy: auth.userId,
       });
 
-      await audit(auth.orgId, auth.userId, "recovery.validation_started", "dlq", deadLetterId, {
+      await auditAction(auth, "recovery.validation_started", { targetType: "dlq", targetId: deadLetterId, metadata: {
         validationRunId: runId,
-      });
+      } });
 
       return sendJson(res, { runId });
     } },
@@ -251,11 +251,11 @@ export const dlqRoutes: Route[] = [
             deadLetterId: id,
             actor: auth.userId,
           });
-          await audit(auth.orgId, auth.userId, "recovery.cluster_apply", "dlq", id, {
+          await auditAction(auth, "recovery.cluster_apply", { targetType: "dlq", targetId: id, metadata: {
             clusterSignature,
             sequenceIndex: i,
             totalInCluster,
-          });
+          } });
           replayed += 1;
         } catch (err) {
           errors.push({
@@ -282,7 +282,7 @@ export const dlqRoutes: Route[] = [
         });
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
-        await audit(auth.orgId, auth.userId, "dlq.replayed", "dlq", body.deadLetterId);
+        await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });
 
         // Auto-close the recovery_item linked to this DLQ row, if any.
         await autoResolveRecoveryItemFromReplay({
@@ -308,7 +308,7 @@ export const dlqRoutes: Route[] = [
       if (!node) return sendJson(res, { error: "Node not found in workflow" }, 404);
 
       await dlqReplay.replayDeadLetter({ runId, workflow, node });
-      await audit(auth.orgId, auth.userId, "dlq.replayed", "run", runId, { nodeId });
+      await auditAction(auth, "dlq.replayed", { targetType: "run", targetId: runId, metadata: { nodeId } });
 
       return sendJson(res, { ok: true });
     } },

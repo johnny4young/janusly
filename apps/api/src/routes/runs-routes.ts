@@ -29,7 +29,7 @@ import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isTerminalRunStatus } from "@janusly/shared/src/status";
 
 import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendEvent, sendJson } from "../http";
@@ -235,10 +235,10 @@ export const runsRoutes: Route[] = [
           orgId: auth.orgId,
           createdBy: auth.userId,
         });
-        await audit(auth.orgId, auth.userId, isAdhoc ? "run.started.adhoc" : "run.started", "run", result.runId, {
+        await auditAction(auth, isAdhoc ? "run.started.adhoc" : "run.started", { targetType: "run", targetId: result.runId, metadata: {
           workflowId: parsedWorkflow.id,
           adhoc: isAdhoc,
-        });
+        } });
         return sendJson(res, result);
       } catch (err) {
         if (err instanceof WorkflowInputValidationError) {
@@ -258,7 +258,7 @@ export const runsRoutes: Route[] = [
           input,
           resumeToken: typeof resumeToken === "string" ? resumeToken : undefined,
         });
-        await audit(auth.orgId, auth.userId, "run.resumed", "run", runId, { nodeId });
+        await auditAction(auth, "run.resumed", { targetType: "run", targetId: runId, metadata: { nodeId } });
         return sendJson(res, result);
       } catch (err) {
         if (err instanceof WorkflowInputValidationError) {
@@ -296,7 +296,7 @@ export const runsRoutes: Route[] = [
       }
 
       await cancelRun(runId, reason);
-      await audit(auth.orgId, auth.userId, "run.cancelled", "run", runId, { reason });
+      await auditAction(auth, "run.cancelled", { targetType: "run", targetId: runId, metadata: { reason } });
       return sendJson(res, { runId, status: "cancelled" });
     } },
 
@@ -399,10 +399,10 @@ export const runsRoutes: Route[] = [
         hasPatch,
       });
 
-      await audit(auth.orgId, auth.userId, "replay_lab.started", "run", sourceRunId, {
+      await auditAction(auth, "replay_lab.started", { targetType: "run", targetId: sourceRunId, metadata: {
         replayRunId,
         hasPatch,
-      });
+      } });
 
       return sendJson(res, { runId: replayRunId });
     } },
@@ -509,12 +509,12 @@ export const runsRoutes: Route[] = [
         }, 422);
       }
 
-      await audit(auth.orgId, auth.userId, "replay_lab.fork_started", "run", sourceRunId, {
+      await auditAction(auth, "replay_lab.fork_started", { targetType: "run", targetId: sourceRunId, metadata: {
         replayRunId: result.runId,
         forkNodeId,
         predecessorCount: result.predecessorCount,
         hasOverride: body.inputOverride !== undefined,
-      });
+      } });
 
       return sendJson(res, {
         runId: result.runId,

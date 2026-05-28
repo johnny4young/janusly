@@ -167,7 +167,7 @@ describe("POST /members/role self-modification guard", () => {
       "member.self_modification_blocked",
       "member",
       "admin-1",
-      { action: "role_set", attemptedRole: "viewer" },
+      expect.objectContaining({ action: "role_set", attemptedRole: "viewer" }),
     );
     expect(dbUpdate).not.toHaveBeenCalled();
   });
@@ -190,7 +190,7 @@ describe("POST /members/role self-modification guard", () => {
       "member.role.updated",
       "member",
       "admin-2",
-      { role: "viewer" },
+      expect.objectContaining({ role: "viewer" }),
     );
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -222,7 +222,7 @@ describe("DELETE /members self-modification guard", () => {
       "member.self_modification_blocked",
       "member",
       "admin-1",
-      { action: "remove" },
+      expect.objectContaining({ action: "remove" }),
     );
     expect(dbDelete).not.toHaveBeenCalled();
   });
@@ -244,6 +244,7 @@ describe("DELETE /members self-modification guard", () => {
       "member.removed",
       "member",
       "admin-2",
+      expect.objectContaining({ actor: expect.objectContaining({ userId: "admin-1" }) }),
     );
     expect(auditMock).not.toHaveBeenCalledWith(
       expect.anything(),

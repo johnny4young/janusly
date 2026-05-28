@@ -185,10 +185,10 @@ describe("runsRoutes Replay Lab handlers", () => {
       createdBy: "user-1",
       hasPatch: false,
     });
-    expect(audit).toHaveBeenCalledWith("org-1", "user-1", "replay_lab.started", "run", "source-run", {
+    expect(audit).toHaveBeenCalledWith("org-1", "user-1", "replay_lab.started", "run", "source-run", expect.objectContaining({
       replayRunId: "replay-run",
       hasPatch: false,
-    });
+    }));
     expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), { runId: "replay-run" });
   });
 

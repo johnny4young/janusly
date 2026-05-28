@@ -35,7 +35,7 @@ import {
   listRecentDispatches,
 } from "@janusly/data/src/alertDispatchesRepo";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -128,13 +128,13 @@ export const alertsRoutes: Route[] = [
         ...refinement.policy,
         createdBy: auth.userId,
       });
-      await audit(auth.orgId, auth.userId, "alert.policy.created", "alert-policy", policy.id, {
+      await auditAction(auth, "alert.policy.created", { targetType: "alert-policy", targetId: policy.id, metadata: {
         name: policy.name,
         trigger: policy.trigger,
         cooldownSeconds: policy.cooldownSeconds,
         enabled: policy.enabled,
         channelCount: policy.channels.length,
-      });
+      } });
       return sendJson(res, { policy });
     },
   },
@@ -204,7 +204,7 @@ export const alertsRoutes: Route[] = [
         return sendJson(res, { error: "policy not found", code: "alert_policy_not_found" }, 404);
       }
 
-      await audit(auth.orgId, auth.userId, "alert.policy.updated", "alert-policy", id, {
+      await auditAction(auth, "alert.policy.updated", { targetType: "alert-policy", targetId: id, metadata: {
         before: {
           name: result.before.name,
           trigger: result.before.trigger,
@@ -221,7 +221,7 @@ export const alertsRoutes: Route[] = [
           cooldownSeconds: result.after.cooldownSeconds,
           enabled: result.after.enabled,
         },
-      });
+      } });
       return sendJson(res, { policy: result.after });
     },
   },
@@ -237,10 +237,10 @@ export const alertsRoutes: Route[] = [
       if (!before) {
         return sendJson(res, { error: "policy not found", code: "alert_policy_not_found" }, 404);
       }
-      await audit(auth.orgId, auth.userId, "alert.policy.deleted", "alert-policy", id, {
+      await auditAction(auth, "alert.policy.deleted", { targetType: "alert-policy", targetId: id, metadata: {
         name: before.name,
         trigger: before.trigger,
-      });
+      } });
       return sendJson(res, { ok: true });
     },
   },

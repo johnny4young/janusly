@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { credentials, db } from "@janusly/db";
 import { getCredentialHealth } from "@janusly/data/src/credentialHealthRepo";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import { productionSecretRefResolver } from "../readiness-helpers";
@@ -56,7 +56,7 @@ export const credentialsRoutes: Route[] = [
       }
       const id = crypto.randomUUID();
       await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, createdBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "credential.created", "credential", id, { kind: body.kind });
+      await auditAction(auth, "credential.created", { targetType: "credential", targetId: id, metadata: { kind: body.kind } });
       return sendJson(res, { id });
     } },
 ];

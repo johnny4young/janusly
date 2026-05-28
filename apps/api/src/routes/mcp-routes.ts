@@ -27,7 +27,7 @@
  * `mcp.tool.expose_to_ai_set`.
  */
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { errorEnvelope } from "../error-codes";
@@ -317,13 +317,13 @@ export const mcpRoutes: Route[] = [
       // persistence out of runDiscovery and wrap the DB writes in a
       // tx after the network call returns.
       const discovery = await runDiscovery(connection);
-      await audit(auth.orgId, auth.userId, "mcp.connection.created", "mcp_connection", connection.id, {
+      await auditAction(auth, "mcp.connection.created", { targetType: "mcp_connection", targetId: connection.id, metadata: {
         alias,
         transport,
         discoveryOk: discovery.ok,
         discoveryError: discovery.ok ? undefined : discovery.error,
         toolCount: discovery.ok ? discovery.tools : 0,
-      });
+      } });
 
       const tools = await listToolDescriptors(connection.id);
       const fresh = await getConnectionByAlias({ orgId: auth.orgId, alias });
@@ -382,7 +382,7 @@ export const mcpRoutes: Route[] = [
         }
       }
 
-      await audit(auth.orgId, auth.userId, "mcp.connection.updated", "mcp_connection", existing.id, {
+      await auditAction(auth, "mcp.connection.updated", { targetType: "mcp_connection", targetId: existing.id, metadata: {
         alias,
         enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
         envRefsChanged: body.envRefs !== undefined,
@@ -392,20 +392,17 @@ export const mcpRoutes: Route[] = [
         exposeToAiChanged: typeof body.exposeToAi === "boolean" && before
           ? body.exposeToAi !== before.exposeToAi
           : undefined,
-      });
+      } });
 
       // Audit-on-change for the exposeToAi flip — independent row so an
       // operator review can grep just the `mcp.connection.expose_to_ai_set`
       // history without scanning every generic `mcp.connection.updated`.
       if (typeof body.exposeToAi === "boolean" && before && body.exposeToAi !== before.exposeToAi) {
-        await audit(
-          auth.orgId,
-          auth.userId,
-          "mcp.connection.expose_to_ai_set",
-          "mcp_connection",
-          existing.id,
-          { alias, before: before.exposeToAi, after: body.exposeToAi },
-        );
+        await auditAction(auth, "mcp.connection.expose_to_ai_set", {
+          targetType: "mcp_connection",
+          targetId: existing.id,
+          metadata: { alias, before: before.exposeToAi, after: body.exposeToAi },
+        });
       }
 
       const fresh = await getConnectionByAlias({ orgId: auth.orgId, alias });
@@ -427,10 +424,10 @@ export const mcpRoutes: Route[] = [
       if (!existing) return sendJson(res, errorEnvelope("mcp_connection_not_found", "connection not found", { alias }), 404);
 
       await deleteConnection({ orgId: auth.orgId, alias });
-      await audit(auth.orgId, auth.userId, "mcp.connection.deleted", "mcp_connection", existing.id, {
+      await auditAction(auth, "mcp.connection.deleted", { targetType: "mcp_connection", targetId: existing.id, metadata: {
         alias,
         transport: existing.transport,
-      });
+      } });
       return sendJson(res, { ok: true });
     },
   },
@@ -464,13 +461,13 @@ export const mcpRoutes: Route[] = [
       const discovery = await runDiscovery(existing);
       const after = await listToolDescriptors(existing.id);
 
-      await audit(auth.orgId, auth.userId, "mcp.connection.rediscovered", "mcp_connection", existing.id, {
+      await auditAction(auth, "mcp.connection.rediscovered", { targetType: "mcp_connection", targetId: existing.id, metadata: {
         alias,
         discoveryOk: discovery.ok,
         discoveryError: discovery.ok ? undefined : discovery.error,
         toolsBefore: before.length,
         toolsAfter: after.length,
-      });
+      } });
       const fresh = await getConnectionByAlias({ orgId: auth.orgId, alias });
       return sendJson(res, { connection: fresh, tools: after, discovery });
     },
@@ -556,14 +553,11 @@ export const mcpRoutes: Route[] = [
       });
 
       if (enabled !== undefined && before && enabled !== before.enabled) {
-        await audit(
-          auth.orgId,
-          auth.userId,
-          enabled ? "mcp.tool.enabled" : "mcp.tool.disabled",
-          "mcp_tool",
-          descriptor.id,
-          { alias, toolName, writeSide: after?.writeSide },
-        );
+        await auditAction(auth, enabled ? "mcp.tool.enabled" : "mcp.tool.disabled", {
+          targetType: "mcp_tool",
+          targetId: descriptor.id,
+          metadata: { alias, toolName, writeSide: after?.writeSide },
+        });
       }
 
       // Audit on actual change only — pinning to setting the same
@@ -573,14 +567,11 @@ export const mcpRoutes: Route[] = [
         && before
         && rateLimitPerMin !== before.rateLimitPerMin
       ) {
-        await audit(
-          auth.orgId,
-          auth.userId,
-          "mcp.tool.rate_limit_set",
-          "mcp_tool",
-          descriptor.id,
-          { alias, toolName, before: before.rateLimitPerMin, after: rateLimitPerMin },
-        );
+        await auditAction(auth, "mcp.tool.rate_limit_set", {
+          targetType: "mcp_tool",
+          targetId: descriptor.id,
+          metadata: { alias, toolName, before: before.rateLimitPerMin, after: rateLimitPerMin },
+        });
       }
 
       // Per-tool exposeToAi flip — also audited on actual change.
@@ -592,14 +583,11 @@ export const mcpRoutes: Route[] = [
         && before
         && exposeToAi !== before.exposeToAi
       ) {
-        await audit(
-          auth.orgId,
-          auth.userId,
-          "mcp.tool.expose_to_ai_set",
-          "mcp_tool",
-          descriptor.id,
-          { alias, toolName, before: before.exposeToAi, after: exposeToAi },
-        );
+        await auditAction(auth, "mcp.tool.expose_to_ai_set", {
+          targetType: "mcp_tool",
+          targetId: descriptor.id,
+          metadata: { alias, toolName, before: before.exposeToAi, after: exposeToAi },
+        });
       }
 
       return sendJson(res, after);

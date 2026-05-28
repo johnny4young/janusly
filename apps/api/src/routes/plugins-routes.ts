@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { db, installedPlugins } from "@janusly/db";
 import { listTools } from "@janusly/engine/src/tool-registry";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -29,7 +29,7 @@ export const pluginsRoutes: Route[] = [
       if (!pluginId) return sendJson(res, { error: "pluginId is required" }, 400);
       const id = crypto.randomUUID();
       await db.insert(installedPlugins).values({ id, orgId: auth.orgId, pluginId, configJson: body.config ?? {}, installedBy: auth.userId });
-      await audit(auth.orgId, auth.userId, "plugin.installed", "plugin", pluginId, body.config ?? {});
+      await auditAction(auth, "plugin.installed", { targetType: "plugin", targetId: pluginId, metadata: (body.config ?? {}) as Record<string, unknown> });
       return sendJson(res, { id });
     } },
 ];

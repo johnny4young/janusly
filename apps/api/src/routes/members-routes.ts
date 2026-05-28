@@ -21,7 +21,7 @@ import {
   revokeInvitation,
 } from "@janusly/data/src/invitationsRepo";
 
-import { audit } from "../audit";
+import { auditAction } from "../audit-helper";
 import { EMAIL_PATTERN, MAX_JSON_BODY_BYTES } from "../api-config";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
@@ -80,10 +80,10 @@ export const membersRoutes: Route[] = [
         role,
         invitedBy: auth.userId,
       });
-      await audit(auth.orgId, auth.userId, "invitation.created", "invitation", invite.id, {
+      await auditAction(auth, "invitation.created", { targetType: "invitation", targetId: invite.id, metadata: {
         email,
         role,
-      });
+      } });
       return sendJson(res, { id: invite.id, status: invite.status });
     } },
   { method: "POST", match: (url) => /^\/members\/invitations\/[^/]+\/revoke$/.test(url), role: "admin", permission: "members.write",
@@ -93,7 +93,7 @@ export const membersRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "invitation id is required" }, 400);
       const ok = await revokeInvitation({ id, orgId: auth.orgId });
       if (!ok) return sendJson(res, { error: "invitation not found or not pending" }, 404);
-      await audit(auth.orgId, auth.userId, "invitation.revoked", "invitation", id, {});
+      await auditAction(auth, "invitation.revoked", { targetType: "invitation", targetId: id });
       return sendJson(res, { ok: true });
     } },
   { method: "POST", match: "/members/role", role: "admin", permission: "members.role_set",
@@ -108,10 +108,10 @@ export const membersRoutes: Route[] = [
       // back). Audit the attempt with the raw operator intent so security
       // review sees both successful and blocked self-modifications.
       if (userId === auth.userId) {
-        await audit(auth.orgId, auth.userId, "member.self_modification_blocked", "member", userId, {
+        await auditAction(auth, "member.self_modification_blocked", { targetType: "member", targetId: userId, metadata: {
           action: "role_set",
           attemptedRole: typeof body.role === "string" ? body.role : null,
-        });
+        } });
         return sendJson(
           res,
           errorEnvelope("self_membership_modification", "Cannot modify your own membership"),
@@ -128,7 +128,7 @@ export const membersRoutes: Route[] = [
         return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
       }
       await db.update(orgMembers).set({ role: accepted }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
-      await audit(auth.orgId, auth.userId, "member.role.updated", "member", userId, { role: accepted });
+      await auditAction(auth, "member.role.updated", { targetType: "member", targetId: userId, metadata: { role: accepted } });
       return sendJson(res, { ok: true });
     } },
   { method: "DELETE", match: (url) => url.startsWith("/members"), role: "admin", permission: "members.write",
@@ -141,9 +141,9 @@ export const membersRoutes: Route[] = [
       // so the closed-enum `metadata.action` field distinguishes the two
       // surfaces in security review.
       if (userId === auth.userId) {
-        await audit(auth.orgId, auth.userId, "member.self_modification_blocked", "member", userId, {
+        await auditAction(auth, "member.self_modification_blocked", { targetType: "member", targetId: userId, metadata: {
           action: "remove",
-        });
+        } });
         return sendJson(
           res,
           errorEnvelope("self_membership_modification", "Cannot modify your own membership"),
@@ -151,7 +151,7 @@ export const membersRoutes: Route[] = [
         );
       }
       await db.delete(orgMembers).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
-      await audit(auth.orgId, auth.userId, "member.removed", "member", userId);
+      await auditAction(auth, "member.removed", { targetType: "member", targetId: userId });
       return sendJson(res, { ok: true });
     } },
 ];
