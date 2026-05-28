@@ -262,6 +262,52 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   return payload
 }
 
+/**
+ * Open the live-run SSE stream (`GET /runs/:runId/stream`) with the SAME
+ * header-based auth as `api()`. Native `EventSource` can't set custom headers,
+ * and Janusly auth is 100% header-based, so the stream uses `fetch` +
+ * `ReadableStream` instead — the caller (`useRunEventStream`) parses SSE frames
+ * off the response body. Returns the raw `Response` (don't JSON-parse it).
+ *
+ * `lastEventId` (the SSE `id:` of the newest event the client already has) is
+ * sent as `Last-Event-ID` so the server replays only the missed gap on
+ * reconnect. Deliberately NOT dedup-wrapped — a stream is a long-lived
+ * connection, not a cacheable request.
+ */
+export async function openRunEventStream(
+  runId: string,
+  options: { lastEventId?: string | null; signal?: AbortSignal } = {},
+): Promise<Response> {
+  const sessionToken = getSessionToken()
+  const token = !sessionToken && supabase
+    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
+    : null
+
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    'x-org-id': getActiveOrg(),
+    'Accept-Language': getResolvedLocale(),
+    ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
+    ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
+    ...(options.lastEventId ? { 'Last-Event-ID': options.lastEventId } : {}),
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`${API_URL}/runs/${encodeURIComponent(runId)}/stream`, {
+      headers,
+      signal: options.signal,
+    })
+  } catch {
+    throw new Error(t('api.error.offline') as string)
+  }
+  if (!res.ok || !res.body) {
+    throw new ApiError(t('api.error.requestFailed', { status: res.status }) as string, { statusCode: res.status })
+  }
+  return res
+}
+
 function isFieldErrorEnvelope(value: unknown): value is { errors: string[] } {
   return (
     typeof value === 'object' &&

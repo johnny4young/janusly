@@ -46,6 +46,7 @@ import { setPdfUsageRecorder } from "./pdf-usage";
 import { setEngineRateLimiter } from "./rate-limit";
 import { setBudgetChecker } from "./budget";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
+import { closeWorkerRunEventRedis, registerWorkerRunEventPublisher } from "./run-event-redis";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
@@ -168,6 +169,13 @@ setEngineRateLimiter(async (bucket, orgId, options) => {
 setBudgetChecker(productionBudgetChecker);
 console.log("[budget] checker registered (worker)");
 
+// Bridge the run-event seam to Redis PUBLISH so node lifecycle events +
+// terminal status flips written here fan out to live SSE subscribers in the
+// API process. The worker is the primary event writer, so this is the
+// load-bearing publisher registration.
+registerWorkerRunEventPublisher();
+console.log("[run-stream] publisher registered (worker)");
+
 // Register the recovery-alerting dispatcher so DLQ inserts inside this
 // worker process can fire alerts immediately (event-driven path). The
 // scanner Worker for state-driven triggers lives in the API process; this
@@ -284,6 +292,7 @@ async function shutdown(signal: NodeJS.Signals) {
   try {
     await worker.close();
     await closeWorkerRateLimitRedis();
+    await closeWorkerRunEventRedis();
     console.log("[worker] drained, exiting");
     process.exit(0);
   } catch (error) {

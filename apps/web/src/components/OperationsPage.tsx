@@ -33,6 +33,7 @@ import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
+import { RunStreamChip } from './RunStreamChip'
 import { buildOperationsTiles } from './operations-tiles'
 import { getResolvedLocale, useT } from '../i18n'
 
@@ -251,6 +252,7 @@ function OperationsHeader({
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
       </div>
 
+      <RunStreamChip />
       {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} />}
 
       {error && (
