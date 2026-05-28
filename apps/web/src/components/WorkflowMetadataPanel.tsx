@@ -61,7 +61,11 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
   const storeWorkflowId = useWorkflowStore((s) => s.currentWorkflowId)
-  const workflowId = explicit ?? storeWorkflowId
+  const storeWorkflowSaved = useWorkflowStore((s) => s.currentWorkflowSaved)
+  // With no explicit id this panel targets the current draft — but only once
+  // it has been saved. An unsaved draft has no server row, so fetching its
+  // metadata would 404; an explicit id (e.g. the recovery drawer) always resolves.
+  const workflowId = explicit ?? (storeWorkflowSaved ? storeWorkflowId : undefined)
 
   const [form, setForm] = useState<WorkflowMetadataForm>(EMPTY_FORM)
   const [ownersRaw, setOwnersRaw] = useState('')
@@ -214,7 +218,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             onChange={(e) =>
               setForm({
                 ...form,
-                severityDefault: (e.target.value as RecoveryItemSeverity | '') ?? '',
+                severityDefault: e.target.value as RecoveryItemSeverity | '',
               })
             }
             disabled={loading || saving}

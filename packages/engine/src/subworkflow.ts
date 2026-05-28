@@ -29,9 +29,7 @@
  */
 
 import { db, runs, workflowVersions } from "@janusly/db";
-import {
-  getOrgConfigSnapshot,
-} from "@janusly/data";
+import { getOrgConfigSnapshot } from "@janusly/data";
 import { eq, and, desc } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import {

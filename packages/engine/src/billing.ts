@@ -28,8 +28,7 @@
  * tests can pin behaviour without standing up Postgres.
  */
 
-import { db } from "@janusly/db";
-import { usageEvents } from "@janusly/db";
+import { db, usageEvents } from "@janusly/db";
 import { and, eq, gte } from "drizzle-orm";
 
 /** Default time window for both summary and breakdown queries. */

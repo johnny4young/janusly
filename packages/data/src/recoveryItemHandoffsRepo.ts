@@ -108,7 +108,7 @@ export async function listHandoffsForItem(
   return rows.map(hydrate);
 }
 
-/** Cross-tenant recency feed (admin debugging UI). Capped at the limit. */
+/** Org-scoped recency feed (admin debugging UI). Capped at the limit. */
 export async function listRecentHandoffs(
   orgId: string,
   limit = 50,

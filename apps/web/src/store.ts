@@ -62,6 +62,13 @@ type WorkflowStore = {
 
   currentWorkflowId: string
   currentWorkflowName: string
+  /**
+   * Whether the current workflow exists server-side. False for the initial
+   * sample draft and after `newWorkflow()`; true once loaded from the server
+   * or successfully saved. Health/metadata lookups skip unsaved drafts so a
+   * never-saved workflow doesn't 404 the health/metadata endpoints on load.
+   */
+  currentWorkflowSaved: boolean
   /** Declared input shape — surfaced in the Inspector + validated at run start. */
   currentWorkflowInputs: WorkflowDefinition['inputs']
   /** Declared output projection map — engine renders templates at terminal status. */
@@ -94,6 +101,8 @@ type WorkflowStore = {
   hydrateWorkflow: (workflow: WorkflowDefinition) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
+  /** Mark the current workflow as persisted server-side (after a successful save). */
+  markWorkflowSaved: () => void
   setWorkflowName: (name: string) => void
   setNodes: (nodes: WorkflowGraphNode[]) => void
   setEdges: (edges: WorkflowGraphEdge[]) => void
@@ -179,6 +188,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   currentWorkflowId: 'ui-test',
   currentWorkflowName: t('workflow.sampleName') as string,
+  currentWorkflowSaved: false,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   nodes: initialNodes,
@@ -222,6 +232,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
+      currentWorkflowSaved: true,
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
       nodes: (workflow.nodes ?? []).map((node, index) => ({
@@ -250,6 +261,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     })
   },
 
+  markWorkflowSaved: () => set({ currentWorkflowSaved: true }),
+
   getWorkflowJson: () => {
     const state = get()
     return graphToWorkflow(
@@ -267,6 +280,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     set({
       currentWorkflowId: id,
       currentWorkflowName: t('workflow.defaultName') as string,
+      currentWorkflowSaved: false,
       currentWorkflowInputs: undefined,
       currentWorkflowOutputs: undefined,
       nodes: [],
