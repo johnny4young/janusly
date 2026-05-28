@@ -37,9 +37,12 @@ import { evaluateExpression } from "../expression";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
-import { getRoutingStats, updateRoutingStats } from "@janusly/data/src/routingStatsRepo";
-import { recordWorkflowImprovement } from "@janusly/data/src/improvementsRepo";
-import { rollbackWorkflowVersion } from "@janusly/data/src/workflowRollbackRepo";
+import {
+  getRoutingStats,
+  updateRoutingStats,
+  recordWorkflowImprovement,
+  rollbackWorkflowVersion,
+} from "@janusly/data";
 import { computeConfidence, shouldRollback } from "@janusly/domain/src/improvementEngine";
 import type { DecisionCandidate } from "@janusly/domain/src/decisionEngine";
 import type {

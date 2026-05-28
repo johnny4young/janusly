@@ -50,7 +50,7 @@ import {
   getToolDescriptor,
   type McpConnectionRow,
   type McpToolDescriptorRow,
-} from "@janusly/data/src/mcpConnectionsRepo";
+} from "@janusly/data";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { createHttpMcpClient, createSseMcpClient, createStdioMcpClient, withMcpClient, type McpClient } from "./mcp-client";

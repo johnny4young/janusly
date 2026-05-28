@@ -35,8 +35,17 @@
  */
 
 import { setUsageRecorder } from "@janusly/ai";
-import { recordEmailUsage, recordIntegrationUsage, recordMcpUsage, recordMemoryUsage, recordPdfUsage, recordUsage } from "@janusly/data/src/usageRepo";
-import { setMemoryUsageRecorder } from "@janusly/data/src/memoryUsage";
+import {
+  recordEmailUsage,
+  recordIntegrationUsage,
+  recordMcpUsage,
+  recordMemoryUsage,
+  recordPdfUsage,
+  recordUsage,
+  setMemoryUsageRecorder,
+  productionBudgetChecker,
+  setRecoveryItemCreator,
+} from "@janusly/data";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setEmailUsageRecorder } from "@janusly/engine/src/email-usage";
 import { setIntegrationUsageRecorder } from "@janusly/engine/src/integration-usage";
@@ -44,7 +53,6 @@ import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
-import { productionBudgetChecker } from "@janusly/data/src/budgetRepo";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -80,7 +88,6 @@ import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
 import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
 import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
-import { setRecoveryItemCreator } from "@janusly/data/src/recovery-item-creator";
 import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
 import { registerWorkflowMetadataSeverityResolver } from "./workflow-metadata-bootstrap";
 import { recoveryRoutes } from "./routes/recovery-routes";

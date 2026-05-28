@@ -32,7 +32,7 @@ import {
   listPromptVersions,
   listPrompts,
   pinPromptVersion,
-} from "@janusly/data/src/promptsRepo";
+} from "@janusly/data";
 import { PromptVariablesSchema, type PromptVariable } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";

@@ -16,8 +16,10 @@ import { z } from "zod";
 import { auditLogs, db, runEvents, runNodes, runs } from "@janusly/db";
 import { buildRunExplainReport, type RunExplainReport } from "@janusly/engine/src/run-explain-report";
 import { composeRecoveryMetrics, type RecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
-import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  queryRecoveryMetricsSignals,
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import { executeTool } from "@janusly/engine/src/tool-registry";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
@@ -709,7 +711,7 @@ export const reportsRoutes: Route[] = [
       const format = formatRaw as "markdown" | "json";
 
       const [signals, snapshot] = await Promise.all([
-        collectRecoveryMetricsSignals(auth.orgId, windowDays),
+        queryRecoveryMetricsSignals(auth.orgId, windowDays),
         getOrgConfigSnapshot(auth.orgId),
       ]);
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);

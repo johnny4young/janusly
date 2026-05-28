@@ -15,7 +15,9 @@
 
 import { eq } from "drizzle-orm";
 
-import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
+import {
+  queryFailureSamples,
+} from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
@@ -50,7 +52,7 @@ export const dlqRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      const samples = await collectFailureSamples(auth.orgId, windowDays);
+      const samples = await queryFailureSamples(auth.orgId, windowDays);
       const clusters = clusterFailureSamples(samples);
       return sendJson(res, { clusters, totalSamples: samples.length, windowDays });
     } },

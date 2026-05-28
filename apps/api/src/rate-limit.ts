@@ -18,17 +18,18 @@
  *   this module doesn't open a Redis connection as a side effect.
  */
 
-import { createRateLimiter, type RateLimitOptions } from "@janusly/data/src/rate-limit";
 import {
+  createRateLimiter,
+  type RateLimitOptions,
   recordRateLimiterError,
   recordRateLimiterRecovery,
-} from "@janusly/data/src/rate-limit-degradation";
+} from "@janusly/data";
 
 export {
   createRateLimiter,
   type RateLimitClient,
   type RateLimitOptions,
-} from "@janusly/data/src/rate-limit";
+} from "@janusly/data";
 
 let productionLimiter: ReturnType<typeof createRateLimiter> | null = null;
 

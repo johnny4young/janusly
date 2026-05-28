@@ -26,7 +26,7 @@ vi.mock("@janusly/data/src/workflowSloRepo", () => ({
 }));
 
 vi.mock("@janusly/data/src/workflowHealthRepo", () => ({
-  collectHealthSignals: vi.fn(),
+  queryHealthSignals: vi.fn(),
   DEFAULT_HEALTH_WINDOW_DAYS: 30,
 }));
 

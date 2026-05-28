@@ -32,7 +32,9 @@ import {
   type HandoffMessageInput,
   type RecoveryHandoffDestination,
 } from "@janusly/shared";
-import type { RecoveryItemHandoff } from "@janusly/data/src/recoveryItemHandoffsRepo";
+import {
+  type RecoveryItemHandoff,
+} from "@janusly/data";
 
 export type DispatchContext = {
   orgId: string;

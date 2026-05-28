@@ -28,7 +28,9 @@
 
 import { Worker, type Processor } from "bullmq";
 import { connection } from "@janusly/engine/src/queue";
-import { setAlertDispatcher } from "@janusly/data/src/alert-dispatch";
+import {
+  setAlertDispatcher,
+} from "@janusly/data";
 
 import { dispatchAlert } from "@janusly/engine/src/alerts/dispatcher";
 

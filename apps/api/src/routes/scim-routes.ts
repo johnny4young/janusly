@@ -38,20 +38,18 @@ import {
   revokeScimDirectory,
   updateScimDirectory,
   type ScimDefaultRole,
-} from "@janusly/data/src/scimDirectoriesRepo";
-import {
   getScimUserState,
   markScimUserInactive,
   upsertScimUserState,
-} from "@janusly/data/src/scimUserStateRepo";
-import {
   deleteScimGroupState,
   getScimGroupState,
   upsertScimGroupState,
-} from "@janusly/data/src/scimGroupStateRepo";
-import { deleteProcessedEvent, recordProcessedEvent } from "@janusly/data/src/scimProcessedEventsRepo";
-import { deleteMembership, upsertMembershipByEmail } from "@janusly/data/src/orgMembersRepo";
-import { getAuthPolicyConfig } from "@janusly/data/src/orgConfigRepo";
+  deleteProcessedEvent,
+  recordProcessedEvent,
+  deleteMembership,
+  upsertMembershipByEmail,
+  getAuthPolicyConfig,
+} from "@janusly/data";
 
 import { handleScimEvent, type ScimEvent } from "../scim-event-handler";
 import type { Route } from "../routes";

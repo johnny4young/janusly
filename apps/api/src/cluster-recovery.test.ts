@@ -1,15 +1,15 @@
 /**
  * Tests for the cluster-recovery glue helpers in `cluster-recovery.ts`.
- * Mocks `collectFailureSamples` so we exercise the signature filtering
+ * Mocks `queryFailureSamples` so we exercise the signature filtering
  * and the limit/cap accounting without standing up a database.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@janusly/data/src/failureClusterRepo', () => ({
-  collectFailureSamples: vi.fn(),
+  queryFailureSamples: vi.fn(),
 }))
 
-import { collectFailureSamples } from '@janusly/data/src/failureClusterRepo'
+import { queryFailureSamples } from '@janusly/data/src/failureClusterRepo'
 import {
   CLUSTER_MEMBERS_DEFAULT_LIMIT,
   CLUSTER_MEMBERS_MAX_LIMIT,
@@ -17,10 +17,10 @@ import {
   recheckSignature,
 } from './cluster-recovery'
 
-const collectFailureSamplesMock = vi.mocked(collectFailureSamples)
+const queryFailureSamplesMock = vi.mocked(queryFailureSamples)
 
 afterEach(() => {
-  collectFailureSamplesMock.mockReset()
+  queryFailureSamplesMock.mockReset()
 })
 
 function dlqSample(id: string, errorJson: unknown, overrides: Record<string, unknown> = {}) {
@@ -55,7 +55,7 @@ function failedRunNodeSample(id: string, errorJson: unknown) {
 
 describe('findClusterMembers', () => {
   it('returns DLQ ids whose normalized signature matches the cluster signature', async () => {
-    collectFailureSamplesMock.mockResolvedValueOnce([
+    queryFailureSamplesMock.mockResolvedValueOnce([
       dlqSample('dlq-1', { code: 'E_SECRET_MISSING', secret: 'GITHUB_TOKEN' }),
       dlqSample('dlq-2', { code: 'E_SECRET_MISSING', secret: 'GITHUB_TOKEN' }),
       dlqSample('dlq-3', { code: 'E_SECRET_MISSING', secret: 'OPENAI_API_KEY' }),
@@ -70,7 +70,7 @@ describe('findClusterMembers', () => {
   })
 
   it('skips failed_run_node-source samples (only DLQ rows are returnable for replay)', async () => {
-    collectFailureSamplesMock.mockResolvedValueOnce([
+    queryFailureSamplesMock.mockResolvedValueOnce([
       dlqSample('dlq-1', { code: 'E_SECRET_MISSING', secret: 'TOKEN' }),
       failedRunNodeSample('run-x:fetch', { code: 'E_SECRET_MISSING', secret: 'TOKEN' }),
     ])
@@ -82,7 +82,7 @@ describe('findClusterMembers', () => {
   })
 
   it('skips closed DLQ rows so bulk recovery only targets open entries', async () => {
-    collectFailureSamplesMock.mockResolvedValueOnce([
+    queryFailureSamplesMock.mockResolvedValueOnce([
       dlqSample('dlq-open', { code: 'E_SECRET_MISSING', secret: 'TOKEN' }),
       dlqSample('dlq-replayed', { code: 'E_SECRET_MISSING', secret: 'TOKEN' }, { status: 'replayed' }),
       dlqSample('dlq-resolved', { code: 'E_SECRET_MISSING', secret: 'TOKEN' }, { status: 'resolved' }),
@@ -97,7 +97,7 @@ describe('findClusterMembers', () => {
 
   it('caps the returned list at the requested limit and reports capped=true when more matches exist', async () => {
     const samples = Array.from({ length: 5 }, (_, i) => dlqSample(`dlq-${i}`, { code: 'E_SECRET_MISSING', secret: 'TOKEN' }))
-    collectFailureSamplesMock.mockResolvedValueOnce(samples)
+    queryFailureSamplesMock.mockResolvedValueOnce(samples)
 
     const result = await findClusterMembers('org-1', 'Missing secret: TOKEN', 30, 3)
 
@@ -108,7 +108,7 @@ describe('findClusterMembers', () => {
 
   it('does not exceed CLUSTER_MEMBERS_MAX_LIMIT even when caller asks for more', async () => {
     const samples = Array.from({ length: 250 }, (_, i) => dlqSample(`dlq-${i}`, { code: 'E_SECRET_MISSING', secret: 'TOKEN' }))
-    collectFailureSamplesMock.mockResolvedValueOnce(samples)
+    queryFailureSamplesMock.mockResolvedValueOnce(samples)
 
     const result = await findClusterMembers('org-1', 'Missing secret: TOKEN', 30, 9999)
 

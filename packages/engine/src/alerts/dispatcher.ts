@@ -31,12 +31,10 @@ import {
 import {
   getEnabledPoliciesByTrigger,
   type AlertPolicy,
-} from "@janusly/data/src/alertPoliciesRepo";
-import {
   getLastDispatchAt,
   recordDispatch,
-} from "@janusly/data/src/alertDispatchesRepo";
-import type { AlertEvent } from "@janusly/data/src/alert-dispatch";
+  type AlertEvent,
+} from "@janusly/data";
 
 import { executeTool } from "../tool-registry";
 import { safePersistPayload } from "../safe-persist";

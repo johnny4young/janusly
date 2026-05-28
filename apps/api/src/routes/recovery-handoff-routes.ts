@@ -26,11 +26,11 @@ import {
   type HandoffDispatchResult,
   type RecoveryHandoffDestination,
 } from "@janusly/shared";
-import { getRecoveryItemById } from "@janusly/data/src/recoveryItemsRepo";
 import {
+  getRecoveryItemById,
   getHandoffByKey,
   upsertHandoff,
-} from "@janusly/data/src/recoveryItemHandoffsRepo";
+} from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import { auditAction, type AuditAction } from "../audit-helper";

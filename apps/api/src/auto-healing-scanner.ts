@@ -53,12 +53,9 @@
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db, deadLetters, orgConfigs, runs } from "@janusly/db";
-import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
-import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
-import { isAutoHealingAllowed } from "@janusly/engine/src/auto-healing-consent";
-import { checkBudget } from "@janusly/engine/src/budget";
 import {
+  queryFailureSamples,
+  getOrgConfigSnapshot,
   countRecentAttemptsBySignature,
   createDiagnosis,
   getDeadLetterIdsWithExistingRun,
@@ -66,7 +63,10 @@ import {
   recordProposal,
   recordScannerFailure,
   recordValidationStarted,
-} from "@janusly/data/src/autoHealingRepo";
+} from "@janusly/data";
+import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
+import { isAutoHealingAllowed } from "@janusly/engine/src/auto-healing-consent";
+import { checkBudget } from "@janusly/engine/src/budget";
 import { getLlmClient, suggestWorkflowPatch } from "@janusly/ai";
 import type { RunEventForPrompt } from "@janusly/ai";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -204,9 +204,9 @@ export async function runOrgScan(orgId: string): Promise<void> {
   const maxAttempts = snapshot.autoHealing.maxAttemptsPerSignature;
   const loopWindowDays = snapshot.autoHealing.loopWindowDays;
 
-  let samples: Awaited<ReturnType<typeof collectFailureSamples>>;
+  let samples: Awaited<ReturnType<typeof queryFailureSamples>>;
   try {
-    samples = await collectFailureSamples(orgId, SAMPLE_WINDOW_DAYS, SAMPLE_LIMIT);
+    samples = await queryFailureSamples(orgId, SAMPLE_WINDOW_DAYS, SAMPLE_LIMIT);
   } catch (err) {
     console.error("[auto-healing] sample collection failed", { orgId, err });
     return;

@@ -23,7 +23,7 @@ import {
   getWorkflowBudget,
   upsertWorkflowBudget,
   type WorkflowBudgetPolicy,
-} from "@janusly/data/src/workflowBudgetsRepo";
+} from "@janusly/data";
 import { db, workflows } from "@janusly/db";
 
 import { auditAction } from "../audit-helper";

@@ -95,7 +95,7 @@ export type RecoveryMetricsSignals = {
 };
 
 /** Collect raw recovery-metrics signals for one org over a rolling window. */
-export async function collectRecoveryMetricsSignals(
+export async function queryRecoveryMetricsSignals(
   orgId: string,
   windowDays = DEFAULT_WINDOW_DAYS,
 ): Promise<RecoveryMetricsSignals> {

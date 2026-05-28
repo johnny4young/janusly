@@ -33,7 +33,7 @@ import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
   type OrgConfigSnapshot,
-} from "@janusly/data/src/orgConfigRepo";
+} from "@janusly/data";
 import { evaluateExpression } from "./expression";
 import { executeTool, isToolWriteSide } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";

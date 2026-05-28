@@ -22,14 +22,14 @@
  */
 
 import { auditLogs, db } from "@janusly/db";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import {
+  getOrgConfigSnapshot,
   createRecoveryItem,
   getRecoveryItemByDeadLetterId,
   resolveRecoveryItem,
-} from "@janusly/data/src/recoveryItemsRepo";
-import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
-import { getRecoveryItemSeverityDefault } from "@janusly/data/src/recovery-item-severity-default";
+  recordAlertEvent,
+  getRecoveryItemSeverityDefault,
+} from "@janusly/data";
 
 import { safePersistPayload } from "../safe-persist";
 

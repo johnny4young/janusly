@@ -4,7 +4,7 @@ const {
   auditMock,
   buildRunExplainReportMock,
   composeRecoveryMetricsMock,
-  collectRecoveryMetricsSignalsMock,
+  queryRecoveryMetricsSignalsMock,
   getOrgConfigSnapshotMock,
   selectRowsBox,
   sendJsonMock,
@@ -16,7 +16,7 @@ const {
   auditMock: vi.fn(),
   buildRunExplainReportMock: vi.fn(),
   composeRecoveryMetricsMock: vi.fn(),
-  collectRecoveryMetricsSignalsMock: vi.fn(),
+  queryRecoveryMetricsSignalsMock: vi.fn(),
   getOrgConfigSnapshotMock: vi.fn(),
   selectRowsBox: { rows: [] as unknown[][] },
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
@@ -87,7 +87,7 @@ vi.mock("@janusly/engine/src/recovery-metrics", () => ({
 }));
 
 vi.mock("@janusly/data/src/recoveryMetricsRepo", () => ({
-  collectRecoveryMetricsSignals: collectRecoveryMetricsSignalsMock,
+  queryRecoveryMetricsSignals: queryRecoveryMetricsSignalsMock,
 }));
 
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({
@@ -232,7 +232,7 @@ beforeEach(() => {
   auditMock.mockReset();
   buildRunExplainReportMock.mockReset();
   composeRecoveryMetricsMock.mockReset();
-  collectRecoveryMetricsSignalsMock.mockReset();
+  queryRecoveryMetricsSignalsMock.mockReset();
   getOrgConfigSnapshotMock.mockReset();
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
@@ -240,7 +240,7 @@ beforeEach(() => {
   executeToolMock.mockReset();
   enforceRateLimitMock.mockReset();
   buildRunExplainReportMock.mockReturnValue(baseReport);
-  collectRecoveryMetricsSignalsMock.mockResolvedValue(valueSignals);
+  queryRecoveryMetricsSignalsMock.mockResolvedValue(valueSignals);
   getOrgConfigSnapshotMock.mockResolvedValue({ value: valueAssumptions });
   composeRecoveryMetricsMock.mockReturnValue(valueMetrics);
 });
@@ -492,7 +492,7 @@ describe("/reports/value-dashboard — export", () => {
       auth,
     });
 
-    expect(collectRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 30);
+    expect(queryRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 30);
     expect(getOrgConfigSnapshotMock).toHaveBeenCalledWith("org-1");
     expect(composeRecoveryMetricsMock).toHaveBeenCalledWith(valueSignals, 30, valueAssumptions);
     expect(resWriteHeadMock).toHaveBeenCalledTimes(1);
@@ -521,7 +521,7 @@ describe("/reports/value-dashboard — export", () => {
       auth,
     });
 
-    expect(collectRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 7);
+    expect(queryRecoveryMetricsSignalsMock).toHaveBeenCalledWith("org-1", 7);
     const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Content-Disposition"]).toContain("-7d.json");
@@ -542,7 +542,7 @@ describe("/reports/value-dashboard — export", () => {
       expect.objectContaining({ error: expect.stringContaining("Unknown format") }),
       400,
     );
-    expect(collectRecoveryMetricsSignalsMock).not.toHaveBeenCalled();
+    expect(queryRecoveryMetricsSignalsMock).not.toHaveBeenCalled();
     expect(getOrgConfigSnapshotMock).not.toHaveBeenCalled();
     expect(auditMock).not.toHaveBeenCalled();
   });

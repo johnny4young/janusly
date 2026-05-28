@@ -24,7 +24,7 @@ vi.mock("@janusly/data/src/recoveryFeedbackRepo", () => ({
 }));
 
 vi.mock("@janusly/data/src/recoveryMetricsRepo", () => ({
-  collectRecoveryMetricsSignals: vi.fn(),
+  queryRecoveryMetricsSignals: vi.fn(),
 }));
 
 vi.mock("@janusly/engine/src/recovery-metrics", () => ({
