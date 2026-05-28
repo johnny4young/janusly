@@ -196,7 +196,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
             <div style={{ height: virtualTotalHeight, position: 'relative' }}>
               <ul className="we-list" style={{ transform: `translateY(${virtualStartOffset}px)` }}>
                 {visibleDeadLetters.map(({ item }) => {
-                  const severity = item.status === 'open' ? 'danger' : item.status === 'replayed' ? 'success' : 'cobalt'
+                  const severity = rowSeverity(item.status)
                   return (
                     <li key={item.id}>
                       <div
@@ -215,7 +215,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
                           </small>
                         </div>
                         <div className="we-list-row__meta">
-                          <span className={`we-list-row__pill we-list-row__pill--${severity === 'danger' ? 'danger' : severity === 'success' ? 'success' : 'cobalt'}`}>
+                          <span className={`we-list-row__pill we-list-row__pill--${severity}`}>
                             {formatStatusLabel(item.status)}
                           </span>
                           <RecoveryItemBadge
@@ -335,4 +335,11 @@ function toStatusFilter(value: string): DeadLetterStatusFilter {
     if (status === value) return status
   }
   return 'open'
+}
+
+/** Severity tone for a DLQ row: open → danger, replayed → success, else cobalt. */
+function rowSeverity(status: DeadLetter['status']): 'danger' | 'success' | 'cobalt' {
+  if (status === 'open') return 'danger'
+  if (status === 'replayed') return 'success'
+  return 'cobalt'
 }

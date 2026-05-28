@@ -499,7 +499,8 @@ export function BudgetTile({ onOpenTab }: { onOpenTab: (tab: ActiveTab) => void 
   }, [platformVersion, t])
 
   const band = budgetBand(envelope)
-  const tileSeverity: 'cobalt' | 'cyan' | 'success' | 'warning' | 'danger' = band === 'danger' ? 'danger' : band === 'warning' ? 'warning' : band === 'success' ? 'success' : band === 'cyan' ? 'cyan' : 'cobalt'
+  // `budgetBand` already returns the exact tile-severity union — no remap.
+  const tileSeverity = band
   const limit = envelope?.monthlyUsdLimit ?? null
   const spent = envelope?.monthlyUsdSpent ?? 0
   const hasBudget = limit !== null && limit > 0

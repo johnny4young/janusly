@@ -23,8 +23,7 @@
  *   log, not in the node output.
  */
 
-import { db } from "@janusly/db";
-import { runs } from "@janusly/db";
+import { db, runs } from "@janusly/db";
 import { eq } from "drizzle-orm";
 import { appendEvent, markWaitingNodeSucceeded, updateRunStatusFromNodes } from "./persistence";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";

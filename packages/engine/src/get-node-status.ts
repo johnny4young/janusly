@@ -4,8 +4,7 @@
  * status without instantiating the full store.
  */
 
-import { db } from "@janusly/db";
-import { runNodes } from "@janusly/db";
+import { db, runNodes } from "@janusly/db";
 import { eq, and } from "drizzle-orm";
 
 /** Return the current `status` of a (runId, nodeId) pair, or `undefined` when absent. */

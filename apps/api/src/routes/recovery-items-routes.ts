@@ -1,10 +1,11 @@
 /**
  * Recovery items (incidents) CRUD + transition routes.
  *
- * Ten routes registered into the global `routes: Route[]` registry:
+ * Eleven routes registered into the global `routes: Route[]` registry:
  *
  *   - `GET    /recovery/items`                        — list paginated     (viewer, recovery.read)
  *   - `GET    /recovery/items/:id`                    — single item        (viewer, recovery.read)
+ *   - `GET    /recovery/items/:id/children`           — debounce occurrences (viewer, recovery.read)
  *   - `POST   /recovery/items/:id/acknowledge`        — open|reopened →    (editor, recovery.write)
  *   - `POST   /recovery/items/:id/in-progress`        — ack|waiting →      (editor, recovery.write)
  *   - `POST   /recovery/items/:id/waiting-external`   — ack|in_prog →      (editor, recovery.write)
@@ -55,6 +56,7 @@ import {
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendJson } from "../http";
+import type { CorsAwareResponse } from "../http";
 import type { Route } from "../routes";
 
 function idFromUrl(url: string | undefined, verb?: string): string | null {
@@ -67,15 +69,22 @@ function idFromUrl(url: string | undefined, verb?: string): string | null {
   return m ? m[1] : null;
 }
 
-function statusCodeFromTransition(currentStatus: string): { code: number; body: Record<string, unknown> } {
-  return {
-    code: 409,
-    body: {
+/**
+ * Send the uniform 409 a transition takes when the CAS UPDATE matched no
+ * row (the item left the allowed pre-state between the read and the
+ * write). The body carries the item's current status so the client can
+ * re-render without a refetch.
+ */
+function sendTransitionConflict(res: CorsAwareResponse, currentStatus: string): void {
+  sendJson(
+    res,
+    {
       error: "transition not allowed from current status",
       code: "recovery_item_transition_invalid",
       currentStatus,
     },
-  };
+    409,
+  );
 }
 
 export const recoveryItemsRoutes: Route[] = [
@@ -153,8 +162,7 @@ export const recoveryItemsRoutes: Route[] = [
       if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
       const result = await acknowledgeRecoveryItem(auth.orgId, id, body.data);
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       await auditAction(auth, "recovery.item.acknowledged", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, owner: result.before.owner, severity: result.before.severity },
@@ -177,8 +185,7 @@ export const recoveryItemsRoutes: Route[] = [
       if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
       const result = await setInProgressRecoveryItem(auth.orgId, id, body.data);
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       await auditAction(auth, "recovery.item.in_progress", { targetType: "recovery-item", targetId: id, metadata: {
         before: { status: result.before.status, owner: result.before.owner },
@@ -201,8 +208,7 @@ export const recoveryItemsRoutes: Route[] = [
       if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
       const result = await setWaitingExternalRecoveryItem(auth.orgId, id, { owner: body.data.owner });
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       if (body.data.comment) {
         await appendCommentToRecoveryItem({
@@ -247,8 +253,7 @@ export const recoveryItemsRoutes: Route[] = [
         slaTargetAtOverrideIso: body.data.slaTargetAtOverrideIso,
       });
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       if (body.data.comment) {
         await appendCommentToRecoveryItem({
@@ -308,8 +313,7 @@ export const recoveryItemsRoutes: Route[] = [
 
       const result = await assignOwnerRecoveryItem(auth.orgId, id, { owner });
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       await auditAction(auth, "recovery.item.assigned", { targetType: "recovery-item", targetId: id, metadata: {
         before: { owner: result.before.owner },
@@ -336,8 +340,7 @@ export const recoveryItemsRoutes: Route[] = [
         reason: body.data.resolutionReason,
       });
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       if (body.data.comment) {
         await appendCommentToRecoveryItem({
@@ -369,8 +372,7 @@ export const recoveryItemsRoutes: Route[] = [
       if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
       const result = await reopenRecoveryItem(auth.orgId, id, { actor: auth.userId });
       if (!result) {
-        const { code, body: errBody } = statusCodeFromTransition(current.status);
-        return sendJson(res, errBody, code);
+        return sendTransitionConflict(res, current.status);
       }
       if (body.data.comment) {
         await appendCommentToRecoveryItem({

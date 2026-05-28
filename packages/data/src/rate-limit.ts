@@ -34,10 +34,10 @@ export type RateLimitClient = {
  * limiter's fail-open invariant survives a buggy or unavailable
  * observability layer.
  *
- * - ``onRedisError`` fires when ``INCR`` or ``PEXPIRE NX`` rejects.
+ * - `onRedisError` fires when `INCR` or `PEXPIRE NX` rejects.
  *   The limiter still returns successfully (fail-open) after the
  *   hook runs.
- * - ``onRedisSuccess`` fires after a healthy ``INCR + PEXPIRE NX``
+ * - `onRedisSuccess` fires after a healthy `INCR + PEXPIRE NX`
  *   round-trip. Production wiring uses this to flip a previously-
  *   degraded bucket back to healthy.
  */
@@ -65,8 +65,8 @@ function fireHook(
   if (!hook) return;
   try {
     // Only forward the third arg when we actually have an error so the
-    // public hook types (``onRedisSuccess: (bucket, key) => …`` vs
-    // ``onRedisError: (bucket, key, error) => …``) match the call shape.
+    // public hook types (`onRedisSuccess: (bucket, key) => …` vs
+    // `onRedisError: (bucket, key, error) => …`) match the call shape.
     const result = error === undefined ? hook(bucket, key) : hook(bucket, key, error);
     // Hooks may be async; we don't await them. A rejection becomes an
     // unhandled rejection — catch it explicitly so the limiter's
@@ -85,9 +85,9 @@ function fireHook(
  * Bind a Redis-like client and return a per-call limiter. Throws a
  * status-bearing 429 when the bucket is exhausted.
  *
- * The optional ``hooks`` argument carries observability callbacks
- * fired on every Redis success / error. See ``RateLimiterHooks``.
- * Both hooks are wrapped in ``try/catch`` — a hook bug NEVER breaks
+ * The optional `hooks` argument carries observability callbacks
+ * fired on every Redis success / error. See `RateLimiterHooks`.
+ * Both hooks are wrapped in `try/catch` — a hook bug NEVER breaks
  * the fail-open invariant.
  */
 export function createRateLimiter(client: RateLimitClient, hooks?: RateLimiterHooks) {

@@ -336,6 +336,11 @@ export async function dispatchTool(
   };
 }
 
+/** True when `value` is a positive, finite number — the shape every optional `limit` / `windowDays` arg must satisfy before it becomes a query param. */
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 async function runOne(
   callApi: CallApi,
   name: string,
@@ -344,7 +349,7 @@ async function runOne(
   switch (name) {
     case "workflows.list": {
       const params = new URLSearchParams();
-      if (typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0) {
+      if (isPositiveNumber(args.limit)) {
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
@@ -404,7 +409,7 @@ async function runOne(
       if (typeof args.workflowId === "string" && args.workflowId.length > 0) {
         params.set("workflowId", args.workflowId);
       }
-      if (typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0) {
+      if (isPositiveNumber(args.limit)) {
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
@@ -418,7 +423,7 @@ async function runOne(
         }
         params.set("status", args.status);
       }
-      if (typeof args.limit === "number" && Number.isFinite(args.limit) && args.limit > 0) {
+      if (isPositiveNumber(args.limit)) {
         params.set("limit", String(args.limit));
       }
       const query = params.toString();
@@ -426,7 +431,7 @@ async function runOne(
     }
     case "dlq.clusters": {
       const params = new URLSearchParams();
-      if (typeof args.windowDays === "number" && Number.isFinite(args.windowDays) && args.windowDays > 0) {
+      if (isPositiveNumber(args.windowDays)) {
         params.set("windowDays", String(args.windowDays));
       }
       const query = params.toString();
@@ -434,7 +439,7 @@ async function runOne(
     }
     case "recovery.metrics": {
       const params = new URLSearchParams();
-      if (typeof args.windowDays === "number" && Number.isFinite(args.windowDays) && args.windowDays > 0) {
+      if (isPositiveNumber(args.windowDays)) {
         params.set("windowDays", String(args.windowDays));
       }
       const query = params.toString();

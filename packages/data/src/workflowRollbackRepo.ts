@@ -50,16 +50,19 @@ export async function rollbackWorkflowVersion(input: {
   const nextVersion = (latest.version ?? 0) + 1;
   const versionId = crypto.randomUUID();
 
+  const targetDag = (target.dagJson ?? {}) as Record<string, unknown>;
+  const targetMetadata = (targetDag.metadata ?? {}) as Record<string, unknown>;
+
   await db.insert(workflowVersions).values({
     id: versionId,
     orgId: input.orgId,
     workflowId: input.workflowId,
     version: nextVersion,
     dagJson: {
-      ...(target.dagJson as Record<string, unknown>),
+      ...targetDag,
       id: input.workflowId,
       metadata: {
-        ...((target.dagJson as any)?.metadata ?? {}),
+        ...targetMetadata,
         rollback: {
           fromVersion: latest.version,
           toVersion: target.version,

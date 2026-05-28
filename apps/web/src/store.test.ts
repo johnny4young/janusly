@@ -13,7 +13,7 @@ beforeEach(() => {
       orgId: null,
       authReady: false,
       currentWorkflowId: 'ui-test',
-      currentWorkflowName: 'UI Test Workflow',
+      currentWorkflowName: 'Sample workflow',
       nodes: [],
       edges: [],
       selectedNodeId: null,
