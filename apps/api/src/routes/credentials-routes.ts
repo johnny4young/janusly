@@ -13,7 +13,9 @@
 import { eq } from "drizzle-orm";
 
 import { credentials, db } from "@janusly/db";
-import { getCredentialHealth } from "@janusly/data/src/credentialHealthRepo";
+import {
+  getCredentialHealth,
+} from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";

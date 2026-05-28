@@ -7,7 +7,11 @@
  * rate-limit posture for their org.
  */
 
-import { listOrgConfig, upsertOrgConfig, getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  listOrgConfig,
+  upsertOrgConfig,
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import {
   cancelPendingMemoryPurge,
   schedulePendingMemoryPurge,

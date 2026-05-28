@@ -39,7 +39,9 @@
  *   flip either of those by changing the header.
  */
 
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import type { AuthContext } from "./auth";
 
 export type McpWriteAllowedResult =

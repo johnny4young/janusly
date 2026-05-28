@@ -21,12 +21,12 @@ import { and, eq } from "drizzle-orm";
 import { db, workflowVersions } from "@janusly/db";
 import type { ReadinessIssue, ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import type { Workflow } from "@janusly/shared";
-import { listCredentialsForOrg } from "@janusly/data/src/credentialsRepo";
-import { listConnections } from "@janusly/data/src/mcpConnectionsRepo";
 import {
+  listCredentialsForOrg,
+  listConnections,
   readCredentialNameFromConfig,
   type SecretRefResolver,
-} from "@janusly/data/src/credentialHealthRepo";
+} from "@janusly/data";
 
 /**
  * Production resolver shared by the credential-health route and every

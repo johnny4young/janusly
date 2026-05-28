@@ -56,7 +56,7 @@ import {
   recordFire,
   upsertScheduleEntry,
   type ScheduleEntry,
-} from "@janusly/data/src/scheduleEntriesRepo";
+} from "@janusly/data";
 import { workflowQueue } from "./queue";
 import { resolveScheduleConfig } from "./schedule";
 import { startRun } from "./start-run";

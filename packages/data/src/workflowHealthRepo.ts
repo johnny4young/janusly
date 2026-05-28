@@ -2,7 +2,7 @@
  * Repository for workflow health signals — the run-time inputs the
  * `computeWorkflowHealth` aggregator (in `@janusly/engine`) consumes.
  *
- * Single function `collectHealthSignals(orgId, workflowId, windowDays,
+ * Single function `queryHealthSignals(orgId, workflowId, windowDays,
  * versionFilter?)` runs the SQL aggregations across `runs`,
  * `run_events`, `dead_letters`, `usage_events`, and `workflow_versions`
  * for one workflow over a rolling window. Returns the typed
@@ -39,7 +39,7 @@ import { runs, runEvents, deadLetters, usageEvents, workflowVersions } from "@ja
 import { and, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 
 /**
- * Optional version-cutoff filter for `collectHealthSignals`. Used by the
+ * Optional version-cutoff filter for `queryHealthSignals`. Used by the
  * recovery before/after delta route to split the same time window by
  * version: rows with `workflow_versions.version < cutoffVersion` form
  * the "before" side; rows with `version >= cutoffVersion` form the
@@ -76,7 +76,7 @@ export type HealthSignals = {
 export const DEFAULT_HEALTH_WINDOW_DAYS = 30;
 
 /** Run all signal-collection queries for one workflow + return the typed shape. */
-export async function collectHealthSignals(
+export async function queryHealthSignals(
   orgId: string,
   workflowId: string,
   windowDays = DEFAULT_HEALTH_WINDOW_DAYS,
@@ -221,7 +221,7 @@ async function sumUsage(orgId: string, runIds: string[]): Promise<{ totalCostUsd
  * worst-case rate; past that the workflow is broken" ceiling.
  *
  * @internal Exported for unit tests; not part of the public repo surface.
- *           Production callers go through `collectHealthSignals`.
+ *           Production callers go through `queryHealthSignals`.
  */
 export async function computeP95Latency(
   runIds: string[],

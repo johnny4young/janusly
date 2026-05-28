@@ -39,10 +39,11 @@ import {
   listSsoConnections,
   revokeSsoConnection,
   updateSsoConnection,
-} from "@janusly/data/src/ssoConnectionsRepo";
-import { consumeSsoNonce, recordSsoNonce } from "@janusly/data/src/ssoStateNoncesRepo";
-import { upsertMembership } from "@janusly/data/src/orgMembersRepo";
-import { withAuditTx } from "@janusly/data/src/audit-tx";
+  consumeSsoNonce,
+  recordSsoNonce,
+  upsertMembership,
+  withAuditTx,
+} from "@janusly/data";
 import { signSignedToken, verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "../audit";

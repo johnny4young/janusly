@@ -49,8 +49,10 @@
  *   so a previously-stuck job doesn't block a fresh schedule.
  */
 
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
-import { purgeMemoryForOrg } from "@janusly/data/src/memoryEntriesRepo";
+import {
+  getOrgConfigSnapshot,
+  purgeMemoryForOrg,
+} from "@janusly/data";
 
 import { workflowQueue } from "./queue";
 

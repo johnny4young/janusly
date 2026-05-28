@@ -28,7 +28,7 @@ import { UpsertWorkflowMetadataBodySchema } from "@janusly/shared";
 import {
   getWorkflowMetadata,
   upsertWorkflowMetadata,
-} from "@janusly/data/src/workflowMetadataRepo";
+} from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";

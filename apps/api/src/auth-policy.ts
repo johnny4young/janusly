@@ -46,11 +46,11 @@
  *   through to catalog defaults via `getAuthPolicyConfig`.
  */
 
-import { getAuthPolicyConfig } from "@janusly/data/src/orgConfigRepo";
 import {
+  getAuthPolicyConfig,
   getSsoConnectionForOrg,
   type SsoConnectionRow,
-} from "@janusly/data/src/ssoConnectionsRepo";
+} from "@janusly/data";
 
 import { audit } from "./audit";
 import type { AuthMode } from "./auth";

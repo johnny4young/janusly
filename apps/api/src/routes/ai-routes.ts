@@ -16,7 +16,10 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { explainRun, promoteNoopPlaceholders, RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowImprovement, suggestWorkflowPatch, type PatchSuggestion, type SuggestImprovementResult } from "@janusly/ai";
-import { summarizePastFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
+import {
+  summarizePastFeedback,
+  listExposedMcpToolsForAi,
+} from "@janusly/data";
 import { db, runEvents, runs, workflowVersions } from "@janusly/db";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { listTools } from "@janusly/engine/src/tool-registry";
@@ -28,7 +31,6 @@ import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
-import { listExposedMcpToolsForAi } from "@janusly/data/src/mcpConnectionsRepo";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema, AiPatchStructuralEnvelope, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { auditAction } from "../audit-helper";

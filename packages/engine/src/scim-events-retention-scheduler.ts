@@ -33,7 +33,9 @@ import {
   auditLogs,
   db,
 } from "@janusly/db";
-import { pruneOldProcessedEvents } from "@janusly/data/src/scimProcessedEventsRepo";
+import {
+  pruneOldProcessedEvents,
+} from "@janusly/data";
 
 import { workflowQueue } from "./queue";
 import { validateCronExpression } from "./schedule";

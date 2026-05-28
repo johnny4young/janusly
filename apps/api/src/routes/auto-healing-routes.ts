@@ -28,8 +28,8 @@ import {
   getByIdForOrg,
   listPendingForOrg,
   recordDecision,
-} from "@janusly/data/src/autoHealingRepo";
-import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
+  recordRecoveryFeedback,
+} from "@janusly/data";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 

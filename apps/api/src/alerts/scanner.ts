@@ -31,15 +31,15 @@ import {
   type AlertParamsByTrigger,
   type WorkflowSlo,
 } from "@janusly/shared";
-import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
-import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
-import { collectHealthSignals } from "@janusly/data/src/workflowHealthRepo";
-import { listOpenItemsWithBreachedSla } from "@janusly/data/src/recoveryItemsRepo";
 import {
+  queryFailureSamples,
+  queryHealthSignals,
+  listOpenItemsWithBreachedSla,
   getEnabledPoliciesByTrigger,
   listOrgIdsWithEnabledPolicies,
   type AlertPolicy,
-} from "@janusly/data/src/alertPoliciesRepo";
+} from "@janusly/data";
+import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 
 import { dispatchAlert } from "@janusly/engine/src/alerts/dispatcher";
 
@@ -131,9 +131,9 @@ async function scanFailureClusters(orgId: string): Promise<void> {
   }
 
   for (const windowDays of windows) {
-    let samples: Awaited<ReturnType<typeof collectFailureSamples>>;
+    let samples: Awaited<ReturnType<typeof queryFailureSamples>>;
     try {
-      samples = await collectFailureSamples(orgId, windowDays, FAILURE_SAMPLE_LIMIT);
+      samples = await queryFailureSamples(orgId, windowDays, FAILURE_SAMPLE_LIMIT);
     } catch (err) {
       console.warn("[alerts] failure sample collection failed", { orgId, windowDays, err });
       continue;
@@ -175,9 +175,9 @@ async function scanWorkflowSloBreaches(orgId: string): Promise<void> {
   if (candidates.length === 0) return;
 
   for (const candidate of candidates) {
-    let signals: Awaited<ReturnType<typeof collectHealthSignals>>;
+    let signals: Awaited<ReturnType<typeof queryHealthSignals>>;
     try {
-      signals = await collectHealthSignals(orgId, candidate.workflowId, candidate.slo.windowDays);
+      signals = await queryHealthSignals(orgId, candidate.workflowId, candidate.slo.windowDays);
     } catch (err) {
       console.warn("[alerts] signals collection failed", { orgId, workflowId: candidate.workflowId, err });
       continue;

@@ -53,8 +53,8 @@ import {
   recordValidationOutcome,
   sweepStaleValidating,
   type AutoHealingRun,
-} from "@janusly/data/src/autoHealingRepo";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import {
   isAutoApplyAllowed,
   isAutoHealingAllowed,

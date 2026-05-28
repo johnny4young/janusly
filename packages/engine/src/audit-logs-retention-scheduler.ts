@@ -36,7 +36,9 @@ import {
   auditLogs,
   db,
 } from "@janusly/db";
-import { deleteExpiredAuditLogs } from "@janusly/data/src/auditLogsRepo";
+import {
+  deleteExpiredAuditLogs,
+} from "@janusly/data";
 
 import { workflowQueue } from "./queue";
 import { validateCronExpression } from "./schedule";

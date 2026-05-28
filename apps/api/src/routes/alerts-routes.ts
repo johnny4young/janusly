@@ -28,12 +28,10 @@ import {
   getAlertPolicyById,
   listAlertPolicies,
   updateAlertPolicy,
-} from "@janusly/data/src/alertPoliciesRepo";
-import {
   RECENT_DISPATCHES_DEFAULT_LIMIT,
   RECENT_DISPATCHES_MAX_LIMIT,
   listRecentDispatches,
-} from "@janusly/data/src/alertDispatchesRepo";
+} from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";

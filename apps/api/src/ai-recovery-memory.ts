@@ -42,8 +42,11 @@
  *   audit metadata. Raw memory content NEVER lands in the audit row.
  */
 
-import { recallMemory, type MemoryRecallEntry } from "@janusly/data/src/memoryEntriesRepo";
-import { isMemoryAllowed } from "@janusly/data/src/memoryConsent";
+import {
+  recallMemory,
+  type MemoryRecallEntry,
+  isMemoryAllowed,
+} from "@janusly/data";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
 /** Hard cap on the bytes in the composed snippets block. Half of the

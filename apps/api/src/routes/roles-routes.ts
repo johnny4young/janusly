@@ -37,7 +37,7 @@ import {
   listOrgRoles,
   updateOrgRole,
   type OrgRoleRow,
-} from "@janusly/data/src/orgRolesRepo";
+} from "@janusly/data";
 import {
   DEFAULT_ROLE_PERMISSIONS,
   PERMISSION_CATALOG,

@@ -13,8 +13,10 @@
 
 import { db } from "@janusly/db";
 import { deadLetters } from "@janusly/db";
-import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
-import { recordRecoveryItemCreationEvent } from "@janusly/data/src/recovery-item-creator";
+import {
+  recordAlertEvent,
+  recordRecoveryItemCreationEvent,
+} from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { safePersistPayload } from "../safe-persist";
 import type { DeadLetterInput, QueueAdapter } from "../core/types";

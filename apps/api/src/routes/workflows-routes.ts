@@ -25,8 +25,12 @@ import {
   workflowMetadata,
   workflowVersions,
 } from "@janusly/db";
-import { collectHealthSignals, DEFAULT_HEALTH_WINDOW_DAYS } from "@janusly/data/src/workflowHealthRepo";
-import { getWorkflowSlo, setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
+import {
+  queryHealthSignals,
+  DEFAULT_HEALTH_WINDOW_DAYS,
+  getWorkflowSlo,
+  setWorkflowSlo,
+} from "@janusly/data";
 import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
 import { computeWorkflowHealth, MIN_RUNS_FOR_DELTA } from "@janusly/engine/src/workflow-health";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
@@ -354,8 +358,8 @@ export const workflowsRoutes: Route[] = [
       // same query plan with a single new `lt`/`gte` predicate on the
       // joined `workflow_versions.version` column.
       const [beforeSignals, afterSignals] = await Promise.all([
-        collectHealthSignals(auth.orgId, workflowId, windowDays, { side: "before", cutoffVersion: afterVersion }),
-        collectHealthSignals(auth.orgId, workflowId, windowDays, { side: "after", cutoffVersion: afterVersion }),
+        queryHealthSignals(auth.orgId, workflowId, windowDays, { side: "before", cutoffVersion: afterVersion }),
+        queryHealthSignals(auth.orgId, workflowId, windowDays, { side: "after", cutoffVersion: afterVersion }),
       ]);
 
       // Same SLO declaration applies to both sides — the operator's
@@ -531,7 +535,7 @@ export const workflowsRoutes: Route[] = [
       ]);
       const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
       const [signals, sloEntry] = await Promise.all([
-        collectHealthSignals(auth.orgId, workflowId),
+        queryHealthSignals(auth.orgId, workflowId),
         getWorkflowSlo(auth.orgId, workflowId),
       ]);
       const health = computeWorkflowHealth({

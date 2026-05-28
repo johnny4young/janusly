@@ -18,7 +18,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@janusly/data/src/failureClusterRepo", () => ({
-  collectFailureSamples: vi.fn(),
+  queryFailureSamples: vi.fn(),
 }));
 
 vi.mock("@janusly/engine/src/cluster-failures", () => ({
@@ -94,7 +94,7 @@ import {
   handleAutoHealingScanTrigger,
 } from "./auto-healing-scanner";
 import { isAutoHealingAllowed } from "@janusly/engine/src/auto-healing-consent";
-import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
+import { queryFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { checkBudget } from "@janusly/engine/src/budget";
@@ -110,7 +110,7 @@ import {
 import { suggestWorkflowPatch } from "@janusly/ai";
 
 const isAllowedMock = vi.mocked(isAutoHealingAllowed);
-const samplesMock = vi.mocked(collectFailureSamples);
+const samplesMock = vi.mocked(queryFailureSamples);
 const clusterMock = vi.mocked(clusterFailureSamples);
 const snapshotMock = vi.mocked(getOrgConfigSnapshot);
 const budgetMock = vi.mocked(checkBudget);

@@ -10,8 +10,10 @@
  * the engine falls back to its hardcoded severity default.
  */
 
-import { setRecoveryItemSeverityDefault } from "@janusly/data/src/recovery-item-severity-default";
-import { getWorkflowMetadata } from "@janusly/data/src/workflowMetadataRepo";
+import {
+  setRecoveryItemSeverityDefault,
+  getWorkflowMetadata,
+} from "@janusly/data";
 
 /** Wire the production severity-default resolver. Idempotent. */
 export function registerWorkflowMetadataSeverityResolver(): void {
