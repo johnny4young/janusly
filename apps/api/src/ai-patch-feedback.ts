@@ -21,7 +21,9 @@
 
 import { z } from "zod";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
-import type { FeedbackSummary } from "@janusly/data/src/recoveryFeedbackRepo";
+import {
+  type FeedbackSummary,
+} from "@janusly/data";
 
 /**
  * Zod body schema for `POST /recovery/feedback`. Closed enums match

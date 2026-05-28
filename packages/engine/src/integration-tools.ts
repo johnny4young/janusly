@@ -42,7 +42,9 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 
-import { getCredentialByName } from "@janusly/data/src/credentialsRepo";
+import {
+  getCredentialByName,
+} from "@janusly/data";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 import { fetchHttpTarget } from "./http-policy";
 import { getIntegrationUsageRecorder } from "./integration-usage";

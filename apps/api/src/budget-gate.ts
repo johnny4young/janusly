@@ -34,7 +34,9 @@ import { and, desc, eq, gte } from "drizzle-orm";
 
 import { auditLogs, db } from "@janusly/db";
 import { checkBudget } from "@janusly/engine/src/budget";
-import { recordAlertEvent } from "@janusly/data/src/alert-dispatch";
+import {
+  recordAlertEvent,
+} from "@janusly/data";
 import type { BudgetCheckResult } from "@janusly/shared/src/budget-types";
 
 import { audit } from "./audit";

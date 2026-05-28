@@ -19,13 +19,13 @@ import {
   findPendingInvitation,
   listInvitationsByOrg,
   revokeInvitation,
-} from "@janusly/data/src/invitationsRepo";
+  getOrgRole,
+} from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
 import { EMAIL_PATTERN, MAX_JSON_BODY_BYTES } from "../api-config";
 import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
-import { getOrgRole } from "@janusly/data/src/orgRolesRepo";
 import { isRole } from "../permissions";
 import type { Route } from "../routes";
 

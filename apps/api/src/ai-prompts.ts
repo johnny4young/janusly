@@ -12,7 +12,9 @@
  * Used by `apps/api/src/routes/ai-routes.ts`.
  */
 
-import type { ExposedMcpTool } from "@janusly/data/src/mcpConnectionsRepo";
+import {
+  type ExposedMcpTool,
+} from "@janusly/data";
 import { sanitizeMcpPromptLabel, sanitizeMcpToolDescription } from "@janusly/shared/src/error-signature";
 
 export const GENERATE_WORKFLOW_SYSTEM_PROMPT = [

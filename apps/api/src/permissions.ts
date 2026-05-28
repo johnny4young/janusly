@@ -36,7 +36,7 @@
 
 import { db, orgMembers } from '@janusly/db'
 import { and, eq } from 'drizzle-orm'
-import { getOrgRole } from '@janusly/data/src/orgRolesRepo'
+import { getOrgRole } from '@janusly/data'
 
 import {
   DEFAULT_ROLE_PERMISSIONS,

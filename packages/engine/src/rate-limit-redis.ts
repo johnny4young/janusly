@@ -14,11 +14,12 @@
 
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
-import { createRateLimiter, type RateLimitOptions } from "@janusly/data/src/rate-limit";
 import {
+  createRateLimiter,
+  type RateLimitOptions,
   recordRateLimiterError,
   recordRateLimiterRecovery,
-} from "@janusly/data/src/rate-limit-degradation";
+} from "@janusly/data";
 
 loadRootEnv();
 

@@ -28,7 +28,10 @@
  * - `apps/api/src/routes/scim-routes.ts` (POST /webhooks/workos/directory).
  */
 
-import type { ScimDirectoryRow, ScimDefaultRole } from "@janusly/data/src/scimDirectoriesRepo";
+import {
+  type ScimDirectoryRow,
+  type ScimDefaultRole,
+} from "@janusly/data";
 
 export type ScimEvent = {
   id: string;

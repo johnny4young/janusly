@@ -40,16 +40,17 @@ import http from "http";
 import { timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
-import { findPendingInvitation, acceptInvitation } from "@janusly/data/src/invitationsRepo";
 import {
+  findPendingInvitation,
+  acceptInvitation,
   findMemberByEmail,
   getMembershipForOrgUser,
   listMembershipsForUser,
   migrateMemberUserId,
   upsertMembership,
-} from "@janusly/data/src/orgMembersRepo";
-import { getSsoConnectionForOrg } from "@janusly/data/src/ssoConnectionsRepo";
-import { findVerifiedDomain } from "@janusly/data/src/verifiedDomainsRepo";
+  getSsoConnectionForOrg,
+  findVerifiedDomain,
+} from "@janusly/data";
 import { verifySignedToken } from "@janusly/engine/src/secrets";
 
 import { audit } from "./audit";

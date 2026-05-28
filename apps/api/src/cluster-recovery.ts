@@ -23,7 +23,9 @@
  * rows that already passed the org-scoped query).
  */
 
-import { collectFailureSamples } from "@janusly/data/src/failureClusterRepo";
+import {
+  queryFailureSamples,
+} from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/engine/src/error-signature";
 
 /** Default member-list cap; matches the bulk-apply request bound. */
@@ -61,7 +63,7 @@ export async function findClusterMembers(
   limit: number,
 ): Promise<FindClusterMembersResult> {
   const cappedLimit = Math.max(1, Math.min(limit, CLUSTER_MEMBERS_MAX_LIMIT));
-  const samples = await collectFailureSamples(orgId, windowDays, SAMPLE_SCAN_LIMIT);
+  const samples = await queryFailureSamples(orgId, windowDays, SAMPLE_SCAN_LIMIT);
 
   const matched: string[] = [];
   let total = 0;

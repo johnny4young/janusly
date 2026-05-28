@@ -27,7 +27,7 @@ import type { Route } from "../routes";
 import {
   getRateLimiterAdminHealth,
   getRateLimiterPublicHealth,
-} from "@janusly/data/src/rate-limit-degradation";
+} from "@janusly/data";
 
 export const healthRoutes: Route[] = [
   {

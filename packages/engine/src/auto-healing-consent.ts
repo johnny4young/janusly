@@ -48,7 +48,9 @@
  *   is no cross-tenant escape.
  */
 
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 
 export type AutoHealingConsentResult =
   | { allowed: true }

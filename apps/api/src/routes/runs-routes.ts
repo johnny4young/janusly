@@ -14,8 +14,10 @@
 
 import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
-import { getRunComparison } from "@janusly/data/src/runComparisonRepo";
+import {
+  getOrgConfigSnapshot,
+  getRunComparison,
+} from "@janusly/data";
 import { db, runEvents, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { replayDecision } from "@janusly/domain";
 import { replayRunAsValidation, replayRunAsValidationFork } from "@janusly/engine/src/adapters/replay-lab";

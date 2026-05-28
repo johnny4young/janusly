@@ -8,11 +8,13 @@
  * deprioritize approaches the operator has already rejected.
  */
 
-import { commitMemory } from "@janusly/data/src/memoryEntriesRepo";
-import { isMemoryAllowed } from "@janusly/data/src/memoryConsent";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
-import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
-import { collectRecoveryMetricsSignals } from "@janusly/data/src/recoveryMetricsRepo";
+import {
+  commitMemory,
+  isMemoryAllowed,
+  getOrgConfigSnapshot,
+  recordRecoveryFeedback,
+  queryRecoveryMetricsSignals,
+} from "@janusly/data";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
@@ -44,7 +46,7 @@ export const recoveryRoutes: Route[] = [
       // don't read `valueEstimate` / `clustersResolved` get the same
       // shape as before plus the new fields, byte-for-byte back-compat.
       const [signals, snapshot] = await Promise.all([
-        collectRecoveryMetricsSignals(auth.orgId, windowDays),
+        queryRecoveryMetricsSignals(auth.orgId, windowDays),
         getOrgConfigSnapshot(auth.orgId),
       ]);
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);

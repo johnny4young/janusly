@@ -46,7 +46,8 @@ import {
   type McpConnectionRow,
   type McpEnvRefs,
   type McpTransport,
-} from "@janusly/data/src/mcpConnectionsRepo";
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import {
   createHttpMcpClient,
   createSseMcpClient,
@@ -55,7 +56,6 @@ import {
   type McpClient,
 } from "@janusly/engine/src/mcp-client";
 import { resolveStdioSandboxConfig } from "@janusly/engine/src/mcp-tool-executor";
-import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";

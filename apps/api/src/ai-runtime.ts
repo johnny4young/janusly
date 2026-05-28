@@ -19,7 +19,10 @@
  */
 
 import { createLlmClient, resolveLlmConfig } from "@janusly/ai";
-import { applyOrgConfigToEnv, getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
+import {
+  applyOrgConfigToEnv,
+  getOrgConfigSnapshot,
+} from "@janusly/data";
 import type { DecisionCandidate } from "@janusly/domain";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";

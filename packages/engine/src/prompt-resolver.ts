@@ -50,7 +50,7 @@ import {
   resolveActiveVersion,
   type Prompt,
   type PromptVersion,
-} from "@janusly/data/src/promptsRepo";
+} from "@janusly/data";
 import type { PromptRef, PromptVariable } from "@janusly/shared";
 
 /** Defensive cap on `{{include.X}}` chain depth. Cycle detection should

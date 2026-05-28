@@ -3,7 +3,7 @@
  * `clusterFailureSamples` aggregator (in `@janusly/engine`) walks to
  * group recent failures by normalized signature.
  *
- * Single function `collectFailureSamples(orgId, windowDays, limit)` runs
+ * Single function `queryFailureSamples(orgId, windowDays, limit)` runs
  * two parallel SQL queries — one over `dead_letters`, one over failed
  * `run_nodes` — and returns a flat list of typed samples. The engine
  * layer normalizes and clusters; this module only collects.
@@ -59,7 +59,7 @@ const DEFAULT_SAMPLE_LIMIT = 500;
  * the engine layer deduplicates `(runId, nodeId)` pairs so a failed run
  * that landed in DLQ counts once, not twice.
  */
-export async function collectFailureSamples(
+export async function queryFailureSamples(
   orgId: string,
   windowDays = DEFAULT_WINDOW_DAYS,
   limit = DEFAULT_SAMPLE_LIMIT,

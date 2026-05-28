@@ -46,9 +46,9 @@ import {
   resolveRecoveryItem,
   setInProgressRecoveryItem,
   setWaitingExternalRecoveryItem,
-} from "@janusly/data/src/recoveryItemsRepo";
-import { listHandoffsForItem } from "@janusly/data/src/recoveryItemHandoffsRepo";
-import { getWorkflowMetadata } from "@janusly/data/src/workflowMetadataRepo";
+  listHandoffsForItem,
+  getWorkflowMetadata,
+} from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
