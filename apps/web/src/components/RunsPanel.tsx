@@ -32,6 +32,7 @@ import { ReplayLabForkDialog } from './ReplayLabForkDialog'
 import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
+import { RunStreamChip } from './RunStreamChip'
 
 type HumanFormWaiting = {
   title?: string
@@ -167,7 +168,10 @@ export function RunsPanel({
       {activeRunId && (
         <section className="panel-card">
           <div className="split-row">
-            <strong>{t('rightPanel.runs.activeRun')}</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <strong>{t('rightPanel.runs.activeRun')}</strong>
+              <RunStreamChip />
+            </span>
             <div style={{ display: 'flex', gap: 8 }}>
               {activeRun && !activeRun.replayMode && isTerminalRunStatus(activeRun.status) && (
                 <button

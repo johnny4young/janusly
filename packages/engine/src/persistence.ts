@@ -22,6 +22,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { WorkflowSchema } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
+import { publishRunEvent } from "./run-event-stream";
 import { safePersistPayload } from "./safe-persist";
 
 // Per-surface size caps for jsonb writes. The chokepoint's default cap
@@ -151,6 +152,7 @@ export async function cancelRun(runId: string, reason?: any) {
   // Subworkflow children: a cancelled child still notifies the parent so the
   // parent's subworkflow node fails (the parent decides whether to roll up).
   await notifyOnTerminal(runId, "cancelled");
+  publishRunEvent(runId, { kind: "run.status", status: "cancelled" });
 }
 
 /**
@@ -280,6 +282,7 @@ export async function updateRunStatusFromNodes(runId: string) {
   if (nodes.some(node => node.status === "failed")) {
     await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
     await notifyOnTerminal(runId, "failed");
+    publishRunEvent(runId, { kind: "run.status", status: "failed" });
     return "failed";
   }
 
@@ -291,6 +294,7 @@ export async function updateRunStatusFromNodes(runId: string) {
       .set({ status: "succeeded", outputJson })
       .where(eq(runs.id, runId));
     await notifyOnTerminal(runId, "succeeded");
+    publishRunEvent(runId, { kind: "run.status", status: "succeeded" });
     return "succeeded";
   }
 
@@ -326,12 +330,26 @@ async function computeRunOutputs(runId: string): Promise<Record<string, unknown>
 
 /** Insert one row into `run_events`. The web's run timeline reads these. */
 export async function appendEvent(runId: string, nodeId: string | null, type: string, payload: any) {
+  const id = crypto.randomUUID();
+  const createdAt = new Date();
+  // Redact ONCE, then both persist and publish the same object — a streamed
+  // event can never expose a value the persisted row wouldn't.
+  const redacted = safePersistPayload(payload);
   await db.insert(runEvents).values({
-    id: crypto.randomUUID(),
+    id,
     runId,
     nodeId,
     type,
-    payload: safePersistPayload(payload),
+    payload: redacted,
+    createdAt,
+  });
+  publishRunEvent(runId, {
+    kind: "event",
+    id,
+    nodeId,
+    type,
+    payload: redacted,
+    createdAt: createdAt.toISOString(),
   });
 }
 

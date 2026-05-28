@@ -35,6 +35,14 @@ import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
+/**
+ * How the active run's timeline is being kept fresh:
+ * - `'idle'`   — no active run, or not yet started.
+ * - `'sse'`    — the live SSE stream is connected (the "Live" pill is green).
+ * - `'polling'`— SSE is unavailable/blocked; the 1.5s `/status` poll is the
+ *                fallback updater (the pill shows amber "Polling").
+ */
+type StreamTransport = 'idle' | 'sse' | 'polling'
 type ToastTone = 'success' | 'error' | 'info'
 type Toast = { id: string; message: string; tone: ToastTone }
 type BudgetBlockedEnvelope = {
@@ -70,6 +78,7 @@ type WorkflowStore = {
   eventsHasMore: boolean
   activeTab: ActiveTab
   streamStatus: StreamStatus
+  streamTransport: StreamTransport
   toasts: Toast[]
   platformVersion: number
   /** Most recent HTTP 402 budget-block envelope from any /ai/* route. The
@@ -99,11 +108,13 @@ type WorkflowStore = {
 
   setRunId: (id: string | null) => void
   setRunNodes: (nodes: RunNode[]) => void
+  mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
   setEvents: (events: RunEvent[]) => void
   setEventsPagination: (cursor: string | null, hasMore: boolean) => void
   setActiveTab: (tab: ActiveTab) => void
   setStreamStatus: (status: StreamStatus) => void
+  setStreamTransport: (transport: StreamTransport) => void
   resetRun: () => void
   addToast: (message: string, tone?: ToastTone) => void
   removeToast: (id: string) => void
@@ -185,6 +196,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   // The builder is one click away via the Workspace-views sidebar.
   activeTab: 'home',
   streamStatus: 'idle',
+  streamTransport: 'idle',
   toasts: [],
   platformVersion: 0,
   budgetBlocked: null,
@@ -313,6 +325,18 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   setRunId: (id) => set({ runId: id }),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
+  mergeRunNode: (incoming) => set((state) => {
+    const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)
+    if (index === -1) return { runNodes: [...state.runNodes, incoming] }
+    const runNodes = state.runNodes.map((node) => {
+      if (node.nodeId !== incoming.nodeId) return node
+      const next: RunNode = { ...node, status: incoming.status }
+      if ('stateJson' in incoming) next.stateJson = incoming.stateJson ?? null
+      if ('errorJson' in incoming) next.errorJson = incoming.errorJson ?? null
+      return next
+    })
+    return { runNodes }
+  }),
   setEvents: (events) => set({ events }),
   setEventsPagination: (eventsCursor, eventsHasMore) => set({ eventsCursor, eventsHasMore }),
 
@@ -330,7 +354,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setStreamStatus: (streamStatus) => set({ streamStatus }),
-  resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle' }),
+  setStreamTransport: (streamTransport) => set({ streamTransport }),
+  resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle', streamTransport: 'idle' }),
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))

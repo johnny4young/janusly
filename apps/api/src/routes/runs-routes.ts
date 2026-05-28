@@ -23,6 +23,7 @@ import { replayDecision } from "@janusly/domain";
 import { replayRunAsValidation, replayRunAsValidationFork } from "@janusly/engine/src/adapters/replay-lab";
 import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { cancelRun } from "@janusly/engine/src/persistence";
+import type { PublishedRunEvent } from "@janusly/engine/src/run-event-stream";
 import { ResumeRunConflictError, resumeRun } from "@janusly/engine/src/resume-run";
 import { startRun } from "@janusly/engine/src/start-run";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
@@ -34,9 +35,10 @@ import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { asRecord, corsHeaders, readJson, sendEvent, sendJson } from "../http";
+import { asRecord, corsHeaders, readJson, sendEventFrame, sendJson, sendSseComment } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
+import { getRunStreamHub } from "../run-stream";
 import {
   checkRollbackAvailability,
   getCredentialReadinessIssues,
@@ -45,7 +47,137 @@ import {
 } from "../readiness-helpers";
 import type { Route } from "../routes";
 
+// SSE heartbeat cadence. The server destroys idle sockets after 60s
+// (`server.setTimeout`); a comment well under that keeps an idle run's
+// stream alive without a flood of frames.
+const STREAM_HEARTBEAT_MS = 25_000;
+// After a run reaches a terminal status, hold the stream open briefly so
+// trailing node events flush, then close server-side.
+const STREAM_TERMINAL_GRACE_MS = 30_000;
+// Client reconnect backoff hint (SSE `retry:` field), in ms.
+const STREAM_RETRY_HINT_MS = 3_000;
+// Cap the per-connect Last-Event-ID catch-up replay so a long-disconnected
+// client can't pull an unbounded backlog in one shot.
+const STREAM_CATCHUP_MAX = 500;
+
 export const runsRoutes: Route[] = [
+  // Live run stream (SSE over Redis pub/sub). MUST precede the `/runs` list
+  // matcher below — both are GET and `/runs/<id>/stream` starts with `/runs`,
+  // so first-match-wins requires this entry first. Events are fanned from the
+  // engine's run-event seam through Redis; the per-run channel + the
+  // `run.orgId === auth.orgId` gate + the hub's per-publish org re-check are
+  // the tenant boundary. Initial timeline history comes from the regular
+  // `/run` fetch; this stream carries live signals (and, on reconnect with
+  // `Last-Event-ID`, the missed gap).
+  { method: "GET", match: (url) => /^\/runs\/[^/?]+\/stream(\?|$)/.test(url), permission: "runs.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const runId = decodeURIComponent(url.pathname.split("/")[2] ?? "");
+      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+
+      const run = await db.select().from(runs).where(eq(runs.id, runId));
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+
+      const { runs: runConfig } = await getOrgConfigSnapshot(auth.orgId);
+
+      let torn = false;
+      let graceTimer: ReturnType<typeof setTimeout> | null = null;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
+      let removeSubscriber: (() => void) | null = null;
+      const teardown = (endResponse: boolean) => {
+        if (torn) return;
+        torn = true;
+        if (heartbeat) clearInterval(heartbeat);
+        if (graceTimer) clearTimeout(graceTimer);
+        removeSubscriber?.();
+        if (endResponse && !res.writableEnded) res.end();
+      };
+      function armGraceClose() {
+        if (graceTimer || torn) return;
+        graceTimer = setTimeout(() => teardown(true), STREAM_TERMINAL_GRACE_MS);
+        graceTimer.unref?.();
+      }
+
+      const writeFrame = (event: PublishedRunEvent) => {
+        if (torn || res.writableEnded) return;
+        try {
+          if (event.kind === "event") {
+            sendEventFrame(res, { id: `${event.createdAt}|${event.id}`, event: "run-event", data: event });
+          } else {
+            sendEventFrame(res, { event: "run-status", data: event });
+            if (isTerminalRunStatus(event.status)) armGraceClose();
+          }
+        } catch {
+          // Socket may have closed between the writableEnded check and write.
+          // `req.on("close")` will run teardown; nothing else to do here.
+        }
+      };
+
+      const hub = getRunStreamHub();
+      const added = hub.addSubscriber(runId, auth.orgId, writeFrame, runConfig.streamMaxSubscriptions, () => teardown(true));
+      if (!added.ok) {
+        return sendJson(res, { error: "Too many live run streams for this organization", code: "stream_cap_exceeded" }, 429);
+      }
+      removeSubscriber = added.remove;
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        // Disable proxy buffering (nginx) so frames flush immediately.
+        "X-Accel-Buffering": "no",
+        ...corsHeaders(res),
+      });
+      res.write(`retry: ${STREAM_RETRY_HINT_MS}\n\n`);
+      sendSseComment(res, "connected");
+
+      heartbeat = setInterval(() => {
+        if (torn || res.writableEnded) return;
+        try {
+          sendSseComment(res, "keep-alive");
+        } catch {
+          // ignore — teardown runs on close
+        }
+      }, STREAM_HEARTBEAT_MS);
+
+      req.on("close", () => teardown(false));
+
+      // Last-Event-ID catch-up: replay the gap since the client's last seen
+      // event (ascending keyset after the cursor), then live signals follow.
+      // Overlap with live events is harmless — the web dedupes by id.
+      const rawLastId = req.headers["last-event-id"];
+      const lastEventId = Array.isArray(rawLastId) ? rawLastId[0] : rawLastId;
+      const cursor = parseEventsCursor(lastEventId ?? null);
+      if (cursor && !torn) {
+        const rows = await db
+          .select()
+          .from(runEvents)
+          .where(and(
+            eq(runEvents.runId, runId),
+            or(
+              gt(runEvents.createdAt, cursor.createdAt),
+              and(eq(runEvents.createdAt, cursor.createdAt), gt(runEvents.id, cursor.id)),
+            ),
+          ))
+          .orderBy(asc(runEvents.createdAt), asc(runEvents.id))
+          .limit(STREAM_CATCHUP_MAX);
+        for (const row of rows) {
+          writeFrame({
+            kind: "event",
+            id: row.id,
+            nodeId: row.nodeId,
+            type: row.type,
+            payload: row.payload,
+            createdAt: (row.createdAt ?? new Date()).toISOString(),
+          });
+        }
+      }
+
+      // If the run is ALREADY terminal at connect time, arm the grace close so
+      // a reconnecting client to a finished run doesn't hang open forever.
+      if (isTerminalRunStatus(run[0].status)) armGraceClose();
+    } },
+
   // Runs — list + reads
   // NOTE: `/runs` prefix excludes `/run?` so the GET `/run?…` entry below
   // can claim it, and excludes `/runs/compare` so the Replay Lab compare
@@ -144,36 +276,6 @@ export const runsRoutes: Route[] = [
       const page = paginateRunEvents(rows, limit);
       return sendJson(res, { run: run[0], nodes, ...page });
     } },
-  { method: "GET", match: (url) => url.startsWith("/events"),
-    handler: async ({ req, res, auth }) => {
-      const url = new URL(req.url ?? "", "http://localhost");
-      const runId = url.searchParams.get("runId");
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
-      const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", ...corsHeaders(res) });
-      let lastSeen: Date | null = null;
-      let closed = false;
-      const tick = async () => {
-        if (closed) return;
-        const filter = lastSeen
-          ? and(eq(runEvents.runId, runId), gt(runEvents.createdAt, lastSeen))
-          : eq(runEvents.runId, runId);
-        const events = await db.select().from(runEvents).where(filter).orderBy(asc(runEvents.createdAt));
-        if (closed) return;
-        if (events.length) {
-          lastSeen = events[events.length - 1].createdAt ?? lastSeen;
-          sendEvent(res, events);
-        }
-      };
-      const interval = setInterval(() => { void tick(); }, 1000);
-      void tick();
-      req.on("close", () => {
-        closed = true;
-        clearInterval(interval);
-      });
-    } },
-
   // Run lifecycle (start / resume / cancel)
   { method: "POST", match: "/start", role: "editor",
     handler: async ({ req, res, auth }) => {

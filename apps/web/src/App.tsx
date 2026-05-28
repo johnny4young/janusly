@@ -38,6 +38,7 @@ import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } 
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
 import { api } from './api'
+import { useRunEventStream } from './hooks/useRunEventStream'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { DeadLetter } from './components/DeadLettersPanel'
@@ -296,6 +297,17 @@ export default function App() {
     return status
   }, [addEvents, setEventsPagination, setRunNodes])
 
+  // Live-run SSE stream (primary). Owns `streamTransport`; on first byte it
+  // sets `streamStatus='connected'` and the poll loop below skips its tick. On
+  // any stream fault it sets `'polling'` and the very next tick resumes.
+  useRunEventStream(runId)
+
+  // Polling fallback. The original 1.5s `/status` loop loads the initial
+  // timeline and stays as the safety net. Its tick is a no-op while SSE is the
+  // live transport (a cheap in-memory check, no network) and resumes the moment
+  // SSE drops back to `'polling'`. Deps intentionally exclude `streamTransport`
+  // so a transport flip never tears the interval down (which would otherwise
+  // race the SSE hook's `streamStatus` write).
   useEffect(() => {
     if (!runId) return
 
@@ -304,6 +316,8 @@ export default function App() {
     setStreamStatus('connecting')
 
     const tick = async () => {
+      // SSE is the live updater — skip the redundant poll.
+      if (useWorkflowStore.getState().streamTransport === 'sse') return
       try {
         const status = await loadStatus(runId)
         if (closed) return

@@ -82,6 +82,7 @@ export type OrgConfigSnapshot = {
   runs: {
     requireSavedWorkflow: boolean;
     subworkflowMaxDepth: number;
+    streamMaxSubscriptions: number;
   };
   mcp: {
     writeConsent: boolean;
@@ -381,6 +382,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 5,
     envKeys: ["JANUSLY_MAX_SUBWORKFLOW_DEPTH"],
     min: 1,
+  },
+  {
+    key: "runs.streamMaxSubscriptions",
+    category: "runs",
+    description: "Maximum concurrent live-run SSE subscriptions per organization (per API replica).",
+    valueType: "number",
+    defaultValue: 50,
+    envKeys: ["JANUSLY_STREAM_MAX_SUBSCRIPTIONS"],
+    min: 1,
+    max: 1000,
   },
   {
     key: "mcp.writeConsent",
@@ -838,6 +849,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
     runs: {
       requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
       subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
+      streamMaxSubscriptions: readNumber(values, "runs.streamMaxSubscriptions"),
     },
     mcp: {
       writeConsent: readBoolean(values, "mcp.writeConsent"),
@@ -990,6 +1002,7 @@ export function applyOrgConfigToEnv(
     JANUSLY_EMAIL_RATE_LIMIT_PER_MIN: String(config.email.rateLimitPerMin),
     JANUSLY_REQUIRE_SAVED_WORKFLOW: String(config.runs.requireSavedWorkflow),
     JANUSLY_MAX_SUBWORKFLOW_DEPTH: String(config.runs.subworkflowMaxDepth),
+    JANUSLY_STREAM_MAX_SUBSCRIPTIONS: String(config.runs.streamMaxSubscriptions),
     // `mcp.writeConsent` + `mcp.clientWriteConsent` have no env overlay by design — see the catalog definition.
     JANUSLY_MCP_CLIENT_RATE_LIMIT_PER_MIN: String(config.mcp.clientRateLimitPerMin),
     JANUSLY_MCP_ALLOWED_COMMANDS: config.mcp.clientCommandAllowlist,

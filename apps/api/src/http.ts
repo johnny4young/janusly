@@ -50,7 +50,7 @@ export function corsHeaders(res: http.ServerResponse) {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-session, Accept-Language, Last-Event-ID",
     "Vary": "Origin",
   };
 }
@@ -71,9 +71,27 @@ export function sendJson(res: http.ServerResponse, payload: unknown, status = 20
   res.end(body);
 }
 
-/** Write one Server-Sent Events frame. Caller manages the stream lifecycle. */
-export function sendEvent(res: http.ServerResponse, data: unknown) {
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+/**
+ * Write one Server-Sent Events frame. Caller manages the stream lifecycle.
+ * An `id` (when provided) becomes the SSE `id:` line — the client echoes it
+ * as `Last-Event-ID` on reconnect so the server can replay the gap. `event`
+ * sets the named SSE event type. `data` is JSON-encoded. Lines that could
+ * contain a newline are written field-by-field per the SSE wire format.
+ */
+export function sendEventFrame(
+  res: http.ServerResponse,
+  frame: { id?: string; event?: string; data: unknown },
+) {
+  let out = "";
+  if (frame.id !== undefined) out += `id: ${frame.id}\n`;
+  if (frame.event !== undefined) out += `event: ${frame.event}\n`;
+  out += `data: ${JSON.stringify(frame.data)}\n\n`;
+  res.write(out);
+}
+
+/** Write a bare SSE comment line (`: text`). Used for keep-alive heartbeats. */
+export function sendSseComment(res: http.ServerResponse, text: string) {
+  res.write(`: ${text}\n\n`);
 }
 
 /**
