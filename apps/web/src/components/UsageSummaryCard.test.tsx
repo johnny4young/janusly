@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { UsageSummaryCard } from './RightPanel'
+import { UsageSummaryCard } from './UsageSummaryCard'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
