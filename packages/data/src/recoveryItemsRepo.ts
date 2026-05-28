@@ -27,8 +27,8 @@
  *    passing schema-parsed input.
  */
 
-import { and, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
-import { db, recoveryItems } from "@janusly/db";
+import { and, count, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { db, recoveryItems, recoveryItemChildren } from "@janusly/db";
 import {
   defaultSlaTargetAt,
   isSeverityEscalation,
@@ -54,6 +54,14 @@ export type RecoveryItem = {
   resolvedBy: string | null;
   resolvedAt: Date | null;
   comments: RecoveryItemComment[];
+  /** Normalized failure signature — the debounce match key alongside org + workflow. Null on items created before debounce or from a signature-less DLQ row. */
+  errorSignature: string | null;
+  /** Number of DLQ failures collapsed into this incident (1 + attached children). */
+  occurrenceCount: number;
+  /** When the first occurrence (the row's own DLQ failure) landed. */
+  firstOccurredAt: Date;
+  /** When the most recent occurrence landed — the sliding-window anchor for debounce. */
+  lastOccurredAt: Date;
   createdBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -73,9 +81,33 @@ function hydrate(row: RecoveryItemRow): RecoveryItem {
     resolvedBy: row.resolvedBy,
     resolvedAt: row.resolvedAt,
     comments: (row.comments as RecoveryItemComment[]) ?? [],
+    errorSignature: row.errorSignature,
+    occurrenceCount: row.occurrenceCount,
+    firstOccurredAt: row.firstOccurredAt,
+    lastOccurredAt: row.lastOccurredAt,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * A DLQ occurrence attached to a recovery_item parent during a failure
+ * storm. Powers the "N occurrences" badge + the child-DLQ drawer.
+ */
+export type RecoveryItemChild = {
+  id: string;
+  recoveryItemId: string;
+  deadLetterId: string;
+  occurredAt: Date;
+};
+
+function hydrateChild(row: typeof recoveryItemChildren.$inferSelect): RecoveryItemChild {
+  return {
+    id: row.id,
+    recoveryItemId: row.recoveryItemId,
+    deadLetterId: row.deadLetterId,
+    occurredAt: row.occurredAt,
   };
 }
 
@@ -171,6 +203,8 @@ export type CreateRecoveryItemInput = {
   severity?: RecoveryItemSeverity;
   owner?: string | null;
   createdBy?: string | null;
+  /** Normalized failure signature persisted as the debounce match key. */
+  errorSignature?: string | null;
 };
 
 /**
@@ -202,6 +236,10 @@ export async function createRecoveryItem(
       resolvedBy: null,
       resolvedAt: null,
       comments: [],
+      errorSignature: input.errorSignature ?? null,
+      occurrenceCount: 1,
+      firstOccurredAt: now,
+      lastOccurredAt: now,
       createdBy: input.createdBy ?? null,
       createdAt: now,
       updatedAt: now,
@@ -218,6 +256,139 @@ export async function createRecoveryItem(
   const item = await getRecoveryItemById(input.orgId, inserted[0]!.id);
   if (!item) throw new Error("recovery item disappeared immediately after insert");
   return { item, wasCreated: true };
+}
+
+// ─── Debounce / failure-storm grouping ───────────────────────────────────────
+
+export type FindOpenRecoveryItemForDebounceInput = {
+  orgId: string;
+  workflowId: string | null;
+  errorSignature: string | null;
+  /** Sliding-window cutoff: only match items whose `lastOccurredAt >= notBefore`. */
+  notBefore: Date;
+};
+
+/**
+ * Find the most-recent still-open recovery item a new DLQ failure should
+ * attach to, or `null` when none qualifies. Match key is
+ * `(orgId, workflowId, errorSignature)` against any non-`resolved` item
+ * whose `lastOccurredAt` falls within the caller's debounce window. Returns
+ * `null` immediately when `errorSignature` is null (a signature-less failure
+ * can't be grouped). Ordered by `lastOccurredAt` desc so the freshest storm
+ * wins when more than one open item somehow matches.
+ */
+export async function findOpenRecoveryItemForDebounce(
+  input: FindOpenRecoveryItemForDebounceInput,
+): Promise<RecoveryItem | null> {
+  if (!input.errorSignature) return null;
+  const rows = await db
+    .select()
+    .from(recoveryItems)
+    .where(
+      and(
+        eq(recoveryItems.orgId, input.orgId),
+        input.workflowId === null
+          ? isNull(recoveryItems.workflowId)
+          : eq(recoveryItems.workflowId, input.workflowId),
+        eq(recoveryItems.errorSignature, input.errorSignature),
+        sql`${recoveryItems.status} <> 'resolved'`,
+        gte(recoveryItems.lastOccurredAt, input.notBefore),
+      ),
+    )
+    .orderBy(desc(recoveryItems.lastOccurredAt))
+    .limit(1);
+  return rows[0] ? hydrate(rows[0]) : null;
+}
+
+export type AttachDeadLetterInput = {
+  orgId: string;
+  recoveryItemId: string;
+  deadLetterId: string;
+  occurredAt?: Date;
+};
+
+/**
+ * Attach a DLQ occurrence to an existing recovery item. Idempotent on
+ * `(recoveryItemId, deadLetterId)`: a replayed insert is a no-op and the
+ * parent counter is bumped ONLY when a child row was actually inserted, so
+ * repeated calls never inflate `occurrenceCount`. Returns the new
+ * `occurrenceCount`, or `null` when the attach was a duplicate (no bump) or
+ * the parent vanished.
+ */
+export async function attachDeadLetterToRecoveryItem(
+  input: AttachDeadLetterInput,
+): Promise<{ occurrenceCount: number } | null> {
+  const occurredAt = input.occurredAt ?? new Date();
+  const inserted = await db
+    .insert(recoveryItemChildren)
+    .values({
+      id: crypto.randomUUID(),
+      orgId: input.orgId,
+      recoveryItemId: input.recoveryItemId,
+      deadLetterId: input.deadLetterId,
+      occurredAt,
+    })
+    .onConflictDoNothing({
+      target: [recoveryItemChildren.recoveryItemId, recoveryItemChildren.deadLetterId],
+    })
+    .returning({ id: recoveryItemChildren.id });
+  if (inserted.length === 0) return null; // duplicate occurrence — don't double-count
+
+  const updated = await db
+    .update(recoveryItems)
+    .set({
+      occurrenceCount: sql`${recoveryItems.occurrenceCount} + 1`,
+      lastOccurredAt: occurredAt,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(recoveryItems.orgId, input.orgId), eq(recoveryItems.id, input.recoveryItemId)))
+    .returning({ occurrenceCount: recoveryItems.occurrenceCount });
+  if (updated.length === 0) return null;
+  return { occurrenceCount: updated[0]!.occurrenceCount };
+}
+
+const RECOVERY_ITEM_CHILDREN_DEFAULT_LIMIT = 100;
+const RECOVERY_ITEM_CHILDREN_MAX_LIMIT = 200;
+
+/** List the DLQ occurrences attached to a recovery item, newest first. Tenant-scoped. */
+export async function listRecoveryItemChildren(
+  orgId: string,
+  recoveryItemId: string,
+  limit?: number,
+): Promise<RecoveryItemChild[]> {
+  const capped = Math.min(
+    Math.max(1, limit ?? RECOVERY_ITEM_CHILDREN_DEFAULT_LIMIT),
+    RECOVERY_ITEM_CHILDREN_MAX_LIMIT,
+  );
+  const rows = await db
+    .select()
+    .from(recoveryItemChildren)
+    .where(
+      and(
+        eq(recoveryItemChildren.orgId, orgId),
+        eq(recoveryItemChildren.recoveryItemId, recoveryItemId),
+      ),
+    )
+    .orderBy(desc(recoveryItemChildren.occurredAt))
+    .limit(capped);
+  return rows.map(hydrateChild);
+}
+
+/** Count the DLQ occurrences attached to a recovery item. Tenant-scoped. */
+export async function countRecoveryItemChildren(
+  orgId: string,
+  recoveryItemId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ value: count() })
+    .from(recoveryItemChildren)
+    .where(
+      and(
+        eq(recoveryItemChildren.orgId, orgId),
+        eq(recoveryItemChildren.recoveryItemId, recoveryItemId),
+      ),
+    );
+  return rows[0]?.value ?? 0;
 }
 
 // ─── CAS-style transitions ─────────────────────────────────────────────────

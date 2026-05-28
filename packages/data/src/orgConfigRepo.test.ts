@@ -339,7 +339,10 @@ describe("ORG_CONFIG_DEFINITIONS recovery.* family", () => {
     const recoveryKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("recovery.")).map(
       (d) => d.key,
     );
-    expect(recoveryKeys).toEqual(["recovery.autoCreateItems"]);
+    expect(recoveryKeys).toEqual([
+      "recovery.autoCreateItems",
+      "recovery.debounceWindowSeconds",
+    ]);
   });
 
   it("registers every recovery.* entry under the `recovery` category", () => {
@@ -354,6 +357,15 @@ describe("ORG_CONFIG_DEFINITIONS recovery.* family", () => {
     const def = findDef("recovery.autoCreateItems");
     expect(def.defaultValue).toBe(true);
     expect(def.envKeys).toBeUndefined();
+  });
+
+  it("defaults the debounce window to 300s and accepts 0 (off) within 0..3600", () => {
+    const def = findDef("recovery.debounceWindowSeconds");
+    expect(def.defaultValue).toBe(300);
+    expect(def.valueType).toBe("number");
+    expect(normalizeOrgConfigValue(def, 0)).toBe(0); // 0 disables debounce
+    expect(() => normalizeOrgConfigValue(def, -1)).toThrow();
+    expect(() => normalizeOrgConfigValue(def, 3601)).toThrow();
   });
 });
 

@@ -86,6 +86,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         resolutionReason: string | null
         comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
         workflowId?: string | null
+        occurrenceCount?: number
+        lastOccurredAt?: string
       }> }) => {
         if (cancelled) return
         const hydrated = (resp?.items ?? []).map((it) => ({
@@ -98,6 +100,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           resolutionReason: (it.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
           comments: it.comments ?? [],
           workflowId: it.workflowId ?? null,
+          occurrenceCount: it.occurrenceCount ?? 1,
+          lastOccurredAtIso: it.lastOccurredAt ?? it.slaTargetAt,
         }))
         setRecoveryItems(hydrated)
       })
