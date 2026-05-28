@@ -19,13 +19,14 @@ jobs:
     name: Build + jsdom test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.23.0
+      # Version comes from the root package.json `packageManager` field —
+      # single source of truth (action-setup v6 reads it when `version` is
+      # omitted, and erroring on a dual spec is why we don't pass it here).
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -43,13 +44,14 @@ jobs:
     name: Browser tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.23.0
+      # Version comes from the root package.json `packageManager` field —
+      # single source of truth (action-setup v6 reads it when `version` is
+      # omitted, and erroring on a dual spec is why we don't pass it here).
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -58,7 +60,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           # apps/web/package.json pins @playwright/test, so its hash flips only
@@ -78,13 +80,14 @@ jobs:
     name: E2E (Compose + Playwright)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.23.0
+      # Version comes from the root package.json `packageManager` field —
+      # single source of truth (action-setup v6 reads it when `version` is
+      # omitted, and erroring on a dual spec is why we don't pass it here).
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -93,7 +96,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           # apps/web/package.json pins @playwright/test, so its hash flips only
@@ -111,7 +114,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: apps/web/playwright-report/
@@ -121,13 +124,14 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.23.0
+      # Version comes from the root package.json `packageManager` field —
+      # single source of truth (action-setup v6 reads it when `version` is
+      # omitted, and erroring on a dual spec is why we don't pass it here).
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -145,9 +149,9 @@ jobs:
     # in parallel but in its own job so a Python failure never blocks the
     # rest of CI from reporting status.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: 'pip'
