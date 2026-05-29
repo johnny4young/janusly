@@ -6803,11 +6803,32 @@ button.we-ops-metric-card--button {
 .we-recovery-delta-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 12px;
+  padding: 16px;
   border: 1px solid var(--we-line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--we-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--we-ink) 4%, transparent);
+}
+
+/* §15 heroic header — title + mono failure signature: the loop's
+   "I fixed it, here's the proof" anchor. */
+.we-recovery-delta-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.we-recovery-delta-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--we-ink);
+}
+.we-recovery-delta-card__id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-muted);
 }
 
 .we-recovery-delta-card--error {
@@ -6868,6 +6889,11 @@ button.we-ops-metric-card--button {
 .we-recovery-delta-pill--counter {
   background: var(--we-primary-soft);
   border-color: color-mix(in srgb, var(--we-primary) 25%, transparent);
+}
+.we-recovery-delta-pill--counter .we-recovery-delta-pill__value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--we-primary);
 }
 
 .we-recovery-delta-pill--success,
