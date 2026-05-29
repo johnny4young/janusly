@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { CircleCheck, Trash2, UserPlus } from 'lucide-react'
+import { AlertCircle, CircleCheck, Info, Trash2, UserPlus } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
@@ -60,6 +60,9 @@ export function MembersPanel() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<string>('viewer')
   const [pending, setPending] = useState(false)
+  const trimmedEmail = email.trim()
+  const emailInvalid = trimmedEmail.length > 0 && !emailPattern.test(trimmedEmail)
+  const canInvite = emailPattern.test(trimmedEmail) && !pending
 
   const load = useCallback(async () => {
     try {
@@ -147,31 +150,52 @@ export function MembersPanel() {
           </div>
           <span className="mode-pill mode-pill-neutral">{role}</span>
         </div>
-        <label className="field-label" htmlFor="member-email">{t('members.email')}</label>
-        <input
-          id="member-email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder={t('members.emailPlaceholder') as string}
-          className="text-field"
-          type="email"
-          autoComplete="off"
-        />
-        <label className="field-label" htmlFor="member-role">{t('members.role')}</label>
-        <select
-          id="member-role"
-          value={role}
-          onChange={(event) => setRole(event.target.value)}
-          className="text-field"
-        >
-          {orgRoles.map(option => (
-            <option key={option.name} value={option.name}>
-              {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
-            </option>
-          ))}
-        </select>
-        <p className="helper-text">{describeRole(role, orgRoles.find(r => r.name === role))}</p>
-        <button onClick={invite} className="command-button command-button-primary" disabled={pending}>
+        <fieldset className="we-fieldset">
+          <label className="field-label" htmlFor="member-email">{t('members.email')}</label>
+          <input
+            id="member-email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder={t('members.emailPlaceholder') as string}
+            className={`text-field${emailInvalid ? ' text-field--error' : ''}`}
+            type="email"
+            autoComplete="off"
+            aria-invalid={emailInvalid}
+          />
+          {emailInvalid && (
+            <span className="helper-text helper-text--error" role="alert">
+              <AlertCircle size={13} aria-hidden="true" /> {t('members.invalidEmail')}
+            </span>
+          )}
+          <span className="field-label">{t('members.role')}</span>
+          <div className="we-role-options" role="radiogroup" aria-label={t('members.role') as string}>
+            {orgRoles.map(option => {
+              const selected = role === option.name
+              return (
+                <label key={option.name} className="we-role-option" data-selected={selected}>
+                  <input
+                    type="radio"
+                    name="invite-role"
+                    value={option.name}
+                    checked={selected}
+                    onChange={() => setRole(option.name)}
+                  />
+                  <span className="we-role-option__copy">
+                    <span className="we-role-option__name">
+                      {option.name}{option.isBuiltin ? '' : (t('members.role.customSuffix') as string)}
+                    </span>
+                    <span className="we-role-option__desc">{describeRole(option.name, option)}</span>
+                  </span>
+                  <span className="we-role-option__radio" aria-hidden="true" />
+                </label>
+              )
+            })}
+          </div>
+          <span className="helper-text helper-text--hint">
+            <Info size={13} aria-hidden="true" /> {t('members.leastPrivilege')}
+          </span>
+        </fieldset>
+        <button onClick={invite} className="command-button command-button-primary" disabled={!canInvite}>
           <UserPlus size={15} aria-hidden="true" />
           <span>{pending ? t('members.inviting') : t('members.invite')}</span>
         </button>
