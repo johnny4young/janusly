@@ -229,7 +229,7 @@ type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedA
 
 /** Env-var NAME shape the server accepts for `secretRef` (mirrors the
  *  rotate modal). The secret VALUE never lives here — only the env-var name. */
-const CREDENTIAL_ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 
 /** Connection kinds the integration chokepoint recognizes. Free-form on the
  *  server, but the select keeps operators on the known set. */
@@ -324,13 +324,17 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
                 <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
               </div>
               <div className="split-row" style={{ width: '100%' }}>
-                {health ? (
-                  <span className={`we-secret-pill we-secret-pill--${linked ? 'healthy' : 'unhealthy'}`}>
-                    {linked ? t('rightPanel.credentials.status.linked') : t('rightPanel.credentials.status.missing')}
-                  </span>
-                ) : (
-                  <span className="helper-text">{t('rightPanel.credentials.secretRefHidden')}</span>
-                )}
+                {/* Always a status pill — never the old plain-text fallback —
+                    so the redesign reads even before /credentials/health
+                    resolves (neutral = status not yet known). */}
+                <span
+                  className={`we-secret-pill we-secret-pill--${health ? (linked ? 'healthy' : 'unhealthy') : 'neutral'}`}
+                  title={t('rightPanel.credentials.secretRefHidden') as string}
+                >
+                  {health
+                    ? (linked ? t('rightPanel.credentials.status.linked') : t('rightPanel.credentials.status.missing'))
+                    : t('rightPanel.credentials.status.unknown')}
+                </span>
                 {health?.lastUsedAt && (
                   <span className="helper-text mono">
                     {t('rightPanel.credentials.lastUsed')}: {new Date(health.lastUsedAt).toLocaleString(getResolvedLocale())}

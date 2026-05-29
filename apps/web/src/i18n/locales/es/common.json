@@ -1442,6 +1442,7 @@
   "rightPanel.credentials.secretRefHidden": "Referencia del secreto oculta",
   "rightPanel.credentials.status.linked": "Vinculado",
   "rightPanel.credentials.status.missing": "Falta",
+  "rightPanel.credentials.status.unknown": "Desconocido",
   "rightPanel.credentials.lastUsed": "Última vez",
   "credentialRotation.kicker": "Rotar secreto",
   "credentialRotation.title": "Rotar {{name}}",
