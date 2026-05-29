@@ -828,7 +828,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-weight: 600;
   gap: 7px;
   justify-content: center;
-  min-height: 34px;
+  min-height: 36px;
   padding: 0 11px;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
@@ -9279,4 +9279,27 @@ button.we-ops-metric-card--button {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ==========================================================================
+   C10 — Accessibility floor. Universal keyboard focus ring + placeholder
+   contrast. `:where()` keeps these at zero specificity so the handful of
+   components with bespoke `:focus-visible` rings keep their treatment;
+   everything else (generic buttons, inputs, selects, links, role-cards,
+   tab chips) gets a visible cobalt ring for free. Critical for the
+   shortcut-driven flow (`/`, `g r`).
+   ========================================================================== */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--we-primary-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Placeholders must clear AA: lift the browser-default faint gray to the
+   `--we-muted` token (which passes on white). opacity:1 defeats Firefox's
+   default placeholder dimming. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--we-muted);
+  opacity: 1;
 }
