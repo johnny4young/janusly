@@ -9214,6 +9214,28 @@ button.we-ops-metric-card--button {
 .we-seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 600; color: var(--we-ink-soft); cursor: pointer; }
 .we-seg button[aria-pressed="true"] { background: var(--we-surface); color: var(--we-primary); box-shadow: 0 1px 2px color-mix(in srgb, var(--we-ink) 6%, transparent); }
 
+/* --- C7 forms: fieldset grouping, inline validation, role radio-cards --- */
+.we-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.we-fieldset > legend { padding: 0; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--we-muted); }
+
+/* inline-validation states, layered on the existing .text-field / .helper-text */
+.text-field--error { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
+.helper-text--error { color: var(--we-danger); display: inline-flex; align-items: center; gap: 5px; }
+.helper-text--hint { color: var(--we-primary); display: inline-flex; align-items: center; gap: 5px; }
+
+/* described role radio-cards (invite form) */
+.we-role-options { display: flex; flex-direction: column; gap: 6px; }
+.we-role-option { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--we-line-strong); border-radius: 8px; cursor: pointer; }
+.we-role-option:hover { background: var(--we-surface-muted); }
+.we-role-option input { position: absolute; opacity: 0; pointer-events: none; }
+.we-role-option[data-selected="true"] { border-color: var(--we-primary); background: var(--we-primary-soft); }
+.we-role-option__copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.we-role-option__name { font-size: 13px; font-weight: 600; color: var(--we-ink); text-transform: capitalize; }
+.we-role-option[data-selected="true"] .we-role-option__name { color: var(--we-primary); }
+.we-role-option__desc { font-size: 11.5px; color: var(--we-muted); line-height: 1.4; }
+.we-role-option__radio { width: 16px; height: 16px; border-radius: 999px; border: 1.5px solid var(--we-line-strong); flex-shrink: 0; }
+.we-role-option[data-selected="true"] .we-role-option__radio { border-color: var(--we-primary); background: radial-gradient(circle, var(--we-primary) 0 38%, transparent 42%); }
+
 .we-ops-credential-card__empty {
   font-size: 12px;
   color: var(--we-text-2);

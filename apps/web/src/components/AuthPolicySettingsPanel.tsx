@@ -164,43 +164,49 @@ export function AuthPolicySettingsPanel() {
         <p className="we-budget-settings__status">{t("authPolicy.loading")}</p>
       ) : (
         <form className="we-budget-settings__form" onSubmit={save} noValidate>
-          <label className="we-field">
-            <span className="we-field__label">{t("authPolicy.allowedDomains")}</span>
-            <input
-              type="text"
-              className="we-field__input"
-              placeholder={t("authPolicy.allowedDomainsPlaceholder") as string}
-              value={form.allowedEmailDomains}
-              onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
-            />
-            <small className="we-field__hint">{t("authPolicy.allowedDomainsHint")}</small>
-          </label>
+          <fieldset className="we-fieldset">
+            <legend>{t("authPolicy.groupAccess")}</legend>
+            <label className="we-field">
+              <span className="we-field__label">{t("authPolicy.allowedDomains")}</span>
+              <input
+                type="text"
+                className="we-field__input"
+                placeholder={t("authPolicy.allowedDomainsPlaceholder") as string}
+                value={form.allowedEmailDomains}
+                onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
+              />
+              <small className="we-field__hint">{t("authPolicy.allowedDomainsHint")}</small>
+            </label>
+          </fieldset>
 
-          <label className="we-field we-field--checkbox">
-            <input
-              type="checkbox"
-              checked={form.mfaRequired}
-              onChange={(e) => setForm({ ...form, mfaRequired: e.target.checked })}
-            />
-            <span className="we-field__label">{t("authPolicy.mfaRequired")}</span>
-            <small className="we-field__hint">{t("authPolicy.mfaRequiredHint")}</small>
-          </label>
+          <fieldset className="we-fieldset">
+            <legend>{t("authPolicy.groupSecurity")}</legend>
+            <label className="we-field we-field--checkbox">
+              <input
+                type="checkbox"
+                checked={form.mfaRequired}
+                onChange={(e) => setForm({ ...form, mfaRequired: e.target.checked })}
+              />
+              <span className="we-field__label">{t("authPolicy.mfaRequired")}</span>
+              <small className="we-field__hint">{t("authPolicy.mfaRequiredHint")}</small>
+            </label>
 
-          <label className="we-field">
-            <span className="we-field__label">{t("authPolicy.sessionTtl")}</span>
-            <input
-              type="number"
-              className="we-field__input"
-              min={SESSION_TTL_MIN}
-              max={SESSION_TTL_MAX}
-              step={60}
-              value={form.sessionTtlSeconds}
-              onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
-            />
-            <small className="we-field__hint">
-              {t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
-            </small>
-          </label>
+            <label className="we-field">
+              <span className="we-field__label">{t("authPolicy.sessionTtl")}</span>
+              <input
+                type="number"
+                className="we-field__input"
+                min={SESSION_TTL_MIN}
+                max={SESSION_TTL_MAX}
+                step={60}
+                value={form.sessionTtlSeconds}
+                onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
+              />
+              <small className="we-field__hint">
+                {t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
+              </small>
+            </label>
+          </fieldset>
 
           {error && (
             <div className="we-budget-settings__error" role="alert">
