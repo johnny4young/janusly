@@ -412,7 +412,7 @@ async function applyCas(
       and(
         eq(recoveryItems.orgId, orgId),
         eq(recoveryItems.id, id),
-        inArray(recoveryItems.status, allowedPre as unknown as string[]),
+        inArray(recoveryItems.status, [...allowedPre]),
       ),
     )
     .returning({ id: recoveryItems.id });
