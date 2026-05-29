@@ -35,6 +35,13 @@ import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
 import { buildOperationsTiles } from './operations-tiles'
+import {
+  OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
+  isOpsSection as isSection,
+  loadStoredOpsSection as loadStoredSection,
+  persistOpsSection as persistSection,
+  type OpsSection,
+} from './operations-section-bus'
 import { getResolvedLocale, useT } from '../i18n'
 
 /** Public ``/health`` rate-limiter payload — matches
@@ -109,41 +116,12 @@ function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetric
   }
 }
 
-/** Closed-enum sub-section value. Adding a fifth tab means an entry here +
- *  a new `<XxxSection />` wrapper + a matching `section === '<name>' && …`
- *  branch in `OperationsPage`'s body + a row in `RAIL_ITEMS` + i18n keys. */
-const SUB_SECTIONS = ['overview', 'reliability', 'access', 'integrations'] as const
-export type OpsSection = typeof SUB_SECTIONS[number]
-
-const STORAGE_KEY = 'janusly:operations:section'
-const SECTION_REQUEST_EVENT = 'janusly:operations:section-request'
-
-function isSection(value: unknown): value is OpsSection {
-  return typeof value === 'string' && (SUB_SECTIONS as readonly string[]).includes(value)
-}
-
-function loadStoredSection(): OpsSection {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (raw && isSection(raw)) return raw
-  } catch {
-    // private mode / quota errors / non-browser exec; fall through.
-  }
-  return 'overview'
-}
-
-function persistSection(section: OpsSection): void {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, section)
-  } catch {
-    // ignore; persistence is convenience, not load-bearing.
-  }
-}
-
-export function requestOperationsSection(section: OpsSection): void {
-  persistSection(section)
-  window.dispatchEvent(new CustomEvent(SECTION_REQUEST_EVENT, { detail: section }))
-}
+// The section bus (sub-section enum + deep-link helper) lives in its own
+// module so OperationsPage stays code-splittable — see operations-section-bus.
+// Re-exported here for back-compat with existing `from './OperationsPage'`
+// callers; new callers should import from the bus directly.
+export { requestOperationsSection } from './operations-section-bus'
+export type { OpsSection } from './operations-section-bus'
 
 type SignalSummary = {
   /** `/health` rate-limiter snapshot. Drives the chip and Reliability dot. */

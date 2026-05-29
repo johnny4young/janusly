@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
@@ -32,9 +32,11 @@ import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
 import { CredentialRotateModal } from './CredentialRotateModal'
 import { type DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
-import { OperationsPage } from './OperationsPage'
 import { InspectorPanel } from './InspectorPanel'
 import { EmptyView, PanelChrome } from './panel-primitives'
+// Operations pulls 11 admin sub-panels + alert/budget/scim/permission forms
+// that canvas/Home users never touch — code-split it out of the main chunk.
+const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 import { RunsPanel } from './RunsPanel'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -115,7 +117,11 @@ export function RightPanel(props: RightPanelProps) {
       <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
     </PanelChrome>
   )
-  if (props.tab === 'operations') return <OperationsPage />
+  if (props.tab === 'operations') return (
+    <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+      <OperationsPage />
+    </Suspense>
+  )
   if (props.tab === 'members') return (
     <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
       <MembersPanel />

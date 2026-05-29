@@ -15,12 +15,13 @@
  * Used in `DeadLettersPanel.tsx` (Runs tab → Operations card).
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
-import { RecoveryDialog } from './RecoveryDialog'
+// Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
+const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
 import type { DeadLetter } from './DeadLettersPanel'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
@@ -352,14 +353,16 @@ export function FailureClustersCard() {
       </ul>
 
       {recovery?.kind === 'open' && (
-        <RecoveryDialog
-          dlq={recovery.dlq}
-          clusterMembers={recovery.members}
-          clusterSignature={recovery.signature}
-          clusterMembersCapped={recovery.capped}
-          clusterMembersTotal={recovery.total}
-          onClose={() => setRecovery(null)}
-        />
+        <Suspense fallback={null}>
+          <RecoveryDialog
+            dlq={recovery.dlq}
+            clusterMembers={recovery.members}
+            clusterSignature={recovery.signature}
+            clusterMembersCapped={recovery.capped}
+            clusterMembersTotal={recovery.total}
+            onClose={() => setRecovery(null)}
+          />
+        </Suspense>
       )}
     </section>
   )

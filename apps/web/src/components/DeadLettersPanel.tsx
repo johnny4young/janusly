@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
@@ -14,7 +14,8 @@ import { useWorkflowStore } from '../store'
 import { EmptyState } from './EmptyState'
 import { FailureClustersCard } from './FailureClustersCard'
 import { AutoHealingPendingCard } from './AutoHealingPendingCard'
-import { RecoveryDialog } from './RecoveryDialog'
+// Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
+const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
 import { ReplayLabDialog } from './ReplayLabDialog'
 import { RecoveryItemBadge, type RecoveryItemBadgeData } from './RecoveryItemBadge'
 import { RecoveryItemDrawer, type RecoveryItemDrawerData } from './RecoveryItemDrawer'
@@ -298,10 +299,12 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
       </section>
 
       {recoveryDeadLetter && (
-        <RecoveryDialog
-          dlq={recoveryDeadLetter}
-          onClose={() => setRecoveryDeadLetter(null)}
-        />
+        <Suspense fallback={null}>
+          <RecoveryDialog
+            dlq={recoveryDeadLetter}
+            onClose={() => setRecoveryDeadLetter(null)}
+          />
+        </Suspense>
       )}
       {labSourceRunId && (
         <ReplayLabDialog

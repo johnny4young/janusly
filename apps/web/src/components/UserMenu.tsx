@@ -32,7 +32,7 @@ import {
 import { AuthProvider, isSupabaseConfigured } from '../auth'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
-import { requestOperationsSection } from './OperationsPage'
+import { requestOperationsSection } from './operations-section-bus'
 import {
   type DensityPreference,
   type ThemePreference,
