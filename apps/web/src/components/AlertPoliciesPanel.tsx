@@ -44,6 +44,15 @@ type Credential = {
   kind: string
 }
 
+/**
+ * Form-only channel: the persisted `Channel` plus a stable client key. A list
+ * keyed by array index corrupts controlled-input state when a middle row is
+ * removed (the indices shift, so React reuses the wrong row's inputs); `_key`
+ * stays attached to its row so removal reconciles correctly. Stripped before save.
+ */
+type FormChannel = Channel & { _key: string }
+const newChannelKey = (): string => crypto.randomUUID()
+
 const KIND_FOR_DESTINATION: Record<AlertDestination, string> = {
   slack: 'slack_webhook',
   webhook: 'webhook_secret',
@@ -59,7 +68,7 @@ const EMPTY_FORM: {
   minFrequency: number
   stalledMinutes: number
   scope: 'org' | 'workflow' | ''
-  channels: Channel[]
+  channels: FormChannel[]
   cooldownSeconds: number
   enabled: boolean
 } = {
@@ -70,7 +79,7 @@ const EMPTY_FORM: {
   minFrequency: 3,
   stalledMinutes: 60,
   scope: '',
-  channels: [{ destination: 'slack', credentialName: '', params: {} }],
+  channels: [{ destination: 'slack', credentialName: '', params: {}, _key: newChannelKey() }],
   cooldownSeconds: ALERT_COOLDOWN_SECONDS_DEFAULT,
   enabled: true,
 }
@@ -92,7 +101,10 @@ function policyToForm(policy: AlertPolicy): typeof EMPTY_FORM {
     stalledMinutes: typeof params.stalledMinutes === 'number' ? params.stalledMinutes : 60,
     scope:
       params.scope === 'org' || params.scope === 'workflow' ? params.scope : '',
-    channels: policy.channels.length > 0 ? policy.channels : EMPTY_FORM.channels,
+    channels:
+      policy.channels.length > 0
+        ? policy.channels.map((c) => ({ ...c, _key: newChannelKey() }))
+        : EMPTY_FORM.channels,
     cooldownSeconds: policy.cooldownSeconds,
     enabled: policy.enabled,
   }
@@ -212,7 +224,9 @@ export function AlertPoliciesPanel(): React.ReactElement {
         name: form.name.trim(),
         trigger: form.trigger,
         parameters: buildParameters(form),
-        channels: form.channels.filter((c) => c.credentialName.trim().length > 0),
+        channels: form.channels
+          .filter((c) => c.credentialName.trim().length > 0)
+          .map(({ _key, ...rest }) => rest),
         cooldownSeconds: form.cooldownSeconds,
         enabled: form.enabled,
       }
@@ -375,7 +389,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 : credentials
               const params = channel.params ?? {}
               return (
-                <div key={idx} className="we-alert-policies__channel">
+                <div key={channel._key} className="we-alert-policies__channel">
                   <select
                     aria-label={t('alerts.form.channelDestination')}
                     value={dest}
@@ -500,7 +514,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                     ...form,
                     channels: [
                       ...form.channels,
-                      { destination: 'slack', credentialName: '', params: {} },
+                      { destination: 'slack', credentialName: '', params: {}, _key: newChannelKey() },
                     ],
                   })
                 }

@@ -22,7 +22,7 @@ export class NodeTimeoutError extends Error {
 
 /** Read `config.timeoutMs` off a `WorkflowNode` if it's a positive finite number; otherwise `undefined`. */
 export function getNodeTimeoutMs(node: WorkflowNode): number | undefined {
-  const timeoutMs = (node as any)?.config?.timeoutMs;
+  const timeoutMs = node.config?.timeoutMs;
 
   if (typeof timeoutMs !== "number") return undefined;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return undefined;
