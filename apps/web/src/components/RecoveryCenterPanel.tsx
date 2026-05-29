@@ -261,6 +261,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         salutation={greeting.salutation}
         subline={greeting.subline}
         healthScore={healthScore}
+        openFailures={openDeadLetters.length}
+        onOpenQueue={() => props.onOpenTab('runs')}
       />
 
       {metricStrip}
