@@ -16,9 +16,22 @@
  */
 
 import React, { useMemo, useState } from 'react'
+import { Layers3 } from 'lucide-react'
 import type { JsonObject, RunEvent } from './types'
+import { EmptyState } from './components/EmptyState'
+import { useWorkflowStore } from './store'
 import { useT } from './i18n'
 import { t as runtimeT } from './i18n/runtime'
+
+/** Phantom lanes shown in the empty timeline so the operator sees the four
+ *  phases a team run will record before anything has run. Purely
+ *  illustrative (aria-hidden); tone keys map to the real chip tones. */
+const GHOST_PHASES = [
+  { key: 'planning', tone: 'config' },
+  { key: 'toolCall', tone: 'ai' },
+  { key: 'reflection', tone: 'http' },
+  { key: 'completion', tone: 'success' },
+] as const
 
 type Tone = 'info' | 'success' | 'warning' | 'error'
 
@@ -116,6 +129,7 @@ export function MultiAgentTimeline({
   onLoadOlderEvents?: () => void | Promise<void>
 }) {
   const { t, i18n } = useT()
+  const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [selected, setSelected] = useState<TimelineItem | null>(null)
   const [loadingOlder, setLoadingOlder] = useState(false)
 
@@ -160,10 +174,23 @@ export function MultiAgentTimeline({
   if (!items.length) {
     return (
       <div className="panel-card">
-        <div className="empty-panel">
-          <strong>{t('multiAgent.empty')}</strong>
-          <p>{t('multiAgent.emptyHelper')}</p>
-        </div>
+        <EmptyState
+          icon={<Layers3 />}
+          kicker={t('multiAgent.empty') as string}
+          body={t('multiAgent.emptyHelper') as string}
+          cta={{ label: t('multiAgent.emptyCta') as string, onClick: () => setActiveTab('copilot') }}
+          testId="multi-agent-empty"
+        />
+        <ul className="we-ghost-lanes" aria-hidden="true">
+          {GHOST_PHASES.map(phase => (
+            <li key={phase.key} className="we-ghost-lane">
+              <span className={`we-ghost-lane__phase we-ghost-lane__phase--${phase.tone}`}>
+                {t(`multiAgent.phase.${phase.key}`)}
+              </span>
+              <span className="we-ghost-lane__bar" />
+            </li>
+          ))}
+        </ul>
       </div>
     )
   }
