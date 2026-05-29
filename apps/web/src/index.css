@@ -1114,6 +1114,29 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-weight: 600;
 }
 
+/* AI Studio node palette — draggable-step chips over the canvas (mirrors the
+   .canvas-toolbar glass treatment). Only mounts when WorkflowCanvas receives
+   paletteNodeTypes + onAddNode (AI Studio), so other tabs are unaffected. */
+.canvas-palette {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  background: var(--we-surface-glass);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
+  backdrop-filter: blur(10px);
+  max-width: calc(100% - 32px);
+}
+
+.canvas-palette .sb-chip { grid-template-columns: 1fr; }
+
 /* ==========================================================================
    10. Panel, list, and empty states
    Common right-panel heading, list card, empty state, metrics, and detail

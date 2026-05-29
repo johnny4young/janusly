@@ -463,6 +463,7 @@
 
   "canvas.flowMapSummary": "Flow map summary",
   "canvas.flowMap": "Flow map",
+  "canvas.palette": "Add a step",
   "canvas.steps_one": "{{count}} step",
   "canvas.steps_other": "{{count}} steps",
   "canvas.paths_one": "{{count}} path",
