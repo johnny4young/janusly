@@ -21,7 +21,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Activity, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
@@ -226,6 +226,14 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
  *  read-only. The env-var NAME never reaches this shape (server posture). */
 type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null }
 
+/** Env-var NAME shape the server accepts for `secretRef` (mirrors the
+ *  rotate modal). The secret VALUE never lives here — only the env-var name. */
+const CREDENTIAL_ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** Connection kinds the integration chokepoint recognizes. Free-form on the
+ *  server, but the select keeps operators on the known set. */
+const CREDENTIAL_KINDS = ['generic', 'github_token', 'slack_webhook', 'webhook_secret'] as const
+
 function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelProps, 'credentials' | 'onCreateCredential'>) {
   const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
@@ -253,6 +261,10 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
     return () => { cancelled = true }
   }, [platformVersion])
 
+  const trimmedRef = secretRef.trim()
+  const refInvalid = trimmedRef.length > 0 && !CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+  const canAdd = name.trim().length > 0 && CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
+
   return (
     <PanelChrome title={t('rightPanel.credentials.title') as string} description={t('rightPanel.credentials.description') as string} icon={<KeyRound size={18} />}>
       <section className="panel-card connection-form">
@@ -263,17 +275,34 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
           </div>
           <LockKeyhole size={18} aria-hidden="true" />
         </div>
-        <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
-        <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
-        <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
-        <input id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)} />
-        <label className="field-label" htmlFor="credential-secret">{t('rightPanel.credentials.envLabel')}</label>
-        <input id="credential-secret" className="text-field" value={secretRef} onChange={event => setSecretRef(event.target.value)} placeholder={t('rightPanel.credentials.envPlaceholder') as string} />
+        <fieldset className="we-fieldset">
+          <label className="field-label" htmlFor="credential-name">{t('rightPanel.credentials.nameLabel')}</label>
+          <input id="credential-name" className="text-field" value={name} onChange={event => setName(event.target.value)} />
+          <label className="field-label" htmlFor="credential-kind">{t('rightPanel.credentials.kindLabel')}</label>
+          <select id="credential-kind" className="text-field" value={kind} onChange={event => setKind(event.target.value)}>
+            {CREDENTIAL_KINDS.map(option => <option key={option} value={option}>{option}</option>)}
+          </select>
+          <label className="field-label" htmlFor="credential-secret">{t('rightPanel.credentials.envLabel')}</label>
+          <input
+            id="credential-secret"
+            className={`text-field${refInvalid ? ' text-field--error' : ''}`}
+            value={secretRef}
+            onChange={event => setSecretRef(event.target.value)}
+            placeholder={t('rightPanel.credentials.envPlaceholder') as string}
+            aria-invalid={refInvalid}
+          />
+          {refInvalid && (
+            <span className="helper-text helper-text--error" role="alert">
+              <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
+            </span>
+          )}
+        </fieldset>
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
+            disabled={!canAdd}
             onClick={() => {
-              onCreateCredential({ name: name || 'API Key', kind, secretRef: secretRef || 'MY_SECRET' })
+              onCreateCredential({ name: name.trim(), kind, secretRef: trimmedRef })
               setName('')
               setSecretRef('')
             }}

@@ -49,9 +49,8 @@ describe('<MembersPanel /> dynamic role list', () => {
     })
     render(<MembersPanel />)
     await waitFor(() => {
-      const select = screen.getByLabelText('Role') as HTMLSelectElement
-      const options = Array.from(select.options).map((o) => o.value)
-      expect(options).toContain('compliance')
+      // The invite role is a described radio-card group, not a <select>.
+      expect(screen.getByRole('radio', { name: /compliance/i })).toBeInTheDocument()
     })
   })
 
@@ -66,11 +65,10 @@ describe('<MembersPanel /> dynamic role list', () => {
     })
     render(<MembersPanel />)
     await waitFor(() => {
-      const select = screen.getByLabelText('Role') as HTMLSelectElement
-      expect(Array.from(select.options).map((o) => o.value)).toContain('compliance')
+      expect(screen.getByRole('radio', { name: /compliance/i })).toBeInTheDocument()
     })
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } })
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'compliance' } })
+    fireEvent.click(screen.getByRole('radio', { name: /compliance/i }))
     fireEvent.click(screen.getByRole('button', { name: /Invite/i }))
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith(
