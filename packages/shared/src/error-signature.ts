@@ -253,6 +253,28 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
     };
   }
 
+  // 3b. Generic (non-AI) rate limit — platform/integration limiter or upstream
+  //     429. Runs before the AI rule so a tool/http rate-limit doesn't
+  //     mis-cluster as an AI-provider issue; only claims it with NO AI context.
+  const aiContext = nodeType === "ai" || nodeType === "agent" || nodeType === "multi_agent" ||
+    (errorObj != null && (typeof errorObj.provider === "string" || typeof errorObj.aiError === "string"));
+  if (!aiContext && RATE_LIMIT_PATTERN.test(message)) {
+    return {
+      signature: `Rate limited on ${nodeType} node`,
+      category: "http_error",
+      suggestedOwner: "workflow_author",
+    };
+  }
+
+  // 3c. HTTP-layer guard failures (body cap / redirect cap / SSRF block / protocol).
+  if (HTTP_GUARD_PATTERN.test(message)) {
+    return {
+      signature: `HTTP guard failed on ${nodeType} node`,
+      category: "http_error",
+      suggestedOwner: "workflow_author",
+    };
+  }
+
   // 4. AI provider — explicit aiError or message hint.
   const aiReason = matchAiProviderReason(error, message);
   if (aiReason) {
@@ -299,8 +321,14 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
 const SECRET_NOT_FOUND_PATTERN = /secret\s+['"]?([\w\-_.]+)['"]?\s+not\s+found/i;
 const ENV_MISSING_PATTERN = /Missing\s+(?:env(?:ironment)?\s+)?variable[: ]+([\w\-_.]+)/i;
 const HTTP_STATUS_PATTERN = /\bHTTP\s+(\d{3})\b/i;
-const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN)\b/i;
-const PARSE_ERROR_PATTERN = /\b(?:invalid\s+JSON|JSON\.parse|unexpected\s+token|parse\s+error)\b/i;
+const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))\b|getaddrinfo|did\s+not\s+resolve\s+to\s+any\s+address|fetch\s+failed/i;
+const PARSE_ERROR_PATTERN = /\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b/i;
+// http-policy.ts chokepoint guard failures (body-cap abort, redirect cap, SSRF
+// private block, unsupported protocol) — all reached the HTTP layer → http_error.
+const HTTP_GUARD_PATTERN = /\b(?:exceeds?\s+maxResponseBytes|redirect\s+limit\s+exceeded|target\s+is\s+private\s+and\s+blocked|resolves?\s+to\s+a\s+private\s+address|Unsupported\s+HTTP\s+target\s+protocol|response\s+(?:body\s+)?too\s+large)\b/i;
+// Platform/integration limiter ("Rate limit exceeded for <bucket>. Retry in Ns.")
+// and bare upstream 429 wording.
+const RATE_LIMIT_PATTERN = /\b(?:rate[_\s-]?limit(?:ed|s)?\s+(?:exceeded|reached|hit)|429\s+too\s+many\s+requests|too\s+many\s+requests)\b/i;
 const TOOL_INVALID_PATTERN = /(?:tool\s+input\s+(?:did\s+not\s+match|invalid)|invalid\s+tool\s+input)(?:\s+for\s+['"]?([\w\-_.]+)['"]?|[: ]+['"]?([\w\-_.]+)['"]?)?/i;
 const TOOL_NOT_FOUND_PATTERN = /tool\s+['"]?([\w\-_.]+)['"]?\s+not\s+found/i;
 

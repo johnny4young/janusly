@@ -279,3 +279,62 @@ describe("sanitizeMcpPromptLabel", () => {
     expect(cleaned.length).toBe(MAX_MCP_PROMPT_LABEL_CHARS);
   });
 });
+
+describe("normalizeErrorSignature — network_timeout (DNS + undici codes)", () => {
+  it("clusters getaddrinfo ENOTFOUND", () => {
+    const r = normalizeErrorSignature(new Error("getaddrinfo ENOTFOUND api.example.com"), { nodeType: "http" });
+    expect(r.category).toBe("network_timeout");
+    expect(r.signature).toBe("Network timeout on http node");
+  });
+  it("clusters connect ENETUNREACH", () => {
+    expect(normalizeErrorSignature(new Error("connect ENETUNREACH 10.0.0.1:443"), { nodeType: "http" }).category).toBe("network_timeout");
+  });
+  it("clusters the http-policy 'did not resolve' string", () => {
+    expect(normalizeErrorSignature(new Error("HTTP target did not resolve to any address: foo"), { nodeType: "http" }).category).toBe("network_timeout");
+  });
+  it("clusters bare 'fetch failed'", () => {
+    expect(normalizeErrorSignature(new Error("fetch failed"), { nodeType: "http" }).category).toBe("network_timeout");
+  });
+});
+
+describe("normalizeErrorSignature — http_error (http-policy guard failures)", () => {
+  it("clusters body-cap aborts", () => {
+    const r = normalizeErrorSignature(new Error("HTTP response exceeds maxResponseBytes after 2048 bytes (cap 1024)"), { nodeType: "http" });
+    expect(r.category).toBe("http_error");
+    expect(r.signature).toBe("HTTP guard failed on http node");
+    expect(r.suggestedOwner).toBe("workflow_author");
+  });
+  it("clusters redirect-cap failures", () => {
+    expect(normalizeErrorSignature(new Error("HTTP redirect limit exceeded; last hop https://a -> https://b"), { nodeType: "http" }).category).toBe("http_error");
+  });
+  it("clusters SSRF private-target blocks", () => {
+    expect(normalizeErrorSignature(new Error("HTTP target is private and blocked: localhost"), { nodeType: "http" }).category).toBe("http_error");
+  });
+  it("clusters unsupported-protocol errors", () => {
+    expect(normalizeErrorSignature(new Error("Unsupported HTTP target protocol: file:"), { nodeType: "http" }).category).toBe("http_error");
+  });
+});
+
+describe("normalizeErrorSignature — generic rate limit (NOT ai_provider)", () => {
+  it("routes a platform-limiter string to http_error / workflow_author", () => {
+    const r = normalizeErrorSignature(new Error("Rate limit exceeded for tool.slack.post. Retry in 12s."), { nodeType: "tool" });
+    expect(r.category).toBe("http_error");
+    expect(r.suggestedOwner).toBe("workflow_author");
+    expect(r.signature).toBe("Rate limited on tool node");
+  });
+  it("still routes an AI-context rate limit to ai_provider", () => {
+    const r = normalizeErrorSignature({ aiError: "rate limit reached", provider: "anthropic" }, { nodeType: "ai" });
+    expect(r.category).toBe("ai_provider");
+  });
+});
+
+describe("normalizeErrorSignature — parse_error (modern V8 / Zod JSON)", () => {
+  it("clusters the modern V8 JSON message", () => {
+    const r = normalizeErrorSignature(new Error("Expected property name or '}' in JSON at position 1 (line 1 column 2)"), { nodeType: "http" });
+    expect(r.category).toBe("parse_error");
+    expect(r.signature).toBe("Parse error in http node");
+  });
+  it("clusters Zod's 'is not valid JSON'", () => {
+    expect(normalizeErrorSignature(new Error('Unexpected token o, "..." is not valid JSON'), { nodeType: "transform" }).category).toBe("parse_error");
+  });
+});
