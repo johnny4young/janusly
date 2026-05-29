@@ -134,6 +134,28 @@ export function useRunEventStream(runId: string | null): void {
       retryTimer = setTimeout(() => { void connect() }, delay)
     }
 
+    // Coalesce SSE frames into one store write per animation frame: a burst
+    // of N frames becomes one addEvents + one render instead of N.
+    let pendingEvents: RunEvent[] = []
+    let pendingNodes: RunNode[] = []
+    let flushHandle: number | null = null
+    const flushPending = () => {
+      flushHandle = null
+      if (stopped) { pendingEvents = []; pendingNodes = []; return }
+      if (pendingEvents.length > 0) {
+        store.getState().addEvents(pendingEvents)
+        pendingEvents = []
+      }
+      if (pendingNodes.length > 0) {
+        const nodes = pendingNodes
+        pendingNodes = []
+        for (const node of nodes) store.getState().mergeRunNode(node)
+      }
+    }
+    const scheduleFlush = () => {
+      if (flushHandle === null) flushHandle = requestAnimationFrame(flushPending)
+    }
+
     const handleData = (frame: ParsedFrame): 'terminal' | 'ok' => {
       let parsed: unknown
       try {
@@ -154,9 +176,10 @@ export function useRunEventStream(runId: string | null): void {
           payload: (signal.payload ?? null) as JsonObject | null,
           createdAt: signal.createdAt,
         }
-        store.getState().addEvents([event])
+        pendingEvents.push(event)
         const runNode = runNodeFromEvent(event)
-        if (runNode) store.getState().mergeRunNode(runNode)
+        if (runNode) pendingNodes.push(runNode)
+        scheduleFlush()
       }
       return 'ok'
     }
@@ -201,6 +224,7 @@ export function useRunEventStream(runId: string | null): void {
               // Flip transport BEFORE marking stopped — `fallbackToPolling`
               // is guarded on `stopped`, so the order matters.
               clearTimeout(firstByteTimer)
+              flushPending() // land any buffered events before handing off
               if (!stopped) store.getState().setStreamTransport('polling')
               stopped = true
               controller?.abort()
@@ -223,6 +247,7 @@ export function useRunEventStream(runId: string | null): void {
     return () => {
       stopped = true
       if (retryTimer) clearTimeout(retryTimer)
+      if (flushHandle !== null) cancelAnimationFrame(flushHandle)
       controller?.abort()
       useWorkflowStore.getState().setStreamTransport('idle')
     }
