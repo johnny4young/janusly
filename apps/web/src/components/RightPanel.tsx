@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Activity, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
@@ -36,7 +36,9 @@ import { OperationsPage } from './OperationsPage'
 import { InspectorPanel } from './InspectorPanel'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { RunsPanel } from './RunsPanel'
-import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { api } from '../api'
+import { useWorkflowStore } from '../store'
+import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelProps = {
   tab: ActiveTab
@@ -214,12 +216,38 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
   )
 }
 
+/** Minimal slice of `GET /credentials/health` the Connections vault list
+ *  consumes to show linked-vs-missing per reference. Connections is the
+ *  sole vault editor; Operations Integrations mirrors the same snapshot
+ *  read-only. The env-var NAME never reaches this shape (server posture). */
+type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null }
+
 function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelProps, 'credentials' | 'onCreateCredential'>) {
   const { t } = useT()
+  const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
   const [secretRef, setSecretRef] = useState('')
   const [rotating, setRotating] = useState<string | null>(null)
+  const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthLite>>(new Map())
+
+  useEffect(() => {
+    let cancelled = false
+    api('/credentials/health')
+      .then(res => {
+        if (cancelled) return
+        const raw = (res ?? {}) as { credentials?: CredentialHealthLite[] }
+        const map = new Map<string, CredentialHealthLite>()
+        for (const entry of Array.isArray(raw.credentials) ? raw.credentials : []) {
+          if (entry && typeof entry.name === 'string') map.set(entry.name, entry)
+        }
+        setHealthByName(map)
+      })
+      // Health is a best-effort enrichment — the vault list still renders
+      // (with the hidden-reference reassurance) if the snapshot is unavailable.
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [platformVersion])
 
   return (
     <PanelChrome title={t('rightPanel.credentials.title') as string} description={t('rightPanel.credentials.description') as string} icon={<KeyRound size={18} />}>
@@ -252,20 +280,37 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
       </section>
       <div className="panel-list">
         {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title={t('rightPanel.credentials.empty.title') as string} body={t('rightPanel.credentials.empty.body') as string} />}
-        {credentials.map(credential => (
-          <div key={credential.id} className="list-card">
-            <div className="split-row" style={{ width: '100%' }}>
-              <strong>{credential.name}</strong>
-              <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
+        {credentials.map(credential => {
+          const health = healthByName.get(credential.name)
+          const linked = health?.secretRefPresent === true
+          return (
+            <div key={credential.id} className="list-card">
+              <div className="split-row" style={{ width: '100%' }}>
+                <strong>{credential.name}</strong>
+                <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
+              </div>
+              <div className="split-row" style={{ width: '100%' }}>
+                {health ? (
+                  <span className={`we-secret-pill we-secret-pill--${linked ? 'healthy' : 'unhealthy'}`}>
+                    {linked ? t('rightPanel.credentials.status.linked') : t('rightPanel.credentials.status.missing')}
+                  </span>
+                ) : (
+                  <span className="helper-text">{t('rightPanel.credentials.secretRefHidden')}</span>
+                )}
+                {health?.lastUsedAt && (
+                  <span className="helper-text mono">
+                    {t('rightPanel.credentials.lastUsed')}: {new Date(health.lastUsedAt).toLocaleString(getResolvedLocale())}
+                  </span>
+                )}
+              </div>
+              <div className="form-actions">
+                <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>
+                  {t('credentialRotation.action.rotate')}
+                </button>
+              </div>
             </div>
-            <span>{t('rightPanel.credentials.secretRefHidden')}</span>
-            <div className="form-actions">
-              <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>
-                {t('credentialRotation.action.rotate')}
-              </button>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
       {rotating && <CredentialRotateModal credentialName={rotating} onClose={() => setRotating(null)} />}
     </PanelChrome>
