@@ -88,7 +88,13 @@ export const HandoffDispatchResultSchema = z
     error: z.string().max(1000).nullable().optional(),
     latencyMs: z.number().int().min(0),
     externalId: z.string().max(200).nullable().optional(),
-    externalUrl: z.string().url().max(2048).nullable().optional(),
+    externalUrl: z
+      .string()
+      .url()
+      .max(2048)
+      .refine((v) => /^https?:\/\//i.test(v), { message: "externalUrl must be http(s)" })
+      .nullable()
+      .optional(),
     /** Set on the second-call append branch for GitHub (commentId, etc). */
     commentId: z.string().max(200).nullable().optional(),
   })

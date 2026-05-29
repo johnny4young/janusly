@@ -506,8 +506,8 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
                   {t('recoveryHandoff.dispatchCount', { count: h.dispatchCount })} ·{' '}
                   {new Date(h.lastDispatchedAt).toLocaleString(getResolvedLocale())}
                 </span>
-                {h.externalUrl && (
-                  <a href={h.externalUrl} target="_blank" rel="noreferrer">
+                {h.externalUrl && /^https?:\/\//i.test(h.externalUrl) && (
+                  <a href={h.externalUrl} target="_blank" rel="noreferrer noopener">
                     {t('recoveryHandoff.openExternal')} <ExternalLink size={12} aria-hidden />
                   </a>
                 )}

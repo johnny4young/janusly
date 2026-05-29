@@ -296,8 +296,10 @@ export const aiRoutes: Route[] = [
       const dlq = await getDeadLetter(auth.orgId, deadLetterId);
       if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
 
-      // Recent events around the failure for run context. Multi-tenant
-      // scope flows through runs.orgId on the run row.
+      // Recent events around the failure for run context. runEvents has no
+      // orgId column; the read below is org-safe because the run row is gated
+      // to auth.orgId immediately here (404 otherwise) and runs are never
+      // deleted — a cross-tenant runId cannot reach the runEvents query.
       const run = await db.select().from(runs).where(eq(runs.id, dlq.runId));
       if (!run[0] || run[0].orgId !== auth.orgId) {
         return sendJson(res, { error: "Run not found" }, 404);
@@ -795,6 +797,11 @@ export const aiRoutes: Route[] = [
         .where(and(eq(workflowVersions.id, run[0].workflowVersionId), eq(workflowVersions.orgId, auth.orgId)));
       const explainRunWorkflowId = versionRow[0]?.workflowId ?? undefined;
 
+      // runEvents has no orgId column; this read is org-safe because the run
+      // was gated to auth.orgId above (404 otherwise) and runs are never
+      // deleted (cascade invariant) — a cross-tenant runId cannot reach here.
+      // Don't drop the run gate above (mirrors the SSE catch-up scoping in
+      // runs-routes.ts).
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
         llm,

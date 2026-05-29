@@ -602,6 +602,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
           code,
           message,
         });
+        // The AI-fallback contract requires this path to NEVER throw — guard
+        // the fallback-response generation too, so a malformed ctx.context
+        // degrades to a minimal envelope instead of bubbling an exception.
+        let fallback: unknown;
+        try {
+          fallback = fallbackAiResponse(message, ctx.context);
+        } catch {
+          fallback = undefined;
+        }
         return {
           status: "completed",
           output: {
@@ -609,8 +618,8 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
             aiError: code,
             promptRef: { name: ref.name, version: ref.version ?? null },
             error: message,
-            response: fallbackAiResponse(message, ctx.context),
-            contextKeys: Object.keys(ctx.context),
+            ...(fallback !== undefined ? { response: fallback } : {}),
+            contextKeys: Object.keys(ctx.context ?? {}),
           },
         };
       }
