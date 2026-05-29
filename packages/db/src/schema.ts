@@ -300,6 +300,12 @@ export const credentials = pgTable(
     metadata: jsonb("metadata"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // Optimistic-concurrency token for secret-ref rotation. Millisecond
+    // precision (timestamptz(3)) on purpose: the rotation route compares it
+    // as an If-Match against the JS Date it round-trips through ISO, and full
+    // microsecond precision would never equal a re-serialized ms-precision
+    // value — so a first rotation would always look like a conflict.
+    updatedAt: timestamp("updated_at", { withTimezone: true, precision: 3 }).defaultNow(),
   },
   (table) => [index("credentials_org_idx").on(table.orgId)],
 );

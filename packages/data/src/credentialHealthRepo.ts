@@ -239,6 +239,52 @@ async function loadLatestWorkflowVersions(orgId: string): Promise<LatestWorkflow
   return out;
 }
 
+/** One workflow that references a credential by name, plus the specific node
+ *  ids carrying the reference. Powers the rotation route's blast-radius
+ *  preview so an operator sees exactly what a rotation touches. */
+export type CredentialWorkflowReference = {
+  workflowId: string;
+  workflowName: string;
+  nodeIds: string[];
+};
+
+/**
+ * Resolve every latest-version workflow that references `credentialName`,
+ * with the matching node ids + the workflow's display name. Reuses the same
+ * `loadLatestWorkflowVersions` + `readCredentialNameFromConfig` machinery the
+ * health snapshot uses, so the rotation preview and the credential-health
+ * card agree on "who uses this credential". Org-scoped via the version load;
+ * pure read, no mutation.
+ */
+export async function resolveCredentialReferences(
+  orgId: string,
+  credentialName: string,
+): Promise<CredentialWorkflowReference[]> {
+  const versions = await loadLatestWorkflowVersions(orgId);
+  const out: CredentialWorkflowReference[] = [];
+  for (const { workflowId, dagJson } of versions) {
+    if (!dagJson || typeof dagJson !== "object") continue;
+    const dag = dagJson as { name?: unknown; nodes?: unknown };
+    const nodes = Array.isArray(dag.nodes) ? dag.nodes : [];
+    const nodeIds: string[] = [];
+    for (const node of nodes) {
+      if (!node || typeof node !== "object") continue;
+      if (readCredentialNameFromConfig((node as { config?: unknown }).config) === credentialName) {
+        const id = (node as { id?: unknown }).id;
+        if (typeof id === "string") nodeIds.push(id);
+      }
+    }
+    if (nodeIds.length > 0) {
+      out.push({
+        workflowId,
+        workflowName: typeof dag.name === "string" && dag.name.length > 0 ? dag.name : workflowId,
+        nodeIds,
+      });
+    }
+  }
+  return out;
+}
+
 type CredentialUsageAggregate = {
   lastUsedAt: string | null;
   lastErrorAt: string | null;

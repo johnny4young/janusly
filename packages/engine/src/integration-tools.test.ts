@@ -44,6 +44,7 @@ function credentialRow(overrides: Partial<Credential> = {}): Credential {
     metadata: null,
     createdBy: null,
     createdAt: new Date(),
+    updatedAt: new Date(),
     ...overrides,
   };
 }
