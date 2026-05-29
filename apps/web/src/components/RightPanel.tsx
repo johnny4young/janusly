@@ -204,7 +204,7 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
           <div key={tool.name} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{tool.name}</strong>
-              <span className="mode-pill mode-pill-neutral">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
+              <span className="we-pill we-pill--amber">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
             </div>
             <span>{tToolDescription(tool)}</span>
             {(tool.required?.length || tool.optional?.length) ? (
