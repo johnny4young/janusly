@@ -25,6 +25,7 @@ const hoisted = vi.hoisted(() => ({
   credentialUsageRows: [] as Array<Record<string, unknown>>,
   mcpUsageRows: [] as Array<Record<string, unknown>>,
   whereSpy: vi.fn(),
+  executeSpy: vi.fn(),
 }));
 
 vi.mock("@janusly/db", () => {
@@ -86,8 +87,19 @@ vi.mock("@janusly/db", () => {
     return { from: vi.fn(() => buildChain([])) };
   });
 
+  // loadLatestWorkflowVersions now issues one DISTINCT ON via db.execute;
+  // source its rows from workflowLatestRows (the latest version per workflow).
+  const execute = vi.fn((sqlArg: unknown) => {
+    hoisted.executeSpy(sqlArg);
+    const rows = Array.from(hoisted.workflowLatestRows.values()).map((v) => ({
+      workflow_id: v.workflowId,
+      dag_json: v.dagJson,
+    }));
+    return Promise.resolve(rows);
+  });
+
   return {
-    db: { select },
+    db: { select, execute },
     credentials: { id: "id", orgId: "org_id", name: "name", kind: "kind" },
     usageEvents: { id: "id", orgId: "org_id", metric: "metric", metadata: "metadata", createdAt: "created_at" },
     workflowVersions: { id: "id", orgId: "org_id", workflowId: "workflow_id", version: "version", dagJson: "dag_json" },
@@ -133,6 +145,7 @@ beforeEach(() => {
   hoisted.workflowMaxVersionRows = [];
   hoisted.workflowLatestRows = new Map();
   hoisted.whereSpy.mockReset();
+  hoisted.executeSpy.mockReset();
   listConnectionsMock.mockReset().mockResolvedValue([]);
   listToolDescriptorsMock.mockReset().mockResolvedValue([]);
 });
@@ -317,9 +330,12 @@ describe("getCredentialHealth", () => {
     hoisted.credentialsRows = [];
     listConnectionsMock.mockResolvedValueOnce([]);
     await getCredentialHealth("org-target", () => true);
-    // The repo issues four primary SELECTs (credentials, usage, mcp
-    // usage, workflow max versions). Each .where(...) hits the spy.
-    expect(hoisted.whereSpy.mock.calls.length).toBeGreaterThanOrEqual(4);
+    // Three .where-based SELECTs (credentials, credential usage, mcp usage)
+    // hit the spy; the latest-workflow-versions read is now a single
+    // DISTINCT ON via db.execute (org-scoped inside the SQL template), so it
+    // shows up on the executeSpy instead of the whereSpy.
+    expect(hoisted.whereSpy.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(hoisted.executeSpy).toHaveBeenCalled();
     // The MCP enrichment delegates to listConnections, which carries
     // its own org scope in its repo (already pinned by mcpConnectionsRepo
     // tests). Verify we invoked it with the right org.
