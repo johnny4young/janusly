@@ -48,7 +48,7 @@ export type Template = {
   categoryCode?: string
   workflow: WorkflowDefinition
 }
-export type Credential = { id: string; name: string; kind: string; secretRef: string; metadata?: JsonObject }
+export type Credential = { id: string; name: string; kind: string; metadata?: JsonObject }
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string }
 export type RunSummary = {

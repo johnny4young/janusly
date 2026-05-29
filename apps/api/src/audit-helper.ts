@@ -64,6 +64,7 @@ export type AuditAction =
   | "billing.budget.configured"
   // credentials
   | "credential.created"
+  | "credential.bulk_updated"
   // dlq / recovery replay
   | "dlq.resolved"
   | "dlq.replayed"

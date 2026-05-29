@@ -315,13 +315,18 @@ export default function App() {
 
     let closed = false
     let stopped = false
+    let loadedInitialStatus = false
     setStreamStatus('connecting')
 
     const tick = async () => {
-      // SSE is the live updater — skip the redundant poll.
-      if (useWorkflowStore.getState().streamTransport === 'sse') return
+      // SSE is the live updater after the first status snapshot. Keep the
+      // initial `/status` fetch even when SSE connects first; otherwise a
+      // node.waiting event published before subscription can be missed and
+      // `runNodes` never materializes.
+      if (loadedInitialStatus && useWorkflowStore.getState().streamTransport === 'sse') return
       try {
         const status = await loadStatus(runId)
+        loadedInitialStatus = true
         if (closed) return
         setStreamStatus('connected')
 

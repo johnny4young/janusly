@@ -6604,6 +6604,30 @@ button.we-ops-metric-card--button {
   color: var(--we-success);
 }
 
+/* Bulk credential-rotation modal: the affected-workflow blast-radius list. */
+.we-credential-rotate__list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-credential-rotate__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--we-border) 30%, transparent);
+}
+
+.we-credential-rotate__nodes {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
 .we-recovery-tabs {
   display: flex;
   flex-wrap: wrap;

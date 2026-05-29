@@ -104,6 +104,7 @@ vi.mock("./mcpConnectionsRepo", () => ({
 import {
   collectWorkflowReferences,
   getCredentialHealth,
+  resolveCredentialReferences,
   type WorkflowReferenceIndex,
 } from "./credentialHealthRepo";
 import { listConnections, listToolDescriptors } from "./mcpConnectionsRepo";
@@ -346,5 +347,45 @@ describe("collectWorkflowReferences (pure helper)", () => {
     expect(() => collectWorkflowReferences("wf-x", null, index)).not.toThrow();
     expect(() => collectWorkflowReferences("wf-x", { nodes: "not-an-array" }, index)).not.toThrow();
     expect(index.byCredentialName.size).toBe(0);
+  });
+});
+
+describe("resolveCredentialReferences", () => {
+  it("returns the referencing workflow with its name + the matching node ids", async () => {
+    hoisted.workflowMaxVersionRows = [{ workflowId: "wf-1", maxVersion: 3 }];
+    hoisted.workflowLatestRows = new Map([
+      [
+        "wf-1",
+        {
+          workflowId: "wf-1",
+          dagJson: {
+            name: "Billing flow",
+            nodes: [
+              { id: "n1", config: { input: { credential: "slack-prod" } } },
+              { id: "n2", config: {} },
+              { id: "n3", config: { credential: "slack-prod" } },
+            ],
+          },
+        },
+      ],
+    ]);
+
+    const refs = await resolveCredentialReferences("org-1", "slack-prod");
+    expect(refs).toEqual([
+      { workflowId: "wf-1", workflowName: "Billing flow", nodeIds: ["n1", "n3"] },
+    ]);
+  });
+
+  it("excludes workflows whose latest version does not reference the credential", async () => {
+    hoisted.workflowMaxVersionRows = [{ workflowId: "wf-1", maxVersion: 1 }];
+    hoisted.workflowLatestRows = new Map([
+      [
+        "wf-1",
+        { workflowId: "wf-1", dagJson: { name: "Other", nodes: [{ id: "n1", config: { input: { credential: "github-bot" } } }] } },
+      ],
+    ]);
+
+    const refs = await resolveCredentialReferences("org-1", "slack-prod");
+    expect(refs).toEqual([]);
   });
 });
