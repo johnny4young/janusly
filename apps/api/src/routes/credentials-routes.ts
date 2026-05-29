@@ -17,6 +17,7 @@ import {
   getCredentialHealth,
   resolveCredentialReferences,
   rotateCredentialSecretRef,
+  withAuditTx,
 } from "@janusly/data";
 
 import { auditAction } from "../audit-helper";
@@ -116,21 +117,44 @@ export const credentialsRoutes: Route[] = [
       }
 
       const affected = await resolveCredentialReferences(auth.orgId, name);
-      const result = await rotateCredentialSecretRef({ orgId: auth.orgId, name, newSecretRef, ifMatchUpdatedAt: ifMatch });
-      if (!result.ok) {
-        if (result.reason === "not_found") return sendJson(res, { error: "credential not found" }, 404);
+      // Atomic: the secret-ref swap + the `credential.bulk_updated` audit row
+      // commit-or-rollback together (so a swap can never go un-audited on an
+      // audit-sink failure). Business outcomes (not_found / conflict) return
+      // normally — the tx then commits an empty change with no audit row.
+      const txOutcome = await withAuditTx(async (tx, audit) => {
+        const result = await rotateCredentialSecretRef(
+          { orgId: auth.orgId, name, newSecretRef, ifMatchUpdatedAt: ifMatch },
+          tx,
+        );
+        if (!result.ok) return { kind: result.reason } as const;
+        await audit({
+          orgId: auth.orgId,
+          userId: auth.userId,
+          action: "credential.bulk_updated",
+          targetType: "credential",
+          targetId: name,
+          // Mirror auditAction's forensic enrichment so the tx-bound row keeps
+          // the same actor/source shape as every other route audit.
+          metadata: {
+            kind: cred.kind,
+            affectedWorkflowIds: affected.map((a) => a.workflowId),
+            affectedWorkflowCount: affected.length,
+            source: auth.source,
+            actor: { userId: auth.userId, mode: auth.mode, serviceTokenSuffix: auth.serviceTokenSuffix },
+          },
+        });
+        return { kind: "ok", updatedAt: result.updatedAt } as const;
+      });
+
+      if (!txOutcome.ok) {
+        // Real transaction/audit failure — the rollback already reverted the swap.
+        return sendJson(res, { error: "Credential rotation failed" }, 500);
+      }
+      const outcome = txOutcome.result;
+      if (outcome.kind === "not_found") return sendJson(res, { error: "credential not found" }, 404);
+      if (outcome.kind === "conflict") {
         return sendJson(res, errorEnvelope("credential_rotation_conflict", "Credential changed since preview; re-preview before rotating"), 409);
       }
-
-      await auditAction(auth, "credential.bulk_updated", {
-        targetType: "credential",
-        targetId: name,
-        metadata: {
-          kind: cred.kind,
-          affectedWorkflowIds: affected.map((a) => a.workflowId),
-          affectedWorkflowCount: affected.length,
-        },
-      });
       // Never echo secretRef (old or new) — the operator supplied the new one
       // and the env-var name is not for the wire (see file header).
       return sendJson(res, {
@@ -138,7 +162,7 @@ export const credentialsRoutes: Route[] = [
         credentialName: name,
         affected,
         affectedCount: affected.length,
-        updatedAt: result.updatedAt,
+        updatedAt: outcome.updatedAt,
       });
     } },
 ];
