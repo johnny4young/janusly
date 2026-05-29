@@ -71,6 +71,28 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
     return validateExpression(edge.condition).valid ? edge : { ...edge, condition: undefined };
   });
   const sanitizedNodes = workflow.nodes.map((node) => {
+    // Draft-generation tolerance for under-specified `transform` nodes.
+    // The AI generation subset (`AiTransformNode`) permits an empty
+    // `config.mapping` ({}), but the engine's strict `validateWorkflow`
+    // rejects it (`transform_missing_mapping`). The LLM intermittently
+    // emits exactly that — a `transform` step it hasn't filled in yet —
+    // which pre-fix discarded the ENTIRE draft to a fallback template
+    // (observed on ~2/3 "loop over a list and collect" generations).
+    // Demote the unfilled node to a `noop` placeholder so the rest of
+    // the draft survives and the operator completes the mapping in the
+    // Inspector — same posture as the partial-tool-input tolerance below
+    // and the operator-only noop-placeholder convention AI generation
+    // already uses for the 9 node types outside the grammar.
+    if (node.type === "transform") {
+      const mapping = (node.config as { mapping?: unknown } | undefined)?.mapping;
+      const hasMapping =
+        !!mapping &&
+        typeof mapping === "object" &&
+        !Array.isArray(mapping) &&
+        Object.keys(mapping as Record<string, unknown>).length > 0;
+      if (!hasMapping) return { ...node, type: "noop" as const, config: {} };
+      return node;
+    }
     if (node.type !== "condition") return node;
     const expression = node.config && typeof (node.config as { expression?: unknown }).expression === "string"
       ? String((node.config as { expression: string }).expression)
