@@ -24,6 +24,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { credentials, db } from "@janusly/db";
+import type { DbOrTx } from "./audit-tx";
 
 export type Credential = typeof credentials.$inferSelect;
 
@@ -85,12 +86,15 @@ export async function rotateCredentialSecretRef(input: {
   name: string;
   newSecretRef: string;
   ifMatchUpdatedAt?: string | null;
-}): Promise<RotateCredentialResult> {
+}, tx: DbOrTx = db): Promise<RotateCredentialResult> {
+  // `tx` defaults to the module `db`, but callers can pass a transaction
+  // handle (from `withAuditTx`) so the secret-ref swap + its audit row
+  // commit-or-rollback together.
   const conds = [eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)];
   if (input.ifMatchUpdatedAt) {
     const ifMatchDate = new Date(input.ifMatchUpdatedAt);
     if (Number.isNaN(ifMatchDate.getTime())) {
-      const existing = await db
+      const existing = await tx
         .select({ id: credentials.id })
         .from(credentials)
         .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
@@ -98,7 +102,7 @@ export async function rotateCredentialSecretRef(input: {
     }
     conds.push(eq(credentials.updatedAt, ifMatchDate));
   }
-  const updated = await db
+  const updated = await tx
     .update(credentials)
     .set({ secretRef: input.newSecretRef, updatedAt: new Date() })
     .where(and(...conds))
@@ -106,7 +110,7 @@ export async function rotateCredentialSecretRef(input: {
   const first = updated[0];
   if (first?.updatedAt) return { ok: true, updatedAt: first.updatedAt };
   // Zero rows updated — separate "no such credential" from "stale If-Match".
-  const existing = await db
+  const existing = await tx
     .select({ id: credentials.id })
     .from(credentials)
     .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));

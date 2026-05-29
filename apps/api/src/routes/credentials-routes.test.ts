@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dbHoisted = vi.hoisted(() => ({ credentialRows: [] as Array<Record<string, unknown>> }));
+const txHoisted = vi.hoisted(() => ({ auditCalls: [] as Array<Record<string, unknown>> }));
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
@@ -27,6 +28,20 @@ vi.mock("@janusly/data/src/credentialHealthRepo", () => ({
 
 vi.mock("@janusly/data/src/credentialsRepo", () => ({
   rotateCredentialSecretRef: vi.fn(),
+}));
+
+// withAuditTx (the atomic entity+audit chokepoint) — run the handler with a
+// fake tx + a capturing audit, mirroring the real {ok,result} envelope.
+vi.mock("@janusly/data/src/audit-tx", () => ({
+  withAuditTx: vi.fn(async (handler: (tx: unknown, audit: (i: Record<string, unknown>) => Promise<void>) => Promise<unknown>) => {
+    const audit = async (input: Record<string, unknown>) => { txHoisted.auditCalls.push(input); };
+    try {
+      const result = await handler({}, audit);
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }),
 }));
 
 vi.mock("@janusly/db", () => {
@@ -92,6 +107,7 @@ async function callRoute(method: string, path: string, body?: unknown) {
 
 beforeEach(() => {
   dbHoisted.credentialRows = [];
+  txHoisted.auditCalls = [];
 });
 
 afterEach(() => {
@@ -149,20 +165,27 @@ describe("POST /credentials/:name/bulk-update", () => {
 
     expect(payload.ok).toBe(true);
     expect(payload.affectedCount).toBe(1);
+    // Rotation runs inside the withAuditTx transaction, so it's called with
+    // the input AND the tx handle.
     expect(rotateMock).toHaveBeenCalledWith({
       orgId: "org-1",
       name: "slack-prod",
       newSecretRef: "SLACK_WEBHOOK_V2",
       ifMatchUpdatedAt: "2026-05-28T00:00:00.000Z",
-    });
+    }, expect.anything());
     // The env-var name is never on the wire — no secretRef in the response.
     expect("secretRef" in payload).toBe(false);
     expect(JSON.stringify(payload)).not.toContain("SLACK_WEBHOOK_V2");
-    expect(auditActionMock).toHaveBeenCalledTimes(1);
-    const [, action, opts] = auditActionMock.mock.calls[0] as [unknown, string, { metadata: Record<string, unknown> }];
-    expect(action).toBe("credential.bulk_updated");
-    expect(opts.metadata.affectedWorkflowCount).toBe(1);
-    expect(opts.metadata).not.toHaveProperty("newSecretRef");
+    // The audit row is written via the tx-bound audit (atomic with the swap),
+    // keeping the same actor/source forensic shape and never echoing secretRef.
+    expect(txHoisted.auditCalls).toHaveLength(1);
+    const auditInput = txHoisted.auditCalls[0] as { action: string; metadata: Record<string, unknown> };
+    expect(auditInput.action).toBe("credential.bulk_updated");
+    expect(auditInput.metadata.affectedWorkflowCount).toBe(1);
+    expect(auditInput.metadata.source).toBe("dev");
+    expect((auditInput.metadata.actor as Record<string, unknown>).userId).toBe("user-1");
+    expect(auditInput.metadata).not.toHaveProperty("newSecretRef");
+    expect(JSON.stringify(auditInput)).not.toContain("SLACK_WEBHOOK_V2");
   });
 
   it("returns 409 with the conflict code on a stale If-Match", async () => {

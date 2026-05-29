@@ -145,6 +145,9 @@ export const runsRoutes: Route[] = [
       // Last-Event-ID catch-up: replay the gap since the client's last seen
       // event (ascending keyset after the cursor), then live signals follow.
       // Overlap with live events is harmless — the web dedupes by id.
+      // orgId is intentionally NOT in this WHERE: the run was org-gated above
+      // (run[0].orgId !== auth.orgId → 403) and run_events are run-scoped, so a
+      // cross-tenant runId can't reach here. Don't "simplify" the up-front gate.
       const rawLastId = req.headers["last-event-id"];
       const lastEventId = Array.isArray(rawLastId) ? rawLastId[0] : rawLastId;
       const cursor = parseEventsCursor(lastEventId ?? null);
