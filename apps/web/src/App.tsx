@@ -890,6 +890,8 @@ export default function App() {
                   selectEdge(edge.id)
                   setActiveTab('inspector')
                 }}
+                paletteNodeTypes={activeTab === 'copilot' ? ['http', 'ai', 'condition', 'tool', 'agent'] : undefined}
+                onAddNode={addNode}
               />
             </div>
             {visibility.contextualSlot && (

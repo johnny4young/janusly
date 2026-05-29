@@ -14,6 +14,7 @@ import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNo
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
+import { getNodeHelper, getNodeLabel } from '../constants'
 import { useT } from '../i18n'
 import '@xyflow/react/dist/style.css'
 
@@ -25,10 +26,15 @@ type WorkflowCanvasProps = {
   onConnect: OnConnect
   onNodeClick: NodeMouseHandler<WorkflowGraphNode>
   onEdgeClick: EdgeMouseHandler<WorkflowGraphEdge>
+  /** When present (AI Studio), renders a draggable-step palette over the
+   *  canvas. Omitted elsewhere — the palette renders null, so the locked
+   *  browser tests (which pass neither prop) are unaffected. */
+  paletteNodeTypes?: string[]
+  onAddNode?: (type: string) => void
 }
 
 /** Render the workflow editor canvas with React Flow + custom step nodes. */
-export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick }: WorkflowCanvasProps) {
+export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode }: WorkflowCanvasProps) {
   const { t } = useT()
   return (
     <div className="canvas-frame">
@@ -39,6 +45,21 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
         </div>
         <span>{t('canvas.paths', { count: edges.length })}</span>
       </div>
+      {paletteNodeTypes && onAddNode && paletteNodeTypes.length > 0 && (
+        <div className="canvas-palette" role="toolbar" aria-label={t('canvas.palette') as string}>
+          {paletteNodeTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className="sb-chip"
+              onClick={() => onAddNode(type)}
+              title={`${getNodeLabel(type)} — ${getNodeHelper(type)}`}
+            >
+              <span className="sb-chip__label">{getNodeLabel(type)}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
