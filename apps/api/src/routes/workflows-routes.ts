@@ -29,6 +29,7 @@ import {
   queryHealthSignals,
   DEFAULT_HEALTH_WINDOW_DAYS,
   getWorkflowSlo,
+  listWorkflowsWithRunSummary,
   setWorkflowSlo,
 } from "@janusly/data";
 import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
@@ -81,7 +82,7 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      const rows = await db.select().from(workflows).where(eq(workflows.orgId, auth.orgId)).orderBy(desc(workflows.createdAt)).limit(limitValue);
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue);
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",

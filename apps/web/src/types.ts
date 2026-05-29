@@ -50,7 +50,7 @@ export type Template = {
 }
 export type Credential = { id: string; name: string; kind: string; metadata?: JsonObject }
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number }
 export type RunSummary = {
   id: string
   orgId?: string
