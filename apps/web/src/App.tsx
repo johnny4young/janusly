@@ -37,6 +37,7 @@ import { RunInputDialog } from './components/RunInputDialog'
 import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
+import { useShallow } from 'zustand/react/shallow'
 import { api } from './api'
 import { useRunEventStream } from './hooks/useRunEventStream'
 import { formatStatusLabel } from './constants'
@@ -142,7 +143,59 @@ export default function App() {
     addToast,
     updateEdgeCondition: storeUpdateEdgeCondition,
     bumpPlatformVersion,
-  } = useWorkflowStore()
+    // Scoped selector (was a selector-less `useWorkflowStore()` that
+    // re-rendered the root on EVERY store mutation). With useShallow the App
+    // root only re-renders when one of the fields it actually reads changes —
+    // unrelated ticks (e.g. platformVersion bumps) no longer re-render it.
+  } = useWorkflowStore(useShallow((s) => ({
+    nodes: s.nodes,
+    edges: s.edges,
+    onNodesChange: s.onNodesChange,
+    onEdgesChange: s.onEdgesChange,
+    connect: s.connect,
+    addNode: s.addNode,
+    activeTab: s.activeTab,
+    session: s.session,
+    userId: s.userId,
+    orgId: s.orgId,
+    authReady: s.authReady,
+    runId: s.runId,
+    runNodes: s.runNodes,
+    events: s.events,
+    selectedNodeId: s.selectedNodeId,
+    selectedEdgeId: s.selectedEdgeId,
+    currentWorkflowId: s.currentWorkflowId,
+    currentWorkflowName: s.currentWorkflowName,
+    currentWorkflowSaved: s.currentWorkflowSaved,
+    currentWorkflowInputs: s.currentWorkflowInputs,
+    currentWorkflowOutputs: s.currentWorkflowOutputs,
+    streamStatus: s.streamStatus,
+    setAuth: s.setAuth,
+    clearAuth: s.clearAuth,
+    setAuthReady: s.setAuthReady,
+    setActiveTab: s.setActiveTab,
+    setWorkflowName: s.setWorkflowName,
+    hydrateWorkflow: s.hydrateWorkflow,
+    getWorkflowJson: s.getWorkflowJson,
+    newWorkflow: s.newWorkflow,
+    markWorkflowSaved: s.markWorkflowSaved,
+    selectNode: s.selectNode,
+    selectEdge: s.selectEdge,
+    updateSelectedNodeConfig: s.updateSelectedNodeConfig,
+    updateSelectedNodeType: s.updateSelectedNodeType,
+    setRunId: s.setRunId,
+    setRunNodes: s.setRunNodes,
+    setEvents: s.setEvents,
+    addEvents: s.addEvents,
+    eventsCursor: s.eventsCursor,
+    eventsHasMore: s.eventsHasMore,
+    setEventsPagination: s.setEventsPagination,
+    setStreamStatus: s.setStreamStatus,
+    resetRun: s.resetRun,
+    addToast: s.addToast,
+    updateEdgeCondition: s.updateEdgeCondition,
+    bumpPlatformVersion: s.bumpPlatformVersion,
+  })))
 
   const { t } = useT()
 
