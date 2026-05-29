@@ -18,7 +18,7 @@ import { Coins, ShieldAlert, X } from 'lucide-react'
 import type { ActiveTab } from '../types'
 import { useWorkflowStore } from '../store'
 import { Trans, useT } from '../i18n'
-import { requestOperationsSection } from './OperationsPage'
+import { requestOperationsSection } from './operations-section-bus'
 
 export type BudgetBlockedEnvelope = {
   monthlyUsdSpent?: number

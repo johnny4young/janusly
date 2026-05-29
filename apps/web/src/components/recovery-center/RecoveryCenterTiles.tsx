@@ -40,7 +40,7 @@ import type { ActiveTab, RunNode, RunSummary } from '../../types'
 import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
 import { useT } from '../../i18n'
-import { requestOperationsSection } from '../OperationsPage'
+import { requestOperationsSection } from '../operations-section-bus'
 import type { DeadLetter } from '../DeadLettersPanel'
 import {
   budgetBand,
