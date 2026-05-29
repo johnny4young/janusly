@@ -320,6 +320,11 @@ export function normalizeErrorSignature(error: unknown, context: ErrorContext = 
 
 const SECRET_NOT_FOUND_PATTERN = /secret\s+['"]?([\w\-_.]+)['"]?\s+not\s+found/i;
 const ENV_MISSING_PATTERN = /Missing\s+(?:env(?:ironment)?\s+)?variable[: ]+([\w\-_.]+)/i;
+// The generic integration/MCP chokepoint error ("credential secret missing
+// for <name>" — the env-var NAME is never echoed; <name> is the operator's
+// credential name) and the plain "Missing secret: <name>" phrasing.
+const CREDENTIAL_MISSING_PATTERN = /credential\s+secret\s+missing\s+for\s+['"]?([\w\-_.]+)/i;
+const MISSING_SECRET_PATTERN = /Missing\s+secret[: ]+['"]?([\w\-_.]+)/i;
 const HTTP_STATUS_PATTERN = /\bHTTP\s+(\d{3})\b/i;
 const NETWORK_FAILURE_PATTERN = /\b(?:timeout|timed\s+out|ECONNRESET|ETIMEDOUT|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ENETDOWN|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))\b|getaddrinfo|did\s+not\s+resolve\s+to\s+any\s+address|fetch\s+failed/i;
 const PARSE_ERROR_PATTERN = /\b(?:invalid\s+JSON|is\s+not\s+valid\s+JSON|JSON\.parse|unexpected\s+token|unexpected\s+end\s+of\s+JSON|parse\s+error|in\s+JSON\s+at\s+position|expected\s+property\s+name)\b/i;
@@ -344,6 +349,10 @@ function matchSecretMissing(message: string): string | null {
   if (direct?.[1]) return direct[1];
   const env = message.match(ENV_MISSING_PATTERN);
   if (env?.[1]) return env[1];
+  const cred = message.match(CREDENTIAL_MISSING_PATTERN);
+  if (cred?.[1]) return cred[1];
+  const missing = message.match(MISSING_SECRET_PATTERN);
+  if (missing?.[1]) return missing[1];
   return null;
 }
 
