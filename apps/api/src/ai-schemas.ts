@@ -82,7 +82,17 @@ const AiTransformNode = z.object({
   id: z.string().min(1),
   type: z.literal("transform"),
   config: z.object({
-    mapping: z.record(z.string(), z.string()),
+    // Structured-output description is surfaced into the provider JSON
+    // schema so the model fills the mapping instead of emitting `{}`.
+    // The grammar can't express "min 1 key" on a record, so an empty
+    // mapping still parses here — `sanitizeAiWorkflow` demotes any
+    // empty-mapping transform to a `noop` placeholder rather than
+    // discarding the whole draft.
+    mapping: z
+      .record(z.string(), z.string())
+      .describe(
+        "Non-empty map of output field name -> template string (at least one entry), e.g. { city: '{{context.fetch.output.city}}' }. Do not emit an empty object.",
+      ),
   }),
 });
 
