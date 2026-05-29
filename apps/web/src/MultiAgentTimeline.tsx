@@ -33,7 +33,7 @@ const GHOST_PHASES = [
   { key: 'completion', tone: 'success' },
 ] as const
 
-type Tone = 'info' | 'success' | 'warning' | 'error'
+type Tone = 'info' | 'config' | 'tool' | 'success' | 'warning' | 'error'
 
 type TimelineItem = {
   id: string
@@ -102,6 +102,10 @@ function getTone(event: RunEvent): Tone {
   if (event.type.includes('reflection')) return payload.decision === 'accept' ? 'success' : 'warning'
   if (event.type.includes('completed')) return 'success'
   if (event.type.includes('planned')) return 'warning'
+  // Lifecycle starts get a hue instead of collapsing to gray: tool calls
+  // read cyan ("tool call" lane), team/step starts read cobalt ("planning").
+  if (event.type.endsWith('.tool.started')) return 'tool'
+  if (event.type.endsWith('.step.started') || event.type.endsWith('.started')) return 'config'
   return 'info'
 }
 
