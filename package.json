@@ -18,6 +18,7 @@
     "evals": "node scripts/run-evals.mjs",
     "seed:recovery-matrix": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-recovery-matrix.ts",
     "seed:demos": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-demos.ts",
+    "seed:full": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-full.ts",
     "backfill:usage-workflowid": "pnpm --filter @janusly/api exec tsx ../../scripts/backfill-usage-workflowid.ts"
   }
 }
