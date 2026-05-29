@@ -3483,7 +3483,12 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .timeline-card[data-tone="warning"]::before { background: var(--we-warning); }
 .timeline-card[data-tone="error"] { background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
 .timeline-card[data-tone="error"]::before { background: var(--we-danger); }
+.timeline-card[data-tone="info"] { background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); }
 .timeline-card[data-tone="info"]::before { background: var(--we-primary); }
+.timeline-card[data-tone="config"] { background: var(--we-info-soft); border-color: var(--we-info-border-30); }
+.timeline-card[data-tone="config"]::before { background: var(--we-info); }
+.timeline-card[data-tone="tool"] { background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
+.timeline-card[data-tone="tool"]::before { background: var(--we-accent); }
 
 .timeline-card-label {
   font-size: 13px;
