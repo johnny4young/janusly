@@ -58,12 +58,19 @@ export function InspectorPanel({
             <h3>{getNodeLabel(selectedNode.data.type)}</h3>
             <p className="helper-text">{getNodeConfigSummary(selectedNode.data.type, selectedNode.data.config ?? {})}</p>
           </div>
-          <span className="status-pill" data-status={status}>{formatStatusLabel(status)}</span>
+          <div className="inspector-header-pills">
+            <span className="status-pill" data-status={status}>{formatStatusLabel(status)}</span>
+            <span
+              className={`we-pill ${nodeIssues.length ? 'we-pill--red' : 'we-pill--green'}`}
+              data-testid="inspector-validation-pill"
+            >
+              {nodeIssues.length ? t('rightPanel.inspector.issueCount', { count: nodeIssues.length }) : t('rightPanel.inspector.ready')}
+            </span>
+          </div>
         </div>
 
         <div className="inspector-meta">
           <span>{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}</span>
-          <span>{nodeIssues.length ? t('rightPanel.inspector.issueCount', { count: nodeIssues.length }) : t('rightPanel.inspector.noIssues')}</span>
         </div>
 
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />

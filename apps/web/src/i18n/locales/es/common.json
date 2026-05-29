@@ -1338,6 +1338,7 @@
   "rightPanel.inspector.issueCount_one": "{{count}} problema",
   "rightPanel.inspector.issueCount_other": "{{count}} problemas",
   "rightPanel.inspector.noIssues": "Sin problemas de validación",
+  "rightPanel.inspector.ready": "Listo",
   "rightPanel.inspector.stepKindLabel": "Tipo de paso",
   "rightPanel.inspector.advancedJsonSummary": "JSON avanzado",
   "rightPanel.inspector.advancedJsonHelper": "Úsalo cuando necesites editar el payload exacto enviado al motor.",

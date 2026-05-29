@@ -1285,6 +1285,14 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   margin-top: 4px;
 }
 
+.inspector-header-pills {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .inspector-meta {
   border-top: 1px solid var(--we-line);
   color: var(--we-muted);
