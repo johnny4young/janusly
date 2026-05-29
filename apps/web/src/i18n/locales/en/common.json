@@ -1338,6 +1338,7 @@
   "rightPanel.inspector.issueCount_one": "{{count}} issue",
   "rightPanel.inspector.issueCount_other": "{{count}} issues",
   "rightPanel.inspector.noIssues": "No validation issues",
+  "rightPanel.inspector.ready": "Ready",
   "rightPanel.inspector.stepKindLabel": "Step kind",
   "rightPanel.inspector.advancedJsonSummary": "Advanced JSON",
   "rightPanel.inspector.advancedJsonHelper": "Use this when you need to edit the exact payload sent to the engine.",
