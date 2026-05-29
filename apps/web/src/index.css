@@ -5763,19 +5763,34 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   color: var(--we-text-1);
 }
 
-.we-cluster-pill--secret_missing,
-.we-cluster-pill--ai_provider {
+/* One color per cause so the cluster's category reads before its text —
+   not a single amber "OTHER" for everything. Buckets mirror the proposal's
+   secret / http / ai / config / other palette (all token-only). */
+.we-cluster-pill--secret_missing {
   background: var(--we-danger-soft);
   color: var(--we-danger);
 }
 
 .we-cluster-pill--http_error,
-.we-cluster-pill--network_timeout,
-.we-cluster-pill--parse_error,
-.we-cluster-pill--tool_input,
-.we-cluster-pill--unknown {
+.we-cluster-pill--network_timeout {
   background: var(--we-warning-soft);
   color: var(--we-warning);
+}
+
+.we-cluster-pill--ai_provider {
+  background: var(--we-accent-soft);
+  color: var(--we-accent);
+}
+
+.we-cluster-pill--parse_error,
+.we-cluster-pill--tool_input {
+  background: var(--we-info-soft);
+  color: var(--we-info);
+}
+
+.we-cluster-pill--unknown {
+  background: var(--we-surface-muted);
+  color: var(--we-muted);
 }
 
 /* ----------------- Workflow version diff -------------------------------- */
