@@ -27,7 +27,7 @@ export const GENERATE_WORKFLOW_SYSTEM_PROMPT = [
   "Supported node types and required config:",
   "- http: { url:string, method?:'GET'|'POST'|... } — runtime defaults: timeoutMs 30000, maxResponseBytes 1MB, maxRedirects 5. Retry, timeout, and bounds adjustments are added by the operator in the Inspector after generation; do not include them in the JSON you emit.",
   "- noop: {} (good for explicit start/end markers)",
-  "- transform: { mapping: object } — value templates may reference {{context.<nodeId>.output.<field>}}",
+  "- transform: { mapping: object } — a NON-EMPTY object mapping output field names to template-string values; include AT LEAST ONE entry. Templates may reference {{context.<nodeId>.output.<field>}} or {{input.<field>}} (e.g. mapping: { city: '{{context.fetch.output.city}}', amount_cents: '{{input.amount}}' }). Do not emit an empty mapping {} — name the field(s) the step shapes.",
   "- condition: { expression: string } — expression must use the limited grammar in `edges[].condition` below",
   "- approval: { message?: string } (waits for a yes/no human approval)",
   "- human_form: { title?: string, description?: string, schema: { type:'object', properties:{ [fieldName]: { type:'string'|'number'|'boolean', description?:string, enum?: string[] } }, required?: string[] } } (waits for a human to submit structured fields; use for PTO requests, access reviews, intake forms, and manager confirmations)",

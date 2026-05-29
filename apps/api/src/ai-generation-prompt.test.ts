@@ -137,6 +137,53 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
       expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
     }
   });
+
+  it("demotes an under-specified transform (empty mapping) to a noop placeholder instead of discarding the whole draft", () => {
+    // Reproducer for the silent-fallback bug: the LLM intermittently
+    // emits a `transform` step with an empty `config.mapping`. Pre-fix
+    // this threw "Transform node requires a non-empty config.mapping
+    // object", which the route's outer try/catch converted into a
+    // fallback template — losing the otherwise-valid `loop` + `http`
+    // nodes around it. Now the unfilled node demotes to a `noop`
+    // placeholder the operator completes in the Inspector.
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "loop_collect",
+      name: "Loop collect",
+      nodes: [
+        { id: "iterate", type: "loop", config: { items: "{{input.items}}" } },
+        { id: "shape", type: "transform", config: { mapping: {} } },
+        { id: "call", type: "http", config: { url: "https://api.example.com/item" } },
+      ],
+      edges: [
+        { from: "iterate", to: "shape" },
+        { from: "shape", to: "call" },
+      ],
+    };
+
+    expect(() => sanitizeAiWorkflow(draft)).not.toThrow();
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes.map((n) => n.type)).toEqual(["loop", "noop", "http"]);
+    expect(sanitized.nodes[1]?.config).toEqual({});
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("preserves a transform node that has a non-empty mapping", () => {
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "shape_draft",
+      name: "Shape draft",
+      nodes: [
+        { id: "shape", type: "transform", config: { mapping: { name: "{{input.name}}" } } },
+      ],
+      edges: [],
+    };
+
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes[0]?.type).toBe("transform");
+    expect((sanitized.nodes[0]?.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
 });
 
 describe("fallbackWorkflowForPrompt — email-shape matcher", () => {
