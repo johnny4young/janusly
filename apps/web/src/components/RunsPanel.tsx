@@ -17,7 +17,7 @@
  */
 
 import React, { useState } from 'react'
-import { Activity, CheckCircle2, Download, FlaskConical, GitBranch, ListChecks, RefreshCw, Send } from 'lucide-react'
+import { Activity, CheckCircle2, CircleX, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
 import type { RunNode, RunSummary, WorkflowInputSchemaShape } from '../types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { formatStatusLabel } from '../constants'
@@ -33,6 +33,7 @@ import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
+import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
 
 type HumanFormWaiting = {
   title?: string
@@ -123,6 +124,7 @@ export function RunsPanel({
   const [humanFormErrors, setHumanFormErrors] = useState<string[]>([])
   const [humanFormSubmitting, setHumanFormSubmitting] = useState(false)
   const addToast = useWorkflowStore(state => state.addToast)
+  const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   // Replay Lab source — set when the operator clicks "Open in Lab" from
   // the active-run card or a history row. The dialog mounts overlay-style
   // while non-null and the source run id stays around as state until the
@@ -156,14 +158,60 @@ export function RunsPanel({
     ? runNodes.filter(node => node.status === 'succeeded' || node.status === 'failed')
     : []
 
+  // Unified metric recipe (shared `VitalSignsStrip`): Total neutral, Active
+  // info, Done healthy, Failed danger — and the Failed tile graduates to a
+  // clickable shortcut into the Recovery Center (home) whenever there's
+  // something to recover, so "16 failed" stops being a dead number.
+  const runMetricTiles: VitalSignsTile[] = [
+    {
+      icon: <ListChecks size={15} aria-hidden="true" />,
+      label: t('rightPanel.runs.metric.total') as string,
+      display: String(runs.length),
+      severity: 'neutral',
+      numericValue: runs.length,
+      rationale: t('rightPanel.runs.metric.totalSub') as string,
+      testId: 'runs-metric-total',
+    },
+    {
+      icon: <Activity size={15} aria-hidden="true" />,
+      label: t('rightPanel.runs.metric.active') as string,
+      display: String(activeRuns),
+      severity: 'info',
+      numericValue: activeRuns,
+      rationale: t('rightPanel.runs.metric.activeSub') as string,
+      testId: 'runs-metric-active',
+    },
+    {
+      icon: <CheckCircle2 size={15} aria-hidden="true" />,
+      label: t('rightPanel.runs.metric.done') as string,
+      display: String(completedRuns),
+      severity: 'healthy',
+      numericValue: completedRuns,
+      rationale: t('rightPanel.runs.metric.doneSub') as string,
+      testId: 'runs-metric-done',
+    },
+    {
+      icon: <CircleX size={15} aria-hidden="true" />,
+      label: t('rightPanel.runs.metric.failed') as string,
+      display: String(failedRuns),
+      severity: failedRuns > 0 ? 'unhealthy' : 'healthy',
+      numericValue: failedRuns,
+      rationale: failedRuns > 0
+        ? (t('rightPanel.runs.metric.failedOpen') as string)
+        : (t('rightPanel.runs.metric.failedClear') as string),
+      onClick: failedRuns > 0 ? () => setActiveTab('home') : undefined,
+      ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria') as string) : undefined,
+      testId: 'runs-metric-failed',
+    },
+  ]
+
   return (
     <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
-      <section className="metric-strip" aria-label={t('rightPanel.runs.summaryAria') as string}>
-        <Metric label={t('rightPanel.runs.metric.total') as string} value={runs.length} icon={<ListChecks size={15} />} />
-        <Metric label={t('rightPanel.runs.metric.active') as string} value={activeRuns} icon={<Activity size={15} />} />
-        <Metric label={t('rightPanel.runs.metric.done') as string} value={completedRuns} icon={<CheckCircle2 size={15} />} />
-        <Metric label={t('rightPanel.runs.metric.failed') as string} value={failedRuns} icon={<RefreshCw size={15} />} />
-      </section>
+      <VitalSignsStrip
+        tiles={runMetricTiles}
+        ariaLabel={t('rightPanel.runs.summaryAria') as string}
+        testId="runs-metric-strip"
+      />
 
       {activeRunId && (
         <section className="panel-card">
@@ -410,16 +458,5 @@ export function RunsPanel({
         />
       )}
     </PanelChrome>
-  )
-}
-
-/** Single metric tile rendered in the 4-cell strip at the top of the Runs tab. */
-function Metric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
-  return (
-    <div className="metric-item">
-      <span>{icon}</span>
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </div>
   )
 }
