@@ -354,7 +354,25 @@ a { color: var(--we-primary); }
 .top-bar-cta:hover { filter: brightness(1.05); }
 .top-bar-cta:active { transform: translateY(1px); }
 
-.top-bar-cta--active {
+/* Attention (1–N open DLQ, no active blocker): amber soft — "there's work",
+   without the emotional weight of a permanent red. */
+.top-bar-cta--attention {
+  background: var(--we-warning-soft);
+  color: var(--we-warning);
+  border: 1px solid color-mix(in srgb, var(--we-warning) 30%, transparent);
+  box-shadow: none;
+  padding: 5px 11px;
+  font-weight: 700;
+}
+
+.top-bar-cta--attention:hover {
+  background: color-mix(in srgb, var(--we-warning) 16%, var(--we-surface) 84%);
+  filter: none;
+}
+
+/* Blocked (a run paused on a human gate right now): the one condition that
+   earns the strongest red. */
+.top-bar-cta--blocked {
   background: linear-gradient(135deg, var(--we-danger), color-mix(in srgb, var(--we-danger) 70%, var(--we-primary-strong)));
   box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--we-danger) 55%, transparent);
 }
