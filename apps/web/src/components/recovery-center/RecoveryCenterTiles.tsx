@@ -305,7 +305,7 @@ export function FailureClustersTile({
                 <div className="we-recovery-watch-row" data-testid={`recovery-center-watch-row-${cluster.signature}`}>
                   <span className="we-recovery-watch-row__sig">{cluster.signature}</span>
                   <div className="we-recovery-watch-row__body">
-                    <strong>{clusterCategoryLabel(cluster.category)}</strong>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{clusterCategoryLabel(cluster.category)}</span>
                     <small>{t('recoveryCenter.tile.clusters.frequency', { count: cluster.frequency })} · {clusterOwnerLabel(cluster.suggestedOwner)}</small>
                   </div>
                   <span className={`we-recovery-watch-row__state we-recovery-watch-row__state--${state}`}>{stateLabel}</span>

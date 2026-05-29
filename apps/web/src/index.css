@@ -1293,6 +1293,11 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   flex-shrink: 0;
 }
 
+/* Recovery Center hero CTA row (action-first mode when failures exist). */
+.we-recovery-center-hero__actions {
+  margin-top: 14px;
+}
+
 .inspector-meta {
   border-top: 1px solid var(--we-line);
   color: var(--we-muted);

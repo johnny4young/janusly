@@ -23,6 +23,7 @@ type InspectorPanelProps = {
   runNodes: RunNode[]
   validationIssues: ValidationIssue[]
   tools: ToolSchema[]
+  currentWorkflowName?: string
   currentWorkflowInputs?: WorkflowDefinition['inputs']
   currentWorkflowOutputs?: WorkflowDefinition['outputs']
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
@@ -36,6 +37,7 @@ export function InspectorPanel({
   runNodes,
   validationIssues,
   tools,
+  currentWorkflowName,
   currentWorkflowInputs,
   currentWorkflowOutputs,
   onUpdateNodeConfig,
@@ -56,6 +58,9 @@ export function InspectorPanel({
           <div>
             <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
             <h3>{getNodeLabel(selectedNode.data.type)}</h3>
+            <p className="helper-text mono">
+              {currentWorkflowName ? `${currentWorkflowName} › ` : ''}{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}
+            </p>
             <p className="helper-text">{getNodeConfigSummary(selectedNode.data.type, selectedNode.data.config ?? {})}</p>
           </div>
           <div className="inspector-header-pills">
@@ -67,10 +72,6 @@ export function InspectorPanel({
               {nodeIssues.length ? t('rightPanel.inspector.issueCount', { count: nodeIssues.length }) : t('rightPanel.inspector.ready')}
             </span>
           </div>
-        </div>
-
-        <div className="inspector-meta">
-          <span>{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}</span>
         </div>
 
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />

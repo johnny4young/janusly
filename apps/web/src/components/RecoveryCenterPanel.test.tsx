@@ -450,8 +450,11 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       deadLetters={populatedDlq as never}
     />)
     await waitFor(() => {
-      const greeting = screen.getByTestId('recovery-center-greeting')
-      expect(greeting.textContent).toMatch(/jane/i)
+      // With open failures the hero leads with the action title and demotes
+      // the personalized greeting to the subline — assert the name still
+      // renders somewhere in the hero, not specifically in the h1.
+      const hero = screen.getByTestId('recovery-center-greeting').closest('header')
+      expect(hero?.textContent).toMatch(/jane/i)
     })
   })
 })
