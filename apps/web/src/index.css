@@ -9185,6 +9185,35 @@ button.we-ops-metric-card--button {
 .we-secret-pill--warn { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
 .we-secret-pill--unhealthy { color: var(--we-danger); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
 
+/* --- C6 densification: Recipes gallery, Tools params, list toolbar ------ */
+
+/* Recipes — even 2-col gallery so patterns compare side by side. */
+.we-recipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 760px) { .we-recipe-grid { grid-template-columns: 1fr; } }
+
+/* Tools — required (cobalt) vs optional (muted) params in one wrap row. */
+.we-tool-params { display: flex; flex-wrap: wrap; gap: 6px; }
+.we-param {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.we-param--required { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 25%, transparent); }
+.we-param--optional { color: var(--we-muted); background: var(--we-surface-muted); border-color: var(--we-line); }
+
+/* List toolbar — search + sort segmented over a dense list (Flows). */
+.we-list-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.we-list-search { position: relative; display: inline-flex; align-items: center; flex: 1 1 180px; min-width: 0; }
+.we-list-search > svg { position: absolute; left: 10px; color: var(--we-muted); pointer-events: none; }
+.we-list-search > input { width: 100%; padding-left: 30px; }
+.we-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 8px; background: var(--we-surface-muted); border: 1px solid var(--we-line-strong); }
+.we-seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 600; color: var(--we-ink-soft); cursor: pointer; }
+.we-seg button[aria-pressed="true"] { background: var(--we-surface); color: var(--we-primary); box-shadow: 0 1px 2px color-mix(in srgb, var(--we-ink) 6%, transparent); }
+
 .we-ops-credential-card__empty {
   font-size: 12px;
   color: var(--we-text-2);

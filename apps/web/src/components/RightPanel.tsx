@@ -171,12 +171,16 @@ function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'tem
   const { t } = useT()
   return (
     <PanelChrome title={t('rightPanel.templates.title') as string} description={t('rightPanel.templates.description') as string} icon={<Workflow size={18} />}>
-      <div className="panel-list">
-        {templates.length === 0 && <EmptyView icon={<Workflow size={22} />} title={t('rightPanel.templates.empty.title') as string} body={t('rightPanel.templates.empty.body') as string} />}
+      {templates.length === 0 && (
+        <div className="panel-list">
+          <EmptyView icon={<Workflow size={22} />} title={t('rightPanel.templates.empty.title') as string} body={t('rightPanel.templates.empty.body') as string} />
+        </div>
+      )}
+      <div className="we-recipe-grid">
         {templates.map(template => (
           <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
             <div className="split-row" style={{ width: '100%' }}>
-              <span className="section-kicker">{tTemplateCategory(template)}</span>
+              <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
               <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
             </div>
             <strong>{tTemplateName(template)}</strong>
@@ -202,12 +206,12 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
               <span className="mode-pill mode-pill-neutral">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
             </div>
             <span>{tToolDescription(tool)}</span>
-            {(tool.required?.length || tool.optional?.length) && (
-              <div className="mini-grid mini-grid-tight">
-                {(tool.required ?? []).map(field => <span key={`required-${field}`}>{t('rightPanel.tools.requiredField', { field })}</span>)}
-                {(tool.optional ?? []).map(field => <span key={`optional-${field}`}>{t('rightPanel.tools.optionalField', { field })}</span>)}
+            {(tool.required?.length || tool.optional?.length) ? (
+              <div className="we-tool-params">
+                {(tool.required ?? []).map(field => <span key={`required-${field}`} className="we-param we-param--required">{field}</span>)}
+                {(tool.optional ?? []).map(field => <span key={`optional-${field}`} className="we-param we-param--optional">{field}</span>)}
               </div>
-            )}
+            ) : null}
             <button className="small-command" onClick={() => onInstallPlugin(tool.name)}>{t('rightPanel.tools.installTool')}</button>
           </div>
         ))}
