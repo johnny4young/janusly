@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node scripts/run-dev.mjs",
     "dev:doctor": "node scripts/dev-doctor.mjs",
-    "down": "docker compose down",
+    "stop": "docker compose stop",
     "clean": "docker compose down -v",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
