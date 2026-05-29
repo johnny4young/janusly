@@ -9210,6 +9210,7 @@ button.we-ops-metric-card--button {
 .we-secret-pill--healthy { color: var(--we-success); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
 .we-secret-pill--warn { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
 .we-secret-pill--unhealthy { color: var(--we-danger); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
+.we-secret-pill--neutral { color: var(--we-muted); background: var(--we-surface-2); border-color: var(--we-line-strong); }
 
 /* --- C6 densification: Recipes gallery, Tools params, list toolbar ------ */
 
