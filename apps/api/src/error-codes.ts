@@ -51,7 +51,9 @@ export type ApiErrorCode =
   | "dlq_field_required"
   // workflows
   | "workflow_not_found"
-  | "workflow_name_required";
+  | "workflow_name_required"
+  // credentials
+  | "credential_rotation_conflict";
 
 /**
  * Canonical 4xx response envelope. The `error` field is the English

@@ -64,4 +64,53 @@ export async function listCredentialsForOrg(orgId: string): Promise<Credential[]
     .where(eq(credentials.orgId, orgId));
 }
 
+/** Outcome of a secret-ref rotation. Never carries the secret value or the
+ *  env-var name — callers learn only success (with the new concurrency
+ *  token) or why it failed. */
+export type RotateCredentialResult =
+  | { ok: true; updatedAt: Date }
+  | { ok: false; reason: "not_found" | "conflict" };
+
+/**
+ * Atomically rotate the `secret_ref` (env-var NAME) of the credential named
+ * `name` for an org. When `ifMatchUpdatedAt` is supplied the UPDATE is
+ * CAS-guarded on `updated_at` (millisecond precision — see schema): a stale
+ * token matches zero rows and returns `conflict`, so a concurrent edit can't
+ * be silently clobbered. Multi-tenant scope via `eq(orgId)` — a credential
+ * from another org is never touched. The secret VALUE is irrelevant here;
+ * only the env-var name (`secretRef`) is stored, exactly as on create.
+ */
+export async function rotateCredentialSecretRef(input: {
+  orgId: string;
+  name: string;
+  newSecretRef: string;
+  ifMatchUpdatedAt?: string | null;
+}): Promise<RotateCredentialResult> {
+  const conds = [eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)];
+  if (input.ifMatchUpdatedAt) {
+    const ifMatchDate = new Date(input.ifMatchUpdatedAt);
+    if (Number.isNaN(ifMatchDate.getTime())) {
+      const existing = await db
+        .select({ id: credentials.id })
+        .from(credentials)
+        .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
+      return { ok: false, reason: existing.length === 0 ? "not_found" : "conflict" };
+    }
+    conds.push(eq(credentials.updatedAt, ifMatchDate));
+  }
+  const updated = await db
+    .update(credentials)
+    .set({ secretRef: input.newSecretRef, updatedAt: new Date() })
+    .where(and(...conds))
+    .returning({ updatedAt: credentials.updatedAt });
+  const first = updated[0];
+  if (first?.updatedAt) return { ok: true, updatedAt: first.updatedAt };
+  // Zero rows updated — separate "no such credential" from "stale If-Match".
+  const existing = await db
+    .select({ id: credentials.id })
+    .from(credentials)
+    .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
+  return { ok: false, reason: existing.length === 0 ? "not_found" : "conflict" };
+}
+
 // Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".

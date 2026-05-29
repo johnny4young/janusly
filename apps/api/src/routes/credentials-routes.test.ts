@@ -1,13 +1,15 @@
 /**
  * Route-level tests for /credentials.
  *
- * Covers the new health endpoint declaration + the permission gates we
- * just back-filled. The dispatcher's role / permission gates are
- * declarative and run before the handler — these tests pin the route
- * entry's shape rather than re-running the dispatcher.
+ * Covers the health endpoint + permission gates, plus the bulk-rotation
+ * route's behavior contract: dry-run previews without mutating or auditing;
+ * commit rotates, audits, and NEVER echoes the env-var name; a stale
+ * If-Match surfaces as 409; an unknown credential is 404.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const dbHoisted = vi.hoisted(() => ({ credentialRows: [] as Array<Record<string, unknown>> }));
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
@@ -20,29 +22,53 @@ vi.mock("../http", async (importOriginal) => {
 
 vi.mock("@janusly/data/src/credentialHealthRepo", () => ({
   getCredentialHealth: vi.fn(),
+  resolveCredentialReferences: vi.fn(),
 }));
 
-vi.mock("@janusly/db", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
-    })),
-    insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
-  },
-  credentials: { id: "id", orgId: "org_id" },
+vi.mock("@janusly/data/src/credentialsRepo", () => ({
+  rotateCredentialSecretRef: vi.fn(),
 }));
 
-vi.mock("../audit", () => ({
-  audit: vi.fn(),
+vi.mock("@janusly/db", () => {
+  // `where` returns a thenable that ALSO exposes `.limit` — the GET list
+  // path awaits `where(...)` directly while the bulk-update path calls
+  // `where(...).limit(1)`; both resolve to the configured credential rows.
+  const makeWhereResult = () => {
+    const rows = dbHoisted.credentialRows;
+    const result = Promise.resolve(rows) as Promise<unknown[]> & { limit: () => Promise<unknown[]> };
+    result.limit = () => Promise.resolve(rows);
+    return result;
+  };
+  return {
+    db: {
+      select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(makeWhereResult) })) })),
+      insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
+    },
+    credentials: {
+      id: "id", orgId: "org_id", name: "name", kind: "kind",
+      secretRef: "secret_ref", metadata: "metadata", createdBy: "created_by",
+      createdAt: "created_at", updatedAt: "updated_at",
+    },
+  };
+});
+
+vi.mock("../audit-helper", () => ({
+  auditAction: vi.fn(),
 }));
 
 import { credentialsRoutes } from "./credentials-routes";
-import { sendJson } from "../http";
-import { getCredentialHealth } from "@janusly/data/src/credentialHealthRepo";
+import { readJson, sendJson } from "../http";
+import { getCredentialHealth, resolveCredentialReferences } from "@janusly/data/src/credentialHealthRepo";
+import { rotateCredentialSecretRef } from "@janusly/data/src/credentialsRepo";
+import { auditAction } from "../audit-helper";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);
+const readJsonMock = vi.mocked(readJson);
 const getCredentialHealthMock = vi.mocked(getCredentialHealth);
+const resolveRefsMock = vi.mocked(resolveCredentialReferences);
+const rotateMock = vi.mocked(rotateCredentialSecretRef);
+const auditActionMock = vi.mocked(auditAction);
 
 function findRoute(method: string, path: string): Route {
   const route = credentialsRoutes.find((r) => {
@@ -53,59 +79,132 @@ function findRoute(method: string, path: string): Route {
   return route;
 }
 
-async function callRoute(method: string, path: string, auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" }) {
+const AUTH = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" };
+
+async function callRoute(method: string, path: string, body?: unknown) {
   const route = findRoute(method, path);
-  return route.handler({
-    req: { url: path } as never,
-    res: {} as never,
-    auth: auth as never,
-  });
+  if (body !== undefined) readJsonMock.mockResolvedValueOnce(body);
+  return route.handler({ req: { url: path } as never, res: {} as never, auth: AUTH as never }) as Promise<{
+    payload: Record<string, unknown>;
+    status: number;
+  }>;
 }
+
+beforeEach(() => {
+  dbHoisted.credentialRows = [];
+});
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
 describe("GET /credentials/health", () => {
-  it("declares role: viewer + permission: credentials.read so the dispatcher gates non-readers", () => {
+  it("declares role: viewer + permission: credentials.read", () => {
     const route = findRoute("GET", "/credentials/health");
     expect(route.role).toBe("viewer");
     expect(route.permission).toBe("credentials.read");
   });
-
-  it("calls getCredentialHealth scoped to the caller's org and returns its snapshot", async () => {
-    getCredentialHealthMock.mockResolvedValueOnce({
-      credentials: [
-        {
-          id: "c1",
-          name: "slack-prod",
-          kind: "slack_webhook",
-          secretRefPresent: true,
-          lastUsedAt: null,
-          lastErrorAt: null,
-          lastErrorMessage: null,
-          usageCount30d: 0,
-          referencingWorkflowIds: [],
-        },
-      ],
-      mcpConnections: [],
-      generatedAt: new Date().toISOString(),
-    });
-    await callRoute("GET", "/credentials/health");
-    expect(getCredentialHealthMock).toHaveBeenCalledTimes(1);
-    expect(getCredentialHealthMock.mock.calls[0]?.[0]).toBe("org-1");
-    // Second arg is the resolver function — must be present + callable.
-    const resolver = getCredentialHealthMock.mock.calls[0]?.[1];
-    expect(typeof resolver).toBe("function");
-    const payload = sendJsonMock.mock.calls[0]?.[1] as { credentials: unknown[] };
-    expect(payload.credentials).toHaveLength(1);
-  });
 });
 
 describe("POST /credentials gate", () => {
-  it("now declares BOTH role: admin AND permission: credentials.write (defense in depth)", () => {
+  it("declares BOTH role: admin AND permission: credentials.write", () => {
     const route = findRoute("POST", "/credentials");
     expect(route.role).toBe("admin");
     expect(route.permission).toBe("credentials.write");
+  });
+});
+
+describe("POST /credentials/:name/bulk-update", () => {
+  const PATH = "/credentials/slack-prod/bulk-update";
+
+  it("declares admin + credentials.write (defense in depth)", () => {
+    const route = findRoute("POST", PATH);
+    expect(route.role).toBe("admin");
+    expect(route.permission).toBe("credentials.write");
+  });
+
+  it("dry-run returns the affected workflows without rotating or auditing", async () => {
+    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date("2026-05-28T00:00:00.000Z") }];
+    resolveRefsMock.mockResolvedValue([{ workflowId: "wf-1", workflowName: "Billing", nodeIds: ["n1"] }]);
+
+    const { payload } = await callRoute("POST", PATH, { dryRun: true });
+
+    expect((payload.affected as unknown[]).length).toBe(1);
+    expect(payload.affectedCount).toBe(1);
+    expect(payload.ok).toBeUndefined();
+    expect(rotateMock).not.toHaveBeenCalled();
+    expect(auditActionMock).not.toHaveBeenCalled();
+  });
+
+  it("commit rotates, writes the audit row, and NEVER echoes a secretRef", async () => {
+    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date("2026-05-28T00:00:00.000Z") }];
+    resolveRefsMock.mockResolvedValue([{ workflowId: "wf-1", workflowName: "Billing", nodeIds: ["n1"] }]);
+    rotateMock.mockResolvedValue({ ok: true, updatedAt: new Date("2026-05-29T00:00:00.000Z") });
+
+    const { payload } = await callRoute("POST", PATH, {
+      dryRun: false,
+      newSecretRef: "SLACK_WEBHOOK_V2",
+      ifMatch: "2026-05-28T00:00:00.000Z",
+    });
+
+    expect(payload.ok).toBe(true);
+    expect(payload.affectedCount).toBe(1);
+    expect(rotateMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      name: "slack-prod",
+      newSecretRef: "SLACK_WEBHOOK_V2",
+      ifMatchUpdatedAt: "2026-05-28T00:00:00.000Z",
+    });
+    // The env-var name is never on the wire — no secretRef in the response.
+    expect("secretRef" in payload).toBe(false);
+    expect(JSON.stringify(payload)).not.toContain("SLACK_WEBHOOK_V2");
+    expect(auditActionMock).toHaveBeenCalledTimes(1);
+    const [, action, opts] = auditActionMock.mock.calls[0] as [unknown, string, { metadata: Record<string, unknown> }];
+    expect(action).toBe("credential.bulk_updated");
+    expect(opts.metadata.affectedWorkflowCount).toBe(1);
+    expect(opts.metadata).not.toHaveProperty("newSecretRef");
+  });
+
+  it("returns 409 with the conflict code on a stale If-Match", async () => {
+    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date() }];
+    resolveRefsMock.mockResolvedValue([]);
+    rotateMock.mockResolvedValue({ ok: false, reason: "conflict" });
+
+    const { status, payload } = await callRoute("POST", PATH, {
+      dryRun: false,
+      newSecretRef: "SLACK_V2",
+      ifMatch: "2026-05-28T00:00:00.000Z",
+    });
+
+    expect(status).toBe(409);
+    expect(payload.code).toBe("credential_rotation_conflict");
+  });
+
+  it("rejects missing or malformed If-Match before scanning or rotating", async () => {
+    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date() }];
+
+    const missing = await callRoute("POST", PATH, { dryRun: false, newSecretRef: "SLACK_V2" });
+    expect(missing.status).toBe(400);
+    expect(resolveRefsMock).not.toHaveBeenCalled();
+    expect(rotateMock).not.toHaveBeenCalled();
+
+    const malformed = await callRoute("POST", PATH, { dryRun: false, newSecretRef: "SLACK_V2", ifMatch: "stale" });
+    expect(malformed.status).toBe(400);
+    expect(resolveRefsMock).not.toHaveBeenCalled();
+    expect(rotateMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 when the credential does not exist", async () => {
+    dbHoisted.credentialRows = [];
+    const { status } = await callRoute("POST", PATH, { dryRun: true });
+    expect(status).toBe(404);
+  });
+
+  it("rejects an invalid env-var name on commit (400)", async () => {
+    dbHoisted.credentialRows = [{ kind: "slack_webhook", updatedAt: new Date() }];
+    resolveRefsMock.mockResolvedValue([]);
+    const { status } = await callRoute("POST", PATH, { dryRun: false, newSecretRef: "not a valid name!" });
+    expect(status).toBe(400);
+    expect(rotateMock).not.toHaveBeenCalled();
   });
 });

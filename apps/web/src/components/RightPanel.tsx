@@ -29,6 +29,7 @@ import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { WorkflowSloPanel } from './WorkflowSloPanel'
 import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
+import { CredentialRotateModal } from './CredentialRotateModal'
 import { type DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { OperationsPage } from './OperationsPage'
@@ -218,6 +219,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
   const [secretRef, setSecretRef] = useState('')
+  const [rotating, setRotating] = useState<string | null>(null)
 
   return (
     <PanelChrome title={t('rightPanel.credentials.title') as string} description={t('rightPanel.credentials.description') as string} icon={<KeyRound size={18} />}>
@@ -256,10 +258,16 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
               <strong>{credential.name}</strong>
               <span className="mode-pill mode-pill-neutral">{credential.kind}</span>
             </div>
-            <span>{'{{secret.' + credential.secretRef + '}}'}</span>
+            <span>{t('rightPanel.credentials.secretRefHidden')}</span>
+            <div className="form-actions">
+              <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>
+                {t('credentialRotation.action.rotate')}
+              </button>
+            </div>
           </div>
         ))}
       </div>
+      {rotating && <CredentialRotateModal credentialName={rotating} onClose={() => setRotating(null)} />}
     </PanelChrome>
   )
 }
