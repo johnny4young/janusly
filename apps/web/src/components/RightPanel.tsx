@@ -129,6 +129,7 @@ export function RightPanel(props: RightPanelProps) {
         runNodes={props.runNodes}
         validationIssues={props.validationIssues}
         tools={props.tools}
+        currentWorkflowName={props.currentWorkflowName}
         currentWorkflowInputs={props.currentWorkflowInputs}
         currentWorkflowOutputs={props.currentWorkflowOutputs}
         onUpdateNodeConfig={props.onUpdateNodeConfig}
