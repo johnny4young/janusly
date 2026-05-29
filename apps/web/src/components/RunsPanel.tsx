@@ -1,12 +1,12 @@
 /**
  * Right-side Runs tab body. Renders:
- *  - 4-cell metric strip (total / active / done / failed).
+ *  - Metric strip (shared VitalSignsStrip): total / active / done / failed.
  *  - Active-run card with cancel + open-in-Lab + workflow-output details.
+ *  - RunExplainChat for the active run ("Ask Janusly", above usage per §10).
  *  - Usage summary card (per-org cost/quota breakdown).
  *  - Paused-nodes action cards (human-form + approval pickers).
  *  - Failed-nodes action cards (per-node retry).
  *  - Fork-eligible nodes action cards (per-node Lab fork).
- *  - RunExplainChat for the active run.
  *  - DeadLettersPanel.
  *  - History list with Open / Lab / Export / Send actions per row.
  *  - 4 overlay dialogs (HumanForm, ReplayLab, ReplayLabFork, ReportDelivery)
@@ -259,6 +259,8 @@ export function RunsPanel({
         </section>
       )}
 
+      <RunExplainChat runId={activeRunId} />
+
       <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
 
       {waitingNodes.length > 0 && (
@@ -357,8 +359,6 @@ export function RunsPanel({
           ))}
         </section>
       )}
-
-      <RunExplainChat runId={activeRunId} />
 
       <DeadLettersPanel
         deadLetters={deadLetters}
