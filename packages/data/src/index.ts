@@ -73,6 +73,7 @@ export * from "./workflowHealthRepo";
 export * from "./workflowMetadataRepo";
 export * from "./workflowRollbackRepo";
 export * from "./workflowSloRepo";
+export * from "./workflowsListRepo";
 
 // ── Namespaced re-exports (repos only) — IDE-discoverable groupings ──────
 export * as alertDispatchesRepo from "./alertDispatchesRepo";
@@ -111,3 +112,4 @@ export * as workflowHealthRepo from "./workflowHealthRepo";
 export * as workflowMetadataRepo from "./workflowMetadataRepo";
 export * as workflowRollbackRepo from "./workflowRollbackRepo";
 export * as workflowSloRepo from "./workflowSloRepo";
+export * as workflowsListRepo from "./workflowsListRepo";
