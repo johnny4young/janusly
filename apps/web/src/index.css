@@ -2122,6 +2122,50 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   margin-top: 4px;
 }
 
+/* Phantom lanes under the empty multi-agent timeline — attenuated phase
+   rows that prefigure the populated structure before any team has run. */
+.we-ghost-lanes {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.we-ghost-lane {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.we-ghost-lane:nth-child(1) { opacity: 0.55; }
+.we-ghost-lane:nth-child(2) { opacity: 0.45; }
+.we-ghost-lane:nth-child(3) { opacity: 0.35; }
+.we-ghost-lane:nth-child(4) { opacity: 0.28; }
+.we-ghost-lane__phase {
+  min-width: 104px;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.we-ghost-lane__phase--config { color: var(--we-info); background: var(--we-info-soft); border-color: color-mix(in srgb, var(--we-info) 30%, transparent); }
+.we-ghost-lane__phase--ai { color: var(--we-accent); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 32%, transparent); }
+.we-ghost-lane__phase--http { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+.we-ghost-lane__phase--success { color: var(--we-success); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+.we-ghost-lane__bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--we-surface-muted);
+}
+
 /* ==========================================================================
    Command palette — Cmd+K modal. Glass backdrop, lifted card, keyboard
    list. Lives in App.tsx's `overlay` slot. Mirrors Linear/Cursor patterns.

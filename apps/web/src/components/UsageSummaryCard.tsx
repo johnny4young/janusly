@@ -13,7 +13,9 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { Gauge } from 'lucide-react'
 import { api } from '../api'
+import { EmptyState } from './EmptyState'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
@@ -193,7 +195,12 @@ export function UsageSummaryCard({
         <button className="small-command" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</button>
       </div>
       {Object.keys(usage).length === 0 ? (
-        <p className="empty-state">{t('rightPanel.usage.empty')}</p>
+        <EmptyState
+          icon={<Gauge />}
+          kicker={t('rightPanel.usage.emptyKicker') as string}
+          body={t('rightPanel.usage.empty') as string}
+          testId="usage-empty"
+        />
       ) : (
         <div className="mini-grid">
           {Object.entries(usage).map(([key, value]) => (
