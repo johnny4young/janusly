@@ -2857,7 +2857,8 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 .we-flow-demo__steps {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
   gap: 0;
   padding: 0;
@@ -2866,7 +2867,6 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 .we-flow-demo__step {
-  flex: 1 1 0;
   min-width: 0;
   display: grid;
   grid-template-rows: auto auto auto auto auto;
@@ -2994,16 +2994,24 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 .we-flow-demo__arrow {
-  display: grid;
+  display: none;
+  grid-column: 1 / -1;
   place-items: center;
   padding: 0 6px;
   color: var(--we-faint);
 }
 
-@media (max-width: 900px) {
-  .we-flow-demo__steps { flex-direction: column; }
-  .we-flow-demo__arrow { transform: rotate(90deg); padding: 4px 0; }
+/* The demo renders inside the ~790px left column of .we-operator-grid, so
+   collapse on the project's canonical breakpoints (the grid itself drops to
+   one column at 1100px), not an orphan viewport value. */
+@media (max-width: 1100px) {
+  .we-flow-demo__steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .we-flow-demo__head { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .we-flow-demo__steps { grid-template-columns: 1fr; }
+  .we-flow-demo__arrow { display: grid; grid-column: 1 / -1; transform: rotate(90deg); padding: 4px 0; }
 }
 
 /* Composer seed transcript — sample AI/User conversation shown when
