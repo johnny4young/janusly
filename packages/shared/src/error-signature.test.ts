@@ -338,3 +338,17 @@ describe("normalizeErrorSignature — parse_error (modern V8 / Zod JSON)", () =>
     expect(normalizeErrorSignature(new Error('Unexpected token o, "..." is not valid JSON'), { nodeType: "transform" }).category).toBe("parse_error");
   });
 });
+
+describe("normalizeErrorSignature — secret_missing (chokepoint + plain phrasings)", () => {
+  it("clusters the generic integration/MCP 'credential secret missing for <name>'", () => {
+    const r = normalizeErrorSignature(new Error("credential secret missing for bot-github"), { nodeType: "tool" });
+    expect(r.category).toBe("secret_missing");
+    expect(r.signature).toBe("Missing secret: bot-github");
+    expect(r.suggestedOwner).toBe("ops");
+  });
+  it("clusters the plain 'Missing secret: <name>' phrasing", () => {
+    const r = normalizeErrorSignature(new Error("Missing secret: GITHUB_TOKEN"), { nodeType: "http" });
+    expect(r.category).toBe("secret_missing");
+    expect(r.signature).toBe("Missing secret: GITHUB_TOKEN");
+  });
+});
