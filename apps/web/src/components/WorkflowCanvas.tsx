@@ -33,8 +33,10 @@ type WorkflowCanvasProps = {
   onAddNode?: (type: string) => void
 }
 
-/** Render the workflow editor canvas with React Flow + custom step nodes. */
-export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode }: WorkflowCanvasProps) {
+/** Render the workflow editor canvas with React Flow + custom step nodes.
+ *  Memoized so it only re-renders when its (stable) graph + handler props
+ *  actually change, not on every unrelated store tick from the App root. */
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode }: WorkflowCanvasProps) {
   const { t } = useT()
   return (
     <div className="canvas-frame">
@@ -80,4 +82,4 @@ export function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onC
       </ReactFlow>
     </div>
   )
-}
+})

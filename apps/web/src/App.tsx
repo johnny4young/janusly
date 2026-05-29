@@ -172,6 +172,22 @@ export default function App() {
   const closePalette = useCallback(() => setPaletteOpen(false), [])
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
 
+  // Stable canvas handlers + palette list so React.memo(WorkflowCanvas) holds
+  // and the (expensive) canvas subtree stops re-rendering on unrelated store
+  // ticks. selectNode/selectEdge/setActiveTab are stable Zustand actions.
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: WorkflowGraphNode) => {
+    selectNode(node.id)
+    setActiveTab('inspector')
+  }, [selectNode, setActiveTab])
+  const handleEdgeClick = useCallback((_: React.MouseEvent, edge: WorkflowGraphEdge) => {
+    selectEdge(edge.id)
+    setActiveTab('inspector')
+  }, [selectEdge, setActiveTab])
+  const canvasPaletteTypes = useMemo(
+    () => (activeTab === 'copilot' ? ['http', 'ai', 'condition', 'tool', 'agent'] : undefined),
+    [activeTab],
+  )
+
   // Global keyboard shortcuts:
   //   Cmd/Ctrl+K — toggle command palette
   //   ?         — open keyboard shortcuts overlay (when not typing in an input)
@@ -882,15 +898,9 @@ export default function App() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={connect}
-                onNodeClick={(_, node) => {
-                  selectNode(node.id)
-                  setActiveTab('inspector')
-                }}
-                onEdgeClick={(_, edge) => {
-                  selectEdge(edge.id)
-                  setActiveTab('inspector')
-                }}
-                paletteNodeTypes={activeTab === 'copilot' ? ['http', 'ai', 'condition', 'tool', 'agent'] : undefined}
+                onNodeClick={handleNodeClick}
+                onEdgeClick={handleEdgeClick}
+                paletteNodeTypes={canvasPaletteTypes}
                 onAddNode={addNode}
               />
             </div>
