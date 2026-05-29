@@ -27,7 +27,7 @@ import React from 'react'
 import { useAnimatedNumber } from '../hooks/useAnimatedNumber'
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
 
-export type VitalSignsTileSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral'
+export type VitalSignsTileSeverity = 'healthy' | 'warn' | 'unhealthy' | 'neutral' | 'info'
 
 export type VitalSignsTile = {
   /** Lucide-react icon node (sized 14-16px). Decorative. */

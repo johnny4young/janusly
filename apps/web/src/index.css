@@ -1356,40 +1356,6 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   padding: 10px;
 }
 
-.metric-strip {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.metric-item {
-  align-items: center;
-  background: var(--we-surface);
-  border: 1px solid var(--we-line);
-  border-radius: 8px;
-  display: grid;
-  gap: 4px;
-  justify-items: start;
-  min-width: 0;
-  padding: 10px;
-}
-
-.metric-item span {
-  color: var(--we-primary);
-  display: inline-flex;
-}
-
-.metric-item strong {
-  font-size: 18px;
-  line-height: 1;
-}
-
-.metric-item small {
-  color: var(--we-muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .action-card {
   display: grid;
   gap: 10px;
@@ -5126,8 +5092,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
   .sidebar-actions,
   .node-palette,
-  .view-list,
-  .metric-strip {
+  .view-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -5212,7 +5177,6 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   .sidebar-actions,
   .node-palette,
   .view-list,
-  .metric-strip,
   .mini-grid {
     grid-template-columns: 1fr;
   }
@@ -6233,6 +6197,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-ops-metric-card--warn { border-left-color: var(--we-warning); }
 .we-ops-metric-card--unhealthy { border-left-color: var(--we-danger); }
 .we-ops-metric-card--neutral { border-left-color: var(--we-line-strong); }
+.we-ops-metric-card--info { border-left-color: var(--we-info); }
 
 .we-ops-metric-card__head {
   display: flex;
@@ -6285,6 +6250,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-ops-progress__fill--warn { background: var(--we-warning); }
 .we-ops-progress__fill--unhealthy { background: var(--we-danger); }
 .we-ops-progress__fill--neutral { background: var(--we-line-strong); }
+.we-ops-progress__fill--info { background: var(--we-info); }
 
 /* Clickable variant of a metric card — used by `<VitalSignsStrip />` when
    a tile carries an `onClick` handler (today: the home page's strip whose
