@@ -696,6 +696,13 @@ export default function App() {
   const env: 'sandbox' | 'production' = (import.meta as { env?: { PROD?: boolean } }).env?.PROD ? 'production' : 'sandbox'
   const envLabel = env === 'production' ? t('topbar.env.production') : t('topbar.env.sandbox')
   const openDlqCount = deadLetters.filter(dlq => dlq.status === 'open').length
+  // Graduated recovery urgency: red is reserved for an ACTIVE blocker (a run
+  // paused on a human gate right now), amber for "there's work" (open DLQ
+  // rows), soft green when there's nothing to recover — so the top-bar CTA
+  // stops shouting in red on every screen.
+  const blockerCount = runNodes.filter(node => node.status === 'waiting').length
+  const recoverState: 'blocked' | 'attention' | 'clear' =
+    blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
   const activeRunCount = runs.filter(run => run.status === 'running' || run.status === 'paused').length
   const queueCount = 0
   const isConnected = streamStatus === 'connected'
@@ -773,19 +780,29 @@ export default function App() {
             </div>
             <button
               type="button"
-              className={openDlqCount > 0 ? 'top-bar-cta top-bar-cta--active' : 'top-bar-cta top-bar-cta--clear'}
+              className={`top-bar-cta top-bar-cta--${recoverState}`}
               onClick={() => setActiveTab('home')}
-              aria-label={openDlqCount > 0 ? t('topbar.recoverAria', { count: openDlqCount }) : t('topbar.allClearAria')}
+              aria-label={
+                recoverState === 'blocked'
+                  ? t('topbar.blockerAria', { count: blockerCount }) as string
+                  : recoverState === 'attention'
+                    ? t('topbar.recoverAria', { count: openDlqCount }) as string
+                    : t('topbar.allClearAria') as string
+              }
             >
-              {openDlqCount > 0 ? (
-                <>
-                  <ShieldAlert size={13} aria-hidden="true" />
-                  <span>{t('topbar.recover', { count: openDlqCount })}</span>
-                </>
-              ) : (
+              {recoverState === 'clear' ? (
                 <>
                   <ShieldCheck size={13} aria-hidden="true" />
                   <span>{t('topbar.allClear')}</span>
+                </>
+              ) : (
+                <>
+                  <ShieldAlert size={13} aria-hidden="true" />
+                  <span>
+                    {recoverState === 'blocked'
+                      ? t('topbar.blocker', { count: blockerCount })
+                      : t('topbar.recover', { count: openDlqCount })}
+                  </span>
                 </>
               )}
             </button>
