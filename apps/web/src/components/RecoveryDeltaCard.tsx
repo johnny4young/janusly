@@ -225,6 +225,12 @@ export function RecoveryDeltaCard({
   return (
     <>
       <div className="we-recovery-delta-card" aria-label={t('recoveryDelta.aria') as string}>
+        {priorFailureSignature ? (
+          <div className="we-recovery-delta-card__head">
+            <span className="we-recovery-delta-card__title">{t('recoveryDelta.headTitle')}</span>
+            <span className="we-recovery-delta-card__id">{t('recoveryDelta.headSignature', { signature: priorFailureSignature })}</span>
+          </div>
+        ) : null}
         <RunCounterPill
           afterVersion={afterVersion}
           counts={data.recentRunsAgainstAfter}
