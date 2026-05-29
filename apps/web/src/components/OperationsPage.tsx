@@ -179,18 +179,26 @@ export function OperationsPage() {
 
   useEffect(() => {
     let cancelled = false
-    api('/health')
-      .then((payload) => {
-        if (cancelled) return
-        const health = (payload as HealthPayload).rateLimiter
-        setRateLimiterHealth(health ?? null)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setRateLimiterHealth(null)
-      })
-    return () => { cancelled = true }
-  }, [platformVersion])
+    const loadHealth = () => {
+      api('/health')
+        .then((payload) => {
+          if (cancelled) return
+          const health = (payload as HealthPayload).rateLimiter
+          setRateLimiterHealth(health ?? null)
+        })
+        .catch(() => {
+          if (cancelled) return
+          setRateLimiterHealth(null)
+        })
+    }
+    loadHealth()
+    // `/health` is infra state (the rate limiter), independent of workflow
+    // saves — poll it on a fixed cadence instead of refiring on every
+    // platformVersion bump. A save no longer refetches it, and a Redis
+    // degradation is still caught within the interval even while idle.
+    const id = window.setInterval(loadHealth, 20_000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
 
   // Sandbox zeros render neutral (decision: an empty workspace is "no
   // signal", not a red emergency). No-op once any run is terminal.
