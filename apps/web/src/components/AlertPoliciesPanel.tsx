@@ -11,7 +11,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Bell, Pencil, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Bell, BellOff, Pencil, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { EmptyState } from './EmptyState'
 import {
   ALERT_COOLDOWN_SECONDS_DEFAULT,
   ALERT_TRIGGERS,
@@ -570,7 +571,13 @@ export function AlertPoliciesPanel(): React.ReactElement {
       <div className="we-alert-policies__list" data-testid="alert-policies-list">
         {loading && <div className="we-list-row--empty">{t('common.loading')}</div>}
         {!loading && policies.length === 0 && (
-          <div className="we-list-row--empty">{t('alerts.panel.empty')}</div>
+          <EmptyState
+            icon={<BellOff />}
+            kicker={t('alerts.panel.emptyKicker') as string}
+            body={t('alerts.panel.empty') as string}
+            cta={showForm ? undefined : { label: t('alerts.panel.new') as string, onClick: () => setShowForm(true) }}
+            testId="alert-policies-empty"
+          />
         )}
         {!loading &&
           policies.map((policy) => (

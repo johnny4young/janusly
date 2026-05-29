@@ -19,6 +19,7 @@ import { useWorkflowStore } from '../store'
 import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import { WorkflowDiffView } from './WorkflowDiffView'
+import { EmptyState } from './EmptyState'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 
@@ -318,7 +319,14 @@ export function VersionHistoryPanel() {
         )}
       </div>
 
-      {versions.length === 0 && <p className="empty-state">{t('versionHistory.empty')}</p>}
+      {versions.length === 0 && (
+        <EmptyState
+          icon={<History />}
+          kicker={t('versionHistory.emptyKicker') as string}
+          body={t('versionHistory.empty') as string}
+          testId="version-history-empty"
+        />
+      )}
 
       {versions.map((version, index) => {
         const isSelected = selectedIds.includes(version.id)
