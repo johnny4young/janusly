@@ -196,45 +196,25 @@ type LatestWorkflowVersion = { workflowId: string; dagJson: unknown };
  *  the latest-per-workflow filter so an org with thousands of historical
  *  versions doesn't blow the budget. */
 async function loadLatestWorkflowVersions(orgId: string): Promise<LatestWorkflowVersion[]> {
-  // Two-step approach so older Postgres / Drizzle combinations don't
-  // need ``DISTINCT ON``. Step 1: per-workflow ``max(version)`` in one
-  // round-trip. Step 2: fetch each matching ``dag_json`` row IN
-  // PARALLEL via ``Promise.all`` — N+1 round-trips remain but at
-  // network-latency-bound cost (~1× p95 not ~N× p95). Both queries
-  // are tenant-scoped on ``orgId``.
-  const maxVersions = await db
-    .select({
-      workflowId: workflowVersions.workflowId,
-      maxVersion: sql<number>`max(${workflowVersions.version})`.as("max_version"),
-    })
-    .from(workflowVersions)
-    .where(eq(workflowVersions.orgId, orgId))
-    .groupBy(workflowVersions.workflowId)
-    .limit(WORKFLOW_VERSION_SCAN_CAP);
-  if (maxVersions.length === 0) return [];
-
-  const settled = await Promise.all(
-    maxVersions.map((row) =>
-      db
-        .select({
-          workflowId: workflowVersions.workflowId,
-          dagJson: workflowVersions.dagJson,
-        })
-        .from(workflowVersions)
-        .where(
-          and(
-            eq(workflowVersions.orgId, orgId),
-            eq(workflowVersions.workflowId, row.workflowId),
-            eq(workflowVersions.version, row.maxVersion),
-          ),
-        )
-        .limit(1)
-        .then((matches) => matches[0] ?? null),
-    ),
-  );
+  // One round-trip via ``DISTINCT ON`` (Postgres 18 is the baseline): the
+  // latest version per workflow, org-scoped, capped. Replaces the prior
+  // ``max(version)`` + ``Promise.all`` per-workflow fan-out (N+1 on every
+  // ``/credentials/health`` request). Covered by the
+  // ``(org_id, workflow_id, version)`` index — the ORDER BY matches its prefix.
+  const rows = await db.execute<{ workflow_id: string; dag_json: unknown }>(sql`
+    SELECT DISTINCT ON (${workflowVersions.workflowId})
+      ${workflowVersions.workflowId} AS workflow_id,
+      ${workflowVersions.dagJson} AS dag_json
+    FROM ${workflowVersions}
+    WHERE ${workflowVersions.orgId} = ${orgId}
+    ORDER BY ${workflowVersions.workflowId}, ${workflowVersions.version} DESC
+    LIMIT ${WORKFLOW_VERSION_SCAN_CAP}
+  `);
   const out: LatestWorkflowVersion[] = [];
-  for (const hit of settled) {
-    if (hit) out.push({ workflowId: hit.workflowId, dagJson: hit.dagJson });
+  for (const row of rows) {
+    if (typeof row.workflow_id === "string") {
+      out.push({ workflowId: row.workflow_id, dagJson: row.dag_json });
+    }
   }
   return out;
 }
