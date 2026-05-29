@@ -86,6 +86,29 @@ type RecoveryMetrics = {
   terminalRuns: number
 }
 
+/**
+ * Sandbox zeros read as "no signal", not red. When no run has reached a
+ * terminal state yet, the signal metrics (success / mttr / p95 / replay /
+ * cost) carry no real data — present them neutral regardless of the
+ * server's band so an empty workspace doesn't look like a broken product.
+ * `approvalsPending` is left alone (0 pending == healthy, never alarming).
+ * No-op the moment any run is terminal, so a seeded/real workspace shows
+ * its true bands.
+ */
+function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetrics | null {
+  if (!metrics || metrics.terminalRuns > 0) return metrics
+  const neutral = <T extends RecoveryMetric>(metric: T): T =>
+    metric.severity === 'neutral' ? metric : { ...metric, severity: 'neutral' as MetricSeverity }
+  return {
+    ...metrics,
+    successRate: neutral(metrics.successRate),
+    mttr: neutral(metrics.mttr),
+    p95Latency: neutral(metrics.p95Latency),
+    replayRate: neutral(metrics.replayRate),
+    costThisWindow: { ...neutral(metrics.costThisWindow), providers: metrics.costThisWindow.providers },
+  }
+}
+
 /** Closed-enum sub-section value. Adding a fifth tab means an entry here +
  *  a new `<XxxSection />` wrapper + a matching `section === '<name>' && …`
  *  branch in `OperationsPage`'s body + a row in `RAIL_ITEMS` + i18n keys. */
@@ -191,12 +214,16 @@ export function OperationsPage() {
     return () => { cancelled = true }
   }, [platformVersion])
 
+  // Sandbox zeros render neutral (decision: an empty workspace is "no
+  // signal", not a red emergency). No-op once any run is terminal.
+  const displayMetrics = neutralizeSandboxZeros(metrics)
+
   // Derive Overview dot signal: any metric in the "unhealthy" band. We
   // skip approvalsPending because its severity reflects load, not breakage.
   // Inline (no useMemo) — 5 comparisons against a fixed-size set is cheap
   // and keeps the asymmetry with the inline rate-limiter checks small.
-  const overviewUnhealthy = metrics
-    ? [metrics.successRate, metrics.mttr, metrics.p95Latency, metrics.replayRate, metrics.costThisWindow]
+  const overviewUnhealthy = displayMetrics
+    ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
         .some((m) => m.severity === 'unhealthy')
     : false
 
@@ -209,7 +236,7 @@ export function OperationsPage() {
   return (
     <div className="we-operations-page">
       <OperationsHeader
-        metrics={metrics}
+        metrics={displayMetrics}
         loading={loading}
         error={error}
         rateLimiterHealth={rateLimiterHealth}
@@ -220,7 +247,7 @@ export function OperationsPage() {
           {/* Lazy-mount: only the active sub-tab's cards exist in the DOM.
               Inactive sub-tabs never fire their per-card `useEffect` fetches,
               which is what cuts page-load API traffic from ~9 calls to ~2-3. */}
-          {section === 'overview' && <OverviewSection metrics={metrics} />}
+          {section === 'overview' && <OverviewSection metrics={displayMetrics} />}
           {section === 'reliability' && <ReliabilitySection />}
           {section === 'access' && <AccessSection />}
           {section === 'integrations' && <IntegrationsSection />}
