@@ -108,8 +108,11 @@ export const credentialsRoutes: Route[] = [
       if (!ENV_VAR_NAME.test(newSecretRef) || newSecretRef.length > ENV_VAR_NAME_MAX) {
         return sendJson(res, { error: "newSecretRef must be a valid environment variable name" }, 400);
       }
-      if (!ifMatch || Number.isNaN(new Date(ifMatch).getTime())) {
-        return sendJson(res, { error: "ifMatch is required and must be a valid preview updatedAt token" }, 400);
+      if (!ifMatch) {
+        return sendJson(res, { error: "ifMatch is required — send the updatedAt token from the dry-run preview response" }, 400);
+      }
+      if (Number.isNaN(new Date(ifMatch).getTime())) {
+        return sendJson(res, { error: "ifMatch must be a valid ISO updatedAt token from the dry-run preview" }, 400);
       }
 
       const affected = await resolveCredentialReferences(auth.orgId, name);
