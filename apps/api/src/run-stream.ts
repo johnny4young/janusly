@@ -30,7 +30,10 @@
  * - The subscriber cap is **per API replica** by design: SSE connections are
  *   pinned to one replica, so the in-process counter is exactly what protects
  *   that process's socket/memory budget. No Redis counter (which would leak
- *   on crash with no natural TTL for a long-lived connection).
+ *   on crash with no natural TTL for a long-lived connection). Capacity-planning
+ *   note for operators: the effective CLUSTER-WIDE ceiling is therefore
+ *   replica_count × `runs.streamMaxSubscriptions`, not the per-org config value
+ *   alone — size the config with the replica count in mind.
  * - Publish is fire-and-forget and never throws — streaming is best-effort.
  */
 
