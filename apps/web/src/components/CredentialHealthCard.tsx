@@ -98,6 +98,10 @@ function formatRelative(isoTimestamp: string | null): string {
 export function CredentialHealthCard() {
   const { t } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  // Integrations is read-only (decision: Connections is the sole vault
+  // editor). The "Set secret" affordance on a missing row is a deep-link
+  // into the Connections tab, not an inline mutation here.
+  const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [payload, setPayload] = useState<CredentialHealthPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -201,13 +205,23 @@ export function CredentialHealthCard() {
                   <div className="we-ops-credential-card__row-name" title={`${entry.name} · ${entry.kind}`}>
                     <strong>{entry.name}</strong> <span className="we-ops-credential-card__row-meta">· {entry.kind}</span>
                   </div>
-                  <div className={`we-ops-credential-card__row-status we-ops-credential-card__row-status--${severity}`}>
-                    {statusLabel}
-                  </div>
-                  <div className="we-ops-credential-card__row-meta">
-                    {t('operations.credentialHealth.col.lastUsed')}: {formatRelative(entry.lastUsedAt)}
-                    {entry.referencingWorkflowIds.length > 0 && (
-                      <> · {t('operations.credentialHealth.col.usedIn', { count: entry.referencingWorkflowIds.length })}</>
+                  <span className={`we-secret-pill we-secret-pill--${severity}`}>{statusLabel}</span>
+                  <div className="we-ops-credential-card__row-meta we-ops-credential-card__row-meta--stack">
+                    <span>
+                      {t('operations.credentialHealth.col.lastUsed')}: {formatRelative(entry.lastUsedAt)}
+                      {entry.referencingWorkflowIds.length > 0 && (
+                        <> · {t('operations.credentialHealth.col.usedIn', { count: entry.referencingWorkflowIds.length })}</>
+                      )}
+                    </span>
+                    {!entry.secretRefPresent && (
+                      <button
+                        type="button"
+                        className="small-command we-ops-credential-card__set-secret"
+                        onClick={() => setActiveTab('credentials')}
+                        data-testid={`credential-set-secret-${entry.id}`}
+                      >
+                        <KeyRound size={12} aria-hidden="true" /> {t('operations.credentialHealth.setSecret')}
+                      </button>
                     )}
                   </div>
                 </li>
@@ -243,9 +257,7 @@ export function CredentialHealthCard() {
                     <strong>{entry.alias}</strong>{' '}
                     <span className="we-ops-credential-card__row-meta">· {t('operations.credentialHealth.mcpToolsSummary', { enabled: entry.enabledToolCount, total: entry.toolCount })}</span>
                   </div>
-                  <div className={`we-ops-credential-card__row-status we-ops-credential-card__row-status--${severity}`}>
-                    {statusLabel}
-                  </div>
+                  <span className={`we-secret-pill we-secret-pill--${severity}`}>{statusLabel}</span>
                   <div className="we-ops-credential-card__row-meta">
                     {meta.length > 0 ? meta.join(' · ') : `${t('operations.credentialHealth.col.lastUsed')}: ${formatRelative(entry.lastUsedAt)}`}
                   </div>
