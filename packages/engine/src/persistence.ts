@@ -361,7 +361,7 @@ export async function getRunContext(runId: string) {
       status: row.status,
       attempts: row.attempts ?? 0,
       state: row.stateJson ?? {},
-      output: (row.stateJson as any)?.output ?? {},
+      output: (row.stateJson as { output?: unknown } | null)?.output ?? {},
       error: row.errorJson ?? null,
     };
     return acc;

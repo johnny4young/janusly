@@ -148,7 +148,7 @@ export class WorkflowRuntime {
       const context = await this.store.getRunContext(runId);
 
       if (node.type === "router" || node.type === "router_llm") {
-        const candidates = normalizeRouterCandidates((node as any)?.config?.candidates);
+        const candidates = normalizeRouterCandidates(node.config?.candidates);
         // RL bandit input: load the org's reinforcement counters once per
         // router decision. The decision engine only reads `pulls` /
         // `meanReward` per candidate so passing the full DB-row shape is
@@ -159,7 +159,7 @@ export class WorkflowRuntime {
         const rlStats = metadata?.orgId
           ? await getRoutingStats(metadata.orgId)
           : undefined;
-        const rawStrategy = (node as any)?.config?.strategy;
+        const rawStrategy = node.config?.strategy;
         // `decide()` accepts the closed enum below; anything else is silently
         // ignored so the workflow author isn't punished for a typo, but a
         // valid value is forwarded so the prompt's documented `strategy`
@@ -228,7 +228,7 @@ export class WorkflowRuntime {
 
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
 
-      const retryPolicy = (node as any)?.config?.retry as RetryPolicy | undefined;
+      const retryPolicy = node.config?.retry as RetryPolicy | undefined;
       const maxAttempts = retryPolicy?.maxAttempts ?? 1;
 
       if (attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
