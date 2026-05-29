@@ -1054,6 +1054,8 @@
   "aiCopilot.aiError.auth": "OpenAI rejected the API key. Re-check the value in the root .env and restart the API.",
 
   "recoveryDelta.aria": "Recovery delta",
+  "recoveryDelta.headTitle": "Patch applied",
+  "recoveryDelta.headSignature": "{{signature}}",
   "recoveryDelta.errorLoad": "Failed to load delta",
   "recoveryDelta.errorVersions": "Failed to fetch versions",
   "recoveryDelta.errorBothVersions": "Could not load both versions for rollback.",

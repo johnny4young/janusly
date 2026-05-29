@@ -1054,6 +1054,8 @@
   "aiCopilot.aiError.auth": "OpenAI rechazó la API key. Revisá el valor en el .env de la raíz y reiniciá el API.",
 
   "recoveryDelta.aria": "Delta de recuperación",
+  "recoveryDelta.headTitle": "Parche aplicado",
+  "recoveryDelta.headSignature": "{{signature}}",
   "recoveryDelta.errorLoad": "No se pudo cargar el delta",
   "recoveryDelta.errorVersions": "No se pudieron obtener las versiones",
   "recoveryDelta.errorBothVersions": "No se pudieron cargar ambas versiones para la reversión.",
