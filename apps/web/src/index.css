@@ -9087,16 +9087,44 @@ button.we-ops-metric-card--button {
   white-space: nowrap;
 }
 
-.we-ops-credential-card__row-status {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0;
+/* Stacked variant: meta line + the read-only "Set secret" deep-link below
+   it, on a missing-secret row. Overrides the single-line clamp. */
+.we-ops-credential-card__row-meta--stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  overflow: visible;
+  white-space: normal;
 }
 
-.we-ops-credential-card__row-status--healthy { color: var(--we-success); }
-.we-ops-credential-card__row-status--warn { color: var(--we-warning); }
-.we-ops-credential-card__row-status--unhealthy { color: var(--we-danger); }
+/* Secret/credential status pill — shared by the read-only Operations
+   credential-health card and the Connections vault list so "linked vs
+   missing" reads as a tinted pill with a dot, never raw red text. */
+.we-secret-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.we-secret-pill::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.we-secret-pill--healthy { color: var(--we-success); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+.we-secret-pill--warn { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+.we-secret-pill--unhealthy { color: var(--we-danger); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
 
 .we-ops-credential-card__empty {
   font-size: 12px;
