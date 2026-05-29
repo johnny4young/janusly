@@ -26,7 +26,7 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
-import { and, asc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 const DEFAULT_WINDOW_DAYS = 30;
@@ -245,13 +245,15 @@ async function queryCostByProvider(orgId: string, since: Date): Promise<CostProv
 }
 
 async function queryP95Latency(orgId: string, since: Date): Promise<number | null> {
-  // Pull run_events joined through runs for org scope, compute first→last
-  // timestamp per run, return p95 via nearest-rank. runs.orgId keeps ad-hoc
-  // executions in the org-level denominator.
+  // Aggregate first→last timestamp per run IN POSTGRES (one row per run, not
+  // one per event) so the p95 sample is ~#runs and never suffers the prior
+  // per-run truncation bias from capping at EVENT_ROW_CAP raw events. The cap
+  // now bounds grouped runs. runs.orgId keeps ad-hoc executions in the
+  // org-level denominator; the (run_id, created_at) index supports the GROUP BY.
   const rows = await db
     .select({
-      runId: runEvents.runId,
-      createdAt: runEvents.createdAt,
+      firstAt: sql<string>`min(${runEvents.createdAt})`,
+      lastAt: sql<string>`max(${runEvents.createdAt})`,
     })
     .from(runEvents)
     .innerJoin(runs, eq(runs.id, runEvents.runId))
@@ -259,20 +261,12 @@ async function queryP95Latency(orgId: string, since: Date): Promise<number | nul
       eq(runs.orgId, orgId),
       gte(runs.createdAt, since),
     ))
-    .orderBy(asc(runEvents.createdAt))
+    .groupBy(runEvents.runId)
     .limit(EVENT_ROW_CAP);
 
-  const range = new Map<string, { first: number; last: number }>();
-  for (const event of rows) {
-    if (!event.createdAt) continue;
-    const ts = event.createdAt.getTime();
-    const prev = range.get(event.runId);
-    if (!prev) range.set(event.runId, { first: ts, last: ts });
-    else prev.last = ts;
-  }
-  const durations = Array.from(range.values())
-    .map((entry) => entry.last - entry.first)
-    .filter((ms) => ms > 0);
+  const durations = rows
+    .map((row) => new Date(row.lastAt).getTime() - new Date(row.firstAt).getTime())
+    .filter((ms) => Number.isFinite(ms) && ms > 0);
   if (durations.length < 5) return null;
   durations.sort((a, b) => a - b);
   const index = Math.max(0, Math.ceil(durations.length * 0.95) - 1);
