@@ -161,6 +161,10 @@ export type AuditAction =
   | "workflow.slo.set"
   | "workflow.deleted"
   | "workflow.force_run_during_pause"
+  // solution packs (installable, ICP-shaped workflow starters)
+  | "workflow.pack_imported"
+  | "solution_pack.sample_run_started"
+  | "solution_pack.failure_injected"
   // upstream health sources
   | "upstream_health.source.created"
   | "upstream_health.source.updated"

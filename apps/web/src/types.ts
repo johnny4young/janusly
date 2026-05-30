@@ -16,7 +16,7 @@ import type { Edge, Node } from '@xyflow/react'
 export type JsonObject = Record<string, unknown>
 export type RunNode = { nodeId: string; status: string; stateJson?: JsonObject | null; errorJson?: JsonObject | null }
 export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
-export type WorkflowNodeData = {
+type WorkflowNodeData = {
   label: string
   type: string
   config: JsonObject
@@ -24,7 +24,7 @@ export type WorkflowNodeData = {
   helper?: string
   hasValidationError?: boolean
 }
-export type WorkflowEdgeData = { condition?: string }
+type WorkflowEdgeData = { condition?: string }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
 export type ToolSchema = {
   name: string
@@ -49,6 +49,26 @@ export type Template = {
   workflow: WorkflowDefinition
 }
 export type Credential = { id: string; name: string; kind: string; metadata?: JsonObject }
+
+/** One required credential a solution pack declares (name + kind + purpose; never a secret value). */
+type PackRequiredCredential = { name: string; kind: string; purpose: string }
+/** One required org-config key a solution pack declares. */
+type PackRequiredOrgConfig = { key: string; purpose: string }
+/** Catalog-safe projection of a solution pack returned by `GET /solution-packs`. */
+export type SolutionPackPublic = {
+  id: string
+  name: string
+  description: string
+  category: string
+  version: string
+  requiredCredentials: PackRequiredCredential[]
+  requiredOrgConfigs: PackRequiredOrgConfig[]
+  nodeCount: number
+  sampleCount: number
+  failureCount: number
+  samplePayloadIds: string[]
+  failureFixtureIds: string[]
+}
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number }
 export type RunSummary = {
@@ -72,7 +92,7 @@ export type OrgMember = { id: string; orgId: string; userId: string; email?: str
 
 export type McpTransport = 'stdio' | 'sse' | 'http'
 export type McpConnectionStatus = 'pending' | 'active' | 'failed' | 'disabled'
-export type McpEnvRef = { kind: 'env'; name: string }
+type McpEnvRef = { kind: 'env'; name: string }
 export type McpConnection = {
   id: string
   orgId: string
@@ -111,7 +131,7 @@ export type McpToolDescriptor = {
 
 export type AiMode = 'ai' | 'fallback' | 'error'
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
-export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
+export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
 
 /**
  * Tabs that NEED the React Flow canvas mounted as their main slot. Today

@@ -12,5 +12,4 @@
 export {
   isAutoApplyAllowed,
   isAutoHealingAllowed,
-  type AutoHealingConsentResult,
 } from "@janusly/engine/src/auto-healing-consent";

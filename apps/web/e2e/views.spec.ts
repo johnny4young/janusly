@@ -1,4 +1,13 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+
+function installConsoleErrorGuards(page: Page) {
+  const errors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  page.on('pageerror', (error) => errors.push(error.message))
+  return errors
+}
 
 const views = [
   { button: /^Home\b/, selector: '.we-recovery-center-hero .section-kicker', text: 'Recovery Center' },
@@ -9,11 +18,14 @@ const views = [
   { button: 'Runs', heading: 'Runs' },
   { button: 'Team', heading: 'Team' },
   { button: 'Recipes', heading: 'Recipes' },
+  { button: 'Packs', heading: 'Solution Packs' },
   { button: 'Tools', heading: 'Tools' },
   { button: 'Connections', heading: 'Connections' },
 ]
 
 test('workspace views can be opened independently', async ({ page }) => {
+  const browserErrors = installConsoleErrorGuards(page)
+
   await page.goto('/')
 
   // No explicit group expansion needed — the three sidebar groups
@@ -36,6 +48,8 @@ test('workspace views can be opened independently', async ({ page }) => {
       await expect(target).toBeVisible()
     }
   }
+
+  expect(browserErrors).toEqual([])
 })
 
 test('selecting a node opens quick setup controls', async ({ page }) => {

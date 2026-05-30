@@ -77,7 +77,11 @@ export type ApiErrorCode =
   | "trigger_payload_too_large"
   | "trigger_no_matching_node"
   | "trigger_dkim_required"
-  | "trigger_event_not_found";
+  | "trigger_event_not_found"
+  // solution packs
+  | "pack_not_found"
+  | "pack_missing_sample_payload"
+  | "pack_no_failure_fixture";
 
 /**
  * Canonical 4xx response envelope. The `error` field is the English

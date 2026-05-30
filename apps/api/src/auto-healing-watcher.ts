@@ -55,15 +55,15 @@ import {
   type AutoHealingRun,
   getOrgConfigSnapshot,
 } from "@janusly/data";
-import {
-  isAutoApplyAllowed,
-  isAutoHealingAllowed,
-} from "@janusly/engine/src/auto-healing-consent";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 
 import { audit } from "./audit";
+import {
+  isAutoApplyAllowed,
+  isAutoHealingAllowed,
+} from "./auto-healing-consent";
 
 /** The deterministic BullMQ scheduler id for the watcher. */
 export const AUTO_HEALING_WATCH_JOB_ID = "system:auto-healing-watcher";

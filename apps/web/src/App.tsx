@@ -44,7 +44,7 @@ import { useRunEventStream } from './hooks/useRunEventStream'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { DeadLetter } from './components/DeadLettersPanel'
-import type { AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { useT } from './i18n'
@@ -204,6 +204,7 @@ export default function App() {
   const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
   const [tools, setTools] = useState<ToolSchema[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
+  const [solutionPacks, setSolutionPacks] = useState<SolutionPackPublic[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
@@ -322,9 +323,10 @@ export default function App() {
   }, [clearAuth, setAuth, setAuthReady])
 
   const refreshPlatform = useCallback(async () => {
-    const [toolData, templateData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
+    const [toolData, templateData, packData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
       api('/tools'),
       api('/templates'),
+      api('/solution-packs'),
       api('/credentials'),
       api('/runs'),
       api('/dlq'),
@@ -335,6 +337,10 @@ export default function App() {
 
     if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
     if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
+    if (packData.status === 'fulfilled') {
+      const packs = (packData.value as { packs?: SolutionPackPublic[] } | null)?.packs
+      setSolutionPacks(Array.isArray(packs) ? packs : [])
+    }
     if (credentialData.status === 'fulfilled') setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
     if (runData.status === 'fulfilled') setRuns(Array.isArray(runData.value) ? runData.value : [])
     if (deadLetterData.status === 'fulfilled') setDeadLetters(Array.isArray(deadLetterData.value) ? deadLetterData.value : [])
@@ -549,14 +555,14 @@ export default function App() {
     }
   }, [addToast, hydrateWorkflow, setActiveTab, t])
 
-  const openRun = useCallback(async (id: string) => {
+  const openRun = useCallback(async (id: string, targetTab: ActiveTab = 'multiAgent') => {
     try {
       const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
       setRunId(id)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
-      setActiveTab('multiAgent')
+      setActiveTab(targetTab)
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
@@ -592,6 +598,46 @@ export default function App() {
       addToast(error instanceof Error ? error.message : t('toasts.credentialFailed'), 'error')
     }
   }, [addToast, refreshPlatform, t])
+
+  const installPack = useCallback(async (packId: string) => {
+    try {
+      const res = await api('/workflows/import-pack', { method: 'POST', body: JSON.stringify({ packId }) }) as { workflowId?: string; missingCredentials?: unknown[] }
+      const missing = Array.isArray(res.missingCredentials) ? res.missingCredentials.length : 0
+      addToast(
+        missing > 0 ? t('packs.toast.installedWithMissing', { count: missing }) : t('packs.toast.installed'),
+        missing > 0 ? 'info' : 'success',
+      )
+      bumpPlatformVersion()
+      await refreshPlatform()
+      if (res.workflowId) await openWorkflow(res.workflowId)
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('packs.toast.installFailed'), 'error')
+    }
+  }, [addToast, bumpPlatformVersion, openWorkflow, refreshPlatform, t])
+
+  const sampleRunPack = useCallback(async (packId: string) => {
+    try {
+      const res = await api(`/solution-packs/${encodeURIComponent(packId)}/sample-run`, { method: 'POST', body: JSON.stringify({}) }) as { runId?: string }
+      addToast(t('packs.toast.sampleStarted'), 'success')
+      bumpPlatformVersion()
+      await refreshPlatform()
+      if (res.runId) await openRun(res.runId, 'runs')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('packs.toast.sampleFailed'), 'error')
+    }
+  }, [addToast, bumpPlatformVersion, openRun, refreshPlatform, t])
+
+  const injectPackFailure = useCallback(async (packId: string) => {
+    try {
+      await api(`/solution-packs/${encodeURIComponent(packId)}/inject-failure`, { method: 'POST', body: JSON.stringify({}) })
+      addToast(t('packs.toast.failureInjected'), 'success')
+      bumpPlatformVersion()
+      await refreshPlatform()
+      setActiveTab('runs')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('packs.toast.injectFailed'), 'error')
+    }
+  }, [addToast, bumpPlatformVersion, refreshPlatform, setActiveTab, t])
 
   const approveNode = useCallback(async (nodeId: string) => {
     if (!runId) return
@@ -797,6 +843,7 @@ export default function App() {
       validationIssues={validationIssues}
       tools={tools}
       templates={templates}
+      solutionPacks={solutionPacks}
       credentials={credentials}
       runs={runs}
       activeRunId={runId}
@@ -813,6 +860,9 @@ export default function App() {
         setActiveTab('inspector')
       }}
       onInstallPlugin={installPlugin}
+      onInstallPack={installPack}
+      onSampleRunPack={sampleRunPack}
+      onInjectPackFailure={injectPackFailure}
       onCreateCredential={createCredential}
       onOpenRun={openRun}
       onRefreshPlatform={refreshPlatform}

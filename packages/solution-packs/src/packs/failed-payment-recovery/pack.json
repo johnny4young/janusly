@@ -1,0 +1,111 @@
+{
+  "id": "failed-payment-recovery",
+  "name": "Failed payment recovery",
+  "description": "When a charge fails, draft a dunning outreach, gate it behind a human approval, retry the charge through your billing system, and notify the collections channel.",
+  "category": "payment_recovery",
+  "version": "1.0.0",
+  "requiredCredentials": [
+    {
+      "name": "billing_webhook",
+      "kind": "webhook_secret",
+      "purpose": "Signs the retry-charge call to your billing system"
+    },
+    {
+      "name": "billing_slack",
+      "kind": "slack_webhook",
+      "purpose": "Posts the recovery outcome to your collections channel"
+    }
+  ],
+  "requiredOrgConfigs": [],
+  "workflowJson": {
+    "dslVersion": "1.0",
+    "id": "failed-payment-recovery",
+    "name": "Failed payment recovery",
+    "inputs": {
+      "type": "object",
+      "required": ["customer", "invoiceId", "amountUsd"],
+      "properties": {
+        "customer": { "type": "string", "description": "Customer email or account id" },
+        "invoiceId": { "type": "string", "description": "Invoice id the failed charge applies to" },
+        "amountUsd": { "type": "number", "description": "Amount of the failed charge in USD" },
+        "reason": { "type": "string", "description": "Decline reason reported by the payment processor" }
+      }
+    },
+    "nodes": [
+      { "id": "trigger", "type": "webhook", "config": {} },
+      {
+        "id": "draft_outreach",
+        "type": "ai",
+        "config": {
+          "prompt": "You are a billing-recovery assistant. Write a short, friendly dunning message (under 120 words) asking the customer to update their payment method, given a failed charge. Customer: {{context.trigger.output.customer}}, invoice: {{context.trigger.output.invoiceId}}, amount: ${{context.trigger.output.amountUsd}}, decline reason: {{context.trigger.output.reason}}."
+        }
+      },
+      {
+        "id": "approval",
+        "type": "approval",
+        "config": {
+          "message": "Approve retrying charge of ${{context.trigger.output.amountUsd}} for {{context.trigger.output.customer}} (invoice {{context.trigger.output.invoiceId}})?\n\nDraft outreach:\n{{context.draft_outreach.output.response}}"
+        }
+      },
+      {
+        "id": "retry_charge",
+        "type": "tool",
+        "config": {
+          "tool": "webhook.send",
+          "input": {
+            "credential": "billing_webhook",
+            "url": "https://billing.example.com/charges/retry",
+            "payload": {
+              "customer": "{{context.trigger.output.customer}}",
+              "invoiceId": "{{context.trigger.output.invoiceId}}",
+              "amountUsd": "{{context.trigger.output.amountUsd}}",
+              "approvedBy": "janusly-approval"
+            }
+          }
+        }
+      },
+      {
+        "id": "notify_team",
+        "type": "tool",
+        "config": {
+          "tool": "slack.post",
+          "input": {
+            "credential": "billing_slack",
+            "text": ":credit_card: Recovery attempted for {{context.trigger.output.customer}} (invoice {{context.trigger.output.invoiceId}}, ${{context.trigger.output.amountUsd}}). Outreach drafted and charge retried."
+          }
+        }
+      }
+    ],
+    "edges": [
+      { "from": "trigger", "to": "draft_outreach" },
+      { "from": "draft_outreach", "to": "approval" },
+      { "from": "approval", "to": "retry_charge" },
+      { "from": "retry_charge", "to": "notify_team" }
+    ]
+  },
+  "samplePayloads": [
+    {
+      "id": "default",
+      "label": "Card declined — insufficient funds",
+      "input": {
+        "customer": "casey@acme.test",
+        "invoiceId": "inv_10428",
+        "amountUsd": 149,
+        "reason": "insufficient_funds"
+      }
+    }
+  ],
+  "failureFixtures": [
+    {
+      "id": "billing_secret_unbound",
+      "label": "Billing webhook secret unbound",
+      "failedNodeId": "retry_charge",
+      "errorJson": {
+        "name": "CredentialMissingError",
+        "code": "credential_missing",
+        "message": "credential secret missing for billing_webhook",
+        "node": "retry_charge"
+      }
+    }
+  ]
+}

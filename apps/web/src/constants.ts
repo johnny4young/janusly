@@ -17,7 +17,6 @@
  *   The parity test catches missing translations at CI time.
  */
 
-import type { CSSProperties } from 'react'
 import type { JsonObject } from './types'
 import { t } from './i18n/runtime'
 
@@ -224,17 +223,6 @@ export function formatStatusLabel(status: string): string {
 /** Label for the AI mode chip — surfaces `"AI"` / `"Fallback"` / `"Error"` per AGENTS.md fallback contract. */
 export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error'): string {
   return t(`aiMode.${mode}` as never) as string
-}
-
-/** Per-status inline-style map for the canvas + status pills (colour tokens from `index.css`). */
-export const statusStyles: Record<string, CSSProperties> = {
-  pending: { border: '1.5px solid var(--we-line-strong)', background: 'var(--we-surface-2)' },
-  queued: { border: '1.5px solid var(--we-warning)', background: 'var(--we-warning-soft)' },
-  running: { border: '1.5px solid var(--we-info)', background: 'var(--we-info-soft)' },
-  waiting: { border: '1.5px solid var(--we-warning)', background: 'var(--we-warning-soft)' },
-  skipped: { border: '1.5px solid var(--we-faint)', background: 'var(--we-surface-muted)' },
-  succeeded: { border: '1.5px solid var(--we-success)', background: 'var(--we-success-soft)' },
-  failed: { border: '1.5px solid var(--we-danger)', background: 'var(--we-danger-soft)' },
 }
 
 function readString(value: unknown): string | null {
