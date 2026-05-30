@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { Check, ExternalLink, MessageCircle, Send, X } from 'lucide-react'
+import { Check, Download, ExternalLink, MessageCircle, Send, X } from 'lucide-react'
 import {
   RECOVERY_ITEM_RESOLUTION_REASONS,
   RECOVERY_ITEM_SEVERITIES,
@@ -24,7 +24,7 @@ import {
   RECOVERY_HANDOFF_DESTINATIONS,
   type RecoveryHandoffDestination,
 } from '@janusly/shared/src/recovery-handoff'
-import { api } from '../api'
+import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { WorkflowAboutCard } from './WorkflowAboutCard'
@@ -135,6 +135,27 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
 
   async function takeOwnership(): Promise<void> {
     await callTransition('assign', { owner: userId ?? 'dev-user' })
+  }
+
+  // Audit evidence export — downloads a single per-incident artefact
+  // (run timeline, DLQ row, scrubbed signature, AI explanation, patch
+  // diff, sandbox validation, approval trail, audit rows, rollback link)
+  // as JSON or Markdown. Compliance buyers archive this per failure. Does
+  // NOT bumpPlatformVersion — exporting is read-only from the operator's
+  // POV (the server's audit row is a side effect, not panel state).
+  const [evidenceBusy, setEvidenceBusy] = useState<'json' | 'markdown' | null>(null)
+  async function exportEvidence(format: 'json' | 'markdown'): Promise<void> {
+    setEvidenceBusy(format)
+    try {
+      await downloadFromApi(`/recovery/items/${item.id}/evidence?format=${format}`, {
+        method: 'POST',
+      })
+      addToast(t('recoveryItems.evidence.toastOk') as string, 'success')
+    } catch (err) {
+      addToast(tApiError(err) || (t('recoveryItems.evidence.toastFailed') as string), 'error')
+    } finally {
+      setEvidenceBusy(null)
+    }
   }
 
   async function submitComment(): Promise<void> {
@@ -328,6 +349,32 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           <dd>{new Date(item.slaTargetAtIso).toLocaleString(getResolvedLocale())}</dd>
         </div>
       </dl>
+
+      <div className="we-recovery-item-drawer__evidence" data-testid="recovery-item-evidence">
+        <span className="we-recovery-item-drawer__evidence-label">
+          {t('recoveryItems.evidence.label')}
+        </span>
+        <div className="we-recovery-item-drawer__evidence-actions">
+          <button
+            type="button"
+            className="we-btn we-btn--ghost we-btn--sm"
+            onClick={() => exportEvidence('json')}
+            disabled={evidenceBusy !== null}
+            data-testid="ri-evidence-json"
+          >
+            <Download size={14} aria-hidden /> {t('recoveryItems.evidence.json')}
+          </button>
+          <button
+            type="button"
+            className="we-btn we-btn--ghost we-btn--sm"
+            onClick={() => exportEvidence('markdown')}
+            disabled={evidenceBusy !== null}
+            data-testid="ri-evidence-markdown"
+          >
+            <Download size={14} aria-hidden /> {t('recoveryItems.evidence.markdown')}
+          </button>
+        </div>
+      </div>
 
       {item.occurrenceCount > 1 && (
         <div className="we-recovery-occurrences" data-testid="recovery-item-occurrences-section">

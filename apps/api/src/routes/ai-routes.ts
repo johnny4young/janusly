@@ -19,15 +19,19 @@ import { explainRun, promoteNoopPlaceholders, RUN_EVENT_PROMPT_CAP, STRUCTURAL_P
 import {
   summarizePastFeedback,
   listExposedMcpToolsForAi,
+  listCalibrations,
+  type StoredCalibration,
 } from "@janusly/data";
-import { db, runEvents, runs, workflowVersions } from "@janusly/db";
+import { db, runEvents, runNodes, runs, workflowVersions } from "@janusly/db";
+import { applyCalibration, CALIBRATION_SUBTITLE_DELTA, type CalibrationCurve } from "@janusly/engine/src/confidence-calibration";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { buildReviewFallback, mergeReviewFindings, sanitizeAiReview, type ReviewFindings } from "@janusly/engine/src/workflow-review-fallback";
 import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/workflow-readiness";
-import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@janusly/shared";
 
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
+import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
@@ -47,6 +51,28 @@ function withBudgetWarning<T extends Record<string, unknown>>(response: T, budge
   return budgetGate.envelope.warningThresholdCrossed
     ? attachBudgetEnvelope(response, budgetGate.envelope)
     : response;
+}
+
+/**
+ * Index the stored calibration curves by `approachLabel` for O(1) lookup
+ * when calibrating each suggestion. The repo's `sampleSize` IS the
+ * threshold gate — the daily sweep only persists a row when the fit
+ * cleared `MIN_CALIBRATION_SAMPLES`, so any present row is trustworthy.
+ * Returns an empty map when calibration is disabled for the org or no
+ * curve has been fit yet, in which case every suggestion's calibrated
+ * value falls back to its raw confidence.
+ */
+function indexCalibrationCurves(rows: StoredCalibration[]): Map<string, CalibrationCurve> {
+  const byApproach = new Map<string, CalibrationCurve>();
+  for (const row of rows) {
+    byApproach.set(row.approachLabel, {
+      slope: row.curveSlope,
+      intercept: row.curveIntercept,
+      sampleSize: row.sampleSize,
+      acceptRate: row.acceptRate,
+    });
+  }
+  return byApproach;
 }
 
 export const aiRoutes: Route[] = [
@@ -316,6 +342,23 @@ export const aiRoutes: Route[] = [
         .orderBy(desc(runEvents.createdAt), desc(runEvents.id))
         .limit(RUN_EVENT_PROMPT_CAP)).reverse();
 
+      // Confidence calibration: when enabled for the org, load the
+      // per-approach curves the daily sweep fitted from this org's
+      // recovery feedback. Each suggestion's raw self-rated confidence is
+      // mapped through the matching curve below to emit a calibrated value
+      // alongside the raw one. Disabled → empty map → calibrated mirrors
+      // raw exactly (zero behavior change). Best-effort read: a DB blip
+      // degrades to "no calibration" (raw shown unchanged) rather than
+      // failing the recovery flow.
+      let calibrationCurves = new Map<string, CalibrationCurve>();
+      if (orgConfig.ai.confidenceCalibrationEnabled) {
+        try {
+          calibrationCurves = indexCalibrationCurves(await listCalibrations(auth.orgId));
+        } catch {
+          calibrationCurves = new Map();
+        }
+      }
+
       // Pick the per-type envelope based on the failing node's type.
       // The typed envelopes wrap a `suggestions` array of 1-3 items —
       // single repeated shape, no full-workflow union — so the compiled
@@ -387,9 +430,13 @@ export const aiRoutes: Route[] = [
       // prompt then has the same shape it had pre-enrichment.
       const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
       const failingWorkflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
-      const pastFeedbackSummary = failingWorkflowId
-        ? composeFeedbackHint(await summarizePastFeedback(auth.orgId, failingWorkflowId))
-        : "";
+      // Keep the raw per-approach summaries — the prompt hint is derived
+      // from them AND the evidence side-channel emits one `recovery_feedback`
+      // row per decided approach. One read, two consumers.
+      const feedbackSummaries = failingWorkflowId
+        ? await summarizePastFeedback(auth.orgId, failingWorkflowId)
+        : [];
+      const pastFeedbackSummary = failingWorkflowId ? composeFeedbackHint(feedbackSummaries) : "";
 
       // Memory-assisted recovery: when org memory is enabled, recall a
       // small bounded set of similar prior failures + accepted/rejected
@@ -410,7 +457,7 @@ export const aiRoutes: Route[] = [
             failingNode: { id: failingNode.data.id, type: failingNode.data.type },
             errorEnvelope: dlq.errorJson,
           })
-        : { snippets: "", hitCount: 0, recallOk: true };
+        : { snippets: "", hitCount: 0, recallOk: true, entries: [] };
 
       const extraContext: Record<string, unknown> = {
         ...(toolInputContract ? { toolInputContract } : {}),
@@ -475,13 +522,36 @@ export const aiRoutes: Route[] = [
         workflow: Workflow;
         rationale: string;
         approachLabel: string;
+        /** The model's raw self-rated confidence (0-100). */
         confidence: number;
+        /**
+         * The calibrated confidence (0-100) — `confidence` mapped through
+         * the org's per-approach curve. Equals `confidence` when no curve
+         * is available (calibration disabled, no fit yet, or the curve was
+         * monotonicity-rejected). The recovery dialog renders this as the
+         * primary number and surfaces a "(model self-rated X%)" subtitle
+         * only when the two differ by ≥ CALIBRATION_SUBTITLE_DELTA points.
+         */
+        calibratedConfidence: number;
       };
+      // Resolve raw + calibrated confidence for one approach. Calibration
+      // is monotonic in `raw` (the fit only ever returns positive-slope
+      // curves), so applying it can never re-order suggestions relative to
+      // their raw ranking — the sort below stays on `confidence` (raw) to
+      // preserve the exact ordering the AC's monotonicity case asserts.
+      const calibrate = (approachLabel: string, rawConfidence: number): number =>
+        applyCalibration(rawConfidence, calibrationCurves.get(approachLabel) ?? null);
       let response: {
         mode: "ai" | "fallback";
         suggestedWorkflow: Workflow | unknown;
         rationale: string;
         suggestions: ValidatedSuggestion[];
+        /** "Why this suggestion?" side-channel — the context the composer
+         *  fed the model, scrubbed at read time. Possibly empty. Populated
+         *  below after the response shape is settled (it is the same on the
+         *  AI and fallback paths — the operator can still see what context
+         *  was available even when the LLM degraded). */
+        evidence: EvidenceRow[];
         model?: string;
         provider?: string;
         aiError?: string;
@@ -516,6 +586,7 @@ export const aiRoutes: Route[] = [
                 rationale: rawItem.rationale,
                 approachLabel: rawItem.approachLabel,
                 confidence: rawItem.confidence,
+                calibratedConfidence: calibrate(rawItem.approachLabel, rawItem.confidence),
               });
             } catch {
               // Drop this suggestion; keep going. If none survive, the
@@ -535,6 +606,7 @@ export const aiRoutes: Route[] = [
             suggestedWorkflow: top.workflow,
             rationale: top.rationale,
             suggestions: validated,
+            evidence: [],
             model: helperResult.model,
             provider: helperResult.provider,
           };
@@ -552,7 +624,9 @@ export const aiRoutes: Route[] = [
               rationale: `AI returned suggestions that could not be applied safely. ${reason}`,
               approachLabel: "other",
               confidence: 0,
+              calibratedConfidence: 0,
             }],
+            evidence: [],
             model: helperResult.model,
             provider: helperResult.provider,
             aiError: helperResult.aiError ?? "no_valid_suggestions",
@@ -569,12 +643,41 @@ export const aiRoutes: Route[] = [
             rationale: fallbackItem.rationale,
             approachLabel: fallbackItem.approachLabel,
             confidence: fallbackItem.confidence,
+            calibratedConfidence: calibrate(fallbackItem.approachLabel, fallbackItem.confidence),
           }],
+          evidence: [],
           model: helperResult.model,
           provider: helperResult.provider,
           aiError: helperResult.aiError,
         };
       }
+
+      // Evidence side-channel ("Why this suggestion?"). Deterministic
+      // projection of the SAME context the prompt composer gathered — no
+      // second LLM call. Populated on BOTH the AI and fallback paths so the
+      // operator can see what context was available even when the model
+      // degraded. Best-effort: the assembler swallows its two supplemental
+      // reads' failures (runbook + recent-error scan) and the per-source
+      // builders are pure, so a DB blip degrades to a shorter list, never a
+      // 500. The shared `scrubEvidenceRows` re-scrubs every snippet at read
+      // time and caps the count. `failingNode` may have failed to parse
+      // (corrupt `nodeJson`) — pass the loose shape through so the signature
+      // rule still fires off `dlq.errorJson`.
+      const evidenceFailingNode = failingNode.success
+        ? { type: failingNode.data.type, id: failingNode.data.id, toolName: toolInputContract?.name }
+        : (typeof (dlq.nodeJson as { type?: unknown } | null)?.type === "string"
+            ? { type: (dlq.nodeJson as { type?: string }).type, id: dlq.nodeId }
+            : { id: dlq.nodeId });
+      response.evidence = await assembleRecoveryEvidence({
+        orgId: auth.orgId,
+        workflowId: failingWorkflowId,
+        runId: dlq.runId,
+        failingNode: evidenceFailingNode,
+        errorJson: dlq.errorJson,
+        feedbackSummaries,
+        memoryEntries: memoryHint.entries,
+        toolContract: toolInputContract ?? null,
+      });
 
       await auditAction(auth, "ai.workflow.patch_suggested", { targetType: "dlq", targetId: deadLetterId, metadata: {
         mode: response.mode,
@@ -606,6 +709,17 @@ export const aiRoutes: Route[] = [
         // failure with the specific `reason`.
         memoryHitCount: memoryHint.hitCount,
         memoryRecallOk: memoryHint.recallOk,
+        // Confidence-calibration observability: whether the org has the
+        // feature on, and how many stored curves were available at read
+        // time (0 = raw shown unchanged everywhere). The actual per-tab
+        // calibrated values ride the response, not the audit row.
+        calibrationEnabled: orgConfig.ai.confidenceCalibrationEnabled,
+        calibrationCurvesAvailable: calibrationCurves.size,
+        // Evidence side-channel observability — the COUNT only. The rows
+        // themselves carry scrubbed snippets that ride the response, never
+        // the audit row, so a memory-entry excerpt or runbook line never
+        // lands in `audit_logs.metadata`.
+        evidenceCount: response.evidence.length,
       } });
 
       return sendJson(res, withBudgetWarning(response, budgetGate));
@@ -677,6 +791,9 @@ export const aiRoutes: Route[] = [
         suggestedWorkflow: Workflow | unknown;
         rationale: string;
         suggestions: ValidatedSuggestion[];
+        /** "Why this suggestion?" evidence — past-feedback + runbook context
+         *  for this workflow. Often empty on a fresh authoring surface. */
+        evidence: EvidenceRow[];
         model?: string;
         provider?: string;
         aiError?: string;
@@ -719,6 +836,7 @@ export const aiRoutes: Route[] = [
             suggestedWorkflow: top.workflow,
             rationale: top.rationale,
             suggestions: validated,
+            evidence: [],
             model: helperResult.model,
             provider: helperResult.provider,
           };
@@ -733,6 +851,7 @@ export const aiRoutes: Route[] = [
               approachLabel: "other",
               confidence: 0,
             }],
+            evidence: [],
             model: helperResult.model,
             provider: helperResult.provider,
             aiError: helperResult.aiError ?? "no_valid_suggestions",
@@ -750,11 +869,22 @@ export const aiRoutes: Route[] = [
             approachLabel: fallbackItem.approachLabel,
             confidence: fallbackItem.confidence,
           }],
+          evidence: [],
           model: helperResult.model,
           provider: helperResult.provider,
           aiError: helperResult.aiError,
         };
       }
+
+      // Evidence side-channel — for the authoring surface the only context-
+      // derived evidence is this workflow's past-feedback history + its
+      // runbook (no failing node → no signature rule / tool contract). Often
+      // `[]`. Best-effort: the assembler swallows its own read failures.
+      response.evidence = await assembleSuggestImprovementEvidence({
+        orgId: auth.orgId,
+        workflowId: workflow.id ?? null,
+        feedbackSummaries: workflow.id ? await summarizePastFeedback(auth.orgId, workflow.id) : [],
+      });
 
       await auditAction(auth, "ai.workflow.improvement_suggested", { targetType: "ai", targetId: workflow.id, metadata: {
         mode: response.mode,
@@ -764,6 +894,7 @@ export const aiRoutes: Route[] = [
         suggestionsCount: response.suggestions.length,
         topApproachLabel: response.suggestions[0]?.approachLabel,
         focusProvided: typeof focus === "string" && focus.trim().length > 0,
+        evidenceCount: response.evidence.length,
       } });
 
       return sendJson(res, withBudgetWarning(response, budgetGate));
@@ -812,12 +943,50 @@ export const aiRoutes: Route[] = [
         // See `/ai/patch-workflow` for the locale propagation rationale.
         locale: localeFromRequest(req),
       });
+
+      // Evidence side-channel — for a failed run, surface the signature rule
+      // that fired on the failing node + the workflow runbook. Read the most
+      // recent failed `run_nodes` row for this run (org-safe: the run row was
+      // already gated to `auth.orgId`, and `run_nodes` carries no orgId so
+      // the run gate IS the scope, same as the events read above). A
+      // successful run has no failed node → only the runbook (if any) shows,
+      // and most healthy runs yield `evidence: []`. `run_nodes` doesn't store
+      // the node config, so the failing node's `type` is recovered from the
+      // matching `node.failed` event payload (best-effort — the signature
+      // rule still fires off `errorJson` alone when no type is found).
+      const failedNodeRow = (await db
+        .select({ nodeId: runNodes.nodeId, errorJson: runNodes.errorJson })
+        .from(runNodes)
+        .where(and(eq(runNodes.runId, runId), eq(runNodes.status, "failed")))
+        .orderBy(desc(runNodes.finishedAt))
+        .limit(1))[0];
+      const failedNodeType = failedNodeRow
+        ? (() => {
+            for (const event of events) {
+              if (event.nodeId !== failedNodeRow.nodeId) continue;
+              const payloadType = (event.payload as { nodeType?: unknown; type?: unknown } | null);
+              if (typeof payloadType?.nodeType === "string") return payloadType.nodeType;
+            }
+            return undefined;
+          })()
+        : undefined;
+      const evidence = await assembleExplainRunEvidence({
+        orgId: auth.orgId,
+        workflowId: explainRunWorkflowId ?? null,
+        failingNode: failedNodeRow ? { id: failedNodeRow.nodeId, type: failedNodeType } : null,
+        errorJson: failedNodeRow?.errorJson ?? null,
+      });
+
       await auditAction(auth, "ai.run.explained", { targetType: "run", targetId: runId, metadata: {
         mode: result.mode,
         model: result.model,
         provider: result.provider,
         aiError: result.aiError,
+        evidenceCount: evidence.length,
       } });
-      return sendJson(res, withBudgetWarning(result, budgetGate));
+      // Spread the helper result (its TS type is owned by `@janusly/ai`) and
+      // attach `evidence` as the route-level extension. Back-compat: legacy
+      // explain-run callers ignore the new key.
+      return sendJson(res, withBudgetWarning({ ...result, evidence }, budgetGate));
     } },
 ];

@@ -24,6 +24,7 @@ import { Layout } from './Layout'
 import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
 import { CommandPalette } from './components/CommandPalette'
+import { SnippetInsertMenu } from './components/SnippetInsertMenu'
 import { ShortcutsModal } from './components/ShortcutsModal'
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
@@ -218,12 +219,14 @@ export default function App() {
   const [runInputSubmitting, setRunInputSubmitting] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
   // Stable references for the overlay close callbacks. Inline arrows here
   // would create a fresh function ref on every App render — polling at 1.5s
   // plus every Zustand mutation would re-bind the Escape keydown listener
   // inside each modal's `useEffect`. useCallback pins the ref.
   const closePalette = useCallback(() => setPaletteOpen(false), [])
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
+  const closeSnippetMenu = useCallback(() => setSnippetMenuOpen(false), [])
 
   // Stable canvas handlers + palette list so React.memo(WorkflowCanvas) holds
   // and the (expensive) canvas subtree stops re-rendering on unrelated store
@@ -816,6 +819,7 @@ export default function App() {
       onUpdateNodeConfig={updateSelectedNodeConfig}
       onUpdateNodeType={updateSelectedNodeType}
       onUpdateEdgeCondition={updateEdgeCondition}
+      onInsertSnippet={() => setSnippetMenuOpen(true)}
       onApproveNode={approveNode}
       onSubmitHumanForm={submitHumanForm}
       onReplayNode={replayNode}
@@ -999,6 +1003,7 @@ export default function App() {
               }
             }}
             onDocsUnavailable={() => addToast(t('statusBar.docsUnavailable'), 'info')}
+            onInsertSnippet={() => setSnippetMenuOpen(true)}
             workflows={savedWorkflows.map(wf => ({ id: wf.id, name: wf.name }))}
             recipes={templates.map(template => ({ id: template.id, name: template.name }))}
             onOpenWorkflow={(id) => { void openWorkflow(id) }}
@@ -1012,6 +1017,7 @@ export default function App() {
             }}
           />
           <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} />
+          <SnippetInsertMenu open={snippetMenuOpen} onClose={closeSnippetMenu} />
         </>
       }
       statusBar={

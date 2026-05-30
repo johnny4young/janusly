@@ -2389,6 +2389,45 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   margin-right: 2px;
 }
 
+/* Snippet insert menu — reuses the cmdk shell with a target-node head + two-line rows. */
+.we-snippet-menu__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--we-line);
+  background: var(--we-surface-2);
+}
+
+.we-snippet-menu__head .field-label { margin: 4px 0 0; }
+
+/* The snippet row label stacks the name over a muted description, so it
+   must opt out of the cmdk single-line ellipsis clamp. */
+[data-testid="snippet-insert-menu"] .we-cmdk-row__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+  min-width: 0;
+}
+
+.we-snippet-row__desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--we-muted);
+  line-height: 1.35;
+}
+
+/* Inspector "Insert snippet…" button — full-width with the layers icon. */
+.we-inspector-snippet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+}
+
 /* Shortcuts modal — `?` keyboard help overlay. */
 .we-shortcuts-backdrop {
   position: fixed;
@@ -5493,6 +5532,129 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   margin-top: 4px;
 }
 
+/* ── Schedule observability (cron heatmap) ─────────────────────────────── */
+.we-schedule-panel {
+  margin-top: 12px;
+}
+
+.we-schedule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.we-schedule-empty {
+  margin: 4px 0 8px;
+}
+
+/* Horizontal scroll so the 24-hour grid never blows out a narrow panel. */
+.we-schedule-heatmap-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.we-schedule-heatmap {
+  display: block;
+}
+
+.we-schedule-heatmap__axis {
+  fill: var(--we-text-2);
+  font-size: 9px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
+.we-schedule-heatmap__cell {
+  stroke: var(--we-line);
+  stroke-width: 0.5;
+  transition: opacity 0.12s ease;
+}
+
+.we-schedule-heatmap__cell:hover {
+  opacity: 0.75;
+}
+
+.we-schedule-heatmap__cell--empty {
+  fill: var(--we-surface-muted);
+}
+
+/* Success ramp — three intensity steps by fire volume. */
+.we-schedule-heatmap__cell--success-1 { fill: color-mix(in srgb, var(--we-success) 30%, transparent); }
+.we-schedule-heatmap__cell--success-2 { fill: color-mix(in srgb, var(--we-success) 60%, transparent); }
+.we-schedule-heatmap__cell--success-3 { fill: var(--we-success); }
+
+/* Mixed ramp — mostly success but some failures (amber). */
+.we-schedule-heatmap__cell--mixed-1 { fill: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+.we-schedule-heatmap__cell--mixed-2 { fill: color-mix(in srgb, var(--we-warning) 60%, transparent); }
+.we-schedule-heatmap__cell--mixed-3 { fill: var(--we-warning); }
+
+/* Fail ramp — failures dominate (red). */
+.we-schedule-heatmap__cell--fail-1 { fill: color-mix(in srgb, var(--we-danger) 30%, transparent); }
+.we-schedule-heatmap__cell--fail-2 { fill: color-mix(in srgb, var(--we-danger) 60%, transparent); }
+.we-schedule-heatmap__cell--fail-3 { fill: var(--we-danger); }
+
+.we-schedule-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-schedule-legend__label {
+  font-size: 11px;
+}
+
+.we-schedule-legend__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 0.5px solid var(--we-line);
+}
+
+.we-schedule-legend__swatch--gap {
+  margin-left: 8px;
+}
+
+.we-schedule-upcoming {
+  margin-top: 12px;
+}
+
+.we-schedule-upcoming__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--we-text-1);
+}
+
+.we-schedule-entry {
+  margin-bottom: 8px;
+}
+
+.we-schedule-entry__cron {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--we-text-1);
+}
+
+.we-schedule-entry__fires {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-schedule-entry__fires li {
+  margin: 2px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-schedule-heatmap__cell {
+    transition: none;
+  }
+}
+
 .we-readiness-issue__code {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 11px;
@@ -6704,6 +6866,92 @@ button.we-ops-metric-card--button {
   color: var(--we-success);
 }
 
+/* "Why this suggestion?" evidence panel — collapsible side-channel listing
+   the context the prompt composer fed the model. Each row is a kind chip +
+   one-line snippet + monospace source-ref deep-link token. */
+.we-recovery-evidence {
+  margin-top: 12px;
+  border: 1px solid var(--we-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--we-surface-2) 60%, transparent);
+}
+
+.we-recovery-evidence__summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--we-text-secondary);
+  user-select: none;
+}
+
+.we-recovery-evidence__summary:hover {
+  color: var(--we-primary);
+}
+
+.we-recovery-evidence__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.we-recovery-evidence__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--we-border) 50%, transparent);
+}
+
+.we-recovery-evidence__row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.we-recovery-evidence__kind {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+/* Memory + runbook lean cyan to visually separate "recalled" sources from
+   the cobalt "decision" sources (feedback / signature / recent error). */
+.we-recovery-evidence__row[data-evidence-kind="memory_entry"] .we-recovery-evidence__kind,
+.we-recovery-evidence__row[data-evidence-kind="runbook_excerpt"] .we-recovery-evidence__kind {
+  background: var(--we-accent-soft);
+  color: var(--we-accent);
+}
+
+.we-recovery-evidence__snippet {
+  flex: 1 1 200px;
+  color: var(--we-text-secondary);
+  word-break: break-word;
+}
+
+.we-recovery-evidence__ref {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--we-text-secondary);
+  opacity: 0.7;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Bulk credential-rotation modal: the affected-workflow blast-radius list. */
 .we-credential-rotate__list {
   list-style: none;
@@ -6773,8 +7021,24 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-tab__confidence {
-  opacity: 0.85;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
+}
+
+.we-recovery-tab__confidence-primary {
+  opacity: 0.85;
+}
+
+/* The "(model self-rated X%)" subtitle — dimmer + smaller so the
+ * calibrated primary number stays the headline. */
+.we-recovery-tab__confidence-self {
+  font-size: 9px;
+  font-weight: 400;
+  opacity: 0.6;
+  white-space: nowrap;
 }
 
 .small-command--primary {
@@ -8605,6 +8869,30 @@ button.we-ops-metric-card--button {
   font-weight: 650;
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+.we-recovery-item-drawer__evidence {
+  align-items: center;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.we-recovery-item-drawer__evidence-label {
+  color: var(--we-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.we-recovery-item-drawer__evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .we-recovery-occurrences {

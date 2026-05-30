@@ -285,6 +285,73 @@ export function QuickConfigEditor({
     )
   }
 
+  if (type === 'email_received') {
+    const dkimRequired = config.dkimRequired !== false
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.emailAliasKey') as string}
+          value={readConfigString(config, 'aliasKey')}
+          onChange={value => patch({ aliasKey: value })}
+        />
+        <div className="config-field-row">
+          <label className="field-label" htmlFor={fieldId(nodeId, 'DkimRequired')}>{t('rightPanel.quickConfig.emailDkimRequired')}</label>
+          <input
+            id={fieldId(nodeId, 'DkimRequired')}
+            type="checkbox"
+            checked={dkimRequired}
+            onChange={event => patch({ dkimRequired: event.target.checked })}
+          />
+        </div>
+        <p className="helper-text">{t('rightPanel.quickConfig.emailReceivedHelper')}</p>
+      </section>
+    )
+  }
+
+  if (type === 'file_dropped') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.fileBucket') as string}
+          value={readConfigString(config, 'bucket')}
+          onChange={value => patch({ bucket: value })}
+        />
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.filePrefix') as string}
+          value={readConfigString(config, 'prefix')}
+          onChange={value => patch({ prefix: value })}
+        />
+        <p className="helper-text">{t('rightPanel.quickConfig.fileDroppedHelper')}</p>
+      </section>
+    )
+  }
+
+  if (type === 'mcp_server_event') {
+    return (
+      <section className="quick-config">
+        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.mcpEventConnectionAlias') as string}
+          value={readConfigString(config, 'connectionAlias')}
+          onChange={value => patch({ connectionAlias: value })}
+        />
+        <TextConfigField
+          scope={nodeId}
+          label={t('rightPanel.quickConfig.mcpEventResourceUri') as string}
+          value={readConfigString(config, 'resourceUri')}
+          onChange={value => patch({ resourceUri: value })}
+        />
+        <p className="helper-text">{t('rightPanel.quickConfig.mcpServerEventHelper')}</p>
+      </section>
+    )
+  }
+
   return (
     <section className="quick-config">
       <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>

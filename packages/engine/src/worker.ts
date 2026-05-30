@@ -73,6 +73,21 @@ import {
   registerScimEventsRetentionScheduler,
   SCIM_EVENTS_RETENTION_JOB_NAME,
 } from "./scim-events-retention-scheduler";
+import {
+  handleRetentionTrigger,
+  registerRetentionScheduler,
+  RETENTION_JOB_NAME,
+} from "./retention-scheduler";
+import {
+  handleUpstreamHealthTrigger,
+  registerUpstreamHealthScheduler,
+  UPSTREAM_HEALTH_JOB_NAME,
+} from "./upstream-health-poller";
+import {
+  CONFIDENCE_CALIBRATION_JOB_NAME,
+  handleConfidenceCalibrationTrigger,
+  registerConfidenceCalibrationScheduler,
+} from "./confidence-calibration-scheduler";
 
 await assertMigrationsApplied();
 
@@ -122,6 +137,44 @@ try {
   if (registered) console.log("[scim-events-retention] daily sweep scheduler registered");
 } catch (err) {
   console.error("[scim-events-retention] scheduler registration failed", err);
+}
+
+// Per-org configurable retention sweep across the five high-volume tenant
+// tables (run_events / audit_logs / usage_events / recovery_feedback /
+// memory_entries). Reads each org's `retention.*` config bounds and
+// honours the per-row `hold_until` legal-hold bypass. Same `system:` id
+// convention + never-throws boot posture as the standalone sweeps above;
+// runs at 05:00 UTC so it doesn't pile onto the same off-peak window.
+try {
+  const registered = await registerRetentionScheduler();
+  if (registered) console.log("[retention] daily per-org sweep scheduler registered");
+} catch (err) {
+  console.error("[retention] scheduler registration failed", err);
+}
+
+// Upstream health poll sweep. Global (non-tenant) recurring job — `system:`
+// id prefix. Fetches every enabled `upstream_health_sources` row through the
+// `fetchHttpTarget` SSRF chokepoint at the per-source interval, then auto-pauses
+// / resumes tagged workflows. FAIL-OPEN: an unreachable status page never
+// pauses anything. Same never-throws boot posture as the retention sweeps.
+try {
+  const registered = await registerUpstreamHealthScheduler();
+  if (registered) console.log("[upstream-health] poll scheduler registered");
+} catch (err) {
+  console.error("[upstream-health] scheduler registration failed", err);
+}
+
+// Confidence-calibration sweep. Global (non-tenant) recurring job —
+// `system:` id prefix. Walks every opted-in org's recovery feedback and
+// fits a per-approach linear curve that maps an LLM's self-rated patch
+// confidence onto its observed accept rate. Opt-out per org via
+// `org_configs.ai.confidenceCalibrationEnabled`. Same never-throws boot
+// posture as the retention sweeps.
+try {
+  const registered = await registerConfidenceCalibrationScheduler();
+  if (registered) console.log("[confidence-calibration] daily sweep scheduler registered");
+} catch (err) {
+  console.error("[confidence-calibration] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -264,6 +317,18 @@ export const worker = new Worker(
     }
     if (job.name === SCIM_EVENTS_RETENTION_JOB_NAME) {
       await handleScimEventsRetentionTrigger();
+      return;
+    }
+    if (job.name === RETENTION_JOB_NAME) {
+      await handleRetentionTrigger();
+      return;
+    }
+    if (job.name === UPSTREAM_HEALTH_JOB_NAME) {
+      await handleUpstreamHealthTrigger();
+      return;
+    }
+    if (job.name === CONFIDENCE_CALIBRATION_JOB_NAME) {
+      await handleConfidenceCalibrationTrigger();
       return;
     }
     // One-shot delayed job — scheduled on demand from the

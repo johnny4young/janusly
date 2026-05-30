@@ -21,87 +21,17 @@ import {
   getOrgConfigSnapshot,
 } from "@janusly/data";
 import { executeTool } from "@janusly/engine/src/tool-registry";
-import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 
 import { auditAction } from "../audit-helper";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
+import {
+  buildReportFilename,
+  contentDispositionAttachment,
+  slugify,
+} from "../report-download";
 import type { Route } from "../routes";
-
-/**
- * Slugify a free-form string into a filesystem-safe lowercase token.
- * Keeps `[a-z0-9_-]` and collapses every other char (whitespace,
- * punctuation, non-ASCII) into a single dash. Trims leading/trailing
- * dashes and clamps length so a runaway workflow name can't blow up
- * the filename. Empty input or all-trimmed-away returns "".
- */
-function slugify(value: string, maxLen = 40): string {
-  return scrubSecretShapes(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, maxLen);
-}
-
-/**
- * Build the human-readable filename for a run-explain download.
- * Pattern: `janusly-<workflow_or_run>-<status>-<YYYY-MM-DD>-<short_id>.<ext>`
- * Examples:
- *   - `janusly-billing_flow-failed-2026-05-12-b3dc412b.md`
- *   - `janusly-run-7f3a91-succeeded-2026-05-12.md` (no resolved name)
- *
- * UUIDs are shortened to 8 chars (long enough to disambiguate within a
- * day, short enough to fit a download history row). Non-ASCII workflow
- * names slug through to ASCII so the filesystem-safe `filename=` ASCII
- * fallback in Content-Disposition still works; the RFC 5987 `filename*=`
- * carries the full UTF-8 form for browsers that prefer it.
- */
-function buildReportFilename(args: {
-  runId: string;
-  workflowName: string | null;
-  status: string;
-  createdAt: Date | string | null;
-  format: "markdown" | "json";
-}): { asciiFilename: string; utf8Filename: string } {
-  const slugSource = args.workflowName ? slugify(args.workflowName) : "";
-  // When a workflow name resolves, namePart is the slug AND we still
-  // append shortId for disambiguation. When it doesn't, namePart is
-  // just "run" — appending the short id at the end gives the disambiguator
-  // without doubling it.
-  const namePart = slugSource || "run";
-  const statusSlug = slugify(args.status) || "unknown";
-  const datePart = (() => {
-    if (!args.createdAt) return "undated";
-    const date = args.createdAt instanceof Date ? args.createdAt : new Date(args.createdAt);
-    if (Number.isNaN(date.getTime())) return "undated";
-    return date.toISOString().slice(0, 10);
-  })();
-  const shortId = slugify(args.runId.slice(0, 8)) || args.runId.slice(0, 8);
-  const ext = args.format === "json" ? "json" : "md";
-
-  // The ASCII filename is always filesystem-safe (slugify guarantees it).
-  // The UTF-8 form is the same here because we don't carry the raw
-  // workflow name through, but the helper structure keeps the two
-  // forms distinct so a future change that preserves the raw name in
-  // the UTF-8 branch only has to swap one line.
-  const base = `janusly-${namePart}-${statusSlug}-${datePart}-${shortId}.${ext}`;
-  return { asciiFilename: base, utf8Filename: base };
-}
-
-/**
- * Build a Content-Disposition header value that's safe in every
- * browser. Sends both `filename="<ascii>"` (RFC 6266 fallback) and
- * `filename*=UTF-8''<percent-encoded>` (RFC 5987) so non-ASCII names
- * survive on browsers that prefer the encoded form.
- */
-function contentDispositionAttachment(ascii: string, utf8: string): string {
-  // RFC 5987 percent-encodes byte-by-byte per the `attr-char` set.
-  // `encodeURIComponent` covers what we need (plus a few that aren't
-  // strictly required but are still safe to encode).
-  const encoded = encodeURIComponent(utf8);
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
-}
 
 /**
  * Body schema for `POST /reports/run-explain/deliver`. The shape stays a

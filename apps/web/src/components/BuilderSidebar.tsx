@@ -25,6 +25,7 @@ import {
   ChevronRight,
   ClipboardList,
   Database,
+  FileInput,
   Gauge,
   GitBranch,
   GitFork,
@@ -33,6 +34,7 @@ import {
   Home,
   KeyRound,
   Layers3,
+  Mail,
   ListTree,
   Megaphone,
   Network,
@@ -42,6 +44,7 @@ import {
   Play,
   Plug,
   Plus,
+  Radio,
   Repeat,
   Route,
   Save,
@@ -93,7 +96,8 @@ const NODE_CATEGORIES: Record<string, string[]> = {
   flow: ['condition', 'router', 'router_llm', 'loop', 'parallel_fork', 'join'],
   human: ['approval', 'human_form'],
   tools: ['tool', 'http', 'webhook', 'mcp_tool', 'subworkflow'],
-  misc: ['noop', 'transform', 'schedule', 'wait_until'],
+  triggers: ['schedule', 'email_received', 'file_dropped', 'mcp_server_event'],
+  misc: ['noop', 'transform', 'wait_until'],
 }
 
 const NODE_ICONS: Record<string, React.ReactNode> = {
@@ -118,6 +122,9 @@ const NODE_ICONS: Record<string, React.ReactNode> = {
   join: <ListTree size={13} />,
   schedule: <CalendarClock size={13} />,
   mcp_tool: <Plug size={13} />,
+  email_received: <Mail size={13} />,
+  file_dropped: <FileInput size={13} />,
+  mcp_server_event: <Radio size={13} />,
 }
 
 type NavItem = {
@@ -185,6 +192,7 @@ const CATEGORY_LABEL_KEYS: Record<string, string> = {
   flow: 'sidebar.category.flow',
   human: 'sidebar.category.human',
   tools: 'sidebar.category.tools',
+  triggers: 'sidebar.category.triggers',
   misc: 'sidebar.category.misc',
 }
 

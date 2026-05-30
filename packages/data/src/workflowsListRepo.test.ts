@@ -45,16 +45,16 @@ describe("listWorkflowsWithRunSummary", () => {
 
   it("folds the run aggregate onto each workflow; zero-run rows default to 0 / null", async () => {
     baseRows = [
-      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z") },
-      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z") },
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded" },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), status: "active", pausedReason: null },
     ];
     aggRows = [{ workflowId: "wf-a", runCount: 3, lastRunStatus: "failed" }];
 
     const rows = await listWorkflowsWithRunSummary("org-1", 100);
 
     expect(rows).toEqual([
-      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3 },
-      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0 },
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3, status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded" },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null },
     ]);
   });
 });

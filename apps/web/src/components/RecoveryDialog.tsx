@@ -33,6 +33,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { computeWorkflowDiff } from '@janusly/shared/src/workflow-diff'
 import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
+import { scrubEvidenceRow, type EvidenceKind, type EvidenceRow } from '@janusly/shared/src/ai-evidence'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { WorkflowDefinition } from '../types'
@@ -54,8 +55,26 @@ type SuggestionTab = {
   workflow: WorkflowDefinition
   rationale: string
   approachLabel: PatchApproachLabel
+  /** The model's raw self-rated confidence (0-100). */
   confidence: number
+  /**
+   * The calibrated confidence (0-100) — `confidence` mapped through the
+   * org's per-approach curve server-side. Equals `confidence` when no
+   * calibration is available (disabled / no fit yet / below the sample
+   * threshold). Optional so pre-calibration cached responses and legacy
+   * fixtures still parse; the renderer falls back to `confidence` when
+   * absent.
+   */
+  calibratedConfidence?: number
 }
+
+/**
+ * Minimum gap (in confidence points) between the calibrated and raw
+ * values before the "(model self-rated X%)" subtitle is shown. Mirrors
+ * `CALIBRATION_SUBTITLE_DELTA` in `@janusly/engine/src/confidence-calibration.ts`
+ * (kept as a local literal because the web bundle can't import engine).
+ */
+const CALIBRATION_SUBTITLE_DELTA = 10
 
 type PatchSuggestion = {
   mode: 'ai' | 'fallback'
@@ -65,6 +84,14 @@ type PatchSuggestion = {
   rationale: string
   /** 1-3 alternative patches sorted by confidence desc. The route guarantees length ≥ 1. */
   suggestions: SuggestionTab[]
+  /**
+   * "Why this suggestion?" evidence — the context the prompt composer fed
+   * the model (past feedback, recalled memory, runbook excerpt, recent
+   * similar errors, the fired signature rule, the tool input contract).
+   * Optional so pre-evidence cached responses + legacy fixtures still parse;
+   * the renderer treats `undefined` as `[]` and hides the panel.
+   */
+  evidence?: EvidenceRow[]
   model?: string
   provider?: string
   aiError?: string
@@ -81,6 +108,64 @@ function approachLabelDisplay(label: PatchApproachLabel): string {
   }
 }
 
+/** Human label for an evidence kind, localized. */
+function evidenceKindLabel(kind: EvidenceKind): string {
+  switch (kind) {
+    case 'recovery_feedback': return runtimeT('recoveryDialog.evidence.kind.recovery_feedback') as string
+    case 'memory_entry': return runtimeT('recoveryDialog.evidence.kind.memory_entry') as string
+    case 'runbook_excerpt': return runtimeT('recoveryDialog.evidence.kind.runbook_excerpt') as string
+    case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error') as string
+    case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule') as string
+    case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract') as string
+  }
+}
+
+/**
+ * Collapsible "Why this suggestion?" panel. Renders one chip per evidence
+ * row, grouped visually by `kind` via a `data-evidence-kind` attribute the
+ * CSS colours. Each row's `sourceRef` is shown as a monospace deep-link
+ * token (run id, recovery item id, memory entry id, tool name, signature
+ * category) so the operator can trace the suggestion back to its source.
+ *
+ * Defense in depth: every row re-passes through the shared `scrubEvidenceRow`
+ * at render time even though the API already scrubbed at read time — the
+ * AC's "scrubbed at read even though scrubbed at write" applies on the
+ * browser side too. An empty list hides the panel entirely.
+ */
+function EvidencePanel({ evidence }: { evidence: readonly EvidenceRow[] }) {
+  const { t } = useT()
+  // Re-scrub at render (cheap, idempotent) and drop any row that scrubbed
+  // down to an empty snippet. Memoized so a re-render of the tabpanel (e.g.
+  // switching suggestion tabs) doesn't re-walk the list each time.
+  const rows = useMemo(
+    () => evidence.map((row) => scrubEvidenceRow(row)).filter((row) => row.snippet.length > 0),
+    [evidence],
+  )
+  if (rows.length === 0) return null
+  return (
+    <details className="we-recovery-evidence">
+      <summary className="we-recovery-evidence__summary">
+        {t('recoveryDialog.evidence.summary', { count: rows.length })}
+      </summary>
+      <ul className="we-recovery-evidence__list">
+        {rows.map((row, index) => (
+          <li
+            key={`${row.kind}:${row.sourceRef}:${index}`}
+            className="we-recovery-evidence__row"
+            data-evidence-kind={row.kind}
+          >
+            <span className="we-recovery-evidence__kind">{row.label || evidenceKindLabel(row.kind)}</span>
+            <span className="we-recovery-evidence__snippet">{row.snippet}</span>
+            <code className="we-recovery-evidence__ref" title={t('recoveryDialog.evidence.sourceRefTitle') as string}>
+              {row.sourceRef}
+            </code>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 function suggestionTabKey(tab: SuggestionTab): string {
   const nodeFingerprint = tab.workflow.nodes.map((node) => `${node.id}:${node.type}`).join(',')
   const edgeFingerprint = tab.workflow.edges
@@ -95,6 +180,28 @@ function suggestionTabKey(tab: SuggestionTab): string {
     edgeFingerprint,
     tab.rationale,
   ].join('|')
+}
+
+/**
+ * Resolve the confidence numbers a suggestion tab renders. The primary
+ * number is the server-calibrated confidence (falling back to the raw
+ * self-rating when no calibration is available). The raw self-rating is
+ * surfaced as a subtitle ONLY when it diverges from the calibrated value
+ * by at least `CALIBRATION_SUBTITLE_DELTA` points — a negligible
+ * correction stays a single clean number.
+ */
+function resolveConfidenceDisplay(tab: SuggestionTab): {
+  primary: number
+  showSelfRated: boolean
+  selfRated: number
+} {
+  const raw = tab.confidence
+  const calibrated = typeof tab.calibratedConfidence === 'number' ? tab.calibratedConfidence : raw
+  return {
+    primary: calibrated,
+    showSelfRated: Math.abs(calibrated - raw) >= CALIBRATION_SUBTITLE_DELTA,
+    selfRated: raw,
+  }
 }
 
 type ClusterApplyError = {
@@ -198,6 +305,11 @@ async function recordFeedback(input: {
    *  the `recovery_rationale` it always writes on accept. Cancel /
    *  iterate paths omit it. */
   rationale?: string
+  /** The model's raw self-rated confidence (0-100) for the decided-on
+   *  suggestion. Persisted on the `recovery_feedback` row so the daily
+   *  confidence-calibration sweep can bucket decisions by raw confidence
+   *  and fit the per-approach curve. Omitted by headless callers. */
+  rawConfidence?: number
 }): Promise<void> {
   try {
     await api('/recovery/feedback', {
@@ -460,6 +572,7 @@ export function RecoveryDialog({
           approachLabel: selected.approachLabel,
           accepted: true,
           rationale: selected.rationale,
+          rawConfidence: selected.confidence,
         })
         return
       }
@@ -486,6 +599,7 @@ export function RecoveryDialog({
         approachLabel: selected.approachLabel,
         accepted: true,
         rationale: selected.rationale,
+        rawConfidence: selected.confidence,
       })
     } catch (error) {
       setStep({
@@ -612,6 +726,7 @@ export function RecoveryDialog({
                     approachLabel: selected.approachLabel,
                     accepted: false,
                     comment: comment.length > 0 ? comment : undefined,
+                    rawConfidence: selected.confidence,
                   })
                 }
                 onClose()
@@ -743,6 +858,7 @@ export function RecoveryDialog({
                       approachLabel: selected.approachLabel,
                       accepted: false,
                       comment: 'validation_failed',
+                      rawConfidence: selected.confidence,
                     })
                   }
                   generateSuggestion()
@@ -862,10 +978,27 @@ function ReviewBody({
               className={`we-recovery-tab${index === selectedIndex ? ' we-recovery-tab--active' : ''}`}
               onClick={() => onSelectIndex(index)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
-              title={t('recoveryDialog.review.tabConfidenceTitle', { confidence: tab.confidence }) as string}
+              title={(() => {
+                const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
+                return showSelfRated
+                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated }) as string
+                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary }) as string
+              })()}
             >
               <span className="we-recovery-tab__label">{approachLabelDisplay(tab.approachLabel)}</span>
-              <span className="we-recovery-tab__confidence">{tab.confidence}%</span>
+              {(() => {
+                const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
+                return (
+                  <span className="we-recovery-tab__confidence">
+                    <span className="we-recovery-tab__confidence-primary">{primary}%</span>
+                    {showSelfRated && (
+                      <span className="we-recovery-tab__confidence-self">
+                        {t('recoveryDialog.review.selfRated', { confidence: selfRated })}
+                      </span>
+                    )}
+                  </span>
+                )
+              })()}
             </button>
           ))}
         </div>
@@ -884,6 +1017,7 @@ function ReviewBody({
             : (t('recoveryDialog.review.suggestedLabel') as string)}
           aiPatchRationale={selected.rationale}
         />
+        <EvidencePanel evidence={suggestion.evidence ?? []} />
       </div>
     </>
   )
@@ -1162,6 +1296,9 @@ function normalisePatchSuggestion(raw: PatchSuggestion): PatchSuggestion {
       rationale: raw.rationale,
       approachLabel: 'other',
       confidence: raw.mode === 'ai' ? 50 : 0,
+      // No server-side calibration on the legacy shape — mirror raw so the
+      // renderer shows a single number (delta is 0, subtitle suppressed).
+      calibratedConfidence: raw.mode === 'ai' ? 50 : 0,
     }],
   }
 }

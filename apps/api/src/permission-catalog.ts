@@ -42,7 +42,11 @@ export type PermissionCategory =
   | "prompts"
   | "auto-healing"
   | "credentials"
-  | "alerts";
+  | "alerts"
+  | "upstream"
+  | "snippets"
+  | "evals"
+  | "triggers";
 
 export type PermissionEntry = {
   key: string;
@@ -52,7 +56,7 @@ export type PermissionEntry = {
 };
 
 /**
- * Closed catalog of permission keys. Currently 21 keys across 11
+ * Closed catalog of permission keys. Currently 35 keys across 17
  * categories. Mirrors the action categories exposed by the API surface
  * today.
  */
@@ -97,6 +101,18 @@ export const PERMISSION_CATALOG = [
   // recovery alerting policies
   { key: "alerts.read",          category: "alerts",      description: "View alert policies and recently fired alerts",         defaultRoles: ["viewer", "editor", "admin"] },
   { key: "alerts.write",         category: "alerts",      description: "Create / edit / delete recovery alerting policies",     defaultRoles: ["admin"] },
+  // upstream health sources
+  { key: "upstream.read",        category: "upstream",    description: "View upstream health sources + derived status",         defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "upstream.write",       category: "upstream",    description: "Register / edit / delete upstream health sources",      defaultRoles: ["admin"] },
+  // workflow snippets library
+  { key: "snippets.read",        category: "snippets",    description: "View built-in + org-private workflow snippets",         defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "snippets.write",       category: "snippets",    description: "Create / edit / delete org-private workflow snippets",  defaultRoles: ["admin"] },
+  // eval datasets (built from opted-in accepted recovery feedback)
+  { key: "evals.read",           category: "evals",       description: "View + export eval datasets built from recovery decisions", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "evals.write",          category: "evals",       description: "Create / delete eval datasets from opted-in recovery feedback", defaultRoles: ["admin"] },
+  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  { key: "triggers.read",        category: "triggers",    description: "View structured inbound-trigger events + replay history", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];

@@ -105,6 +105,14 @@ export type ComposeRecoveryMemoryHintResult = {
    *  returned (with hits or empty). Fulfilled-but-empty runtime failures
    *  remain diagnosable via the repo's `memory.recall.failed` audit rows. */
   recallOk: boolean;
+  /** The post-filtered, post-ranked recall entries that backed the rendered
+   *  `snippets` block — same order, BEFORE the byte-cap truncation that
+   *  `composeMemorySnippetsBlock` applies for the prompt. Carried out so the
+   *  evidence assembler can emit one `memory_entry` evidence row per recalled
+   *  entry (with the entry id as the deep-link `sourceRef`) WITHOUT issuing a
+   *  second `recallMemory` call. Empty when memory is disabled or the recall
+   *  returned nothing. */
+  entries: readonly MemoryRecallEntry[];
 };
 
 /**
@@ -235,7 +243,7 @@ export async function composeRecoveryMemoryHint(
     // (process flag, tenant flag, or `config_unavailable` fail-closed).
     // An audit reader sees `memoryRecallOk: false` and knows to NOT go
     // looking for `memory.recall.failed` rows — the recall never ran.
-    return { snippets: "", hitCount: 0, recallOk: false };
+    return { snippets: "", hitCount: 0, recallOk: false, entries: [] };
   }
 
   const query = buildRecallQuery(input.failingNode, input.errorEnvelope);
@@ -245,7 +253,7 @@ export async function composeRecoveryMemoryHint(
     // embedding call doesn't fire on a zero-length string. Consent was
     // allowed, so `recallOk: true` is honest at this layer (matching the
     // empty-substrate case below).
-    return { snippets: "", hitCount: 0, recallOk: true };
+    return { snippets: "", hitCount: 0, recallOk: true, entries: [] };
   }
 
   // Two kinds in parallel. `recallMemory` normally handles consent,
@@ -272,7 +280,7 @@ export async function composeRecoveryMemoryHint(
     rationaleSettled.status === "fulfilled" && patchSettled.status === "fulfilled";
 
   if (allEntries.length === 0) {
-    return { snippets: "", hitCount: 0, recallOk };
+    return { snippets: "", hitCount: 0, recallOk, entries: [] };
   }
 
   // Workflow post-filter: same-workflow matches lead, cross-workflow
@@ -284,7 +292,11 @@ export async function composeRecoveryMemoryHint(
     : sortBySimilarityDesc(allEntries);
 
   const snippets = composeMemorySnippetsBlock(sorted);
-  return { snippets, hitCount: countRenderedEntries(snippets), recallOk };
+  // `sorted` is the full ranked set; `snippets` may have dropped the tail
+  // entries to fit the byte cap. The evidence assembler bounds the count
+  // itself (`MAX_EVIDENCE_ROWS`), so handing back the full ranked list is
+  // fine — it never produces MORE evidence rows than the panel cap.
+  return { snippets, hitCount: countRenderedEntries(snippets), recallOk, entries: sorted };
 }
 
 function sortWorkflowMatchesFirst(

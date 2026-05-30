@@ -62,6 +62,9 @@ export const nodePresets: Record<string, JsonObject> = {
   join: { sources: { a: '', b: '' } },
   schedule: { cronExpression: '0 9 * * *', enabled: true },
   mcp_tool: { connectionAlias: '', toolName: '', input: {} },
+  email_received: { aliasKey: '', dkimRequired: true },
+  file_dropped: { bucket: '', prefix: '' },
+  mcp_server_event: { connectionAlias: '', resourceUri: '' },
 }
 
 /** Ordered list of supported node-type ids — derived from `nodePresets`. */
@@ -188,6 +191,20 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
     const toolName = readString(config.toolName)
     if (alias && toolName) return t('nodeSummary.mcp_tool.set', { alias, tool: toolName }) as string
     return t('nodeSummary.mcp_tool.empty') as string
+  }
+  if (type === 'email_received') {
+    const alias = readString(config.aliasKey)
+    return alias ? (t('nodeSummary.email_received.set', { alias }) as string) : (t('nodeSummary.email_received.empty') as string)
+  }
+  if (type === 'file_dropped') {
+    const bucket = readString(config.bucket)
+    return bucket ? (t('nodeSummary.file_dropped.set', { bucket }) as string) : (t('nodeSummary.file_dropped.empty') as string)
+  }
+  if (type === 'mcp_server_event') {
+    const alias = readString(config.connectionAlias)
+    const resource = readString(config.resourceUri)
+    if (alias && resource) return t('nodeSummary.mcp_server_event.set', { alias, resource }) as string
+    return t('nodeSummary.mcp_server_event.empty') as string
   }
   return t('nodeSummary.fallback') as string
 }
