@@ -32,6 +32,10 @@ export type WorkflowListRow = {
   createdAt: Date | null;
   lastRunStatus: string | null;
   runCount: number;
+  /** Operational status — `active` or `paused_upstream_degraded`. Drives the paused pill + force-run affordance. */
+  status: string;
+  /** Operator-visible reason when paused; null when active. */
+  pausedReason: string | null;
 };
 
 /**
@@ -82,5 +86,7 @@ export async function listWorkflowsWithRunSummary(
     createdAt: w.createdAt ?? null,
     lastRunStatus: byId.get(w.id)?.lastRunStatus ?? null,
     runCount: byId.get(w.id)?.runCount ?? 0,
+    status: w.status ?? "active",
+    pausedReason: w.pausedReason ?? null,
   }));
 }

@@ -51,12 +51,19 @@ import {
   listRecoveryItemChildren,
   countRecoveryItemChildren,
   getWorkflowMetadata,
+  resolveRecoveryEvidence,
 } from "@janusly/data";
+import { buildRecoveryEvidenceReport } from "@janusly/engine/src/recovery-evidence-report";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, corsHeaders, readJson, sendJson } from "../http";
 import type { CorsAwareResponse } from "../http";
+import {
+  buildReportFilename,
+  contentDispositionAttachment,
+  type ReportFormat,
+} from "../report-download";
 import type { Route } from "../routes";
 
 function idFromUrl(url: string | undefined, verb?: string): string | null {
@@ -421,6 +428,104 @@ export const recoveryItemsRoutes: Route[] = [
         bodyPreview,
       } });
       return sendJson(res, { comment: result.ok ? result.comment : null });
+    },
+  },
+  {
+    // POST /recovery/items/:id/evidence?format=json|markdown
+    //
+    // Single downloadable "audit evidence" artefact for one incident —
+    // run timeline (pagination cap respected), DLQ row, scrubbed failure
+    // signature, AI explanation mode, selected patch diff (via shared
+    // computeWorkflowDiff), sandbox validation result, approval trail,
+    // audit rows scoped to (runId, deadLetterId, recoveryItemId), and a
+    // rollback link. Mirrors the `/reports/run-explain` download shape
+    // (JSON envelope + optional Markdown rendering, dual-form
+    // Content-Disposition). Compliance buyers archive this per failure.
+    //
+    // `role: "editor"` AND `permission: "recovery.read"` — the registry
+    // requires BOTH, so an editor-rank operator with recovery.read can
+    // export; a plain viewer cannot (editor rank is the AC requirement).
+    //
+    // Multi-tenant gate lives in `resolveRecoveryEvidence` (the recovery
+    // item read is org-scoped; a cross-org / missing id returns a uniform
+    // 404 with no enumeration distinction). Secrets are redacted at the
+    // safePersistPayload chokepoint (write time) AND again at render time
+    // (scrubSecretShapes inside the builder). Every export writes a
+    // `report.evidence.exported` audit row.
+    method: "POST",
+    match: (url) => /^\/recovery\/items\/[^/?]+\/evidence$/.test(url.split("?")[0] ?? ""),
+    role: "editor",
+    permission: "recovery.read",
+    handler: async ({ req, res, auth }) => {
+      const id = idFromUrl(req.url, "evidence");
+      if (!id) return sendJson(res, { error: "id required" }, 400);
+
+      const url = new URL(req.url ?? "", "http://internal");
+      const formatRaw = (url.searchParams.get("format") ?? "json").toLowerCase();
+      if (formatRaw !== "markdown" && formatRaw !== "json") {
+        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "markdown" or "json".` }, 400);
+      }
+      const format = formatRaw as ReportFormat;
+
+      const bundle = await resolveRecoveryEvidence(auth.orgId, id);
+      if (!bundle) {
+        return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      }
+
+      const report = buildRecoveryEvidenceReport({
+        recoveryItem: bundle.recoveryItem,
+        deadLetter: bundle.deadLetter,
+        originalRun: bundle.originalRun,
+        originalRunNodes: bundle.originalRunNodes,
+        originalRunEvents: bundle.originalRunEvents,
+        originalRunEventsTruncated: bundle.originalRunEventsTruncated,
+        validationRun: bundle.validationRun,
+        validationRunNodes: bundle.validationRunNodes,
+        auditRows: bundle.auditRows,
+        rollback: bundle.rollback,
+        appBaseUrl: process.env.JANUSLY_PUBLIC_APP_URL ?? null,
+      });
+
+      await auditAction(auth, "report.evidence.exported", {
+        targetType: "recovery-item",
+        targetId: id,
+        metadata: {
+          format,
+          deadLetterId: bundle.recoveryItem.deadLetterId,
+          workflowId: bundle.recoveryItem.workflowId,
+          runId: bundle.deadLetter?.runId ?? null,
+          validationRunId: bundle.validationRun?.id ?? null,
+          hasPatchDiff: report.json.patchDiff !== null,
+          auditRowCount: report.json.auditTrail.length,
+        },
+      });
+
+      const { asciiFilename, utf8Filename } = buildReportFilename({
+        runId: id,
+        workflowName: bundle.recoveryItem.workflowId,
+        status: `evidence-${bundle.recoveryItem.status}`,
+        createdAt: bundle.recoveryItem.createdAt,
+        format,
+      });
+
+      if (format === "json") {
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
+          "Access-Control-Expose-Headers": "Content-Disposition",
+          ...corsHeaders(res),
+        });
+        res.end(JSON.stringify(report.json));
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
+        "Access-Control-Expose-Headers": "Content-Disposition",
+        ...corsHeaders(res),
+      });
+      res.end(report.markdown);
     },
   },
 ];

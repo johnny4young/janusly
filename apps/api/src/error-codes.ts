@@ -52,8 +52,32 @@ export type ApiErrorCode =
   // workflows
   | "workflow_not_found"
   | "workflow_name_required"
+  | "upstream_degraded"
+  // upstream health sources
+  | "upstream_source_not_found"
+  | "upstream_source_duplicate"
   // credentials
-  | "credential_rotation_conflict";
+  | "credential_rotation_conflict"
+  // snippets
+  | "snippet_not_found"
+  | "snippet_name_exists"
+  | "snippet_builtin_immutable"
+  // eval datasets
+  | "eval_dataset_not_found"
+  | "eval_dataset_name_exists"
+  | "eval_dataset_name_required"
+  // experiments
+  | "experiment_invalid_body"
+  | "experiment_dataset_not_found"
+  | "experiment_dataset_empty"
+  | "experiment_prompt_ref_invalid"
+  | "experiment_not_found"
+  // inbound trigger events
+  | "trigger_invalid_payload"
+  | "trigger_payload_too_large"
+  | "trigger_no_matching_node"
+  | "trigger_dkim_required"
+  | "trigger_event_not_found";
 
 /**
  * Canonical 4xx response envelope. The `error` field is the English

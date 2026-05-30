@@ -66,6 +66,21 @@ export type RecoveryFeedbackInput = {
   approachLabel: RecoveryApproachLabel;
   accepted: boolean;
   comment: string | null;
+  /**
+   * Operator opt-in to reuse this decision as eval-dataset training
+   * material. Default `false` — a row is NEVER eligible for an eval
+   * example unless the operator explicitly consents. The dataset-build
+   * query filters `accepted = true AND eval_consent = true`.
+   */
+  evalConsent?: boolean;
+  /**
+   * The model's raw self-rated confidence (0-100) for the decided-on
+   * suggestion. Nullable — headless callers (MCP, CI) and rows written
+   * before the column landed omit it. The daily confidence-calibration
+   * sweep buckets only rows where this is non-null, so a missing value
+   * silently drops out of the curve fit rather than skewing it toward 0.
+   */
+  rawConfidence?: number | null;
 };
 
 /**
@@ -95,6 +110,8 @@ export async function recordRecoveryFeedback(input: RecoveryFeedbackInput): Prom
     approachLabel: input.approachLabel,
     accepted: input.accepted,
     comment: safeComment,
+    evalConsent: input.evalConsent ?? false,
+    rawConfidence: input.rawConfidence ?? null,
   });
 }
 

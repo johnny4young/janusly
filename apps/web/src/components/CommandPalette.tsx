@@ -22,6 +22,7 @@ import {
   GitBranch,
   Home,
   KeyRound,
+  Layers,
   Layers3,
   LogOut,
   Moon,
@@ -65,6 +66,7 @@ type CommandContext = {
   onNew: () => void
   onSignOut: () => void
   onDocsUnavailable: () => void
+  onInsertSnippet: () => void
 }
 
 export type PaletteWorkflow = { id: string; name: string }
@@ -122,6 +124,7 @@ function buildCommands(): Command[] {
     { id: 'action.validate', labelKey: 'palette.action.validate', icon: <CheckCircle2 size={14} />, group: 'action', run: ({ onValidate }) => { onValidate() } },
     { id: 'action.save', labelKey: 'palette.action.save', icon: <Save size={14} />, group: 'action', run: ({ onSave }) => { onSave() } },
     { id: 'action.run', labelKey: 'palette.action.run', icon: <Play size={14} />, group: 'action', run: ({ onStart }) => { onStart() } },
+    { id: 'action.insertSnippet', labelKey: 'palette.action.insertSnippet', icon: <Layers size={14} />, group: 'action', run: ({ onInsertSnippet }) => { onInsertSnippet() } },
     { id: 'action.recover', labelKey: 'palette.action.recover', icon: <ShieldAlert size={14} />, group: 'action', run: ({ openTab }) => { openTab('home') } },
     { id: 'action.openRuns', labelKey: 'palette.action.openRuns', icon: <PlayCircle size={14} />, group: 'action', run: ({ openTab }) => { openTab('runs') } },
     { id: 'action.openRecipes', labelKey: 'palette.action.openRecipes', icon: <Compass size={14} />, group: 'action', run: ({ openTab }) => { openTab('templates') } },
@@ -173,6 +176,7 @@ export function CommandPalette({
   onNew,
   onSignOut,
   onDocsUnavailable,
+  onInsertSnippet,
   workflows = [],
   recipes = [],
   onOpenWorkflow,
@@ -266,7 +270,7 @@ export function CommandPalette({
   }, [ordered.length])
 
   const runCommand = (cmd: Command) => {
-    const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onDocsUnavailable }
+    const ctx: CommandContext = { openTab, onValidate, onSave, onStart, onNew, onSignOut, onDocsUnavailable, onInsertSnippet }
     const keepOpen = cmd.run(ctx)
     const nextRecent = [cmd.id, ...recent.filter(id => id !== cmd.id)].slice(0, RECENT_LIMIT)
     setRecent(nextRecent)

@@ -20,6 +20,8 @@ import { validateExpression } from "./expression";
 import { parseIsoDuration } from "./iso-duration";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
+import { resolveTriggerConfig } from "./triggers";
+import { isTriggerNodeType } from "@janusly/shared/src/trigger-types";
 import { isRegisteredTool, validateToolInput } from "./tool-registry";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
@@ -171,6 +173,20 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         issues.push({
           code: "schedule_invalid_cron",
           message: err instanceof Error ? err.message : "schedule node has invalid config",
+          nodeId: node.id,
+        });
+      }
+    }
+    // Event-driven trigger nodes — validate the authored config against the
+    // shared per-type Zod schema so a malformed alias / bucket / connection
+    // surfaces at save time, not at first inbound event.
+    if (isTriggerNodeType(node.type)) {
+      try {
+        resolveTriggerConfig(node.type, node.config);
+      } catch (err) {
+        issues.push({
+          code: "trigger_invalid_config",
+          message: err instanceof Error ? err.message : `${node.type} node has invalid config`,
           nodeId: node.id,
         });
       }

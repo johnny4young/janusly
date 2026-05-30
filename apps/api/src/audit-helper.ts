@@ -96,6 +96,11 @@ export type AuditAction =
   | "prompt.created"
   | "prompt.version_created"
   | "prompt.version_pinned"
+  // workflow snippets library
+  | "snippet.created"
+  | "snippet.updated"
+  | "snippet.deleted"
+  | "snippet.inserted"
   // recovery handoff (one per RecoveryHandoffDestination)
   | "recovery.handoff.slack"
   | "recovery.handoff.linear"
@@ -112,10 +117,22 @@ export type AuditAction =
   | "recovery.item.commented"
   // recovery feedback
   | "recovery.feedback"
+  // eval datasets (built from opted-in accepted recovery feedback)
+  | "eval.dataset.created"
+  | "eval.dataset.deleted"
+  | "eval.dataset.exported"
+  // prompt/model experiments (A/B control-vs-candidate against an eval dataset)
+  | "experiment.run.started"
+  | "experiment.run.completed"
+  | "experiment.run.promotion_suggested"
   // reports
   | "report.run_explain.exported"
   | "report.run_explain.delivered"
   | "report.value_dashboard.exported"
+  | "report.evidence.exported"
+  // retention (per-org daily purge sweep; written by the engine scheduler
+  // with the real orgId, userId null — system-actor write, not a route)
+  | "retention.purged"
   // roles / permissions
   | "org.role.created"
   | "org.role.updated"
@@ -142,7 +159,17 @@ export type AuditAction =
   | "workflow.saved"
   | "workflow.rolled_back"
   | "workflow.slo.set"
-  | "workflow.deleted";
+  | "workflow.deleted"
+  | "workflow.force_run_during_pause"
+  // upstream health sources
+  | "upstream_health.source.created"
+  | "upstream_health.source.updated"
+  | "upstream_health.source.deleted"
+  // inbound trigger events (email_received / file_dropped / mcp_server_event)
+  | "trigger.event.received"
+  | "trigger.event.started"
+  | "trigger.event.skipped"
+  | "trigger.event.replayed";
 
 export type AuditActionOptions = {
   targetType?: string;

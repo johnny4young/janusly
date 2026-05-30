@@ -482,3 +482,55 @@ describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
     expect(normalizeOrgConfigValue(def, "acme.com,partner.com")).toBe("acme.com,partner.com");
   });
 });
+
+describe("ORG_CONFIG_DEFINITIONS retention.* family", () => {
+  it("catalogues exactly the five retention.* keys", () => {
+    const retentionKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("retention."))
+      .map((d) => d.key)
+      .sort();
+    expect(retentionKeys).toEqual(
+      [
+        "retention.runEventsDays",
+        "retention.auditLogsDays",
+        "retention.usageEventsDays",
+        "retention.recoveryFeedbackDays",
+        "retention.memoryEntriesDays",
+      ].sort(),
+    );
+  });
+
+  it("registers every retention.* entry under the `retention` category as a number", () => {
+    for (const def of ORG_CONFIG_DEFINITIONS) {
+      if (def.key.startsWith("retention.")) {
+        expect(def.category).toBe("retention");
+        expect(def.valueType).toBe("number");
+      }
+    }
+  });
+
+  // [defaultValue, min, max] per the AC.
+  const SPECS: Array<[string, number, number, number]> = [
+    ["retention.runEventsDays", 90, 7, 365],
+    ["retention.auditLogsDays", 365, 30, 730],
+    ["retention.usageEventsDays", 90, 30, 365],
+    ["retention.recoveryFeedbackDays", 180, 30, 365],
+    ["retention.memoryEntriesDays", 90, 7, 730],
+  ];
+
+  it.each(SPECS)("%s declares default %d and range %d..%d", (key, def, min, max) => {
+    const d = findDef(key);
+    expect(d.defaultValue).toBe(def);
+    expect(d.min).toBe(min);
+    expect(d.max).toBe(max);
+  });
+
+  it.each(SPECS)("%s normalizes in-range, floors fractional, and rejects out-of-range", (key, _def, min, max) => {
+    const d = findDef(key);
+    expect(normalizeOrgConfigValue(d, min)).toBe(min);
+    expect(normalizeOrgConfigValue(d, max)).toBe(max);
+    // Day counts are integer keys (no `fractional`), so a fractional input floors.
+    expect(normalizeOrgConfigValue(d, min + 0.9)).toBe(min);
+    expect(() => normalizeOrgConfigValue(d, min - 1)).toThrow(new RegExp(`>= ${min}`));
+    expect(() => normalizeOrgConfigValue(d, max + 1)).toThrow(new RegExp(`<= ${max}`));
+  });
+});

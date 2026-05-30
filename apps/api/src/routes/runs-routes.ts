@@ -17,6 +17,8 @@ import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
 import {
   getOrgConfigSnapshot,
   getRunComparison,
+  getWorkflowStatus,
+  WORKFLOW_STATUS_ACTIVE,
 } from "@janusly/data";
 import { db, runEvents, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { replayDecision } from "@janusly/domain";
@@ -35,6 +37,7 @@ import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
+import { errorEnvelope } from "../error-codes";
 import { asRecord, corsHeaders, readJson, sendEventFrame, sendJson, sendSseComment } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
@@ -291,6 +294,11 @@ export const runsRoutes: Route[] = [
         ? asRecord(body.workflow)
         : body;
       const inputValue = Object.hasOwn(body, "input") ? body.input : {};
+      // Explicit operator override to start a run even when the workflow is
+      // paused by an upstream-health degradation. Surfaced as the "Force run"
+      // button on the paused-workflow UI; audited separately so the override
+      // is traceable.
+      const forceRunDuringPause = body.forceRunDuringPause === true;
 
       const validation = validateWorkflow(workflow);
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
@@ -335,6 +343,35 @@ export const runsRoutes: Route[] = [
         return sendJson(res, { error: "Ad-hoc workflows are disabled. Save the workflow first." }, 403);
       }
 
+      // Upstream-health pause gate. A saved workflow auto-paused by a degraded
+      // upstream source rejects new run starts with HTTP 409 unless the operator
+      // explicitly forces the run. Ad-hoc workflows have no persisted status row
+      // so they're never gated here. The pause is set/cleared by the worker's
+      // background poller (`upstream-health-poller.ts`).
+      let forcedDuringPause = false;
+      if (!isAdhoc && typeof parsedWorkflow.id === "string" && parsedWorkflow.id) {
+        const wfStatus = await getWorkflowStatus(auth.orgId, parsedWorkflow.id);
+        if (wfStatus && wfStatus.status !== WORKFLOW_STATUS_ACTIVE) {
+          if (!forceRunDuringPause) {
+            return sendJson(
+              res,
+              errorEnvelope(
+                "upstream_degraded",
+                wfStatus.pausedReason ?? "Workflow is paused because an upstream dependency is degraded",
+                { status: wfStatus.status },
+              ),
+              409,
+            );
+          }
+          forcedDuringPause = true;
+          await auditAction(auth, "workflow.force_run_during_pause", {
+            targetType: "workflow",
+            targetId: parsedWorkflow.id,
+            metadata: { status: wfStatus.status, pausedReason: wfStatus.pausedReason },
+          });
+        }
+      }
+
       try {
         const result = await startRun({
           ...parsedWorkflow,
@@ -345,6 +382,7 @@ export const runsRoutes: Route[] = [
         await auditAction(auth, isAdhoc ? "run.started.adhoc" : "run.started", { targetType: "run", targetId: result.runId, metadata: {
           workflowId: parsedWorkflow.id,
           adhoc: isAdhoc,
+          ...(forcedDuringPause ? { forcedDuringPause: true } : {}),
         } });
         return sendJson(res, result);
       } catch (err) {

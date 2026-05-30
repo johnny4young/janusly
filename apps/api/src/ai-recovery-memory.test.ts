@@ -200,7 +200,7 @@ describe("composeRecoveryMemoryHint — memory-disabled zero behavior change", (
     });
     // recallOk: false signals "memory was OFF at this call site" — the
     // audit reader uses this to skip looking for memory.recall.failed rows.
-    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: false });
+    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: false, entries: [] });
     expect(recallMemoryMock).not.toHaveBeenCalled();
   });
 
@@ -274,7 +274,7 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
       failingNode: { id: "n1", type: "http" },
       errorEnvelope: { message: "boom" },
     });
-    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: true });
+    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: true, entries: [] });
   });
 
   it("keeps the patch route resilient when one recall kind throws", async () => {
@@ -300,7 +300,7 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
       failingNode: { id: "fetch", type: "http" },
       errorEnvelope: { message: "timeout" },
     });
-    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: false });
+    expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: false, entries: [] });
   });
 
   it("renders the snippets block when entries come back", async () => {

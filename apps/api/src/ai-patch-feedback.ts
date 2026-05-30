@@ -45,6 +45,13 @@ export const RecoveryFeedbackBodySchema = z.object({
   ]),
   accepted: z.boolean(),
   comment: z.string().max(2000).optional(),
+  // Operator opt-in to reuse this decision as eval-dataset training
+  // material. Optional + defaults to `false` server-side — a row is
+  // never eligible for an eval example without explicit consent. Only
+  // meaningful on `accepted: true` rows (the dataset build filters
+  // accepted), but stored verbatim so a future rejection-capture
+  // dataset is a one-line change.
+  evalConsent: z.boolean().optional(),
   // Optional LLM rationale text for the accepted suggestion. The
   // recovery dialog passes it on the apply-success path so the route
   // can synthesize a `patch_rationale` memory entry alongside the
@@ -54,6 +61,13 @@ export const RecoveryFeedbackBodySchema = z.object({
   // `comment`'s DoS bound and matches the upstream-suggested rationale
   // size from the patch envelope.
   rationale: z.string().max(2000).optional(),
+  // The model's raw self-rated confidence (0-100) for the decided-on
+  // suggestion. Persisted on the `recovery_feedback` row so the daily
+  // confidence-calibration sweep can bucket decisions by raw confidence
+  // and fit the per-approach linear curve. Optional + integer-bounded;
+  // headless callers omit it (those rows drop out of the calibration fit
+  // via the repo's `raw_confidence IS NOT NULL` filter).
+  rawConfidence: z.number().int().min(0).max(100).optional(),
 });
 
 /** Max characters in the produced hint string. Truncated with a trailing `…` if exceeded. */

@@ -90,12 +90,15 @@ export const recoveryRoutes: Route[] = [
         approachLabel: parsed.data.approachLabel,
         accepted: parsed.data.accepted,
         comment: parsed.data.comment ?? null,
+        evalConsent: parsed.data.evalConsent ?? false,
+        rawConfidence: parsed.data.rawConfidence ?? null,
       });
 
       await auditAction(auth, "recovery.feedback", { targetType: "dead_letter", targetId: parsed.data.deadLetterId, metadata: {
         approachLabel: parsed.data.approachLabel,
         suggestionMode: parsed.data.suggestionMode,
         accepted: parsed.data.accepted,
+        evalConsent: parsed.data.evalConsent ?? false,
       } });
 
       // Memory-write side of the recovery loop. Fires ONLY when the

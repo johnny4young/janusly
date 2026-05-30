@@ -99,6 +99,20 @@ export const workflows = pgTable(
     id: text("id").primaryKey(),
     orgId: text("org_id").notNull().default("default"),
     name: text("name").notNull(),
+    /**
+     * Operational status. `active` is the normal state. The upstream-health
+     * poller flips this to `paused_upstream_degraded` when a watched status
+     * page reports a referenced component degraded, and restores it to
+     * `active` on recovery. `POST /start` rejects a non-`active` workflow with
+     * HTTP 409 unless the caller passes the explicit force-run flag.
+     */
+    status: text("status").notNull().default("active"),
+    /**
+     * Free-form reason for a non-`active` status (e.g. the upstream source
+     * name + component that triggered the pause). Operator-visible only; NULL
+     * when `status === "active"`.
+     */
+    pausedReason: text("paused_reason"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -120,6 +134,14 @@ export const workflowVersions = pgTable(
      * the save body explicitly overrides it.
      */
     sloJson: jsonb("slo_json"),
+    /**
+     * Optional list of `upstream_health_sources.name` values this workflow is
+     * tagged with. When any referenced source reports a watched component
+     * degraded, the poller auto-pauses the workflow. Carried forward from the
+     * prior version on every save (same posture as `sloJson`). `null` / empty
+     * = not subscribed to any upstream feed.
+     */
+    upstreamHealthSources: jsonb("upstream_health_sources").$type<string[]>(),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -204,6 +226,10 @@ export const runEvents = pgTable(
     type: text("type").notNull(),
     payload: jsonb("payload"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // Legal-hold bypass for the retention sweep. When set in the future,
+    // the row is exempt from purge until the timestamp passes (e.g. an
+    // active investigation freezes its run timeline). NULL = no hold.
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [index("run_events_run_created_idx").on(table.runId, table.createdAt)],
 );
@@ -272,6 +298,8 @@ export const usageEvents = pgTable(
     quantity: integer("quantity").notNull().default(1),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // Legal-hold bypass for the retention sweep — see `run_events.holdUntil`.
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [
     index("usage_events_org_metric_idx").on(table.orgId, table.metric),
@@ -334,6 +362,10 @@ export const auditLogs = pgTable(
     targetId: text("target_id"),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // Legal-hold bypass for the retention sweep — see `run_events.holdUntil`.
+    // The retention floor on audit_logs is 365 days; a hold freezes a row
+    // referenced by an active compliance investigation past that floor.
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [
     index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc()),
@@ -428,8 +460,23 @@ export const recoveryFeedback = pgTable(
     suggestionMode: text("suggestion_mode").notNull(),
     approachLabel: text("approach_label").notNull(),
     accepted: boolean("accepted").notNull(),
+    // The LLM's self-rated confidence (0-100) for the suggestion the
+    // operator decided on. Nullable because rows written before this
+    // column landed (and headless callers that omit it) carry no value;
+    // the daily confidence-calibration sweep buckets only rows where this
+    // is non-null, so a missing value silently drops out of the curve fit
+    // rather than skewing it toward 0.
+    rawConfidence: integer("raw_confidence"),
     comment: text("comment"),
+    // Operator opt-in to reuse this decision as eval-dataset training
+    // material. Default `false`: a row is NEVER eligible for an eval
+    // example unless the operator explicitly consents at feedback time.
+    // The dataset-build query filters `accepted = true AND eval_consent =
+    // true`, so consent is a hard gate on top of the accept gate.
+    evalConsent: boolean("eval_consent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    // Legal-hold bypass for the retention sweep — see `run_events.holdUntil`.
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [
     // Read-side aggregation: list past feedback for this workflow when
@@ -989,9 +1036,14 @@ export const memoryEntries = pgTable(
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     // Populated by the commit helper from per-kind retention defaults
-    // or per-tenant overrides; the retention sweep deletes rows where
+    // or per-tenant overrides; the per-kind sweep deletes rows where
     // `retain_until <= now()`.
     retainUntil: timestamp("retain_until", { withTimezone: true }).notNull(),
+    // Legal-hold bypass for the org-level retention sweep (the
+    // `retention.memoryEntriesDays` policy) — see `run_events.holdUntil`.
+    // Distinct from `retain_until`: that drives the per-kind memory-policy
+    // expiry; this freezes a row past the org's retention floor.
+    holdUntil: timestamp("hold_until", { withTimezone: true }),
   },
   (table) => [
     index("memory_entries_org_kind_created_idx").on(
@@ -1395,5 +1447,359 @@ export const workflowMetadata = pgTable(
   (table) => [
     uniqueIndex("workflow_metadata_org_workflow_idx").on(table.orgId, table.workflowId),
     index("workflow_metadata_org_updated_idx").on(table.orgId, table.updatedAt.desc()),
+  ],
+);
+
+/**
+ * Operator-declared upstream status feeds. Each row is one status page /
+ * probe the background poller fetches (through the `fetchHttpTarget` SSRF
+ * chokepoint) at `checkIntervalSeconds`. A workflow opts in by listing this
+ * row's `name` in `workflow_versions.upstreamHealthSources`; when a watched
+ * component flips degraded the poller auto-pauses every tagged workflow and
+ * auto-resumes on recovery.
+ *
+ * Cascade posture: orphan-tolerant (no FK). Deleting a source leaves
+ * tagged-workflow references dangling — the poller simply finds no row for the
+ * name and skips it (a dangling tag never pauses anything).
+ */
+export const upstreamHealthSources = pgTable(
+  "upstream_health_sources",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull().default("default"),
+    /** Join key — workflows reference this in `upstreamHealthSources`. Unique per org. */
+    name: text("name").notNull(),
+    /** Closed-enum provider (`statuspage_io` / `atlassian_statuspage` / `http_probe` / `custom_feed`). */
+    kind: text("kind").notNull(),
+    /** Feed URL fetched through the SSRF chokepoint. */
+    url: text("url").notNull(),
+    /** Closed array of component display-names to watch (empty = page-level indicator). */
+    expectedComponents: jsonb("expected_components").$type<string[]>().notNull().default([]),
+    /** Poll cadence in seconds (clamped 30..3600 by the Zod schema). */
+    checkIntervalSeconds: integer("check_interval_seconds").notNull().default(60),
+    /** Whether the poller fetches this source. */
+    enabled: boolean("enabled").notNull().default(true),
+    /**
+     * Derived overall status from the most recent successful poll
+     * (closed `UPSTREAM_COMPONENT_STATUSES` enum). NULL = never polled.
+     * A poll that fails-open (unreachable feed) leaves this UNCHANGED.
+     */
+    lastStatus: text("last_status"),
+    /** Whether the last successful poll classified the source as degraded (drives auto-pause). */
+    lastDegraded: boolean("last_degraded").notNull().default(false),
+    /** Timestamp of the last poll that produced a usable status. */
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    /** Closed-enum reason from the last fail-open poll (e.g. `unreachable`); NULL on success. */
+    lastErrorReason: text("last_error_reason"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("upstream_health_sources_org_name_idx").on(table.orgId, table.name),
+    index("upstream_health_sources_enabled_idx").on(table.enabled),
+  ],
+);
+
+/**
+ * Org-private reusable workflow snippets — composable node+edge fragments an
+ * operator drops into a workflow being edited. ONLY custom (org-authored)
+ * snippets live here; the eight built-in snippets ship in code
+ * (`@janusly/shared/src/workflow-snippets.ts:BUILTIN_SNIPPETS`) and are NEVER
+ * persisted. A snippet is not a runnable workflow — it has no trigger and only
+ * inserts (`insertSnippet`) into an existing canvas.
+ *
+ * Multi-tenant scope on every read via `eq(snippets.orgId, orgId)`. `builtin`
+ * is always `false` for DB rows (the column exists for shape parity with the
+ * shared `SnippetDefinition`; the create route forbids `true`).
+ *
+ * Cascade posture: orphan-tolerant (no FK). Deleting an org leaves snippet
+ * rows; re-creating the org id inherits them. `createdBy` records the author
+ * for the audit trail.
+ */
+export const snippets = pgTable(
+  "snippets",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Closed `SNIPPET_CATEGORIES` enum value (`retry`/`approval`/…/`custom`). */
+    category: text("category").notNull(),
+    /** Operator-chosen labels (closed bounded array). */
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** Always false for DB rows; built-ins are code-only. Kept for shape parity. */
+    builtin: boolean("builtin").notNull().default(false),
+    /** Snippet node templates (local ids; remapped to fresh ids on insert). */
+    nodesJson: jsonb("nodes_json").$type<unknown[]>().notNull().default([]),
+    /** Snippet-internal edge templates (reference local node ids). */
+    edgesJson: jsonb("edges_json").$type<unknown[]>().notNull().default([]),
+    /** Local id of the snippet's entry node (stitch target); nullable = first node. */
+    entryNodeId: text("entry_node_id"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("snippets_org_name_idx").on(table.orgId, table.name),
+    index("snippets_org_updated_idx").on(table.orgId, table.updatedAt.desc()),
+  ],
+);
+
+/**
+ * Eval datasets — named, org-scoped collections of recovery decisions an
+ * admin curates into a reusable regression bed for the AI patch surface.
+ *
+ * A dataset is built once from the eligible `recovery_feedback` rows
+ * (accepted AND `eval_consent = true`) at create time; the snapshot of
+ * examples lives in `eval_examples` so re-running an export is
+ * deterministic and a later retention purge of `recovery_feedback`
+ * doesn't silently shrink an already-published dataset.
+ *
+ * Multi-tenant scope: every read carries `eq(evalDatasets.orgId, orgId)`.
+ *
+ * Cascade posture: orphan-tolerant (no FK, per the Janusly convention).
+ * Deleting a dataset hard-deletes its `eval_examples` rows in the same
+ * repo call (the child rows are operationally meaningless without the
+ * parent — the `workflow_versions` precedent). `sourceFeedbackId` on each
+ * example references a `recovery_feedback` row that may have since been
+ * purged; the example carries its own scrubbed snapshot so it survives.
+ */
+export const evalDatasets = pgTable(
+  "eval_datasets",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Optional workflow scope — when set, only that workflow's eligible feedback rows were pulled. */
+    workflowId: text("workflow_id"),
+    /** Count of examples captured at build time (denormalized for list views). */
+    exampleCount: integer("example_count").notNull().default(0),
+    /** Days the examples are retained before a future purge sweep may remove them; null = indefinite. */
+    retentionDays: integer("retention_days"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("eval_datasets_org_name_idx").on(table.orgId, table.name),
+    index("eval_datasets_org_created_idx").on(table.orgId, table.createdAt.desc()),
+  ],
+);
+
+/**
+ * Eval examples — one captured recovery decision inside a dataset.
+ *
+ * Each row stores a SCRUBBED input-context snapshot (the failure
+ * signature + node/error context the LLM saw), the expected outcome
+ * (the approach the operator accepted), the approval label, and
+ * retention metadata. `scrubSecretShapes` runs over every free-text
+ * field at write time (when the dataset is built) AND again at read
+ * time (when the example is exported / surfaced to an LLM) — defense in
+ * depth so a secret shape that slipped past the write-time pass, or one
+ * introduced by a regex update between write and read, is still redacted.
+ *
+ * When surfaced to an LLM, examples are framed as DATA, never
+ * instructions — the export/prompt composer wraps them in the same
+ * suspicion-framing block `composeGenerationSystemPrompt` uses for MCP
+ * tool descriptions.
+ *
+ * Multi-tenant scope: every read carries `eq(evalExamples.orgId, orgId)`;
+ * the `datasetId` reference is always resolved through an org-scoped
+ * dataset read first.
+ */
+export const evalExamples = pgTable(
+  "eval_examples",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    datasetId: text("dataset_id").notNull(),
+    /** The `recovery_feedback` row this example was distilled from (may be purged later). */
+    sourceFeedbackId: text("source_feedback_id").notNull(),
+    workflowId: text("workflow_id"),
+    deadLetterId: text("dead_letter_id"),
+    /** Scrubbed failure signature the operator was reacting to. */
+    failureSignature: text("failure_signature").notNull().default(""),
+    /** Scrubbed free-text input context (operator comment / failure detail). */
+    inputContext: text("input_context").notNull().default(""),
+    /** The approach the operator accepted — the expected outcome for an eval run. */
+    expectedApproachLabel: text("expected_approach_label").notNull(),
+    /** Always `true` for a built dataset (only accepted rows are eligible); kept explicit for shape clarity. */
+    accepted: boolean("accepted").notNull().default(true),
+    /** `"ai"` | `"fallback"` — which suggestion mode produced the accepted approach. */
+    suggestionMode: text("suggestion_mode").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("eval_examples_org_dataset_idx").on(table.orgId, table.datasetId),
+  ],
+);
+
+/**
+ * Experiments — an org-scoped A/B comparison of a CONTROL vs a CANDIDATE
+ * (prompt version, model id, or both) measured against an eval dataset.
+ *
+ * The runner executes every `eval_examples` row in the referenced dataset
+ * through BOTH sides via `LlmClient.generateText`, captures per-side
+ * `costUsd` / `latencyMs` / `aiError`, scores each side with a configurable
+ * scorer (string equality / JSON-schema match / LLM-as-judge with a
+ * deterministic fallback), and writes the aggregate to `summary_json`.
+ *
+ * Promotion is RECOMMENDATION-ONLY: the harness never auto-replaces the
+ * org's production prompt/model. A favourable result writes an
+ * `experiment.run.promotion_suggested` audit row and stamps
+ * `summary_json.recommendation` — the operator promotes manually through
+ * the existing PromptOps / org-config surfaces.
+ *
+ * Multi-tenant scope: every read carries `eq(experiments.orgId, orgId)`.
+ * The `eval_dataset_id` reference is always resolved through an org-scoped
+ * dataset read first.
+ *
+ * Cascade posture: orphan-tolerant (no FK, per the Janusly convention).
+ * Deleting the referenced dataset does NOT delete its experiments — the
+ * `summary_json` snapshot stands on its own so a past comparison survives.
+ */
+export const experiments = pgTable(
+  "experiments",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    name: text("name").notNull(),
+    /** `prompt` | `model` | `prompt_and_model` — what the comparison varies. */
+    kind: text("kind").notNull(),
+    /**
+     * The control side. For `prompt`/`prompt_and_model` it is a
+     * `"<promptName>@<version>"` reference (or `"<promptName>"` for the
+     * pinned/latest version); for `model`/`prompt_and_model` the model
+     * portion is a bare model id or `"<provider>/<model>"`. The runner
+     * interprets it per `kind`.
+     */
+    controlRef: text("control_ref").notNull(),
+    /** The candidate side, same shape as `control_ref`. */
+    candidateRef: text("candidate_ref").notNull(),
+    /** Eval dataset whose examples drive the comparison. */
+    evalDatasetId: text("eval_dataset_id").notNull(),
+    /** Scorer applied to each side: `string_equality` | `json_schema` | `llm_judge`. */
+    scorerKind: text("scorer_kind").notNull().default("string_equality"),
+    /** `pending` → `running` → `completed` | `failed`. */
+    status: text("status").notNull().default("pending"),
+    /** Aggregate result — per-side score / cost / latency / error counts + recommendation. Null until completion. */
+    summaryJson: jsonb("summary_json"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("experiments_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    index("experiments_org_dataset_idx").on(table.orgId, table.evalDatasetId),
+  ],
+);
+
+/**
+ * Per-`(orgId, approachLabel)` confidence calibration curve.
+ *
+ * LLM patch suggestions carry a self-rated `confidence` (0-100) that is
+ * systematically mis-scaled — a model that says "90%" might only be
+ * accepted by the operator 60% of the time. This table stores the
+ * empirically-fitted correction so the recovery dialog can show a
+ * calibrated number alongside the raw self-rating.
+ *
+ * The curve is linear in v1: `calibrated = clamp(a * raw + b, 0, 100)`,
+ * where `a` (slope) and `b` (intercept) are solved by least-squares over
+ * per-raw-confidence-bucket observed accept rates drawn from
+ * `recovery_feedback` in a rolling 30-day window. A daily BullMQ sweep
+ * recomputes one row per `(orgId, approachLabel)` that has ≥
+ * `MIN_CALIBRATION_SAMPLES` accept/reject decisions in the window; below
+ * the threshold the prior row is left stale (the read side treats a
+ * stale-but-present row the same as absent and falls back to raw via the
+ * `sampleSize` check).
+ *
+ * Multi-tenant scope: every read carries `eq(confidenceCalibrations.orgId,
+ * orgId)`; the unique index leads with `org_id` so a tenant can never read
+ * another tenant's curve. Orphan-tolerant like every other table — no FK
+ * to `organizations`.
+ */
+export const confidenceCalibrations = pgTable(
+  "confidence_calibrations",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    /** Closed enum mirrored from the patch envelope `approachLabel` set. */
+    approachLabel: text("approach_label").notNull(),
+    /** Observed accept rate (0..1) over the rolling window — the headline signal. */
+    acceptRate: real("accept_rate").notNull(),
+    /** Total accept + reject decisions the curve was fit from. */
+    sampleSize: integer("sample_size").notNull(),
+    /** Linear slope `a` in `calibrated = a * raw + b`. */
+    curveSlope: real("curve_slope").notNull(),
+    /** Linear intercept `b` in `calibrated = a * raw + b`. */
+    curveIntercept: real("curve_intercept").notNull(),
+    /** When the curve was last recomputed by the daily sweep. */
+    lastComputedAt: timestamp("last_computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("confidence_calibrations_org_approach_idx").on(table.orgId, table.approachLabel),
+  ],
+);
+
+/**
+ * Structured inbound-trigger events for the event-driven trigger node types
+ * (`email_received`, `file_dropped`, `mcp_server_event`).
+ *
+ * One row is persisted by the API ingestion seam
+ * (`apps/api/src/routes/trigger-ingest-routes.ts`) for EVERY accepted inbound
+ * event BEFORE the run is spawned — the row is the DLQ-style replay anchor
+ * (an operator can re-run the same normalized event) and the audit-friendly
+ * record of what arrived. `status` tracks the lifecycle: `received` (row
+ * written, run not yet spawned), `started` (run spawned, `runId` set),
+ * `skipped` (rate-limit storm guard tripped or trigger node disabled), or
+ * `failed` (run spawn threw).
+ *
+ * `triggerType` is one of the closed `triggerNodeTypeValues`. `payloadJson`
+ * is the normalized inbound payload (the SAME shape a replay re-submits),
+ * already run through `safePersistPayload` so a secret-shaped field in an
+ * email body / MCP resource is redacted at rest. Attachment / object BODIES
+ * are NOT stored here — they live in the object store under the
+ * `orgs/<orgId>/email/...` prefix; `payloadJson` carries only their metadata
+ * + object-store keys.
+ *
+ * Multi-tenant scope: every row carries `org_id`; the resolver binds the
+ * inbound event to an org via the workflow-version row, NEVER from a claim in
+ * the payload. The unique index on `(org_id, dedupe_key)` makes the seam
+ * idempotent under relay retries — the same upstream message id can't spawn
+ * two runs. Orphan-tolerant like every other table (no FK to
+ * `workflow_versions` / `runs`).
+ */
+export const triggerEvents = pgTable(
+  "trigger_events",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    /** One of the closed `triggerNodeTypeValues` (`email_received` / `file_dropped` / `mcp_server_event`). */
+    triggerType: text("trigger_type").notNull(),
+    workflowId: text("workflow_id"),
+    /** The workflow version whose trigger node matched the inbound event. */
+    workflowVersionId: text("workflow_version_id").notNull(),
+    /** The trigger node id inside that version. */
+    nodeId: text("node_id").notNull(),
+    /** Lifecycle status — one of the closed `triggerEventStatusValues`. */
+    status: text("status").notNull().default("received"),
+    /** The run this event spawned (null until `started`). */
+    runId: text("run_id"),
+    /** Idempotency key (e.g. email message-id, object etag) for relay-retry dedupe. */
+    dedupeKey: text("dedupe_key"),
+    /** Normalized inbound payload (key-redacted via `safePersistPayload`). */
+    payloadJson: jsonb("payload_json").notNull(),
+    /** When `status` is `skipped` / `failed`, the human-readable reason. */
+    skippedReason: text("skipped_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    // Per-org idempotency on the inbound dedupe key (relay retries converge).
+    uniqueIndex("trigger_events_org_dedupe_idx").on(table.orgId, table.dedupeKey),
+    // Operator-facing recent-event feed + replay listing, newest first.
+    index("trigger_events_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Per-trigger-node lookup (replay history for one node).
+    index("trigger_events_org_node_idx").on(table.orgId, table.workflowVersionId, table.nodeId),
   ],
 );

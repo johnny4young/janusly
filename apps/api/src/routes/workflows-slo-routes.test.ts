@@ -30,9 +30,22 @@ vi.mock("@janusly/data/src/workflowHealthRepo", () => ({
   DEFAULT_HEALTH_WINDOW_DAYS: 30,
 }));
 
+vi.mock("@janusly/data/src/scheduleHistoryRepo", () => ({
+  queryScheduleFires: vi.fn(),
+  findScheduleEntriesForWorkflow: vi.fn(),
+}));
+
 vi.mock("@janusly/engine/src/schedule-scheduler", () => ({
   unregisterAllForWorkflow: vi.fn(),
 }));
+
+// The schedule-history engine helpers are pure (no I/O) — import the real
+// module so the route test exercises the genuine bucketing + cron-parser
+// next-fire computation end-to-end.
+vi.mock("@janusly/engine/src/schedule-history", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@janusly/engine/src/schedule-history")>();
+  return { ...actual };
+});
 
 vi.mock("@janusly/engine/src/workflow-health", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@janusly/engine/src/workflow-health")>();
@@ -83,12 +96,15 @@ import { workflowsRoutes } from "./workflows-routes";
 import { sendJson, readJson } from "../http";
 import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
+import { findScheduleEntriesForWorkflow, queryScheduleFires } from "@janusly/data/src/scheduleHistoryRepo";
 import { workflowMetadata } from "@janusly/db";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);
 const readJsonMock = vi.mocked(readJson);
 const setWorkflowSloMock = vi.mocked(setWorkflowSlo);
+const queryScheduleFiresMock = vi.mocked(queryScheduleFires);
+const findScheduleEntriesMock = vi.mocked(findScheduleEntriesForWorkflow);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -113,6 +129,8 @@ async function callRoute(method: string, path: string, body: unknown) {
 beforeEach(() => {
   readJsonMock.mockReset();
   setWorkflowSloMock.mockReset();
+  queryScheduleFiresMock.mockReset();
+  findScheduleEntriesMock.mockReset();
   workflowsOwnedLimitMock.mockReset();
   deleteMock.mockClear();
   sendJsonMock.mockClear();
@@ -222,5 +240,110 @@ describe("DELETE /workflows/:id handler", () => {
 
     expect(deleteMock).toHaveBeenCalledWith(workflowMetadata);
     expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
+  });
+});
+
+describe("GET /workflows/:id/schedule-history route shape", () => {
+  it("declares role: viewer + permission: workflows.read", () => {
+    const route = findRoute("GET", "/workflows/wf-1/schedule-history");
+    expect(route.role).toBe("viewer");
+    expect(route.permission).toBe("workflows.read");
+  });
+
+  it("does not match the bare /workflows/wf-1 path or unrelated suffixes", () => {
+    expect(() => findRoute("GET", "/workflows/wf-1")).toThrow();
+    expect(() => findRoute("GET", "/workflows/wf-1/other")).toThrow();
+  });
+
+  it("matches with a trailing query string", () => {
+    expect(() => findRoute("GET", "/workflows/wf-1/schedule-history?windowDays=30")).not.toThrow();
+  });
+});
+
+describe("GET /workflows/:id/schedule-history handler", () => {
+  it("returns 404 when the workflow does not belong to the caller's org", async () => {
+    mockWorkflowOwned(false);
+    await callRoute("GET", "/workflows/wf-1/schedule-history", {});
+    const status = sendJsonMock.mock.calls[0]?.[2];
+    expect(status).toBe(404);
+    // Tenant gate fails closed BEFORE any history read.
+    expect(queryScheduleFiresMock).not.toHaveBeenCalled();
+    expect(findScheduleEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it("buckets fires into the heatmap and previews next fires for enabled schedules", async () => {
+    mockWorkflowOwned(true);
+    // 2024-01-01 is a Monday (UTC dayOfWeek = 1).
+    queryScheduleFiresMock.mockResolvedValueOnce([
+      { firedAt: new Date("2024-01-01T09:00:00.000Z"), status: "succeeded" },
+      { firedAt: new Date("2024-01-01T09:30:00.000Z"), status: "failed" },
+    ]);
+    findScheduleEntriesMock.mockResolvedValueOnce([
+      { nodeId: "cron-1", cronExpression: "0 9 * * *", enabled: true, lastRunAt: new Date("2024-01-01T09:30:00.000Z"), lastRunId: "run-9", workflowVersionId: "v1" },
+      { nodeId: "cron-2", cronExpression: "0 12 * * *", enabled: false, lastRunAt: null, lastRunId: null, workflowVersionId: "v1" },
+    ]);
+
+    await callRoute("GET", "/workflows/wf-1/schedule-history?windowDays=30&nextFires=3", {});
+
+    const payload = sendJsonMock.mock.calls.at(-1)?.[1] as {
+      workflowId: string;
+      windowDays: number;
+      capped: boolean;
+      heatmap: { cells: Array<{ dayOfWeek: number; hour: number; total: number; success: number; fail: number; anomaly: boolean }>; totalFires: number; totalSuccess: number; totalFail: number; timezone: string };
+      schedules: Array<{ nodeId: string; cronExpression: string; enabled: boolean; lastRunAt: string | null; lastRunId: string | null; nextFires: string[] }>;
+    };
+
+    expect(payload.workflowId).toBe("wf-1");
+    expect(payload.windowDays).toBe(30);
+    expect(payload.capped).toBe(false);
+    expect(payload.heatmap.totalFires).toBe(2);
+    expect(payload.heatmap.totalSuccess).toBe(1);
+    expect(payload.heatmap.totalFail).toBe(1);
+    expect(payload.heatmap.timezone).toBe("UTC");
+    expect(payload.heatmap.cells).toHaveLength(1);
+    expect(payload.heatmap.cells[0]).toMatchObject({ dayOfWeek: 1, hour: 9, total: 2, success: 1, fail: 1, anomaly: false });
+
+    // Enabled schedule gets a 3-entry preview; disabled schedule gets none.
+    const enabled = payload.schedules.find((s) => s.nodeId === "cron-1");
+    const disabled = payload.schedules.find((s) => s.nodeId === "cron-2");
+    expect(enabled?.nextFires).toHaveLength(3);
+    expect(enabled?.lastRunAt).toBe("2024-01-01T09:30:00.000Z");
+    expect(disabled?.nextFires).toEqual([]);
+    expect(disabled?.cronExpression).toBe("0 12 * * *");
+
+    // The repo received the clamped window + the org/workflow scope.
+    expect(queryScheduleFiresMock).toHaveBeenCalledWith("org-1", "wf-1", 30, expect.any(Number));
+    expect(findScheduleEntriesMock).toHaveBeenCalledWith("org-1", "wf-1");
+  });
+
+  it("renders an empty heatmap when the workflow has no scheduled history", async () => {
+    mockWorkflowOwned(true);
+    queryScheduleFiresMock.mockResolvedValueOnce([]);
+    findScheduleEntriesMock.mockResolvedValueOnce([]);
+
+    await callRoute("GET", "/workflows/wf-1/schedule-history", {});
+
+    const payload = sendJsonMock.mock.calls.at(-1)?.[1] as {
+      heatmap: { cells: unknown[]; totalFires: number };
+      schedules: unknown[];
+      windowDays: number;
+    };
+    expect(payload.heatmap.cells).toEqual([]);
+    expect(payload.heatmap.totalFires).toBe(0);
+    expect(payload.schedules).toEqual([]);
+    // Default window is the full 90-day lookback.
+    expect(payload.windowDays).toBe(90);
+  });
+
+  it("clamps an out-of-range windowDays into [1, 90]", async () => {
+    mockWorkflowOwned(true);
+    queryScheduleFiresMock.mockResolvedValueOnce([]);
+    findScheduleEntriesMock.mockResolvedValueOnce([]);
+
+    await callRoute("GET", "/workflows/wf-1/schedule-history?windowDays=9999", {});
+
+    const payload = sendJsonMock.mock.calls.at(-1)?.[1] as { windowDays: number };
+    expect(payload.windowDays).toBe(90);
+    expect(queryScheduleFiresMock).toHaveBeenCalledWith("org-1", "wf-1", 90, expect.any(Number));
   });
 });

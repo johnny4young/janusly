@@ -30,6 +30,7 @@ import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 import { CredentialHealthCard } from './CredentialHealthCard'
 import { AlertPoliciesPanel } from './AlertPoliciesPanel'
+import { UpstreamHealthPanel } from './UpstreamHealthPanel'
 import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
@@ -403,6 +404,7 @@ function ReliabilitySection() {
     <>
       <AlertPoliciesPanel />
       <RecentAlertsCard />
+      <UpstreamHealthPanel />
       <BudgetSettingsPanel />
     </>
   )
