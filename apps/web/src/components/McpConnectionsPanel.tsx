@@ -363,7 +363,7 @@ export function McpConnectionsPanel() {
                       : `${connection.transport} · ${connection.url ?? ''}`}
                   </div>
                   {connection.statusReason && (
-                    <div className="helper-text" style={{ color: 'var(--we-danger-500)' }}>
+                    <div className="helper-text helper-text--error">
                       {connection.statusReason}
                     </div>
                   )}

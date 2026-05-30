@@ -46,7 +46,8 @@ export type PermissionCategory =
   | "upstream"
   | "snippets"
   | "evals"
-  | "triggers";
+  | "triggers"
+  | "packs";
 
 export type PermissionEntry = {
   key: string;
@@ -56,7 +57,7 @@ export type PermissionEntry = {
 };
 
 /**
- * Closed catalog of permission keys. Currently 35 keys across 17
+ * Closed catalog of permission keys. Currently 37 keys across 18
  * categories. Mirrors the action categories exposed by the API surface
  * today.
  */
@@ -113,6 +114,9 @@ export const PERMISSION_CATALOG = [
   // inbound trigger events (email_received / file_dropped / mcp_server_event)
   { key: "triggers.read",        category: "triggers",    description: "View structured inbound-trigger events + replay history", defaultRoles: ["viewer", "editor", "admin"] },
   { key: "triggers.ingest",      category: "triggers",    description: "Submit a normalized inbound trigger event (relay / forwarder)", defaultRoles: ["editor", "admin"] },
+  // solution packs (installable, ICP-shaped workflow starters)
+  { key: "packs.read",           category: "packs",       description: "View the solution-pack catalog + per-org dependency hints", defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "packs.install",        category: "packs",       description: "Install a pack as a draft workflow, run a sandbox sample, or inject a demo failure", defaultRoles: ["editor", "admin"] },
 ] as const satisfies readonly PermissionEntry[];
 
 export type Permission = (typeof PERMISSION_CATALOG)[number]["key"];

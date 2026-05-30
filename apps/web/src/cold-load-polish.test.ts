@@ -18,8 +18,8 @@
  * so they survive any vitest cwd posture.
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // pnpm runs the package's `test` script with cwd = apps/web, which is also
@@ -29,6 +29,15 @@ import { describe, expect, it } from "vitest";
 const PACKAGE_ROOT = process.cwd();
 const indexHtml = readFileSync(resolve(PACKAGE_ROOT, "index.html"), "utf8");
 const indexCss = readFileSync(resolve(PACKAGE_ROOT, "src/index.css"), "utf8");
+
+function listSourceFiles(dir: string): string[] {
+  return readdirSync(dir)
+    .flatMap((name) => {
+      const fullPath = resolve(dir, name);
+      if (statSync(fullPath).isDirectory()) return listSourceFiles(fullPath);
+      return /\.(css|ts|tsx)$/.test(name) ? [fullPath] : [];
+    });
+}
 
 describe("font preload link", () => {
   it("preload href matches stylesheet href byte-for-byte", () => {
@@ -68,5 +77,30 @@ describe("universal reduced-motion rule", () => {
     // for the component-scoped blocks that override with `animation: none`.
     const matches = indexCss.match(/@media\s+\(prefers-reduced-motion:\s*reduce\)/g);
     expect(matches?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("design token aliases", () => {
+  it("defines every Janusly CSS custom property used by web source files", () => {
+    const defined = new Set(
+      [...indexCss.matchAll(/--([A-Za-z0-9_-]+)\s*:/g)].map((match) => `--${match[1]}`),
+    );
+    const missing = new Map<string, Set<string>>();
+
+    for (const file of listSourceFiles(resolve(PACKAGE_ROOT, "src"))) {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(/var\((--we-[A-Za-z0-9_-]+)/g)) {
+        const token = match[1];
+        if (defined.has(token)) continue;
+        const relativePath = relative(PACKAGE_ROOT, file);
+        const files = missing.get(token) ?? new Set<string>();
+        files.add(relativePath);
+        missing.set(token, files);
+      }
+    }
+
+    expect(
+      [...missing.entries()].map(([token, files]) => `${token}: ${[...files].join(", ")}`),
+    ).toEqual([]);
   });
 });

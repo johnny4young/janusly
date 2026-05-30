@@ -29,7 +29,7 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
   getOrgConfigSnapshot: vi.fn(),
 }));
 
-vi.mock("@janusly/engine/src/auto-healing-consent", () => ({
+vi.mock("./auto-healing-consent", () => ({
   isAutoHealingAllowed: vi.fn(),
 }));
 
@@ -93,7 +93,7 @@ import {
   runOrgScan,
   handleAutoHealingScanTrigger,
 } from "./auto-healing-scanner";
-import { isAutoHealingAllowed } from "@janusly/engine/src/auto-healing-consent";
+import { isAutoHealingAllowed } from "./auto-healing-consent";
 import { queryFailureSamples } from "@janusly/data/src/failureClusterRepo";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";

@@ -209,6 +209,29 @@ describe('api', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('invalidates cached GET snapshots after a successful mutation', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockImplementationOnce(async () => new Response(JSON.stringify({ items: [{ id: 'dlq-1' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api('/dlq')).resolves.toEqual({ items: [] })
+    await expect(api('/solution-packs/incident-triage/inject-failure', { method: 'POST', body: '{}' })).resolves.toEqual({ ok: true })
+    await expect(api('/dlq')).resolves.toEqual({ items: [{ id: 'dlq-1' }] })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('does not dedup across the TTL boundary', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn(async () => new Response('{}', {

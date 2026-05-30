@@ -101,6 +101,7 @@ import { runsRoutes } from "./routes/runs-routes";
 import { templatesRoutes } from "./routes/templates-routes";
 import { toolsRoutes } from "./routes/tools-routes";
 import { triggerIngestRoutes } from "./routes/trigger-ingest-routes";
+import { solutionPacksRoutes } from "./routes/solution-packs-routes";
 import { workflowsRoutes } from "./routes/workflows-routes";
 import { createApiServer } from "./server";
 
@@ -123,6 +124,9 @@ export const routes: Route[] = [
   ...scimRoutes,
   ...rolesRoutes,
   ...mcpRoutes,
+  // Solution packs register before workflows so `POST /workflows/import-pack`
+  // resolves here before any `/workflows/*` matcher can shadow it.
+  ...solutionPacksRoutes,
   ...workflowsRoutes,
   ...pluginsRoutes,
   ...credentialsRoutes,

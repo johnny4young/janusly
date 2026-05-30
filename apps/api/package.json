@@ -17,6 +17,7 @@
     "@janusly/domain": "workspace:*",
     "@janusly/engine": "workspace:*",
     "@janusly/shared": "workspace:*",
+    "@janusly/solution-packs": "workspace:*",
     "@supabase/supabase-js": "^2.106.2",
     "bullmq": "^5.77.6",
     "drizzle-orm": "1.0.0-rc.4-5d5b77c",

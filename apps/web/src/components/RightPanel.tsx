@@ -22,7 +22,7 @@
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { MultiAgentTimeline } from '../MultiAgentTimeline'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 import { MembersPanel } from './MembersPanel'
@@ -34,6 +34,7 @@ import { CredentialRotateModal } from './CredentialRotateModal'
 import { type DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
+import { SolutionPacksPanel } from './SolutionPacksPanel'
 import { EmptyView, PanelChrome } from './panel-primitives'
 // Operations pulls 11 admin sub-panels + alert/budget/scim/permission forms
 // that canvas/Home users never touch — code-split it out of the main chunk.
@@ -54,6 +55,7 @@ export type RightPanelProps = {
   validationIssues: ValidationIssue[]
   tools: ToolSchema[]
   templates: Template[]
+  solutionPacks: SolutionPackPublic[]
   credentials: Credential[]
   runs: RunSummary[]
   activeRunId?: string | null
@@ -68,6 +70,9 @@ export type RightPanelProps = {
   onOpenWorkflow: (id: string) => void
   onUseTemplate: (workflow: WorkflowDefinition) => void
   onInstallPlugin: (pluginId: string) => void
+  onInstallPack: (packId: string) => void
+  onSampleRunPack: (packId: string) => void
+  onInjectPackFailure: (packId: string) => void
   onCreateCredential: (credential: { name: string; kind: string; secretRef: string }) => void
   onOpenRun: (id: string) => void
   onRefreshPlatform: () => void
@@ -153,6 +158,15 @@ export function RightPanel(props: RightPanelProps) {
     </PanelChrome>
   )
   if (props.tab === 'templates') return <TemplatesPanel templates={props.templates} onUseTemplate={props.onUseTemplate} />
+  if (props.tab === 'packs') return (
+    <SolutionPacksPanel
+      packs={props.solutionPacks}
+      credentials={props.credentials}
+      onInstall={props.onInstallPack}
+      onSampleRun={props.onSampleRunPack}
+      onInjectFailure={props.onInjectPackFailure}
+    />
+  )
   if (props.tab === 'marketplace') return <ToolsPanel tools={props.tools} onInstallPlugin={props.onInstallPlugin} />
   if (props.tab === 'credentials') return <CredentialsPanel credentials={props.credentials} onCreateCredential={props.onCreateCredential} />
   if (props.tab === 'runs') return (
