@@ -331,32 +331,63 @@ export function __resetInFlightForTests(): void {
 }
 
 /**
+ * Optional download options. `method` defaults to GET; pass `'POST'`
+ * (with an optional JSON `body`) for download routes that are POST —
+ * e.g. the recovery audit-evidence export, which is a POST because it
+ * writes an audit row as a side effect.
+ */
+export type DownloadOptions = {
+  method?: 'GET' | 'POST'
+  /** JSON-serialisable request body for POST downloads. */
+  body?: unknown
+  /** Override the server-suggested filename. */
+  filename?: string
+}
+
+/**
  * Download a file from the API using the same auth resolution as
  * `api()`. The API's `Content-Disposition: attachment; filename=...`
  * header carries the suggested filename; if the caller passes
  * `filename`, it overrides that. The Blob + anchor click pattern
  * sidesteps the browser's "open in tab" default for text MIME types.
  *
+ * GET by default; pass `{ method: 'POST', body }` for POST download
+ * routes (the evidence export writes an audit row, so it's a POST).
+ *
  * Deliberately NOT dedup-wrapped — downloads are intentional
  * user-initiated actions, two clicks should produce two downloads.
  */
-export async function downloadFromApi(path: string, filename?: string): Promise<void> {
+export async function downloadFromApi(
+  path: string,
+  optionsOrFilename?: string | DownloadOptions,
+): Promise<void> {
+  // Back-compat: the second positional arg used to be a filename string.
+  const options: DownloadOptions =
+    typeof optionsOrFilename === 'string' ? { filename: optionsOrFilename } : optionsOrFilename ?? {}
+  const method = options.method ?? 'GET'
+  const filename = options.filename
+
   const sessionToken = getSessionToken()
   const session = !sessionToken && supabase
     ? await supabase.auth.getSession()
     : { data: { session: null } }
   const token = session.data.session?.access_token
 
-  const headers = {
+  const headers: Record<string, string> = {
     'x-org-id': getActiveOrg(),
     ...(sessionToken ? { 'x-janusly-session': sessionToken } : {}),
     ...(!sessionToken && token ? { Authorization: `Bearer ${token}` } : {}),
     ...(!sessionToken && !token ? { 'x-user-id': 'dev-user' } : {}),
   }
+  const init: RequestInit = { method, headers }
+  if (method === 'POST') {
+    headers['Content-Type'] = 'application/json'
+    init.body = JSON.stringify(options.body ?? {})
+  }
 
   let res: Response
   try {
-    res = await fetch(`${API_URL}${path}`, { headers })
+    res = await fetch(`${API_URL}${path}`, init)
   } catch {
     throw new Error(t('api.error.offline') as string)
   }

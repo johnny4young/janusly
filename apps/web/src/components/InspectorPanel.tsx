@@ -10,7 +10,7 @@
  */
 
 import React, { useState } from 'react'
-import { GitBranch } from 'lucide-react'
+import { GitBranch, Layers } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { useT } from '../i18n'
@@ -29,6 +29,8 @@ type InspectorPanelProps = {
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
+  /** Opens the "Insert snippet…" dialog. */
+  onInsertSnippet: () => void
 }
 
 export function InspectorPanel({
@@ -43,6 +45,7 @@ export function InspectorPanel({
   onUpdateNodeConfig,
   onUpdateNodeType,
   onUpdateEdgeCondition,
+  onInsertSnippet,
 }: InspectorPanelProps) {
   const { t } = useT()
   const [jsonError, setJsonError] = useState<string | null>(null)
@@ -92,6 +95,16 @@ export function InspectorPanel({
           tools={tools}
           onUpdate={onUpdateNodeConfig}
         />
+
+        <button
+          type="button"
+          className="we-btn we-btn--ghost we-inspector-snippet-btn"
+          data-testid="inspector-insert-snippet"
+          onClick={onInsertSnippet}
+        >
+          <Layers size={14} aria-hidden="true" />
+          <span>{t('snippets.menu.trigger')}</span>
+        </button>
 
         <details className="advanced-config">
           <summary>{t('rightPanel.inspector.advancedJsonSummary')}</summary>
@@ -146,6 +159,15 @@ export function InspectorPanel({
           <GitBranch size={24} aria-hidden="true" />
           <strong>{t('rightPanel.inspector.emptyTitle')}</strong>
           <p>{t('rightPanel.inspector.emptyBody')}</p>
+          <button
+            type="button"
+            className="we-btn we-btn--ghost we-inspector-snippet-btn"
+            data-testid="inspector-insert-snippet-empty"
+            onClick={onInsertSnippet}
+          >
+            <Layers size={14} aria-hidden="true" />
+            <span>{t('snippets.menu.trigger')}</span>
+          </button>
         </div>
       </section>
     </>

@@ -62,6 +62,13 @@ export const nodeTypeValues = [
   "join",
   "schedule",
   "mcp_tool",
+  // Event-driven trigger node types (config + inbound-payload contracts in
+  // `trigger-types.ts`). NOT emitted by AI generation — operators promote a
+  // `noop` placeholder in the Inspector, mirroring the `wait_*` / `schedule_*`
+  // convention. The grammar cap on `/ai/generate-workflow` stays at 11.
+  "email_received",
+  "file_dropped",
+  "mcp_server_event",
 ] as const;
 
 /** Zod enum derived from `nodeTypeValues`; powers `NodeSchema`'s `type` field. */

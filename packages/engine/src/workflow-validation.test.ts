@@ -291,6 +291,52 @@ describe('validateWorkflow', () => {
     expect(result.issues.find(issue => issue.code === 'schedule_invalid_cron')).toBeUndefined()
   })
 
+  it('rejects event-driven trigger nodes with a missing or malformed config', () => {
+    const missingAlias = validateWorkflow({
+      nodes: [
+        { id: 'inbox', type: 'email_received', config: {} },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'inbox', to: 'next' }],
+    })
+    expect(missingAlias.issues.some(i => i.code === 'trigger_invalid_config' && i.nodeId === 'inbox')).toBe(true)
+
+    const missingBucket = validateWorkflow({
+      nodes: [
+        { id: 'drop', type: 'file_dropped', config: {} },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'drop', to: 'next' }],
+    })
+    expect(missingBucket.issues.some(i => i.code === 'trigger_invalid_config' && i.nodeId === 'drop')).toBe(true)
+
+    const missingResource = validateWorkflow({
+      nodes: [
+        { id: 'mcp_evt', type: 'mcp_server_event', config: { connectionAlias: 'notion' } },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'mcp_evt', to: 'next' }],
+    })
+    expect(missingResource.issues.some(i => i.code === 'trigger_invalid_config' && i.nodeId === 'mcp_evt')).toBe(true)
+  })
+
+  it('accepts event-driven trigger nodes with a valid config', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'inbox', type: 'email_received', config: { aliasKey: 'support', dkimRequired: true } },
+        { id: 'drop', type: 'file_dropped', config: { bucket: 'inbound', prefix: 'uploads/' } },
+        { id: 'mcp_evt', type: 'mcp_server_event', config: { connectionAlias: 'notion', resourceUri: 'notion://db/1' } },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [
+        { from: 'inbox', to: 'next' },
+        { from: 'drop', to: 'next' },
+        { from: 'mcp_evt', to: 'next' },
+      ],
+    })
+    expect(result.issues.find(issue => issue.code === 'trigger_invalid_config')).toBeUndefined()
+  })
+
   it('accepts ai/agent/transform nodes when their required fields are present', () => {
     const result = validateWorkflow({
       nodes: [

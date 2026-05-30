@@ -73,6 +73,9 @@ export async function rollbackWorkflowVersion(input: {
     // Rolling back the DAG does not roll back the operator's reliability
     // contract — keep the current SLO attached to the new version.
     sloJson: latest.sloJson ?? null,
+    // Same posture for upstream-health source tags: a rollback restores the
+    // DAG, not the operator's current upstream-pause subscription.
+    upstreamHealthSources: (latest.upstreamHealthSources as string[] | null) ?? null,
     createdBy: input.createdBy,
   });
 

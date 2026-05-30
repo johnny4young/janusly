@@ -48,6 +48,7 @@ import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
+import { emailReceivedExecutor, fileDroppedExecutor, mcpServerEventExecutor } from "./triggers";
 import { signResumeToken } from "./secrets";
 import { executeMcpTool, readMcpClientWritesEnabled, resolveMcpClientRateLimitPerMin, resolveStdioSandboxConfig } from "./mcp-tool-executor";
 
@@ -845,4 +846,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // save; the executor itself just succeeds with `triggeredAt` so
   // downstream nodes have a stable output to read.
   schedule: scheduleExecutor,
+
+  // Event-driven trigger nodes — passthrough triggers (like `schedule`).
+  // The actual firing happens at the API ingestion seam
+  // (`trigger-ingest-routes.ts`): it persists a structured `trigger_events`
+  // row, applies a per-trigger rate-limit storm guard, and spawns a run via
+  // `startRun` with the normalized inbound event as the run input. The
+  // executors here just succeed with `{ triggeredBy, event }` so downstream
+  // nodes can read the inbound payload.
+  email_received: emailReceivedExecutor,
+  file_dropped: fileDroppedExecutor,
+  mcp_server_event: mcpServerEventExecutor,
 };

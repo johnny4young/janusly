@@ -82,6 +82,43 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Apply.*validate/i })).toBeInTheDocument()
   })
 
+  it('renders the "Why this suggestion?" evidence panel with chips and scrubs secrets at read', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      ...aiSuggestion,
+      evidence: [
+        { kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched rule "network_timeout"' },
+        { kind: 'memory_entry', sourceRef: 'mem-77', snippet: 'operator accepted add_retry once' },
+        // Defense-in-depth: a snippet that still carries a secret shape must
+        // be redacted by the render-time scrub even if the API missed it.
+        { kind: 'recent_error', sourceRef: 'run-prior9', snippet: 'auth failed sk-abcdefghijklmnopqrstuvwxyz012345' },
+      ],
+    })
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    await waitFor(() => screen.getByText(/Added retry to handle/i))
+    // The collapsible summary shows the source count.
+    const summary = screen.getByText(/Why this suggestion\?/i)
+    expect(summary).toBeInTheDocument()
+    expect(summary.textContent).toMatch(/3 sources/i)
+    // Each row's source-ref deep-link token renders.
+    expect(screen.getByText('mem-77')).toBeInTheDocument()
+    expect(screen.getByText('run-prior9')).toBeInTheDocument()
+    // Kind labels render.
+    expect(screen.getByText('Memory')).toBeInTheDocument()
+    expect(screen.getByText('Signature rule')).toBeInTheDocument()
+    // The secret never reaches the DOM — redaction at read.
+    expect(screen.queryByText(/sk-abcdefghijklmnopqrstuvwxyz012345/)).not.toBeInTheDocument()
+    expect(screen.getByText(/\[redacted\]/)).toBeInTheDocument()
+  })
+
+  it('hides the evidence panel entirely when evidence is empty (empty case is valid)', async () => {
+    vi.mocked(api).mockResolvedValueOnce({ ...aiSuggestion, evidence: [] })
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+    await waitFor(() => screen.getByText(/Added retry to handle/i))
+    expect(screen.queryByText(/Why this suggestion\?/i)).not.toBeInTheDocument()
+  })
+
   it('runs validate-fix → poll → save → replay in order on Apply', async () => {
     vi.mocked(api)
       .mockResolvedValueOnce(aiSuggestion)

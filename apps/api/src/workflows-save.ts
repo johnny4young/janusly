@@ -159,8 +159,15 @@ export async function saveWorkflowVersion(args: {
   orgId: string;
   userId: string | null;
   parsedWorkflow: Workflow;
+  /**
+   * Optional upstream-health source tags for the new version. `undefined`
+   * means "no explicit value in the save body" → carry forward the prior
+   * version's tags (same posture as the SLO carry-forward). An explicit array
+   * (including `[]`) overrides — `[]` clears the subscription.
+   */
+  upstreamHealthSources?: string[];
 }): Promise<SaveWorkflowResult> {
-  const { orgId, userId, parsedWorkflow } = args;
+  const { orgId, userId, parsedWorkflow, upstreamHealthSources } = args;
   const workflowId = parsedWorkflow.id ?? crypto.randomUUID();
   const workflowName = parsedWorkflow.name ?? workflowId;
 
@@ -181,6 +188,12 @@ export async function saveWorkflowVersion(args: {
         // have to re-declare it on every workflow edit. A dedicated
         // setWorkflowSlo route writes to the latest version in place.
         const inheritedSloJson = existingVersions[0]?.sloJson ?? null;
+        // Carry forward upstream-health source tags the same way. An explicit
+        // value in the save body overrides; `undefined` inherits.
+        const resolvedUpstreamHealthSources =
+          upstreamHealthSources !== undefined
+            ? upstreamHealthSources
+            : ((existingVersions[0]?.upstreamHealthSources as string[] | null) ?? null);
 
         const existingWorkflow = await tx.select().from(workflows)
           .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)));
@@ -200,6 +213,7 @@ export async function saveWorkflowVersion(args: {
           version: computedVersion,
           dagJson: { ...parsedWorkflow, id: workflowId, name: workflowName },
           sloJson: inheritedSloJson,
+          upstreamHealthSources: resolvedUpstreamHealthSources,
           createdBy: userId,
         });
 

@@ -33,6 +33,11 @@
 
 import { z } from "zod";
 import { nodeTypeValues, type NodeType } from "@janusly/shared/src/workflow";
+import {
+  EmailReceivedConfigSchema,
+  FileDroppedConfigSchema,
+  McpServerEventConfigSchema,
+} from "@janusly/shared/src/trigger-types";
 
 export const HttpNodeConfigSchema = z
   .object({
@@ -241,6 +246,12 @@ export const NODE_CONFIG_SCHEMAS = {
   join: JoinNodeConfigSchema,
   schedule: ScheduleNodeConfigSchema,
   mcp_tool: McpToolNodeConfigSchema,
+  // Event-driven trigger node types — the authoring-side config schemas live
+  // in `@janusly/shared/src/trigger-types` so the API ingestion seam and the
+  // web Inspector share one contract.
+  email_received: EmailReceivedConfigSchema,
+  file_dropped: FileDroppedConfigSchema,
+  mcp_server_event: McpServerEventConfigSchema,
 } satisfies Record<NodeType, z.ZodTypeAny>;
 
 /** Mapped type — `NodeConfigByType["http"]` is the inferred HTTP config shape. */

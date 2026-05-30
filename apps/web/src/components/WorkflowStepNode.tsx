@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { Activity, Boxes, Bot, CheckCircle2, ClipboardList, GitBranch, Layers3, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
+import { Activity, Boxes, Bot, CheckCircle2, ClipboardList, FileInput, GitBranch, Layers3, Mail, Radio, Sparkles, SquarePlus, Users, Workflow } from 'lucide-react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { formatStatusLabel, getNodeConfigSummary, getNodeHelper, getNodeLabel } from '../constants'
@@ -30,6 +30,9 @@ const nodeIcons: Record<string, React.ReactNode> = {
   multi_agent: <Layers3 size={15} />,
   router: <GitBranch size={15} />,
   router_llm: <Sparkles size={15} />,
+  email_received: <Mail size={15} />,
+  file_dropped: <FileInput size={15} />,
+  mcp_server_event: <Radio size={15} />,
 }
 
 /** Render one workflow step on the canvas with icon, label, summary, and status pill. */

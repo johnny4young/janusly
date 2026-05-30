@@ -92,6 +92,11 @@ export async function rollbackWorkflowToVersion(args: {
       workflowId: args.workflowId,
       version: nextVersion,
       dagJson: source.dagJson,
+      // Carry forward the SLO + upstream-health subscription from the current
+      // latest — a DAG rollback should not drop the operator's reliability
+      // contract or upstream-pause subscription.
+      sloJson: existing[0]?.sloJson ?? null,
+      upstreamHealthSources: (existing[0]?.upstreamHealthSources as string[] | null) ?? null,
       createdBy: args.userId,
     });
 

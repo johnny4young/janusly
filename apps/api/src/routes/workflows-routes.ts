@@ -28,15 +28,25 @@ import {
 import {
   queryHealthSignals,
   DEFAULT_HEALTH_WINDOW_DAYS,
+  findScheduleEntriesForWorkflow,
   getWorkflowSlo,
   listWorkflowsWithRunSummary,
+  queryScheduleFires,
   setWorkflowSlo,
 } from "@janusly/data";
 import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
+import {
+  bucketScheduleFires,
+  computeNextFires,
+  DEFAULT_NEXT_FIRES,
+  MAX_FIRE_ROWS,
+  MAX_HISTORY_DAYS,
+  MAX_NEXT_FIRES,
+} from "@janusly/engine/src/schedule-history";
 import { computeWorkflowHealth, MIN_RUNS_FOR_DELTA } from "@janusly/engine/src/workflow-health";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
+import { UpstreamHealthSourceTagsSchema, WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { z } from "zod";
 
@@ -109,6 +119,20 @@ export const workflowsRoutes: Route[] = [
       if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
 
+      // Optional upstream-health source tags — a sibling field on the save body
+      // (NOT part of the DAG JSON, mirroring how the SLO lives on its own
+      // column). `undefined` carries forward the prior version's tags; an
+      // explicit array (incl. `[]`) overrides. Validated against the bounded
+      // string-array shape; an invalid value is rejected with 422.
+      let upstreamHealthSources: string[] | undefined;
+      if (Object.hasOwn(workflow, "upstreamHealthSources")) {
+        const parsedTags = UpstreamHealthSourceTagsSchema.safeParse(workflow.upstreamHealthSources);
+        if (!parsedTags.success) {
+          return sendJson(res, { error: "invalid upstreamHealthSources", issues: parsedTags.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) }, 422);
+        }
+        upstreamHealthSources = parsedTags.data;
+      }
+
       // Concurrent saves for the same `(orgId, workflowId)` resolve via
       // a bounded unique-constraint retry inside `saveWorkflowVersion`.
       // On exhausted retries the helper returns `kind: "conflict"` so
@@ -118,6 +142,7 @@ export const workflowsRoutes: Route[] = [
         orgId: auth.orgId,
         userId: auth.userId,
         parsedWorkflow,
+        upstreamHealthSources,
       });
 
       if (result.kind === "conflict") {
@@ -209,6 +234,83 @@ export const workflowsRoutes: Route[] = [
       } });
       return sendJson(res, { workflowId, slo: parsed.data.slo, versionId: result.versionId });
     } },
+  // GET /workflows/:id/schedule-history — cron-observability heatmap.
+  // Returns a 90-day day-of-week × hour-of-day grid of scheduled-fire
+  // timestamps (bucketed in UTC) with a per-cell success/fail ratio, plus a
+  // next-N-fires preview computed from each enabled schedule entry's cron
+  // expression (cron-parser is DST-safe). Read-only — viewer role suffices.
+  // The fire history comes from `runs` the scheduler created (joined through
+  // `workflow_versions` for tenant + workflow scope); `schedule_entries`
+  // supplies the cron expressions for the preview and a `last_run_at` marker
+  // for entries whose run rows aged out of the window. Bounded: window ≤ 90
+  // days, row scan ≤ 1000.
+  { method: "GET",
+    match: (url) => {
+      if (!url.startsWith("/workflows/")) return false;
+      const rest = url.slice("/workflows/".length).split("?")[0];
+      const segments = rest.split("/");
+      return segments.length === 2 && segments[1] === "schedule-history" && segments[0].length > 0;
+    },
+    role: "viewer", permission: "workflows.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const workflowId = decodeURIComponent(url.pathname.slice("/workflows/".length).split("/")[0]);
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+
+      // Multi-tenant gate first — same enumeration-safe 404 the sibling
+      // `/workflows/health` and `/workflows/:id/slo` routes use.
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+
+      // windowDays clamps to [1, 90]; default to the full 90-day lookback so
+      // the heatmap is populated even for sparse weekly crons.
+      const rawWindow = Number(url.searchParams.get("windowDays") ?? NaN);
+      const windowDays = Number.isInteger(rawWindow)
+        ? Math.min(MAX_HISTORY_DAYS, Math.max(1, rawWindow))
+        : MAX_HISTORY_DAYS;
+      // nextFires clamps to [0, MAX_NEXT_FIRES]; default 5.
+      const rawNext = Number(url.searchParams.get("nextFires") ?? NaN);
+      const nextFiresCount = Number.isInteger(rawNext)
+        ? Math.min(MAX_NEXT_FIRES, Math.max(0, rawNext))
+        : DEFAULT_NEXT_FIRES;
+
+      const [fires, entries] = await Promise.all([
+        queryScheduleFires(auth.orgId, workflowId, windowDays, MAX_FIRE_ROWS),
+        findScheduleEntriesForWorkflow(auth.orgId, workflowId),
+      ]);
+
+      const heatmap = bucketScheduleFires(fires);
+
+      // One next-fires preview per schedule entry, keyed by node id. Only
+      // enabled entries can actually fire, so disabled ones report an empty
+      // preview (the cron expression is still surfaced so the UI can show it
+      // greyed out). cron-parser handles DST internally; a corrupt cron row
+      // degrades to `[]` rather than 500ing the observability surface.
+      const upcoming = entries.map((entry) => ({
+        nodeId: entry.nodeId,
+        cronExpression: entry.cronExpression,
+        enabled: entry.enabled,
+        lastRunAt: entry.lastRunAt ? entry.lastRunAt.toISOString() : null,
+        lastRunId: entry.lastRunId,
+        nextFires: entry.enabled ? computeNextFires(entry.cronExpression, nextFiresCount) : [],
+      }));
+
+      return sendJson(res, {
+        workflowId,
+        windowDays,
+        rowCap: MAX_FIRE_ROWS,
+        // Whether the row cap was hit — the UI labels the heatmap as a sample
+        // when true so operators know a busy cron's grid is partial.
+        capped: fires.length >= MAX_FIRE_ROWS,
+        heatmap,
+        schedules: upcoming,
+      });
+    } },
+
   // DELETE /workflows/:id — hard-deletes the workflow + every persisted
   // version + every cron-driven schedule entry (and its BullMQ
   // scheduler). Runs and audit rows stay; their `workflow_version_id`

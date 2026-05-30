@@ -63,3 +63,24 @@ export {
   type EmbeddingResult,
   type EmbeddingOptions,
 } from "./embeddings";
+export {
+  SCORER_KINDS,
+  isScorerKind,
+  scoreOutput,
+  scoreStringEquality,
+  scoreJsonSchema,
+  scoreLlmJudge,
+  parseJudgeScore,
+  type ScorerKind,
+  type ScoreResult,
+} from "./experiment-scorer";
+export {
+  runExperiment,
+  MIN_SCORE_DELTA,
+  MAX_EXAMPLES_PER_RUN,
+  type ExperimentArm,
+  type ExperimentExample,
+  type ExperimentCallHook,
+  type ExperimentSideSummary,
+  type ExperimentSummary,
+} from "./experiment-runner";

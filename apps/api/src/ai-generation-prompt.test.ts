@@ -15,7 +15,8 @@ import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "
 describe("generate-workflow system prompt", () => {
   it("documents the current 11-node Anthropic grammar selection", () => {
     expect(promptsSource).toContain("'approval', 'human_form', 'loop'");
-    expect(promptsSource).toContain("The platform supports 9 more operator-only types (multi_agent");
+    expect(promptsSource).toContain("The platform supports 12 more operator-only types (multi_agent");
+    expect(promptsSource).toContain("email_received, file_dropped, mcp_server_event");
     expect(promptsSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
     expect(promptsSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
     expect(promptsSource).not.toContain("'approval', 'multi_agent', 'loop'");

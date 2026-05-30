@@ -91,11 +91,16 @@ import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
 import { registerWorkflowMetadataSeverityResolver } from "./workflow-metadata-bootstrap";
+import { upstreamHealthRoutes } from "./routes/upstream-health-routes";
+import { snippetsRoutes } from "./routes/snippets-routes";
+import { evalDatasetsRoutes } from "./routes/eval-datasets-routes";
+import { experimentsRoutes } from "./routes/experiments-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { runsRoutes } from "./routes/runs-routes";
 import { templatesRoutes } from "./routes/templates-routes";
 import { toolsRoutes } from "./routes/tools-routes";
+import { triggerIngestRoutes } from "./routes/trigger-ingest-routes";
 import { workflowsRoutes } from "./routes/workflows-routes";
 import { createApiServer } from "./server";
 
@@ -131,6 +136,11 @@ export const routes: Route[] = [
   ...recoveryItemsRoutes,
   ...recoveryHandoffRoutes,
   ...workflowMetadataRoutes,
+  ...upstreamHealthRoutes,
+  ...snippetsRoutes,
+  ...evalDatasetsRoutes,
+  ...experimentsRoutes,
+  ...triggerIngestRoutes,
   ...runsRoutes,
   ...dlqRoutes,
 ];

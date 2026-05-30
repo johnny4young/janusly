@@ -67,6 +67,7 @@ export type OrgConfigSnapshot = {
     maxRetries: number;
     promptMaxChars: number;
     rateLimitPerMin: number;
+    confidenceCalibrationEnabled: boolean;
   };
   http: {
     timeoutMs: number;
@@ -143,6 +144,7 @@ const ALLOWED_CATEGORIES = [
   "auto-healing",
   "recovery",
   "value",
+  "retention",
 ] as const;
 
 /** Closed enum of memory kinds eligible for persistence. Mirrors the memory
@@ -303,6 +305,14 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "warn",
     envKeys: ["JANUSLY_AI_BUDGET_EXCEEDED_POLICY"],
     allowedValues: ["warn", "block"],
+  },
+  {
+    key: "ai.confidenceCalibrationEnabled",
+    category: "ai",
+    description:
+      "Tenant switch for calibrating AI patch-suggestion confidence against observed accept/reject history. Defaults to true: a daily sweep fits a per-approach linear curve from recovery feedback and the recovery dialog shows the calibrated value as primary. Set false to show the model's raw self-rated confidence unchanged (no curve fit, no calibrated number).",
+    valueType: "boolean",
+    defaultValue: true,
   },
   {
     key: "http.timeoutMs",
@@ -690,6 +700,61 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 0,
     max: 86_400,
   },
+  {
+    key: "retention.runEventsDays",
+    category: "retention",
+    description:
+      "Days of run-event history (`run_events`) kept before the daily retention sweep purges them, scoped to this org. Run timelines older than this are deleted unless a per-row `holdUntil` legal hold is in force. Range 7..365, default 90.",
+    valueType: "number",
+    defaultValue: 90,
+    envKeys: ["JANUSLY_RETENTION_RUN_EVENTS_DAYS"],
+    min: 7,
+    max: 365,
+  },
+  {
+    key: "retention.auditLogsDays",
+    category: "retention",
+    description:
+      "Days of audit-log history (`audit_logs`) kept for this org before the daily retention sweep purges them. The floor is 30 days but the default is 365 to satisfy common compliance evidence windows; a per-row `holdUntil` legal hold exempts rows referenced by an active investigation. Range 30..730, default 365.",
+    valueType: "number",
+    defaultValue: 365,
+    envKeys: ["JANUSLY_RETENTION_AUDIT_LOGS_DAYS"],
+    min: 30,
+    max: 730,
+  },
+  {
+    key: "retention.usageEventsDays",
+    category: "retention",
+    description:
+      "Days of usage-event history (`usage_events`) kept for this org before the daily retention sweep purges them. Drives billing/value-dashboard rollups, so the floor is 30 days. A per-row `holdUntil` legal hold exempts a row. Range 30..365, default 90.",
+    valueType: "number",
+    defaultValue: 90,
+    envKeys: ["JANUSLY_RETENTION_USAGE_EVENTS_DAYS"],
+    min: 30,
+    max: 365,
+  },
+  {
+    key: "retention.recoveryFeedbackDays",
+    category: "retention",
+    description:
+      "Days of recovery-feedback history (`recovery_feedback`) kept for this org before the daily retention sweep purges them. The labeled accept/reject signal feeds the AI patch loop, so the floor is 30 days. A per-row `holdUntil` legal hold exempts a row. Range 30..365, default 180.",
+    valueType: "number",
+    defaultValue: 180,
+    envKeys: ["JANUSLY_RETENTION_RECOVERY_FEEDBACK_DAYS"],
+    min: 30,
+    max: 365,
+  },
+  {
+    key: "retention.memoryEntriesDays",
+    category: "retention",
+    description:
+      "Days of memory-entry history (`memory_entries`) kept for this org before the daily retention sweep purges them, by `created_at`. Gated by the memory policy (docs/memory-policy.md); independent of and an upper bound over the per-kind `retain_until` expiry, so a row is removed by whichever of the two fires first. A per-row `holdUntil` legal hold exempts a row from the org-level sweep. Range 7..730, default 90.",
+    valueType: "number",
+    defaultValue: 90,
+    envKeys: ["JANUSLY_RETENTION_MEMORY_ENTRIES_DAYS"],
+    min: 7,
+    max: 730,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -845,6 +910,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       maxRetries: readNumber(values, "ai.maxRetries"),
       promptMaxChars: readNumber(values, "ai.promptMaxChars"),
       rateLimitPerMin: readNumber(values, "ai.rateLimitPerMin"),
+      confidenceCalibrationEnabled: readBoolean(values, "ai.confidenceCalibrationEnabled"),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),
@@ -988,6 +1054,90 @@ export async function getAuthPolicyConfig(orgId: string): Promise<AuthPolicyConf
       continue;
     }
   }
+  return policy;
+}
+
+/**
+ * Per-org retention policy snapshot consumed by the daily retention
+ * sweep. Narrow read by design — the sweep iterates every org and only
+ * needs these 5 day-count knobs, so it reads just the `retention.*` keys
+ * (mirrors `getAuthPolicyConfig`'s scoped read) instead of materializing
+ * the full typed `OrgConfigSnapshot` per org.
+ *
+ * Each value is already clamped to its catalog `[min, max]` range at
+ * write time; this reader re-applies the catalog default when the org
+ * has no row OR when a stored value somehow falls outside range, so the
+ * sweep never deletes against a nonsense window.
+ */
+export type RetentionPolicyConfig = {
+  runEventsDays: number;
+  auditLogsDays: number;
+  usageEventsDays: number;
+  recoveryFeedbackDays: number;
+  memoryEntriesDays: number;
+};
+
+const RETENTION_POLICY_KEYS = [
+  "retention.runEventsDays",
+  "retention.auditLogsDays",
+  "retention.usageEventsDays",
+  "retention.recoveryFeedbackDays",
+  "retention.memoryEntriesDays",
+] as const satisfies readonly OrgConfigKey[];
+
+function retentionDefaultFor(key: OrgConfigKey): number {
+  return ORG_CONFIG_DEFINITIONS.find((d) => d.key === key)!.defaultValue as number;
+}
+
+function retentionPolicyDefault(): RetentionPolicyConfig {
+  return {
+    runEventsDays: retentionDefaultFor("retention.runEventsDays"),
+    auditLogsDays: retentionDefaultFor("retention.auditLogsDays"),
+    usageEventsDays: retentionDefaultFor("retention.usageEventsDays"),
+    recoveryFeedbackDays: retentionDefaultFor("retention.recoveryFeedbackDays"),
+    memoryEntriesDays: retentionDefaultFor("retention.memoryEntriesDays"),
+  };
+}
+
+/** Clamp a stored retention value into its catalog range, falling back
+ *  to the catalog default if it is non-numeric or out of bounds. */
+function clampRetention(key: OrgConfigKey, stored: unknown): number {
+  // `findDefinition` returns the loose `OrgConfigDefinition` (with `min?`
+  // / `max?`); reaching into `ORG_CONFIG_DEFINITIONS` directly would keep
+  // the narrow literal union where some members lack those fields.
+  const def = findDefinition(key)!;
+  const fallback = def.defaultValue as number;
+  if (typeof stored !== "number" || !Number.isFinite(stored)) return fallback;
+  if (def.min !== undefined && stored < def.min) return fallback;
+  if (def.max !== undefined && stored > def.max) return fallback;
+  return stored;
+}
+
+/**
+ * Read just the `retention.*` policy keys for an org. Used by the daily
+ * retention sweep scheduler; keep the query scoped to ≤5 rows. Returns
+ * catalog defaults when the org has no row for a given key.
+ *
+ * Multi-tenant scope: every read carries `eq(orgConfigs.orgId, orgId)`.
+ */
+export async function getRetentionPolicyConfig(orgId: string): Promise<RetentionPolicyConfig> {
+  const policy = retentionPolicyDefault();
+  let rows: Array<typeof orgConfigs.$inferSelect> = [];
+  try {
+    rows = await db
+      .select()
+      .from(orgConfigs)
+      .where(and(eq(orgConfigs.orgId, orgId), inArray(orgConfigs.key, [...RETENTION_POLICY_KEYS])));
+  } catch (err) {
+    console.warn(`[retention] failed to read org_configs for ${orgId}; using defaults`, err);
+    return policy;
+  }
+  const byKey = new Map(rows.map((row) => [row.key, row.valueJson]));
+  policy.runEventsDays = clampRetention("retention.runEventsDays", byKey.get("retention.runEventsDays") ?? policy.runEventsDays);
+  policy.auditLogsDays = clampRetention("retention.auditLogsDays", byKey.get("retention.auditLogsDays") ?? policy.auditLogsDays);
+  policy.usageEventsDays = clampRetention("retention.usageEventsDays", byKey.get("retention.usageEventsDays") ?? policy.usageEventsDays);
+  policy.recoveryFeedbackDays = clampRetention("retention.recoveryFeedbackDays", byKey.get("retention.recoveryFeedbackDays") ?? policy.recoveryFeedbackDays);
+  policy.memoryEntriesDays = clampRetention("retention.memoryEntriesDays", byKey.get("retention.memoryEntriesDays") ?? policy.memoryEntriesDays);
   return policy;
 }
 

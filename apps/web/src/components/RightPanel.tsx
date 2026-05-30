@@ -29,6 +29,7 @@ import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { WorkflowSloPanel } from './WorkflowSloPanel'
 import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
+import { ScheduleHistoryPanel } from './ScheduleHistoryPanel'
 import { CredentialRotateModal } from './CredentialRotateModal'
 import { type DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
@@ -73,6 +74,8 @@ export type RightPanelProps = {
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
+  /** Opens the "Insert snippet…" dialog (also bound to a Cmd+K palette entry). */
+  onInsertSnippet: () => void
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | void> | string[] | void
   onReplayNode: (nodeId: string) => void
@@ -141,9 +144,11 @@ export function RightPanel(props: RightPanelProps) {
         onUpdateNodeConfig={props.onUpdateNodeConfig}
         onUpdateNodeType={props.onUpdateNodeType}
         onUpdateEdgeCondition={props.onUpdateEdgeCondition}
+        onInsertSnippet={props.onInsertSnippet}
       />
       <VersionHistoryPanel />
       <WorkflowSloPanel />
+      <ScheduleHistoryPanel />
       <WorkflowMetadataPanel />
     </PanelChrome>
   )
