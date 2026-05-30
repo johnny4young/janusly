@@ -88,16 +88,21 @@
   --we-surface-panel: color-mix(in srgb, var(--we-surface) 70%, transparent);
   --we-surface-glass: color-mix(in srgb, var(--we-surface) 84%, transparent);
   --we-surface-node-summary: color-mix(in srgb, var(--we-surface) 72%, transparent);
+  --we-surface-hover: var(--we-surface-muted);
   --we-line: var(--color-we-line);
   --we-line-strong: var(--color-we-line-strong);
+  --we-border: var(--we-line);
   --we-grid: color-mix(in srgb, var(--we-primary) 8%, transparent);
   --we-grid-strong: color-mix(in srgb, var(--we-primary) 16%, transparent);
   --we-ink: var(--color-we-ink);
   --we-ink-soft: var(--color-we-ink-soft);
   --we-text-1: var(--color-we-ink);
   --we-text-2: var(--color-we-muted);
+  --we-text-secondary: var(--we-text-2);
+  --we-ink-muted: var(--we-text-2);
   --we-muted: var(--color-we-muted);
   --we-faint: var(--color-we-faint);
+  --we-faint-soft: color-mix(in srgb, var(--we-faint) 25%, transparent);
   --we-success: var(--color-we-success);
   --we-success-soft: var(--color-we-success-soft);
   --we-success-border-25: color-mix(in srgb, var(--we-success) 25%, transparent);
@@ -9563,7 +9568,7 @@ button.we-ops-metric-card--button {
 .we-recipe-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 760px) { .we-recipe-grid { grid-template-columns: 1fr; } }
 
-/* Tools — required (cobalt) vs optional (muted) params in one wrap row. */
+/* Tools — required (cobalt), missing (warning), and optional (muted) params in one wrap row. */
 .we-tool-params { display: flex; flex-wrap: wrap; gap: 6px; }
 .we-param {
   display: inline-flex;
@@ -9575,6 +9580,7 @@ button.we-ops-metric-card--button {
   border: 1px solid transparent;
 }
 .we-param--required { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 25%, transparent); }
+.we-param--missing { color: var(--we-warning); background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
 .we-param--optional { color: var(--we-muted); background: var(--we-surface-muted); border-color: var(--we-line); }
 
 /* List toolbar — search + sort segmented over a dense list (Flows). */

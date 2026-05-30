@@ -37,7 +37,7 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
   getOrgConfigSnapshot: vi.fn(),
 }));
 
-vi.mock("@janusly/engine/src/auto-healing-consent", () => ({
+vi.mock("./auto-healing-consent", () => ({
   isAutoApplyAllowed: vi.fn(),
   isAutoHealingAllowed: vi.fn(),
 }));
@@ -70,7 +70,7 @@ import {
 import {
   isAutoApplyAllowed,
   isAutoHealingAllowed,
-} from "@janusly/engine/src/auto-healing-consent";
+} from "./auto-healing-consent";
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
 
 const upsertJobSchedulerMock = hoisted.upsertJobSchedulerMock;

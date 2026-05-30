@@ -65,7 +65,6 @@ import {
   recordValidationStarted,
 } from "@janusly/data";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
-import { isAutoHealingAllowed } from "@janusly/engine/src/auto-healing-consent";
 import { checkBudget } from "@janusly/engine/src/budget";
 import { getLlmClient, suggestWorkflowPatch } from "@janusly/ai";
 import type { RunEventForPrompt } from "@janusly/ai";
@@ -74,6 +73,7 @@ import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
 
 import { patchEnvelopeForNodeType } from "./ai-schemas";
+import { isAutoHealingAllowed } from "./auto-healing-consent";
 import {
   applyConfigPatchToWorkflow,
   applyStructuralPatchToWorkflow,

@@ -23,7 +23,9 @@
  *   passes an `AbortSignal` (sharing a Promise across abort intents
  *   would silently drop one fetch). For mutating verbs this collapses
  *   an accidental double-click within the window into a single
- *   mutation — intentional double-click prevention.
+ *   mutation — intentional double-click prevention. Once a mutation
+ *   resolves, the ephemeral GET cache is cleared so immediate
+ *   post-write refreshes cannot reuse pre-write snapshots.
  */
 
 import { getActiveOrg, getSessionToken, supabase } from './auth'
@@ -132,6 +134,7 @@ export class ApiError extends Error {
 export async function api(path: string, options: RequestInit = {}): Promise<unknown> {
   const method = (options.method ?? 'GET').toUpperCase()
   const hasSignal = options.signal !== undefined && options.signal !== null
+  const isMutation = method !== 'GET' && method !== 'HEAD'
   const sessionToken = getSessionToken()
   // Resolve the Supabase JWT BEFORE building the cache key so user
   // identity is part of the dedup tuple. In Supabase v2 the hot path
@@ -156,7 +159,10 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
     }
   }
 
-  const promise = doApiFetch(path, options, requestScope)
+  const promise = doApiFetch(path, options, requestScope).then((payload) => {
+    if (isMutation) inFlight.clear()
+    return payload
+  })
 
   if (key !== null) {
     const entry: InFlightEntry = { promise, expiresAt: Number.POSITIVE_INFINITY }

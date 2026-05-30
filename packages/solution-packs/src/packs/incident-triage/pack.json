@@ -1,0 +1,100 @@
+{
+  "id": "incident-triage",
+  "name": "Incident triage",
+  "description": "When an alert fires, classify its severity with AI, open a tracking issue on GitHub, and page the on-call channel on Slack.",
+  "category": "incident_triage",
+  "version": "1.0.0",
+  "requiredCredentials": [
+    {
+      "name": "ops_github",
+      "kind": "github_token",
+      "purpose": "Opens the incident tracking issue in your repo"
+    },
+    {
+      "name": "ops_slack",
+      "kind": "slack_webhook",
+      "purpose": "Pages your on-call channel"
+    }
+  ],
+  "requiredOrgConfigs": [],
+  "workflowJson": {
+    "dslVersion": "1.0",
+    "id": "incident-triage",
+    "name": "Incident triage",
+    "inputs": {
+      "type": "object",
+      "required": ["alertName", "summary"],
+      "properties": {
+        "alertName": { "type": "string", "description": "Short alert name from your monitoring system" },
+        "summary": { "type": "string", "description": "Alert body / description" },
+        "service": { "type": "string", "description": "Affected service name" }
+      }
+    },
+    "nodes": [
+      { "id": "trigger", "type": "webhook", "config": {} },
+      {
+        "id": "classify",
+        "type": "ai",
+        "config": {
+          "prompt": "You are an SRE triage assistant. Classify the severity of this alert as EXACTLY one lowercase word, no punctuation: `sev1` | `sev2` | `sev3`. Then on a new line write a one-sentence rationale. Alert: {{context.trigger.output.alertName}} on {{context.trigger.output.service}} — {{context.trigger.output.summary}}"
+        }
+      },
+      {
+        "id": "open_issue",
+        "type": "tool",
+        "config": {
+          "tool": "github.create_issue",
+          "input": {
+            "credential": "ops_github",
+            "owner": "your-org",
+            "repo": "incidents",
+            "title": "[incident] {{context.trigger.output.alertName}} on {{context.trigger.output.service}}",
+            "body": "Severity: {{context.classify.output.response}}\n\n{{context.trigger.output.summary}}",
+            "labels": ["incident", "auto-triaged"]
+          }
+        }
+      },
+      {
+        "id": "page_oncall",
+        "type": "tool",
+        "config": {
+          "tool": "slack.post",
+          "input": {
+            "credential": "ops_slack",
+            "text": ":rotating_light: {{context.trigger.output.alertName}} on {{context.trigger.output.service}} — severity {{context.classify.output.response}}. Issue: {{context.open_issue.output.result.url}}"
+          }
+        }
+      }
+    ],
+    "edges": [
+      { "from": "trigger", "to": "classify" },
+      { "from": "classify", "to": "open_issue" },
+      { "from": "open_issue", "to": "page_oncall" }
+    ]
+  },
+  "samplePayloads": [
+    {
+      "id": "default",
+      "label": "Database connection pool exhausted",
+      "input": {
+        "alertName": "DBConnectionPoolExhausted",
+        "summary": "Primary Postgres pool at 100% for 5m; new connections rejected.",
+        "service": "checkout-api"
+      }
+    }
+  ],
+  "failureFixtures": [
+    {
+      "id": "slack_5xx_transient",
+      "label": "Slack page returned HTTP 500",
+      "failedNodeId": "page_oncall",
+      "errorJson": {
+        "name": "ToolError",
+        "code": "http_error",
+        "message": "slack.post failed: upstream returned HTTP 500",
+        "statusCode": 500,
+        "node": "page_oncall"
+      }
+    }
+  ]
+}
