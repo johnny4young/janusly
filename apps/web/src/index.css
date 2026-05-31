@@ -9455,6 +9455,186 @@ button.we-ops-metric-card--button {
   }
 }
 
+/* "First recovered run" onboarding banner — a soft cobalt guidance overlay
+ * mirroring .we-budget-banner's geometry. Lower z-index than the budget
+ * block (a hard stop outranks a nudge); the two rarely co-occur. */
+.we-onboarding-banner {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 59;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  max-width: min(760px, calc(100vw - 32px));
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--we-surface-1);
+  border: 1px solid color-mix(in srgb, var(--we-primary) 35%, transparent);
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--we-primary) 12%, transparent);
+  animation: onboarding-banner-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.we-onboarding-banner__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--we-primary) 12%, transparent);
+  color: var(--we-primary);
+  flex-shrink: 0;
+}
+
+.we-onboarding-banner__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--we-text-1);
+  min-width: 0;
+}
+
+.we-onboarding-banner__copy strong {
+  color: var(--we-text-1);
+  font-weight: 600;
+}
+
+.we-onboarding-banner__copy span {
+  color: var(--we-text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.we-onboarding-banner__dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-onboarding-banner__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--we-muted) 22%, transparent);
+  color: var(--we-surface-1);
+  flex-shrink: 0;
+}
+
+.we-onboarding-banner__dot--done {
+  background: var(--we-success);
+  color: var(--we-surface-1);
+}
+
+.we-onboarding-banner__dot--current {
+  background: var(--we-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-primary) 22%, transparent);
+}
+
+.we-onboarding-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.we-onboarding-banner__count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--we-text-2);
+  white-space: nowrap;
+}
+
+.we-onboarding-banner__skip {
+  all: unset;
+  font-size: 12px;
+  color: var(--we-text-2);
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+
+.we-onboarding-banner__skip:hover {
+  color: var(--we-text-1);
+  background: color-mix(in srgb, var(--we-muted) 12%, transparent);
+}
+
+.we-onboarding-banner__skip:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+@keyframes onboarding-banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (max-width: 760px) {
+  .we-onboarding-banner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px;
+  }
+  .we-onboarding-banner__actions {
+    justify-content: space-between;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-onboarding-banner {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* "Replay onboarding" footer control on the Recovery Center home — a quiet
+ * way to re-run the guided checklist on the same tenant once it's completed
+ * or skipped (the banner itself is hidden then). */
+.we-onboarding-replay {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+.we-onboarding-replay__button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--we-text-2);
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--we-line);
+  transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.we-onboarding-replay__button:hover {
+  color: var(--we-primary);
+  border-color: color-mix(in srgb, var(--we-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--we-primary) 6%, transparent);
+}
+
+.we-onboarding-replay__button:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-onboarding-replay__button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Credential health card — surfaces broken / stale credentials and
  * MCP connections inside OperationsPanel. The card is observability-
  * only: no admin actions live here; rediscover stays in the existing

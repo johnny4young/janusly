@@ -31,6 +31,7 @@ function snapshotWithConsent(consent: boolean) {
     autoHealing: {} as never,
     recovery: {} as never,
     value: {} as never,
+    onboarding: {} as never,
   } as Awaited<ReturnType<typeof getOrgConfigSnapshot>>;
 }
 
