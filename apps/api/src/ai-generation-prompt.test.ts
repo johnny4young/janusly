@@ -185,6 +185,76 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
     expect((sanitized.nodes[0]?.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
     expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
   });
+
+  it("demotes a human_form with no field schema to a noop placeholder instead of discarding the whole draft", () => {
+    // Reproducer for the top model-independent generation failure: the
+    // LLM emits a `human_form` step with no `config.schema` (or an empty
+    // object schema). Pre-fix `validateWorkflow` rejected it
+    // ("Human form node requires a valid config.schema" /
+    // "...at least one field..."), which the route's outer try/catch
+    // converted into a fallback template — losing the otherwise-valid
+    // `ai` node around it. Now the unfilled node demotes to a `noop` the
+    // operator completes in the Inspector, preserving id + edges.
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "support_draft",
+      name: "Support draft",
+      nodes: [
+        { id: "draft", type: "ai", config: { prompt: "Draft a reply to {{input.ticket}}" } },
+        { id: "collect", type: "human_form", config: {} },
+      ],
+      edges: [{ from: "draft", to: "collect" }],
+    };
+
+    expect(() => sanitizeAiWorkflow(draft)).not.toThrow();
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes.map((n) => n.type)).toEqual(["ai", "noop"]);
+    // id + edges survive the demotion so the operator can still find it.
+    expect(sanitized.nodes[1]?.id).toBe("collect");
+    expect(sanitized.nodes[1]?.config).toEqual({});
+    expect(sanitized.edges).toEqual([{ from: "draft", to: "collect" }]);
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("demotes a human_form whose object schema has empty properties", () => {
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "empty_props",
+      name: "Empty props",
+      nodes: [
+        { id: "collect", type: "human_form", config: { schema: { type: "object", properties: {} } } },
+      ],
+      edges: [],
+    };
+
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes[0]?.type).toBe("noop");
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("preserves a human_form that declares at least one field", () => {
+    // A filled-in form is valid and must survive untouched — the
+    // demotion mirrors the validator's exact predicate, so a real
+    // object schema with properties (or a valid non-object schema) is
+    // left alone.
+    const draft: Workflow = {
+      dslVersion: "1.0",
+      id: "filled_form",
+      name: "Filled form",
+      nodes: [
+        {
+          id: "collect",
+          type: "human_form",
+          config: { schema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] } },
+        },
+      ],
+      edges: [],
+    };
+
+    const sanitized = sanitizeAiWorkflow(draft);
+    expect(sanitized.nodes[0]?.type).toBe("human_form");
+    expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
+  });
 });
 
 describe("fallbackWorkflowForPrompt — email-shape matcher", () => {
