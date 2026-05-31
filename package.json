@@ -16,6 +16,7 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "migrate": "pnpm --filter @janusly/db db:migrate",
     "evals": "node scripts/run-evals.mjs",
+    "evals:local": "node scripts/run-evals-local.mjs",
     "seed:recovery-matrix": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-recovery-matrix.ts",
     "seed:demos": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-demos.ts",
     "seed:full": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-full.ts",
