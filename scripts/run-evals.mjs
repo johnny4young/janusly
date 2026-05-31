@@ -91,16 +91,16 @@ async function runOne(c) {
   }
 
   // Skip cases that need live AI only when the API fell back because no
-  // OPENAI_API_KEY is configured. If `aiError` is present, the live AI path was
-  // attempted and degraded; that is exactly the regression this harness should
-  // surface.
+  // provider API key is configured. If `aiError` is present, the live AI path
+  // was attempted and degraded; that is exactly the regression this harness
+  // should surface.
   if (c.expect?.requiresMode === "ai" && body.mode === "fallback" && !body.aiError) {
     return {
       id: c.id,
       ok: true,
       skipped: true,
       mode: body.mode,
-      reason: "requires AI mode (set OPENAI_API_KEY)",
+      reason: "requires AI mode (configure a provider API key)",
     };
   }
 
