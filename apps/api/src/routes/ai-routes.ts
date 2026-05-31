@@ -8,8 +8,8 @@
  * AI-mode AND fallback. Per the AGENTS.md AI-mutation contract,
  * `/ai/review-workflow`, `/ai/patch-workflow`, and
  * `/ai/suggest-improvement` audit on both paths;
- * `/ai/generate-workflow` and `/ai/explain-workflow` audit on AI-mode
- * success only.
+ * `/ai/generate-workflow` and `/ai/explain-workflow` also audit fallback
+ * responses so AI outages are visible in the audit trail.
  */
 
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -33,6 +33,7 @@ import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@ja
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
+import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
@@ -95,19 +96,29 @@ export const aiRoutes: Route[] = [
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const fallbackWorkflow = fallbackWorkflowForPrompt(promptText);
       if (!llm) {
+        // No provider configured. Audit the fallback for observability, but
+        // do NOT put `aiError` on the RESPONSE body: `pnpm evals`
+        // (`scripts/run-evals.mjs`) skips `requiresMode:"ai"` cases only when
+        // the body is `mode:"fallback"` WITHOUT `aiError`, so a dev with no
+        // `ANTHROPIC_API_KEY` still gets a green eval run. `aiError` is
+        // reserved for an LLM call that was attempted and degraded.
+        await auditAction(auth, "ai.workflow.generated", {
+          targetType: "ai",
+          targetId: fallbackWorkflow?.id,
+          metadata: { mode: "fallback", error: "AI provider not configured", generationMode: orgConfig.ai.generationMode },
+        });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           ...(fallbackWorkflow ?? {}),
         }, budgetGate));
       }
       try {
-        // Schema-aware generation. The AI SDK plumbs the slim
-        // `AiGenerationWorkflowSchema` through each provider's
-        // structured-output capability and validates the response. The
-        // shape-coercing `looseAiWorkflow` pre-pass that existed before this
-        // is gone — schema enforcement is now real. Failures (LLM emits
-        // non-conformant JSON) throw inside the SDK and flow through the
-        // existing try/catch into the fallback contract.
+        // Generation runs in one of two modes per `ai.generationMode`
+        // (default `free_json`): free-JSON parses the model's JSON text
+        // server-side; constrained uses the provider's structured-output
+        // path. Both validate against `AiGenerationWorkflowSchema`, and any
+        // failure flows through the existing try/catch into the fallback
+        // contract below.
         // Org-level admins can opt MCP connections into LLM exposure via
         // the `exposeToAi` flag. When present, the connection's enabled
         // tool descriptors (with sanitised descriptions) are appended to
@@ -117,21 +128,46 @@ export const aiRoutes: Route[] = [
         // behaviour to today for non-opt-in orgs.
         const exposedMcpTools = await listExposedMcpToolsForAi(auth.orgId);
         const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools);
-        const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
-          schema: AiGenerationWorkflowSchema,
-          schemaName: "JanuslyWorkflow",
-          schemaDescription: "Workflow DAG for /ai/generate-workflow.",
-          system: systemPrompt,
-          prompt: promptText,
-          modelHint: modelOverride,
-          context: { orgId: auth.orgId, userId: auth.userId },
-        });
-        // Cast: the AI-side discriminated-union node configs are strict
-        // subsets of the engine's loose `config: Record<string, unknown>`,
-        // so the inferred AI shape structurally satisfies `Workflow`. The
-        // post-validation `sanitizeAiWorkflow` re-parses through
-        // `WorkflowSchema` so a bad cast can never reach persistence.
-        const pass1Workflow = result.object as unknown as Workflow;
+        const generationMode = orgConfig.ai.generationMode;
+        let pass1Workflow: Workflow;
+        let genModel: string;
+        let genProvider: string;
+        let generationAttempts = 1;
+        if (generationMode === "free_json") {
+          // Free-JSON (camino A, default): the model emits the workflow as
+          // JSON text validated server-side against the SAME
+          // `AiGenerationWorkflowSchema` shapes. Retry-on-parse-fail; throws
+          // after the attempt cap into the fallback contract below.
+          const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, {
+            orgId: auth.orgId,
+            userId: auth.userId,
+          });
+          pass1Workflow = gen.workflow;
+          genModel = gen.model;
+          genProvider = gen.provider;
+          generationAttempts = gen.attempts;
+        } else {
+          // Legacy constrained mode: the provider's structured-output path
+          // enforces the slim `AiGenerationWorkflowSchema` directly.
+          // Non-conformant output throws inside the SDK → fallback below.
+          const result = await llm.generateObject<z.infer<typeof AiGenerationWorkflowSchema>>({
+            schema: AiGenerationWorkflowSchema,
+            schemaName: "JanuslyWorkflow",
+            schemaDescription: "Workflow DAG for /ai/generate-workflow.",
+            system: systemPrompt,
+            prompt: promptText,
+            modelHint: modelOverride,
+            context: { orgId: auth.orgId, userId: auth.userId },
+          });
+          // Cast: the AI-side discriminated-union node configs are strict
+          // subsets of the engine's loose `config: Record<string, unknown>`,
+          // so the inferred AI shape structurally satisfies `Workflow`. The
+          // post-validation `sanitizeAiWorkflow` re-parses through
+          // `WorkflowSchema` so a bad cast can never reach persistence.
+          pass1Workflow = result.object as unknown as Workflow;
+          genModel = result.model;
+          genProvider = result.provider;
+        }
 
         // Pass 2: promote any noop placeholder whose id matches a
         // recognised wait-intent prefix into a typed operator-only node.
@@ -150,8 +186,12 @@ export const aiRoutes: Route[] = [
         const workflow = sanitizeAiWorkflow(promotion.workflow);
         await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: workflow.id, metadata: {
           mode: "ai",
-          model: result.model,
-          provider: result.provider,
+          model: genModel,
+          provider: genProvider,
+          // Generation mechanism + how many free-JSON attempts it took
+          // (1 unless retry-on-parse-fail fired). `constrained` always 1.
+          generationMode,
+          generationAttempts,
           promotionAttempts: promotion.promotionAttempts,
           promotionsSucceeded: promotion.promotionsSucceeded,
           // Per-family breakdown of the same totals — operators read
@@ -160,10 +200,10 @@ export const aiRoutes: Route[] = [
           // families add a new key here without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
         } });
-        return sendJson(res, withBudgetWarning({ mode: "ai", model: result.model, provider: result.provider, ...workflow }, budgetGate));
+        return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message } });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
@@ -182,8 +222,11 @@ export const aiRoutes: Route[] = [
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       if (!llm) {
+        const message = "AI provider not configured";
+        await auditAction(auth, "ai.workflow.explained", { targetType: "ai", metadata: { mode: "fallback", error: message } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
+          aiError: message,
           explanation: fallbackExplainWorkflow(workflow),
         }, budgetGate));
       }

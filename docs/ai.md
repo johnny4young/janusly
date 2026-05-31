@@ -14,7 +14,7 @@ This guide covers local setup. For production secret management, point the same 
 
 | Feature | Endpoint / surface | Without key | With key |
 | --- | --- | --- | --- |
-| Generate a workflow from a natural-language prompt | `POST /ai/generate-workflow` | Returns the seeded `http-ai-summary` template | LLM emits an Anthropic-safe typed DAG via `generateObject({ schema: AiGenerationWorkflowSchema })`, then the API re-validates it through the engine workflow gates |
+| Generate a workflow from a natural-language prompt | `POST /ai/generate-workflow` | Returns the seeded `http-ai-summary` template | Default `free_json` mode asks the LLM for JSON text, parses it through `AiGenerationWorkflowSchema`, then re-validates it through the engine workflow gates. Legacy `constrained` mode keeps `generateObject({ schema })` available by config |
 | Explain a saved workflow | `POST /ai/explain-workflow` | Plain-language local summary | Bullet-pointed walkthrough |
 | AI semantic review of a workflow | `POST /ai/review-workflow` | Deterministic readiness gate (`checkWorkflowReadiness`) | LLM finds ambiguous prompts, raw secrets, missing approvals upstream of write-side actions, and ambiguous tool inputs |
 | Suggest high-impact improvements to a workflow being authored | `POST /ai/suggest-improvement` | `{ mode: "fallback" }` with a single 0-confidence "other" item and the original workflow untouched | Returns `suggestions: Array<{ workflow, rationale, approachLabel, confidence }>` with 1-3 distinct items, sorted by confidence after server validation. The route validates each suggestion through `JSON.parse` → `WorkflowSchema.safeParse` → `sanitizeAiWorkflow` server-side and degrades to fallback if none survive. Surfaced in `VersionHistoryPanel.tsx`'s Compare-mode "Suggest improvement" button — the diff panel mounts a second `<WorkflowDiffView>` showing what the selected suggestion would change with the AI rationale rendered as `aiPatchRationale`; when multiple suggestions survive, the UI renders chips to switch between them. |
@@ -22,7 +22,7 @@ This guide covers local setup. For production secret management, point the same 
 | AI prompt step inside a workflow | `ai` node | Captures the prompt and returns a local fallback summary | LLM answers with run context |
 | Agent planner inside `agent` / `multi_agent` nodes | `config.planner: "openai"` (legacy field name; resolves to the configured `ai.provider`) | Falls back to the rules planner | LLM picks the next tool per step |
 | Causal reasoning over past decisions | `GET /causal?runId=...&nodeId=...` | Always available — pure logic, no LLM | Same |
-| Health / introspection | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, provider, model, timeoutMs, maxRetries }` |
+| Health / introspection | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, provider, model, generationMode, timeoutMs, maxRetries }` |
 
 ### 1b. Failure recovery loop
 
@@ -111,7 +111,7 @@ OPENAI_TIMEOUT_MS=30000                    # historical env name; applies to eve
 OPENAI_MAX_RETRIES=2                       # historical env name; applies to every provider
 ```
 
-For OpenAI (registered for future expansion, currently unverified), `OPENAI_API_KEY=sk-...` plus `JANUSLY_LLM_PROVIDER=openai` is enough — but expect `/ai/generate-workflow` to fall back due to the `oneOf` strict-mode rejection.
+For OpenAI (registered for future expansion, currently unverified), `OPENAI_API_KEY=sk-...` plus `JANUSLY_LLM_PROVIDER=openai` is enough to exercise the provider abstraction. `free_json` removes the `/ai/generate-workflow` structured-output `oneOf` blocker, but OpenAI remains unsupported until it passes the eval harness and release smoke.
 
 **Restart both the API and the worker** after editing `.env` — env is captured at process start:
 
@@ -149,6 +149,7 @@ curl -s http://localhost:3001/ai/health \
   "enabled": true,
   "provider": "anthropic",
   "model": "claude-haiku-4-5-20251001",
+  "generationMode": "free_json",
   "timeoutMs": 30000,
   "maxRetries": 2
 }
@@ -253,7 +254,7 @@ The LLM did emit suggestions but none survived `WorkflowSchema.safeParse` + `san
 The run id is for a different org. The API enforces `org_members` scoping — check the `x-org-id` header.
 
 ### AI generates an "invalid workflow"
-`/ai/generate-workflow` calls `llm.generateObject({ schema: AiGenerationWorkflowSchema })` so the model returns one of the capped, Anthropic-safe node shapes directly. The route then runs `sanitizeAiWorkflow` (`apps/api/src/index.ts`), which filters edge `condition` strings and `condition`-node expressions through the engine's limited grammar and runs the full workflow validator — non-grammar-valid expressions are dropped (edge condition stripped) or replaced with `"true"` (condition node). Schema-validation failures and sanitize throws degrade to `mode: "fallback"` with `aiError: "AI returned a workflow with validation issues: ..."`. Try a higher-tier model (`ANTHROPIC_MODEL=claude-sonnet-4-5-20251001`) for higher structural reliability if your prompts are complex.
+`/ai/generate-workflow` defaults to `free_json`: `llm.generateText({ responseFormat: "json" })` returns JSON text, the API parses it through `AiGenerationWorkflowSchema`, then the route runs `sanitizeAiWorkflow` (`apps/api/src/index.ts`). Legacy `constrained` mode still calls `llm.generateObject({ schema: AiGenerationWorkflowSchema })` directly. Both modes filter edge `condition` strings and `condition`-node expressions through the engine's limited grammar and run the full workflow validator — non-grammar-valid expressions are dropped (edge condition stripped) or replaced with `"true"` (condition node). Parse, schema, and sanitize failures degrade to `mode: "fallback"` with `aiError`. Try a higher-tier model (`ANTHROPIC_MODEL=claude-sonnet-4-5-20251001`) for higher structural reliability if your prompts are complex.
 
 ### Worker calls `agent` with `planner: "openai"` but it still uses rules
 The worker process needs its own restart after changing `.env`. The historical `planner: "openai"` field name resolves to the configured `ai.provider` at runtime — under the MVP Anthropic posture, `planner: "openai"` actually calls Anthropic. The fallback also fires when the LLM call throws — check the worker logs for the `aiError` payload on `agent.step.planned` events.
@@ -267,7 +268,7 @@ The node you queried isn't a `router` / `router_llm`, or the run didn't reach th
 
 ```
 Prompt
-  → /ai/generate-workflow → typed DAG (generateObject + sanitizeAiWorkflow)
+  → /ai/generate-workflow → typed DAG (free_json/constrained + sanitizeAiWorkflow)
   → /ai/review-workflow   → readiness gate + AI semantic pass
   → POST /workflows/save  → versioned
   → POST /start           → execution
