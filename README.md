@@ -99,7 +99,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 | Runtime     | Node.js 24 LTS (Krypton), Postgres 18, Redis 8                         |
 | TypeScript  | 6.0                                                                     |
 | Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
-| AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback (try/catch + `{ mode: "fallback", aiError, ... }`). |
+| AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback; attempted LLM-call failures surface `{ mode: "fallback", aiError, ... }`. |
 | Validation  | `zod` 4                                                                 |
 | UI          | React 19, Vite 8 (Rolldown), `@xyflow/react`, Tailwind 4               |
 | State       | `zustand` 5                                                             |
@@ -198,13 +198,13 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 
 | Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
-| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | LLM emits an Anthropic-safe typed DAG via `generateObject({ schema: AiGenerationWorkflowSchema })`, then the API re-validates it through the engine workflow gates |
+| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | Default `free_json` mode asks the LLM for JSON text, parses it through `AiGenerationWorkflowSchema`, then re-validates it through the engine workflow gates. Legacy `constrained` mode keeps `generateObject({ schema })` available by config |
 | Explain a workflow | `POST /ai/explain-workflow` | Generic placeholder | Bullet walkthrough |
 | Review a workflow for production-readiness | `POST /ai/review-workflow` | Deterministic readiness gate (`checkWorkflowReadiness`) | LLM semantic pass on top of the deterministic gate |
 | Run-level Q&A chat | `POST /ai/explain-run` + UI Runs tab | Deterministic summary (failures / retries / decisions / rollbacks) | Free-form answers |
 | Agent planner | `agent.config.planner: "openai"` | Rules planner | LLM picks tools per step |
 | Causal reasoning | `GET /causal?runId=...&nodeId=...` | Always available — pure logic | Same |
-| Health check | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, provider, model }` |
+| Health check | `GET /ai/health` | `{ enabled: false }` | `{ enabled: true, provider, model, generationMode }` |
 
 ### Failure recovery loop
 
@@ -229,10 +229,10 @@ curl -s http://localhost:3001/ai/health -H "x-org-id: default" -H "x-user-id: de
 ```
 
 ```json
-{ "enabled": true, "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "timeoutMs": 30000, "maxRetries": 2 }
+{ "enabled": true, "provider": "anthropic", "model": "claude-haiku-4-5-20251001", "generationMode": "free_json", "timeoutMs": 30000, "maxRetries": 2 }
 ```
 
-OpenAI is registered in the provider abstraction for future expansion but is **not a supported runtime target** in the current MVP — the `/ai/generate-workflow` schema currently trips OpenAI's strict-mode `oneOf` rejection. Don't switch a tenant's `ai.provider` away from `anthropic` without a verification plan; see `AGENTS.md` "AI integration" for the full operating posture.
+OpenAI is registered in the provider abstraction for future expansion but is **not a supported runtime target** in the current MVP. `free_json` removes the `/ai/generate-workflow` structured-output `oneOf` blocker, but OpenAI remains unverified until it passes the eval harness and release smoke. Don't switch a tenant's `ai.provider` away from `anthropic` without a verification plan; see `AGENTS.md` "AI integration" for the full operating posture.
 
 ---
 

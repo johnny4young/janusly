@@ -68,6 +68,7 @@ export type OrgConfigSnapshot = {
     promptMaxChars: number;
     rateLimitPerMin: number;
     confidenceCalibrationEnabled: boolean;
+    generationMode: string;
   };
   http: {
     timeoutMs: number;
@@ -228,6 +229,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "openai",
     envKeys: ["JANUSLY_LLM_PROVIDER"],
     allowedValues: ["openai", "anthropic"],
+  },
+  {
+    key: "ai.generationMode",
+    category: "ai",
+    description:
+      "Workflow generation mechanism for /ai/generate-workflow. 'free_json' (default) has the model emit the workflow as JSON text validated server-side — higher reliability/quality and provider-agnostic. 'constrained' uses the legacy provider structured-output schema. Reversible per tenant.",
+    valueType: "string",
+    defaultValue: "free_json",
+    envKeys: ["JANUSLY_AI_GENERATION_MODE"],
+    allowedValues: ["constrained", "free_json"],
   },
   {
     key: "ai.openai.model",
@@ -923,6 +934,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       promptMaxChars: readNumber(values, "ai.promptMaxChars"),
       rateLimitPerMin: readNumber(values, "ai.rateLimitPerMin"),
       confidenceCalibrationEnabled: readBoolean(values, "ai.confidenceCalibrationEnabled"),
+      generationMode: readString(values, "ai.generationMode"),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),

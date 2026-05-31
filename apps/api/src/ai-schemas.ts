@@ -6,12 +6,12 @@
  *   - **`/ai/generate-workflow`** — full-workflow generation. Uses
  *     `AiGenerationWorkflowSchema`, an 11-branch slim discriminated
  *     union. Each `http` / `tool` / `agent` config declares only the
- *     fields the operator MUST populate. Compiles to JSON Schema
- *     `oneOf` and works against Anthropic. OpenAI strict mode rejects
- *     `oneOf`; tracked as a follow-up — empirically, relaxing to an
- *     open shape regresses Anthropic (the model skips required fields
- *     when the schema doesn't force them), so the real fix is heavier
- *     than a one-line schema swap.
+ *     fields the operator MUST populate. The default free-JSON path parses
+ *     model text through this schema server-side; legacy constrained mode
+ *     sends the same schema to the provider, where it compiles to JSON
+ *     Schema `oneOf` and works against Anthropic. OpenAI strict mode rejects
+ *     that provider-side `oneOf`; free-JSON avoids that structured-output
+ *     blocker without widening the accepted workflow shape.
  *
  *   - **`/ai/patch-workflow`** — failure-recovery config patch. Uses
  *     ONE non-union envelope per call, picked by failing-node type via
@@ -23,14 +23,14 @@
  * Why two strategies: a single union schema compiled at the
  * structured-output boundary is incompatible with both providers under
  * realistic field counts. Anthropic caps compiled-grammar size; OpenAI
- * strict mode bans `oneOf` outright. The generation route is constrained
- * to a slim union (one model has to emit any of the 11 types, can't
- * pre-dispatch). The patch route knows the failing-node type at request
- * time, so it can dispatch to a single concrete schema per call.
+ * strict mode bans `oneOf` outright. Free-JSON keeps the generation route
+ * on the slim union without sending that union to the provider. The patch
+ * route knows the failing-node type at request time, so it can dispatch to
+ * a single concrete schema per call.
  *
  * Used by:
  *   - `apps/api/src/routes/ai-routes.ts` — `/ai/generate-workflow` and
- *     `/ai/patch-workflow` route handlers.
+ *     `/ai/patch-workflow` route handlers and the free-JSON parser.
  *   - `apps/api/src/ai-patch-schema.test.ts` — pins per-envelope parse
  *     behavior and the dispatcher.
  *
@@ -238,9 +238,10 @@ const AiNodeSchema = z.discriminatedUnion("type", [
 
 /**
  * Workflow envelope for `/ai/generate-workflow`. Slim discriminated
- * union, 11 branches. Works on Anthropic; OpenAI strict mode rejects
- * the compiled `oneOf`. See `AiNodeSchema` above for the cross-provider
- * note.
+ * union, 11 branches. The default free-JSON path uses it only for local
+ * validation; legacy constrained mode sends it to the provider, where
+ * OpenAI strict mode rejects the compiled `oneOf`. See `AiNodeSchema`
+ * above for the cross-provider note.
  */
 export const AiGenerationWorkflowSchema = z.object({
   dslVersion: z.literal("1.0").optional(),

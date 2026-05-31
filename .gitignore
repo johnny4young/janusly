@@ -9,6 +9,9 @@ apps/web/test-results/
 apps/web/.vitest-attachments/
 apps/web/**/__screenshots__/
 output/
+# Ephemeral eval-run output from scripts/model-eval-compare.ts (the harness
+# .ts is committed; its per-run results are not).
+scripts/model-eval-results.*
 .env
 .DS_Store
 

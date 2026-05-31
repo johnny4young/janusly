@@ -51,15 +51,17 @@ export async function aiStatus(orgId: string) {
     model,
     timeoutMs: orgConfig.ai.timeoutMs,
     maxRetries: orgConfig.ai.maxRetries,
+    generationMode: orgConfig.ai.generationMode,
   };
 }
 
 /**
  * Post-Zod sanitization for `/ai/generate-workflow` (and any other
  * AI mutation that emits a workflow). The LLM-emitted workflow has
- * already been validated against the AI generation subset by the
- * SDK's structured-output path; this step filters edge `condition`
- * strings and `condition`-node expressions through `validateExpression`
+ * already been validated against the AI generation subset by either the
+ * free-JSON parser or the SDK's structured-output path; this step filters
+ * edge `condition` strings and condition-node expressions through
+ * `validateExpression`
  * (Janusly's limited grammar), then runs the full engine
  * `validateWorkflow` gate. Without this, valid-shaped-but-runtime-
  * invalid output would crash at execution time instead of degrading

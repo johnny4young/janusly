@@ -44,7 +44,7 @@ The plan is structured so each item below is independently shippable and individ
 ### Weaknesses (pivot points)
 
 - **Workflow expressiveness ceiling.** Subworkflows, workflow inputs/outputs, loops, approvals, scheduled triggers, and sandbox replay exist, but event subscriptions and richer human forms are still thin.
-- **AI is provider-neutral in code but Anthropic-only in posture.** The abstraction exists and every surface has fallback, but production support currently depends on Anthropic structured-output behavior. Multi-provider verification is intentionally deferred.
+- **AI is provider-neutral in code but Anthropic-only in posture.** The abstraction exists and every surface has fallback, but production support currently depends on Anthropic verification; `free_json` removes the generation route's structured-output blocker without making other providers supported. Multi-provider verification is intentionally deferred.
 - **Tool input contracts are typed, but not yet provider-native.** The in-tree registry validates Zod input/output schemas and exposes AI Studio metadata, but those definitions are not yet wired into provider-native tool-call APIs or external MCP tools.
 - **Memory is event-log scrolling.** The agent loop reads `getRunMemory(runId)` which returns ordered run events. Useful, but it's not "knowledge."
 - **The reinforcement layer doesn't influence model choice, prompt template, or retry strategy** — only `router` node candidate selection. Model routing should be RL-driven too: cheaper model for low-stakes, premium for high-stakes.
@@ -119,9 +119,9 @@ Implementation status:
 
 The client must preserve the existing `mode: "fallback" | "ai"` + `aiError` contract.
 
-#### Phase B — Switch internals to `generateObject` for structured output (shipped)
+#### Phase B — Structured workflow generation envelope (shipped)
 
-`/ai/generate-workflow` now calls `llm.generateObject({ schema: AiGenerationWorkflowSchema })` so the model returns one of Janusly's capped, Anthropic-safe node shapes through the provider abstraction. The route still runs `sanitizeAiWorkflow`, `WorkflowSchema.safeParse`, and the workflow validator after schema validation because the engine's expression grammar and runtime contract are stricter than the AI-facing generation envelope.
+`/ai/generate-workflow` now defaults to `free_json`: `llm.generateText({ responseFormat: "json" })` emits JSON text that the API parses through `AiGenerationWorkflowSchema` server-side. The legacy `constrained` mode still calls `llm.generateObject({ schema: AiGenerationWorkflowSchema })`. Both modes return one of Janusly's capped node shapes through the provider abstraction, then run `sanitizeAiWorkflow`, `WorkflowSchema.safeParse`, and the workflow validator because the engine's expression grammar and runtime contract are stricter than the AI-facing generation envelope.
 
 #### Phase C — Add provider config
 
@@ -620,7 +620,7 @@ Goal: provider freedom, cost visibility, MCP server stub.
 - AI provider abstraction migration (§4 phases A–C) shipped through `LlmClient`; supported MVP runtime is Anthropic-only while OpenAI remains registered for future verification.
 - `usage_events` instrumentation shipped: every LLM call writes one row with provider/model/tokens/cost metadata.
 - `@janusly/mcp-server` shipped with read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) plus `workflows.validate`; writes stay disabled until consent/audit policy lands.
-- `/ai/generate-workflow` now uses `generateObject({ schema: AiGenerationWorkflowSchema })` plus a sanitize + engine-validation pass.
+- `/ai/generate-workflow` now defaults to free-JSON text generation parsed through `AiGenerationWorkflowSchema`, with the legacy `generateObject({ schema: AiGenerationWorkflowSchema })` path retained as `constrained` mode; both modes run the same sanitize + engine-validation pass.
 - Drizzle migrations shipped in ENG-008: checked-in SQL migrations, real `pnpm migrate`, and API/worker fail-fast guards before boot.
 - GitHub Actions shipped in ENG-015: build + jsdom test, browser test, e2e, and high+ dependency audit.
 
