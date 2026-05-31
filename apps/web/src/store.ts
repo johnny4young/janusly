@@ -31,6 +31,7 @@ import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
 
@@ -92,6 +93,10 @@ type WorkflowStore = {
    *  AI Studio top-of-canvas BudgetBlockedBanner reads this slot; the
    *  api() wrapper sets it on every 402; clearBudgetBlocked() unsets. */
   budgetBlocked: BudgetBlockedEnvelope | null
+  /** Latest "first recovered run" onboarding snapshot. The OnboardingBanner
+   *  overlay self-fetches `/onboarding` on mount + every platformVersion bump
+   *  and stores the result here; renders only while `status === 'active'`. */
+  onboarding: OnboardingState | null
 
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
@@ -129,6 +134,7 @@ type WorkflowStore = {
   removeToast: (id: string) => void
   setBudgetBlocked: (envelope: BudgetBlockedEnvelope | null) => void
   clearBudgetBlocked: () => void
+  setOnboarding: (state: OnboardingState | null) => void
   bumpPlatformVersion: () => void
 }
 
@@ -210,6 +216,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   toasts: [],
   platformVersion: 0,
   budgetBlocked: null,
+  onboarding: null,
 
   setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
   clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
@@ -385,6 +392,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
   setBudgetBlocked: (envelope) => set({ budgetBlocked: envelope }),
   clearBudgetBlocked: () => set({ budgetBlocked: null }),
+  setOnboarding: (onboarding) => set({ onboarding }),
 }))
 
 /**

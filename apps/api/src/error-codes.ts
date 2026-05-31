@@ -81,7 +81,9 @@ export type ApiErrorCode =
   // solution packs
   | "pack_not_found"
   | "pack_missing_sample_payload"
-  | "pack_no_failure_fixture";
+  | "pack_no_failure_fixture"
+  // onboarding
+  | "onboarding_invalid_action";
 
 /**
  * Canonical 4xx response envelope. The `error` field is the English

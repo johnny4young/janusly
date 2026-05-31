@@ -129,6 +129,9 @@ export type OrgConfigSnapshot = {
     minutesSavedPerRecovery: number;
     baselineMttrSeconds: number;
   };
+  onboarding: {
+    enabled: boolean;
+  };
 };
 
 const ALLOWED_CATEGORIES = [
@@ -145,6 +148,7 @@ const ALLOWED_CATEGORIES = [
   "recovery",
   "value",
   "retention",
+  "onboarding",
 ] as const;
 
 /** Closed enum of memory kinds eligible for persistence. Mirrors the memory
@@ -755,6 +759,14 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 7,
     max: 730,
   },
+  {
+    key: "onboarding.enabled",
+    category: "onboarding",
+    description:
+      "Tenant switch for the \"first recovered run\" onboarding checklist banner. Defaults to true so the guided flow is on; set false to hide the banner for this org (e.g. once the team is past onboarding). Disabling makes GET /onboarding skip all milestone derivation and return a hidden state — flipping it back on resumes from the org's derived progress.",
+    valueType: "boolean",
+    defaultValue: true,
+  },
 ] as const satisfies readonly OrgConfigDefinition[];
 
 export type OrgConfigKey = typeof ORG_CONFIG_DEFINITIONS[number]["key"];
@@ -972,7 +984,34 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       minutesSavedPerRecovery: readNumber(values, "value.minutesSavedPerRecovery"),
       baselineMttrSeconds: readNumber(values, "value.baselineMttrSeconds"),
     },
+    onboarding: {
+      enabled: readBoolean(values, "onboarding.enabled"),
+    },
   };
+}
+
+/**
+ * Read just the `onboarding.enabled` tenant toggle. Narrow read — the
+ * onboarding route only needs this one boolean, so it reads a single scoped
+ * row instead of materializing the full `OrgConfigSnapshot`. Returns the
+ * catalog default (`true`) when the org has no row OR on a read error
+ * (fail-open: a config-store blip must not silently hide onboarding).
+ * Multi-tenant scope: the read carries `eq(orgConfigs.orgId, orgId)`.
+ */
+export async function isOnboardingEnabled(orgId: string): Promise<boolean> {
+  const fallback = ORG_CONFIG_DEFINITIONS.find((d) => d.key === "onboarding.enabled")!
+    .defaultValue as boolean;
+  try {
+    const rows = await db
+      .select()
+      .from(orgConfigs)
+      .where(and(eq(orgConfigs.orgId, orgId), eq(orgConfigs.key, "onboarding.enabled")));
+    const stored = rows[0]?.valueJson;
+    return typeof stored === "boolean" ? stored : fallback;
+  } catch (err) {
+    console.warn(`[onboarding] failed to read org_configs for ${orgId}; defaulting enabled`, err);
+    return fallback;
+  }
 }
 
 /**

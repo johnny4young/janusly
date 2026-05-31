@@ -1,0 +1,1 @@
+ALTER TABLE "onboarding_progress" ADD COLUMN "restarted_at" timestamp with time zone;

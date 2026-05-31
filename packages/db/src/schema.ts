@@ -1803,3 +1803,56 @@ export const triggerEvents = pgTable(
     index("trigger_events_org_node_idx").on(table.orgId, table.workflowVersionId, table.nodeId),
   ],
 );
+
+/**
+ * Onboarding progress — a thin per-`(orgId, userId)` cache backing the
+ * "first recovered run" guided checklist. The row is NOT the source of
+ * truth for milestone completion: `GET /onboarding` derives each milestone
+ * live from durable org-state (a `credentials` row, a `succeeded` run, a
+ * `dead_letters` row, a replayed/resolved DLQ row, a `workflow.pack_imported`
+ * audit row). The six advanceable milestones therefore need no per-step
+ * write site — they are read off existing tables.
+ *
+ * What this row persists:
+ * - `step` — the monotonic high-water mark (one of the closed
+ *   `ONBOARDING_STEPS`). It provides hysteresis: a milestone the user already
+ *   reached never visually un-checks if a derived signal later regresses
+ *   (e.g. a DLQ row purged by retention). Effective per-step done =
+ *   derived OR high_water_index >= step_index.
+ * - `status` — `active` / `skipped` / `completed`. The `completed` transition
+ *   is a CAS (`UPDATE … WHERE status<>'completed' RETURNING *`) so a single
+ *   `onboarding.completed` audit fires even under parallel reads.
+ *
+ * Orphan-tolerant (no cascade): deleting an org leaves the row; a re-created
+ * org with the same id inherits the prior progress.
+ */
+export const onboardingProgress = pgTable(
+  "onboarding_progress",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Monotonic high-water mark — one of the closed `ONBOARDING_STEPS`. */
+    step: text("step").notNull().default("org_created"),
+    /** Lifecycle status — `active` / `skipped` / `completed`. */
+    status: text("status").notNull().default("active"),
+    /** Set when the user skips; cleared on resume. */
+    skippedAt: timestamp("skipped_at", { withTimezone: true }),
+    /** Set once, via CAS, when all six milestones are reached. */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * Restart epoch. When set, milestone derivation only counts org activity
+     * with `created_at >= restarted_at` — so an operator can replay the whole
+     * onboarding flow on the same tenant (the prior credential / pack / run /
+     * failure / recovery no longer count). Null = normal (all activity counts).
+     */
+    restartedAt: timestamp("restarted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // One onboarding row per user per org; the idempotent-create + CAS paths
+    // rely on this unique index.
+    uniqueIndex("onboarding_progress_org_user_idx").on(table.orgId, table.userId),
+  ],
+);
