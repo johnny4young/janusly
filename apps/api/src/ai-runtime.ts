@@ -26,7 +26,7 @@ import {
 import type { DecisionCandidate } from "@janusly/domain";
 import { validateExpression } from "@janusly/engine/src/expression";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { WorkflowSchema, type Workflow } from "@janusly/shared";
+import { WorkflowInputSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
 import { httpError, asNumber, asRecord } from "./http";
 import { workflowTemplates } from "./templates";
@@ -93,6 +93,29 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
         !Array.isArray(mapping) &&
         Object.keys(mapping as Record<string, unknown>).length > 0;
       if (!hasMapping) return { ...node, type: "noop" as const, config: {} };
+      return node;
+    }
+    // Draft-generation tolerance for under-specified `human_form` nodes.
+    // The strict `validateWorkflow` gate rejects a human_form whose
+    // `config.schema` is absent / malformed (`human_form_invalid_schema`)
+    // or is an object schema with no fields (`human_form_empty_schema`).
+    // The LLM intermittently emits exactly that — a form step it hasn't
+    // filled in yet — which pre-fix discarded the ENTIRE draft to a
+    // fallback template (the top model-independent generation failure,
+    // seen on `ai-support-draft` / `lead-enrichment` across models).
+    // Demote the unfilled node to a `noop` placeholder so the rest of the
+    // draft survives and the operator completes the field schema in the
+    // Inspector — same posture as the empty-`transform` demotion above.
+    // Mirror the validator's exact predicate so a still-valid non-object
+    // schema (e.g. `{ type: "string" }`) is left untouched.
+    if (node.type === "human_form") {
+      const schema = (node.config as { schema?: unknown } | undefined)?.schema;
+      const parsed = WorkflowInputSchema.safeParse(schema);
+      const isEmpty =
+        !parsed.success ||
+        (parsed.data.type === "object" &&
+          (!parsed.data.properties || Object.keys(parsed.data.properties).length === 0));
+      if (isEmpty) return { ...node, type: "noop" as const, config: {} };
       return node;
     }
     if (node.type !== "condition") return node;
