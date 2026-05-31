@@ -46,6 +46,7 @@ import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { ValueDashboardSection } from './ValueDashboardSection'
+import { OnboardingReplayButton } from './OnboardingReplayButton'
 import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
 import {
   buildGreeting,
@@ -326,6 +327,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           {t('recoveryCenter.metricsUnavailable', { detail: metricsError })}
         </p>
       )}
+
+      <OnboardingReplayButton />
     </div>
   )
 }

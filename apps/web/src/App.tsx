@@ -30,6 +30,7 @@ import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
+import { OnboardingBanner } from './components/OnboardingBanner'
 import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
@@ -1021,6 +1022,7 @@ export default function App() {
       overlay={
         <>
           <BudgetBlockedBanner onOpenTab={setActiveTab} />
+          <OnboardingBanner onOpenTab={setActiveTab} />
           {runInputOpen && currentWorkflowInputs ? (
             <RunInputDialog
               inputs={currentWorkflowInputs}

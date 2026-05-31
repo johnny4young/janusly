@@ -165,6 +165,11 @@ export type AuditAction =
   | "workflow.pack_imported"
   | "solution_pack.sample_run_started"
   | "solution_pack.failure_injected"
+  // onboarding ("first recovered run" guided checklist)
+  | "onboarding.skipped"
+  | "onboarding.resumed"
+  | "onboarding.restarted"
+  | "onboarding.completed"
   // upstream health sources
   | "upstream_health.source.created"
   | "upstream_health.source.updated"
