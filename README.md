@@ -179,6 +179,8 @@ pnpm build           # type-check + Vite production build (Rolldown, manualChunk
 pnpm test:e2e        # Playwright; boots Compose, runs UI flow, tears Compose down
 pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
 pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
+pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into evals/baseline.json (the regression floors)
+pnpm test:evals      # node:test for the eval-gate logic (scripts/evals-baseline.mjs) — $0, no API
 pnpm seed:demos      # idempotently seed the canonical demo credentials
 pnpm seed:recovery-matrix  # reset + seed DLQ fixtures for Recovery dialog smoke
 pnpm seed:full       # fuller local demo seed
