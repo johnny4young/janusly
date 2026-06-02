@@ -199,12 +199,20 @@ curl -s -X POST http://localhost:3001/ai/generate-workflow \
 
 Use `pnpm evals` when `pnpm dev` is already running. It POSTs the checked-in
 [`evals/generate-workflow.jsonl`](../evals/generate-workflow.jsonl) cases to
-`/ai/generate-workflow`, asserts shape, and skips `requiresMode: "ai"` cases
-only when the API falls back because no provider key is configured.
+`/ai/generate-workflow`. Deterministic cases (and any transport error) are hard
+per-case failures; `requiresMode: "ai"` cases feed two suite-level rates — the
+ai-mode rate and a deterministic shape-pass rate — gated against
+[`evals/baseline.json`](../evals/baseline.json), so a single free-JSON
+model-variance flake no longer reds the whole run (only a drop past the
+baseline's tolerance band does). An `ai` case that falls back without an
+`aiError` (no provider key) is skipped and excluded from the rates, so a no-key
+run stays green at $0. Refresh the baseline floors with `pnpm evals:baseline`;
+the pure gate logic is unit-tested at $0 via `pnpm test:evals`.
 
 Use `pnpm evals:local` when you want the wrapper to boot Postgres + Redis,
 apply migrations, start the API, run the same golden evals, and tear the stack
-down. It can spend provider credits when `ANTHROPIC_API_KEY` is reachable.
+down. It can spend provider credits when `ANTHROPIC_API_KEY` is reachable. The
+gate is intentionally local / developer-invoked — not wired into CI.
 
 For provider/model A/B work, run the manual comparison harness directly:
 
