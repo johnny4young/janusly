@@ -100,9 +100,9 @@ function makeLlm(opts: { text?: string[]; object?: unknown }) {
   };
 }
 
-function setRuntime(generationMode: string, llm: ReturnType<typeof makeLlm>) {
+function setRuntime(generationMode: string, llm: ReturnType<typeof makeLlm>, generationCandidates = 1) {
   orgLlmMock.mockResolvedValue({
-    orgConfig: { ai: { generationMode, promptMaxChars: 4000, rateLimitPerMin: 60 } } as never,
+    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60 } } as never,
     llm: llm as never,
     llmConfig: {} as never,
   });
@@ -145,6 +145,44 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     // sanitizeAiWorkflow is a passthrough mock here, so the draft validates
     // on the first try and the self-repair loop never fires.
     expect(meta.repairAttempts).toBe(0);
+    // Default generationCandidates = 1 → single-shot, candidateCount 1.
+    expect(meta.candidateCount).toBe(1);
+    expect(res.payload.candidateCount).toBe(1);
+  });
+
+  it("free_json: Best-of-N samples N candidates and reports candidateCount", async () => {
+    const llm = makeLlm({ text: [VALID_JSON, VALID_JSON, VALID_JSON] });
+    setRuntime("free_json", llm, 3);
+
+    const res = await callGenerate();
+
+    // One generateText per candidate (sanitize is a passthrough mock, so all
+    // three "validate"; the winner is selected by readiness and re-promoted).
+    expect(llm.generateText).toHaveBeenCalledTimes(3);
+    expect(res.payload.mode).toBe("ai");
+    expect(res.payload.candidateCount).toBe(3);
+
+    const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.candidateCount).toBe(3);
+    expect(meta.validCandidates).toBe(3);
+  });
+
+  it("free_json: Best-of-N fallback reports sampled candidates", async () => {
+    const llm = makeLlm({ text: ["garbage", "still garbage", "also garbage", "retry garbage", "final garbage"] });
+    setRuntime("free_json", llm, 3);
+
+    const res = await callGenerate();
+
+    // Three Best-of-N samples parse to zero candidates, then the single-shot
+    // retry path spends its two parse attempts before falling back.
+    expect(llm.generateText).toHaveBeenCalledTimes(5);
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.candidateCount).toBe(3);
+
+    const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.mode).toBe("fallback");
+    expect(meta.candidateCount).toBe(3);
+    expect(meta.validCandidates).toBe(0);
   });
 
   it("free_json: retries then falls back when parsing never succeeds", async () => {
@@ -156,10 +194,12 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(llm.generateText).toHaveBeenCalledTimes(2); // FREE_JSON_MAX_ATTEMPTS
     expect(res.payload.mode).toBe("fallback");
     expect(typeof res.payload.aiError).toBe("string");
+    expect(res.payload.candidateCount).toBe(1);
 
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
     expect(meta.mode).toBe("fallback");
     expect(meta.generationMode).toBe("free_json");
+    expect(meta.candidateCount).toBe(1);
   });
 
   it("constrained: uses generateObject and audits generationMode=constrained", async () => {

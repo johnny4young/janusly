@@ -33,6 +33,7 @@ import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@ja
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
+import { generateWorkflowCandidates, selectBestCandidate } from "../ai-generate-bestofn";
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
@@ -116,6 +117,10 @@ export const aiRoutes: Route[] = [
       // Hoisted above the outer try so the fallback catch can report
       // repair attempts too (0 when generation failed before sanitize).
       let repairAttempts = 0;
+      // Best-of-N telemetry: how many candidates were sampled and how many
+      // passed the strict validity gate (null = single-shot / not applicable).
+      let candidateCount = 1;
+      let validCandidates: number | null = null;
       try {
         // Generation runs in one of two modes per `ai.generationMode`
         // (default `free_json`): free-JSON parses the model's JSON text
@@ -140,16 +145,41 @@ export const aiRoutes: Route[] = [
         if (generationMode === "free_json") {
           // Free-JSON mode (default): the model emits the workflow as
           // JSON text validated server-side against the SAME
-          // `AiGenerationWorkflowSchema` shapes. Retry-on-parse-fail; throws
-          // after the attempt cap into the fallback contract below.
-          const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, {
-            orgId: auth.orgId,
-            userId: auth.userId,
-          });
-          pass1Workflow = gen.workflow;
-          genModel = gen.model;
-          genProvider = gen.provider;
-          generationAttempts = gen.attempts;
+          // `AiGenerationWorkflowSchema` shapes.
+          const ctx = { orgId: auth.orgId, userId: auth.userId };
+          const candidateTarget = orgConfig.ai.generationCandidates;
+          if (candidateTarget > 1) {
+            // Best-of-N: sample N independent drafts and keep the best by a
+            // deterministic readiness score. The winner flows through the same
+            // promote → sanitize → repair tail as a single-shot draft.
+            const candidates = await generateWorkflowCandidates(llm, systemPrompt, promptText, modelOverride, ctx, candidateTarget);
+            candidateCount = candidateTarget;
+            const selection = selectBestCandidate(candidates);
+            if (selection) {
+              pass1Workflow = selection.winner.workflow;
+              genModel = selection.winner.model;
+              genProvider = selection.winner.provider;
+              validCandidates = selection.validCount;
+              generationAttempts = 1;
+            } else {
+              // Zero candidates even parsed — fall to the single-shot retry
+              // path, which throws into the fallback contract if it also fails.
+              validCandidates = 0;
+              const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, ctx);
+              pass1Workflow = gen.workflow;
+              genModel = gen.model;
+              genProvider = gen.provider;
+              generationAttempts = gen.attempts;
+            }
+          } else {
+            // Single-shot (default): retry-on-parse-fail; throws after the
+            // attempt cap into the fallback contract below.
+            const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, ctx);
+            pass1Workflow = gen.workflow;
+            genModel = gen.model;
+            genProvider = gen.provider;
+            generationAttempts = gen.attempts;
+          }
         } else {
           // Legacy constrained mode: the provider's structured-output path
           // enforces the slim `AiGenerationWorkflowSchema` directly.
@@ -222,6 +252,10 @@ export const aiRoutes: Route[] = [
           // (1 unless retry-on-parse-fail fired). `constrained` always 1.
           generationMode,
           generationAttempts,
+          // Best-of-N: candidates sampled (1 = single-shot) and how many passed
+          // the strict validity gate (null = single-shot / not applicable).
+          candidateCount,
+          validCandidates,
           // Directed self-repair attempts spent when the draft failed strict
           // graph validation (0 when the first draft validated cleanly).
           repairAttempts,
@@ -233,13 +267,14 @@ export const aiRoutes: Route[] = [
           // families add a new key here without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
         } });
-        return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, ...workflow }, budgetGate));
+        return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, candidateCount, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts } });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,
+          candidateCount,
           ...(fallbackWorkflow ?? {}),
         }, budgetGate));
       }
