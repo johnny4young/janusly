@@ -26,7 +26,7 @@ The philosophical centerpiece. AC names this explicitly. Engineering reality (fr
 
 ### What runs in self-host (full-runtime, license TBD)
 
-- The full runtime — Postgres + Redis + BullMQ + worker + API + web. One `pnpm dev` brings everything up in <5 min.
+- The full runtime — Postgres + Redis + Ollama + BullMQ + worker + API + web. One `pnpm dev` brings everything up in <5 min.
 - Workflow DSL + DAG editor (React Flow canvas).
 - **Recovery Center** — the headline feature. Full DLQ, failure-signature clustering, sandbox validation, version rollback. We do not gate the recovery loop.
 - Multi-tenant scoping at the engine level (a single self-host instance can host one org by design — multi-org isolation across teams is a Team Cloud feature, not a runtime feature).
@@ -277,7 +277,7 @@ El epicentro filosófico. El AC lo nombra explícitamente. La engineering realit
 
 #### Qué corre en self-host (full-runtime, licencia TBD)
 
-- El runtime completo — Postgres + Redis + BullMQ + worker + API + web. Un `pnpm dev` levanta todo en <5 min.
+- El runtime completo — Postgres + Redis + Ollama + BullMQ + worker + API + web. Un `pnpm dev` levanta todo en <5 min.
 - DSL de flujos + editor DAG (canvas React Flow).
 - **Centro de Recuperación** — el feature headline. DLQ completo, clustering por signature de falla, validación en sandbox, rollback de versión. No gateamos el loop de recuperación.
 - Scoping multi-tenant a nivel de engine (una instancia self-host puede hospedar un solo org por diseño — el aislamiento multi-org cross-team es feature de Team Cloud, no del runtime).

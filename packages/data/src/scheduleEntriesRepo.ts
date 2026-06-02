@@ -12,10 +12,10 @@
  * Used by:
  * - `packages/engine/src/schedule-scheduler.ts` — sync / unregister / replay
  *   path (calls every function here).
- * - `apps/api/src/index.ts:POST /workflows/save` — indirectly via the
- *   scheduler module on every successful save.
- * - `apps/api/src/index.ts:DELETE /workflows/:id` — indirectly via the
- *   scheduler module on workflow deletion.
+ * - `apps/api/src/routes/workflows-routes.ts:POST /workflows/save` —
+ *   indirectly via the scheduler module on every successful save.
+ * - `apps/api/src/routes/workflows-routes.ts:DELETE /workflows/:id` —
+ *   indirectly via the scheduler module on workflow deletion.
  *
  * Invariants:
  * - Multi-tenant scope: every function takes `orgId` and filters via
@@ -156,4 +156,4 @@ export async function recordFire(orgId: string, id: string, runId: string): Prom
     .where(and(eq(scheduleEntries.orgId, orgId), eq(scheduleEntries.id, id)));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

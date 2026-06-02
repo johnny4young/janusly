@@ -11,7 +11,8 @@
  * - `packages/engine/src/persistence.ts` and `core/runtime.ts` — wire-side
  *   comparisons, `inArray` clauses on cancellation paths, terminal-status
  *   guards.
- * - `apps/api/src/index.ts` — `/run/cancel`'s "already-terminal" guard.
+ * - `apps/api/src/routes/runs-routes.ts` — `/run/cancel`'s
+ *   "already-terminal" guard.
  * - `apps/web/src/App.tsx`, `apps/web/src/components/RightPanel.tsx` —
  *   active-run polling shutdown and the Cancel button's disabled state.
  *

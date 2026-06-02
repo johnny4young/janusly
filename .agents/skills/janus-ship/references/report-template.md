@@ -20,6 +20,7 @@ Print the report in chat at the end of PHASE 2, in this exact section order. See
     - Compose: brought up / not started / brought down at the end
     - Collateral fixes applied: <one per line, or "None">
     - ROADMAP §3b items captured: <new Pending rows added, or "None">
+    - ROADMAP archive move: <ENG-NNN moved to §3c, left Partial in §3b, or "None">
 
 ## Section 3 — Review Guide
 
@@ -44,7 +45,7 @@ Print the report in chat at the end of PHASE 2, in this exact section order. See
 
     Bring-up:
 
-        docker compose up -d redis postgres
+        docker compose up -d redis postgres ollama
         pnpm --filter @janusly/api dev      # http://localhost:3001
         pnpm --filter @janusly/engine dev   # worker
         pnpm --filter @janusly/web dev      # http://localhost:5173
@@ -91,7 +92,7 @@ Print the report in chat at the end of PHASE 2, in this exact section order. See
     - [ ] Audit log row on every new mutation
 
     **5. Docs sync checklist**
-    - [ ] `docs/ROADMAP.md` §3b Status flipped with summary
+    - [ ] `docs/ROADMAP.md` §3b/§3c updated: Shipped row archived, or Partial row left active with Remaining
     - [ ] `docs/PLAN.md` §X.0 Status Update added (when applicable)
     - [ ] AGENTS.md updated (only if an operational invariant changed; symlink intact)
     - [ ] `docs/ROADMAP.md` §3b: new Pending row created (when a new requirement without AC came up)

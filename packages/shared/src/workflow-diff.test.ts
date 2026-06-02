@@ -157,6 +157,20 @@ describe("computeWorkflowDiff — node config changes + tags", () => {
     const secretChange = changed.fields.find((f) => f.path === "config.url");
     expect(secretChange?.tag).toBe("secret_ref");
   });
+
+  it("does not tag unsupported credential-template values as secret_ref by value alone", () => {
+    const before = makeWorkflow({
+      nodes: [{ id: "fetch", type: "http", config: { url: "https://x" } }],
+    });
+    const after = makeWorkflow({
+      nodes: [{ id: "fetch", type: "http", config: { url: "https://x?token={{credential.GH}}" } }],
+    });
+    const result = computeWorkflowDiff(before, after);
+    const changed = result.nodes[0];
+    if (changed.kind !== "changed") throw new Error("expected changed node");
+    const secretChange = changed.fields.find((f) => f.path === "config.url");
+    expect(secretChange?.tag).toBeNull();
+  });
 });
 
 describe("computeWorkflowDiff — edges", () => {

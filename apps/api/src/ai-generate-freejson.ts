@@ -1,5 +1,5 @@
 /**
- * Free-JSON workflow generation for `/ai/generate-workflow` (camino A).
+ * Free-JSON workflow generation for `/ai/generate-workflow`.
  *
  * Instead of the provider's constrained structured-output path
  * (`llm.generateObject`), the model emits the workflow as JSON *text*

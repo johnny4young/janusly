@@ -1,5 +1,5 @@
 /**
- * Authentication policy admin editor — mounted inside `OperationsPanel`.
+ * Authentication policy admin editor — mounted inside `OperationsPage`.
  *
  * Three controls written to `POST /org/config`:
  *
@@ -10,7 +10,7 @@
  * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
  * any panel that reads org config refetches.
  *
- * Used by `OperationsPanel.tsx`.
+ * Used by `OperationsPage.tsx`.
  */
 
 import React, { useEffect, useState } from "react";

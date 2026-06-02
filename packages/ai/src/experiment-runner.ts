@@ -88,9 +88,10 @@ export type ExperimentSummary = {
   costDelta: number;
   /**
    * Non-binding recommendation. `promote_candidate` when the candidate's
-   * mean score is meaningfully higher (≥ `MIN_SCORE_DELTA`) and it is not
-   * dramatically more expensive; `keep_control` when control wins or ties;
-   * `inconclusive` when the dataset was empty.
+   * mean score is meaningfully higher (≥ `MIN_SCORE_DELTA`); `keep_control`
+   * when control wins or ties; `inconclusive` when the dataset was empty.
+   * Cost is NOT a gate — `costDelta` is reported alongside so the operator
+   * can weigh it, since "too expensive" is a per-org judgment call.
    */
   recommendation: "promote_candidate" | "keep_control" | "inconclusive";
   /** Plain-language reason for the recommendation (operator-facing). */

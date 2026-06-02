@@ -40,7 +40,7 @@ For a "human approves before notifying" upgrade, wire an `approval` node between
 
 Three failure modes worth surfacing:
 
-- **MCP connection unreachable** — the stdio process exits, the HTTP endpoint 503s, the SSE stream disconnects. The `mcp_tool` node returns `{ ok: false, error }`; the workflow run lands `failed` on that node. DLQ surfaces it; Recovery Queue offers `add_retry` (transient) or `swap_connection` (alias points at a different connection).
+- **MCP connection unreachable** — the stdio process exits, the HTTP endpoint 503s, the SSE stream disconnects. The `mcp_tool` node returns `{ ok: false, error }`; the workflow run lands `failed` on that node. DLQ surfaces it; Recovery Queue can offer generic resilience fixes such as `add_retry` or `other`; changing the alias/descriptor remains an operator action in the MCP admin panel.
 - **Tool descriptor disabled** — the admin disabled `pages.read` after the workflow was saved. The mcp_tool node returns `{ ok: false, error: "tool disabled" }`. Recovery suggests enabling the descriptor or routing to a different tool.
 - **Rate limit hit** — the per-tool bucket fired. The mcp_tool node returns `{ ok: false, error: "Rate limit exceeded" }`. Recovery suggests raising `rate_limit_per_min` on the descriptor or routing to a different tool.
 

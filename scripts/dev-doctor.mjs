@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 /**
- * Dev port doctor — frees the host-side dev ports (api :3001, web :5173)
+ * Dev port doctor — frees the host-side dev ports (api :3001, web :5173/:5174)
  * when a previous `pnpm dev` left orphan processes behind, which surfaces
  * to the user as:
  *
  *     Error: listen EADDRINUSE: address already in use :::3001
  *
  * Use:
- *   pnpm dev:doctor              # kill orphans on :3001 and :5173
- *   pnpm dev:doctor --compose    # also `docker compose down` so postgres + redis go too
+ *   pnpm dev:doctor              # kill orphans on :3001, :5173, and :5174
+ *   pnpm dev:doctor --compose    # also `docker compose down` so postgres + redis + ollama go too
  *
  * Behaviour:
- *  - Scans :3001 and :5173 via `lsof -ti tcp:<port>`. macOS / Linux compatible.
+ *  - Scans :3001, :5173, and :5174 via `lsof -ti tcp:<port>`. macOS / Linux compatible.
  *  - For each PID found: SIGTERM → wait 2s → SIGKILL if still alive.
- *  - Never touches postgres / redis by PID (they live inside Compose and
+ *  - Never touches postgres / redis / ollama by PID (they live inside Compose and
  *    are torn down with the `--compose` flag).
  *  - Idempotent — running it when ports are free is a no-op that prints
  *    "all dev ports already free".
@@ -27,12 +27,15 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 /**
- * Ports the host-side dev stack listens on. Postgres :5432 and Redis :6379
- * live inside Compose; this script never touches them by PID.
+ * Ports the host-side dev stack listens on. Vite normally uses :5173 but can
+ * fall back to :5174 when a stale web process is already bound; both are in
+ * API_ALLOWED_ORIGINS, so the doctor cleans both. Postgres :5432, Redis :6379,
+ * and Ollama :11434 live inside Compose and are torn down only with --compose.
  */
 const HOST_PORTS = [
   { port: 3001, label: "api (apps/api)" },
   { port: 5173, label: "web (apps/web)" },
+  { port: 5174, label: "web fallback (apps/web)" },
 ];
 
 const KILL_GRACE_MS = 2_000;

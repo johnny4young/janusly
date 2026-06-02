@@ -41,7 +41,7 @@ This is what a complete review report looks like for the Drizzle migrations work
 
 ## Doc sync checklist (verifying the implementer's work)
 
-- [x] `docs/ROADMAP.md` §3b ENG-008 flipped from Partial to Shipped with 2-line summary
+- [x] `docs/ROADMAP.md` ENG-008 moved from §3b to §3c as Shipped with 2-line summary
 - [ ] `docs/PLAN.md` §10.2 Status Update — implementer judged it not needed; I agree (claims still hold).
 - [x] AGENTS.md (CLAUDE.md symlink intact, no roadmap leaked)
 - [x] README.md without leaked planning (the `pnpm migrate` line in §Quick start was added correctly; no planning leaked)
@@ -57,7 +57,7 @@ This is what a complete review report looks like for the Drizzle migrations work
     - api: replace runSchemaSync with a migrations-table presence check
     - scripts: run-e2e calls pnpm migrate between Compose up and API boot
     - test: round-trip migrations.test.ts covers empty, idempotent, and partial-state cases
-    - doc sync: ROADMAP §3b ENG-008 flipped to Shipped with summary
+    - doc sync: ROADMAP ENG-008 moved from §3b to §3c as Shipped
     - reviewer fix: packages/db/migrations/0002_audit_logs.sql:14 — restored audit_logs_org_created_idx that was dropped during extraction
     - reviewer fix: packages/db/src/migrations.test.ts:8 — replaced silent skipIf with hard error + added pg-mem unit test
     - roadmap: ENG-015 Scope cell cross-references the new pnpm migrate script

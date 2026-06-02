@@ -15,9 +15,12 @@
  *
  * Used by:
  * - `packages/ai/src/runExplainer.ts` — `/ai/explain-run`.
- * - `apps/api/src/index.ts`           — `/ai/generate-workflow`,
+ * - `apps/api/src/ai-runtime.ts`      — tenant runtime creation for API
+ *                                        routes.
+ * - `apps/api/src/routes/ai-routes.ts` — `/ai/generate-workflow`,
  *                                        `/ai/explain-workflow`,
- *                                        `/ai/explain-run`.
+ *                                        `/ai/explain-run`, patch, review,
+ *                                        and improvement surfaces.
  * - `packages/engine/src/agent-planner.ts` — `agent` planner `"openai"`.
  * - `packages/engine/src/node-registry.ts` — the `ai` step type.
  *

@@ -264,6 +264,9 @@ export const runsRoutes: Route[] = [
       const page = paginateRunEvents(rows, limit);
       return sendJson(res, { run: run[0], nodes, ...page });
     } },
+  // Poll-oriented read: `/status` always returns the latest event page.
+  // Historical pages use `/run?eventsCursor=...` so polling cannot get
+  // stuck walking older history while the run is still changing.
   { method: "GET", match: (url) => url.startsWith("/status"),
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");

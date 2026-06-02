@@ -1,5 +1,5 @@
 /**
- * SCIM directory admin panel — mounted inside `OperationsPanel`.
+ * SCIM directory admin panel — mounted inside `OperationsPage`.
  *
  * Admins attach one WorkOS Directory id per org with a default role
  * (viewer / editor / admin) and a directory type label. SCIM-
@@ -10,7 +10,7 @@
  * attach / revoke so other panels that depend on membership counts
  * refetch.
  *
- * Used by `OperationsPanel.tsx`.
+ * Used by `OperationsPage.tsx`.
  */
 
 import React, { useEffect, useState } from "react";

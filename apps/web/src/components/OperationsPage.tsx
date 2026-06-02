@@ -14,8 +14,7 @@
  * off. A defensive `isSection()` guard collapses unknown values back to
  * `overview` — same posture as `BuilderSidebar`'s stored-state loader.
  *
- * Wired into `RightPanel.tsx` for the `'operations'` tab. The legacy
- * `OperationsPanel.tsx` remains unreferenced while the new shell owns
+ * Wired into `RightPanel.tsx` for the `'operations'` tab — this shell owns
  * the mounted operations experience.
  */
 
@@ -430,9 +429,8 @@ function IntegrationsSection() {
 }
 
 /**
- * Status chip surfacing Redis-backed rate-limiter degradation. Same shape
- * as the legacy `OperationsPanel`'s chip — kept in this file so the new
- * page is self-contained while the legacy panel remains unmounted.
+ * Status chip surfacing Redis-backed rate-limiter degradation. Kept in this
+ * file so the Operations page stays self-contained.
  */
 function RateLimiterStatusChip({ health }: { health: RateLimiterHealth }) {
   const { t } = useT()

@@ -15,8 +15,8 @@
  *
  * Tag classifier (drives the UI's severity treatment):
  *   - `secret_ref` — field path's last segment matches the sensitive-key
- *     regex, OR the value uses a `{{secret.X}}` / `{{credential.X}}` /
- *     `{{env.X}}` template.
+ *     regex, OR the value uses a supported `{{secret.X}}` / `{{env.X}}`
+ *     template.
  *   - `retry` / `timeout` / `bounds` — config knobs governing an
  *     external call's resilience.
  *   - `approval` — a node of type `approval` was added or removed.
@@ -322,7 +322,7 @@ function isWalkable(value: unknown): boolean {
 
 /* ----------------------------- Tag classifier ----------------------------- */
 
-const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|credential|env)\.[^}]+\}\}/;
+const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|env)\.[^}]+\}\}/;
 
 /** Return the tag for a field change, or null when no rule matches. */
 export function classifyTag(path: string, before: unknown, after: unknown): ChangeTag | null {

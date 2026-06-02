@@ -6,7 +6,7 @@
  * Janusly Studio at http://localhost:5173.
  *
  * Lifecycle:
- *   1. `docker compose up -d redis postgres`
+ *   1. `docker compose up -d redis postgres ollama`
  *   2. wait for Postgres readiness via `pg_isready`
  *   3. `pnpm migrate` — applies Drizzle migrations idempotently
  *   4. spawn api / worker / web binaries directly (`tsx watch ...` and
@@ -29,6 +29,10 @@
  * - Runs `pnpm migrate` between Compose-up and api/worker boot — preserves
  *   the invariant that api/worker call `assertMigrationsApplied()`
  *   and refuse to boot otherwise.
+ * - Sets a host-reachable `OLLAMA_BASE_URL` for api/worker children when the
+ *   caller did not provide one. The embedding code's library default is
+ *   `http://ollama:11434` for containerized deployments, but `pnpm dev` runs
+ *   Node on the host and reaches the Compose service through port 11434.
  */
 
 import { spawn } from "node:child_process";
@@ -38,6 +42,7 @@ import { delimiter as pathDelimiter } from "node:path";
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const children = new Set();
 let shuttingDown = false;
+const hostOllamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -190,11 +195,11 @@ try {
   // changes its dev command, update the line here too.
   startService("api", "tsx", ["watch", "src/index.ts"], {
     cwd: `${rootDir}/apps/api`,
-    env: { PATH: workspaceBinPath("apps/api") },
+    env: { PATH: workspaceBinPath("apps/api"), OLLAMA_BASE_URL: hostOllamaBaseUrl },
   });
   startService("worker", "tsx", ["watch", "src/worker.ts"], {
     cwd: `${rootDir}/packages/engine`,
-    env: { PATH: workspaceBinPath("packages/engine") },
+    env: { PATH: workspaceBinPath("packages/engine"), OLLAMA_BASE_URL: hostOllamaBaseUrl },
   });
   startService("web", "vite", [], {
     cwd: `${rootDir}/apps/web`,

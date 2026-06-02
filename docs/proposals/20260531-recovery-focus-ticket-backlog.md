@@ -1,7 +1,7 @@
 # Recovery Focus Ticket Backlog - May 31, 2026
 
 > Status: candidate planning backlog, not the active roadmap.
-> Canonical ticket status remains in `docs/ROADMAP.md`.
+> Canonical active/archive ticket status remains in `docs/ROADMAP.md`.
 > Default decision for every item is `Undecided` until the owner promotes it.
 
 This backlog turns the May 31 product audit into implementation-shaped tickets
@@ -31,6 +31,7 @@ For each ticket, set exactly one owner decision:
 - `Defer` - keep for later, with a reason.
 - `Reject` - remove from candidate scope.
 - `Needs discussion` - keep open until the product decision is clearer.
+- `Resolved` - already handled in the active docs/roadmap and should not be promoted again.
 
 Do not implement directly from this file. Copy selected tickets into
 `docs/ROADMAP.md` or the chosen issue tracker with final IDs, sequencing, and
@@ -45,8 +46,8 @@ The smallest high-leverage batch is:
 3. RF-003 - Instrument the recovery funnel.
 4. RF-006 - Simplify default navigation around Recovery Center.
 5. RF-010 - Refresh README as the state-of-truth.
-6. RF-011 - Decide and document AI generation/provider posture.
-7. RF-012 - Split roadmap into active roadmap plus archive.
+6. RF-013 - Product decision record: Recovery Center as home.
+7. RF-014 - Integration acceptance rule.
 
 That batch validates the wedge and reduces scope confusion before adding more
 platform surface.
@@ -65,8 +66,8 @@ platform surface.
 | RF-008 | Recovery Center command entrypoint | P1 | M | Medium | Undecided |
 | RF-009 | Narrow solution packs to recovery demos | P1 | S | Low | Undecided |
 | RF-010 | README state-of-truth refresh | P0 | S | Low | Undecided |
-| RF-011 | AI generation/provider posture | P0 | S | Medium | Undecided |
-| RF-012 | Active roadmap plus archive split | P0 | M | Low | Undecided |
+| RF-011 | AI generation/provider posture | P0 | S | Medium | Resolved |
+| RF-012 | Active roadmap plus archive split | P0 | M | Low | Resolved |
 | RF-013 | Product decision record: Recovery Center as home | P1 | S | Low | Undecided |
 | RF-014 | Integration acceptance rule | P0 | S | Low | Undecided |
 | RF-015 | Hide non-core surfaces for new orgs | P1 | M | Medium | Undecided |
@@ -181,7 +182,7 @@ funnel without relying on manual notes.
 
 **Effort/Risk:** M effort, low risk if derived from existing runtime signals.
 
-**Decision:** Undecided.
+**Decision:** Resolved — current posture is Anthropic-only completions, `free_json` as the default `/ai/generate-workflow` mode, deterministic fallback on every AI surface, and bounded graph self-repair after strict validation failures. OpenAI enablement remains separate roadmap work (ENG-194), not an implicit supported target.
 
 ## RF-004 - Recovery Evidence Report V1
 
@@ -214,7 +215,7 @@ for an operator, founder, or compliance reviewer.
 
 **Effort/Risk:** M effort, medium risk because evidence spans several tables.
 
-**Decision:** Undecided.
+**Decision:** Resolved — `docs/ROADMAP.md` now keeps active work in §3b and archived shipped history in §3c. The `janus-ship` and `janus-review` skill docs now treat the archive move as part of doc-sync.
 
 ## RF-005 - Workflow Recovery Score
 
@@ -415,9 +416,9 @@ the maintainer.
 
 ## RF-011 - AI Generation And Provider Posture
 
-**Problem:** The repo contains provider abstraction and current free-JSON
-generation work, while docs still describe OpenAI as registered but not
-verified for runtime generation. The product needs one clear operating posture.
+**Problem:** At backlog creation time, the repo contained provider abstraction
+and free-JSON generation work while docs did not yet state one clear operating
+posture for supported providers and generation modes.
 
 **Outcome:** Janusly has an explicit, tested stance for AI generation modes and
 providers.
@@ -446,12 +447,12 @@ generation mode.
 **Effort/Risk:** S effort for decision/docs, medium risk if it changes default
 runtime behavior.
 
-**Decision:** Undecided.
+**Decision:** Resolved — current posture is Anthropic-only completions, `free_json` as the default `/ai/generate-workflow` mode, deterministic fallback on every AI surface, and bounded graph self-repair after strict validation failures. OpenAI enablement remains separate roadmap work (ENG-194), not an implicit supported target.
 
 ## RF-012 - Active Roadmap Plus Archive Split
 
-**Problem:** `docs/ROADMAP.md` has become a large shipped-history ledger. That
-makes it hard to see what is actually next.
+**Problem:** `docs/ROADMAP.md` had become a large shipped-history ledger, which
+made it hard to see what was actually next.
 
 **Outcome:** Janusly has a short active roadmap and a separate archive for
 completed historical tickets.
@@ -478,7 +479,7 @@ searching a 500KB file.
 
 **Effort/Risk:** M effort, low risk if done mechanically with link checks.
 
-**Decision:** Undecided.
+**Decision:** Resolved — `docs/ROADMAP.md` now keeps active work in §3b and archived shipped history in §3c. The `janus-ship` and `janus-review` skill docs now treat the archive move as part of doc-sync.
 
 ## RF-013 - Product Decision Record: Recovery Center As Home
 

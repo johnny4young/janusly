@@ -2,155 +2,122 @@
 
 ## Goal
 
-Move the workflow engine from a BullMQ/Postgres-coupled implementation toward a portable runtime with explicit ports and adapters.
+Keep workflow orchestration portable and testable by separating pure runtime
+semantics from infrastructure adapters. BullMQ and Postgres are the production
+adapters, but `WorkflowRuntime` owns the lifecycle rules.
 
-The target architecture is:
-
-```txt
-packages/engine
-  src/
-    core/                 # pure orchestration rules and runtime contracts
-      execution-context.ts
-      runtime.ts
-      types.ts
-    adapters/             # infrastructure implementations
-      bullmq/
-      postgres/
-    nodes/                # node executors and registries
-```
-
-## Current coupling
-
-The worker currently coordinates node state transitions, event emission, execution, scheduling, and queueing in one place. That is productive for the MVP, but it makes the engine harder to reuse outside BullMQ and harder to test without Redis/Postgres.
-
-## Design principles
-
-1. The core runtime owns workflow execution semantics.
-2. Infrastructure is injected through small interfaces.
-3. Node execution is pluggable through a typed executor registry.
-4. The runtime should be testable in memory without Redis or Postgres.
-5. BullMQ workers should become an adapter, not the engine itself.
-
-## Proposed ports
-
-```ts
-type NodeTerminalStatus = "succeeded" | "failed" | "skipped" | "cancelled";
-type NodeStatus = "pending" | "queued" | "running" | "waiting" | NodeTerminalStatus;
-type RunStatus = "created" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "timed_out";
-```
-
-```ts
-interface ExecutionStore {
-  getRunContext(runId: string): Promise<RunContext>;
-  getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
-  markNodeQueued(runId: string, nodeId: string): Promise<void>;
-  markNodeRunning(runId: string, nodeId: string): Promise<void>;
-  markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
-  markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;
-  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
-  markNodeSkipped(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
-  appendEvent(event: WorkflowEvent): Promise<void>;
-  updateRunStatusFromNodes(runId: string): Promise<void>;
-}
-```
-
-```ts
-interface QueueAdapter {
-  enqueueNode(input: EnqueueNodeInput): Promise<void>;
-}
-```
-
-```ts
-interface NodeExecutorRegistry {
-  execute(input: ExecuteNodeInput): Promise<NodeExecutionResult>;
-}
-```
-
-## Proposed runtime orchestration
-
-The runtime should expose two main operations:
-
-```ts
-interface WorkflowRuntime {
-  executeQueuedNode(input: ExecuteQueuedNodeInput): Promise<void>;
-  enqueueReadyNodes(input: EnqueueReadyNodesInput): Promise<number>;
-}
-```
-
-`executeQueuedNode` owns the node lifecycle:
+## Current shape
 
 ```txt
-queued -> running -> succeeded -> schedule downstream
+packages/engine/src/
+  core/
+    runtime.ts          # WorkflowRuntime orchestration
+    types.ts            # adapter/runtime contracts
+    events.ts           # event-type catalogue + builder
+    retry-policy.ts     # pure retry classifier/delay logic
+    timeout.ts          # per-node timeout primitive
+  adapters/
+    postgres-execution-store.ts
+    bullmq-queue-adapter.ts
+    dead-letter-queue.ts
+    replay-lab.ts
+    sandbox-run.ts
+    sample-failure.ts
+  worker.ts             # BullMQ process wiring
+  start-run.ts          # transactional run bootstrap
+  resume-run.ts         # waiting-node resume path
+```
+
+`worker.ts`, `resume-run.ts`, `subworkflow.ts`, replay-lab helpers, and
+sandbox-run helpers all construct or call `WorkflowRuntime` rather than
+duplicating graph scheduling rules.
+
+## Adapter contracts
+
+`ExecutionStore` is the persistence boundary. The production implementation is
+`PostgresExecutionStore`, which wraps the existing run/node/event persistence
+helpers.
+
+`QueueAdapter` is the queue boundary. The production implementation is
+`BullMQQueueAdapter`, which composes the DLQ adapter. Failed-beyond-retry jobs
+must keep flowing through this adapter so dead-letter insertion stays part of
+the queue contract.
+
+`NodeExecutorRegistry` is the node-execution boundary. The registry delegates
+to concrete node executors in `node-registry.ts`; runtime core does not import
+executor-specific config schemas.
+
+## Runtime lifecycle
+
+`WorkflowRuntime.executeQueuedNode(input)` owns one queued node:
+
+```txt
+queued -> running -> succeeded -> enqueueReadyNodes
 queued -> running -> waiting
-queued -> running -> failed
+queued -> running -> failed -> retry or DLQ
+queued -> skipped when run is already cancelled/failed
 ```
 
-`enqueueReadyNodes` owns graph readiness:
+Important guards:
+
+- Pre-execution run-status check prevents jobs from executing after a run is
+  already `cancelled` or `failed`.
+- Atomic `queued -> running` claim prevents a stale queued job from executing
+  after another worker or cancellation path advanced the row.
+- Post-success cancellation check prevents downstream enqueue after an operator
+  cancels while a node body is running.
+- Retry policy is pure and explicit: no policy means no retry.
+
+`WorkflowRuntime.enqueueReadyNodes(input)` owns graph readiness:
 
 ```txt
-pending + all dependencies terminal + edge condition satisfied -> queued
-pending + all dependencies terminal + no edge condition satisfied -> skipped
+pending + dependencies terminal + edge condition satisfied -> queued
+pending + dependencies terminal + no satisfied edge -> skipped
 ```
 
-## Execution semantics
+`parallel_fork` / `join` fan-in behavior is handled here, so callers do not
+need custom scheduling branches for parallel subgraphs.
 
-### Dependency readiness
+## Status contract
 
-A node is ready when all inbound dependency nodes are terminal. In the first implementation, `succeeded` and `skipped` count as satisfiable terminal statuses. `failed` blocks by default unless a future `continueOnError` policy is added.
+Run and node statuses are exported from `packages/shared/src/status.ts` and
+re-exported by `core/types.ts` so API, engine, and web read the same values.
+Changing a status is a cross-layer migration: database rows, engine runtime,
+API docs, and web comparisons must change together.
 
-### Edge conditions
-
-Multiple inbound edges are treated as OR for execution eligibility. If at least one unconditional edge or true conditional edge exists after dependencies are terminal, the node is queued.
-
-### Start nodes
-
-Nodes with no incoming edges are start nodes. They should be queued when a run is created.
-
-### Waiting nodes
-
-A node may return `{ status: "waiting" }`. Waiting nodes do not schedule downstream nodes until an explicit resume action transitions them back into execution.
-
-### Failed nodes
-
-A failed node should emit `node.failed`, update the run status, and leave downstream nodes pending unless recovery semantics are explicitly configured.
-
-## Migration plan
-
-### Phase 1: Introduce contracts
-
-Add `core/types.ts` and `core/runtime.ts` with interfaces only. Keep existing worker behavior unchanged.
-
-### Phase 2: Wrap existing infrastructure
-
-Create adapters that delegate to existing persistence and queue modules:
+Current run statuses:
 
 ```txt
-adapters/postgres/execution-store.ts -> wraps persistence.ts
-adapters/bullmq/queue-adapter.ts      -> wraps queue.ts
+created, running, waiting, succeeded, failed, cancelled, timed_out
 ```
 
-### Phase 3: Move scheduling into runtime
+Current node statuses:
 
-Extract current `enqueueNextNodes` behavior into `WorkflowRuntime.enqueueReadyNodes` and let `scheduler.ts` become a compatibility facade.
+```txt
+pending, queued, running, waiting, succeeded, failed, skipped, cancelled
+```
 
-### Phase 4: Move worker orchestration into runtime
+## Run start and resume boundaries
 
-Make `worker.ts` call `runtime.executeQueuedNode(...)` instead of manually orchestrating status transitions.
+`startRun` keeps the run row, all initial node rows, and the `run.started`
+event in one transaction. After that transaction commits, it queues start
+nodes. Do not split the transactional bootstrap back into per-node writes.
 
-### Phase 5: Add in-memory test adapter
+`resumeRun` is the only path that completes waiting `approval`, `webhook`, and
+`human_form` nodes. `human_form` resumes require an engine-signed token and
+schema validation; `webhook` resumes capture the inbound payload as node output;
+`approval` preserves the historical empty-output behavior.
 
-Add an in-memory `ExecutionStore` and `QueueAdapter` to test graph semantics without Redis/Postgres.
+## Remaining portability work
 
-## Non-goals for this branch
+The core runtime boundary exists today. Remaining improvements are narrower:
 
-- Rewriting all node config schemas as discriminated unions.
-- Replacing BullMQ.
-- Replacing Drizzle/Postgres.
-- Changing the public API contract.
-- Implementing a plugin marketplace.
+- add a reusable in-memory adapter package for integration tests instead of
+  per-test mocks;
+- keep moving executor-specific validation into typed node config parsers;
+- preserve compatibility exports while callers finish moving to the runtime
+  boundary;
+- avoid adding new infrastructure calls inside `core/*`.
 
-## Risk controls
-
-- Keep compatibility exports during migration.
-- Add tests around scheduler behavior before changing it deeply.
-- Prefer small commits that preserve `pnpm test` and `pnpm build`.
+Non-goals remain unchanged: do not replace BullMQ, Drizzle/Postgres, or the
+public API contract as part of runtime-boundary maintenance.

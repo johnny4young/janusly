@@ -321,4 +321,4 @@ export async function deleteEvalDataset(orgId: string, datasetId: string): Promi
   });
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate - see AGENTS.md "AuthContext is Janusly-resolved".

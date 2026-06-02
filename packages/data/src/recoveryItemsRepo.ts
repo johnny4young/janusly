@@ -596,4 +596,4 @@ export async function appendCommentToRecoveryItem(
 // Convenience re-exports for callers building Drizzle filters.
 export { eq, and, or, isNull };
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

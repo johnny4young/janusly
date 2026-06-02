@@ -5,7 +5,7 @@
 > [`20260520-product-improvement-plan.md`](20260520-product-improvement-plan.md)
 > and the operationalization of
 > [`20260520-world-class-product-plan.md`](20260520-world-class-product-plan.md).
-> Canonical ticket status remains in `docs/ROADMAP.md` section 3b.
+> Canonical active ticket status lives in `docs/ROADMAP.md` §3b; shipped history lives in §3c.
 
 ## Purpose
 
@@ -1373,7 +1373,7 @@ has consistent framing. Format is tighter than §12 — most tickets get a
 | --- | --- |
 | ENG-093 | In-flight private beta; operational, not code. |
 | ENG-114 | Closed by [`docs/memory-policy.md`](../memory-policy.md). Pure docs ticket, no architecture. |
-| ENG-134 | Gated on the self-host-vs-cloud product decision (§3c). Reframe only valuable once direction is set. |
+| ENG-134 | Gated on the self-host-vs-cloud product decision (§3d). Reframe only valuable once direction is set. |
 | ENG-142 | Deferred indefinitely (§11.1). |
 | ENG-144 | Cut (§11.1). |
 
@@ -1642,7 +1642,7 @@ Returns the resolved prompt
 
 **Sounds like:** building a second client library platform.
 
-**Actually is:** same shape as ENG-112 but in Python — typed wrappers over HTTP with `pydantic` for envelopes. Published on PyPI as `janusly`.
+**Actually is:** same shape as ENG-112 but in Python — typed wrappers over HTTP with `httpx` and a stdlib-only webhook verifier. It lives under `packages/sdk-python` with PyPI package name `janusly`; publish is a separate release step.
 
 **Composes:** the route registry from ENG-112's generator; same source of truth, different language target.
 
@@ -2031,7 +2031,7 @@ unreachable. **Estimate: 2-3 weeks.**
 
 **Composes:** ENG-129 solution packs, change review (ENG-145) for the verification dance.
 
-**Hard:** license decision (§3c gate) determines whether community packs ship under MIT, Apache 2.0, or a Janusly Source License.
+**Hard:** license decision (§3d gate) determines whether community packs ship under MIT, Apache 2.0, or a Janusly Source License.
 
 **Estimate:** 3-4 weeks (mostly process + content, not code).
 

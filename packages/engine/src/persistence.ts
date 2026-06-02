@@ -68,21 +68,6 @@ export async function getRunOrgId(runId: string): Promise<string | null> {
   return rows[0]?.orgId ?? null;
 }
 
-/**
- * Resolve the optional `replayMode` tag on a run. Sister to `getRunOrgId`,
- * loaded once per node execution by `executeNode` so `NodeContext.dryRun`
- * can be set when this is `"validation"`. Returns `null` for production
- * runs and for missing rows; callers treat both as "not a sandbox run."
- */
-export async function getRunReplayMode(runId: string): Promise<string | null> {
-  const rows = await db
-    .select({ replayMode: runs.replayMode })
-    .from(runs)
-    .where(eq(runs.id, runId))
-    .limit(1);
-  return rows[0]?.replayMode ?? null;
-}
-
 /** Stable per-run metadata loaded once at runtime entry: org scope, the
  *  active workflow-version pointer, the workflow id (resolved through the
  *  versions table), and the user who started the run. */
@@ -91,6 +76,11 @@ export type RunMetadata = {
   workflowVersionId: string;
   workflowId: string | null;
   createdBy: string | null;
+  /** `runs.replayMode` — `"validation"` for sandbox/dry-run replays, `null`
+   *  for production runs. Optional so existing `ExecutionStore` mocks that
+   *  omit it stay valid. `executeNode` reads it to set `NodeContext.dryRun`
+   *  without a second per-node `runs` lookup. */
+  replayMode?: string | null;
 };
 
 /**
@@ -120,6 +110,7 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
       workflowVersionId: runs.workflowVersionId,
       workflowId: workflowVersions.workflowId,
       createdBy: runs.createdBy,
+      replayMode: runs.replayMode,
     })
     .from(runs)
     .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
@@ -132,6 +123,7 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
     workflowVersionId: row.workflowVersionId,
     workflowId: row.workflowId ?? null,
     createdBy: row.createdBy ?? null,
+    replayMode: row.replayMode ?? null,
   };
 }
 

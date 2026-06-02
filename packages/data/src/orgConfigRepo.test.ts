@@ -57,6 +57,12 @@ describe("ORG_CONFIG_DEFINITIONS memory.* family", () => {
   it("has NO env fallback on the tenant consent flag (mirrors mcp.writeConsent)", () => {
     expect(findDef("memory.enabled").envKeys).toBeUndefined();
   });
+
+  it("documents embedding provider/model env fallbacks", () => {
+    expect(findDef("memory.embeddingProvider").envKeys).toEqual(["JANUSLY_EMBEDDING_PROVIDER"]);
+    expect(findDef("memory.embeddingModel").envKeys).toEqual(["JANUSLY_EMBEDDING_MODEL"]);
+    expect(findDef("memory.embeddingBaseUrl").envKeys).toEqual(["OLLAMA_BASE_URL"]);
+  });
 });
 
 describe("normalizeOrgConfigValue — memory.enabled", () => {

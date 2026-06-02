@@ -127,7 +127,15 @@ export const membersRoutes: Route[] = [
       if (!accepted) {
         return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
       }
-      await db.update(orgMembers).set({ role: accepted }).where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)));
+      const updated = await db.update(orgMembers)
+        .set({ role: accepted })
+        .where(and(eq(orgMembers.orgId, auth.orgId), eq(orgMembers.userId, userId)))
+        .returning({ userId: orgMembers.userId });
+      // No matching row → the target is not a member of this org. Return 404
+      // instead of auditing a phantom role change that never touched a row.
+      if (updated.length === 0) {
+        return sendJson(res, { error: "member not found" }, 404);
+      }
       await auditAction(auth, "member.role.updated", { targetType: "member", targetId: userId, metadata: { role: accepted } });
       return sendJson(res, { ok: true });
     } },

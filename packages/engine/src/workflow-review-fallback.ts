@@ -15,11 +15,11 @@
  *      occasionally hallucinates ids), then re-rolls up the status. Same
  *      pattern as `sanitizeAiWorkflow` for the generation route.
  *
- * Used by `apps/api/src/index.ts:/ai/review-workflow`. The route's Zod
- * schema (`ReviewFindingsSchema`) lives in the API module since it's
- * tightly coupled to the structured-output prompt; the engine ships only
- * these helpers + the corresponding types so the AI/web layers can import
- * a shared shape.
+ * Used by `apps/api/src/routes/ai-routes.ts:/ai/review-workflow`. The
+ * route's Zod schema (`ReviewFindingsSchema`) lives in the API module since
+ * it's tightly coupled to the structured-output prompt; the engine ships
+ * only these helpers + the corresponding types so the AI/web layers can
+ * import a shared shape.
  */
 
 import type { Workflow, WorkflowEdge } from "@janusly/shared";

@@ -8,7 +8,7 @@
  * Pattern matches `workflow-health.ts` — pure module, easy to unit-test
  * with hand-rolled samples. No I/O. The DB layer
  * (`packages/data/src/failureClusterRepo.ts`) supplies the samples; the
- * API route (`apps/api/src/index.ts:GET /dlq/clusters`) wires them
+ * API route (`apps/api/src/routes/dlq-routes.ts:GET /dlq/clusters`) wires them
  * together.
  *
  * Deduplication: when a failed run lands in DLQ, both surfaces emit a
@@ -17,7 +17,7 @@
  * pair, so cluster counts reflect distinct failure events rather than
  * double-counting.
  *
- * Used by `apps/api/src/index.ts:GET /dlq/clusters`.
+ * Used by `apps/api/src/routes/dlq-routes.ts:GET /dlq/clusters`.
  */
 
 import {

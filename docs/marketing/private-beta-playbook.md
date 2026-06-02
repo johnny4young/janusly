@@ -278,8 +278,8 @@ Walk the partner through the README Quick-start, condensed:
 
 1. `git clone` Janusly + `pnpm install`.
 2. Set environment: `ANTHROPIC_API_KEY` (the partner pastes their own or uses the BYO key). Dev-mode auth needs no separate setup when Supabase is unset and `NODE_ENV !== "production"`; `x-org-id: default` and `x-user-id: dev-user` headers ride automatically from the web.
-3. `pnpm dev` brings Postgres + Redis up via Compose, runs migrations, then starts api + worker + web at http://localhost:5173.
-4. In a second terminal, `pnpm seed:demos` writes the three canonical demo credentials (idempotent — no-op if they already exist; `--force` resets per ENG-069).
+3. `pnpm dev` brings Postgres + Redis + Ollama up via Compose, runs migrations, then starts api + worker + web at http://localhost:5173.
+4. In a second terminal, `pnpm seed:demos` writes the three canonical demo credentials (idempotent — no-op if they already exist; `pnpm seed:demos -- --force` resets per ENG-069).
 5. Open http://localhost:5173.
 
 **Friction watchpoints (founder narrates aloud while the partner runs the commands):**
@@ -1047,8 +1047,8 @@ Camina al partner por el Quick-start del README, condensado:
 
 1. `git clone` Janusly + `pnpm install`.
 2. Setea environment: `ANTHROPIC_API_KEY` (el partner pega la suya o usa modo BYO key). Auth en dev-mode no necesita setup adicional cuando Supabase está sin setear y `NODE_ENV !== "production"`; los headers `x-org-id: default` y `x-user-id: dev-user` ridean automáticamente desde la web.
-3. `pnpm dev` levanta Postgres + Redis vía Compose, corre migrations, después arranca api + worker + web en http://localhost:5173.
-4. En una segunda terminal, `pnpm seed:demos` escribe las tres credenciales canónicas de demo (idempotente — no-op si ya existen; `--force` resetea per ENG-069).
+3. `pnpm dev` levanta Postgres + Redis + Ollama vía Compose, corre migrations, después arranca api + worker + web en http://localhost:5173.
+4. En una segunda terminal, `pnpm seed:demos` escribe las tres credenciales canónicas de demo (idempotente — no-op si ya existen; `pnpm seed:demos -- --force` reinicia según ENG-069).
 5. Abre http://localhost:5173.
 
 **Friction watchpoints (el fundador narra en voz alta mientras el partner corre los comandos):**

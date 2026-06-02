@@ -11,9 +11,9 @@
  * (before / after a recovery patch) so before/after deltas reuse the
  * same query plan.
  *
- * Used by `apps/api/src/index.ts:GET /workflows/health` (no version
- * filter) and `GET /workflows/health/delta` (called twice per request,
- * once per side). The engine layer
+ * Used by `apps/api/src/routes/workflows-routes.ts:GET /workflows/health`
+ * (no version filter) and `GET /workflows/health/delta` (called twice per
+ * request, once per side). The engine layer
  * computes the score from these signals + the static readiness check;
  * this module only collects.
  *
@@ -269,4 +269,4 @@ export async function computeP95Latency(
   return typeof row.p95_ms === "string" ? Number(row.p95_ms) : row.p95_ms;
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

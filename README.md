@@ -63,7 +63,7 @@ See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis, or [`
   - **Apply across the cluster.** `GET /dlq/clusters` groups DLQ entries by failure signature; `POST /dlq/cluster-apply` replays every entry that shares the cluster signature in one bulk action with per-row signature recheck.
   - **Rollback.** `POST /workflows/rollback` saves any prior version's DAG as the new latest in a single transaction with a `workflow.rolled_back` audit row.
 - **Decide**: `router` / `router_llm` nodes pick a route via a decision engine (cost / latency / quality + RL on past pulls).
-- **Learn**: every node outcome updates `routing_stats`; reinforcement learning shifts future scoring. Rollback fires automatically when a confidence delta drops below 30%.
+- **Learn**: executed nodes write org-scoped `routing_stats`; router candidates read those per-node counters, so repeated successes / failures bias future route scoring. When an evaluated workflow change has a baseline version and confidence falls below 30%, the improvement engine rolls back to that base version.
 - **Explain**: natural-language Q&A about any past run (`POST /ai/explain-run`), counterfactual decision replay (`GET /causal`), readiness review with structured findings (`POST /ai/review-workflow`), per-workflow health rollup (`GET /workflows/health`), org-wide recovery metrics dashboard (`GET /recovery/metrics`).
 - **Operate**: visual builder with React Flow, Failure Clusters card on the Operations dashboard, per-row Suggest fix + Recover-this-pattern affordances, multi-tenant scoping enforced on every query.
 
@@ -81,11 +81,14 @@ packages/
   domain     -> decision engine, RL, causal reasoning, improvement engine
   data       -> drizzle repos: routing stats, improvements, rollback
   ai         -> provider-neutral LLM surfaces + deterministic fallback
-  db         -> drizzle schema + idempotent bootstrap
+  db         -> drizzle schema + checked-in migrations
   shared     -> Zod 4 contracts for the workflow DSL
+  mcp-server -> stdio MCP server that proxies Janusly API tools
+  solution-packs -> code-resident installable workflow starter catalog
   sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24+ source package, zero runtime deps,
                 resource-style API + async iterators + opt-in retries +
                 webhook signature verifier — see `packages/sdk-node/README.md`)
+  sdk-python -> typed `janusly` Python client + stdlib webhook verifier
 ```
 
 The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter @janusly/engine dev`.
@@ -113,7 +116,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 - Node.js **24+** (`engines.node` enforced at root)
 - PNPM **10** (`corepack enable`)
-- Docker (for Postgres 18 + Redis 8 services)
+- Docker (for Postgres 18 + Redis 8 + Ollama services in local dev)
 - (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
 
 ---
@@ -127,7 +130,7 @@ Three steps to a working local stack with the dev-mode UI (no auth setup needed)
 corepack enable
 pnpm install
 
-# 2. Start Postgres, Redis, API, worker, and web
+# 2. Start Postgres, Redis, Ollama, API, worker, and web
 pnpm dev
 
 # 3. Open the Studio
@@ -136,11 +139,13 @@ pnpm dev
 
 Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). (If port 5173 is already in use, Vite falls back to 5174; both are in `API_ALLOWED_ORIGINS` by default.)
 
+The first `pnpm dev` boot may take several minutes while Ollama pulls the `bge-m3` embedding model into the `ollama_models` volume. That model is only used after memory is enabled with both `JANUSLY_MEMORY_ENABLED=true` and the tenant `memory.enabled` config flag.
+
 When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator shuts down API, worker, web, and Compose.
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server that exposes six tools over stdio: five read-only tools (`workflows.list`, `workflows.get`, `recipes.list`, `tools.list`, `runs.get`) plus `workflows.validate`. MCP write tools, including `workflows.save`, stay unavailable until the consent/audit policy lands. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an MCP server over stdio. It exposes fifteen non-persisting tools (`workflows.list`, `workflows.get`, `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`, `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`, `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`, `workflows.validate`, `workflows.readiness`) plus the gated `workflows.save` write tool when both MCP write-consent flags are enabled. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {
@@ -160,15 +165,24 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 
 See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the architecture, auth flow, and how to add new tools.
 
-### Test commands
+### Root commands
 
 ```bash
-pnpm test       # ~535 Vitest tests across shared / engine / ai / domain / web / api / mcp-server
-pnpm test:browser  # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
-pnpm build      # type-check + Vite production build (Rolldown, manualChunks)
-pnpm test:e2e   # Playwright; boots Compose, runs UI flow, tears Compose down
-pnpm evals      # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
-pnpm evals:local  # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
+pnpm dev             # full local stack: Compose redis/postgres/ollama + migrate + api/worker/web
+pnpm dev:doctor      # free orphaned api/web dev ports (:3001, :5173, :5174); add --compose to tear Compose down too
+pnpm stop            # docker compose stop (keeps volumes)
+pnpm clean           # docker compose down -v (removes local volumes)
+pnpm migrate         # apply Drizzle migrations against DATABASE_URL
+pnpm test            # Vitest across the workspace packages
+pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
+pnpm build           # type-check + Vite production build (Rolldown, manualChunks)
+pnpm test:e2e        # Playwright; boots Compose, runs UI flow, tears Compose down
+pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
+pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
+pnpm seed:demos      # idempotently seed the canonical demo credentials
+pnpm seed:recovery-matrix  # reset + seed DLQ fixtures for Recovery dialog smoke
+pnpm seed:full       # fuller local demo seed
+pnpm backfill:usage-workflowid  # one-off legacy usage_events workflow attribution backfill
 ```
 
 ### End-to-end smoke via curl
@@ -199,7 +213,7 @@ The AI surfaces are listed in detail in [`docs/ai.md`](docs/ai.md). Quick summar
 
 | Feature | Endpoint / surface | Without provider key | With key |
 | --- | --- | --- | --- |
-| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | Default `free_json` mode asks the LLM for JSON text, parses it through `AiGenerationWorkflowSchema`, then re-validates it through the engine workflow gates. Legacy `constrained` mode keeps `generateObject({ schema })` available by config |
+| Generate a workflow from a prompt | `POST /ai/generate-workflow` | Returns a seeded template | Default `free_json` mode asks the LLM for JSON text, parses it through `AiGenerationWorkflowSchema`, promotes supported noop placeholders, then validates through the engine workflow gates. Strict graph failures get up to 2 targeted self-repair attempts before fallback. Legacy `constrained` mode keeps `generateObject({ schema })` available by config |
 | Explain a workflow | `POST /ai/explain-workflow` | Generic placeholder | Bullet walkthrough |
 | Review a workflow for production-readiness | `POST /ai/review-workflow` | Deterministic readiness gate (`checkWorkflowReadiness`) | LLM semantic pass on top of the deterministic gate |
 | Run-level Q&A chat | `POST /ai/explain-run` + UI Runs tab | Deterministic summary (failures / retries / decisions / rollbacks) | Free-form answers |
@@ -318,13 +332,18 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 | `packages/domain`        | Vitest 4 for decision engine, causal reasoning, improvement engine, RL.            |
 | `packages/ai`            | Vitest 4 for the provider-neutral `LlmClient`, run explainer, multi-suggestion patch helper (mocked LLM). |
 | `apps/api`               | Vitest 4 for the patch envelopes (multi-suggestion array), the recovery-fixture matrix, rollback transaction, cluster recovery glue, route registry, rate limiter, run pagination. |
-| `packages/db`, `packages/data` | `tsc --noEmit` as a type guard.                                              |
+| `packages/db`, `packages/data` | Vitest 4 for migrations/env/schema helpers and data repos; `tsc --noEmit` as a type guard. |
+| `packages/mcp-server`      | Vitest 4 for MCP stdio protocol, tool descriptors, auth headers, and dispatch. |
+| `packages/solution-packs`  | Vitest 4 for pack schema validity, fixture integrity, and public catalog shape. |
+| `packages/sdk-node`        | Vitest 4 for typed client headers, errors, polling/streaming, reports, recovery, and webhooks. |
+| `packages/sdk-python`      | Pytest for auth, errors, runs, reports, recovery, webhook signatures, and packaging. |
 
 ```bash
-pnpm test               # full unit test suite (~535 tests across shared/engine/ai/domain/web/api/mcp-server)
+pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
+pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, :5174) after a crashed local run
 pnpm --filter @janusly/web test:watch   # Vitest watch
 ```
 
@@ -359,10 +378,10 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **OTEL** | OpenTelemetry | The tracing / metrics stack. Tracer + Meter carry `service.name="janusly"`; Prometheus exporter is wired in. |
 | **p95** | 95th percentile | Latency notation: 95% of runs / nodes finish at or below this duration. Surfaced on the workflow health rollup, the recovery metrics dashboard, and as an SLO threshold (`p95DurationMs`). |
 | **PNPM** | Performant Node Package Manager | The package manager used at the monorepo root (pinned to `pnpm@10` via `packageManager`). |
-| **RL** | Reinforcement Learning | The decision-engine layer that updates `routing_stats` after every node outcome and shifts future router scoring. |
+| **RL** | Reinforcement Learning | The decision-engine layer that reads per-node `routing_stats` and shifts future router scoring after enough observed successes / failures. |
 | **RPA** | Robotic Process Automation | Click-record desktop automation (UiPath / Automation Anywhere shape). Janusly is *not* this — it operates AI workflows, not desktop scripts. |
 | **SCIM** | System for Cross-domain Identity Management | The IdP-side standard for pushing user / group lifecycle into a SaaS. Janusly consumes SCIM through WorkOS Directory Sync via `POST /webhooks/workos/directory`, normalizing events into `org_members` upserts / deactivations. |
-| **SDK** | Software Development Kit | The first-party clients: `packages/sdk-node` (`@janusly/sdk`) and `packages/sdk-python` (`janusly` on PyPI). |
+| **SDK** | Software Development Kit | The first-party clients: `packages/sdk-node` (`@janusly/sdk`) and `packages/sdk-python` (`janusly`, local install until the PyPI release ticket ships). |
 | **SLO** | Service Level Objective | The per-workflow reliability contract (success rate %, p95 duration, MTTR seconds, etc.) persisted on `workflow_versions.slo_json`. Breaches surface on `GET /workflows/health` and in the Inspector's SLO panel; they do *not* change the numeric health score, they are an orthogonal alert signal. |
 | **SSO** | Single Sign-On | The "log in once with my company IdP" flow. Janusly's SSO is WorkOS-backed: `GET /auth/sso/start` → IdP → `GET /auth/sso/callback` issues the `x-janusly-session` HMAC token. Per-org `enforced_sso: true` rejects non-SSO modes outside dev. |
 | **SSRF** | Server-Side Request Forgery | The attack class where a workflow author tricks the engine into hitting an internal endpoint (e.g. `169.254.169.254` AWS metadata). Defence is the `fetchHttpTarget` / `validateHttpTarget` chokepoint plus DNS-pinning the validated IP onto the actual TCP connect via an `undici.Agent`. |

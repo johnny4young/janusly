@@ -20,13 +20,13 @@ Apply [`fix-policy.md`](fix-policy.md) for collateral fixes encountered along th
 
 Run doc-sync BEFORE the final stage. The doc edits land in the same diff as the code.
 
-### docs/ROADMAP.md §3b
+### docs/ROADMAP.md §3b/§3c
 
 Required for every ticket close. Flip the row's `Status`:
 
-- `Partial` → `Shipped` when the work closes the ticket entirely.
-- `Pending` → `Shipped` when the entire scope landed.
-- `Pending` → `Partial` when only a slice landed; update the Scope cell with a `Remaining:` line listing what is left.
+- `Partial` → `Shipped` when the work closes the ticket entirely; append a `**Summary:**` and move the row to §3c.
+- `Pending` → `Shipped` when the entire scope landed; append a `**Summary:**` and move the row to §3c.
+- `Pending` → `Partial` when only a slice landed; keep the row in §3b and update the Scope cell with a `**Remaining:**` line listing what is left.
 
 Append a 2-3 line `**Summary:**` to the end of the Scope cell describing what shipped. Use the existing ENG-NNN row patterns as the template.
 

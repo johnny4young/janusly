@@ -5,9 +5,9 @@
  * passes the limited grammar in `expression.ts`, and tool nodes' inputs
  * pass the tool's Zod schema.
  *
- * Used by `apps/api/src/index.ts` `POST /validate` (the AI Studio surfaces
- * issues to the user) and by `sanitizeAiWorkflow` after `generateObject`
- * returns.
+ * Used by `apps/api/src/routes/workflows-routes.ts` `POST /validate` (the
+ * AI Studio surfaces issues to the user) and by `sanitizeAiWorkflow` after
+ * AI generation parses a draft.
  *
  * Invariants:
  * - The result is a flat list of issues with stable `code` strings — the

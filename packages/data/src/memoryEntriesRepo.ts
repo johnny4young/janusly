@@ -10,10 +10,14 @@
  * the defense-in-depth posture the canonical memory policy demands.
  *
  * Used by:
- * - Future routes (`apps/api/src/routes/memory-routes.ts` — not in this
- *   ticket) for direct admin export / delete operations.
- * - Future engine consumers (`packages/engine/src/memory-recall.ts` —
- *   not in this ticket) for recovery-suggestion enrichment.
+ * - `apps/api/src/routes/recovery-routes.ts` — commits accepted/rejected
+ *   recovery feedback and applied patch rationales when memory is enabled.
+ * - `apps/api/src/ai-recovery-memory.ts` — recalls similar prior recovery
+ *   outcomes for `/ai/patch-workflow` prompt enrichment.
+ * - `packages/engine/src/memory-retention-scheduler.ts` and
+ *   `memory-purge-scheduler.ts` — retention and consent-revocation purges.
+ * - Future routes (`apps/api/src/routes/memory-routes.ts` — not in tree yet)
+ *   for direct admin export / per-entry delete operations.
  *
  * Invariants:
  * - Multi-tenant scope: every query carries
@@ -864,4 +868,4 @@ function fireUsageRecorder(input: FireUsageInput): void {
 
 export type { EmbeddingResult };
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

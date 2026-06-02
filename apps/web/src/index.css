@@ -6715,7 +6715,7 @@ button.we-ops-metric-card--button {
 
 /* ==========================================================================
    Operations page — sticky vertical sub-tab rail + active-only content
-   column. Replaces the legacy `OperationsPanel` vertical stack. Only the
+   column. Replaces the former full vertical-stack operations layout. Only the
    active sub-tab's cards mount, so per-refresh API traffic on this page
    drops from ~9 calls (every card self-fetched) to ~2-3 (header metrics +
    active tab).
@@ -7080,8 +7080,8 @@ button.we-ops-metric-card--button {
   box-shadow: 0 1px 2px color-mix(in srgb, var(--we-ink) 4%, transparent);
 }
 
-/* §15 heroic header — title + mono failure signature: the loop's
-   "I fixed it, here's the proof" anchor. */
+/* Applied-state header — title + mono failure signature: the loop's
+   proof anchor after a recovery patch lands. */
 .we-recovery-delta-card__head {
   display: flex;
   align-items: center;
@@ -9636,7 +9636,7 @@ button.we-ops-metric-card--button {
 }
 
 /* Credential health card — surfaces broken / stale credentials and
- * MCP connections inside OperationsPanel. The card is observability-
+ * MCP connections inside OperationsPage. The card is observability-
  * only: no admin actions live here; rediscover stays in the existing
  * McpConnectionsPanel. Severity tinted left border mirrors the
  * existing .we-ops-metric-card pattern. */

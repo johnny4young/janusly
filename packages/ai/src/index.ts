@@ -3,8 +3,12 @@
  * provider-neutral LLM abstraction.
  *
  * Used by:
- * - `apps/api/src/index.ts` — `/ai/*` routes import `explainRun` +
- *   `getLlmClient`.
+ * - `apps/api/src/index.ts` — boots `setUsageRecorder(recordUsage)` so
+ *   LLM usage lands in `usage_events`.
+ * - `apps/api/src/routes/ai-routes.ts` — imports the route-level helpers
+ *   (`explainRun`, patch/improvement helpers, noop promotion).
+ * - `apps/api/src/auto-healing-scanner.ts` — imports `getLlmClient` +
+ *   `suggestWorkflowPatch` for scheduled recovery suggestions.
  * - `packages/engine/src/agent-planner.ts` + `node-registry.ts` — both
  *   import `getLlmClient` so the engine never names a vendor.
  *
