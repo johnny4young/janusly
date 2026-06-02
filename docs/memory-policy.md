@@ -131,6 +131,7 @@ and AI budgets — it is a deliberate symmetry, not a coincidence.
 | `run_summary` | Deterministic explain-run narrative on terminal success | 90 days | 365 days | Raw node outputs NOT included. |
 | `runbook_fragment` | Operator-tagged Markdown (ENG-139) | 365 days | 36,500 days (100-year effective cap) | Markdown subset shared with `pdf.generate`. |
 | `patch_rationale` | Post-acceptance recovery patch rationale | 365 days | 730 days | Rationale only — patched workflow JSON is NOT stored here (it lives in `workflow_versions`). |
+| `generated_workflow` | Successful `/ai/generate-workflow` (fire-and-forget) | 365 days | 730 days | Few-shot prior: `content` is the generation prompt (the embedding key); `metadata.workflowShape` holds node-types + edge-count + output-keys ONLY — never config values. Recalled as labeled DATA exemplars to steer future generations. |
 
 Retention defaults live in `org_configs.memory.retentionDaysByKind` as a
 JSON-encoded string validated against the closed-enum kinds and the per-kind
@@ -310,7 +311,7 @@ if they look like credentials.
 | Key | Type | Default | Bounds | Notes |
 | --- | --- | --- | --- | --- |
 | `memory.enabled` | boolean | `false` | n/a | Tenant master switch. Required true (alongside `JANUSLY_MEMORY_ENABLED=true`) for any memory write. |
-| `memory.allowedKinds` | csv | `""` (empty = none) | closed-enum: `recovery_rationale,run_summary,runbook_fragment,patch_rationale` | Per-kind opt-in. Empty CSV with `memory.enabled=true` is a valid "memory feature on but no kinds active yet" state. |
+| `memory.allowedKinds` | csv | `""` (empty = none) | closed-enum: `recovery_rationale,run_summary,runbook_fragment,patch_rationale,generated_workflow` | Per-kind opt-in. Empty CSV with `memory.enabled=true` is a valid "memory feature on but no kinds active yet" state. |
 | `memory.retentionDaysByKind` | json string | `""` (use per-kind defaults; `{}` also accepted) | each value in the per-kind maximum range from §5 | Validates closed-key set; rejects unknown kinds. |
 | `memory.recallMaxEntries` | number | `8` | `1..32` | Hard cap on entries returned per recall. |
 | `memory.recallMaxBytes` | number | `8192` | `1024..65536` | Hard cap on total bytes returned per recall. |
