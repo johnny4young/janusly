@@ -163,6 +163,7 @@ const MEMORY_KINDS = [
   "run_summary",
   "runbook_fragment",
   "patch_rationale",
+  "generated_workflow",
 ] as const;
 
 /** Per-kind maximum retention in days from the memory policy. */
@@ -172,6 +173,7 @@ const MEMORY_RETENTION_MAX_DAYS: Record<(typeof MEMORY_KINDS)[number], number> =
   // Admin-configurable runbook fragments still need a finite, auditable cap.
   runbook_fragment: 36_500,
   patch_rationale: 730,
+  generated_workflow: 730,
 };
 
 function isMemoryKind(value: string): value is (typeof MEMORY_KINDS)[number] {
@@ -579,7 +581,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     key: "memory.allowedKinds",
     category: "memory",
     description:
-      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
+      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale, generated_workflow. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
     allowEmpty: true,

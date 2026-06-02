@@ -34,6 +34,7 @@ import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { generateWorkflowCandidates, selectBestCandidate } from "../ai-generate-bestofn";
+import { composeGenerationExemplars, recordGenerationExemplar, type GenerationExemplarsResult } from "../ai-generation-memory";
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
@@ -121,6 +122,9 @@ export const aiRoutes: Route[] = [
       // passed the strict validity gate (null = single-shot / not applicable).
       let candidateCount = 1;
       let validCandidates: number | null = null;
+      // Few-shot exemplars recalled from memory (empty when memory is off).
+      // Hoisted so BOTH the success and fallback audits can log the count/ids.
+      let exemplars: GenerationExemplarsResult = { block: "", ids: [], count: 0 };
       try {
         // Generation runs in one of two modes per `ai.generationMode`
         // (default `free_json`): free-JSON parses the model's JSON text
@@ -136,7 +140,11 @@ export const aiRoutes: Route[] = [
         // composer is a no-op when nothing is exposed → identical
         // behaviour to today for non-opt-in orgs.
         const exposedMcpTools = await listExposedMcpToolsForAi(auth.orgId);
-        const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools);
+        // Few-shot: recall similar prior workflow shapes (consent-gated; empty
+        // when memory is off) and frame them as DATA in the system prompt so
+        // they steer every generation mode + Best-of-N candidate.
+        exemplars = await composeGenerationExemplars(auth.orgId, promptText);
+        const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools, exemplars.block);
         const generationMode = orgConfig.ai.generationMode;
         let pass1Workflow: Workflow;
         let genModel: string;
@@ -244,6 +252,10 @@ export const aiRoutes: Route[] = [
           genModel = repaired.model;
           genProvider = repaired.provider;
         }
+        // Few-shot WRITE side: persist this prompt → workflow-shape exemplar
+        // for future similar prompts. Fire-and-forget + consent-gated inside
+        // the helper, so it never delays or breaks the response.
+        void recordGenerationExemplar({ orgId: auth.orgId, workflowId: workflow.id, prompt: promptText, workflow });
         await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: workflow.id, metadata: {
           mode: "ai",
           model: genModel,
@@ -256,6 +268,10 @@ export const aiRoutes: Route[] = [
           // the strict validity gate (null = single-shot / not applicable).
           candidateCount,
           validCandidates,
+          // Few-shot exemplars recalled from memory and framed into the prompt
+          // (0 / [] when memory is off). Ids only — never raw exemplar content.
+          exemplarCount: exemplars.count,
+          exemplarIds: exemplars.ids,
           // Directed self-repair attempts spent when the draft failed strict
           // graph validation (0 when the first draft validated cleanly).
           repairAttempts,
@@ -270,7 +286,7 @@ export const aiRoutes: Route[] = [
         return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, candidateCount, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates } });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts, candidateCount, validCandidates, exemplarCount: exemplars.count, exemplarIds: exemplars.ids } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,

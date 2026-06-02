@@ -61,6 +61,7 @@ export const MEMORY_KINDS = [
   "run_summary",
   "runbook_fragment",
   "patch_rationale",
+  "generated_workflow",
 ] as const;
 
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
@@ -71,6 +72,7 @@ const DEFAULT_RETENTION_DAYS: Record<MemoryKind, number> = {
   run_summary: 90,
   runbook_fragment: 365,
   patch_rationale: 365,
+  generated_workflow: 365,
 };
 
 function isMemoryKind(value: string): value is MemoryKind {
