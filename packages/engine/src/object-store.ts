@@ -185,7 +185,7 @@ export function setObjectStoreForTests(provider: ObjectStoreProvider | null): vo
 
 /**
  * Resolve the active object store for the current call. Reads env every
- * call so tenant overrides take effect without restart (see CLAUDE.md
+ * call so tenant overrides take effect without restart (see AGENTS.md
  * "Org config" — `objectstore.*` overrides feed this resolver via
  * `applyOrgConfigToEnv`).
  */

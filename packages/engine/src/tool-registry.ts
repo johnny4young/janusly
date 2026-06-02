@@ -10,8 +10,8 @@
  * Used by:
  * - `packages/engine/src/node-registry.ts` — `tool` node and the agent loop
  *   call `executeTool`.
- * - `apps/api/src/index.ts` `GET /tools` — returns `listTools()` to the AI
- *   Studio for inspector rendering.
+ * - `apps/api/src/routes/tools-routes.ts` `GET /tools` — returns
+ *   `listTools()` to the AI Studio for inspector rendering.
  *
  * Invariants:
  * - Tool registration is global, not per-org. `auth.orgId` scoping happens
@@ -1353,9 +1353,9 @@ function describeShape(schema: z.ZodObject<z.ZodRawShape>): { required: string[]
 /**
  * Public list of registered tools, shaped for the AI Studio inspector.
  *
- * Called from `apps/api/src/index.ts` `GET /tools`. The JSON shape is part of
- * the contract `apps/web` consumes via `ToolSchema` in `apps/web/src/types.ts`
- * — the field names must stay stable.
+ * Called from `apps/api/src/routes/tools-routes.ts` `GET /tools`. The JSON
+ * shape is part of the contract `apps/web` consumes via `ToolSchema` in
+ * `apps/web/src/types.ts` — the field names must stay stable.
  */
 export function listTools(): ToolSchema[] {
   return Object.values(tools).map((tool) => {

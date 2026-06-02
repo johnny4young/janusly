@@ -8,7 +8,8 @@
  * policies, and tenant opt-in flags for guarded features.
  *
  * Used by:
- * - `apps/api/src/index.ts` — `GET /org/config` and `POST /org/config`.
+ * - `apps/api/src/routes/org-routes.ts` — `GET /org/config` and
+ *   `POST /org/config`.
  *
  * Invariants:
  * - Every DB query filters by `orgId`.
@@ -608,6 +609,7 @@ export const ORG_CONFIG_DEFINITIONS = [
       "Provider used to compute embeddings for memory entries. Closed enum: ollama (self-hosted, v1 default) / voyage / openai. Anthropic does not currently offer an embeddings endpoint; AGENTS.md's 'Anthropic-only' rule applies to LLM completions, not embeddings. Empty = use the env default (ollama). Stored on each entry for explicit re-embedding. See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
+    envKeys: ["JANUSLY_EMBEDDING_PROVIDER"],
     allowEmpty: true,
     allowedValues: ["ollama", "voyage", "openai"],
   },
@@ -618,6 +620,7 @@ export const ORG_CONFIG_DEFINITIONS = [
       "Model id used to compute embeddings for memory entries. Empty = use the env default (bge-m3 when provider is ollama). Stored on each entry for explicit re-embedding when the provider/model changes. See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
+    envKeys: ["JANUSLY_EMBEDDING_MODEL"],
     allowEmpty: true,
   },
   {
@@ -1283,4 +1286,4 @@ export async function upsertOrgConfig(input: {
   };
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

@@ -15,9 +15,10 @@
  * That's the closed loop: every recovery teaches the next one.
  *
  * Used by:
- * - `apps/api/src/index.ts:POST /recovery/feedback` — write path
- *   (called from `RecoveryDialog.tsx` on Apply / Cancel / Iterate).
- * - `apps/api/src/index.ts:POST /ai/patch-workflow` — read path,
+ * - `apps/api/src/routes/recovery-routes.ts:POST /recovery/feedback` —
+ *   write path (called from `RecoveryDialog.tsx` on Apply / Cancel /
+ *   Iterate).
+ * - `apps/api/src/routes/ai-routes.ts:POST /ai/patch-workflow` — read path,
  *   via `summarizePastFeedback` → `composeFeedbackHint` →
  *   `extraContext.pastFeedbackSummary` injected into the LLM prompt.
  *
@@ -188,4 +189,4 @@ export async function summarizePastFeedback(
   return Array.from(buckets.values());
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

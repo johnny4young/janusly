@@ -2,6 +2,21 @@
 
 Each example below is a complete, runnable DAG. Save it via `POST /workflows/save`, run it with `POST /start`, and inspect with `GET /run?runId=...`.
 
+`dslVersion` is optional in examples because `WorkflowSchema` defaults it to
+`"1.0"`; persisted workflows store the defaulted value. `POST /start` accepts
+either the flat workflow body shown below or `{ "workflow": <dag>, "input": <payload> }`
+when the workflow declares typed `inputs`. In production mode
+(`JANUSLY_PRODUCTION_MODE=true`), start also runs the readiness gate and rejects
+fail-level issues before `startRun` writes anything.
+
+Pause/resume nodes share one endpoint with different token posture:
+`webhook` and `approval` use the legacy `<runId>:<nodeId>` checkpoint coordinate
+and rely on authenticated `POST /resume`; `human_form` uses an HMAC-signed,
+purpose-bound `resumeToken` because submitted form values become node output.
+`POST /run/cancel` flips the run and still-open nodes to `cancelled`; a worker
+job already in progress may finish its current executor, but the runtime will
+not enqueue downstream work after cancellation.
+
 ---
 
 ## 1. Fetch + transform + uppercase tool
@@ -206,12 +221,12 @@ Run starts, `publish` enters `waiting`. The UI shows an "Approve publish" button
 
 ---
 
-## 7. Workflow using a credential placeholder
+## 7. Workflow using an environment secret placeholder
 
 ```json
 {
   "id": "secret-call",
-  "name": "Call API with org-stored secret",
+  "name": "Call API with env-backed secret",
   "nodes": [
     {
       "id": "call",
@@ -227,7 +242,7 @@ Run starts, `publish` enters `waiting`. The UI shows an "Approve publish" button
 }
 ```
 
-`{{secret.EXAMPLE_API_TOKEN}}` resolves at render time from `process.env.EXAMPLE_API_TOKEN`. Configure the credential in **Secrets** (UI) or via `POST /credentials`.
+`{{secret.EXAMPLE_API_TOKEN}}` resolves at render time from `process.env.EXAMPLE_API_TOKEN`. This is a direct environment-backed placeholder. Operator-managed `credentials` rows are separate: `POST /credentials` stores a credential name/kind plus a `secretRef` env-var name, and integration tools then reference the credential by its operator-facing name.
 
 ---
 

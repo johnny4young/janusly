@@ -17,7 +17,7 @@ Every inline fix lands in the report under "Bugs fixed inline" with file:line + 
 - Orphan deps in `package.json` that the diff does not use.
 - Inline hex in components — replace with `var(--color-we-*)`.
 - Illegal imports in `apps/web` (`@radix-ui/*`, `class-variance-authority`, `clsx`, `tailwind-merge`, anything not in the AGENTS.md whitelist). Rewrite with CSS-first Tailwind 4.
-- AI surface broken: try/catch removed, `aiError` not surfaced, `parseAiWorkflow` looser gone, `{ mode, aiError }` contract changed.
+- AI surface broken: try/catch removed, `aiError` not surfaced, generate-workflow parse/sanitize/repair chain bypassed, `{ mode, aiError }` contract changed.
 - Engine regressions: non-atomic `markNodeQueued` re-introduced, `startRun` split into separate inserts, DLQ adapter bypassed.
 - React 19 + Zustand pitfalls: non-pure read during render (`Date.now()`, `Math.random()`), persist without `partialize`, useEffect deps with new literals each render.
 - Pagination cap 100/200 removed on `/runs` or `/workflows`.
@@ -56,4 +56,4 @@ Bugs go to the inline fix list. Tickets go to ROADMAP. Never confuse the two.
 
 ## When the implementer's doc-sync is missing
 
-When the implementer forgot a required doc-sync edit (most commonly the `docs/ROADMAP.md` §3b Status flip), apply the doc edit inline like any other fix. List it under "Bugs fixed inline" with a note that it was a doc-sync oversight.
+When the implementer forgot a required doc-sync edit (most commonly the `docs/ROADMAP.md` §3b/§3c status/archive move), apply the doc edit inline like any other fix. List it under "Bugs fixed inline" with a note that it was a doc-sync oversight.

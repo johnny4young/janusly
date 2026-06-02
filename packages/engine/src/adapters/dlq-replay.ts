@@ -16,8 +16,9 @@
  * gates the production save+replay on the validation run reaching
  * `succeeded`, so a regression never reaches `workflow_versions`.
  *
- * Used by `apps/api/src/index.ts` (`POST /dlq/replay`, `POST /dlq/validate-fix`)
- * after `requireRole` gates editor on the calling user.
+ * Used by `apps/api/src/routes/dlq-routes.ts` (`POST /dlq/replay`,
+ * `POST /dlq/validate-fix`) after `requireRole` gates editor on the calling
+ * user.
  *
  * Invariants:
  * - Multi-tenant scope is enforced by the route layer; this adapter trusts

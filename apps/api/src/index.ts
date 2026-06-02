@@ -15,8 +15,8 @@
  *   5. Wire SIGTERM/SIGINT to drain HTTP connections, then `server.listen`.
  *
  * Per-request: route registry match → `requireAuth` → route-declared
- * `requireRole` → handler. Handlers see `auth: AuthContext` already
- * validated.
+ * `requireRole` / `requirePermission` → handler. Handlers see
+ * `auth: AuthContext` already validated.
  *
  * Used by `apps/web` (the only browser client today) and any external
  * caller that respects dev headers or the Supabase JWT auth.

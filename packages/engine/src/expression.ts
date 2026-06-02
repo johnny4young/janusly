@@ -6,13 +6,14 @@
  * `null`, and dotted paths starting with `context.` or `inputs.`.
  *
  * Used by `node-registry.ts` (`condition` node executor + edge guard) and
- * by `apps/api/src/index.ts:sanitizeAiWorkflow` (filters LLM-emitted
+ * by `apps/api/src/ai-runtime.ts:sanitizeAiWorkflow` (filters LLM-emitted
  * grammar-invalid expressions post-Zod).
  *
  * Invariants:
  * - Don't expand the grammar without updating
- *   `apps/api/src/index.ts:GENERATE_WORKFLOW_SYSTEM_PROMPT` so the LLM
- *   knows what's emittable. The grammar is published in the system prompt.
+ *   `apps/api/src/ai-prompts.ts:GENERATE_WORKFLOW_SYSTEM_PROMPT` so the
+ *   LLM knows what's emittable. The grammar is published in the system
+ *   prompt.
  * - The evaluator must NEVER do template substitution. Template values
  *   resolve before `evaluateExpression` is called.
  */

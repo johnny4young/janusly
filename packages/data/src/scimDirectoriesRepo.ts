@@ -156,4 +156,4 @@ export async function recordScimDirectorySync(input: { id: string; orgId: string
     .where(and(eq(scimDirectories.id, input.id), eq(scimDirectories.orgId, input.orgId)));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

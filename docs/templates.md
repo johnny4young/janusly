@@ -8,12 +8,12 @@ Each template entry carries:
 
 | Field | Purpose |
 | --- | --- |
-| `id` | Stable identifier. Used as the deterministic eval fallback. Don't rename — bookmarks + eval cases depend on it. |
+| `id` | Stable identifier. Some eval fixtures use it as a deterministic fallback. Don't rename — bookmarks + eval cases depend on it. |
 | `name` | Human-readable label rendered in the panel. |
 | `description` | One-line summary of when to use it. |
 | `category` | Display group (`AI`, `Data`, `Human-in-the-loop`, `Operations`, `Revenue`, …). |
 | `requiredCredentials` | Closed list of `credentials.kind` values an operator needs configured before the run will succeed. Informational only — runtime enforces credential presence per-tool. |
-| `workflow` | Full `Workflow` DAG, parsed through `WorkflowSchema` at boot. |
+| `workflow` | Full `Workflow` DAG. `apps/api/src/templates.test.ts` parses every entry through `WorkflowSchema` + `validateWorkflow`; save/run paths validate cloned workflows again. |
 
 ## Catalog
 
@@ -105,7 +105,7 @@ Webhook → AI summarizes the claim → human approval → signed `webhook.send`
   }
   ```
 - **Expected output:** approval pauses the run; once approved, the billing webhook receives a JSON payload + `X-Janusly-Signature: t=<unix>,v1=<hmac-sha256-hex>` over `<timestamp>.<body>`. The customer email confirms the refund.
-- **Failure path:** if the approval is rejected (use `POST /resume` with a rejection payload — currently the engine treats any resume as approval; see ENG-033 follow-up), the downstream branch fires. The signed-webhook step returns `ok: false` on a non-2xx from the billing system; the email step still runs and confirms what was attempted. Pair with a downstream `condition` if you want strict halt-on-failure.
+- **Failure path:** approval is a one-way gate today — any valid `POST /resume` unblocks downstream work and the decision lives in audit/timeline events, not node output. The signed-webhook step returns `ok: false` on a non-2xx from the billing system; the email step still runs and confirms what was attempted. Pair with a downstream `condition` if you want strict halt-on-failure.
 
 ### `ai-support-draft-review` — AI support draft → human review → send (Revenue)
 
@@ -131,6 +131,15 @@ Webhook → AI drafts a customer reply → `human_form` for a human agent to edi
 - **Inputs:** none — the schedule trigger fires on cron.
 - **Expected output:** every Monday at 9am, a Slack message with a top-5 ranking of at-risk customers and one-line recommended actions per row.
 - **Failure path:** if the HTTP analytics endpoint is unreachable, the AI step receives an empty body and produces a fallback message. If the Slack post fails (rate limit / bad credential), the run lands `failed` for that node; the next Monday's run still fires per the cron.
+
+### `email-reply` — Email auto-reply (Communication)
+
+`noop` inbound placeholder → `condition` sender match → `email.send` reply. This is a scaffold for teams wiring inbox-triggered replies before a first-class Gmail-read integration lands; the operator replaces the placeholder source and sender expression in the Inspector.
+
+- **Required credentials:** none for the checked-in scaffold. Real delivery still needs the configured mailer (Resend / SendGrid via env, or the noop provider for dry demos).
+- **Inputs:** none until the operator swaps the inbound placeholder for a real trigger/source. The default reply expects `context.match_sender.output.sender`.
+- **Expected output:** once the inbound source is wired, `reply` sends a short acknowledgement to the matched sender.
+- **Failure path:** the shipped scaffold can run only after the operator maps the sender field; without that wiring, the `to` template remains unresolved/empty and mail delivery fails or noops depending on the mailer configuration. Recovery is to update the source mapping rather than ask AI to repair an upstream integration that does not exist yet.
 
 ### `failed-workflow-recovery` — Failed workflow recovery → DLQ → patch → replay (Operations)
 
@@ -183,7 +192,7 @@ Webhook → AI drafts a customer reply → `human_form` for a human agent to edi
   }
   ```
 - **Expected output:** a Slack message in the team channel with a 3-5 bullet summary of the Notion page's action items and decisions.
-- **Failure path:** mcp_tool failures (connection unreachable, descriptor disabled, rate limit hit) return `{ ok: false, error }` and the run lands `failed`. The Recovery Queue offers `add_retry` (transient) or `swap_connection` (alias points at a different connection).
+- **Failure path:** mcp_tool failures (connection unreachable, descriptor disabled, rate limit hit) return `{ ok: false, error }` and the run lands `failed`. The Recovery Queue can propose generic resilience fixes such as `add_retry` or `other`; changing the MCP alias/descriptor remains an operator action in the MCP admin panel.
 
 ### `bulk-classify-loop` — Bulk customer classify → digest email (Data)
 
@@ -216,7 +225,7 @@ Webhook → AI drafts a customer reply → `human_form` for a human agent to edi
    }
    ```
 2. If the template references integration tools (`slack.post`, `github.create_issue`, `webhook.send`), list every matching `credentials.kind` in `requiredCredentials` — the test in `apps/api/src/templates.test.ts` enforces this.
-3. Add an entry to `evals/generate-workflow.jsonl` with `fallbackTemplate: "<id>"` so the eval harness has a deterministic shape check.
+3. Add a case to `evals/generate-workflow.jsonl` when AI generation should cover the template. Put the lock under `expect.fallbackTemplate: "<id>"` only when the no-LLM fallback must return this exact template; otherwise use the usual `requiredTypes` / `anyOfTypes` / `requiresMode` assertions.
 4. Add a section to this document describing the inputs, expected output, and failure path.
 5. Run `pnpm --filter @janusly/api test` — the templates test parses the new entry through `WorkflowSchema` + `validateWorkflow`, asserts node id uniqueness, and cross-checks every `tool` node's `config.tool` against the registered catalog from `listTools()`.
 

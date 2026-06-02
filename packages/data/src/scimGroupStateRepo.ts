@@ -89,4 +89,4 @@ export async function deleteScimGroupState(input: { id: string }): Promise<void>
   await db.delete(scimGroupState).where(eq(scimGroupState.id, input.id));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

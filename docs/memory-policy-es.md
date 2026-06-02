@@ -2,13 +2,11 @@
 
 > 🇬🇧 English: [`memory-policy.md`](memory-policy.md) · 🇪🇸 Español: este documento.
 
-> Estado: política canónica. Borrador de cierre de ENG-114. Operacionaliza la
-> compuerta "AI training data / memory opt-in policy" de `docs/ROADMAP.md`
-> §3c. El trabajo de implementación que la acompaña vive en ENG-115
-> (sustrato) y ENG-116 (recuperación asistida por memoria). NO lances memoria
-> persistente entre corridas hasta que esta política sea revisada por
-> producto + legal y las entradas del catálogo `org_configs.memory.*`
-> documentadas aquí estén integradas.
+> Estado: política canónica. ENG-114 cerró la compuerta de política; ENG-115
+> entregó el sustrato `memory_entries` y ENG-116 entregó recuperación asistida
+> por memoria. La memoria sigue apagada por default y la habilitación para
+> clientes requiere consentimiento a nivel proceso y tenant, además de las
+> aprobaciones de rollout rastreadas en §16.
 
 ## 0. Resumen en un párrafo
 
@@ -17,10 +15,10 @@ recuperación aprobados para que las sugerencias de IA mejoren con el tiempo.
 La memoria está **apagada por default**, requiere opt-in explícito a nivel
 organización, queda aislada por tenant, se trata como datos del cliente
 (nunca como datos de entrenamiento para los proveedores del modelo), y
-respeta retención acotada con borrado y exportación dirigidos por el
-operador. La memoria recordada se enmarca al LLM como dato, nunca como
-instrucción. Los fallos de embedding degradan a recall vacío — nunca rompen
-la ejecución del workflow ni la recuperación.
+respeta retención acotada más borrado y exportación dirigidos por el operador
+que siguen como superficies planificadas. La memoria recordada se enmarca al
+LLM como dato, nunca como instrucción. Los fallos de embedding degradan a
+recall vacío — nunca rompen la ejecución del workflow ni la recuperación.
 
 ## 1. Por qué existe esta política
 
@@ -157,21 +155,28 @@ entradas de memoria de manera idéntica a otras tablas con retención.
 
 ### 6.1 Borrado dirigido por el operador
 
-- **Borrado por entrada:** los admins pueden borrar entradas individuales de
-  memoria a través de la UI de operaciones. Escribe el audit
+- **Purga masiva a nivel org (shipped):** poner
+  `org_configs.memory.enabled` en `false` agenda la purga por revocación de
+  consentimiento descrita en §4. El worker llama `purgeMemoryForOrg(orgId)`,
+  que escribe `memory.bulk.purged`.
+- **Purga por retención (shipped):** el scheduler diario de retención de
+  memoria llama `deleteExpiredMemory({})`, que escribe
+  `memory.retention.purged` para orgs con filas expiradas.
+- **Borrado por entrada (superficie admin futura):** los admins deberían poder
+  borrar entradas individuales de memoria desde la UI de operaciones. Esa ruta
+  no está en el árbol hoy; cuando aterrice debe escribir
   `memory.entry.deleted` con el id de la entrada pero no con el contenido.
-- **Purga por kind:** los admins pueden purgar todas las entradas de un kind
-  dado de la org. Escribe el audit `memory.kind.purged`.
-- **Purga masiva a nivel org:** poner `org_configs.memory.enabled` en
-  `false` dispara la purga masiva descrita en §4.
+- **Purga por kind (superficie admin futura):** los admins deberían poder
+  purgar todas las entradas de un kind dado de la org. Esa ruta no está en el
+  árbol hoy; cuando aterrice debe escribir `memory.kind.purged`.
 
 ### 6.2 Exportación
 
-- **Exportación por org:** los admins pueden pedir una exportación de
-  memoria vía `POST /memory/export` (ENG-115). La ruta encola un job de
-  background que produce un archivo JSONL con scope de tenant a través de la
-  abstracción de object-store existente, firmado por URL durante 24 horas.
-  Escribe el audit `memory.exported`.
+- **Exportación por org (superficie admin futura):** los admins deberían poder
+  pedir una exportación de memoria que produzca un archivo JSONL con scope de
+  tenant a través de la abstracción de object-store existente, firmado por URL
+  durante 24 horas. `POST /memory/export` no está en el árbol hoy; cuando
+  aterrice debe escribir `memory.exported`.
 - **La exportación por usuario NO aplica.** Las entradas de memoria están
   con scope de org, no de usuario. Un usuario que pida "su" memoria recibe
   un 422 con la explicación de que la memoria es compartida en el límite de
@@ -324,10 +329,10 @@ invariante existente de aislamiento entre orgs.
 
 ## 12. Catálogo de configuración de la org (`org_configs.memory.*`)
 
-Estas claves se agregan al catálogo seguro de `org_configs` en
-`packages/data/src/orgConfigRepo.ts` por ENG-114. Se validan en write-time,
-se auditan, y son rechazadas por las guardas existentes de
-forbidden-name / forbidden-value si parecen credenciales.
+Estas claves viven en el catálogo seguro de `org_configs` en
+`packages/data/src/orgConfigRepo.ts`. Se validan en write-time, se auditan, y
+son rechazadas por las guardas existentes de forbidden-name / forbidden-value
+si parecen credenciales.
 
 | Clave | Tipo | Default | Rangos | Notas |
 | --- | --- | --- | --- | --- |
@@ -336,16 +341,19 @@ forbidden-name / forbidden-value si parecen credenciales.
 | `memory.retentionDaysByKind` | cadena JSON | `""` (usa defaults por kind; `{}` también aceptado) | cada valor en el rango máximo por kind de §5 | Valida el set cerrado de claves; rechaza kinds desconocidos. |
 | `memory.recallMaxEntries` | number | `8` | `1..32` | Tope duro de entradas devueltas por recall. |
 | `memory.recallMaxBytes` | number | `8192` | `1024..65536` | Tope duro de bytes totales devueltos por recall. |
-| `memory.embeddingProvider` | string | `""` (usa el default del env) | enum cerrado: `anthropic` (otros proveedores no están verificados, ver AGENTS.md AI integration) | Trabajo futuro de re-embedding; no es un override de runtime hoy. |
-| `memory.embeddingModel` | string | `""` (usa el default del env) | non-empty si se setea | Guardado en cada entrada para re-embedding explícito. |
+| `memory.embeddingProvider` | string | `""` (usa el default del env) | enum cerrado: `ollama,voyage,openai` | Proveedor usado para embeddings de memoria. El runtime v1 está cableado a Ollama; Voyage/OpenAI son opciones futuras permitidas por catálogo que requieren revisión de DPA/sub-procesador antes de uso con clientes. |
+| `memory.embeddingModel` | string | `""` (usa el default del env) | non-empty si se setea | Guardado en cada entrada para re-embedding explícito. Default BGE-m3 cuando el proveedor es Ollama. |
+| `memory.embeddingBaseUrl` | string | `""` (usa env / default) | string con forma de URL y no secreto | Base URL opcional por tenant para un endpoint Ollama administrado por el operador. Valores que parecen secretos son rechazados por el forbidden-value guard. |
 
 Ninguna clave en este catálogo guarda material de secreto. Las API keys del
 proveedor siguen en env / vault — nunca en `org_configs`.
 
 ## 13. Acciones de auditoría
 
-Las siguientes acciones de auditoría se introducen por ENG-114 (sólo
-catálogo) y son usadas por ENG-115+:
+La superficie de memoria usa estas acciones de auditoría. Algunas están
+implementadas hoy (`created`, `failed`, `bulk.purged`, `retention.purged`,
+`recall.failed`); las acciones admin-only de borrado/exportación quedan
+reservadas para las rutas futuras nombradas arriba:
 
 - `memory.consent.granted` — la flag del tenant se activó a true.
 - `memory.consent.revoked` — la flag del tenant se activó a false.
@@ -389,7 +397,10 @@ secreto apareciendo en un payload de recall, fallo del job de retención):
 
 ## 15. Lo que esta política NO hace
 
-- No define el almacén de memoria de runtime. Ese es ENG-115.
+- No es la referencia de implementación del almacén de runtime. El código
+  shipped vive en `packages/data/src/memoryEntriesRepo.ts`,
+  `apps/api/src/ai-recovery-memory.ts`, y los schedulers de retención / purga
+  de memoria.
 - No enumera todos los posibles consumidores de memoria. Los consumidores
   nuevos deben citar esta política y respetar §3, §9, y §11.
 - No negocia opt-in de training del lado del proveedor. Ver §7.
@@ -399,7 +410,8 @@ secreto apareciendo en un payload de recall, fallo del job de retención):
 
 ## 16. Bitácora de aprobación
 
-Este documento cierra el alcance de ingeniería de ENG-114 una vez que:
+ENG-114 ya cerró su alcance de ingeniería. Las casillas de abajo distinguen
+trabajo implementado en el repo de aprobaciones humanas de rollout:
 
 - [ ] Revisión de producto (sign-off de PM registrado en los comentarios del
   ticket).
@@ -413,7 +425,6 @@ Este documento cierra el alcance de ingeniería de ENG-114 una vez que:
 - [x] Entradas del catálogo `org_configs.memory.*` integradas (`packages/data/src/orgConfigRepo.ts`).
 - [x] Paridad en español publicada (`docs/memory-policy-es.md`).
 
-ENG-114 puede marcarse `Shipped` cuando la lista de verificación de ingeniería
-esté completa. Activar memoria persistente de runtime para clientes sigue
-bloqueado hasta que las casillas de Producto, Legal e Ingeniería estén
-firmadas.
+La memoria de runtime está shipped detrás de `JANUSLY_MEMORY_ENABLED` y
+`org_configs.memory.enabled`. El rollout amplio a clientes sigue bloqueado
+hasta que las casillas de Producto, Legal e Ingeniería estén firmadas.

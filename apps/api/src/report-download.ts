@@ -75,7 +75,7 @@ export function buildReportFilename(args: {
 }
 
 /** Format a date as `YYYY-MM-DD`, or `undated` when null / unparseable. */
-export function formatDatePart(value: Date | string | null): string {
+function formatDatePart(value: Date | string | null): string {
   if (!value) return "undated";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "undated";

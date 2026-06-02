@@ -400,4 +400,4 @@ function mapRunEvent(row: typeof runEvents.$inferSelect): EvidenceRunEvent {
   };
 }
 
-// Multi-tenant invariant: tenant-scoped reads keep orgId in the predicate; downstream reads are reached only through org-gated ids - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads keep orgId in the predicate; downstream reads are reached only through org-gated ids - see AGENTS.md "AuthContext is Janusly-resolved".

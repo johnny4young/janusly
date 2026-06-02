@@ -2,9 +2,9 @@
  * Repository for the org-level recovery metrics dashboard. Six parallel
  * windowed queries that the engine layer (`composeRecoveryMetrics` in
  * `@janusly/engine`) rolls up into the UI-friendly shape rendered by
- * `OperationsPanel.tsx`.
+ * `OperationsPage.tsx`.
  *
- * Used by `apps/api/src/index.ts:GET /recovery/metrics`.
+ * Used by `apps/api/src/routes/recovery-routes.ts:GET /recovery/metrics`.
  *
  * Invariants:
  * - Multi-tenant scope: every query carries an org-scoped predicate
@@ -362,4 +362,4 @@ export async function queryFailureClustersResolved(
   };
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

@@ -13,8 +13,8 @@
  *
  * Bands are documented inline as exported constants so future tuning
  * lives in one place and tests can pin the edges. Pure function — no
- * I/O, no DB, no network. Used by `apps/api/src/index.ts:GET
- * /recovery/metrics`.
+ * I/O, no DB, no network. Used by
+ * `apps/api/src/routes/recovery-routes.ts:GET /recovery/metrics`.
  *
  * Out of scope by design: "auto-fixes suggested/applied" and "rollbacks
  * triggered" counters — both need new audit-log actions that don't

@@ -1,5 +1,5 @@
 /**
- * Credential health card surfaced in `OperationsPanel`. Polls
+ * Credential health card surfaced in `OperationsPage`. Polls
  * `GET /credentials/health` on the existing `platformVersion`
  * cadence and renders two compact sub-lists (credentials + MCP
  * connections) with severity-tinted rows.

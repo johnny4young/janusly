@@ -3,15 +3,17 @@
  * that drive the runtime's RL-flavoured router selection.
  *
  * Each row tracks `pulls`, `value` (cumulative reward), `meanReward`, and
- * success/failure counts for one routing candidate. The decision engine
- * reads them via `getRoutingStats`; node executors update them through
- * `updateRoutingStats` once a run resolves a routing decision.
+ * success/failure counts for one executable node. Router candidates point at
+ * node ids, so the decision engine reads these rows via `getRoutingStats` and
+ * biases a candidate only after that node has enough observed outcomes.
+ * `WorkflowRuntime` updates the counters after non-waiting node success/failure
+ * using the structured org metadata loaded from the run row.
  *
  * Used by:
  * - `packages/domain/src/decisionEngine.ts` — reads stats to bias candidate
  *   scoring.
- * - `packages/engine/src/core/runtime.ts` — calls `updateRoutingStats` after
- *   a `router` node completes.
+ * - `packages/engine/src/core/runtime.ts` — calls `getRoutingStats` before a
+ *   router decision and `updateRoutingStats` after node completion.
  *
  * Invariants:
  * - All queries scope on `orgId`. Calls without `orgId` return early so
@@ -33,7 +35,7 @@ export async function getRoutingStats(orgId: string) {
 
 /**
  * Apply one reinforcement update for a (org, node) pair. Returns immediately
- * (no-op) when `orgId` is undefined — keeps anonymous code paths from
+ * (no-op) when `orgId` is undefined — keeps defensive / deleted-run paths from
  * silently writing to a global bucket.
  */
 export async function updateRoutingStats({
@@ -86,4 +88,4 @@ export async function updateRoutingStats({
     .where(eq(routingStats.id, current.id));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

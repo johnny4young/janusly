@@ -34,6 +34,7 @@ import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
+import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
 import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
@@ -112,6 +113,9 @@ export const aiRoutes: Route[] = [
           ...(fallbackWorkflow ?? {}),
         }, budgetGate));
       }
+      // Hoisted above the outer try so the fallback catch can report
+      // repair attempts too (0 when generation failed before sanitize).
+      let repairAttempts = 0;
       try {
         // Generation runs in one of two modes per `ai.generationMode`
         // (default `free_json`): free-JSON parses the model's JSON text
@@ -134,7 +138,7 @@ export const aiRoutes: Route[] = [
         let genProvider: string;
         let generationAttempts = 1;
         if (generationMode === "free_json") {
-          // Free-JSON (camino A, default): the model emits the workflow as
+          // Free-JSON mode (default): the model emits the workflow as
           // JSON text validated server-side against the SAME
           // `AiGenerationWorkflowSchema` shapes. Retry-on-parse-fail; throws
           // after the attempt cap into the fallback contract below.
@@ -183,7 +187,33 @@ export const aiRoutes: Route[] = [
           modelHint: modelOverride,
         });
 
-        const workflow = sanitizeAiWorkflow(promotion.workflow);
+        // A draft can parse + shape-validate yet still fail the engine's
+        // strict graph validation (e.g. an edge referencing a missing node).
+        // Rather than discard it straight to fallback, feed the specific
+        // validator issues back to the model for a bounded number of
+        // targeted repair attempts. On exhaustion the repair helper rethrows
+        // so the outer catch degrades to fallback as before.
+        let workflow: Workflow;
+        try {
+          workflow = sanitizeAiWorkflow(promotion.workflow);
+        } catch {
+          // Mark the full attempt budget spent up front so an exhausted
+          // repair (helper rethrows -> outer catch) reports it on the
+          // fallback audit row; a success below reassigns the real count.
+          repairAttempts = MAX_REPAIR_ATTEMPTS;
+          const repaired = await repairGeneratedWorkflow({
+            llm,
+            system: systemPrompt,
+            originalPrompt: promptText,
+            candidate: promotion.workflow,
+            modelHint: modelOverride,
+            context: { orgId: auth.orgId, userId: auth.userId },
+          });
+          workflow = repaired.workflow;
+          repairAttempts = repaired.repairAttempts;
+          genModel = repaired.model;
+          genProvider = repaired.provider;
+        }
         await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: workflow.id, metadata: {
           mode: "ai",
           model: genModel,
@@ -192,6 +222,9 @@ export const aiRoutes: Route[] = [
           // (1 unless retry-on-parse-fail fired). `constrained` always 1.
           generationMode,
           generationAttempts,
+          // Directed self-repair attempts spent when the draft failed strict
+          // graph validation (0 when the first draft validated cleanly).
+          repairAttempts,
           promotionAttempts: promotion.promotionAttempts,
           promotionsSucceeded: promotion.promotionsSucceeded,
           // Per-family breakdown of the same totals — operators read
@@ -203,7 +236,7 @@ export const aiRoutes: Route[] = [
         return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, ...workflow }, budgetGate));
       } catch (err) {
         const message = err instanceof Error ? err.message : "AI request failed";
-        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode } });
+        await auditAction(auth, "ai.workflow.generated", { targetType: "ai", targetId: fallbackWorkflow?.id, metadata: { mode: "fallback", error: message, generationMode: orgConfig.ai.generationMode, repairAttempts } });
         return sendJson(res, withBudgetWarning({
           mode: "fallback",
           aiError: message,

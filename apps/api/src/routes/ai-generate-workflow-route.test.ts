@@ -1,5 +1,5 @@
 /**
- * Route-level dispatch tests for `POST /ai/generate-workflow` (camino A).
+ * Route-level dispatch tests for `POST /ai/generate-workflow`.
  *
  * Asserts the `org_configs.ai.generationMode` branch: free_json calls
  * `llm.generateText` + parses server-side; constrained calls
@@ -142,6 +142,9 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(meta.mode).toBe("ai");
     expect(meta.generationMode).toBe("free_json");
     expect(meta.generationAttempts).toBe(1);
+    // sanitizeAiWorkflow is a passthrough mock here, so the draft validates
+    // on the first try and the self-repair loop never fires.
+    expect(meta.repairAttempts).toBe(0);
   });
 
   it("free_json: retries then falls back when parsing never succeeds", async () => {

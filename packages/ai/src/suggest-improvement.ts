@@ -21,7 +21,7 @@
  * The structured-output schema is owned by the API route, not this
  * helper — same pattern as `suggestWorkflowPatch` and `explainRun`.
  *
- * Used by `apps/api/src/index.ts:POST /ai/suggest-improvement`.
+ * Used by `apps/api/src/routes/ai-routes.ts:POST /ai/suggest-improvement`.
  */
 
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
@@ -164,7 +164,7 @@ Pick the MOST-IMPACTFUL angles:
 Improvement axes to consider (ordered by typical impact):
 - \`add_retry\` — every \`http\` / \`tool\` / \`ai\` / \`agent\` node that calls an external service should have \`retry: { maxAttempts: 2-5 }\` for transient failures (5xx, ECONNRESET, ETIMEDOUT). \`maxAttempts\` must be at least 2 because 1 means no retry.
 - \`raise_timeout\` — \`timeoutMs\` defaults to 30000 ms; raise modestly (60000-120000) when the upstream is known to be slow rather than removing the bound.
-- \`swap_secret_ref\` — any literal-looking token, password, or API key in a node config should become \`{{secret.NAME}}\` / \`{{credential.NAME}}\` / \`{{env.NAME}}\` template references. Examples: an Authorization header literally set to "Bearer abc123" → "Bearer {{secret.AUTH_TOKEN}}".
+- \`swap_secret_ref\` — any literal-looking token, password, or API key in a node config should become a supported \`{{secret.NAME}}\` / \`{{env.NAME}}\` template reference, or a credential-backed integration-tool input such as \`input.credential: "github-bot"\` when the tool supports it. Examples: an Authorization header literally set to "Bearer abc123" → "Bearer {{secret.AUTH_TOKEN}}".
 - \`add_approval\` — for write-side workflows (anything that mutates external state: \`http\` POST/PUT/PATCH/DELETE, \`tool\` calls flagged write-side, \`ai\` calls that drive downstream writes), insert an \`approval\` node upstream as a human-in-the-loop guard.
 - \`add_observability\` — when the workflow lacks declared outputs or has no \`agent\` reflection, suggest a small \`agent\` node that summarises the run for downstream consumers, OR add a richer \`condition\` expression that asserts an upstream output is non-empty.
 - \`simplify\` — when a chain has multiple \`transform\` nodes back-to-back doing trivial mappings, merge them; when an unreachable edge exists, remove it. Don't aggressively re-architect — small wins only.

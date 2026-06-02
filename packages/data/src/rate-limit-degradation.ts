@@ -16,7 +16,7 @@
  * - ``apps/api/src/routes/health-routes.ts`` reads the snapshot for
  *   the public ``GET /health`` block + the admin
  *   ``GET /system/rate-limiter`` route.
- * - ``apps/web/src/components/OperationsPanel.tsx`` polls the
+ * - ``apps/web/src/components/OperationsPage.tsx`` polls the
  *   public snapshot on the existing fetch cadence and surfaces a
  *   chip when degraded.
  *

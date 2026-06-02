@@ -29,7 +29,8 @@
  *
  * Used by:
  * - `apps/api/src/workflows-save.ts` — post-commit `syncWorkflowSchedules`.
- * - `apps/api/src/index.ts:DELETE /workflows/:id` — `unregisterAllForWorkflow`.
+ * - `apps/api/src/routes/workflows-routes.ts:DELETE /workflows/:id` —
+ *   `unregisterAllForWorkflow`.
  * - `packages/engine/src/worker.ts` — `replayAllScheduleEntries` at boot,
  *   `handleScheduleTrigger` for `job.name === "schedule-trigger"`.
  *

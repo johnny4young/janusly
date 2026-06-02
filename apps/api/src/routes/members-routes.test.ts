@@ -57,7 +57,10 @@ beforeEach(() => {
   auditMock.mockResolvedValue(undefined);
   // Default chainable shapes — `db.update(orgMembers).set(...).where(...)`
   // and `db.delete(orgMembers).where(...)` mirror the production calls.
-  updateWhere.mockResolvedValue(undefined);
+  // `db.update(orgMembers).set(...).where(...).returning(...)` — `.where()`
+  // returns a builder whose `.returning()` yields the affected rows: one row
+  // (the demoted member) on success, [] when the userId is not a member.
+  updateWhere.mockReturnValue({ returning: vi.fn().mockResolvedValue([{ userId: "admin-2" }]) });
   updateSet.mockReturnValue({ where: updateWhere });
   dbUpdate.mockReturnValue({ set: updateSet });
   deleteWhere.mockResolvedValue(undefined);
@@ -196,6 +199,29 @@ describe("POST /members/role self-modification guard", () => {
       expect.anything(),
       expect.anything(),
       "member.self_modification_blocked",
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("returns 404 without auditing when the target is not a member", async () => {
+    // No row matched the (orgId, userId) predicate → `.returning()` is empty,
+    // so the handler must 404 instead of auditing a phantom role change.
+    updateWhere.mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/members/role");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/members/role", method: "POST", body: { userId: "ghost-9", role: "viewer" } }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(auditMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "member.role.updated",
       expect.anything(),
       expect.anything(),
       expect.anything(),

@@ -27,7 +27,7 @@
  *
  * The Recovery Center is pure composition — no API additions, no engine change.
  * Each child tile refetches independently on the cross-panel
- * `platformVersion` tick (same pattern OperationsPanel uses today).
+ * `platformVersion` tick (same pattern OperationsPage uses today).
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *

@@ -31,12 +31,25 @@ import { WorkflowInputSchema, WorkflowSchema, type Workflow } from "@janusly/sha
 import { httpError, asNumber, asRecord } from "./http";
 import { workflowTemplates } from "./templates";
 
+/**
+ * Resolve the tenant-safe AI runtime in one place: org_config supplies
+ * provider/model/limit choices, while env/vault-backed values still supply
+ * API keys and global defaults. Returning `llm: null` is intentional and
+ * lets callers use the deterministic fallback path without special-casing
+ * "AI not configured" as an infrastructure failure.
+ */
 export async function orgLlmRuntime(orgId: string) {
   const orgConfig = await getOrgConfigSnapshot(orgId);
   const llmConfig = resolveLlmConfig(applyOrgConfigToEnv(orgConfig));
   return { orgConfig, llm: llmConfig ? createLlmClient(llmConfig) : null, llmConfig };
 }
 
+/**
+ * Read-only status payload for the UI health check. It reports the effective
+ * provider/model without exposing credentials, and it mirrors the same
+ * resolution path AI mutations use so the health pill cannot drift from
+ * runtime behavior.
+ */
 export async function aiStatus(orgId: string) {
   // Env still provides API keys and global defaults; `org_configs` can
   // override safe tenant-level choices such as provider/model and limits.

@@ -9,8 +9,8 @@
  * stay in lockstep.
  *
  * Used by:
- * - `apps/api/src/index.ts` — `WorkflowSchema.parse` on `/start`, `/save`,
- *   `/validate`, AI generation, etc.
+ * - `apps/api/src/routes/*` — `WorkflowSchema.parse` on `/start`, `/save`,
+ *   `/validate`, AI generation, solution-pack import, and replay routes.
  * - `packages/engine/src/workflow-validation.ts` — graph-level validation runs
  *   on top of the schema-level parse.
  * - `packages/engine/src/start-run.ts` / `resume-run.ts` — read parsed nodes.

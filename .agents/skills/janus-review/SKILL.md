@@ -39,7 +39,7 @@ The full classifier is in [`references/fix-policy.md`](references/fix-policy.md)
 
 ## Workflow at a glance
 
-1. **Orient.** Read `git status`, `git diff --cached --stat`, `.git/COMMIT_EDITMSG` if present. Identify the ENG-NNN the diff claims to attack. Validate against `docs/ROADMAP.md` §3b: does the ticket exist, was Status `Pending`/`Partial` before, does the diff scope fit?
+1. **Orient.** Read `git status`, `git diff --cached --stat`, `.git/COMMIT_EDITMSG` if present. Identify the ENG-NNN the diff claims to attack. Validate against `docs/ROADMAP.md`: active work starts in §3b as `Pending`/`Partial`, and fully shipped work should move to §3c. Confirm the ticket exists and the diff scope fits.
 2. **Align against the approved plan.** When a plan from `janus-ship` PHASE 1 is in the chat, compare. Files outside the plan are scope creep (report). Missing files the plan flagged required (test, doc, sync entry) are findings (report).
 3. **Run cheap gates.** `bash .agents/skills/janus-review/scripts/run-gates.sh` (add `--e2e` only when the diff touches end-to-end user-facing surface). The script wraps `pnpm build` + `pnpm test` (+ optional `pnpm test:e2e`) into a single PASS/FAIL summary that paste-fits into the report's Gates section. When `--e2e` runs, guarantee `docker compose down` at the end.
 4. **Run review skills in parallel** on the staged diff:
@@ -54,7 +54,7 @@ The full classifier is in [`references/fix-policy.md`](references/fix-policy.md)
 In priority order:
 
 - **AGENTS.md** — minimal operational invariants. CLAUDE.md is a symlink to it. Never planning content.
-- **docs/ROADMAP.md §3b** — ticket Status, Priority, AC. Verify the implementer's Status flip is consistent with the diff.
+- **docs/ROADMAP.md §3b/§3c** — active ticket Status, Priority, AC, plus the shipped archive. Verify the implementer's status/archive move is consistent with the diff.
 - **docs/PLAN.md** — load only the section that matches the ticket (grep for ENG-NNN). Never load the full file.
 - **README.md** — descriptive only. When the implementer leaked planning into README, fix inline by moving content to ROADMAP.
 - **Conversation chat** — when a `janus-ship` plan is present, the staged diff MUST correspond to it.
@@ -76,7 +76,7 @@ When ROADMAP and PLAN disagree on Status, ROADMAP wins. When AGENTS.md and PLAN 
 The generic review skills do not know about Janusly's conventions. Run through the relevant checks based on what the diff touched:
 
 - **a. Multi-tenant** — every new query carries `eq(<table>.orgId, auth.orgId)`.
-- **b. AI fallback** — try/catch + `{ mode, aiError }` contract intact; `parseAiWorkflow` looser kept.
+- **b. AI fallback** — try/catch + `{ mode, aiError }` contract intact; generate-workflow parse/sanitize/repair chain preserved.
 - **c. Engine atomicity** — `tryClaimNodeForQueue` atomic; `startRun` one transaction; DLQ adapter not bypassed; worker `worker.close()` on SIGTERM/SIGINT.
 - **d. Audit logs** — every mutation writes a row with a stable `action`. AI mutations write audit on success AND fallback.
 - **e. Cross-panel reactivity** — mutations call `bumpPlatformVersion()` so independent panels refetch.
@@ -88,7 +88,7 @@ The generic review skills do not know about Janusly's conventions. Run through t
 - **k. HTTP/SSRF** — `ALLOW_PRIVATE_HTTP_TARGETS=false` not loosened.
 - **l. Tests** — edge cases for helpers, AI success+fallback, audit row asserted.
 - **m. Banned deps** — no tRPC, no Stripe SDK.
-- **n. Doc sync** — ROADMAP §3b Status flip applied; PLAN updated only when claims drifted; AGENTS only when invariant changed; README without leaked planning.
+- **n. Doc sync** — ROADMAP §3b/§3c update applied; Shipped rows archived with summary, Partial rows left active with Remaining; PLAN updated only when claims drifted; AGENTS only when invariant changed; README without leaked planning.
 - **o. API routing (Open/Closed)** — new HTTP routes register in the `routes: Route[]` array exported from `apps/api/src/index.ts`; no inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` declared on the route entry, not in the handler body.
 - **p. No ticket / roadmap refs in source code** — staged source files under `packages/**/src` and `apps/**/src` (incl. tests, migrations) must not contain `ENG-NNN` / `Phase N` / `Layer N` / `§N` references. ROADMAP / PLAN / AGENTS / report / commit-message-summary may keep them.
 - **q. i18n coverage** — user-facing text added or changed under `apps/web/**` is wrapped via `useT()` / `t()` from `apps/web/src/i18n` (no raw literals in JSX, `aria-label`, `placeholder`, `title`, `alt`, or the first arg of `addToast(...)`). Every new key in `en/common.json` has its sibling in `es/common.json` (gated by `apps/web/src/i18n/parity.test.ts`). Server-emitted strings with a stable `code` use the surface-specific helpers (`tValidationIssue` / `tReadinessIssue` / `tAiReviewIssue` / `tRunEvent` / `tFailureCluster`); free-form goes through `t('serverEvents.fallback', { message })`. Components MUST NOT import from `i18next` / `react-i18next` directly — everything routes through the i18n module. Exemptions and full action policy in [`references/janusly-checks.md`](references/janusly-checks.md).

@@ -1,8 +1,10 @@
 /**
  * Agent run memory — pulls a recent slice of `run_events` for embedding in
- * the next agent loop's prompt. The selection filters event types that
- * carry meaningful agent context (succeeded/failed/waiting/resumed/memory
- * append) and caps to the most recent `limit` entries.
+ * the next agent loop's prompt. This is intentionally run-local context,
+ * distinct from the durable `memory_entries` vector substrate used by
+ * recovery recall. The selection filters event types that carry meaningful
+ * agent context (succeeded/failed/waiting/resumed/memory append) and caps
+ * to the most recent `limit` entries.
  *
  * Used by `node-registry.ts:runAgentLoop` (every iteration of `agent` /
  * `multi_agent` nodes) to give the planner access to prior steps.

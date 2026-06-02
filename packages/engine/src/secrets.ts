@@ -6,8 +6,8 @@
  * before the executor's output lands in `run_nodes.state_json`.
  *
  * Used by `template.ts` (the template renderer is the only resolver call
- * site) and by `apps/api/src/index.ts` `POST /credentials` validation
- * (`listSecretRefs`).
+ * site) and by `apps/api/src/routes/credentials-routes.ts`
+ * `POST /credentials` validation (`listSecretRefs`).
  *
  * Invariants:
  * - The persist-side guarantee — never write resolved secret values to the

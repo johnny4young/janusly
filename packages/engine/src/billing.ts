@@ -4,8 +4,8 @@
  * OOMing the API on every dashboard poll. The shared LLM recorder writes the
  * rows this query reads.
  *
- * Used by `apps/api/src/index.ts` `GET /billing/usage`, which the web's
- * "Usage summary" card consumes.
+ * Used by `apps/api/src/routes/billing-routes.ts` `GET /billing/usage`,
+ * which the web's "Usage summary" card consumes.
  *
  * Invariants:
  * - Multi-tenant scope: every query carries `eq(usageEvents.orgId, orgId)`.

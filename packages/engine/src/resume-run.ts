@@ -3,8 +3,8 @@
  * or `human_form` node back into the queue.
  *
  * Used by:
- * - `apps/api/src/index.ts` `POST /resume` — when a human approves or a
- *   webhook payload arrives.
+ * - `apps/api/src/routes/runs-routes.ts` `POST /resume` — when a human
+ *   approves or a webhook payload arrives.
  *
  * Invariants:
  * - Marks the paused node as succeeded and re-enqueues downstream nodes

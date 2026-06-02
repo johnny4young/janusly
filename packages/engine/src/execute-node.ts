@@ -17,7 +17,7 @@
 
 import { nodeRegistry } from "./node-registry";
 import { NODE_CONFIG_SCHEMAS } from "./node-configs";
-import { getRunContext, getRunMetadata, getRunReplayMode } from "./persistence";
+import { getRunContext, getRunMetadata } from "./persistence";
 import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 import type { NodeType } from "@janusly/shared/src/workflow";
@@ -54,10 +54,9 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
   // Sandbox/validation runs (`runs.replayMode === "validation"`) carry a
   // dryRun flag through every node execution so write-side actions
   // (HTTP non-safe methods, tools flagged `writeSide`) can be skipped
-  // without committing external state. Loaded once per node execution,
-  // same pattern as `getRunOrgId`.
-  const replayMode = await getRunReplayMode(runId);
-  const dryRun = replayMode === "validation";
+  // without committing external state. Reuses the single `getRunMetadata`
+  // row above — no second per-node `runs` lookup.
+  const dryRun = meta.replayMode === "validation";
 
   const context = await getRunContext(runId);
 

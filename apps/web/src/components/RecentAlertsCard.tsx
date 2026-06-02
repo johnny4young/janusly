@@ -1,5 +1,5 @@
 /**
- * Recent-alerts feed inside `OperationsPanel`. Polls
+ * Recent-alerts feed inside `OperationsPage`. Polls
  * `GET /alerts/recent` on `platformVersion` cadence and renders the last
  * 50 dispatches with per-row severity tint (cobalt = delivered, amber =
  * delivery_failed).

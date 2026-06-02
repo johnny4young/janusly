@@ -8,7 +8,7 @@
  * `run_nodes` — and returns a flat list of typed samples. The engine
  * layer normalizes and clusters; this module only collects.
  *
- * Used by `apps/api/src/index.ts:GET /dlq/clusters`.
+ * Used by `apps/api/src/routes/dlq-routes.ts:GET /dlq/clusters`.
  *
  * Invariants:
  * - Multi-tenant scope: every query carries an org-scoped persisted row
@@ -245,4 +245,4 @@ function lookupNodeFromDag(dagJson: unknown, nodeId: string): { type: string; to
   return { type: "node" };
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

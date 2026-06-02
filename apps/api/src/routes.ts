@@ -1,10 +1,10 @@
 /**
  * Route registry types for `apps/api/src/server.ts`.
  *
- * The api server dispatches each request against the `routes: Route[]` array
- * exported from `index.ts`. New routes plug in via `routes.push({...})` (or by
- * appending to the literal at source); the dispatcher loop in `server.ts` is
- * closed for modification.
+ * The api server dispatches each request against the composed `routes:
+ * Route[]` exported from `index.ts`. Feature modules export small
+ * `<feature>Routes` arrays and `index.ts` spreads them into the registry.
+ * The dispatcher loop in `server.ts` is closed for modification.
  *
  * Used by `apps/api/src/server.ts` (the dispatcher) and by every feature that
  * adds an HTTP route.
