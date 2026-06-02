@@ -70,6 +70,8 @@ export type OrgConfigSnapshot = {
     rateLimitPerMin: number;
     confidenceCalibrationEnabled: boolean;
     generationMode: string;
+    /** Best-of-N candidate count for free_json generation (1 = single-shot). */
+    generationCandidates: number;
   };
   http: {
     timeoutMs: number;
@@ -240,6 +242,17 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "free_json",
     envKeys: ["JANUSLY_AI_GENERATION_MODE"],
     allowedValues: ["constrained", "free_json"],
+  },
+  {
+    key: "ai.generationCandidates",
+    category: "ai",
+    description:
+      "Best-of-N for free_json generation: how many candidate workflows /ai/generate-workflow samples per request, keeping the best by a deterministic readiness score (no LLM judge). 1 (default) = single-shot, identical to pre-Best-of-N behavior; 2–5 trade a few cheap generation calls for lower per-prompt variance. Ignored in 'constrained' mode.",
+    valueType: "number",
+    defaultValue: 1,
+    envKeys: ["JANUSLY_AI_GENERATION_CANDIDATES"],
+    min: 1,
+    max: 5,
   },
   {
     key: "ai.openai.model",
@@ -938,6 +951,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       rateLimitPerMin: readNumber(values, "ai.rateLimitPerMin"),
       confidenceCalibrationEnabled: readBoolean(values, "ai.confidenceCalibrationEnabled"),
       generationMode: readString(values, "ai.generationMode"),
+      generationCandidates: readNumber(values, "ai.generationCandidates"),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),
