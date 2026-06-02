@@ -42,6 +42,11 @@ vi.mock("../ai-runtime", () => ({
   fallbackExplainWorkflow: vi.fn(),
 }));
 
+vi.mock("../ai-generation-memory", () => ({
+  composeGenerationExemplars: vi.fn(async () => ({ block: "", ids: [], count: 0 })),
+  recordGenerationExemplar: vi.fn(async () => {}),
+}));
+
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
 vi.mock("../budget-gate", () => ({
@@ -59,6 +64,7 @@ vi.mock("../http", async (importOriginal) => {
   };
 });
 
+import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { readJson, sendJson } from "../http";
@@ -66,6 +72,8 @@ import type { Route } from "../routes";
 import { aiRoutes } from "./ai-routes";
 
 const orgLlmMock = vi.mocked(orgLlmRuntime);
+const exemplarsMock = vi.mocked(composeGenerationExemplars);
+const recordExemplarMock = vi.mocked(recordGenerationExemplar);
 const auditMock = vi.mocked(auditAction);
 const readJsonMock = vi.mocked(readJson);
 const sendJsonMock = vi.mocked(sendJson);
@@ -123,6 +131,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   auditMock.mockResolvedValue(undefined as never);
   readJsonMock.mockResolvedValue({ prompt: "make a flow" } as never);
+  // Default: memory off → no exemplars (each test that wants few-shot opts in).
+  exemplarsMock.mockResolvedValue({ block: "", ids: [], count: 0 });
+  recordExemplarMock.mockResolvedValue(undefined);
 });
 
 describe("POST /ai/generate-workflow — generationMode dispatch", () => {
@@ -148,6 +159,25 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     // Default generationCandidates = 1 → single-shot, candidateCount 1.
     expect(meta.candidateCount).toBe(1);
     expect(res.payload.candidateCount).toBe(1);
+    // Memory off (default mock) → no exemplars logged.
+    expect(meta.exemplarCount).toBe(0);
+  });
+
+  it("free_json: threads recalled few-shot exemplars into the prompt + audit, writes one back", async () => {
+    exemplarsMock.mockResolvedValue({ block: "Similar prior workflows...\n- Request: a -> Shape: b", ids: ["ex1", "ex2"], count: 2 });
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+
+    const res = await callGenerate();
+
+    expect(res.payload.mode).toBe("ai");
+    expect(exemplarsMock).toHaveBeenCalledWith("org-1", "make a flow");
+    // Write side fired exactly once on success.
+    expect(recordExemplarMock).toHaveBeenCalledTimes(1);
+
+    const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.exemplarCount).toBe(2);
+    expect(meta.exemplarIds).toEqual(["ex1", "ex2"]);
   });
 
   it("free_json: Best-of-N samples N candidates and reports candidateCount", async () => {
