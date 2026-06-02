@@ -115,6 +115,12 @@ const WORKFLOW_VERSION_SCAN_CAP = 500;
 /** Lookback for ``usageCount30d`` / latest-usage joins. */
 const USAGE_LOOKBACK_DAYS = 30;
 
+/** Cap on usage rows scanned per credential-health read so the endpoint stays
+ *  constant-memory (mirrors the bounded-scan posture elsewhere in the repo).
+ *  DESC order keeps the freshest rows, so the derived latest-usage /
+ *  latest-error fields are unaffected; only deep `usageCount30d` tails clip. */
+const USAGE_ROW_CAP = 10_000;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function toIso(value: Date | string | null | undefined): string | null {
@@ -296,7 +302,8 @@ async function loadCredentialUsageAggregates(
         sql`${usageEvents.metadata} ? 'credentialName'`,
       ),
     )
-    .orderBy(desc(usageEvents.createdAt));
+    .orderBy(desc(usageEvents.createdAt))
+    .limit(USAGE_ROW_CAP);
 
   const map = new Map<string, CredentialUsageAggregate>();
   for (const row of rows) {
@@ -446,4 +453,4 @@ export async function getCredentialHealth(
   };
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

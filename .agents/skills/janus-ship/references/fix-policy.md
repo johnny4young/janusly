@@ -19,7 +19,7 @@ Every collateral fix lands in:
 - Orphan deps in `apps/*/package.json` or `packages/*/package.json` that the diff does not use.
 - Inline hex in `apps/web` components — replace with `var(--color-we-*)`.
 - Illegal imports in `apps/web`: `@radix-ui/*`, `class-variance-authority`, `clsx`, `tailwind-merge`, or any dep not listed in AGENTS.md. Rewrite with CSS-first Tailwind 4.
-- AI fallback broken: try/catch removed, `aiError` not surfaced, `parseAiWorkflow` looser gone, `{ mode, aiError }` contract changed.
+- AI fallback broken: try/catch removed, `aiError` not surfaced, generate-workflow parse/sanitize/repair chain bypassed, `{ mode, aiError }` contract changed.
 - Pagination cap 100/200 removed without explanation on `/runs` or `/workflows`.
 - `bumpPlatformVersion()` missing after a mutation that should fan out to other panels.
 - Missing audit row on a new mutation.

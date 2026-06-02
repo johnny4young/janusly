@@ -7,7 +7,7 @@
  * partially-started run never escapes to the queue.
  *
  * Used by:
- * - `apps/api/src/index.ts` `POST /start` — primary caller.
+ * - `apps/api/src/routes/runs-routes.ts` `POST /start` — primary caller.
  * - `packages/engine/src/resume-run.ts` — for restart-from-checkpoint paths.
  *
  * Invariants:
@@ -88,6 +88,9 @@ export async function startRun(workflow: StartableWorkflow) {
     });
   });
 
+  // Root nodes are the only initial queue entries. Everything else reaches
+  // the queue through `WorkflowRuntime.enqueueReadyNodes` after its
+  // predecessors complete, preserving fan-in/fan-out semantics.
   const startNodes = workflow.nodes.filter((node) => {
     return !workflow.edges.some((edge) => edge.to === node.id);
   });

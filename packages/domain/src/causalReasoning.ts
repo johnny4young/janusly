@@ -3,8 +3,9 @@
  * the alternatives), recomputes scores under the current preferences so the
  * UI can show "why this won" without re-running the original LLM call.
  *
- * Pure logic, no I/O. Used by `apps/api/src/index.ts` for the decision
- * explorer that backs the AI Studio's per-step inspector.
+ * Pure logic, no I/O. Used by `apps/api/src/routes/runs-routes.ts` for the
+ * `GET /causal` decision explorer that backs the AI Studio's per-step
+ * inspector.
  */
 
 import { scoreCandidate, type DecisionCandidate, type DecisionPreferences } from "./decisionEngine";

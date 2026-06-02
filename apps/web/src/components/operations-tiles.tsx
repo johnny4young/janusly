@@ -1,9 +1,7 @@
 /**
- * Shared tile builder for the Operations dashboard strip. Used by both
- * the new `OperationsPage` and the legacy `OperationsPanel` so a future
- * metric change lands in one place. When the legacy panel is finally
- * deleted, the only consumer becomes `OperationsPage` and this module
- * still acts as the single source of truth for the Operations tile shape.
+ * Shared tile builder for the Operations dashboard strip. `OperationsPage`
+ * is the sole consumer; the module stays the single source of truth for the
+ * Operations tile shape so a future metric change lands in one place.
  *
  * Tiles are static (no `onClick`, no `numericValue`) so the Operations
  * strip never animates and never wraps in a button — matching the legacy

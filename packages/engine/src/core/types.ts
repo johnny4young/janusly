@@ -162,7 +162,7 @@ export interface QueueAdapter {
   enqueueDeadLetter?(input: DeadLetterInput): Promise<void>;
 }
 
-/** DLQ replay boundary used by `apps/api/src/index.ts:/dlq/replay`. */
+/** DLQ replay boundary used by `apps/api/src/routes/dlq-routes.ts:/dlq/replay`. */
 export interface DeadLetterReplayAdapter {
   replayDeadLetter(input: DeadLetterReplayInput): Promise<void>;
 }

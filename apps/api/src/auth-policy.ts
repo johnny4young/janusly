@@ -1,15 +1,13 @@
 /**
  * Centralized authentication policy evaluator.
  *
- * Today the auth pipeline runs three different policy checks at three
- * different layers: (1) the boot-time `ALLOW_DEV_AUTH_HEADERS` guard
- * stops dev-headers in production; (2) `resolveJanuslyMembership` checks
- * `sso_connections.enforced_sso` inline; (3) the SSO callback hardcodes
- * an 8-hour session TTL. This module consolidates the per-org policy
- * decisions (allowed email domains, MFA-required marker, session TTL)
- * behind a single mode-aware function so the resolver and the SSO
- * callback both call the same code path, and every rejection writes a
- * uniform `auth.policy.rejected` audit row.
+ * The auth pipeline has one per-org policy boundary: this module. The
+ * membership resolver and the SSO callback both call `evaluateAuthPolicy`
+ * instead of inlining gate logic, and the SSO callback reads
+ * `sessionTtlSeconds` from the returned decision before issuing a Janusly
+ * session token. New auth policy behavior belongs here plus in
+ * `getAuthPolicyConfig`'s narrow reader and the org-config catalog — not in
+ * individual route handlers.
  *
  * The boot-time dev-headers guard stays where it is — env-level
  * `ALLOW_DEV_AUTH_HEADERS` is the centralized production-time
@@ -30,7 +28,8 @@
  * `getAuthPolicyConfig` (in `packages/data/src/orgConfigRepo.ts`) is a
  * narrow `SELECT` for the 3 `auth.*` keys — never the full
  * `OrgConfigSnapshot`. The resolver runs on every authenticated
- * request, so this hot-path budget matters.
+ * request, so this hot-path budget matters. Storage errors inside that
+ * reader degrade to catalog defaults.
  *
  * Used by:
  * - `apps/api/src/auth.ts` (resolver-side policy check).
@@ -42,8 +41,9 @@
  *   `safePersistPayload` (sensitive-key redaction + size cap).
  * - Audit emission is fail-soft — a DB blip cannot prevent the resolver
  *   from returning its decision.
- * - The function never throws past the boundary; storage errors fall
- *   through to catalog defaults via `getAuthPolicyConfig`.
+ * - Policy-config storage errors fall through to catalog defaults via
+ *   `getAuthPolicyConfig`; SSO-connection read errors are treated as no
+ *   active connection.
  */
 
 import {
@@ -122,6 +122,9 @@ export async function evaluateAuthPolicy(input: AuthPolicyInput): Promise<AuthPo
         ? await safeReadSsoConnection(input.orgId)
         : input.ssoConnection;
     if (ssoConnection && ssoConnection.status === "active" && ssoConnection.enforcedSso) {
+      // Explicit escape hatch for local/staging incidents. The gate fires
+      // outside production too; without this flag an enforced-SSO org rejects
+      // every non-SSO mode even in dev, matching the fail-closed invariant.
       const devBypass = process.env.ALLOW_DEV_SSO_BYPASS === "true";
       if (!devBypass) {
         await safeAudit(input, POLICY_KEY_ENFORCED_SSO, "org requires SSO login");

@@ -138,8 +138,6 @@ export const PROMOTE_FAMILIES: ReadonlyArray<{ prefixes: readonly string[]; targ
   },
 ];
 
-const PROMOTE_TARGETS: ReadonlyArray<PromoteTarget> = ["wait_until", "schedule"];
-
 function readPromoteTarget(node: WorkflowNode): PromoteTarget | null {
   if (node.type !== "noop") return null;
   const id = node.id.toLowerCase();
@@ -313,8 +311,3 @@ export async function promoteNoopPlaceholders(
     promotionsByFamily,
   };
 }
-
-// `PROMOTE_TARGETS` is the closed set of family keys mirrored in
-// `promotionsByFamily`. Exported for tests + audit-row readers that
-// want to iterate without hard-coding the names.
-export { PROMOTE_TARGETS };

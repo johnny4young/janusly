@@ -1,7 +1,7 @@
 /**
  * Built-in recipe catalog — each entry pairs a description with a fully-
  * formed `Workflow` DAG. The AI Studio's Templates panel reads this via
- * `GET /templates`; the evals harness uses the `id`s as deterministic
+ * `GET /templates`; selected eval fixtures also pin these ids as deterministic
  * fallback templates when no LLM key is configured.
  *
  * Used by `apps/api/src/routes/templates-routes.ts` `GET /templates` and indirectly by the

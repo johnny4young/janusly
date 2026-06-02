@@ -151,4 +151,4 @@ export async function getExperiment(orgId: string, experimentId: string): Promis
   return rows[0] ? mapExperiment(rows[0]) : null;
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate - see AGENTS.md "AuthContext is Janusly-resolved".

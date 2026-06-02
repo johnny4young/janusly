@@ -34,6 +34,7 @@ This is what a complete PHASE 2 report looks like when the work landed cleanly a
 - Compose: brought up for e2e and smoke, brought down at the end.
 - Collateral fixes applied: 1 (apps/web/src/store.ts).
 - ROADMAP §3b items captured: None.
+- ROADMAP archive move: ENG-008 moved to §3c.
 
 ### Review Guide — ENG-008
 
@@ -55,7 +56,7 @@ Test files added or modified:
 
 Bring-up:
 
-    docker compose up -d redis postgres
+    docker compose up -d redis postgres ollama
     pnpm migrate                          # NEW — applies the 3 migrations
     pnpm --filter @janusly/api dev      # http://localhost:3001
     pnpm --filter @janusly/engine dev   # worker
@@ -65,7 +66,7 @@ Auth: dev mode sends `x-org-id: default` and `x-user-id: dev-user` automatically
 
 Numbered steps:
 
-1. Tear down Compose if running, then start fresh: `docker compose down -v && docker compose up -d redis postgres`.
+1. Tear down Compose if running, then start fresh: `docker compose down -v && docker compose up -d redis postgres ollama`.
 2. Run `pnpm migrate` and confirm the 3 migrations applied (output lists them).
 3. Boot api + worker + web. The API should start without printing the previous `runSchemaSync` log line.
 4. Open http://localhost:5173, click `Save`, click `Run`. The run completes successfully — confirms tables wired correctly.
@@ -109,7 +110,7 @@ Cross-check invariants:
 - [x] Audit log untouched.
 
 **5. Docs sync checklist**
-- [x] `docs/ROADMAP.md` §3b ENG-008 flipped from Partial to Shipped with 2-line summary.
+- [x] `docs/ROADMAP.md` ENG-008 moved from §3b to §3c as Shipped with 2-line summary.
 - [ ] `docs/PLAN.md` §10.2 Status Update not needed — claims still hold.
 - [x] AGENTS.md not touched (no operational invariant changed).
 - [ ] No new Pending row added.
@@ -135,5 +136,5 @@ Cross-check invariants:
     - api: replace runSchemaSync with a migrations-table presence check
     - scripts: run-e2e calls pnpm migrate between Compose up and API boot
     - test: round-trip migrations.test.ts covers empty, idempotent, and partial-state cases
-    - doc sync: ROADMAP §3b ENG-008 flipped to Shipped with summary
+    - doc sync: ROADMAP ENG-008 moved from §3b to §3c as Shipped
     - collateral: apps/web/src/store.ts:42 — stale formatBytes import replaced with Intl.NumberFormat

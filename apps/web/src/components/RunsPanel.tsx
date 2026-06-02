@@ -2,7 +2,7 @@
  * Right-side Runs tab body. Renders:
  *  - Metric strip (shared VitalSignsStrip): total / active / done / failed.
  *  - Active-run card with cancel + open-in-Lab + workflow-output details.
- *  - RunExplainChat for the active run ("Ask Janusly", above usage per §10).
+ *  - RunExplainChat for the active run ("Ask Janusly", above usage).
  *  - Usage summary card (per-org cost/quota breakdown).
  *  - Paused-nodes action cards (human-form + approval pickers).
  *  - Failed-nodes action cards (per-node retry).

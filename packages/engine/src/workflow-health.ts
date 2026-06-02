@@ -16,8 +16,9 @@
  *     tokens), and latency (p95 across runs).
  *
  * Used by:
- *   - `apps/api/src/index.ts:GET /workflows/health` — returns the score
- *     for one workflow id; renders into the web's health badge.
+ *   - `apps/api/src/routes/workflows-routes.ts:GET /workflows/health` —
+ *     returns the score for one workflow id; renders into the web's health
+ *     badge.
  *   - `packages/data/src/workflowHealthRepo.ts` returns the same
  *     `HealthSignals` shape via structural typing, without importing
  *     from engine.

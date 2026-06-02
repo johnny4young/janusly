@@ -1,5 +1,5 @@
 /**
- * AI cost budget admin editor — mounted inside `OperationsPanel`.
+ * AI cost budget admin editor — mounted inside `OperationsPage`.
  *
  * Two stacked sections:
  *
@@ -13,7 +13,7 @@
  * the Recovery Center Budget tile + Operations bar refetch via their existing
  * `platformVersion` deps.
  *
- * Used by `OperationsPanel.tsx`.
+ * Used by `OperationsPage.tsx`.
  */
 
 import React, { useEffect, useMemo, useState } from "react";

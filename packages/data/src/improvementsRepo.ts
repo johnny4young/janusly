@@ -4,9 +4,10 @@
  * rollback) with `before/afterMetrics` and a confidence score.
  *
  * Used by:
- * - `packages/domain/src/improvementEngine.ts` — calls `record...` after each
- *   evaluation cycle.
- * - `apps/api/src/index.ts` — surfaces `list...` to the Improvements panel.
+ * - `packages/engine/src/core/runtime.ts` — calls `record...` after each
+ *   improvement evaluation cycle.
+ * - future API/read models can use `list...` to surface the ledger; today's
+ *   route registry does not own a dedicated improvements endpoint.
  *
  * Invariants:
  * - Every read filters on `orgId` (multi-tenant scope).
@@ -50,4 +51,4 @@ export async function listWorkflowImprovements(orgId: string, workflowId: string
     .orderBy(desc(workflowImprovements.createdAt));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

@@ -2,185 +2,104 @@
 
 ## Product thesis
 
-AI should be a first-class citizen in the workflow engine, not an optional helper bolted onto the side.
+AI is a first-class operator interface for Janusly, not a sidecar chat box.
+The system can draft workflows, explain behavior, review readiness, and
+propose repairs, but every AI-produced artifact still flows through schema
+validation, engine validation, audit logging, and human/operator action before
+it changes production behavior.
 
-The product should feel easier with AI than without AI:
+## Current AI surfaces
 
-- Users describe intent in natural language.
-- AI proposes workflows, nodes, conditions, retries, credentials, and observability policies.
-- Users review diffs before applying changes.
-- Runtime failures are explainable and repairable.
-- AI can safely suggest, but not silently mutate production workflows without validation and approval.
+| Surface | Route / module | Current behavior |
+| --- | --- | --- |
+| Generate workflow | `POST /ai/generate-workflow` | Creates a draft workflow from an operator prompt. Default mode is `free_json`: `LlmClient.generateText({ responseFormat: "json" })` -> `parseGeneratedWorkflow` -> noop promotion -> `sanitizeAiWorkflow` -> strict engine validation. Graph-validity failures get up to two targeted repair attempts via `repairGeneratedWorkflow` before deterministic fallback. |
+| Explain workflow | `POST /ai/explain-workflow` | Produces a human-readable walkthrough of a workflow; fallback returns local deterministic content. |
+| Review workflow | `POST /ai/review-workflow` | Runs deterministic readiness checks plus an optional LLM semantic pass; invalid or unconfigured LLM paths still return a structured fallback review. |
+| Patch failed workflow | `POST /ai/patch-workflow` | Recovery-dialog surface. Reads DLQ/run context, asks for 1-3 config or structural alternatives, merges each candidate, validates through the same workflow gate, sorts by confidence, and returns legacy + multi-suggestion fields. It never saves or replays by itself. |
+| Suggest improvement | `POST /ai/suggest-improvement` | Compare-panel sibling of patch-workflow for non-DLQ workflow improvement suggestions. |
+| Explain run | `POST /ai/explain-run` | Answers questions about a run using compact evidence from run events, nodes, DLQ, recovery items, and bounded recalled recovery snippets when memory is enabled. |
+| Health | `GET /ai/health` | Reports the effective tenant runtime config (`enabled`, provider/model/generation mode) without exposing credentials. |
 
-## Design principles
+All routes live in `apps/api/src/routes/ai-routes.ts`. Provider calls route
+through `packages/ai/src/llm-client.ts`; API keys still come from env, while
+safe tenant choices such as provider/model/limits come from `org_configs`.
 
-1. AI is a workflow authoring interface.
-2. AI is a runtime debugging assistant.
-3. AI is an operations copilot.
-4. AI suggestions are always schema-validated.
-5. AI changes are represented as diffs and auditable events.
-6. AI should learn from run events, DLQ entries, retries, and node outputs.
-7. Human approval is required for destructive or production-impacting actions.
+## Provider posture
 
-## First-class AI surfaces
+LLM completions are provider-neutral in code but Anthropic-only in the current
+MVP release posture. Use `anthropic/claude-haiku-4-5-20251001` for demos,
+evals, and release smoke. OpenAI remains registered for future expansion but
+is not a supported runtime target until it passes the eval harness and release
+verification. Embeddings are separate: memory v1 uses Ollama BGE-m3 when both
+global and tenant memory flags are enabled.
 
-### 1. Generate workflow
+## Validation pipeline
 
-Prompt -> valid workflow JSON.
+AI-generated workflows converge through the same runtime gates used by saved
+workflows:
 
-Use cases:
+1. Parse / shape-check against the AI generation envelope.
+2. Promote supported noop placeholders (`wait_until`, `schedule`) when Pass 2
+   can produce a typed config.
+3. Sanitize expressions and transform placeholders in `sanitizeAiWorkflow`.
+4. Validate the whole graph with `validateWorkflow`.
+5. When strict graph validation fails after parsing succeeds, run bounded
+   self-repair and re-validate.
+6. On any unresolved failure, return `{ mode: "fallback", aiError, ... }`.
 
-- “When a webhook arrives, call this API, transform response, then notify Slack.”
-- “Create a payment retry workflow with DLQ and alerting.”
-- “Build a POS inventory sync workflow.”
-
-### 2. Explain workflow
-
-Workflow JSON -> human explanation.
-
-Should explain:
-
-- trigger
-- each node
-- branches
-- retry/failure behavior
-- security concerns
-- missing credentials
-
-### 3. Explain failure
-
-Run events + node state + DLQ entry -> failure explanation.
-
-Should answer:
-
-- what failed
-- why it likely failed
-- whether retry policy was correct
-- what config should change
-- whether replay is safe
-
-### 4. Suggest fix
-
-Failure context -> validated patch.
-
-Patch examples:
-
-```json
-{
-  "nodeId": "call-api",
-  "patch": {
-    "config": {
-      "timeoutMs": 10000,
-      "retry": {
-        "maxAttempts": 5,
-        "delayMs": 1000,
-        "backoff": "exponential",
-        "retryOn": ["timeout", "network", "5xx"],
-        "ignoreOn": ["4xx"]
-      }
-    }
-  }
-}
-```
-
-### 5. Replay with AI patch
-
-AI suggests an override or workflow patch; user reviews and applies.
-
-Never silently replay with modified behavior without explicit user action.
-
-## Runtime context for AI
-
-AI explanations should receive compact context:
-
-```ts
-type AiRunContext = {
-  workflow: Workflow;
-  run: unknown;
-  nodes: unknown[];
-  events: unknown[];
-  deadLetter?: unknown;
-};
-```
-
-## API proposal
-
-```http
-POST /ai/explain-failure
-{
-  "runId": "...",
-  "nodeId": "...",
-  "deadLetterId": "optional"
-}
-```
-
-```http
-POST /ai/suggest-fix
-{
-  "runId": "...",
-  "nodeId": "...",
-  "deadLetterId": "optional"
-}
-```
-
-```http
-POST /ai/apply-suggested-patch
-{
-  "workflowId": "...",
-  "patch": {...}
-}
-```
-
-## UI proposal
-
-Add AI actions to the observability and DLQ panels:
-
-- Explain failure
-- Suggest fix
-- Preview patch
-- Apply patch as new workflow version
-- Replay after patch
+Patch and improvement suggestions are also validated after merge. Invalid
+candidates are dropped rather than returned to the operator.
 
 ## Safety model
 
 AI may:
 
-- explain
-- suggest
-- generate draft workflows
-- generate patches
+- draft workflow JSON;
+- explain workflows and runs;
+- review readiness;
+- propose config or structural patches;
+- phrase evidence-backed recommendations.
 
-AI must not automatically:
+AI must not:
 
-- change credentials
-- expose secret values
-- run production workflows
-- replay failed jobs with modified config
-- delete workflows or audit logs
+- save a workflow version without the operator choosing to save;
+- replay a run with modified behavior without explicit user action;
+- reveal secret values or provider-native claims;
+- mutate credentials, roles, audit logs, or org config directly;
+- bypass `sanitizeAiWorkflow`, `validateWorkflow`, audit rows, budget gates, or
+  rate limits.
 
-## Implementation roadmap
+The Recovery dialog's production path is intentionally multi-step: suggest ->
+operator review -> sandbox validation (`POST /dlq/validate-fix`) -> save new
+workflow version -> replay. This is the control boundary that keeps AI from
+silently changing production behavior.
 
-### Phase 1: AI failure explanation
+## Data framing
 
-- Add `/ai/explain-failure` endpoint.
-- Use existing events, run nodes, run record, and optional DLQ entry.
-- Return deterministic fallback when `OPENAI_API_KEY` is missing.
-- Add UI button: `Explain failure`.
+Prompt inputs that originate from users, workflows, tool descriptions, run
+events, DLQ payloads, or remembered snippets are treated as data. Prompts use
+explicit boundaries and suspicion framing where third-party or user-authored
+text can contain instructions. The MCP-exposure path additionally sanitizes
+tool descriptions before they can appear in the generation system prompt.
 
-### Phase 2: AI fix suggestion
+## Auditing and telemetry
 
-- Add `/ai/suggest-fix` endpoint.
-- Return a schema-validated patch.
-- Show patch preview in UI.
+AI mutations audit both success and fallback paths with stable action names
+such as `ai.workflow.generated`, `ai.workflow.reviewed`,
+`ai.workflow.patch_suggested`, and `ai.workflow.improvement_suggested`.
+`usage_events` records LLM calls through the `LlmClient` recorder, including
+success/failure metadata. Generate-workflow audit metadata includes
+`generationMode`, `generationAttempts`, `repairAttempts`, and noop-promotion
+counts so operators can see reliability pressure without reading logs.
 
-### Phase 3: AI patch application
+## Active follow-ups
 
-- Apply patch as a new workflow version.
-- Never mutate in place.
-- Emit audit event.
+The current roadmap keeps AI-generation reliability work explicit instead of
+hiding it in this architecture doc:
 
-### Phase 4: AI operations copilot
-
-- Batch analyze DLQ.
-- Identify recurring failures.
-- Suggest retry, timeout, credential, and branching improvements.
+- ENG-191: best-of-N generation + selection.
+- ENG-192: eval-suite expansion and optional CI/scheduled gate.
+- ENG-193: retrieval exemplars for generation.
+- ENG-194: verify and enable OpenAI only after harness proof.
+- ENG-195: widen direct emission / generalize noop promotion.
+- ENG-196: per-surface model routing and prompt caching.

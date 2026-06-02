@@ -6,8 +6,9 @@
  *
  * Pure logic, no I/O. The `routing_stats` row provides the inputs; the
  * runtime applies the output before picking a winner. Today's adjustments
- * are a counter-based heuristic; a future probabilistic model can replace them with proper
- * Thompson sampling.
+ * are intentionally a small counter-based heuristic; a future policy layer
+ * can replace this with UCB / Thompson sampling without changing the repo
+ * contract.
  *
  * Used by `packages/domain/src/decisionEngine.ts` and the runtime's
  * post-routing reward update path.

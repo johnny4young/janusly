@@ -69,7 +69,7 @@ export const REVIEW_WORKFLOW_SYSTEM_PROMPT = [
   "Checks to apply (non-exhaustive — flag anything you'd hesitate to ship):",
   "- Retries on http/tool/ai/agent nodes (config.retry.maxAttempts).",
   "- HTTP bounds (timeoutMs / maxResponseBytes / maxRedirects) — defaults are sensible but explicit values record operator intent.",
-  "- Hardcoded secrets in node config — a string value that looks like a token, key, or bearer literal should be a {{secret.X}} / {{env.X}} / {{credential.X}} template.",
+  "- Hardcoded secrets in node config — a string value that looks like a token, key, or bearer literal should become a supported {{secret.X}} / {{env.X}} template, or an integration-tool `input.credential` name when the node uses a credential-backed tool.",
   "- Approval gate upstream of write-side actions (POST/PUT/PATCH/DELETE http nodes; tool calls that send/create/delete; multi_agent crews making external changes).",
   "- Unknown tools — a `tool` node whose `tool` field doesn't match a real registered tool name; flag as ambiguous.",
   "- Malformed routers — router/router_llm with empty candidates, candidates pointing at nodes that don't exist in the workflow, or candidates that all do the same work (no real choice).",

@@ -9,7 +9,7 @@
  *      (`x-org-id: default`, `x-user-id: dev-user`).
  *   3. For each response, evaluate:
  *      - If `requiresMode: "ai"` is set on the case AND the response returned
- *        `mode: "fallback"` without `aiError` → SKIP (no OpenAI key
+ *        `mode: "fallback"` without `aiError` → SKIP (no provider key
  *        configured; not a regression).
  *      - Otherwise, assert minNodes/maxNodes, requiredTypes/forbiddenTypes,
  *        and (when fallback fires) fallbackTemplate id.

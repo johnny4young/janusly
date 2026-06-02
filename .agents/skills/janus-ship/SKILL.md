@@ -29,7 +29,8 @@ When the user names an ENG-NNN explicitly, that ticket is the target. When the u
 In priority order:
 
 - **AGENTS.md** — minimal operational invariants for running the project. CLAUDE.md is a symlink to it. No roadmap content here.
-- **docs/ROADMAP.md §3b** — canonical ticket pool. Status, Priority, Phase, Scope, AC live in one row per ticket.
+- **docs/ROADMAP.md §3b** — canonical active ticket pool. Pending, Partial, Gated, and Deferred rows live here.
+- **docs/ROADMAP.md §3c** — archived shipped tickets. Closed rows move here with their closing summary.
 - **docs/PLAN.md** — strategic context. Read only the section that matches the ticket; cite which one in the plan.
 - **packages/\*/src and apps/\*/src** — the actual code, the final source of truth when docs and code disagree.
 
@@ -49,7 +50,7 @@ After Accept (or after textual feedback on Reject), PHASE 2:
 
 6. First line: `Executing ENG-NNN — <one-liner>`.
 7. Implement the ticket: code + tests + doc-sync + collateral fixes, all in one cohesive working tree.
-8. Doc-sync: flip Status in `docs/ROADMAP.md` §3b, update `docs/PLAN.md` only if a claim drifted, touch AGENTS.md only when an invariant changed, touch README.md only for descriptive facts.
+8. Doc-sync: update the ticket row in `docs/ROADMAP.md`; closed tickets move from §3b to §3c with a summary, while Partial tickets stay in §3b with a Remaining line. Update `docs/PLAN.md` only if a claim drifted, touch AGENTS.md only when an invariant changed, touch README.md only for descriptive facts.
 9. Run gates: `bash .agents/skills/janus-ship/scripts/run-gates.sh` (add `--e2e` when user-facing). The script runs `pnpm build` + `pnpm test` (+ optional `pnpm test:e2e`), captures PASS/FAIL with timing, and tails the failing log when something breaks. Then run `typescript-react-reviewer` + `node` review skills in parallel on the unstaged diff.
 10. Bring Compose down if it was started during the work.
 11. `git add <explicit paths>` — ticket files + doc-sync + collaterals only.
@@ -65,12 +66,12 @@ These never bend, in either phase:
 - **No AI co-authorship in commit messages.** No `Co-Authored-By: Claude`, no "Generated with Claude Code", no watermarks of any kind.
 - **i18n coverage:** new or changed user-facing text in `apps/web/**` must go through `useT()` / `t()` exported from `apps/web/src/i18n` — never raw string literals in JSX, `aria-label`, `placeholder`, `title`, `alt`, or in the first argument of `addToast(...)`. Every new key in `en/common.json` requires its sibling in `es/common.json` (gated by `apps/web/src/i18n/parity.test.ts`). Strings emitted from the server with a stable `code` go through the dedicated helpers (`tValidationIssue` / `tReadinessIssue` / `tAiReviewIssue` / `tRunEvent` / `tFailureCluster`) and gain a `<surface>.<code>` entry in the catalog when the engine adds a new code; free-form server messages flow through `t('serverEvents.fallback', { message })`. Components MUST NOT import from `i18next` / `react-i18next` directly — every consumer is the i18n module. Exempt: technical identifiers (`'dev-user'`, role tokens like `'admin'` when stored as values, tool names like `'slack.post'`), brand-mark codes (`'JN'`, `'Janusly'`), single-punctuation / emoji-only nodes, test files, console / log messages, and backend `error.message` strings passed through unmodified. Spot scan: `bash .agents/skills/janus-ship/scripts/check-i18n-coverage.sh` (a wrapper for `apps/web/scripts/check-i18n-coverage.sh`) reports suspect literals against `git diff --cached`.
 - **Multi-tenant scope:** every new query carries `eq(<table>.orgId, auth.orgId)`. No bespoke middleware.
-- **AI fallback contract:** every OpenAI call wrapped in try/catch; failure returns `{ mode: "fallback", aiError, ... }`; `parseAiWorkflow` looser stays.
+- **AI fallback contract:** every LLM call wrapped in try/catch; failure returns `{ mode: "fallback", aiError, ... }`; generate-workflow parse/sanitize/repair chain stays intact.
 - **Engine atomicity:** no non-atomic `markNodeQueued`, no split `startRun`, no DLQ adapter bypass, worker `SIGTERM`/`SIGINT` handler intact.
 - **OTel `service.name === "janusly"`** in tracer and meter.
 - **Cross-panel reactivity:** mutations that invalidate server data call `bumpPlatformVersion()`.
 - **Pagination cap 100/200** on `/runs` and `/workflows`; new list endpoints follow the pattern.
-- **API routing (Open/Closed):** new HTTP routes plug into `routes: Route[]` in `apps/api/src/index.ts` via `routes.push({...})`. No inline `if (req.method === ...)` branches outside the dispatcher; `requireAuth` + `requireRole` are declared on the route entry, not called inside the handler.
+- **API routing (Open/Closed):** new HTTP routes live in feature-level `<feature>Routes` arrays that `apps/api/src/index.ts` spreads into the composed `routes: Route[]` registry. No inline `if (req.method === ...)` branches outside the dispatcher; auth, role, and permission gates are declared on the route entry, not called inside the handler.
 - **Web deps lockdown:** `apps/web` imports stay within `react`, `react-dom`, `@xyflow/react`, `@supabase/supabase-js`, `zustand`, `lucide-react`, `i18next`, `react-i18next`. The two i18n libs are restricted to the `apps/web/src/i18n/` module — components NEVER import from `i18next` / `react-i18next` directly. No radix, cva, clsx, tailwind-merge, shadcn scaffolding.
 - **Tailwind 4 CSS-first:** no `tailwind.config.ts`, no `postcss.config.js`, no inline hex.
 - **Vite 8:** `manualChunks` is a function.
@@ -91,7 +92,7 @@ When a real bug surfaces in code unrelated to the ticket, fix it inline without 
 
 After the code lands and gates pass, before the final stage:
 
-- `docs/ROADMAP.md` §3b — flip Status with a 2-3 line summary at the end of the Scope cell. Required for every ticket.
+- `docs/ROADMAP.md` §3b/§3c — required for every ticket close. If the ticket is fully shipped, append a 2-3 line `**Summary:**`, set `Status: Shipped`, and move the row to §3c. If work remains, keep the row in §3b as `Partial` and end the Scope cell with `**Remaining:**`.
 - `docs/PLAN.md` — only when a strategic claim drifted. Append `### §X.0 Status Update` inline.
 - `AGENTS.md` — only when a new operational invariant landed.
 - `README.md` — only when a descriptive fact (commands, stack, architecture) went stale.

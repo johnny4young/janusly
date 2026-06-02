@@ -1,7 +1,7 @@
 # Janusly World-Class Product Plan - May 20, 2026
 
 > Status: strategic planning input, not the active ticket source.
-> Canonical ticket status remains in `docs/ROADMAP.md` section 3b.
+> Canonical active ticket status lives in `docs/ROADMAP.md` §3b; shipped history lives in §3c.
 
 This document answers one question: what must Janusly become to reach
 world-class quality in its market?

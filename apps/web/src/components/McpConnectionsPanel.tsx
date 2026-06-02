@@ -1,5 +1,5 @@
 /**
- * MCP client connection admin panel — mounted inside `OperationsPanel`.
+ * MCP client connection admin panel — mounted inside `OperationsPage`.
  *
  * Admins register external MCP servers (alias + transport + connection
  * details + env-refs), then per-tool toggle which descriptors the

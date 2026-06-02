@@ -39,7 +39,7 @@ Run these once per machine before your first recording. They are not per-recordi
    ```bash
    pnpm dev
    ```
-   This brings Compose up (Postgres + Redis), applies migrations, and spawns api + worker + web. The web lands at <http://localhost:5173>; api at <http://localhost:3001>.
+   This brings Compose up (Postgres + Redis + Ollama), applies migrations, and spawns api + worker + web. The web lands at <http://localhost:5173>; api at <http://localhost:3001>.
 
 4. **Seed the demo credentials:**
    ```bash

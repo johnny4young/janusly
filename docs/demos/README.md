@@ -37,9 +37,22 @@ Every narrative follows the same skeleton:
 6. **Closing metric** — the one number the demo proves out (MTTR, dollars saved, approvals processed, etc.).
 7. **3-5 minute talk track** — a tight script for live demos and screen recordings.
 
+## Templates vs solution packs
+
+The narrative demos above are anchored to `WorkflowTemplate` entries: immutable
+starter DAGs served by `GET /templates` and copied into the editor.
+
+Solution packs live separately in [`packages/solution-packs/`](../../packages/solution-packs/).
+They are installable ICP-shaped bundles with workflow JSON, required credential
+hints, sample payloads, failure fixtures, and pack-local READMEs. The API exposes
+them through `GET /solution-packs`, `POST /workflows/import-pack`,
+`POST /solution-packs/:id/sample-run`, and
+`POST /solution-packs/:id/inject-failure`. The current pack ids are
+`failed-payment-recovery`, `incident-triage`, and `support-escalation`.
+
 ## How these docs feed downstream work
 
-- **Landing-page copy** (`docs/marketing/landing-page.md`, future) — hero subcopy, problem statement, use-case cards, and security/control proof points are derived from the per-demo "story" sections.
+- **Landing-page copy** (`docs/marketing/landing-page.md`) — hero subcopy, problem statement, use-case cards, and security/control proof points are derived from the per-demo "story" sections.
 - **Sales calls** — the talk tracks here are the literal scripts.
 - **Recording scripts** ([`docs/marketing/recording-scripts/`](../marketing/recording-scripts/)) — second-by-second timed beat sheets for the three flagship demos, with exact button labels, copy-pasteable setup commands, sample payloads, and failure-injection / recovery-moment sequences. Use these when filming a sales recording or onboarding a private-beta design partner.
 - **Private-beta MTTR experiment** — design partners walk through the three flagship demos before measuring their baseline; the post-flow surveys ask which demo moved them most.
@@ -48,8 +61,14 @@ Every narrative follows the same skeleton:
 
 1. Add or pick a `WorkflowTemplate` in [`apps/api/src/templates.ts`](../../apps/api/src/templates.ts).
 2. Add i18n keys for `templates.<id>.name` and `templates.<id>.description` in [`apps/web/src/i18n/locales/en/common.json`](../../apps/web/src/i18n/locales/en/common.json) and the Spanish sibling.
-3. Add an entry to [`evals/generate-workflow.jsonl`](../../evals/generate-workflow.jsonl) with `fallbackTemplate: "<id>"`.
+3. Add an entry to [`evals/generate-workflow.jsonl`](../../evals/generate-workflow.jsonl) when AI generation should cover the demo. Use `expect.fallbackTemplate: "<id>"` only when the deterministic no-LLM fallback should return that exact template.
 4. Add a section to [`docs/templates.md`](../templates.md) describing the template (technical reference).
 5. Add a narrative file here (operator-facing demo story) using the seven-section skeleton above.
 6. Extend [`apps/web/e2e/demo-templates.spec.ts`](../../apps/web/e2e/demo-templates.spec.ts) to validate the new demo end-to-end.
 7. Link the new demo from the table in this README.
+
+For a new solution pack, add a folder under
+[`packages/solution-packs/src/packs/`](../../packages/solution-packs/src/packs/)
+with `pack.json` + `README.md`, register it in the package barrel, add EN/ES
+`packs.*` labels, and extend `packages/solution-packs/src/solution-packs.test.ts`
+plus `apps/web/e2e/solution-packs.spec.ts` when the UI flow changes.

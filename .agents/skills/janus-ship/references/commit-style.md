@@ -37,7 +37,7 @@ This applies to every surface: the printed suggestion, any heredoc body, any reb
     - <main implementer change>
     - <secondary implementer change>
     - <test additions>
-    - <doc sync: ROADMAP §3b ENG-NNN flipped to Shipped>
+    - <doc sync: ROADMAP ENG-NNN moved from §3b to §3c as Shipped>
     - collateral: <file>:<L> — <what was broken + fix>
     - collateral: <file>:<L> — <what was broken + fix>
 
@@ -69,5 +69,5 @@ A ticket touches the API and the web. It fixes a stale import in `apps/web/src/s
     - api: aggregate per-run token + cost summary in GET /runs/:id
     - web: render the usage chip in the Run header
     - test: cover empty / single-call / multi-provider runs in api + web
-    - doc sync: ROADMAP §3b ENG-012 flipped to Shipped with summary
+    - doc sync: ROADMAP ENG-012 moved from §3b to §3c as Shipped
     - collateral: apps/web/src/store.ts:42 — stale import to deleted formatBytes helper, replaced with the local Intl formatter

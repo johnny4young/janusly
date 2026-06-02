@@ -25,8 +25,9 @@ export type InputsValidationResult = { valid: true } | { valid: false; errors: s
 
 /**
  * Thrown by `startRun` when a workflow declared `inputs` and the run-start
- * payload doesn't satisfy the shape. The route handler in
- * `apps/api/src/index.ts` catches and returns 400 with the error list.
+ * payload doesn't satisfy the shape. The `POST /start` route handler in
+ * `apps/api/src/routes/runs-routes.ts` catches and returns 400 with the
+ * error list.
  */
 export class WorkflowInputValidationError extends Error {
   readonly errors: string[];

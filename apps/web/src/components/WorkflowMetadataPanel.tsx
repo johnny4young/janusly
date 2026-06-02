@@ -19,7 +19,7 @@ import {
   type RecoveryItemSeverity,
 } from '@janusly/shared/src/recovery-item'
 import { api } from '../api'
-import { tApiError, useT } from '../i18n'
+import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
 
 type WorkflowMetadataForm = {
@@ -238,7 +238,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             {t('workflowMetadata.field.runbook') as string}
             <span className="helper-text">
               {' '}
-              ({runbookByteLength.toLocaleString()}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString()}{' '}
+              ({runbookByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
               {t('workflowMetadata.field.runbookUnit') as string})
             </span>
           </span>

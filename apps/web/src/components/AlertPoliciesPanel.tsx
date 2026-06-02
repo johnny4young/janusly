@@ -1,5 +1,5 @@
 /**
- * Alert policies admin CRUD inside `OperationsPanel`. v1 surfaces the
+ * Alert policies admin CRUD inside `OperationsPage`. v1 surfaces the
  * core flows: list, create, toggle enabled, delete. The form swaps its
  * parameters sub-form based on the selected trigger and filters the
  * channel credential dropdown by destination kind so an operator can't

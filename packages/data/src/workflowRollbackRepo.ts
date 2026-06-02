@@ -9,7 +9,8 @@
  * Used by:
  * - `packages/domain/src/improvementEngine.ts` — calls this when an applied
  *   improvement performs worse than the baseline.
- * - `apps/api/src/index.ts` — exposed via the rollback admin endpoint.
+ * - `apps/api/src/workflows-rollback.ts` — API rollback adapter used by
+ *   `apps/api/src/routes/workflows-routes.ts`.
  *
  * Invariants:
  * - Multi-tenant scope: every query filters on `orgId`.
@@ -88,4 +89,4 @@ export async function rollbackWorkflowVersion(input: {
   };
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

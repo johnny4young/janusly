@@ -244,7 +244,7 @@ function FieldChangeRow({ change }: { change: FieldChange }) {
   const { t } = useT()
   // A `secret_ref`-tagged change either points at a sensitive key name
   // (`apiKey` / `Authorization` / …) or carries a `{{secret.X}}` /
-  // `{{credential.X}}` / `{{env.X}}` template. In either case the raw
+  // supported `{{secret.X}}` / `{{env.X}}` template. In either case the raw
   // before/after values are unsafe to render in the DOM — a workflow
   // version that literally embedded a token before being templated
   // would leak it through the diff. Mask both sides with `[redacted]`

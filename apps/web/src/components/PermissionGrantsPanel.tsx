@@ -1,5 +1,5 @@
 /**
- * Permission grants admin panel — mounted inside `OperationsPanel`.
+ * Permission grants admin panel — mounted inside `OperationsPage`.
  *
  * Renders the closed permission catalog as a checkbox grid grouped by
  * category, with one card per role (built-ins first, custom roles
@@ -14,7 +14,7 @@
  * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
  * panels that depend on roles (MembersPanel) refetch.
  *
- * Used by `OperationsPanel.tsx`.
+ * Used by `OperationsPage.tsx`.
  */
 
 import React, { useEffect, useMemo, useState } from "react";

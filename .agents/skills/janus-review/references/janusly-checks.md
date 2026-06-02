@@ -14,9 +14,9 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 
 ## b. AI fallback contract
 
-**What:** `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run`, the `agent` planner with `"openai"`, and the `ai` step type each wrap their OpenAI call in `try/catch`. Any failure (quota, rate, network, malformed output) returns `{ mode: "fallback", aiError: "<reason>", ... }` with the local content attached. `aiError` flows to the UI — never swallowed. `parseAiWorkflow` (in `apps/api/src/index.ts`) keeps its looser that coerces wrong-typed ids and drops invalid edges/conditions before Zod parse.
+**What:** `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run`, the `agent` planner with `"openai"`, and the `ai` step type each wrap their LLM call in `try/catch`. Any failure (quota, rate, network, malformed output) returns `{ mode: "fallback", aiError: "<reason>", ... }` with the local content attached. `aiError` flows to the UI — never swallowed. `/ai/generate-workflow` parses free-JSON output through `parseGeneratedWorkflow` (`apps/api/src/ai-generate-freejson.ts`), then converges through noop promotion, `sanitizeAiWorkflow` (`apps/api/src/ai-runtime.ts`), and bounded graph self-repair before fallback.
 
-**Why:** OpenAI calls fail routinely. Without the fallback contract, every AI surface becomes a single point of failure for the entire workflow runtime. The looser exists because LLM output drifts; coercing near-misses keeps the success rate high without sacrificing the runtime schema.
+**Why:** LLM calls fail routinely. Without the fallback contract, every AI surface becomes a single point of failure for the entire workflow runtime. The parser/repair chain exists because LLM output drifts; recovering near-misses keeps the success rate high without sacrificing the runtime schema.
 
 **Action:** FIX INLINE when try/catch was removed or the response contract changed.
 
@@ -120,13 +120,13 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 
 **What:**
 
-- **`docs/ROADMAP.md` §3b**: Status flip applied (Shipped, or Partial with updated `Remaining:`), 2-3 line summary at the end of the Scope cell.
+- **`docs/ROADMAP.md` §3b/§3c**: Shipped rows have a 2-3 line `**Summary:**` and live in §3c; Partial rows stay in §3b with updated `**Remaining:**`.
 - **`docs/PLAN.md`**: `### §X.0 Status Update` inline at the end of the relevant section, when a strategic claim drifted.
 - **AGENTS.md**: updated only if an operational invariant changed. CLAUDE.md → AGENTS.md symlink intact. NO roadmap content.
 - **README.md**: contains no planning, no pending features, no roadmap. When the implementer leaked planning into README, **FIX INLINE** by moving the content to `docs/ROADMAP.md` or removing duplicates.
 - **New requirement without AC** spotted during review: add a new `Pending` row in `docs/ROADMAP.md` §3b. Bugs do not go here; fix them inline.
 
-**Why:** Doc sync is what keeps `docs/ROADMAP.md` reliable as a ticket pool — if Status flips drift behind reality, the next `janus-ship` invocation picks the wrong tickets. Planning leaking into README means two sources of truth that drift. The split (operational in AGENTS.md, tactical in ROADMAP, strategic in PLAN, descriptive in README) breaks down quickly without enforcement.
+**Why:** Doc sync is what keeps `docs/ROADMAP.md` reliable as a ticket pool — if closed tickets stay in §3b, the next `janus-ship` invocation has to sift through archive noise. Planning leaking into README means two sources of truth that drift. The split (operational in AGENTS.md, tactical in ROADMAP, strategic in PLAN, descriptive in README) breaks down quickly without enforcement.
 
 **Action:** FIX INLINE when a required doc-sync edit is missing. It is a docs edit, not a code change.
 
@@ -138,7 +138,7 @@ Each check has a **what** (the invariant), a **why** (the rationale, so edge cas
 - `Route` types live in `apps/api/src/routes.ts`. `skipAuth: true` is set only on `/health`. `role: "editor"` / `role: "admin"` is on the route entry, not in the handler body.
 - No reintroduced `if (req.method === "POST" && req.url === "/x") { ... }` branches outside the dispatcher.
 
-**Why:** ENG-041 closed the dispatcher for modification. The registry is the extension point; new routes plug in via `routes.push({...})`. Bypassing it means duplicate auth logic, RBAC drift, and a return to the unmaintainable 33-if-branch shape we just escaped. Phase 2 will add 11+ more routes — every ticket that bypasses the registry compounds the cost of the next refactor.
+**Why:** ENG-041 closed the dispatcher for modification. Feature route modules export small `<feature>Routes` arrays, and `apps/api/src/index.ts` composes them into the single ordered registry. Bypassing it means duplicate auth logic, RBAC drift, and a return to the unmaintainable inline-branch shape we already left behind.
 
 **Action:** FIX INLINE when a new route was added as an inline `if` branch outside the dispatcher — convert it to a registry entry, move `requireRole` from handler body to the route's `role` field. REPORT (don't fix) when the change is structural — e.g. introducing per-domain route files (`routes/runs.ts`, `routes/workflows.ts`), path-parameter routing (`/run/:id/cancel`), or middleware composition — those are design discussions, not silent regressions.
 

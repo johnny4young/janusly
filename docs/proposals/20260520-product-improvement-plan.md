@@ -1,7 +1,7 @@
 # Product Improvement Plan - May 20, 2026
 
 > Status: curated planning input for `docs/ROADMAP.md`, not an implementation spec.
-> Canonical ticket status remains in `docs/ROADMAP.md` section 3b.
+> Canonical active ticket status lives in `docs/ROADMAP.md` §3b; shipped history lives in §3c.
 
 ## Why This Exists
 

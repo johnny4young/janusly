@@ -22,14 +22,14 @@ A missing `org_id` filter on any query lets one organization read or mutate anot
 
 **What:**
 
-- `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run`, the `agent` planner `"openai"`, and the `ai` step type each wrap the OpenAI call in `try/catch`.
+- `/ai/generate-workflow`, `/ai/explain-workflow`, `/ai/explain-run`, the `agent` planner `"openai"`, and the `ai` step type each wrap the LLM call in `try/catch`.
 - On any failure (quota, rate, network, malformed output), the response stays `{ mode: "fallback", aiError: "<reason>", ... }` with the local content attached.
 - `aiError` flows to the UI — never swallowed.
-- `parseAiWorkflow` (in `apps/api/src/index.ts`) keeps its looser that coerces wrong-typed ids and drops invalid edges/conditions before Zod parse. The looser stays even when adding fields.
+- `/ai/generate-workflow` parses free-JSON output through `parseGeneratedWorkflow` (`apps/api/src/ai-generate-freejson.ts`), then converges through noop promotion, `sanitizeAiWorkflow` (`apps/api/src/ai-runtime.ts`), and bounded graph self-repair before fallback.
 
 **Why:**
 
-OpenAI calls fail routinely — rate limits, billing issues, transient network blips, malformed JSON output. Without the fallback contract, every AI surface becomes a single point of failure for the entire workflow runtime: a quota error could brick the run pipeline. The contract turns failure into a graceful degradation: features still work in deterministic mode, the user sees an explanation (`aiError`), and runs continue. The looser on `parseAiWorkflow` exists because LLM output drifts even with prompt engineering — coercing near-misses (wrong-typed ids, malformed edges) keeps the success rate high without sacrificing the strict schema for the runtime.
+LLM calls fail routinely — rate limits, billing issues, transient network blips, malformed JSON output. Without the fallback contract, every AI surface becomes a single point of failure for the entire workflow runtime: a quota error could brick the run pipeline. The contract turns failure into a graceful degradation: features still work in deterministic mode, the user sees an explanation (`aiError`), and runs continue. The parser + sanitize + repair chain exists because LLM output drifts even with prompt engineering — recovering near-misses keeps the success rate high without sacrificing the strict schema for the runtime.
 
 ## Engine atomicity & lifecycle
 
@@ -54,13 +54,13 @@ The SIGTERM/SIGINT handler drains in-flight jobs. Without it, a container restar
 
 **What:**
 
-- Every HTTP route on `apps/api/src/index.ts` is one entry in the exported `routes: Route[]` array. The `http.createServer` dispatcher iterates the array (first-match-wins), runs `requireAuth` + `requireRole` based on the route's declared shape, and invokes the handler. `Route` types live in `apps/api/src/routes.ts`.
-- Don't reintroduce inline `if (req.method === "POST" && req.url === "/x") { ... }` branches outside the registry. New routes plug in via `routes.push({...})` (or by appending to the literal at source); the dispatch loop is closed for modification.
+- Feature modules export small `<feature>Routes` arrays, and `apps/api/src/index.ts` spreads them into the composed `routes: Route[]` registry. The `http.createServer` dispatcher iterates the array (first-match-wins), runs `requireAuth` + route-declared role/permission gates, and invokes the handler. `Route` types live in `apps/api/src/routes.ts`.
+- Don't reintroduce inline `if (req.method === "POST" && req.url === "/x") { ... }` branches outside the registry. New routes join the relevant feature array (or a new feature route module) and `index.ts` composes that array; the dispatch loop is closed for modification.
 - Per-row multi-tenant scope still lives inside each handler — the dispatcher only handles auth + RBAC.
 
 **Why:**
 
-The dispatcher used to be 33 if/else branches in one giant function. Phase 2 will add 11+ more routes (one per ENG-030..ENG-040 sub-ticket that exposes API surface). Linear extension is unmaintainable; the registry plus a closed dispatcher (Open/Closed, the "O" in SOLID) lets new routes plug in without touching the dispatch loop. ENG-029 (run cancellation) was the first new route to land as a single object literal — that's the working proof of the contract.
+The dispatcher used to be a single giant `if/else` chain. Linear extension is unmaintainable; the registry plus a closed dispatcher (Open/Closed, the "O" in SOLID) lets new routes plug in without touching the dispatch loop. The current shape keeps route ownership in feature modules while preserving one ordered registry for auth/RBAC/permission enforcement.
 
 **Risk if violated:** dispatcher drift accumulates per ticket; a typo in a new if-branch silently disables a route; auth/RBAC enforcement diverges between branches; `index.ts` becomes unauditable again.
 

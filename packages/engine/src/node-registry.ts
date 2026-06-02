@@ -718,6 +718,11 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
   },
 
+  // `webhook` / `approval` keep the legacy checkpoint-coordinate token:
+  // the authenticated `/resume` route still gates the action, and the token
+  // mostly lets the UI/API point at the waiting node. `human_form` below uses
+  // an HMAC-signed token because form links can leave the app context and
+  // carry user-submitted data that becomes node output.
   webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
   approval: async (ctx) => ({ status: "waiting", reason: "Waiting for human approval", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
   human_form: async (ctx) => {

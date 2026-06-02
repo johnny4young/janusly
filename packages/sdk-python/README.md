@@ -3,10 +3,10 @@
 A typed Python client for the Janusly platform, plus a stdlib-only HMAC verifier for inbound webhooks. Sibling of the TypeScript SDK at `packages/sdk-node`.
 
 ```bash
-pip install janusly
+pip install -e packages/sdk-python
 ```
 
-Requires Python 3.10+. Before the package is published to PyPI, install it from a repo checkout with `pip install -e packages/sdk-python`.
+Requires Python 3.10+. The package is not published to PyPI yet; after the release ticket publishes it, consumers can use `pip install janusly`.
 
 ## Quickstart
 

@@ -247,7 +247,7 @@ A bullet list of 5–7 items. Every claim cites engineering reality (not "enterp
 - Provider-neutral LLM client with Anthropic as the supported runtime target (`anthropic/claude-haiku-4-5-20251001`). OpenAI remains registered for future verification, not current production use. Every AI call wraps in try/catch + AI fallback contract.
 - MCP client (consume external MCP servers as workflow steps) + MCP server (expose Janusly to AI assistants).
 - OpenTelemetry traces, meters, logs with `service.name="janusly"`. Drop-in for Grafana / Datadog / Honeycomb.
-- Self-host via `pnpm dev` — brings up Postgres + Redis + API + worker + web in <5 min. No magic; everything is `docker compose` + standard Node tooling.
+- Self-host via `pnpm dev` — brings up Postgres + Redis + Ollama + API + worker + web in <5 min. No magic; everything is `docker compose` + standard Node tooling.
 - Self-hostable posture: the runtime, the recovery loop, and the audit log are inspectable and runnable locally. Managed cloud adds hosted operations on top.
 
 **Presentation mode 2 — Structured comparison table (for CTOs choosing a stack):**
@@ -496,7 +496,7 @@ Esta sección se acompaña con un diagrama visual de los 8 pasos del loop (Promp
 - Cliente LLM neutro al proveedor con Anthropic como runtime soportado (`anthropic/claude-haiku-4-5-20251001`). OpenAI sigue registrado para verificación futura, no para uso actual en producción. Cada llamada de IA va envuelta en try/catch + contrato de fallback de IA.
 - Cliente MCP (consumí servidores MCP externos como pasos del flujo) + servidor MCP (exponé Janusly a asistentes de IA).
 - Trazas, métricas y logs de OpenTelemetry con `service.name="janusly"`. Drop-in para Grafana / Datadog / Honeycomb.
-- Self-host vía `pnpm dev` — levanta Postgres + Redis + API + worker + web en menos de 5 min. Sin magia; todo es `docker compose` + tooling Node estándar.
+- Self-host vía `pnpm dev` — levanta Postgres + Redis + Ollama + API + worker + web en menos de 5 min. Sin magia; todo es `docker compose` + tooling Node estándar.
 - Postura self-host: el runtime, el loop de recuperación y el registro de auditoría son inspeccionables y corribles localmente. El cloud manejado agrega operación hospedada encima.
 
 **Modo 2 — Tabla estructurada de comparación (CTOs eligiendo stack):**

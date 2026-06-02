@@ -14,6 +14,8 @@ Hot files:
 - `packages/data/src/mcpConnectionsRepo.ts` — multi-tenant-scoped CRUD + the LLM-prompt-injection helper `listExposedMcpToolsForAi`.
 - `packages/engine/src/mcp-client.ts` — transport-agnostic SDK wrapper + per-transport factories.
 - `packages/engine/src/mcp-tool-executor.ts` — per-call chokepoint (gates, env-ref resolution, rate limit, audit, usage).
+- `packages/engine/src/mcp-sandbox.ts` — pure stdio sandbox profile builder + redacted stderr capture.
+- `packages/engine/src/node-registry.ts` — `mcp_tool` node wrapper that emits run timeline events and turns failed envelopes into retry/DLQ errors.
 - `apps/api/src/routes/mcp-routes.ts` — admin CRUD + per-tool toggles + discovery.
 - `apps/api/src/ai-prompts.ts` — `composeGenerationSystemPrompt(base, exposedTools)` injects sanitised tool descriptions into `/ai/generate-workflow`.
 
@@ -23,10 +25,22 @@ Three supported transports, all dispatched by `connection.transport` in `buildCl
 
 ### `stdio`
 
-Spawns a local child process and speaks JSON-RPC over its stdin/stdout. Two safeties:
+Spawns a local child process and speaks JSON-RPC over its stdin/stdout. The
+runtime safety posture is layered because this is the only transport that runs
+an operator-chosen process on Janusly infrastructure:
 
-- **Command allowlist.** The `command` field must appear in the env-controlled allowlist `JANUSLY_MCP_ALLOWED_COMMANDS` (CSV) OR the tenant override `org_configs.mcp.clientCommandAllowlist`. Fail-closed when both are empty — registration rejects with a clear error.
+- **Command allowlist at registration and spawn time.** The `command` field must appear in the env-controlled allowlist `JANUSLY_MCP_ALLOWED_COMMANDS` (CSV) OR the tenant override `org_configs.mcp.clientCommandAllowlist`. Fail-closed when both are empty. `apps/api/src/routes/mcp-routes.ts` checks this when a connection is registered; `buildSandboxProfile` checks again on every spawn so tightening the allowlist after registration takes effect without a migration.
 - **Spawn env whitelist.** The child's env is rebuilt from scratch on every connect as `{ PATH, ...resolvedEnvRefs }`. We never spread `process.env` — a misconfigured third-party MCP server cannot read `DATABASE_URL`, `JANUSLY_RESUME_TOKEN_SECRET`, or any other variable the worker process happens to carry.
+- **Ephemeral cwd.** Every spawn gets a fresh `mkdtemp` directory under the OS temp dir and removes it in `close()`. This is best-effort hygiene, not a chroot; the child could still write absolute paths.
+- **Lifetime cap.** The stdio client arms a watchdog on first connect (`mcp.stdioMaxLifetimeMs`, default 600s, clamped by the catalog). Expiry closes the transport, then escalates to `SIGKILL` after a short grace window.
+- **Stderr byte cap with redaction.** Stderr is piped, buffered up to `mcp.stdioMaxStderrBytes`, and scrubbed with `scrubSecretShapes` when read for audit. Exceeding the cap kills the child and maps to `mcp_sandbox_stderr_exceeded`.
+- **Linux virtual-memory cap.** On Linux production by default, the command is wrapped through `/bin/sh -c 'ulimit -v "$1"; shift; exec "$@"' ...` using `mcp.stdioMaxVmKb`. `JANUSLY_MCP_SANDBOX_ENFORCE_LINUX=false` is the explicit opt-out for images where that shell wrapper is unavailable.
+
+Sandbox-driven failures map to stable envelope/audit codes:
+`mcp_sandbox_command_rejected`, `mcp_sandbox_lifetime_exceeded`, and
+`mcp_sandbox_stderr_exceeded`. The node wrapper writes both
+`mcp_tool.completed` and `mcp.sandbox.terminated` run events when a sandbox kill
+is the cause, with only the redacted stderr tail attached.
 
 ### `sse`
 
@@ -58,7 +72,11 @@ Discovery (one-shot at create + admin-triggered re-discovery) caches every tool 
 - `enabled: false` — operator must explicitly opt in for each tool before workflows can use it.
 - `writeSide: true` (fail-safe default) — admin marks down to `false` only when the tool is genuinely read-only. This drives the dry-run gate (sandbox replays skip write-side calls) and the write-consent gate.
 
-Re-discovery uses `upsertToolDescriptor` so existing `enabled` / `writeSide` flags survive an upstream rename. A vanished tool stays in the descriptor table as a no-op until manually deleted.
+Re-discovery uses `upsertToolDescriptor` so existing `enabled` / `writeSide`
+flags survive an upstream rename. A vanished upstream tool is not deleted by
+discovery; the cached descriptor remains until an admin disables or deletes the
+connection. If a workflow still calls the vanished tool, the remote SDK call
+fails and the node enters the normal retry/DLQ path.
 
 ## 5. Sanitisation layers (LLM exposure)
 
@@ -111,9 +129,9 @@ Read-side tools still execute so the validation run produces real signal. The ga
 
 **Audit (nine actions, API-level mutations only)**: `mcp.connection.created`, `mcp.connection.updated`, `mcp.connection.deleted`, `mcp.connection.rediscovered`, `mcp.connection.expose_to_ai_set`, `mcp.tool.enabled`, `mcp.tool.disabled`, `mcp.tool.rate_limit_set`, `mcp.tool.expose_to_ai_set`. The connection/tool `_expose_to_ai_set` rows and `_rate_limit_set` rows carry `{ before, after }` metadata so reverts are traceable; all fire only on actual change.
 
-**Per-invocation telemetry**: every executor call (success OR failure — rate-limit reject, timeout, missing env-ref, tool isError) writes:
+**Per-invocation telemetry**: every executor call (success OR failure — rate-limit reject, timeout, missing env-ref, tool isError, sandbox kill) writes:
 
-- A `run_events` row via `appendEvent` (`mcp_tool.started` + `mcp_tool.completed`) — operators see per-call timing on the run timeline.
+- A `run_events` row via `appendEvent` (`mcp_tool.started` + `mcp_tool.completed`) — operators see per-call timing on the run timeline. Sandbox-driven terminations also add `mcp.sandbox.terminated` with the typed reason and redacted stderr tail.
 - A `usage_events` row via the `setMcpUsageRecorder` DI seam (`metric: "tool.mcp.<alias>.<toolName>"`) — per-call cost on the billing dashboard, scoped by org.
 
 Telemetry recorder failures are caught and dropped. Telemetry must never break a tool path (mirrors the AI fallback contract).

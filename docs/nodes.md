@@ -2,11 +2,13 @@
 
 Every workflow is a DAG of `nodes` connected by `edges`. Each node has an `id`, a `type` (one of the supported types below), and a `config` object validated by the engine.
 
+The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; operators promote advanced runtime nodes in the Inspector or by editing the workflow JSON.
+
 Templating is supported in any string config value via `{{...}}`:
 
 - `{{context.<nodeId>.output.<field>}}` — read another node's output
 - `{{inputs.<field>}}` — read fields from the node's own config
-- `{{secret.<NAME>}}` — read `process.env.<NAME>` (workspace secret)
+- `{{secret.<NAME>}}` — read `process.env.<NAME>` directly (deploy/vault secret, not a `credentials` row)
 - `{{env.<NAME>}}` — read `process.env.<NAME>` (any env var)
 
 ## `noop`
@@ -77,7 +79,7 @@ For true row-by-row CSV processing, use the `csv.fetch` tool instead of `http.re
   "id": "summarize_invoices_csv",
   "type": "tool",
   "config": {
-    "toolName": "csv.fetch",
+    "tool": "csv.fetch",
     "input": {
       "url": "https://files.partner.example.com/invoices/2026-05.csv",
       "headers": { "Accept": "text/csv" },
@@ -159,7 +161,7 @@ Iterates over `config.items` (array, comma-separated string, or template that re
 
 ## `tool`
 
-Invokes a builtin tool from the registry (`http.request`, `text.uppercase`, `json.pick`).
+Invokes a registered in-tree tool such as `http.request`, `text.uppercase`, `json.pick`, `csv.fetch`, `email.send`, or `pdf.generate`. The config key is always `tool`; `input` is rendered through the template engine before execution. In validation/sandbox replay, write-side tools are skipped while read-side tools still run.
 
 ```jsonc
 {
@@ -176,7 +178,7 @@ Invokes a builtin tool from the registry (`http.request`, `text.uppercase`, `jso
 
 ## `agent`
 
-Runs a single-agent loop using either the rule-based planner or an OpenAI planner (`config.planner: "rules" | "openai"`). The agent picks tools from the registry and iterates up to `maxSteps` times. With `reflection: true`, each step is followed by a self-check.
+Runs a single-agent loop using either the rule-based planner or the provider-backed planner (`config.planner: "rules" | "openai"`). The agent picks tools from the registry and iterates up to `maxSteps` times. With `reflection: true`, each step is followed by a self-check.
 
 ```jsonc
 {
@@ -239,9 +241,29 @@ Pure heuristic node: inspects an input string for failure signals (`error`, `fai
 
 **Output:** `{ decision: "accept", reason: "...", input: "..." }`
 
+## `router` / `router_llm`
+
+Chooses one candidate branch using the decision engine. `config.candidates` must list target node ids with the canonical `{ "nodeId": "..." }` shape; the runtime still accepts the legacy `{ "id": "..." }` field for old AI-generated drafts. Optional `strategy` values are `auto`, `cheapest`, `fastest`, and `balanced`; the decision engine also reads run context `preferences` / `budget` and org routing stats.
+
+```jsonc
+{
+  "id": "pick_route",
+  "type": "router",
+  "config": {
+    "strategy": "balanced",
+    "candidates": [
+      { "nodeId": "fast_path", "avgLatencyMs": 2000, "avgCost": 0.04, "successRate": 0.97 },
+      { "nodeId": "cheap_path", "avgLatencyMs": 8000, "avgCost": 0.01, "successRate": 0.91 }
+    ]
+  }
+}
+```
+
+**Output:** `{ decision: { chosenNodeId, ranking, strategy, ... } }`
+
 ## `ai`
 
-Synthetic AI placeholder. Echoes the prompt and the available context. Replace with an OpenAI/Anthropic call when integrating a real model.
+Runs a provider-neutral LLM text call. `config.prompt` is the inline prompt; `config.promptRef` can point to a saved prompt registry entry and wins over `prompt` when both are set. `config.variables` supplies prompt-ref variables, and `config.model` can be either a bare model id or a `<provider>/<model>` override. Provider errors, missing prompt refs, budget blocks, and missing API keys complete the node with `mode: "fallback"` instead of throwing into retry/DLQ.
 
 ```jsonc
 {
@@ -251,11 +273,11 @@ Synthetic AI placeholder. Echoes the prompt and the available context. Replace w
 }
 ```
 
-**Output:** `{ prompt, contextUsed, response: string }`
+**Output:** AI success returns `{ mode: "ai", model, provider, prompt, response, usage?, costUsd?, latencyMs? }`; fallback returns `{ mode: "fallback", aiError?, prompt, response, ... }`.
 
 ## `webhook`
 
-Pauses the run and emits a `node.waiting` event with a `resumeToken` of the form `<runId>:<nodeId>`. Resume with `POST /resume`.
+Pauses the run and emits a `node.waiting` event with a resume token of the form `<runId>:<nodeId>`. Resume with `POST /resume`; the resume payload is stored as this node's output so downstream templates can read fields from the inbound webhook.
 
 ```jsonc
 {
@@ -265,11 +287,11 @@ Pauses the run and emits a `node.waiting` event with a `resumeToken` of the form
 }
 ```
 
-**Output (on resume):** the run continues; this node is marked `succeeded`.
+**Output (on resume):** the submitted resume input, or `{}` when none was supplied.
 
 ## `approval`
 
-Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node.
+Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node. The resume token is the legacy `<runId>:<nodeId>` shape; the approval decision is represented by the timeline/audit trail, while node output stays `{}` for backward compatibility.
 
 ```jsonc
 {
@@ -279,11 +301,11 @@ Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI s
 }
 ```
 
-**Output (on resume):** the run continues; node `succeeded`.
+**Output (on resume):** `{}`. The approval decision is recorded in events/audit, not node state.
 
 ## `human_form`
 
-Pauses the run and asks an operator for structured input. The node config carries a small JSON-schema subset; the web renders it as a form, validates submitted values, and resumes the run with the parsed form body as this node's output.
+Pauses the run and asks an operator for structured input. The node config carries a small JSON-schema subset; the web renders it as a form, validates submitted values, and resumes the run with the parsed form body as this node's output. Unlike `webhook` / `approval`, the resume token is HMAC-signed and bound to org/run/node/purpose.
 
 ```jsonc
 {
@@ -306,6 +328,163 @@ Pauses the run and asks an operator for structured input. The node config carrie
 ```
 
 **Output (on resume):** the submitted object, for example `{ employee: "Ana", days: 3, urgent: false }`.
+
+## `subworkflow`
+
+Starts another saved workflow as a child run and pauses until the child reaches a terminal status. The child workflow lookup is scoped to the same org, `config.input` is forwarded when present, otherwise the parent's run input is inherited, and subworkflow nesting is bounded by `runs.subworkflowMaxDepth`.
+
+```jsonc
+{
+  "id": "run_enrichment",
+  "type": "subworkflow",
+  "config": {
+    "workflowId": "customer-enrichment",
+    "input": { "customerId": "{{context.fetch_user.output.body.id}}" }
+  }
+}
+```
+
+**Output:** the child run's `outputJson` after the child succeeds. If the child fails or is cancelled, the parent node fails.
+
+## `wait_until`
+
+Pauses the run for an ISO 8601 duration, then resumes automatically through a delayed BullMQ job. Manual `POST /resume` can short-circuit the wait, and the delayed wake-up is idempotent if the node has already advanced.
+
+```jsonc
+{
+  "id": "wait_three_days",
+  "type": "wait_until",
+  "config": { "duration": "P3D" }
+}
+```
+
+**Waiting metadata:** `{ wakeAt, durationMs }`. **Output on resume:** `{}`.
+
+## `parallel_fork` / `join`
+
+`parallel_fork` declares named branches and succeeds immediately; actual fan-out is the normal DAG behavior of multiple outgoing edges. `join` waits for all incoming predecessors through the runtime's fan-in readiness check, then assembles branch outputs from `config.sources`.
+
+```jsonc
+{
+  "id": "fan_out",
+  "type": "parallel_fork",
+  "config": {
+    "branches": [
+      { "label": "crm", "description": "Fetch CRM data" },
+      { "label": "billing", "description": "Fetch billing data" }
+    ]
+  }
+}
+```
+
+```jsonc
+{
+  "id": "join_results",
+  "type": "join",
+  "config": {
+    "sources": {
+      "crm": "fetch_crm",
+      "billing": "fetch_billing"
+    }
+  }
+}
+```
+
+**`parallel_fork` output:** `{ branches: [{ label, description? }, ...] }`
+
+**`join` output:** `{ branches: { "<label>": <predecessor output>, ... } }`
+
+## `schedule`
+
+Passthrough trigger for cron-started workflows. The executor does not sleep or schedule by itself; `schedule-scheduler.ts` registers/removes the BullMQ repeatable job when a workflow is saved. `cronExpression` is a standard five-field cron string. `enabled: false` prevents scheduler registration, but manual `POST /start` still runs the node.
+
+```jsonc
+{
+  "id": "weekday_morning",
+  "type": "schedule",
+  "config": {
+    "cronExpression": "0 9 * * 1-5",
+    "enabled": true
+  }
+}
+```
+
+**Output:** `{ triggeredAt, cronExpression }`
+
+## `mcp_tool`
+
+Invokes a tool from an org-registered external MCP connection. The connection and descriptor must both be active/enabled; write-side execution requires both the process write flag and the tenant `mcp.clientWriteConsent` flag. Stdio transports run through the subprocess sandbox; URL transports keep the HTTP SSRF validation perimeter.
+
+```jsonc
+{
+  "id": "notion_lookup",
+  "type": "mcp_tool",
+  "config": {
+    "connectionAlias": "notion",
+    "toolName": "pages.search",
+    "input": { "query": "{{context.summary.output.title}}" },
+    "timeoutMs": 30000
+  }
+}
+```
+
+**Output:** the MCP tool's `output` payload. Runtime failures throw as node failures so retry/DLQ machinery applies.
+
+## Event-driven triggers
+
+`email_received`, `file_dropped`, and `mcp_server_event` are passthrough
+trigger nodes. The executor never talks to SMTP, a bucket, or an MCP server;
+the API ingestion seam owns all external I/O. Ingestion routes normalize the
+payload, write a `trigger_events` row, apply a per-trigger storm guard, and
+start a run with the normalized event under `input.event`. Replay uses the
+stored payload from that structured event row.
+
+- `POST /triggers/email/ingest` matches `email_received.config.aliasKey`, then enforces DKIM and optional `fromDomains`.
+- `POST /triggers/file/ingest` matches `file_dropped.config.bucket` plus optional `prefix` / `extensions`.
+- `POST /triggers/mcp/ingest` matches `mcp_server_event.config.connectionAlias`, `resourceUri`, and optional `eventTypes`.
+- `POST /triggers/events/:id/replay` replays a stored event against the current latest workflow version.
+
+Manual `POST /start` still executes a workflow containing trigger nodes; in
+that path the trigger output carries an empty `event` object.
+
+```jsonc
+{
+  "id": "inbox",
+  "type": "email_received",
+  "config": {
+    "aliasKey": "invoices",
+    "dkimRequired": true,
+    "fromDomains": ["vendor.example"],
+    "rateLimitPerMin": 30
+  }
+}
+```
+
+```jsonc
+{
+  "id": "file_drop",
+  "type": "file_dropped",
+  "config": {
+    "bucket": "customer-imports",
+    "prefix": "org/default/",
+    "extensions": ["csv"]
+  }
+}
+```
+
+```jsonc
+{
+  "id": "mcp_change",
+  "type": "mcp_server_event",
+  "config": {
+    "connectionAlias": "notion",
+    "resourceUri": "notion://database/customer-tasks",
+    "eventTypes": ["notifications/resources/updated"]
+  }
+}
+```
+
+**Output:** `{ triggeredBy, triggeredAt, event }`
 
 ---
 

@@ -62,7 +62,7 @@ When new Pending rows were added to `docs/ROADMAP.md` §3b during the review, li
 
     ## Doc sync checklist (verifying the implementer's work)
 
-    - [x] `docs/ROADMAP.md` §3b Status flipped with summary
+    - [x] `docs/ROADMAP.md` §3b/§3c updated: Shipped row archived, or Partial row left active with Remaining
     - [ ] `docs/PLAN.md` §X.0 Status Update added (✎ I fixed inline)
     - [x] AGENTS.md (CLAUDE.md symlink intact, no roadmap leaked)
     - [x] README.md without leaked planning (✎ I fixed inline if any)

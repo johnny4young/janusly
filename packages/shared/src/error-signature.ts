@@ -28,9 +28,11 @@
  * Used by:
  *   - `packages/engine/src/cluster-failures.ts` (the aggregator).
  *   - `packages/data/src/failureClusterRepo.ts` exposes the samples.
- *   - `apps/api/src/index.ts:GET /dlq/clusters` ties them together.
- *   - `apps/api/src/index.ts:GET /workflows/health/delta` runs the
- *     same-failure check against the caller-supplied prior signature.
+ *   - `apps/api/src/routes/dlq-routes.ts:GET /dlq/clusters` ties them
+ *     together.
+ *   - `apps/api/src/routes/workflows-routes.ts:GET /workflows/health/delta`
+ *     runs the same-failure check against the caller-supplied prior
+ *     signature.
  *   - `apps/web/src/components/RecoveryDialog.tsx` derives the prior
  *     signature from the source DLQ before calling the delta route.
  *

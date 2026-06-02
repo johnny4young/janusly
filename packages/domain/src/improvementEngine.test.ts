@@ -27,6 +27,18 @@ describe('computeConfidence', () => {
     expect(result.confidence).toBeLessThanOrEqual(100)
     expect(result.confidence).toBeGreaterThanOrEqual(0)
   })
+
+  it('does not let a latency win mask a success-rate regression', () => {
+    // Deltas are normalized to the same fractional scale, so a large absolute
+    // latency improvement (2000ms -> 1000ms) cannot swamp a sharp success
+    // drop (0.9 -> 0.4). Pre-normalization this read as "improving" because
+    // raw millisecond deltas dominated the weighted blend.
+    const result = computeConfidence(
+      { successRate: 0.9, avgLatencyMs: 2000, avgCost: 0.01 },
+      { successRate: 0.4, avgLatencyMs: 1000, avgCost: 0.01 },
+    )
+    expect(result.status).toBe('regressing')
+  })
 })
 
 describe('shouldRollback / shouldPromote', () => {

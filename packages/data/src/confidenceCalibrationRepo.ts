@@ -221,4 +221,4 @@ export async function listOrgIdsWithCalibrationEnabled(
     .filter((orgId) => !optedOutSet.has(orgId));
 }
 
-// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; the org-discovery read is the documented global exception - see AGENTS.md "Decision engine / RL".
+// Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; the org-discovery read is the documented global exception - see AGENTS.md "AuthContext is Janusly-resolved".

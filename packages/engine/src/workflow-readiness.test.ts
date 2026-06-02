@@ -174,6 +174,17 @@ describe('checkWorkflowReadiness', () => {
     expect(result.issues.find((issue) => issue.code === 'raw_secret_in_config')).toBeUndefined()
   })
 
+  it('does flag unsupported credential-template strings', () => {
+    const workflow = makeWorkflow({
+      nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://api.example.com', method: 'GET', timeoutMs: 5000, retry: { maxAttempts: 3 }, headers: { Authorization: 'Bearer {{credential.GITHUB_TOKEN}}' } } }],
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'raw_secret_in_config',
+      nodeId: 'fetch',
+    }))
+  })
+
   it('rolls up to fail when any issue is fail-level even alongside warns', () => {
     const workflow = makeWorkflow({
       nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://api.example.com', method: 'GET' } }],

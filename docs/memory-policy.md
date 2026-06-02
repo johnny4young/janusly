@@ -2,19 +2,18 @@
 
 > 🇬🇧 English: this document · 🇪🇸 Español: [`memory-policy-es.md`](memory-policy-es.md).
 
-> Status: canonical policy. Closing draft of ENG-114. Operationalizes the "AI
-> training data / memory opt-in policy" gate in `docs/ROADMAP.md` §3c.
-> Companion shipping work lives in ENG-115 (substrate) and ENG-116
-> (memory-assisted recovery). Do NOT ship persistent cross-run memory until
-> this policy is reviewed by product + legal and the `org_configs.memory.*`
-> catalog entries documented here are merged.
+> Status: canonical policy. ENG-114 closed the policy gate; ENG-115 shipped the
+> `memory_entries` substrate and ENG-116 shipped memory-assisted recovery.
+> Memory remains off by default and customer enablement still requires both
+> process-level and tenant-level consent plus the rollout approvals tracked in
+> §16.
 
 ## 0. One-paragraph summary
 
 Janusly may store summaries of past runs and approved recovery outcomes so AI
 suggestions improve over time. Memory is **off by default**, requires explicit
 org-level opt-in, is scoped per tenant, is treated as customer data (never as
-training data for model providers), and respects bounded retention with
+training data for model providers), and respects bounded retention plus planned
 operator-driven deletion and export. Recalled memory is framed to the LLM as
 data, never as instructions. Embedding failures degrade to empty recall — they
 never break workflow execution or recovery.
@@ -143,20 +142,26 @@ identically to other retention-managed tables.
 
 ### 6.1 Operator-driven deletion
 
-- **Per-entry delete:** admins can delete individual memory entries through
-  the operations UI. Writes audit `memory.entry.deleted` with the entry id but
-  not the content.
-- **Per-kind purge:** admins can purge all entries of a given kind for the
-  org. Writes audit `memory.kind.purged`.
-- **Bulk org-wide purge:** flipping `org_configs.memory.enabled` to `false`
-  triggers the bulk purge described in §4.
+- **Bulk org-wide purge (shipped):** flipping `org_configs.memory.enabled` to
+  `false` schedules the consent-revocation purge described in §4. The worker
+  calls `purgeMemoryForOrg(orgId)`, which writes `memory.bulk.purged`.
+- **Retention purge (shipped):** the daily memory-retention scheduler calls
+  `deleteExpiredMemory({})`, which writes `memory.retention.purged` for orgs
+  with expired rows.
+- **Per-entry delete (future admin surface):** admins should be able to delete
+  individual memory entries through the operations UI. That route is not in
+  tree today; when it lands it should write `memory.entry.deleted` with the
+  entry id but not the content.
+- **Per-kind purge (future admin surface):** admins should be able to purge all
+  entries of a given kind for the org. That route is not in tree today; when it
+  lands it should write `memory.kind.purged`.
 
 ### 6.2 Export
 
-- **Per-org export:** admins can request a memory export via
-  `POST /memory/export` (ENG-115). The route enqueues a background job that
-  produces a tenant-scoped JSONL file via the existing object-store
-  abstraction, signed-URL'd for 24 hours. Writes audit `memory.exported`.
+- **Per-org export (future admin surface):** admins should be able to request
+  a memory export that produces a tenant-scoped JSONL file via the existing
+  object-store abstraction, signed-URL'd for 24 hours. `POST /memory/export` is
+  not in tree today; when it lands it should write `memory.exported`.
 - **Per-user export does NOT apply.** Memory entries are org-scoped, not
   user-scoped. A user requesting "their" memory gets a 422 with the
   explanation that memory is shared at the org boundary.
@@ -297,10 +302,10 @@ existing cross-org isolation invariant.
 
 ## 12. Org configuration catalog (`org_configs.memory.*`)
 
-These keys are added to the safe `org_configs` catalog in
-`packages/data/src/orgConfigRepo.ts` by ENG-114. They are validated at write
-time, audited, and rejected by the existing forbidden-name / forbidden-value
-guards if they look like credentials.
+These keys live in the safe `org_configs` catalog in
+`packages/data/src/orgConfigRepo.ts`. They are validated at write time,
+audited, and rejected by the existing forbidden-name / forbidden-value guards
+if they look like credentials.
 
 | Key | Type | Default | Bounds | Notes |
 | --- | --- | --- | --- | --- |
@@ -309,16 +314,19 @@ guards if they look like credentials.
 | `memory.retentionDaysByKind` | json string | `""` (use per-kind defaults; `{}` also accepted) | each value in the per-kind maximum range from §5 | Validates closed-key set; rejects unknown kinds. |
 | `memory.recallMaxEntries` | number | `8` | `1..32` | Hard cap on entries returned per recall. |
 | `memory.recallMaxBytes` | number | `8192` | `1024..65536` | Hard cap on total bytes returned per recall. |
-| `memory.embeddingProvider` | string | `""` (use env default) | closed-enum: `anthropic` (other providers are unverified, see AGENTS.md AI integration) | Future re-embedding work; not a runtime override today. |
-| `memory.embeddingModel` | string | `""` (use env default) | non-empty if set | Stored on each entry for explicit re-embedding. |
+| `memory.embeddingProvider` | string | `""` (use env default) | closed-enum: `ollama,voyage,openai` | Provider used for memory embeddings. v1 runtime is wired to Ollama; Voyage/OpenAI are catalog-allowed future provider choices that require DPA/sub-processor review before customer use. |
+| `memory.embeddingModel` | string | `""` (use env default) | non-empty if set | Stored on each entry for explicit re-embedding. Defaults to BGE-m3 when provider is Ollama. |
+| `memory.embeddingBaseUrl` | string | `""` (use env / default) | URL-looking non-secret string | Optional per-tenant base URL for an operator-managed Ollama endpoint. Secret-looking values are rejected by the forbidden-value guard. |
 
 No key in this catalog stores secret material. Provider API keys remain in env
 / vault — never in `org_configs`.
 
 ## 13. Audit actions
 
-The following audit actions are introduced by ENG-114 (catalog only) and used
-by ENG-115+:
+The memory surface uses these audit actions. Some are implemented today
+(`created`, `failed`, `bulk.purged`, `retention.purged`, `recall.failed`);
+admin-only delete/export actions are reserved for the future admin routes named
+above:
 
 - `memory.consent.granted` — tenant flag flipped to true.
 - `memory.consent.revoked` — tenant flag flipped to false.
@@ -354,7 +362,10 @@ appearing in a recall payload, retention job miss):
 
 ## 15. What this policy does NOT do
 
-- It does not define the runtime memory store. That is ENG-115.
+- It is not the implementation reference for the runtime store. The shipped
+  code lives in `packages/data/src/memoryEntriesRepo.ts`,
+  `apps/api/src/ai-recovery-memory.ts`, and the memory retention / purge
+  schedulers.
 - It does not enumerate every possible memory consumer. New consumers must
   cite this policy and respect §3, §9, and §11.
 - It does not negotiate provider-side training opt-in. See §7.
@@ -363,7 +374,8 @@ appearing in a recall payload, retention job miss):
 
 ## 16. Approval log
 
-This document closes the engineering scope of ENG-114 once:
+ENG-114 has closed its engineering scope. The boxes below now distinguish
+implemented repo work from human rollout approvals:
 
 - [ ] Product review (PM sign-off recorded in the ticket comments).
 - [ ] Legal review (DPA language in §10 confirmed by counsel).
@@ -375,6 +387,6 @@ This document closes the engineering scope of ENG-114 once:
 - [x] `org_configs.memory.*` catalog entries merged (`packages/data/src/orgConfigRepo.ts`).
 - [x] Spanish-language parity shipped (`docs/memory-policy-es.md`).
 
-ENG-114 may be marked `Shipped` once the engineering checklist is complete.
-Enabling persistent runtime memory for customers remains blocked until the
+Runtime memory is shipped behind `JANUSLY_MEMORY_ENABLED` and
+`org_configs.memory.enabled`. Broad customer rollout remains blocked until the
 Product, Legal, and Engineering sign-off boxes above are checked.

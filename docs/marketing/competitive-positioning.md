@@ -100,7 +100,7 @@ The moments a buyer leaves a competitor and pivots toward Janusly. Each trigger 
 - **Trigger 4: "We tried n8n's error workflows; they don't explain anything."** — `POST /ai/patch-workflow` returns 1–3 alternatives with `confidence` (0–100) and `approachLabel` (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
 - **Trigger 5: "We're hitting AI cost surprises on our workflows."** — budget governance via `GET /billing/budget` + per-org / per-workflow caps in `org_configs.ai.budget*` + `workflow_budgets` + AI Studio cost preview chips from `@janusly/shared/src/llm-pricing`. Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md) (Operations dashboard tour).
 - **Trigger 6: "Our agency rewrites the same recovery glue per client."** — Janusly IS the recovery glue: DLQ + structured `errorJson` + sandbox replay + version rollback + audit per action + MCP client. Demo: [multi-agent-decision](../demos/multi-agent-decision.md) + [mcp-notion-summary](../demos/mcp-notion-summary.md).
-- **Trigger 7: "Compliance asked who approved this AI action."** — `audit_logs` per action + RBAC custom roles via per-org `org_roles` (17-key permission catalog) + SSO via WorkOS `(shipped)` + SCIM Directory Sync `(shipped)`. Demo: [incident-triage](../demos/incident-triage.md).
+- **Trigger 7: "Compliance asked who approved this AI action."** — `audit_logs` per action + RBAC custom roles via per-org `org_roles` (39-key permission catalog) + SSO via WorkOS `(shipped)` + SCIM Directory Sync `(shipped)`. Demo: [incident-triage](../demos/incident-triage.md).
 
 If a trigger is what the buyer just said out loud, jump to the matching demo. If two triggers fit, the buyer is segment-fit — use the persona-to-segment table at the bottom of [`icp.md`](icp.md) to pick which talk track to bring.
 
@@ -230,7 +230,7 @@ One block per AC competitor; seven blocks total. Every block follows the same sh
 
 **Where they're stronger.** Simplest AI builder UX in the category. Fastest time-to-first-AI-workflow for a non-engineer. Marketing-team-friendly, "I built this in an afternoon" buying motion.
 
-**Where Janusly is stronger.** Recovery Center as the home screen. Sandbox replay before save. MTTR rollup (`GET /recovery/metrics`) as the master metric. `audit_logs` per action. RBAC via per-org `org_roles` with the 17-key permission catalog. SSO via WorkOS `(shipped)` and SCIM Directory Sync `(shipped)`. We are for the operator who lives with the workflow in production; Gumloop is for the prototyper.
+**Where Janusly is stronger.** Recovery Center as the home screen. Sandbox replay before save. MTTR rollup (`GET /recovery/metrics`) as the master metric. `audit_logs` per action. RBAC via per-org `org_roles` with the 39-key permission catalog. SSO via WorkOS `(shipped)` and SCIM Directory Sync `(shipped)`. We are for the operator who lives with the workflow in production; Gumloop is for the prototyper.
 
 **Choose Gumloop when.** The team is non-technical and the buying criterion is "AI workflow demo by Friday." The workflow is one-off, low-stakes, not customer-facing. Audit / recovery / RBAC are not on the buyer's list.
 
@@ -389,7 +389,7 @@ Los momentos en que un comprador deja un competidor y pivota hacia Janusly. Cada
 - **Disparador 4: "Probamos los error workflows de n8n; no explican nada."** — `POST /ai/patch-workflow` retorna 1-3 alternativas con `confidence` (0-100) y `approachLabel` (`add_retry` / `raise_timeout` / `swap_secret_ref` / `add_approval` / `fix_url` / `other`). Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md).
 - **Disparador 5: "Estamos teniendo sorpresas de costo AI en nuestros flujos."** — governance de presupuesto vía `GET /billing/budget` + caps per-org / per-workflow en `org_configs.ai.budget*` + `workflow_budgets` + chips de cost preview en AI Studio desde `@janusly/shared/src/llm-pricing`. Demo: [failed-workflow-recovery](../demos/failed-workflow-recovery.md) (tour del dashboard de Operations).
 - **Disparador 6: "Nuestra agencia reescribe el mismo recovery glue por cada cliente."** — Janusly ES el recovery glue: DLQ + `errorJson` estructurado + replay en sandbox + version rollback + audit por acción + cliente MCP. Demo: [multi-agent-decision](../demos/multi-agent-decision.md) + [mcp-notion-summary](../demos/mcp-notion-summary.md).
-- **Disparador 7: "Compliance preguntó quién aprobó esta acción AI."** — `audit_logs` por acción + RBAC con roles custom vía per-org `org_roles` (catálogo de 17 permisos) + SSO vía WorkOS `(en producción)` + SCIM Directory Sync `(en producción)`. Demo: [incident-triage](../demos/incident-triage.md).
+- **Disparador 7: "Compliance preguntó quién aprobó esta acción AI."** — `audit_logs` por acción + RBAC con roles custom vía per-org `org_roles` (catálogo de 39 permisos) + SSO vía WorkOS `(en producción)` + SCIM Directory Sync `(en producción)`. Demo: [incident-triage](../demos/incident-triage.md).
 
 Si un disparador es lo que el comprador acaba de decir en voz alta, salta al demo que corresponde. Si dos disparadores coinciden, el comprador es segment-fit — usa la tabla de persona-to-segment al final de [`icp.md`](icp.md) para elegir qué talk track traer.
 
@@ -517,7 +517,7 @@ Un bloque por competidor del AC; siete bloques en total. Cada bloque sigue la mi
 
 **Dónde son más fuertes.** UX de builder AI más simple en la categoría. Tiempo más rápido a primer flujo AI para un no-ingeniero. Friendly para equipos de marketing, motion de compra "lo construí en una tarde".
 
-**Dónde Janusly es más fuerte.** Centro de Recuperación como home screen. Replay en sandbox antes de save. Rollup de MTTR (`GET /recovery/metrics`) como métrica maestra. `audit_logs` por acción. RBAC vía per-org `org_roles` con el catálogo de 17 permisos. SSO vía WorkOS `(en producción)` y SCIM Directory Sync `(en producción)`. Somos para el operador que vive con el flujo en producción; Gumloop es para el prototipador.
+**Dónde Janusly es más fuerte.** Centro de Recuperación como home screen. Replay en sandbox antes de save. Rollup de MTTR (`GET /recovery/metrics`) como métrica maestra. `audit_logs` por acción. RBAC vía per-org `org_roles` con el catálogo de 39 permisos. SSO vía WorkOS `(en producción)` y SCIM Directory Sync `(en producción)`. Somos para el operador que vive con el flujo en producción; Gumloop es para el prototipador.
 
 **Elige Gumloop cuando.** El equipo es no técnico y el criterio de compra es "demo de flujo AI para el viernes". El flujo es one-off, low-stakes, no customer-facing. Audit / recovery / RBAC no están en la lista del comprador.
 

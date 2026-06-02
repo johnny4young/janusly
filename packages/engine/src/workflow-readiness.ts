@@ -12,9 +12,11 @@
  * `warn` issue → status `warn`; clean → `pass`.
  *
  * Used by:
- *   - `apps/api/src/index.ts` — `POST /workflows/readiness` route returns
- *     the result; `POST /start` consults it when `JANUSLY_PRODUCTION_MODE`
- *     is set and rejects fail-level issues with HTTP 422.
+ *   - `apps/api/src/routes/workflows-routes.ts` — `POST
+ *     /workflows/readiness` returns the result.
+ *   - `apps/api/src/routes/runs-routes.ts` — `POST /start` consults it when
+ *     `JANUSLY_PRODUCTION_MODE` is set and rejects fail-level issues with
+ *     HTTP 422.
  *   - `apps/web/src/components/WorkflowReadinessBadge.tsx` — fetches the
  *     result and surfaces the rollup in the app header.
  *
@@ -80,7 +82,7 @@ const SENSITIVE_TOOL_SUFFIXES = [".write", ".create", ".send", ".delete", ".upda
 // the literal value into the workflow JSON. A field whose KEY matches
 // `SENSITIVE_KEY_PATTERN` and whose VALUE is one of these is fine; anything
 // else gets `raw_secret_in_config`.
-const SECRET_TEMPLATE_PATTERN = /\{\{\s*(secret|env|credential)\.[A-Za-z0-9_-]+\s*\}\}/;
+const SECRET_TEMPLATE_PATTERN = /\{\{\s*(secret|env)\.[A-Za-z0-9_-]+\s*\}\}/;
 
 /** Run every deterministic readiness check against a parsed workflow. */
 export function checkWorkflowReadiness(workflow: Workflow): ReadinessResult {
@@ -169,7 +171,7 @@ function checkRawSecretsInConfig(node: WorkflowNode, issues: ReadinessIssue[]) {
   walkConfig(node.config, (key, value) => {
     if (!SENSITIVE_KEY_PATTERN.test(key)) return;
     if (typeof value !== "string") return;
-    // Empty / template-only / `{{secret.X}}`-shaped values are fine.
+    // Empty / supported template values (`{{secret.X}}`, `{{env.X}}`) are fine.
     if (value.trim() === "") return;
     if (SECRET_TEMPLATE_PATTERN.test(value)) return;
     issues.push({
@@ -177,7 +179,7 @@ function checkRawSecretsInConfig(node: WorkflowNode, issues: ReadinessIssue[]) {
       severity: "fail",
       message: `Node "${node.id}" hardcodes what looks like a secret in field \`${key}\`. The persistence chokepoint will scrub it at write time, but the saved workflow JSON still carries the literal value.`,
       nodeId: node.id,
-      suggestion: `Replace the value with a template reference such as \`{{secret.${key.toUpperCase()}}}\` or \`{{credential.<NAME>}}\`.`,
+      suggestion: `Replace the value with a supported template reference such as \`{{secret.${key.toUpperCase()}}}\` / \`{{env.${key.toUpperCase()}}}\`, or move the call to an integration tool that references an operator-managed credential by name.`,
     });
   });
 }
