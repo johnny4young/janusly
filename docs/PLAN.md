@@ -582,7 +582,7 @@ pick order, and the ARCHIVED shipped history.
 Current execution focus:
 
 1. **Private-beta proof** — ENG-093 once three design partners are ready.
-2. **Generation reliability** — finish ENG-192, then ENG-191 and ENG-193.
+2. **Generation reliability** — ENG-191, then ENG-193.
 3. **Provider breadth** — ENG-194 only after generation reliability has a
    stable Anthropic baseline.
 4. **Generation refinements** — ENG-195 and ENG-196 after reliability/provider
@@ -676,7 +676,7 @@ execution queue is intentionally short and mirrors `docs/ROADMAP.md` §3a:
 1. **Private-beta proof:** pick ENG-093 once three design partners are ready.
    The shipped playbook in `docs/marketing/private-beta-playbook.md` is the
    operating manual for this sprint.
-2. **Generation reliability:** finish ENG-192, then ENG-191 and ENG-193. The
+2. **Generation reliability:** ENG-191, then ENG-193. The
    goal is a stable eval baseline before provider comparisons.
 3. **Provider breadth:** pick ENG-194 only after reliability is stable enough
    to compare OpenAI / open-weights endpoints honestly against Anthropic.

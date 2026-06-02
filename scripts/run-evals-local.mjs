@@ -201,7 +201,9 @@ try {
 
   // Force the child harness to hit the API this wrapper owns, even if the
   // caller's shell points JANUSLY_EVALS_API_URL at another dev instance.
-  await run("node", ["scripts/run-evals.mjs"], {
+  // Forward extra CLI args (e.g. `--update-baseline`) to the harness.
+  const forwardedArgs = process.argv.slice(2);
+  await run("node", ["scripts/run-evals.mjs", ...forwardedArgs], {
     env: { JANUSLY_EVALS_API_URL: apiUrl },
   });
 } catch (error) {
