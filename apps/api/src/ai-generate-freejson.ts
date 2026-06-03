@@ -14,11 +14,12 @@
  * legacy `constrained` mode keeps the `generateObject` path.
  *
  * Invariants:
- * - Allowed node shapes are unchanged: the parsed text is validated
- *   against `AiGenerationWorkflowSchema` (the same 11-branch subset the
- *   constrained path uses), so this is a pure mechanism swap. The route's
- *   downstream `promoteNoopPlaceholders` + `sanitizeAiWorkflow` remain the
- *   authoritative correctness gate.
+ * - The parsed text is validated against `AiGenerationWorkflowSchemaFreeJson`
+ *   — the 11 constrained shapes PLUS `parallel_fork` + `join` (13 branches).
+ *   free-JSON validates server-side, so it is not bound by the Anthropic
+ *   compiled-grammar cap that keeps `constrained`'s `generateObject` schema at
+ *   11. The route's downstream `promoteNoopPlaceholders` + `sanitizeAiWorkflow`
+ *   remain the authoritative correctness gate.
  * - Never silently degrades to a wrong workflow: a parse/validation
  *   failure on every attempt throws, and the route's existing try/catch
  *   degrades to the deterministic fallback per the AI-fallback contract.
@@ -27,7 +28,7 @@
 import { type LlmClient } from "@janusly/ai";
 import { type Workflow } from "@janusly/shared";
 
-import { AiGenerationWorkflowSchema } from "./ai-schemas";
+import { AiGenerationWorkflowSchemaFreeJson } from "./ai-schemas";
 
 /** Max generation attempts before degrading to fallback (blind re-sample). */
 export const FREE_JSON_MAX_ATTEMPTS = 2;
@@ -59,7 +60,7 @@ export function parseGeneratedWorkflow(text: string): Workflow | null {
   } catch {
     return null;
   }
-  const parsed = AiGenerationWorkflowSchema.safeParse(raw);
+  const parsed = AiGenerationWorkflowSchemaFreeJson.safeParse(raw);
   if (!parsed.success) return null;
   // The AI generation subset's discriminated-union node configs are strict
   // subsets of the engine's loose `config: Record<string, unknown>`, so the

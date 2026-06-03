@@ -3,15 +3,14 @@
  *
  * Two surfaces, two strategies:
  *
- *   - **`/ai/generate-workflow`** — full-workflow generation. Uses
- *     `AiGenerationWorkflowSchema`, an 11-branch slim discriminated
- *     union. Each `http` / `tool` / `agent` config declares only the
- *     fields the operator MUST populate. The default free-JSON path parses
- *     model text through this schema server-side; legacy constrained mode
- *     sends the same schema to the provider, where it compiles to JSON
- *     Schema `oneOf` and works against Anthropic. OpenAI strict mode rejects
- *     that provider-side `oneOf`; free-JSON avoids that structured-output
- *     blocker without widening the accepted workflow shape.
+ *   - **`/ai/generate-workflow`** — full-workflow generation. Legacy
+ *     constrained mode uses `AiGenerationWorkflowSchema`, an 11-branch slim
+ *     discriminated union sent to the provider. The default free-JSON path
+ *     validates model text server-side through `AiGenerationWorkflowSchemaFreeJson`,
+ *     the same base 11 shapes plus `parallel_fork` / `join`. Each config
+ *     declares only the fields the operator MUST populate. OpenAI strict mode
+ *     rejects provider-side `oneOf`; free-JSON avoids that structured-output
+ *     blocker because the union is not sent to the provider.
  *
  *   - **`/ai/patch-workflow`** — failure-recovery config patch. Uses
  *     ONE non-union envelope per call, picked by failing-node type via
@@ -23,10 +22,10 @@
  * Why two strategies: a single union schema compiled at the
  * structured-output boundary is incompatible with both providers under
  * realistic field counts. Anthropic caps compiled-grammar size; OpenAI
- * strict mode bans `oneOf` outright. Free-JSON keeps the generation route
- * on the slim union without sending that union to the provider. The patch
- * route knows the failing-node type at request time, so it can dispatch to
- * a single concrete schema per call.
+ * strict mode bans `oneOf` outright. Free-JSON keeps the generation route on
+ * local Zod validation without sending any union to the provider. The patch
+ * route knows the failing-node type at request time, so it can dispatch to a
+ * single concrete schema per call.
  *
  * Used by:
  *   - `apps/api/src/routes/ai-routes.ts` — `/ai/generate-workflow` and
@@ -49,11 +48,12 @@
  * reaching the operator. Engine `NodeSchema.config` is `Record<string,
  * unknown>`, so retry and bounds fields pass through verbatim.
  *
- * Adding a new node type means adding a branch to `AiNodeSchema` (for
- * the generation route) AND, if the type has rich resilience fields the
- * AI should be allowed to set, adding a per-type envelope here plus a
- * branch in `patchEnvelopeForNodeType`. Otherwise the generic envelope
- * picks it up automatically.
+ * Adding a constrained-mode node type means adding a branch to `AiNodeSchema`.
+ * Adding a free-JSON-only generation type means adding it to
+ * `AiNodeSchemaFreeJson` without widening the provider-sent constrained union.
+ * If the type has rich resilience fields the AI should be allowed to set,
+ * also add a per-type patch envelope plus a branch in `patchEnvelopeForNodeType`.
+ * Otherwise the generic envelope picks it up automatically.
  */
 
 import { EdgeSchema } from "@janusly/shared";
@@ -194,20 +194,18 @@ const AiLoopNode = z.object({
   }),
 });
 
-// AI generation emits 11 of the engine's 20 node types. Anthropic's
-// structured-output grammar compiler caps schema size — empirically the
-// limit is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
-// `claude-opus-4-7` (all three accept up to 11 branches with the full
-// envelope below; 12+ rejects with "The compiled grammar is too large").
-// The remaining 9 (`multi_agent`, `wait_until`, `webhook`,
-// `agent_reflection`, `router_llm`, `subworkflow`, `parallel_fork`, `join`,
-// `schedule`) stay operator-only — AI emits a `noop` placeholder named after
-// the requested step (e.g. `crew_review`, `fork_lead_enrichment`,
-// `join_branches`, `wait_24h`) and the operator promotes it in the Inspector
-// via the type `<select>`. The engine's
-// strict `WorkflowSchema` (used by /save, /start, /validate) still accepts
-// all 20, so once a workflow leaves AI generation it has full
-// expressiveness.
+// Constrained AI generation emits 11 of the engine's node types. Anthropic's
+// structured-output grammar compiler caps schema size — empirically the limit
+// is identical across `claude-haiku-4-5`, `claude-sonnet-4-5`, and
+// `claude-opus-4-7` (all three accept up to 11 branches with the full envelope
+// below; 12+ rejects with "The compiled grammar is too large"). free-JSON is
+// validated server-side, so `AiNodeSchemaFreeJson` below widens only that path
+// with direct `parallel_fork` / `join`. Other operator-only types stay `noop`
+// placeholders named after the requested step (e.g. `crew_review`,
+// `wait_24h`) and the operator promotes them in the Inspector via the type
+// `<select>`. The engine's strict `WorkflowSchema` (used by /save, /start,
+// /validate) still accepts every runtime node type, so once a workflow leaves
+// AI generation it has full expressiveness.
 //
 // CROSS-PROVIDER NOTE: this `discriminatedUnion` compiles to JSON Schema
 // `oneOf`, which OpenAI strict mode rejects (`'oneOf' is not permitted`).
@@ -237,17 +235,123 @@ const AiNodeSchema = z.discriminatedUnion("type", [
 ]);
 
 /**
- * Workflow envelope for `/ai/generate-workflow`. Slim discriminated
- * union, 11 branches. The default free-JSON path uses it only for local
- * validation; legacy constrained mode sends it to the provider, where
- * OpenAI strict mode rejects the compiled `oneOf`. See `AiNodeSchema`
- * above for the cross-provider note.
+ * Workflow envelope for legacy constrained `/ai/generate-workflow` mode. Slim
+ * discriminated union, 11 branches, sent to the provider, where OpenAI strict
+ * mode rejects the compiled `oneOf`. The default free-JSON path uses
+ * `AiGenerationWorkflowSchemaFreeJson` below. See `AiNodeSchema` above for the
+ * cross-provider note.
  */
 export const AiGenerationWorkflowSchema = z.object({
   dslVersion: z.literal("1.0").optional(),
   id: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   nodes: z.array(AiNodeSchema),
+  edges: z.array(EdgeSchema),
+});
+
+// ---------------------------------------------------------------------------
+// free-JSON extension: two STRUCTURAL fan-out/fan-in node types the model can
+// express directly (it designs the branches itself, so it has all the info —
+// unlike subworkflow / mcp_tool / triggers, which need org-specific ids the
+// model can't know and stay `noop` placeholders).
+//
+// Why a SEPARATE union instead of widening `AiNodeSchema`: the 11-branch cap
+// is Anthropic's compiled-grammar limit, which only bites `constrained` mode
+// (`generateObject` sends the schema to the provider; 12+ branches → "compiled
+// grammar too large"). free-JSON validates the model's JSON text SERVER-SIDE,
+// so it has no grammar limit and can use this wider 13-branch union. Keeping
+// the two unions separate lets `constrained` stay grammar-safe at 11 while
+// free-JSON (the default) gains direct fork/join.
+// ---------------------------------------------------------------------------
+
+/** `parallel_fork` for free-JSON direct emission. `branches` mirrors the
+ *  engine's `resolveParallelForkBranches` contract: 2..10 labeled branches
+ *  (an optional human description each). A parse-valid fork is also
+ *  `validateWorkflow`-valid, so it survives `sanitizeAiWorkflow` without the
+ *  repair pass. */
+const AI_FORK_JOIN_MIN_BRANCHES = 2;
+const AI_FORK_JOIN_MAX_BRANCHES = 10;
+const AI_FORK_JOIN_MAX_LABEL_LENGTH = 64;
+const AI_FORK_JOIN_MAX_DESCRIPTION_LENGTH = 280;
+
+const AiForkJoinLabelSchema = z
+  .string()
+  .refine((label) => label.trim().length > 0, { message: "branch label must be non-empty" })
+  .max(AI_FORK_JOIN_MAX_LABEL_LENGTH);
+
+const AiParallelForkBranchSchema = z.object({
+  label: AiForkJoinLabelSchema,
+  description: z.string().max(AI_FORK_JOIN_MAX_DESCRIPTION_LENGTH).optional(),
+});
+
+const AiParallelForkNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("parallel_fork"),
+  config: z.object({
+    branches: z
+      .array(AiParallelForkBranchSchema)
+      .min(AI_FORK_JOIN_MIN_BRANCHES)
+      .max(AI_FORK_JOIN_MAX_BRANCHES)
+      .refine(
+        (branches) => new Set(branches.map((branch) => branch.label)).size === branches.length,
+        { message: "parallel_fork.config.branches must use unique labels" },
+      ),
+  }),
+});
+
+/** `join` for free-JSON direct emission. `sources` mirrors the engine's
+ *  `resolveJoinSources` contract: a map of 2..10 branch labels → the id of the
+ *  node that ends that branch. The labels MUST match the paired fork's branch
+ *  labels and the values MUST be real upstream node ids (the engine + the
+ *  readiness gate verify reachability downstream). */
+const AiJoinNode = z.object({
+  id: z.string().min(1),
+  type: z.literal("join"),
+  config: z.object({
+    sources: z
+      .record(
+        AiForkJoinLabelSchema,
+        z.string().refine((nodeId) => nodeId.trim().length > 0, {
+          message: "join.config.sources values must be non-empty predecessor node ids",
+        }),
+      )
+      .refine((s) => Object.keys(s).length >= 2 && Object.keys(s).length <= 10, {
+        message: "join.config.sources must map 2..10 branch labels to predecessor node ids",
+      })
+      .refine((s) => new Set(Object.values(s)).size === Object.values(s).length, {
+        message: "join.config.sources must not reference the same predecessor node id more than once",
+      }),
+  }),
+});
+
+/** 13-branch node union for free-JSON validation: the 11 constrained shapes
+ *  plus `parallel_fork` + `join`. NOT sent to any provider — used only by
+ *  `parseGeneratedWorkflow` server-side. */
+export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
+  AiNoopNode,
+  AiHttpNode,
+  AiTransformNode,
+  AiConditionNode,
+  AiAiNode,
+  AiToolNode,
+  AiAgentNode,
+  AiRouterNode,
+  AiApprovalNode,
+  AiHumanFormNode,
+  AiLoopNode,
+  AiParallelForkNode,
+  AiJoinNode,
+]);
+
+/** Workflow envelope used by the default free-JSON generation path. Same
+ *  envelope as `AiGenerationWorkflowSchema` but with the wider 13-branch node
+ *  union (`constrained` mode keeps the 11-branch `AiGenerationWorkflowSchema`
+ *  for the Anthropic grammar cap). */
+export const AiGenerationWorkflowSchemaFreeJson = z.object({
+  dslVersion: z.literal("1.0").optional(),
+  id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  nodes: z.array(AiNodeSchemaFreeJson),
   edges: z.array(EdgeSchema),
 });
 
