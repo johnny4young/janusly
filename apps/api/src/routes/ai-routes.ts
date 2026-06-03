@@ -39,7 +39,7 @@ import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT, REVIEW_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
-import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
+import { aiStatus, fallbackExplainWorkflow, fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema, AiPatchStructuralEnvelope, AiSuggestImprovementEnvelope, patchEnvelopeForNodeType, ReviewFindingsSchema, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
@@ -89,6 +89,7 @@ export const aiRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const promptText = typeof body.prompt === "string" ? body.prompt : "";
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "generate-workflow", modelOverride);
       if (promptText.length > orgConfig.ai.promptMaxChars) {
         return sendJson(res, { error: `prompt exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
       }
@@ -160,7 +161,7 @@ export const aiRoutes: Route[] = [
             // Best-of-N: sample N independent drafts and keep the best by a
             // deterministic readiness score. The winner flows through the same
             // promote → sanitize → repair tail as a single-shot draft.
-            const candidates = await generateWorkflowCandidates(llm, systemPrompt, promptText, modelOverride, ctx, candidateTarget);
+            const candidates = await generateWorkflowCandidates(llm, systemPrompt, promptText, surfaceModel, ctx, candidateTarget, true);
             candidateCount = candidateTarget;
             const selection = selectBestCandidate(candidates);
             if (selection) {
@@ -173,7 +174,7 @@ export const aiRoutes: Route[] = [
               // Zero candidates even parsed — fall to the single-shot retry
               // path, which throws into the fallback contract if it also fails.
               validCandidates = 0;
-              const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, ctx);
+              const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, surfaceModel, ctx, true);
               pass1Workflow = gen.workflow;
               genModel = gen.model;
               genProvider = gen.provider;
@@ -182,7 +183,7 @@ export const aiRoutes: Route[] = [
           } else {
             // Single-shot (default): retry-on-parse-fail; throws after the
             // attempt cap into the fallback contract below.
-            const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, modelOverride, ctx);
+            const gen = await generateWorkflowFreeJson(llm, systemPrompt, promptText, surfaceModel, ctx, true);
             pass1Workflow = gen.workflow;
             genModel = gen.model;
             genProvider = gen.provider;
@@ -198,7 +199,8 @@ export const aiRoutes: Route[] = [
             schemaDescription: "Workflow DAG for /ai/generate-workflow.",
             system: systemPrompt,
             prompt: promptText,
-            modelHint: modelOverride,
+            modelHint: surfaceModel,
+            cacheSystemPrompt: true,
             context: { orgId: auth.orgId, userId: auth.userId },
           });
           // Cast: the AI-side discriminated-union node configs are strict
@@ -222,7 +224,7 @@ export const aiRoutes: Route[] = [
           workflow: pass1Workflow,
           originalPrompt: promptText,
           context: { orgId: auth.orgId, userId: auth.userId },
-          modelHint: modelOverride,
+          modelHint: surfaceModel,
         });
 
         // A draft can parse + shape-validate yet still fail the engine's
@@ -244,7 +246,8 @@ export const aiRoutes: Route[] = [
             system: systemPrompt,
             originalPrompt: promptText,
             candidate: promotion.workflow,
-            modelHint: modelOverride,
+            modelHint: surfaceModel,
+            cacheSystemPrompt: true,
             context: { orgId: auth.orgId, userId: auth.userId },
           });
           workflow = repaired.workflow;
@@ -301,6 +304,7 @@ export const aiRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const { workflow } = body;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "explain-workflow", modelOverride);
       const explainWorkflowIdEarly = workflow && typeof workflow === "object" && "id" in (workflow as object) && typeof (workflow as { id?: unknown }).id === "string" ? (workflow as { id: string }).id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowIdEarly, action: "ai.workflow.explained" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
@@ -324,7 +328,7 @@ export const aiRoutes: Route[] = [
           : "";
         const result = await llm.generateText({
           prompt: `You are a workflow assistant. Explain this DAG clearly with bullet points covering purpose, flow, and any noteworthy nodes:\n${JSON.stringify(workflow, null, 2)}${explainLocaleSuffix}`,
-          modelHint: modelOverride,
+          modelHint: surfaceModel,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: explainWorkflowId },
         });
         await auditAction(auth, "ai.workflow.explained", { targetType: "ai", metadata: { mode: "ai", model: result.model, provider: result.provider } });
@@ -353,6 +357,7 @@ export const aiRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "review-workflow", modelOverride);
       const reviewWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: reviewWorkflowIdEarly, action: "ai.workflow.reviewed" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
@@ -396,7 +401,7 @@ export const aiRoutes: Route[] = [
             ? "\n\nIMPORTANT — RESPONSE LANGUAGE: write the per-issue `message`, `rationale`, and `suggestion` fields in Spanish. Keep `code` (closed enum), `severity` values (`info`/`warn`/`fail`), `nodeId`, and `edgeId` verbatim — they are machine identifiers."
             : ""),
           prompt: JSON.stringify(workflow),
-          modelHint: modelOverride,
+          modelHint: surfaceModel,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
         });
         const review = mergeReviewFindings(
@@ -435,6 +440,8 @@ export const aiRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "patch-workflow", modelOverride);
       const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
       if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
       // Org-level budget gate on recovery routes. The per-workflow gate
@@ -605,6 +612,7 @@ export const aiRoutes: Route[] = [
 
       const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
+        model: surfaceModel,
         envelopeSchema: envelopeSchemaAny,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
@@ -871,6 +879,7 @@ export const aiRoutes: Route[] = [
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
       const focus = typeof body.focus === "string" ? body.focus : undefined;
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "suggest-improvement", modelOverride);
       const suggestWorkflowIdEarly = typeof candidate.id === "string" ? candidate.id : undefined;
       const budgetGate = await gateBudget({ orgId: auth.orgId, userId: auth.userId, workflowId: suggestWorkflowIdEarly, action: "ai.workflow.improvement_suggested" });
       if (budgetGate.blocked) return sendJson(res, budgetBlockedResponse(budgetGate.envelope), 402);
@@ -896,7 +905,7 @@ export const aiRoutes: Route[] = [
         envelopeSchema: AiSuggestImprovementEnvelope,
         workflow,
         focus,
-        model: modelOverride,
+        model: surfaceModel,
         context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
         // See `/ai/patch-workflow` for the locale propagation rationale.
         locale: localeFromRequest(req),
@@ -1030,7 +1039,10 @@ export const aiRoutes: Route[] = [
   { method: "POST", match: "/ai/explain-run",
     handler: async ({ req, res, auth }) => {
       const { orgConfig, llm } = await orgLlmRuntime(auth.orgId);
-      const { runId, question } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const explainRunBody = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const { runId, question } = explainRunBody;
+      const modelOverride = typeof explainRunBody.model === "string" ? explainRunBody.model : undefined;
+      const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "explain-run", modelOverride);
       if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
       const questionText = typeof question === "string" ? question : undefined;
       if (questionText && questionText.length > orgConfig.ai.promptMaxChars) {
@@ -1063,6 +1075,7 @@ export const aiRoutes: Route[] = [
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId)).orderBy(asc(runEvents.createdAt));
       const result = await explainRun({
         llm,
+        model: surfaceModel,
         run: run[0],
         events,
         question: questionText,

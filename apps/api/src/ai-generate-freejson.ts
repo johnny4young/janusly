@@ -90,6 +90,7 @@ export async function generateWorkflowFreeJson(
   prompt: string,
   modelHint: string | undefined,
   context: { orgId: string; userId?: string },
+  cacheSystemPrompt = false,
 ): Promise<FreeJsonGenerationResult> {
   let lastModel = "";
   let lastProvider = "";
@@ -99,6 +100,7 @@ export async function generateWorkflowFreeJson(
       prompt: attempt === 1 ? prompt : prompt + RETRY_NUDGE,
       responseFormat: "json",
       modelHint,
+      cacheSystemPrompt,
       context,
     });
     lastModel = result.model;

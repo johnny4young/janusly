@@ -22,6 +22,7 @@ import { createLlmClient, resolveLlmConfig } from "@janusly/ai";
 import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
+  type AiSurface,
 } from "@janusly/data";
 import type { DecisionCandidate } from "@janusly/domain";
 import { validateExpression } from "@janusly/engine/src/expression";
@@ -42,6 +43,26 @@ export async function orgLlmRuntime(orgId: string) {
   const orgConfig = await getOrgConfigSnapshot(orgId);
   const llmConfig = resolveLlmConfig(applyOrgConfigToEnv(orgConfig));
   return { orgConfig, llm: llmConfig ? createLlmClient(llmConfig) : null, llmConfig };
+}
+
+/**
+ * Resolve the effective model id for one AI surface call. Precedence, highest
+ * first: (1) the per-request override (`body.model`), (2) the org's per-surface
+ * default from `ai.surfaceModels`, (3) `undefined` → the LLM client's global
+ * default model. The result is passed verbatim as `modelHint`, so a bare id
+ * routes to the configured provider and a `"<provider>/<model>"` spec overrides
+ * the provider for that one call (see `packages/ai/src/llm-client.ts`).
+ */
+export function resolveSurfaceModel(
+  surfaceModels: Record<string, string>,
+  surface: AiSurface,
+  requestOverride?: string,
+): string | undefined {
+  const requestModel = requestOverride?.trim();
+  if (requestModel) return requestModel;
+
+  const surfaceModel = surfaceModels[surface]?.trim();
+  return surfaceModel || undefined;
 }
 
 /**

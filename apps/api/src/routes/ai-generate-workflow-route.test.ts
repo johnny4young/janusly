@@ -40,6 +40,13 @@ vi.mock("../ai-runtime", () => ({
   fallbackWorkflowForPrompt: vi.fn(() => FALLBACK_WF),
   aiStatus: vi.fn(),
   fallbackExplainWorkflow: vi.fn(),
+  // Real (pure) implementation — the route's per-surface model precedence is
+  // under test, so a passthrough mock would defeat the assertions.
+  resolveSurfaceModel: (
+    surfaceModels: Record<string, string>,
+    surface: string,
+    requestOverride?: string,
+  ) => requestOverride ?? surfaceModels?.[surface] ?? undefined,
 }));
 
 vi.mock("../ai-generation-memory", () => ({
@@ -108,9 +115,14 @@ function makeLlm(opts: { text?: string[]; object?: unknown }) {
   };
 }
 
-function setRuntime(generationMode: string, llm: ReturnType<typeof makeLlm>, generationCandidates = 1) {
+function setRuntime(
+  generationMode: string,
+  llm: ReturnType<typeof makeLlm>,
+  generationCandidates = 1,
+  surfaceModels: Record<string, string> = {},
+) {
   orgLlmMock.mockResolvedValue({
-    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60 } } as never,
+    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels } } as never,
     llm: llm as never,
     llmConfig: {} as never,
   });
@@ -246,5 +258,50 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(meta.mode).toBe("ai");
     expect(meta.generationMode).toBe("constrained");
     expect(meta.generationAttempts).toBe(1);
+  });
+});
+
+describe("POST /ai/generate-workflow — system-prompt caching + per-surface model", () => {
+  // The mock fns are declared with no args, so `mock.calls[i]` types as an
+  // empty tuple under `tsc`; cast to read the captured option object (mirrors
+  // the pattern in `ai-generate-freejson.test.ts`).
+  const firstCall = (fn: unknown) =>
+    (fn as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>;
+
+  it("free_json: opts the generation system prompt into Anthropic caching", async () => {
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+
+    await callGenerate();
+
+    expect(firstCall(llm.generateText).cacheSystemPrompt).toBe(true);
+  });
+
+  it("constrained: opts the generation system prompt into Anthropic caching", async () => {
+    const llm = makeLlm({ object: VALID_WORKFLOW });
+    setRuntime("constrained", llm);
+
+    await callGenerate();
+
+    expect(firstCall(llm.generateObject).cacheSystemPrompt).toBe(true);
+  });
+
+  it("threads the per-surface model as the modelHint when no request override", async () => {
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm, 1, { "generate-workflow": "claude-sonnet-4-5" });
+
+    await callGenerate();
+
+    expect(firstCall(llm.generateText).modelHint).toBe("claude-sonnet-4-5");
+  });
+
+  it("lets the per-request body.model override the per-surface model", async () => {
+    readJsonMock.mockResolvedValue({ prompt: "make a flow", model: "anthropic/claude-opus-4" } as never);
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm, 1, { "generate-workflow": "claude-sonnet-4-5" });
+
+    await callGenerate();
+
+    expect(firstCall(llm.generateText).modelHint).toBe("anthropic/claude-opus-4");
   });
 });
