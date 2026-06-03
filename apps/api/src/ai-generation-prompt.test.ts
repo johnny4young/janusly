@@ -13,13 +13,17 @@ import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "./ai-prompts";
 
 describe("generate-workflow system prompt", () => {
-  it("documents the current 11-node Anthropic grammar selection", () => {
-    expect(promptsSource).toContain("'approval', 'human_form', 'loop'");
-    expect(promptsSource).toContain("The platform supports 12 more operator-only types (multi_agent");
+  it("documents the free-JSON 13-node selection (11 base + direct parallel_fork/join)", () => {
+    // free-JSON can emit the two structural fan-out/fan-in types directly; the
+    // operator-only list dropped to 10 (parallel_fork/join removed from it).
+    expect(promptsSource).toContain("'loop', 'parallel_fork', 'join'");
+    expect(promptsSource).toContain("The platform supports 10 more operator-only types (multi_agent");
     expect(promptsSource).toContain("email_received, file_dropped, mcp_server_event");
+    expect(promptsSource).toContain("FORK/JOIN RULE");
     expect(promptsSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
     expect(promptsSource).toContain("use noop placeholders for teams/crews/groups that need multi_agent promotion");
-    expect(promptsSource).not.toContain("'approval', 'multi_agent', 'loop'");
+    // parallel_fork/join are no longer in the operator-only noop list.
+    expect(promptsSource).not.toContain("agent_reflection, parallel_fork, join, schedule");
   });
 
   it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {

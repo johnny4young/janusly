@@ -52,11 +52,30 @@ describe("parseGeneratedWorkflow", () => {
   it("parses a fenced valid workflow", () => {
     expect(parseGeneratedWorkflow("```json\n" + VALID_JSON + "\n```")).not.toBeNull();
   });
+  it("parses direct free-JSON parallel_fork and join nodes", () => {
+    const parallelJson = JSON.stringify({
+      nodes: [
+        { id: "fork", type: "parallel_fork", config: { branches: [{ label: "crm" }, { label: "billing" }] } },
+        { id: "fetch_crm", type: "http", config: { url: "https://api.example.com/crm" } },
+        { id: "fetch_billing", type: "http", config: { url: "https://api.example.com/billing" } },
+        { id: "merge", type: "join", config: { sources: { crm: "fetch_crm", billing: "fetch_billing" } } },
+      ],
+      edges: [
+        { from: "fork", to: "fetch_crm" },
+        { from: "fork", to: "fetch_billing" },
+        { from: "fetch_crm", to: "merge" },
+        { from: "fetch_billing", to: "merge" },
+      ],
+    });
+    const wf = parseGeneratedWorkflow(parallelJson);
+    expect(wf?.nodes.map((node) => node.type)).toContain("parallel_fork");
+    expect(wf?.nodes.map((node) => node.type)).toContain("join");
+  });
   it("returns null on malformed JSON", () => {
     expect(parseGeneratedWorkflow("{ not valid json ]")).toBeNull();
   });
   it("returns null when the shape is outside the generation subset", () => {
-    // `type: "totally_unknown"` is not in the 11-branch discriminated union.
+    // `type: "totally_unknown"` is not in the 13-branch free-JSON union.
     expect(parseGeneratedWorkflow('{"nodes":[{"id":"n1","type":"totally_unknown","config":{}}],"edges":[]}')).toBeNull();
   });
   it("returns null on empty text", () => {
