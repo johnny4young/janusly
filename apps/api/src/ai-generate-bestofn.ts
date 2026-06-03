@@ -70,11 +70,12 @@ export async function generateWorkflowCandidates(
   modelHint: string | undefined,
   context: { orgId: string; userId?: string },
   n: number,
+  cacheSystemPrompt = false,
 ): Promise<GeneratedCandidate[]> {
   const count = clampCandidateCount(n);
   const settled = await Promise.allSettled(
     Array.from({ length: count }, () =>
-      llm.generateText({ system, prompt, responseFormat: "json", modelHint, context }),
+      llm.generateText({ system, prompt, responseFormat: "json", modelHint, cacheSystemPrompt, context }),
     ),
   );
 

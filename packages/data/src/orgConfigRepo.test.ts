@@ -543,3 +543,56 @@ describe("ORG_CONFIG_DEFINITIONS retention.* family", () => {
     expect(() => normalizeOrgConfigValue(d, max + 1)).toThrow(new RegExp(`<= ${max}`));
   });
 });
+
+describe("normalizeOrgConfigValue — ai.surfaceModels JSON validator", () => {
+  const def = findDef("ai.surfaceModels");
+
+  it("defaults to empty string and allows empty / whitespace", () => {
+    expect(def.defaultValue).toBe("");
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+    expect(normalizeOrgConfigValue(def, "   ")).toBe("");
+  });
+
+  it("accepts a valid map of known surfaces to model ids", () => {
+    const json = JSON.stringify({
+      "patch-workflow": "claude-sonnet-4-5",
+      "suggest-improvement": "anthropic/claude-sonnet-4-5",
+    });
+    expect(normalizeOrgConfigValue(def, json)).toBe(json);
+  });
+
+  it("accepts an empty JSON object", () => {
+    expect(normalizeOrgConfigValue(def, "{}")).toBe("{}");
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(() => normalizeOrgConfigValue(def, "{not-json}")).toThrow(/must be valid JSON/);
+  });
+
+  it("rejects a non-object JSON value", () => {
+    expect(() => normalizeOrgConfigValue(def, '["generate-workflow"]')).toThrow(/must be a JSON object/);
+    expect(() => normalizeOrgConfigValue(def, "null")).toThrow(/must be a JSON object/);
+  });
+
+  it("rejects an unknown surface key", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"evil-surface":"claude-haiku-4-5"}')).toThrow(/is not one of/);
+  });
+
+  it("rejects a non-string or empty model value", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"patch-workflow":123}')).toThrow(/must be a non-empty string/);
+    expect(() => normalizeOrgConfigValue(def, '{"patch-workflow":""}')).toThrow(/must be a non-empty string/);
+    expect(() => normalizeOrgConfigValue(def, '{"patch-workflow":"   "}')).toThrow(/must be a non-empty string/);
+  });
+
+  it("accepts every known surface slug", () => {
+    const all = JSON.stringify({
+      "generate-workflow": "claude-haiku-4-5",
+      "explain-workflow": "claude-haiku-4-5",
+      "review-workflow": "claude-sonnet-4-5",
+      "patch-workflow": "claude-sonnet-4-5",
+      "suggest-improvement": "claude-sonnet-4-5",
+      "explain-run": "claude-haiku-4-5",
+    });
+    expect(normalizeOrgConfigValue(def, all)).toBe(all);
+  });
+});

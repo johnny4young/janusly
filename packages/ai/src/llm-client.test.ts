@@ -691,3 +691,86 @@ describe("generateObject (schema-aware generation)", () => {
     expect(recorder).not.toHaveBeenCalled();
   });
 });
+
+describe("cacheSystemPrompt — Anthropic ephemeral system-prompt caching", () => {
+  beforeEach(() => {
+    generateTextMock.mockResolvedValue({ text: "ok", finishReason: "stop", usage: baseUsage });
+  });
+
+  const anthropicCfg = () =>
+    resolveLlmConfig({
+      JANUSLY_LLM_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+
+  it("marks the system prompt as an Anthropic cache breakpoint when enabled (generateText)", async () => {
+    const client = createLlmClient(anthropicCfg());
+    await client.generateText({ system: "big static prompt", prompt: "draft a flow", cacheSystemPrompt: true });
+
+    const opts = generateTextMock.mock.calls[0][0];
+    // `system` becomes a SystemModelMessage carrying the cache breakpoint…
+    expect(opts.system).toEqual({
+      role: "system",
+      content: "big static prompt",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+    // …and the user prompt is unchanged (still a plain string).
+    expect(opts.prompt).toBe("draft a flow");
+  });
+
+  it("leaves the system prompt a plain string when the flag is off", async () => {
+    const client = createLlmClient(anthropicCfg());
+    await client.generateText({ system: "big static prompt", prompt: "draft a flow" });
+
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.system).toBe("big static prompt");
+  });
+
+  it("does NOT cache when there is no system prompt (nothing to mark)", async () => {
+    const client = createLlmClient(anthropicCfg());
+    await client.generateText({ prompt: "draft a flow", cacheSystemPrompt: true });
+
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.system).toBeUndefined();
+  });
+
+  it("does NOT cache when the EFFECTIVE provider is not Anthropic (override to openai)", async () => {
+    const cfg = resolveLlmConfig({
+      OPENAI_API_KEY: "sk-x",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateText({
+      system: "big static prompt",
+      prompt: "draft a flow",
+      cacheSystemPrompt: true,
+      modelHint: "openai/gpt-4o",
+    });
+
+    const opts = generateTextMock.mock.calls[0][0];
+    // Anthropic cacheControl must NEVER reach a non-Anthropic provider.
+    expect(opts.system).toBe("big static prompt");
+  });
+
+  it("applies the cache breakpoint on the generateObject path too", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-cache" },
+      finishReason: "stop",
+      usage: baseUsage,
+    });
+    const client = createLlmClient(anthropicCfg());
+    await client.generateObject({
+      system: "big static prompt",
+      prompt: "draft a flow",
+      schema: { __mockZodSchema: "stub" } as never,
+      cacheSystemPrompt: true,
+    });
+
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.system).toEqual({
+      role: "system",
+      content: "big static prompt",
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    });
+  });
+});

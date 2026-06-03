@@ -40,7 +40,7 @@
  *   intentionally underscore-prefixed; production code must never call them.
  */
 
-import { generateText as aiGenerateText, Output, type LanguageModel } from "ai";
+import { generateText as aiGenerateText, Output, type LanguageModel, type SystemModelMessage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { computeCostUsd, getModelPrice } from "./pricing";
@@ -127,6 +127,16 @@ export type LlmGenerateTextInput = {
    */
   modelHint?: string;
   /**
+   * When `true` AND the EFFECTIVE provider resolves to Anthropic AND a
+   * `system` prompt is present, mark the system prompt as an Anthropic
+   * ephemeral cache breakpoint (`providerOptions.anthropic.cacheControl`).
+   * Repeat calls reusing the same system prefix within the cache window read
+   * it at ~90% lower input-token cost. No-op for any other provider or when
+   * there is no system prompt — the request is byte-for-byte unchanged.
+   * Opt-in: only the workflow-generation route sets it today.
+   */
+  cacheSystemPrompt?: boolean;
+  /**
    * Per-call context for usage telemetry. Optional so unit tests
    * and outside callers can omit it; in production every call site fills at
    * least `orgId` so the multi-tenant scope on `usage_events` holds. The
@@ -191,6 +201,8 @@ export type LlmGenerateObjectInput<T> = {
   schemaDescription?: string;
   /** Same `bare-id` or `"<provider>/<model>"` semantics as `generateText`. */
   modelHint?: string;
+  /** Same Anthropic system-prompt caching opt-in as `generateText`. */
+  cacheSystemPrompt?: boolean;
   /** Same telemetry context shape used by `generateText`. */
   context?: {
     orgId: string;
@@ -311,6 +323,32 @@ function parseModelSpec(spec: string | undefined): [string | null, string | unde
 }
 
 /**
+ * Resolve the `system` field for an `aiGenerateText` call. When
+ * `cacheSystemPrompt` is requested AND the EFFECTIVE provider is Anthropic AND
+ * a system prompt is present, return a `SystemModelMessage` carrying an
+ * Anthropic ephemeral cache breakpoint (the AI SDK's documented idiom for
+ * prompt caching) so repeat calls read the cached prefix at ~90% lower
+ * input-token cost. Every other case returns the bare string (or `undefined`),
+ * leaving the request byte-for-byte unchanged — non-Anthropic providers and
+ * non-cached calls are unaffected. `providerName` MUST be the post-`parseModelSpec`
+ * value so a `"<provider>/<model>"` override away from Anthropic skips caching.
+ */
+function buildSystemPrompt(
+  providerName: string,
+  system: string | undefined,
+  cacheSystemPrompt: boolean | undefined,
+): string | SystemModelMessage | undefined {
+  if (cacheSystemPrompt && providerName === "anthropic" && system) {
+    return {
+      role: "system",
+      content: system,
+      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    };
+  }
+  return system;
+}
+
+/**
  * Bind a `LlmClient` to a resolved config. Per-provider model factories are
  * memoised inside the closure so repeat calls don't re-instantiate
  * `createOpenAI` / `createAnthropic` clients.
@@ -349,7 +387,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         const buildModel = factoryFor(providerName);
         aiResult = await aiGenerateText({
           model: buildModel(modelId),
-          system: input.system,
+          system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
@@ -418,7 +456,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         const buildModel = factoryFor(providerName);
         aiResult = await aiGenerateText({
           model: buildModel(modelId),
-          system: input.system,
+          system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),

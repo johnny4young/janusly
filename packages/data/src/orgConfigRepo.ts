@@ -72,6 +72,12 @@ export type OrgConfigSnapshot = {
     generationMode: string;
     /** Best-of-N candidate count for free_json generation (1 = single-shot). */
     generationCandidates: number;
+    /**
+     * Per-surface model override map (surface slug → model id). Empty when no
+     * override is set, in which case every surface uses the global default.
+     * Keys are validated against the closed `AI_SURFACES` enum at write time.
+     */
+    surfaceModels: Record<string, string>;
   };
   http: {
     timeoutMs: number;
@@ -220,6 +226,61 @@ function validateMemoryRetentionDaysByKind(value: string | number | boolean): vo
     }
   }
 }
+
+/**
+ * Closed enum of AI surfaces eligible for a per-surface model override via
+ * `ai.surfaceModels`. Each value is the route slug (the path after `/ai/`) so
+ * the API can key the map by surface without a second naming convention.
+ */
+export const AI_SURFACES = [
+  "generate-workflow",
+  "explain-workflow",
+  "review-workflow",
+  "patch-workflow",
+  "suggest-improvement",
+  "explain-run",
+] as const;
+
+/** One of the six AI surfaces that accepts a per-surface model override. */
+export type AiSurface = (typeof AI_SURFACES)[number];
+
+/** Narrow an arbitrary string to a known AI surface slug. */
+export function isAiSurface(value: string): value is AiSurface {
+  return (AI_SURFACES as readonly string[]).includes(value);
+}
+
+/**
+ * Validate the JSON-encoded `ai.surfaceModels` map: a JSON object whose keys
+ * are all known AI surfaces and whose values are non-empty model-id strings.
+ * A value carries the same `modelHint` semantics as the per-request
+ * `body.model` (bare id → configured provider; `"<provider>/<model>"` →
+ * provider override for that surface). Empty string clears the override.
+ * The value is intentionally a free model id — the Anthropic-only posture is a
+ * product/operational stance, not enforced here; a mismatch (e.g. a Claude id
+ * on an OpenAI org) degrades through the AI-fallback contract, never breaks.
+ */
+function validateAiSurfaceModels(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("ai.surfaceModels must be a string");
+  if (value === "") return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("ai.surfaceModels must be valid JSON");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("ai.surfaceModels must be a JSON object");
+  }
+  for (const [key, model] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isAiSurface(key)) {
+      throw new Error(`ai.surfaceModels key "${key}" is not one of: ${AI_SURFACES.join(", ")}`);
+    }
+    if (typeof model !== "string" || model.trim() === "") {
+      throw new Error(`ai.surfaceModels["${key}"] must be a non-empty string`);
+    }
+  }
+}
+
 const FORBIDDEN_CONFIG_NAME_PATTERN =
   /(secret|token|password|api[_-]?key|authorization|cookie|private[_-]?key|database[_-]?url|redis[_-]?url|supabase|service[_-]?role|service[_-]?token)/i;
 const FORBIDDEN_CONFIG_VALUE_PATTERN =
@@ -271,6 +332,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     valueType: "string",
     defaultValue: "claude-haiku-4-5-20251001",
     envKeys: ["ANTHROPIC_MODEL"],
+  },
+  {
+    key: "ai.surfaceModels",
+    category: "ai",
+    description:
+      "JSON-encoded per-surface model override (e.g. {\"patch-workflow\":\"claude-sonnet-4-5\",\"suggest-improvement\":\"anthropic/claude-sonnet-4-5\"}). Keys are AI surface slugs (generate-workflow, explain-workflow, review-workflow, patch-workflow, suggest-improvement, explain-run); each value is a model id — a bare id uses the configured provider, \"<provider>/<model>\" overrides the provider for that surface only. A per-request body.model still wins. Empty = every surface uses the global default model.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateAiSurfaceModels,
   },
   {
     key: "ai.timeoutMs",
@@ -939,6 +1010,32 @@ function readBoolean(values: Map<OrgConfigKey, string | number | boolean>, key: 
   return value;
 }
 
+/**
+ * Parse the JSON-encoded `ai.surfaceModels` config value into a typed map.
+ * The catalog validator already rejected malformed JSON at write time, so this
+ * read-side parse is defensive (a hand-edited row, a future schema drift): it
+ * degrades to an empty map ("no per-surface override") rather than throwing in
+ * the hot snapshot path, and drops any unknown key or non-string value.
+ */
+function parseSurfaceModels(raw: string): Record<string, string> {
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, model] of Object.entries(parsed as Record<string, unknown>)) {
+    const normalizedModel = typeof model === "string" ? model.trim() : "";
+    if (isAiSurface(key) && normalizedModel) {
+      out[key] = normalizedModel;
+    }
+  }
+  return out;
+}
+
 /** Return a typed config snapshot for runtime code that should honor tenant overrides. */
 export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<OrgConfigSnapshot> {
   const values = valuesByKey(await listOrgConfig(orgId, env));
@@ -954,6 +1051,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       confidenceCalibrationEnabled: readBoolean(values, "ai.confidenceCalibrationEnabled"),
       generationMode: readString(values, "ai.generationMode"),
       generationCandidates: readNumber(values, "ai.generationCandidates"),
+      surfaceModels: parseSurfaceModels(readString(values, "ai.surfaceModels")),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),
