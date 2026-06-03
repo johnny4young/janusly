@@ -121,4 +121,14 @@ describe("generateWorkflowFreeJson", () => {
     expect(firstCall.modelHint).toBe("anthropic/claude-sonnet-4-6");
     expect(firstCall.context).toEqual(ctx);
   });
+
+  it("threads cacheSystemPrompt when requested and defaults it off", async () => {
+    const cached = makeLlm(VALID_JSON);
+    await generateWorkflowFreeJson(cached, "sys", "p", undefined, ctx, true);
+    expect((cached.generateText as ReturnType<typeof vi.fn>).mock.calls[0][0].cacheSystemPrompt).toBe(true);
+
+    const uncached = makeLlm(VALID_JSON);
+    await generateWorkflowFreeJson(uncached, "sys", "p", undefined, ctx);
+    expect((uncached.generateText as ReturnType<typeof vi.fn>).mock.calls[0][0].cacheSystemPrompt).toBe(false);
+  });
 });

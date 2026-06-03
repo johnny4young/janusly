@@ -64,6 +64,9 @@ export type RepairInput = {
   /** The post-promotion draft that failed `sanitizeAiWorkflow`. */
   candidate: Workflow;
   modelHint: string | undefined;
+  /** Opt into Anthropic system-prompt caching for the repair calls (same
+   *  generation system prompt → reuses the cached prefix). Default false. */
+  cacheSystemPrompt?: boolean;
   context: { orgId: string; userId?: string };
 };
 
@@ -177,7 +180,7 @@ export function composeRepairPrompt(
  * outer try/catch degrades to the deterministic fallback.
  */
 export async function repairGeneratedWorkflow(input: RepairInput): Promise<RepairResult> {
-  const { llm, system, originalPrompt, candidate, modelHint, context } = input;
+  const { llm, system, originalPrompt, candidate, modelHint, cacheSystemPrompt = false, context } = input;
   let current = candidate;
   let lastError: unknown = new Error("workflow repair produced no valid output");
 
@@ -192,6 +195,7 @@ export async function repairGeneratedWorkflow(input: RepairInput): Promise<Repai
       prompt,
       responseFormat: "json",
       modelHint,
+      cacheSystemPrompt,
       context,
     });
 
