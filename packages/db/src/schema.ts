@@ -710,11 +710,9 @@ export const scimUserState = pgTable(
 );
 
 /**
- * Per-(directory, IdP-side group) state. v1 captures group existence
- * + membership so the data is available for future role-mapping; the
- * group's name is mirrored from the IdP. v2 will add an explicit
- * `scim_group_role_mappings` table for operator-configured role
- * overrides per group.
+ * Per-(directory, IdP-side group) state. Captures group existence +
+ * name mirrored from the IdP. Consulted (with `scim_group_role_mappings`
+ * + `scim_user_groups`) to derive a member's role from their groups.
  */
 export const scimGroupState = pgTable(
   "scim_group_state",
@@ -728,6 +726,60 @@ export const scimGroupState = pgTable(
   },
   (table) => [
     uniqueIndex("scim_group_state_directory_group_idx").on(table.scimDirectoryId, table.providerGroupId),
+  ],
+);
+
+/**
+ * Operator-configured IdP-group → Janusly-role mapping (SCIM v2). When a
+ * SCIM-provisioned user belongs to one or more mapped groups, their role
+ * is the HIGHEST-rank mapped role (viewer < editor < admin); with no
+ * mapped group the directory's `defaultRole` applies. `role` is a
+ * built-in role name only — custom-role mapping is a future follow-up.
+ * Unique per `(directory, group)`; one role per group.
+ */
+export const scimGroupRoleMappings = pgTable(
+  "scim_group_role_mappings",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    scimDirectoryId: text("scim_directory_id").notNull(),
+    providerGroupId: text("provider_group_id").notNull(),
+    role: text("role").notNull(),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scim_group_role_mappings_directory_group_idx").on(table.scimDirectoryId, table.providerGroupId),
+    index("scim_group_role_mappings_org_idx").on(table.orgId),
+  ],
+);
+
+/**
+ * User↔group membership mirror for SCIM v2 role derivation, maintained
+ * by the `dsync.group.user_added` / `_removed` events. Keyed by the
+ * WorkOS `directory_user.id` (providerUserId) + `directory_group.id`
+ * (providerGroupId). No FK — orphan-tolerant like the rest of the SCIM
+ * module; delete events best-effort clean these rows before re-deriving roles.
+ */
+export const scimUserGroups = pgTable(
+  "scim_user_groups",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    scimDirectoryId: text("scim_directory_id").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+    providerGroupId: text("provider_group_id").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("scim_user_groups_user_group_idx").on(
+      table.scimDirectoryId,
+      table.providerUserId,
+      table.providerGroupId,
+    ),
+    index("scim_user_groups_directory_user_idx").on(table.scimDirectoryId, table.providerUserId),
   ],
 );
 

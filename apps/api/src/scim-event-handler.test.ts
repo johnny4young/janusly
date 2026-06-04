@@ -12,7 +12,7 @@
  */
 import { describe, expect, it, beforeEach } from "vitest";
 
-import { handleScimEvent, type ScimEvent, type ScimHandlerDeps } from "./scim-event-handler";
+import { deriveScimRole, handleScimEvent, type ScimEvent, type ScimHandlerDeps } from "./scim-event-handler";
 import type { ScimDirectoryRow } from "@janusly/data/src/scimDirectoriesRepo";
 
 function fixtureDirectory(overrides: Partial<ScimDirectoryRow> = {}): ScimDirectoryRow {
@@ -57,6 +57,14 @@ type Captured = {
   syncBumps: unknown[];
   processedEventIds: Set<string>;
   releasedEventIds: string[];
+  addedUserGroups: Array<{ providerUserId: string; providerGroupId: string }>;
+  removedUserGroups: Array<{ providerUserId: string; providerGroupId: string }>;
+  deletedUserGroupsForGroup: Array<{ providerGroupId: string }>;
+  deletedUserGroupsForUser: Array<{ providerUserId: string }>;
+  /** Live mirror of the user's group memberships, mutated by add/remove so the
+   *  handler's "persist join row, THEN recompute" ordering is exercised end to
+   *  end (the recompute reads `listScimUserGroupIds` after the mutation). */
+  userGroupIds: Set<string>;
 };
 
 function makeDeps(input: {
@@ -70,6 +78,12 @@ function makeDeps(input: {
   existingGroupState?: { id: string };
   allowedDomains?: string[];
   processedEventIds?: Set<string>;
+  /** Seed group memberships for the (single) user under test. */
+  userGroupIds?: string[];
+  /** providerGroupId → providerUserIds for group-deletion recompute. */
+  groupUserIdsForGroup?: Record<string, string[]>;
+  /** providerGroupId → built-in role mapping for the directory. */
+  groupRoleMappings?: Record<string, string>;
 }): { deps: ScimHandlerDeps; captured: Captured } {
   const captured: Captured = {
     upsertedUserState: [],
@@ -82,7 +96,13 @@ function makeDeps(input: {
     syncBumps: [],
     processedEventIds: input.processedEventIds ?? new Set(),
     releasedEventIds: [],
+    addedUserGroups: [],
+    removedUserGroups: [],
+    deletedUserGroupsForGroup: [],
+    deletedUserGroupsForUser: [],
+    userGroupIds: new Set(input.userGroupIds ?? []),
   };
+  const mappings = new Map(Object.entries(input.groupRoleMappings ?? {}));
 
   const deps: ScimHandlerDeps = {
     upsertScimUserState: async (i) => {
@@ -127,6 +147,25 @@ function makeDeps(input: {
     },
     recordScimDirectorySync: async (i) => {
       captured.syncBumps.push(i);
+    },
+    getScimGroupRoleMappingsMap: async () => new Map(mappings),
+    listScimUserGroupIds: async () => [...captured.userGroupIds],
+    listScimUserIdsForGroup: async (i) => input.groupUserIdsForGroup?.[i.providerGroupId] ?? [],
+    addScimUserGroup: async (i) => {
+      captured.addedUserGroups.push({ providerUserId: i.providerUserId, providerGroupId: i.providerGroupId });
+      captured.userGroupIds.add(i.providerGroupId);
+    },
+    removeScimUserGroup: async (i) => {
+      captured.removedUserGroups.push({ providerUserId: i.providerUserId, providerGroupId: i.providerGroupId });
+      captured.userGroupIds.delete(i.providerGroupId);
+    },
+    deleteScimUserGroupsForGroup: async (i) => {
+      captured.deletedUserGroupsForGroup.push({ providerGroupId: i.providerGroupId });
+      captured.userGroupIds.delete(i.providerGroupId);
+    },
+    deleteScimUserGroupsForUser: async (i) => {
+      captured.deletedUserGroupsForUser.push({ providerUserId: i.providerUserId });
+      captured.userGroupIds.clear();
     },
   };
 
@@ -464,6 +503,7 @@ describe("handleScimEvent — user.deleted", () => {
     });
     expect(result).toEqual({ processed: true, action: "deprovisioned" });
     expect(captured.deletedMemberships).toHaveLength(1);
+    expect(captured.deletedUserGroupsForUser).toEqual([{ providerUserId: "directory_user_1" }]);
     expect(captured.inactiveCalls).toHaveLength(1);
     expect(captured.audits.find((a) => a.action === "scim.user.deprovisioned")).toBeDefined();
   });
@@ -476,6 +516,7 @@ describe("handleScimEvent — user.deleted", () => {
       deps,
     });
     expect(result).toEqual({ processed: false, reason: "unknown_user" });
+    expect(captured.deletedUserGroupsForUser).toEqual([{ providerUserId: "directory_user_1" }]);
     expect(captured.audits.find((a) => a.action === "scim.webhook.unknown_user")).toBeDefined();
   });
 
@@ -496,6 +537,7 @@ describe("handleScimEvent — user.deleted", () => {
     });
     expect(result).toEqual({ processed: false, reason: "out_of_order" });
     expect(captured.deletedMemberships).toHaveLength(0);
+    expect(captured.deletedUserGroupsForUser).toHaveLength(0);
   });
 });
 
@@ -517,8 +559,20 @@ describe("handleScimEvent — group events", () => {
     expect(captured.audits.find((a) => a.action === "scim.group.synced")).toBeDefined();
   });
 
-  it("deletes group state on dsync.group.deleted", async () => {
-    const { deps, captured } = makeDeps({ existingGroupState: { id: "grp_state_1" } });
+  it("deletes group state, cleans join rows, and recomputes affected active users", async () => {
+    const { deps, captured } = makeDeps({
+      existingGroupState: { id: "grp_state_1" },
+      existingState: {
+        id: "state_1",
+        orgId: "org-A",
+        email: "ada@example.com",
+        active: true,
+        lastEventTimestamp: "2026-05-10T00:00:00Z",
+      },
+      userGroupIds: ["directory_group_1"],
+      groupUserIdsForGroup: { directory_group_1: ["directory_user_1"] },
+      groupRoleMappings: { directory_group_1: "admin" },
+    });
     const result = await handleScimEvent({
       event: {
         id: "evt_grp_2",
@@ -531,22 +585,176 @@ describe("handleScimEvent — group events", () => {
     });
     expect(result.processed).toBe(true);
     expect(captured.deletedGroupState).toHaveLength(1);
+    expect(captured.deletedUserGroupsForGroup).toEqual([{ providerGroupId: "directory_group_1" }]);
+    expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "viewer" });
+    const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
+    expect((audit?.metadata as { roleRecomputed: boolean; providerGroupId: string }).roleRecomputed).toBe(true);
+  });
+});
+
+describe("deriveScimRole (pure)", () => {
+  it("returns defaultRole when the user has no groups", () => {
+    expect(deriveScimRole([], new Map(), "viewer")).toBe("viewer");
   });
 
-  it("treats group.user_added as a no-op state capture in v1", async () => {
-    const { deps, captured } = makeDeps({});
+  it("returns defaultRole when no group the user is in maps to a role", () => {
+    expect(deriveScimRole(["g1", "g2"], new Map([["g3", "admin"]]), "editor")).toBe("editor");
+  });
+
+  it("returns the single mapped role for a single mapped group", () => {
+    expect(deriveScimRole(["g1"], new Map([["g1", "editor"]]), "viewer")).toBe("editor");
+  });
+
+  it("picks the HIGHEST-rank role across multiple mapped groups", () => {
+    const mappings = new Map([
+      ["g1", "viewer"],
+      ["g2", "admin"],
+      ["g3", "editor"],
+    ]);
+    expect(deriveScimRole(["g1", "g2", "g3"], mappings, "viewer")).toBe("admin");
+  });
+
+  it("ignores unknown / custom role names (rank -1, never beats a built-in)", () => {
+    const mappings = new Map([
+      ["g1", "billing-admin"], // custom role — unknown to the built-in rank table
+      ["g2", "editor"],
+    ]);
+    expect(deriveScimRole(["g1", "g2"], mappings, "viewer")).toBe("editor");
+  });
+
+  it("falls through to defaultRole when the only mapped group is an unknown role", () => {
+    expect(deriveScimRole(["g1"], new Map([["g1", "billing-admin"]]), "viewer")).toBe("viewer");
+  });
+});
+
+describe("handleScimEvent — group→role derivation", () => {
+  it("provisions a user at the derived role when a pre-existing membership maps to a higher role", async () => {
+    // Group-before-user ordering: the join row already exists (g1) and maps to
+    // admin; the create derives admin instead of the directory's defaultRole.
+    const { deps, captured } = makeDeps({
+      userGroupIds: ["g1"],
+      groupRoleMappings: { g1: "admin" },
+    });
+    const result = await handleScimEvent({
+      event: fixtureUserEvent(),
+      scimDirectory: fixtureDirectory({ defaultRole: "viewer" }),
+      deps,
+    });
+    expect(result).toEqual({ processed: true, action: "provisioned" });
+    expect(captured.upsertedByEmail[0]).toMatchObject({ role: "admin" });
+    const audit = captured.audits.find((a) => a.action === "scim.user.provisioned");
+    expect((audit?.metadata as { role: string }).role).toBe("admin");
+  });
+
+  it("provisions at defaultRole when the user's groups map to nothing", async () => {
+    const { deps, captured } = makeDeps({
+      userGroupIds: ["g9"],
+      groupRoleMappings: { g1: "admin" },
+    });
     await handleScimEvent({
+      event: fixtureUserEvent(),
+      scimDirectory: fixtureDirectory({ defaultRole: "editor" }),
+      deps,
+    });
+    expect(captured.upsertedByEmail[0]).toMatchObject({ role: "editor" });
+  });
+
+  it("group.user_added persists the join row then recomputes the member role", async () => {
+    const { deps, captured } = makeDeps({
+      existingState: {
+        id: "state_1",
+        orgId: "org-A",
+        email: "ada@example.com",
+        active: true,
+        lastEventTimestamp: "2026-05-10T00:00:00Z",
+      },
+      groupRoleMappings: { g1: "admin" },
+    });
+    const result = await handleScimEvent({
       event: {
         id: "evt_grp_add",
         event: "dsync.group.user_added",
         created_at: "2026-05-14T18:30:00Z",
-        data: { directory_id: "directory_01", user_id: "u1", directory_group_id: "g1" },
+        data: { directory_id: "directory_01", user_id: "directory_user_1", directory_group_id: "g1" },
+      },
+      scimDirectory: fixtureDirectory({ defaultRole: "viewer" }),
+      deps,
+    });
+    expect(result).toEqual({ processed: true, action: "group_membership_added" });
+    // Join row persisted FIRST...
+    expect(captured.addedUserGroups).toEqual([{ providerUserId: "directory_user_1", providerGroupId: "g1" }]);
+    // ...then the role recomputed to the mapped admin.
+    expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "admin" });
+    const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
+    expect((audit?.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(true);
+  });
+
+  it("group.user_removed drops the join row then lowers the role back toward defaultRole", async () => {
+    const { deps, captured } = makeDeps({
+      existingState: {
+        id: "state_1",
+        orgId: "org-A",
+        email: "ada@example.com",
+        active: true,
+        lastEventTimestamp: "2026-05-10T00:00:00Z",
+      },
+      userGroupIds: ["g1"], // currently in the admin-mapped group
+      groupRoleMappings: { g1: "admin" },
+    });
+    const result = await handleScimEvent({
+      event: {
+        id: "evt_grp_rm",
+        event: "dsync.group.user_removed",
+        created_at: "2026-05-14T18:30:00Z",
+        data: { directory_id: "directory_01", user_id: "directory_user_1", directory_group_id: "g1" },
+      },
+      scimDirectory: fixtureDirectory({ defaultRole: "viewer" }),
+      deps,
+    });
+    expect(result).toEqual({ processed: true, action: "group_membership_removed" });
+    expect(captured.removedUserGroups).toEqual([{ providerUserId: "directory_user_1", providerGroupId: "g1" }]);
+    // After removing the only admin group, derivation falls back to defaultRole.
+    expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "viewer" });
+  });
+
+  it("group.user_added before the user is provisioned records the join but skips the membership write", async () => {
+    // No existing user_state → recompute audits roleRecomputed:false and does
+    // NOT write org_members; the later user.created derives the role.
+    const { deps, captured } = makeDeps({
+      groupRoleMappings: { g1: "admin" },
+    });
+    const result = await handleScimEvent({
+      event: {
+        id: "evt_grp_add_early",
+        event: "dsync.group.user_added",
+        created_at: "2026-05-14T18:30:00Z",
+        data: { directory_id: "directory_01", user_id: "directory_user_1", directory_group_id: "g1" },
       },
       scimDirectory: fixtureDirectory(),
       deps,
     });
+    expect(result).toEqual({ processed: true, action: "group_membership_added" });
+    expect(captured.addedUserGroups).toHaveLength(1);
     expect(captured.upsertedByEmail).toHaveLength(0);
-    expect(captured.audits.find((a) => a.action === "scim.group.synced")).toBeDefined();
+    const audit = captured.audits.find((a) => a.action === "scim.group.membership_changed");
+    expect((audit?.metadata as { roleRecomputed: boolean }).roleRecomputed).toBe(false);
+  });
+
+  it("rejects a membership event missing user_id / directory_group_id", async () => {
+    const { deps, captured } = makeDeps({});
+    const result = await handleScimEvent({
+      event: {
+        id: "evt_grp_bad",
+        event: "dsync.group.user_added",
+        created_at: "2026-05-14T18:30:00Z",
+        data: { directory_id: "directory_01", user_id: "directory_user_1" }, // missing directory_group_id
+      },
+      scimDirectory: fixtureDirectory(),
+      deps,
+    });
+    expect(result).toEqual({ processed: false, reason: "malformed_payload" });
+    expect(captured.addedUserGroups).toHaveLength(0);
+    expect(captured.audits.find((a) => a.action === "scim.webhook.malformed_payload")).toBeDefined();
   });
 });
 

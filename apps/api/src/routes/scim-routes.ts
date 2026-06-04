@@ -49,6 +49,20 @@ import {
   deleteMembership,
   upsertMembershipByEmail,
   getAuthPolicyConfig,
+  // SCIM v2 group→role mapping
+  listScimGroupRoleMappings,
+  getScimGroupRoleMappingById,
+  findScimGroupRoleMappingByGroup,
+  createScimGroupRoleMapping,
+  updateScimGroupRoleMapping,
+  deleteScimGroupRoleMapping,
+  getScimGroupRoleMappingsMap,
+  listScimUserGroupIds,
+  listScimUserIdsForGroup,
+  addScimUserGroup,
+  removeScimUserGroup,
+  deleteScimUserGroupsForUser,
+  deleteScimUserGroupsForGroup,
 } from "@janusly/data";
 
 import { handleScimEvent, type ScimEvent } from "../scim-event-handler";
@@ -152,6 +166,121 @@ export const scimRoutes: Route[] = [
     },
   },
 
+  // === Admin CRUD on scim_group_role_mappings (SCIM v2) ===
+  {
+    method: "GET",
+    match: "/org/scim/group-role-mappings",
+    role: "viewer",
+    handler: async ({ res, auth }) => {
+      const directory = await getScimDirectoryByOrgId(auth.orgId);
+      if (!directory) return sendJson(res, []);
+      const rows = await listScimGroupRoleMappings(auth.orgId, directory.id);
+      return sendJson(res, rows);
+    },
+  },
+  {
+    method: "POST",
+    match: "/org/scim/group-role-mappings",
+    role: "admin",
+    handler: async ({ req, res, auth }) => {
+      // Read the request body before any await on DB I/O so the stream's
+      // data/end events aren't missed (matches the directory POST ordering).
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const directory = await getScimDirectoryByOrgId(auth.orgId);
+      if (!directory) {
+        return sendJson(res, { error: "attach a SCIM directory before configuring group role mappings" }, 409);
+      }
+      const providerGroupId = typeof body.providerGroupId === "string" ? body.providerGroupId.trim() : "";
+      if (!providerGroupId) {
+        return sendJson(res, { error: "providerGroupId is required (e.g. directory_group_…)" }, 400);
+      }
+      if (!isDefaultRole(body.role)) {
+        return sendJson(res, { error: "role must be viewer | editor | admin" }, 400);
+      }
+      const role = body.role;
+      // The group must exist in this directory's synced state — guards against
+      // typo'd / cross-directory group ids that would silently never match.
+      const group = await getScimGroupState({ scimDirectoryId: directory.id, providerGroupId });
+      if (!group) {
+        return sendJson(res, { error: "unknown providerGroupId for this directory" }, 404);
+      }
+      const dup = await findScimGroupRoleMappingByGroup({
+        orgId: auth.orgId,
+        scimDirectoryId: directory.id,
+        providerGroupId,
+      });
+      if (dup) {
+        return sendJson(res, { error: "a mapping for this group already exists; update it instead" }, 409);
+      }
+      const row = await createScimGroupRoleMapping({
+        orgId: auth.orgId,
+        scimDirectoryId: directory.id,
+        providerGroupId,
+        role,
+        createdBy: auth.userId,
+      });
+      await auditAction(auth, "org.scim.group_role_mapping_created", {
+        targetType: "scim_group_role_mapping",
+        targetId: row.id,
+        metadata: { providerGroupId, role, scimDirectoryId: directory.id },
+      });
+      return sendJson(res, row);
+    },
+  },
+  {
+    method: "POST",
+    match: (url) => /^\/org\/scim\/group-role-mappings\/[^/]+$/.test(url),
+    role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
+      const id = match?.[1];
+      if (!id) return sendJson(res, { error: "mapping id is required" }, 400);
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      if (!isDefaultRole(body.role)) {
+        return sendJson(res, { error: "role must be viewer | editor | admin" }, 400);
+      }
+      const role = body.role;
+      const existing = await getScimGroupRoleMappingById({ id, orgId: auth.orgId });
+      if (!existing) return sendJson(res, { error: "group role mapping not found" }, 404);
+      const updated = await updateScimGroupRoleMapping({ id, orgId: auth.orgId, role, updatedBy: auth.userId });
+      if (!updated) return sendJson(res, { error: "group role mapping not found" }, 404);
+      await auditAction(auth, "org.scim.group_role_mapping_updated", {
+        targetType: "scim_group_role_mapping",
+        targetId: id,
+        metadata: {
+          providerGroupId: existing.providerGroupId,
+          before: existing.role,
+          after: role,
+          scimDirectoryId: existing.scimDirectoryId,
+        },
+      });
+      return sendJson(res, updated);
+    },
+  },
+  {
+    method: "DELETE",
+    match: (url) => /^\/org\/scim\/group-role-mappings\/[^/]+$/.test(url),
+    role: "admin",
+    handler: async ({ req, res, auth }) => {
+      const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
+      const id = match?.[1];
+      if (!id) return sendJson(res, { error: "mapping id is required" }, 400);
+      const existing = await getScimGroupRoleMappingById({ id, orgId: auth.orgId });
+      if (!existing) return sendJson(res, { error: "group role mapping not found" }, 404);
+      await deleteScimGroupRoleMapping({ id, orgId: auth.orgId });
+      await auditAction(auth, "org.scim.group_role_mapping_deleted", {
+        targetType: "scim_group_role_mapping",
+        targetId: id,
+        metadata: {
+          providerGroupId: existing.providerGroupId,
+          role: existing.role,
+          scimDirectoryId: existing.scimDirectoryId,
+        },
+      });
+      return sendJson(res, { ok: true });
+    },
+  },
+
   // === Webhook receiver ===
   {
     method: "POST",
@@ -233,6 +362,13 @@ export const scimRoutes: Route[] = [
           getAuthPolicyConfig,
           audit,
           recordScimDirectorySync,
+          getScimGroupRoleMappingsMap,
+          listScimUserGroupIds,
+          listScimUserIdsForGroup,
+          addScimUserGroup,
+          removeScimUserGroup,
+          deleteScimUserGroupsForUser,
+          deleteScimUserGroupsForGroup,
         },
       });
 
