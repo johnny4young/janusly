@@ -24,7 +24,7 @@ the same transport config, pure helpers, and webhook verifier.
 from __future__ import annotations
 
 import time
-from typing import Any, Iterator, Literal, Optional
+from typing import Any, Iterator, Literal, Optional, cast
 from urllib.parse import quote, urlencode
 
 from ._http import (
@@ -129,7 +129,7 @@ class RunsResource:
         if input is not None:
             body["input"] = input
         response = request(self._config, method="POST", path="/start", json_body=body)
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
     def get(
         self,
@@ -153,7 +153,7 @@ class RunsResource:
             method="GET",
             path=f"/run?{urlencode(params)}",
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
     def list(
         self,
@@ -292,7 +292,7 @@ class RunsResource:
             path="/resume",
             json_body=body,
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
 
 class ReportsResource:
@@ -342,7 +342,7 @@ class RecoveryResource:
             method="GET",
             path=f"/recovery/metrics?{urlencode(params)}",
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
 
 class WebhooksResource:
