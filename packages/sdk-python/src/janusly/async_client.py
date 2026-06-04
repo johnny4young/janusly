@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, AsyncIterator, Literal, Optional
+from typing import Any, AsyncIterator, Literal, Optional, cast
 from urllib.parse import quote, urlencode
 
 from ._http import (
@@ -140,7 +140,7 @@ class AsyncRunsResource:
         response = await async_request(
             self._config, method="POST", path="/start", json_body=body
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
     async def get(
         self,
@@ -160,7 +160,7 @@ class AsyncRunsResource:
             method="GET",
             path=f"/run?{urlencode(params)}",
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
     async def list(
         self,
@@ -296,7 +296,7 @@ class AsyncRunsResource:
             path="/resume",
             json_body=body,
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
 
 class AsyncReportsResource:
@@ -346,7 +346,7 @@ class AsyncRecoveryResource:
             method="GET",
             path=f"/recovery/metrics?{urlencode(params)}",
         )
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
 
 __all__ = [

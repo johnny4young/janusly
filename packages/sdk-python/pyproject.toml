@@ -32,6 +32,7 @@ dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",
     "pytest-asyncio>=0.23",
+    "mypy>=1.8",
 ]
 
 [project.urls]
@@ -50,3 +51,11 @@ asyncio_mode = "auto"
 filterwarnings = [
     "error",
 ]
+
+[tool.mypy]
+# Strict type-checking for the public `src/janusly` surface (the CI lane runs
+# `mypy src/janusly`). Pinned to the minimum supported runtime so a 3.10-only
+# typing regression is caught. The test suite is intentionally out of scope
+# (its pytest fixtures and deliberately loose JSON mocks need a looser config).
+strict = true
+python_version = "3.10"

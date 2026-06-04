@@ -250,7 +250,7 @@ def _retry_delay_seconds(error: Exception, retry: RetryConfig, attempt: int) -> 
     (``backoff_ms * 2**attempt``)."""
     if isinstance(error, JanuslyRateLimitError) and error.retry_after_seconds is not None:
         return max(0.0, error.retry_after_seconds)
-    return max(0.0, (retry.backoff_ms * (2 ** attempt)) / 1000.0)
+    return max(0.0, float(retry.backoff_ms * (2 ** attempt)) / 1000.0)
 
 
 def _with_retries(

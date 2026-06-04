@@ -164,3 +164,7 @@ jobs:
       - name: Test (pytest)
         working-directory: packages/sdk-python
         run: pytest -q
+
+      - name: Type-check (mypy --strict)
+        working-directory: packages/sdk-python
+        run: mypy src/janusly
