@@ -1,6 +1,6 @@
 # Python SDK
 
-The `janusly` Python package is the sibling of the TypeScript SDK at `packages/sdk-node`. It ships a typed synchronous client + a stdlib-only HMAC verifier for inbound webhooks.
+The `janusly` Python package is the sibling of the TypeScript SDK at `packages/sdk-node`. It ships typed synchronous and asynchronous clients plus a stdlib-only HMAC verifier for inbound webhooks.
 
 Full reference and examples: `packages/sdk-python/README.md`.
 
@@ -14,7 +14,7 @@ Requires Python 3.10+. After the release ticket publishes the package to PyPI, c
 
 ## Surfaces
 
-The Python SDK mirrors the TypeScript SDK's four resource bindings. Canonical HTTP shapes documented in [`docs/api.md`](api.md).
+The Python SDK mirrors the TypeScript SDK's four resource bindings. `JanuslyClient` exposes the blocking surface below; `JanuslyAsyncClient` mirrors it 1:1 with `async def` methods (`runs.list` and `runs.stream_events` are async generators). Canonical HTTP shapes documented in [`docs/api.md`](api.md).
 
 | Resource | Method | HTTP route |
 | -------- | ------ | ---------- |
@@ -60,7 +60,7 @@ JanuslyWebhookSignatureError   (carries reason field)
 
 ## v1 non-goals (honest)
 
-- **No async client.** `JanuslyAsyncClient` is a future follow-up. FastAPI handlers call the sync client via `asyncio.to_thread`.
+- **No shared async connection pool / `aclose()` lifecycle.** `JanuslyAsyncClient` mirrors the sync client's stateless per-call transport with a fresh `httpx.AsyncClient` per request.
 - **No auto-retry.** Caller composes retry policy. (The TS SDK has opt-in exponential backoff; the Python sync client defers this.)
 - **No CLI.** Library only.
 - **No PyPI publish yet.** Pip-installable from the repo (`pip install -e packages/sdk-python`). A separate release ticket handles PyPI.

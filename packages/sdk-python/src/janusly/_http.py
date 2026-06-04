@@ -155,6 +155,50 @@ def request(
             headers=headers,
             json=json_body,
         )
+    return _raise_for_status(response)
+
+
+async def async_request(
+    config: ClientConfig,
+    *,
+    method: str,
+    path: str,
+    json_body: Any = None,
+    extra_headers: Optional[dict[str, str]] = None,
+    timeout: Optional[float] = None,
+) -> httpx.Response:
+    """Async sibling of :func:`request`.
+
+    Issues one request through a fresh :class:`httpx.AsyncClient` (the
+    transport is stateless per-call, mirroring the sync path — no shared
+    pool). Same header composition, same per-call ``timeout`` override,
+    and the SAME typed error mapping via :func:`_raise_for_status`, so an
+    identical response yields an identical :class:`JanuslyApiError`
+    subclass on either path. Returns the raw 2xx :class:`httpx.Response`;
+    raises for non-2xx.
+    """
+    url = f"{config.base_url}{path}"
+    headers = build_headers(config, extra_headers)
+    effective_timeout = timeout if timeout is not None else config.timeout
+    async with httpx.AsyncClient(timeout=effective_timeout) as client:
+        response = await client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=json_body,
+        )
+    return _raise_for_status(response)
+
+
+def _raise_for_status(response: httpx.Response) -> httpx.Response:
+    """Return ``response`` unchanged on 2xx; otherwise map it to the right
+    :class:`JanuslyApiError` subclass.
+
+    Shared by the sync :func:`request` and the async :func:`async_request`
+    so both transports produce byte-identical errors from identical
+    responses. A non-JSON error body falls back to the raw text rather
+    than throwing a parse error.
+    """
     if 200 <= response.status_code < 300:
         return response
     body_text = response.text or None
@@ -179,6 +223,7 @@ __all__ = [
     "BearerAuth",
     "ClientConfig",
     "ServiceTokenAuth",
+    "async_request",
     "build_headers",
     "make_config",
     "request",

@@ -12,10 +12,13 @@ Mirrors the TypeScript SDK's four resource bindings:
   ``client.webhooks.verify_signature(...)`` interchangeably with
   ``from janusly.webhooks import verify_signature``.
 
-v1 ships SYNC only — Python's sync/async split has no transparent
-bridge, and the most common adoption surfaces (Lambda receivers, glue
-scripts, batch jobs, FastAPI handlers via ``asyncio.to_thread``) all
-prefer sync. A ``JanuslyAsyncClient`` sibling is a future follow-up.
+This is the SYNCHRONOUS client — the most common adoption surfaces
+(Lambda receivers, glue scripts, batch jobs) prefer it. Code already
+inside an event loop should use the awaitable sibling
+:class:`janusly.async_client.JanuslyAsyncClient`, which mirrors this
+surface 1:1 over ``httpx.AsyncClient``. Python's sync/async split has no
+transparent bridge, so the two clients are separate classes that share
+the same transport config, pure helpers, and webhook verifier.
 """
 
 from __future__ import annotations
