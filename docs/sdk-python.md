@@ -58,9 +58,12 @@ JanuslyWebhookSignatureError   (carries reason field)
 
 `JanuslyTimeoutError` and `JanuslyWebhookSignatureError` are NOT subclasses of `JanuslyApiError` — a bare `except JanuslyApiError` won't accidentally swallow signature mismatches or polling timeouts.
 
+## Retries
+
+Both clients accept an opt-in `RetryConfig` (off by default). A transient `429` / `502` / `503` / `504` or a network / timeout error is retried with exponential backoff (`backoff_ms * 2**attempt`); a `429` carrying `Retry-After` uses that delay; 4xx validation errors are never retried. Mirrors the TypeScript SDK's `JanuslyRetryConfig`. See `packages/sdk-python/README.md` for the usage example.
+
 ## v1 non-goals (honest)
 
 - **No shared async connection pool / `aclose()` lifecycle.** `JanuslyAsyncClient` mirrors the sync client's stateless per-call transport with a fresh `httpx.AsyncClient` per request.
-- **No auto-retry.** Caller composes retry policy. (The TS SDK has opt-in exponential backoff; the Python sync client defers this.)
 - **No CLI.** Library only.
 - **No PyPI publish yet.** Pip-installable from the repo (`pip install -e packages/sdk-python`). A separate release ticket handles PyPI.
