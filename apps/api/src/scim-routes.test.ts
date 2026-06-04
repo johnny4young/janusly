@@ -14,6 +14,21 @@ const createScimDirectory = vi.fn();
 const updateScimDirectory = vi.fn();
 const revokeScimDirectory = vi.fn();
 const recordScimDirectorySync = vi.fn();
+const getScimGroupState = vi.fn();
+// SCIM v2 group→role mapping repos
+const listScimGroupRoleMappings = vi.fn();
+const getScimGroupRoleMappingById = vi.fn();
+const findScimGroupRoleMappingByGroup = vi.fn();
+const createScimGroupRoleMapping = vi.fn();
+const updateScimGroupRoleMapping = vi.fn();
+const deleteScimGroupRoleMapping = vi.fn();
+const getScimGroupRoleMappingsMap = vi.fn();
+const listScimUserGroupIds = vi.fn();
+const listScimUserIdsForGroup = vi.fn();
+const addScimUserGroup = vi.fn();
+const removeScimUserGroup = vi.fn();
+const deleteScimUserGroupsForUser = vi.fn();
+const deleteScimUserGroupsForGroup = vi.fn();
 
 vi.mock("@janusly/data/src/scimDirectoriesRepo", () => ({
   getScimDirectoryByOrgId: (...args: unknown[]) => getScimDirectoryByOrgId(...args),
@@ -35,7 +50,24 @@ vi.mock("@janusly/data/src/scimUserStateRepo", () => ({
 vi.mock("@janusly/data/src/scimGroupStateRepo", () => ({
   upsertScimGroupState: vi.fn().mockResolvedValue(null),
   deleteScimGroupState: vi.fn().mockResolvedValue(undefined),
-  getScimGroupState: vi.fn().mockResolvedValue(null),
+  getScimGroupState: (...args: unknown[]) => getScimGroupState(...args),
+}));
+vi.mock("@janusly/data/src/scimGroupRoleMappingsRepo", () => ({
+  listScimGroupRoleMappings: (...args: unknown[]) => listScimGroupRoleMappings(...args),
+  getScimGroupRoleMappingById: (...args: unknown[]) => getScimGroupRoleMappingById(...args),
+  findScimGroupRoleMappingByGroup: (...args: unknown[]) => findScimGroupRoleMappingByGroup(...args),
+  createScimGroupRoleMapping: (...args: unknown[]) => createScimGroupRoleMapping(...args),
+  updateScimGroupRoleMapping: (...args: unknown[]) => updateScimGroupRoleMapping(...args),
+  deleteScimGroupRoleMapping: (...args: unknown[]) => deleteScimGroupRoleMapping(...args),
+  getScimGroupRoleMappingsMap: (...args: unknown[]) => getScimGroupRoleMappingsMap(...args),
+}));
+vi.mock("@janusly/data/src/scimUserGroupsRepo", () => ({
+  listScimUserGroupIds: (...args: unknown[]) => listScimUserGroupIds(...args),
+  listScimUserIdsForGroup: (...args: unknown[]) => listScimUserIdsForGroup(...args),
+  addScimUserGroup: (...args: unknown[]) => addScimUserGroup(...args),
+  removeScimUserGroup: (...args: unknown[]) => removeScimUserGroup(...args),
+  deleteScimUserGroupsForUser: (...args: unknown[]) => deleteScimUserGroupsForUser(...args),
+  deleteScimUserGroupsForGroup: (...args: unknown[]) => deleteScimUserGroupsForGroup(...args),
 }));
 vi.mock("@janusly/data/src/scimProcessedEventsRepo", () => ({
   recordProcessedEvent: vi.fn().mockResolvedValue({ fresh: true }),
@@ -68,9 +100,33 @@ beforeEach(() => {
   updateScimDirectory.mockReset();
   revokeScimDirectory.mockReset();
   recordScimDirectorySync.mockReset();
+  getScimGroupState.mockReset();
+  listScimGroupRoleMappings.mockReset();
+  getScimGroupRoleMappingById.mockReset();
+  findScimGroupRoleMappingByGroup.mockReset();
+  createScimGroupRoleMapping.mockReset();
+  updateScimGroupRoleMapping.mockReset();
+  deleteScimGroupRoleMapping.mockReset();
+  getScimGroupRoleMappingsMap.mockReset();
+  listScimUserGroupIds.mockReset();
+  listScimUserIdsForGroup.mockReset();
+  addScimUserGroup.mockReset();
+  removeScimUserGroup.mockReset();
+  deleteScimUserGroupsForUser.mockReset();
+  deleteScimUserGroupsForGroup.mockReset();
   auditMock.mockReset();
   auditMock.mockResolvedValue(undefined);
   recordScimDirectorySync.mockResolvedValue(undefined);
+  // Safe defaults so webhook dispatch of a user.created event (which now
+  // runs role derivation) doesn't touch the real DB; CRUD tests override.
+  getScimGroupState.mockResolvedValue(null);
+  getScimGroupRoleMappingsMap.mockResolvedValue(new Map());
+  listScimUserGroupIds.mockResolvedValue([]);
+  listScimUserIdsForGroup.mockResolvedValue([]);
+  addScimUserGroup.mockResolvedValue(undefined);
+  removeScimUserGroup.mockResolvedValue(undefined);
+  deleteScimUserGroupsForUser.mockResolvedValue(undefined);
+  deleteScimUserGroupsForGroup.mockResolvedValue(undefined);
   vi.stubEnv("WORKOS_WEBHOOK_SECRET", SECRET);
 });
 
@@ -335,6 +391,239 @@ describe("SCIM admin CRUD", () => {
     });
     expect(listScimDirectories).toHaveBeenCalledWith("org-a");
     expect(JSON.parse(res.bodyText)).toHaveLength(1);
+  });
+});
+
+describe("SCIM group role mapping CRUD", () => {
+  const dirRow = {
+    id: "sd-1",
+    orgId: "org-a",
+    providerDirectoryId: "directory_01",
+    directoryType: null,
+    defaultRole: "viewer" as const,
+    status: "active" as const,
+    lastSyncedAt: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+  const mappingRow = {
+    id: "m-1",
+    orgId: "org-a",
+    scimDirectoryId: "sd-1",
+    providerGroupId: "directory_group_1",
+    role: "editor",
+    createdBy: "admin-1",
+    updatedBy: "admin-1",
+    createdAt: null,
+    updatedAt: null,
+  };
+
+  it("GET returns [] when no directory is attached", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/group-role-mappings" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(JSON.parse(res.bodyText)).toEqual([]);
+    expect(listScimGroupRoleMappings).not.toHaveBeenCalled();
+  });
+
+  it("GET lists mappings scoped to org + directory", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    listScimGroupRoleMappings.mockResolvedValueOnce([mappingRow]);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/group-role-mappings" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(listScimGroupRoleMappings).toHaveBeenCalledWith("org-a", "sd-1");
+    expect(JSON.parse(res.bodyText)).toHaveLength(1);
+  });
+
+  it("POST creates a mapping and audits org.scim.group_role_mapping_created", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    getScimGroupState.mockResolvedValueOnce({ id: "grp_state_1" });
+    findScimGroupRoleMappingByGroup.mockResolvedValueOnce(null);
+    createScimGroupRoleMapping.mockResolvedValueOnce(mappingRow);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings",
+        method: "POST",
+        body: { providerGroupId: "directory_group_1", role: "editor" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(createScimGroupRoleMapping).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-a",
+      scimDirectoryId: "sd-1",
+      providerGroupId: "directory_group_1",
+      role: "editor",
+      createdBy: "admin-1",
+    }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-a", "admin-1", "org.scim.group_role_mapping_created", "scim_group_role_mapping", "m-1",
+      expect.objectContaining({ providerGroupId: "directory_group_1", role: "editor" }),
+    );
+  });
+
+  it("POST rejects an invalid role with 400", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings",
+        method: "POST",
+        body: { providerGroupId: "directory_group_1", role: "superuser" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(createScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+
+  it("POST rejects an unknown group with 404", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    getScimGroupState.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings",
+        method: "POST",
+        body: { providerGroupId: "directory_group_unknown", role: "editor" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(createScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+
+  it("POST rejects a duplicate mapping with 409", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    getScimGroupState.mockResolvedValueOnce({ id: "grp_state_1" });
+    findScimGroupRoleMappingByGroup.mockResolvedValueOnce(mappingRow);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings",
+        method: "POST",
+        body: { providerGroupId: "directory_group_1", role: "admin" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(409);
+    expect(createScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+
+  it("POST rejects with 409 when no directory is attached", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings",
+        method: "POST",
+        body: { providerGroupId: "directory_group_1", role: "editor" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(409);
+    expect(createScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+
+  it("POST :id updates a mapping and audits before/after", async () => {
+    getScimGroupRoleMappingById.mockResolvedValueOnce(mappingRow);
+    updateScimGroupRoleMapping.mockResolvedValueOnce({ ...mappingRow, role: "admin" });
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings/m-1");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings/m-1",
+        method: "POST",
+        body: { role: "admin" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(updateScimGroupRoleMapping).toHaveBeenCalledWith(expect.objectContaining({
+      id: "m-1", orgId: "org-a", role: "admin", updatedBy: "admin-1",
+    }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-a", "admin-1", "org.scim.group_role_mapping_updated", "scim_group_role_mapping", "m-1",
+      expect.objectContaining({ before: "editor", after: "admin" }),
+    );
+  });
+
+  it("POST :id returns 404 when the mapping is missing", async () => {
+    getScimGroupRoleMappingById.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/group-role-mappings/m-x");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({
+        url: "/org/scim/group-role-mappings/m-x",
+        method: "POST",
+        body: { role: "admin" },
+      }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(updateScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+
+  it("DELETE :id removes a mapping and audits", async () => {
+    getScimGroupRoleMappingById.mockResolvedValueOnce(mappingRow);
+    deleteScimGroupRoleMapping.mockResolvedValueOnce(1);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "DELETE", "/org/scim/group-role-mappings/m-1");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/group-role-mappings/m-1", method: "DELETE" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(deleteScimGroupRoleMapping).toHaveBeenCalledWith({ id: "m-1", orgId: "org-a" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-a", "admin-1", "org.scim.group_role_mapping_deleted", "scim_group_role_mapping", "m-1",
+      expect.any(Object),
+    );
+  });
+
+  it("DELETE :id returns 404 when the mapping is missing", async () => {
+    getScimGroupRoleMappingById.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "DELETE", "/org/scim/group-role-mappings/m-x");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/group-role-mappings/m-x", method: "DELETE" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(deleteScimGroupRoleMapping).not.toHaveBeenCalled();
   });
 });
 

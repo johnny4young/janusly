@@ -150,6 +150,11 @@ export type AuditAction =
   | "org.scim.directory_attached"
   | "org.scim.directory_updated"
   | "org.scim.directory_revoked"
+  // scim group→role mapping admin (authenticated routes; the webhook-side
+  // membership recompute audits via the lower-level audit() with a plain string)
+  | "org.scim.group_role_mapping_created"
+  | "org.scim.group_role_mapping_updated"
+  | "org.scim.group_role_mapping_deleted"
   // sso connection admin (authenticated routes; callback stays on audit())
   | "org.sso.connection_added"
   | "org.sso.connection_updated"
