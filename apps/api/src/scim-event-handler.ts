@@ -102,6 +102,40 @@ export type ScimHandlerDeps = {
     metadata?: unknown,
   ) => Promise<void>;
   recordScimDirectorySync: (input: { id: string; orgId: string }) => Promise<void>;
+  // SCIM v2 group→role mapping
+  getScimGroupRoleMappingsMap: (orgId: string, scimDirectoryId: string) => Promise<Map<string, string>>;
+  listScimUserGroupIds: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerUserId: string;
+  }) => Promise<string[]>;
+  listScimUserIdsForGroup: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerGroupId: string;
+  }) => Promise<string[]>;
+  addScimUserGroup: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerUserId: string;
+    providerGroupId: string;
+  }) => Promise<void>;
+  removeScimUserGroup: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerUserId: string;
+    providerGroupId: string;
+  }) => Promise<void>;
+  deleteScimUserGroupsForUser: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerUserId: string;
+  }) => Promise<void>;
+  deleteScimUserGroupsForGroup: (input: {
+    orgId: string;
+    scimDirectoryId: string;
+    providerGroupId: string;
+  }) => Promise<void>;
 };
 
 export type ScimHandlerResult =
@@ -109,6 +143,44 @@ export type ScimHandlerResult =
   | { processed: false; reason: string };
 
 const SCIM_ACTOR = "scim:webhook";
+
+/** Built-in role rank for highest-wins group→role derivation. Mirrors the
+ *  `viewer < editor < admin` ordering in `apps/api/src/permissions.ts`; kept
+ *  local so this pure module doesn't import the DB-touching permissions file. */
+const ROLE_RANK: Record<string, number> = { viewer: 1, editor: 2, admin: 3 };
+
+/**
+ * Derive a SCIM-provisioned member's role from their IdP group memberships.
+ *
+ * Among the groups the user belongs to that carry a mapping, return the
+ * HIGHEST-rank built-in role (`viewer < editor < admin`); when no group the
+ * user is in maps to a role, return `defaultRole`. Highest-rank-wins is the
+ * standard group-RBAC semantics; the `defaultRole` fallback keeps a user with
+ * no mapped group exactly as the pre-v2 (flat `defaultRole`) behavior — so an
+ * org that hasn't configured any mapping is byte-for-byte unchanged.
+ *
+ * Pure + exported for unit tests. Unknown / custom role names in the mapping
+ * rank as -1 (never beat a built-in); a map containing only unknowns falls
+ * through to `defaultRole`.
+ */
+export function deriveScimRole(
+  userGroupIds: readonly string[],
+  mappings: Map<string, string>,
+  defaultRole: string,
+): string {
+  let best: string | null = null;
+  let bestRank = 0; // built-in ranks start at 1, so 0 means "nothing matched"
+  for (const groupId of userGroupIds) {
+    const role = mappings.get(groupId);
+    if (!role) continue;
+    const rank = ROLE_RANK[role] ?? -1;
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = role;
+    }
+  }
+  return best ?? defaultRole;
+}
 
 /**
  * Top-level dispatcher. Returns a structured result so the route can
@@ -172,14 +244,10 @@ export async function handleScimEvent(input: {
         result = await handleGroupDeleted({ event, scimDirectory, deps });
         break;
       case "dsync.group.user_added":
+        result = await handleGroupUserAdded({ event, scimDirectory, deps });
+        break;
       case "dsync.group.user_removed":
-        // v1: state is captured by user + group event handlers; group
-        // membership transitions don't alter Janusly role yet.
-        await deps.audit(orgId, SCIM_ACTOR, "scim.group.synced", "scim_event", event.id, {
-          eventType: event.event,
-          scimDirectoryId: scimDirectory.id,
-        });
-        result = { processed: true, action: "noop" };
+        result = await handleGroupUserRemoved({ event, scimDirectory, deps });
         break;
       default:
         await deps.audit(orgId, SCIM_ACTOR, "scim.webhook.unknown_event", "scim_event", event.id, {
@@ -289,16 +357,27 @@ async function handleUserCreated(input: {
     lastEventId: event.id,
     lastEventTimestamp: eventTimestamp,
   });
+  // Derive the role from the user's group memberships. When a group event
+  // arrived before this create (the membership join row already exists),
+  // derivation picks it up here; with no mapped group it returns
+  // `defaultRole`, byte-for-byte the pre-v2 flat-role behavior.
+  const role = await resolveDerivedRole({
+    orgId,
+    scimDirectoryId: scimDirectory.id,
+    providerUserId,
+    defaultRole: scimDirectory.defaultRole,
+    deps,
+  });
   await deps.upsertMembershipByEmail({
     orgId,
     email: lowerEmail,
-    role: scimDirectory.defaultRole,
+    role,
     invitedBy: SCIM_ACTOR,
   });
 
   await deps.audit(orgId, SCIM_ACTOR, "scim.user.provisioned", "scim_user", providerUserId, {
     email: lowerEmail,
-    role: scimDirectory.defaultRole,
+    role,
     scimDirectoryId: scimDirectory.id,
     eventId: event.id,
     reactivated: wasReactivation,
@@ -382,15 +461,26 @@ async function handleUserUpdated(input: {
     lastEventId: event.id,
     lastEventTimestamp: eventTimestamp,
   });
+  // Re-derive the role on every update so a re-key (email change) or a
+  // mapping configured since the last sync is reflected; no mapped group
+  // → `defaultRole` (pre-v2 behavior).
+  const role = await resolveDerivedRole({
+    orgId,
+    scimDirectoryId: scimDirectory.id,
+    providerUserId,
+    defaultRole: scimDirectory.defaultRole,
+    deps,
+  });
   await deps.upsertMembershipByEmail({
     orgId,
     email: lowerEmail,
-    role: scimDirectory.defaultRole,
+    role,
     invitedBy: SCIM_ACTOR,
   });
 
   await deps.audit(orgId, SCIM_ACTOR, "scim.user.updated", "scim_user", providerUserId, {
     email: lowerEmail,
+    role,
     previousEmail: oldEmail === lowerEmail ? undefined : oldEmail,
     scimDirectoryId: scimDirectory.id,
     eventId: event.id,
@@ -422,6 +512,12 @@ async function handleUserDeleted(input: {
     providerUserId,
   });
   if (!existing) {
+    // A delete for an unknown user can arrive after one or more early
+    // group-membership events. Clear those orphan join rows so a later,
+    // genuine user.created event cannot inherit stale groups from the old
+    // lifecycle. This is safe before the out-of-order guard because there is
+    // no user state timestamp to compare against.
+    await deps.deleteScimUserGroupsForUser({ orgId, scimDirectoryId: scimDirectory.id, providerUserId });
     await deps.audit(orgId, SCIM_ACTOR, "scim.webhook.unknown_user", "scim_event", event.id, {
       eventType: event.event,
       providerUserId,
@@ -442,6 +538,7 @@ async function handleUserDeleted(input: {
   }
 
   await deps.deleteMembership({ orgId, email: existing.email });
+  await deps.deleteScimUserGroupsForUser({ orgId, scimDirectoryId: scimDirectory.id, providerUserId });
   await deps.markScimUserInactive({
     id: existing.id,
     eventId: event.id,
@@ -456,7 +553,131 @@ async function handleUserDeleted(input: {
   return { processed: true, action: "deprovisioned" };
 }
 
+/* ------------------------ role derivation (v2) --------------------------- */
+
+/** Load the user's current groups + the directory's mappings and derive the
+ *  member role (highest-rank mapped role, else `defaultRole`). */
+async function resolveDerivedRole(input: {
+  orgId: string;
+  scimDirectoryId: string;
+  providerUserId: string;
+  defaultRole: string;
+  deps: ScimHandlerDeps;
+}): Promise<string> {
+  const [groupIds, mappings] = await Promise.all([
+    input.deps.listScimUserGroupIds({
+      orgId: input.orgId,
+      scimDirectoryId: input.scimDirectoryId,
+      providerUserId: input.providerUserId,
+    }),
+    input.deps.getScimGroupRoleMappingsMap(input.orgId, input.scimDirectoryId),
+  ]);
+  return deriveScimRole(groupIds, mappings, input.defaultRole);
+}
+
+/**
+ * Recompute a member's role after a group-membership change and write the
+ * `org_members` row. When no active `scim_user_state` exists for the user
+ * (a group event arriving before the user is provisioned, or a deprovisioned
+ * user) the join row is already persisted by the caller — a later user
+ * create/update will derive the role — so we only audit the membership
+ * change and skip the membership write.
+ */
+async function recomputeMemberRole(input: {
+  event: ScimEvent;
+  scimDirectory: ScimDirectoryRow;
+  deps: ScimHandlerDeps;
+  providerUserId: string;
+  providerGroupId: string;
+  change: "added" | "removed";
+}): Promise<void> {
+  const { event, scimDirectory, deps, providerUserId, providerGroupId, change } = input;
+  const orgId = scimDirectory.orgId;
+  const userState = await deps.getScimUserState({ scimDirectoryId: scimDirectory.id, providerUserId });
+  if (!userState || !userState.active) {
+    await deps.audit(orgId, SCIM_ACTOR, "scim.group.membership_changed", "scim_user", providerUserId, {
+      eventType: event.event,
+      change,
+      providerGroupId,
+      scimDirectoryId: scimDirectory.id,
+      roleRecomputed: false,
+    });
+    return;
+  }
+  const derivedRole = await resolveDerivedRole({
+    orgId,
+    scimDirectoryId: scimDirectory.id,
+    providerUserId,
+    defaultRole: scimDirectory.defaultRole,
+    deps,
+  });
+  const lowerEmail = userState.email.toLowerCase();
+  await deps.upsertMembershipByEmail({ orgId, email: lowerEmail, role: derivedRole, invitedBy: SCIM_ACTOR });
+  await deps.audit(orgId, SCIM_ACTOR, "scim.group.membership_changed", "scim_user", providerUserId, {
+    eventType: event.event,
+    change,
+    providerGroupId,
+    scimDirectoryId: scimDirectory.id,
+    email: lowerEmail,
+    derivedRole,
+    roleRecomputed: true,
+  });
+}
+
 /* ----------------------------- group events ------------------------------ */
+
+// Membership events rely on the top-level event-id replay guard for
+// idempotency (an exact replay never reaches these handlers) and on the
+// idempotent `scim_user_groups` join (ON CONFLICT DO NOTHING). They do NOT
+// carry a per-membership out-of-order guard the way the user handlers do —
+// the join table has no `lastEventTimestamp`, so the derived role reflects
+// whatever join rows currently exist (eventual consistency). The blast
+// radius of a reordered add/remove pair is a stale role one rank off until
+// the next membership event corrects it; it can never escalate a user
+// beyond an admin-configured mapping, so this is an accepted v1 posture.
+
+async function handleGroupUserAdded(input: {
+  event: ScimEvent;
+  scimDirectory: ScimDirectoryRow;
+  deps: ScimHandlerDeps;
+}): Promise<ScimHandlerResult> {
+  const { event, scimDirectory, deps } = input;
+  const orgId = scimDirectory.orgId;
+  const providerUserId = stringField(event.data, "user_id");
+  const providerGroupId = stringField(event.data, "directory_group_id");
+  if (!providerUserId || !providerGroupId) {
+    await deps.audit(orgId, SCIM_ACTOR, "scim.webhook.malformed_payload", "scim_event", event.id, {
+      eventType: event.event,
+    });
+    return { processed: false, reason: "malformed_payload" };
+  }
+  // Persist the membership FIRST so the recompute sees the new group.
+  await deps.addScimUserGroup({ orgId, scimDirectoryId: scimDirectory.id, providerUserId, providerGroupId });
+  await recomputeMemberRole({ event, scimDirectory, deps, providerUserId, providerGroupId, change: "added" });
+  return { processed: true, action: "group_membership_added" };
+}
+
+async function handleGroupUserRemoved(input: {
+  event: ScimEvent;
+  scimDirectory: ScimDirectoryRow;
+  deps: ScimHandlerDeps;
+}): Promise<ScimHandlerResult> {
+  const { event, scimDirectory, deps } = input;
+  const orgId = scimDirectory.orgId;
+  const providerUserId = stringField(event.data, "user_id");
+  const providerGroupId = stringField(event.data, "directory_group_id");
+  if (!providerUserId || !providerGroupId) {
+    await deps.audit(orgId, SCIM_ACTOR, "scim.webhook.malformed_payload", "scim_event", event.id, {
+      eventType: event.event,
+    });
+    return { processed: false, reason: "malformed_payload" };
+  }
+  // Drop the membership FIRST so the recompute excludes the removed group
+  // (a removal may lower the role back toward `defaultRole`).
+  await deps.removeScimUserGroup({ orgId, scimDirectoryId: scimDirectory.id, providerUserId, providerGroupId });
+  await recomputeMemberRole({ event, scimDirectory, deps, providerUserId, providerGroupId, change: "removed" });
+  return { processed: true, action: "group_membership_removed" };
+}
 
 async function handleGroupUpsert(input: {
   event: ScimEvent;
@@ -504,6 +725,23 @@ async function handleGroupDeleted(input: {
     providerGroupId,
   });
   if (existing) await deps.deleteScimGroupState({ id: existing.id });
+  // Capture affected users before deleting the join rows, then recompute after
+  // cleanup so active members immediately lose roles derived from the deleted
+  // group. Orphan-tolerant by design (no FK) — users without active state only
+  // receive a roleRecomputed:false audit from the recompute helper.
+  const affectedUserIds = await deps.listScimUserIdsForGroup({
+    orgId: scimDirectory.orgId,
+    scimDirectoryId: scimDirectory.id,
+    providerGroupId,
+  });
+  await deps.deleteScimUserGroupsForGroup({
+    orgId: scimDirectory.orgId,
+    scimDirectoryId: scimDirectory.id,
+    providerGroupId,
+  });
+  for (const providerUserId of affectedUserIds) {
+    await recomputeMemberRole({ event, scimDirectory, deps, providerUserId, providerGroupId, change: "removed" });
+  }
   await deps.audit(scimDirectory.orgId, SCIM_ACTOR, "scim.group.synced", "scim_group", providerGroupId, {
     eventType: event.event,
     deleted: true,
