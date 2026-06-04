@@ -586,8 +586,10 @@ Current execution focus:
    as the provider-comparison floor.
 3. **Provider breadth** — ENG-194 only after generation reliability has a
    stable baseline.
-4. **Generation refinements** — ENG-196 shipped; no remaining refinement ticket
-   is pickable until provider decisions land.
+4. **Generation refinements** — ENG-196 + ENG-197 shipped (per-surface model
+   routing + Anthropic prompt caching across generation/review/patch/suggest);
+   the cluster is closed, no remaining refinement ticket is pickable until
+   provider decisions land.
 5. **Deferred/gated context** — ENG-025, ENG-026, ENG-087, and ENG-038 remain
    non-pickable until their blockers change.
 
@@ -681,8 +683,10 @@ execution queue is intentionally short and mirrors `docs/ROADMAP.md` §3a:
    baseline is now the floor for provider comparisons.
 3. **Provider breadth:** pick ENG-194 only after reliability is stable enough
    to compare OpenAI / open-weights endpoints honestly against Anthropic.
-4. **Generation refinements:** ENG-196 shipped; no remaining refinement ticket
-   is pickable until provider decisions land.
+4. **Generation refinements:** ENG-196 + ENG-197 shipped (per-surface model
+   routing + Anthropic prompt caching across generation/review/patch/suggest);
+   the cluster is closed, no remaining refinement ticket is pickable until
+   provider decisions land.
 5. **Gated/deferred context:** ENG-025, ENG-026, ENG-087, and ENG-038 remain
    non-pickable until their blockers change.
 

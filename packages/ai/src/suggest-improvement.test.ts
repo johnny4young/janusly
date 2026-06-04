@@ -271,3 +271,32 @@ describe("suggestWorkflowImprovement — system prompt pinning", () => {
     expect(callArgs.system).toContain("DO NOT include any literal secret values");
   });
 });
+
+describe("suggestWorkflowImprovement — system-prompt caching", () => {
+  const aiResult = {
+    object: { suggestions: [{ patchedWorkflowJson: JSON.stringify(baseWorkflow), rationale: "ok", approachLabel: "other", confidence: 10 }] },
+    model: "x",
+    provider: "y",
+    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+    latencyMs: 10,
+  };
+
+  it("threads cacheSystemPrompt to generateObject when requested and defaults it off", async () => {
+    const cached = vi.fn(async () => aiResult);
+    await suggestWorkflowImprovement({
+      llm: { generateText: vi.fn(), generateObject: cached } as unknown as LlmClient,
+      envelopeSchema,
+      workflow: baseWorkflow,
+      cacheSystemPrompt: true,
+    });
+    expect((cached.mock.calls[0] as unknown[])[0] as { cacheSystemPrompt?: boolean }).toMatchObject({ cacheSystemPrompt: true });
+
+    const uncached = vi.fn(async () => aiResult);
+    await suggestWorkflowImprovement({
+      llm: { generateText: vi.fn(), generateObject: uncached } as unknown as LlmClient,
+      envelopeSchema,
+      workflow: baseWorkflow,
+    });
+    expect(((uncached.mock.calls[0] as unknown[])[0] as { cacheSystemPrompt?: boolean }).cacheSystemPrompt).toBeUndefined();
+  });
+});
