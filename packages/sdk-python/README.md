@@ -242,4 +242,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Optional type-check: `mypy --strict src/janusly`.
+Type-check: `mypy src/janusly` (strict mode is configured in `pyproject.toml`; `mypy` ships in the `[dev]` extra and CI runs it on every change).
