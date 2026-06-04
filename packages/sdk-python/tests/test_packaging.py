@@ -34,7 +34,11 @@ def test_webhooks_module_imports_without_httpx() -> None:
     """
     import sys
 
-    # Save + clear any pre-imported httpx so the test reflects a clean slate.
+    # Save + clear any pre-imported modules so the test reflects a clean
+    # process. Importing a submodule executes `janusly.__init__` first, so the
+    # package itself must be cleared too — otherwise this would miss eager
+    # client imports in `__init__`.
+    saved_package = sys.modules.pop("janusly", None)
     saved_httpx = sys.modules.pop("httpx", None)
     saved_webhooks = sys.modules.pop("janusly.webhooks", None)
     try:
@@ -49,3 +53,36 @@ def test_webhooks_module_imports_without_httpx() -> None:
             sys.modules["httpx"] = saved_httpx
         if saved_webhooks is not None:
             sys.modules["janusly.webhooks"] = saved_webhooks
+        if saved_package is not None:
+            sys.modules["janusly"] = saved_package
+
+
+def test_top_level_client_reexports_are_lazy_but_available() -> None:
+    """`from janusly import JanuslyClient` remains the public convenience path."""
+    import sys
+
+    # Accessing the lazy client symbols imports `.client` / `.async_client` /
+    # `._http` (and httpx) into sys.modules. Save + restore those submodules
+    # too, so this test leaves sys.modules exactly as it found it — matching
+    # the isolation discipline of `test_webhooks_module_imports_without_httpx`
+    # and preventing inter-test contamination.
+    managed = ("janusly", "janusly.client", "janusly.async_client", "janusly._http")
+    saved = {name: sys.modules.pop(name, None) for name in managed}
+    try:
+        import janusly
+
+        assert "JanuslyClient" not in janusly.__dict__
+        client_cls = janusly.JanuslyClient
+        async_client_cls = janusly.JanuslyAsyncClient
+        assert client_cls.__name__ == "JanuslyClient"
+        assert async_client_cls.__name__ == "JanuslyAsyncClient"
+        # The lazy lookup caches the resolved symbols so repeated access is
+        # normal attribute access.
+        assert janusly.__dict__["JanuslyClient"] is client_cls
+        assert janusly.__dict__["JanuslyAsyncClient"] is async_client_cls
+    finally:
+        for name, module in saved.items():
+            if module is not None:
+                sys.modules[name] = module
+            else:
+                sys.modules.pop(name, None)
