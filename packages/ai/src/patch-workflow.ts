@@ -145,6 +145,14 @@ export type SuggestWorkflowPatchInput = {
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
   /**
+   * Opt into Anthropic system-prompt caching. The patch system prompt is
+   * static per (override × locale) while the DLQ/run/memory context rides the
+   * user prompt, so marking it as an ephemeral cache breakpoint lets repeat
+   * patch calls reuse the cached prefix. No-op on non-Anthropic providers
+   * (see `buildSystemPrompt` in `llm-client.ts`). Default off.
+   */
+  cacheSystemPrompt?: boolean;
+  /**
    * Optional system-prompt override. The default `SYSTEM_PROMPT`
    * narrates the config-only patch contract. The route passes
    * `STRUCTURAL_PATCH_SYSTEM_PROMPT` when it dispatches to the
@@ -285,7 +293,7 @@ RECALLED CONTEXT — when the prompt body contains \`extraContext.memorySnippets
 export async function suggestWorkflowPatch(
   input: SuggestWorkflowPatchInput,
 ): Promise<PatchSuggestion> {
-  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, extraContext, context, systemPromptOverride, locale } = input;
+  const { llm, envelopeSchema, workflow, failedNodeId, errorJson, runEvents, model, cacheSystemPrompt, extraContext, context, systemPromptOverride, locale } = input;
 
   if (!llm) {
     return {
@@ -336,6 +344,7 @@ export async function suggestWorkflowPatch(
       system: (systemPromptOverride ?? SYSTEM_PROMPT) + localeInstructionForLlm(locale),
       prompt: promptBody,
       modelHint: model,
+      cacheSystemPrompt,
       context,
     });
     // The route is responsible for merging each `patchedConfig` into a

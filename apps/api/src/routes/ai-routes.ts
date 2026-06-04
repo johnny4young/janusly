@@ -402,6 +402,7 @@ export const aiRoutes: Route[] = [
             : ""),
           prompt: JSON.stringify(workflow),
           modelHint: surfaceModel,
+          cacheSystemPrompt: true,
           context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
         });
         const review = mergeReviewFindings(
@@ -613,6 +614,7 @@ export const aiRoutes: Route[] = [
       const helperResult: PatchSuggestion = await suggestWorkflowPatch({
         llm,
         model: surfaceModel,
+        cacheSystemPrompt: true,
         envelopeSchema: envelopeSchemaAny,
         workflow: dlq.workflowJson,
         failedNodeId: dlq.nodeId,
@@ -906,6 +908,7 @@ export const aiRoutes: Route[] = [
         workflow,
         focus,
         model: surfaceModel,
+        cacheSystemPrompt: true,
         context: { orgId: auth.orgId, userId: auth.userId, workflowId: workflow.id },
         // See `/ai/patch-workflow` for the locale propagation rationale.
         locale: localeFromRequest(req),
