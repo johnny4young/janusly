@@ -124,6 +124,14 @@ export type SuggestWorkflowImprovementInput = {
   /** Optional model override (`"<provider>/<model>"` form for cross-provider). */
   model?: string;
   /**
+   * Opt into Anthropic system-prompt caching. The improvement system prompt is
+   * static per locale while the workflow rides the user prompt, so marking it
+   * as an ephemeral cache breakpoint lets repeat calls reuse the cached prefix.
+   * No-op on non-Anthropic providers (see `buildSystemPrompt` in
+   * `llm-client.ts`). Default off.
+   */
+  cacheSystemPrompt?: boolean;
+  /**
    * Telemetry context forwarded to `LlmClient.generateObject`. The
    * route owns this and threads `orgId` (always) and `workflowId`
    * (when the input workflow has a saved id) so the recorder can
@@ -186,7 +194,7 @@ Rules per suggestion:
 export async function suggestWorkflowImprovement(
   input: SuggestWorkflowImprovementInput,
 ): Promise<SuggestImprovementResult> {
-  const { llm, envelopeSchema, workflow, focus, model, context, locale } = input;
+  const { llm, envelopeSchema, workflow, focus, model, cacheSystemPrompt, context, locale } = input;
 
   if (!llm) {
     return {
@@ -216,6 +224,7 @@ export async function suggestWorkflowImprovement(
       prompt: promptBody,
       context,
       modelHint: model,
+      cacheSystemPrompt,
     });
     return {
       mode: "ai",

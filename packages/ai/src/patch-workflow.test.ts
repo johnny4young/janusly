@@ -212,6 +212,32 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).toContain('"401 unauthorized"');
   });
 
+  it("threads cacheSystemPrompt to generateObject when requested and defaults it off", async () => {
+    const result = {
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    };
+    const cached = vi.fn(async () => result);
+    await suggestWorkflowPatch({
+      llm: { generateText: vi.fn(), generateObject: cached } as unknown as LlmClient,
+      envelopeSchema,
+      ...baseInput,
+      cacheSystemPrompt: true,
+    });
+    expect((cached.mock.calls[0] as unknown[])[0] as { cacheSystemPrompt?: boolean }).toMatchObject({ cacheSystemPrompt: true });
+
+    const uncached = vi.fn(async () => result);
+    await suggestWorkflowPatch({
+      llm: { generateText: vi.fn(), generateObject: uncached } as unknown as LlmClient,
+      envelopeSchema,
+      ...baseInput,
+    });
+    expect(((uncached.mock.calls[0] as unknown[])[0] as { cacheSystemPrompt?: boolean }).cacheSystemPrompt).toBeUndefined();
+  });
+
   it("instructs the model to emit 1-3 suggestions with approachLabel + confidence", async () => {
     const generateObject = vi.fn(async () => ({
       object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
