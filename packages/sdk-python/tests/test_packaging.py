@@ -29,8 +29,9 @@ def test_webhooks_module_imports_without_httpx() -> None:
     surface. Confirmed by importing the module fresh and asserting
     httpx is absent from sys.modules unless the caller already loaded it.
 
-    (We don't try to make the FULL package import skip httpx — `import janusly`
-    does pull the client. The lightweight contract is on `from janusly.webhooks import …`.)
+    Full-package `import janusly` is lazy too, but this submodule path is
+    the strictest contract: webhook-only consumers must be able to import the
+    verifier without importing the client transport at all.
     """
     import sys
 
@@ -66,20 +67,24 @@ def test_top_level_client_reexports_are_lazy_but_available() -> None:
     # too, so this test leaves sys.modules exactly as it found it — matching
     # the isolation discipline of `test_webhooks_module_imports_without_httpx`
     # and preventing inter-test contamination.
-    managed = ("janusly", "janusly.client", "janusly.async_client", "janusly._http")
+    managed = ("janusly", "janusly.client", "janusly.async_client", "janusly._http", "httpx")
     saved = {name: sys.modules.pop(name, None) for name in managed}
     try:
         import janusly
 
         assert "JanuslyClient" not in janusly.__dict__
+        assert "httpx" not in sys.modules
         client_cls = janusly.JanuslyClient
         async_client_cls = janusly.JanuslyAsyncClient
+        retry_config_cls = janusly.RetryConfig
         assert client_cls.__name__ == "JanuslyClient"
         assert async_client_cls.__name__ == "JanuslyAsyncClient"
+        assert retry_config_cls.__name__ == "RetryConfig"
         # The lazy lookup caches the resolved symbols so repeated access is
         # normal attribute access.
         assert janusly.__dict__["JanuslyClient"] is client_cls
         assert janusly.__dict__["JanuslyAsyncClient"] is async_client_cls
+        assert janusly.__dict__["RetryConfig"] is retry_config_cls
     finally:
         for name, module in saved.items():
             if module is not None:

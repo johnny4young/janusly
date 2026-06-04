@@ -184,9 +184,22 @@ except JanuslyApiError as err:
     print(err.status_code, err.code, err.params)
 ```
 
-## Notes on retries
+## Retries
 
-The sync client does NOT auto-retry. The TypeScript SDK has opt-in exponential backoff; in Python we leave retry to the caller (one `try/except`, one composable policy — pick whatever library or pattern fits your service).
+Both clients ship an **opt-in** retry layer (off by default, mirroring the TypeScript SDK). Pass a `RetryConfig` to the constructor:
+
+```python
+from janusly import JanuslyClient, RetryConfig, ServiceTokenAuth
+
+client = JanuslyClient(
+    base_url="https://api.janus.ly",
+    org_id="acme",
+    auth=ServiceTokenAuth(token="...", user_id="ops-bot"),
+    retry=RetryConfig(max_attempts=3),  # 3 extra attempts; 0 (default) = no retries
+)
+```
+
+A transient `429` / `502` / `503` / `504` — or a network / timeout error — is retried with exponential backoff (`backoff_ms * 2**attempt`, default `backoff_ms=200`). A `429` carrying a `Retry-After` header uses that delay instead. A 4xx validation error (a status not in `retry_on`) is never retried. `RetryConfig` fields: `max_attempts` (default `0`), `backoff_ms` (default `200`), `retry_on` (default `(429, 502, 503, 504)`). The async client applies the same policy with `asyncio.sleep`. With no `retry` argument the behavior is identical to a single blocking call.
 
 ## Async support
 

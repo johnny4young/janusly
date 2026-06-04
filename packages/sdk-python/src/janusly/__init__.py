@@ -40,7 +40,7 @@ from .errors import (
 from .webhooks import verify_signature
 
 if TYPE_CHECKING:
-    from ._http import BearerAuth, ServiceTokenAuth
+    from ._http import BearerAuth, RetryConfig, ServiceTokenAuth
     from .async_client import (
         AsyncRecoveryResource,
         AsyncReportsResource,
@@ -60,6 +60,7 @@ __version__ = "0.0.1"
 _LAZY_EXPORTS = {
     "BearerAuth": ("._http", "BearerAuth"),
     "ServiceTokenAuth": ("._http", "ServiceTokenAuth"),
+    "RetryConfig": ("._http", "RetryConfig"),
     "JanuslyClient": (".client", "JanuslyClient"),
     "RecoveryResource": (".client", "RecoveryResource"),
     "ReportsResource": (".client", "ReportsResource"),
@@ -96,6 +97,7 @@ def __dir__() -> list[str]:
 __all__ = [
     # Client + auth
     "BearerAuth",
+    "RetryConfig",
     "JanuslyClient",
     "JanuslyAsyncClient",
     "RecoveryResource",
