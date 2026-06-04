@@ -42,6 +42,7 @@ from ._http import (
     AuthLike,
     BearerAuth,
     ClientConfig,
+    RetryConfig,
     ServiceTokenAuth,
     async_request,
     make_config,
@@ -75,6 +76,7 @@ class JanuslyAsyncClient:
         auth: AuthLike,
         timeout: float = 30.0,
         user_agent_suffix: str = "",
+        retry: Optional[RetryConfig] = None,
     ) -> None:
         self._config: ClientConfig = make_config(
             base_url=base_url,
@@ -82,6 +84,7 @@ class JanuslyAsyncClient:
             auth=auth,
             timeout=timeout,
             user_agent_suffix=user_agent_suffix,
+            retry=retry,
         )
         self._runs = AsyncRunsResource(self._config)
         self._reports = AsyncReportsResource(self._config)
