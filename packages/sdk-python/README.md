@@ -190,17 +190,34 @@ The sync client does NOT auto-retry. The TypeScript SDK has opt-in exponential b
 
 ## Async support
 
-**v1 is sync-only.** Python's sync (`Iterator[X]`) and async (`AsyncIterator[X]`) constructs are not interchangeable, and the most common adoption surfaces (Lambda receivers, glue scripts, batch jobs) prefer sync. FastAPI handlers can call the sync client via `asyncio.to_thread`:
+The SDK ships **both a sync and an async client**. Use `JanuslyClient`
+(blocking) for Lambda receivers, glue scripts, and batch jobs; use
+`JanuslyAsyncClient` when your code already runs inside an event loop
+(FastAPI handlers, async pipelines):
 
 ```python
-import asyncio
+from janusly import JanuslyAsyncClient, ServiceTokenAuth
 
-@app.get("/runs/{run_id}")
-async def get_run(run_id: str) -> dict:
-    return await asyncio.to_thread(client.runs.get, run_id)
+client = JanuslyAsyncClient(
+    base_url="https://api.janus.ly",
+    org_id="acme",
+    auth=ServiceTokenAuth(token="...", user_id="ops-bot"),
+)
+
+run = await client.runs.start(workflow_id="wf-billing", input={"month": "2026-05"})
+final = await client.runs.poll_until_terminal(run["runId"])
+
+async for event in client.runs.stream_events(run["runId"]):
+    print(event["type"])
 ```
 
-A `JanuslyAsyncClient` sibling is a future follow-up.
+The async client mirrors the sync surface 1:1 — same four resources
+(`runs` / `reports` / `recovery` / `webhooks`), same methods, same typed
+error hierarchy. `runs.list` and `runs.stream_events` are async
+generators (`async for`); `webhooks.verify_signature` stays synchronous
+(it's pure HMAC, no I/O). Both clients share the same per-call transport
+(a fresh `httpx` client per request — no shared pool to close), so there
+is no context-manager lifecycle to manage on either.
 
 ## Development
 

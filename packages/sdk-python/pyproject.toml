@@ -31,6 +31,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",
+    "pytest-asyncio>=0.23",
 ]
 
 [project.urls]
@@ -43,6 +44,9 @@ packages = ["src/janusly"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# `auto` lets `async def test_*` run without a per-test marker — the async
+# client suite relies on it (pytest-httpx mocks both sync + async transports).
+asyncio_mode = "auto"
 filterwarnings = [
     "error",
 ]
