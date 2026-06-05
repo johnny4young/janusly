@@ -15,6 +15,7 @@ const updateScimDirectory = vi.fn();
 const revokeScimDirectory = vi.fn();
 const recordScimDirectorySync = vi.fn();
 const getScimGroupState = vi.fn();
+const listScimGroupState = vi.fn();
 // SCIM v2 group→role mapping repos
 const listScimGroupRoleMappings = vi.fn();
 const getScimGroupRoleMappingById = vi.fn();
@@ -48,9 +49,12 @@ vi.mock("@janusly/data/src/scimUserStateRepo", () => ({
   markScimUserInactive: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@janusly/data/src/scimGroupStateRepo", () => ({
+  SCIM_GROUP_STATE_DEFAULT_LIMIT: 100,
+  SCIM_GROUP_STATE_MAX_LIMIT: 200,
   upsertScimGroupState: vi.fn().mockResolvedValue(null),
   deleteScimGroupState: vi.fn().mockResolvedValue(undefined),
   getScimGroupState: (...args: unknown[]) => getScimGroupState(...args),
+  listScimGroupState: (...args: unknown[]) => listScimGroupState(...args),
 }));
 vi.mock("@janusly/data/src/scimGroupRoleMappingsRepo", () => ({
   listScimGroupRoleMappings: (...args: unknown[]) => listScimGroupRoleMappings(...args),
@@ -101,6 +105,7 @@ beforeEach(() => {
   revokeScimDirectory.mockReset();
   recordScimDirectorySync.mockReset();
   getScimGroupState.mockReset();
+  listScimGroupState.mockReset();
   listScimGroupRoleMappings.mockReset();
   getScimGroupRoleMappingById.mockReset();
   findScimGroupRoleMappingByGroup.mockReset();
@@ -127,6 +132,7 @@ beforeEach(() => {
   removeScimUserGroup.mockResolvedValue(undefined);
   deleteScimUserGroupsForUser.mockResolvedValue(undefined);
   deleteScimUserGroupsForGroup.mockResolvedValue(undefined);
+  listScimGroupState.mockResolvedValue([]);
   vi.stubEnv("WORKOS_WEBHOOK_SECRET", SECRET);
 });
 
@@ -391,6 +397,65 @@ describe("SCIM admin CRUD", () => {
     });
     expect(listScimDirectories).toHaveBeenCalledWith("org-a");
     expect(JSON.parse(res.bodyText)).toHaveLength(1);
+  });
+});
+
+describe("SCIM synced groups", () => {
+  const dirRow = {
+    id: "sd-1",
+    orgId: "org-a",
+    providerDirectoryId: "directory_01",
+    directoryType: null,
+    defaultRole: "viewer" as const,
+    status: "active" as const,
+    lastSyncedAt: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+
+  it("GET returns [] when no directory is attached", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/org/scim/groups");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/groups" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(JSON.parse(res.bodyText)).toEqual([]);
+    expect(listScimGroupState).not.toHaveBeenCalled();
+  });
+
+  it("GET lists synced groups scoped to the org directory", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    listScimGroupState.mockResolvedValueOnce([
+      { id: "g1", orgId: "org-a", scimDirectoryId: "sd-1", providerGroupId: "dg1", name: "Engineering", lastSyncedAt: null },
+    ]);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/org/scim/groups");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/groups" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(listScimGroupState).toHaveBeenCalledWith("org-a", "sd-1", 100);
+    expect(JSON.parse(res.bodyText)).toHaveLength(1);
+  });
+
+  it("GET caps the requested group list limit", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    listScimGroupState.mockResolvedValueOnce([]);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "GET", "/org/scim/groups?limit=9999");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/groups?limit=9999" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(listScimGroupState).toHaveBeenCalledWith("org-a", "sd-1", 200);
   });
 });
 

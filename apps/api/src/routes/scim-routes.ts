@@ -43,6 +43,9 @@ import {
   upsertScimUserState,
   deleteScimGroupState,
   getScimGroupState,
+  listScimGroupState,
+  SCIM_GROUP_STATE_DEFAULT_LIMIT,
+  SCIM_GROUP_STATE_MAX_LIMIT,
   upsertScimGroupState,
   deleteProcessedEvent,
   recordProcessedEvent,
@@ -73,6 +76,14 @@ const VALID_DEFAULT_ROLES: readonly ScimDefaultRole[] = ["viewer", "editor", "ad
 
 function isDefaultRole(v: unknown): v is ScimDefaultRole {
   return typeof v === "string" && (VALID_DEFAULT_ROLES as readonly string[]).includes(v);
+}
+
+function parseScimGroupListLimit(rawUrl: string | undefined): number {
+  const url = new URL(rawUrl ?? "", "http://localhost");
+  const limitParam = Number(url.searchParams.get("limit"));
+  return Number.isFinite(limitParam) && limitParam > 0
+    ? Math.min(limitParam, SCIM_GROUP_STATE_MAX_LIMIT)
+    : SCIM_GROUP_STATE_DEFAULT_LIMIT;
 }
 
 export const scimRoutes: Route[] = [
@@ -163,6 +174,22 @@ export const scimRoutes: Route[] = [
       await revokeScimDirectory({ id, orgId: auth.orgId });
       await auditAction(auth, "org.scim.directory_revoked", { targetType: "scim_directory", targetId: id });
       return sendJson(res, { ok: true });
+    },
+  },
+
+  // === Synced groups (read-only; backs the group→role mapping picker) ===
+  {
+    method: "GET",
+    // Predicate (not an exact string) so the optional `?limit=` query is
+    // honoured: the dispatcher matches against the raw `req.url` including
+    // the query string, so an exact-string match would 404 on `?limit=…`.
+    match: (url) => url === "/org/scim/groups" || url.startsWith("/org/scim/groups?"),
+    role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const directory = await getScimDirectoryByOrgId(auth.orgId);
+      if (!directory) return sendJson(res, []);
+      const rows = await listScimGroupState(auth.orgId, directory.id, parseScimGroupListLimit(req.url));
+      return sendJson(res, rows);
     },
   },
 
