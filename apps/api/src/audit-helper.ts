@@ -155,6 +155,8 @@ export type AuditAction =
   | "org.scim.group_role_mapping_created"
   | "org.scim.group_role_mapping_updated"
   | "org.scim.group_role_mapping_deleted"
+  // bulk on-demand re-derivation of every active member's role
+  | "org.scim.resynced"
   // sso connection admin (authenticated routes; callback stays on audit())
   | "org.sso.connection_added"
   | "org.sso.connection_updated"

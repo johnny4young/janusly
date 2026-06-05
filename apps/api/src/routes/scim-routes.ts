@@ -39,6 +39,7 @@ import {
   updateScimDirectory,
   type ScimDefaultRole,
   getScimUserState,
+  listActiveScimUserState,
   markScimUserInactive,
   upsertScimUserState,
   deleteScimGroupState,
@@ -50,6 +51,7 @@ import {
   deleteProcessedEvent,
   recordProcessedEvent,
   deleteMembership,
+  findMemberByEmail,
   upsertMembershipByEmail,
   getAuthPolicyConfig,
   // SCIM v2 group→role mapping
@@ -69,6 +71,7 @@ import {
 } from "@janusly/data";
 
 import { handleScimEvent, type ScimEvent } from "../scim-event-handler";
+import { resyncScimMemberRoles } from "../scim-resync";
 import type { Route } from "../routes";
 import { verifyWorkOsWebhookSignature } from "../workos-webhook";
 
@@ -305,6 +308,41 @@ export const scimRoutes: Route[] = [
         },
       });
       return sendJson(res, { ok: true });
+    },
+  },
+
+  // === Bulk role re-sync (apply current mappings to every active member) ===
+  {
+    method: "POST",
+    match: "/org/scim/resync",
+    role: "admin",
+    handler: async ({ res, auth }) => {
+      const directory = await getScimDirectoryByOrgId(auth.orgId);
+      if (!directory) {
+        return sendJson(res, { error: "attach a SCIM directory before re-syncing roles" }, 409);
+      }
+      const result = await resyncScimMemberRoles({
+        scimDirectory: directory,
+        deps: {
+          listActiveScimUserState,
+          getScimGroupRoleMappingsMap,
+          listScimUserGroupIds,
+          findMemberByEmail,
+          upsertMembershipByEmail,
+        },
+      });
+      await auditAction(auth, "org.scim.resynced", {
+        targetType: "scim_directory",
+        targetId: directory.id,
+        metadata: {
+          membersResynced: result.membersResynced,
+          membersChanged: result.membersChanged,
+          skipped: result.skipped,
+          capped: result.capped,
+          scimDirectoryId: directory.id,
+        },
+      });
+      return sendJson(res, result);
     },
   },
 
