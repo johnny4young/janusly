@@ -26,6 +26,7 @@ import { FailureClustersCard } from './FailureClustersCard'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
+import { AuditLogPanel } from './AuditLogPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
 import { CredentialHealthCard } from './CredentialHealthCard'
 import { AlertPoliciesPanel } from './AlertPoliciesPanel'
@@ -415,6 +416,7 @@ function AccessSection() {
       <AuthPolicySettingsPanel />
       <ScimDirectorySettingsPanel />
       <PermissionGrantsPanel />
+      <AuditLogPanel />
     </>
   )
 }
