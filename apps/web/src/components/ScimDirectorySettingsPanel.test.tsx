@@ -42,6 +42,7 @@ function mockApi(opts: {
     if (path === '/org/scim/group-role-mappings' && method === 'POST') return { id: 'm-new' }
     if (path.startsWith('/org/scim/group-role-mappings/') && method === 'POST') return { id: 'm-1' }
     if (path.startsWith('/org/scim/group-role-mappings/') && method === 'DELETE') return { ok: true }
+    if (path === '/org/scim/resync' && method === 'POST') return { membersResynced: 3, membersChanged: 1, skipped: 0, capped: false, changes: [] }
     return []
   })
 }
@@ -215,5 +216,40 @@ describe('<ScimDirectorySettingsPanel />', () => {
       expect(api).toHaveBeenCalledWith('/org/scim/group-role-mappings/m1', { method: 'DELETE' })
     })
     confirmSpy.mockRestore()
+  })
+
+  it('shows the Re-sync now button when at least one mapping exists', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg1', role: 'editor' }],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    expect(await screen.findByRole('button', { name: /Re-sync every active member/i })).toBeInTheDocument()
+  })
+
+  it('hides the Re-sync now button when there are no mappings', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    await screen.findByText(/Group → role mappings/i)
+    expect(screen.queryByRole('button', { name: /Re-sync every active member/i })).not.toBeInTheDocument()
+  })
+
+  it('re-syncs roles via POST /org/scim/resync', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg1', role: 'editor' }],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    const button = await screen.findByRole('button', { name: /Re-sync every active member/i })
+    fireEvent.click(button)
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/org/scim/resync', expect.objectContaining({ method: 'POST' }))
+    })
   })
 })

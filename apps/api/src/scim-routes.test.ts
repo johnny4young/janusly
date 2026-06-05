@@ -16,6 +16,8 @@ const revokeScimDirectory = vi.fn();
 const recordScimDirectorySync = vi.fn();
 const getScimGroupState = vi.fn();
 const listScimGroupState = vi.fn();
+const listActiveScimUserState = vi.fn();
+const findMemberByEmail = vi.fn();
 // SCIM v2 group→role mapping repos
 const listScimGroupRoleMappings = vi.fn();
 const getScimGroupRoleMappingById = vi.fn();
@@ -47,6 +49,8 @@ vi.mock("@janusly/data/src/scimUserStateRepo", () => ({
   getScimUserState: vi.fn().mockResolvedValue(null),
   upsertScimUserState: vi.fn().mockResolvedValue(null),
   markScimUserInactive: vi.fn().mockResolvedValue(undefined),
+  listActiveScimUserState: (...args: unknown[]) => listActiveScimUserState(...args),
+  SCIM_RESYNC_MAX_MEMBERS: 5000,
 }));
 vi.mock("@janusly/data/src/scimGroupStateRepo", () => ({
   SCIM_GROUP_STATE_DEFAULT_LIMIT: 100,
@@ -80,6 +84,7 @@ vi.mock("@janusly/data/src/scimProcessedEventsRepo", () => ({
 vi.mock("@janusly/data/src/orgMembersRepo", () => ({
   upsertMembershipByEmail: vi.fn().mockResolvedValue({ id: "m-1" }),
   deleteMembership: vi.fn().mockResolvedValue(1),
+  findMemberByEmail: (...args: unknown[]) => findMemberByEmail(...args),
 }));
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({
   getAuthPolicyConfig: vi.fn().mockResolvedValue({
@@ -106,6 +111,8 @@ beforeEach(() => {
   recordScimDirectorySync.mockReset();
   getScimGroupState.mockReset();
   listScimGroupState.mockReset();
+  listActiveScimUserState.mockReset();
+  findMemberByEmail.mockReset();
   listScimGroupRoleMappings.mockReset();
   getScimGroupRoleMappingById.mockReset();
   findScimGroupRoleMappingByGroup.mockReset();
@@ -133,6 +140,8 @@ beforeEach(() => {
   deleteScimUserGroupsForUser.mockResolvedValue(undefined);
   deleteScimUserGroupsForGroup.mockResolvedValue(undefined);
   listScimGroupState.mockResolvedValue([]);
+  listActiveScimUserState.mockResolvedValue([]);
+  findMemberByEmail.mockResolvedValue(null);
   vi.stubEnv("WORKOS_WEBHOOK_SECRET", SECRET);
 });
 
@@ -689,6 +698,57 @@ describe("SCIM group role mapping CRUD", () => {
     });
     expect(res.statusCode).toBe(404);
     expect(deleteScimGroupRoleMapping).not.toHaveBeenCalled();
+  });
+});
+
+describe("SCIM bulk role re-sync", () => {
+  const dirRow = {
+    id: "sd-1",
+    orgId: "org-a",
+    providerDirectoryId: "directory_01",
+    directoryType: null,
+    defaultRole: "viewer" as const,
+    status: "active" as const,
+    lastSyncedAt: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+
+  it("POST returns 409 when no directory is attached", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(null);
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/resync");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/resync", method: "POST" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    expect(res.statusCode).toBe(409);
+    expect(listActiveScimUserState).not.toHaveBeenCalled();
+  });
+
+  it("POST re-derives active members, audits org.scim.resynced, returns the summary", async () => {
+    getScimDirectoryByOrgId.mockResolvedValueOnce(dirRow);
+    listActiveScimUserState.mockResolvedValueOnce([{ providerUserId: "u1", email: "ada@example.com" }]);
+    getScimGroupRoleMappingsMap.mockResolvedValueOnce(new Map([["g1", "admin"]]));
+    listScimUserGroupIds.mockResolvedValueOnce(["g1"]);
+    findMemberByEmail.mockResolvedValueOnce({ role: "viewer" });
+    const routes = await loadRoutes();
+    const route = findRoute(routes, "POST", "/org/scim/resync");
+    const res = fakeRes();
+    await route.handler({
+      req: fakeReq({ url: "/org/scim/resync", method: "POST" }) as never,
+      res: res as never,
+      auth: ADMIN_AUTH,
+    });
+    const body = JSON.parse(res.bodyText);
+    expect(body.membersResynced).toBe(1);
+    expect(body.membersChanged).toBe(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-a", "admin-1", "org.scim.resynced", "scim_directory", "sd-1",
+      expect.objectContaining({ membersResynced: 1, membersChanged: 1 }),
+    );
   });
 });
 

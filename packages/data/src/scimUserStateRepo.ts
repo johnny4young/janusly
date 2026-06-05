@@ -128,6 +128,38 @@ export async function upsertScimUserState(input: {
   return created;
 }
 
+/**
+ * Hard cap on how many active members a single on-demand re-sync sweep
+ * processes. Bounds the synchronous admin "re-sync now" loop so a very
+ * large directory can't run unbounded; a directory beyond this needs a
+ * queue-backed sweep (a follow-up). The caller surfaces a `capped` flag
+ * when the result hits this limit.
+ */
+export const SCIM_RESYNC_MAX_MEMBERS = 5000;
+
+/**
+ * List the ACTIVE members of one directory, org-scoped, bounded by
+ * `SCIM_RESYNC_MAX_MEMBERS`. Backs the bulk role re-sync — every row is a
+ * candidate whose role gets re-derived from current group→role mappings.
+ */
+export async function listActiveScimUserState(
+  orgId: string,
+  scimDirectoryId: string,
+): Promise<ScimUserStateRow[]> {
+  const rows = await db
+    .select()
+    .from(scimUserState)
+    .where(
+      and(
+        eq(scimUserState.orgId, orgId),
+        eq(scimUserState.scimDirectoryId, scimDirectoryId),
+        eq(scimUserState.active, true),
+      ),
+    )
+    .limit(SCIM_RESYNC_MAX_MEMBERS);
+  return rows.map(mapRow);
+}
+
 /** Mark a user inactive (deprovisioned). Does NOT touch `org_members`. */
 export async function markScimUserInactive(input: {
   id: string;
