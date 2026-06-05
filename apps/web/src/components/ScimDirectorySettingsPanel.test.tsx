@@ -20,6 +20,32 @@ const ROW_EXAMPLE = {
   updatedAt: null,
 }
 
+/**
+ * Wire the mocked `api` as a tiny router over the three GET reads the
+ * panel issues in parallel (directories / mappings / groups) plus the
+ * mutation routes. Every GET resolves to a real array so the panel's
+ * `Promise.all` never sees an undefined (the production `api` always
+ * returns a Promise).
+ */
+function mockApi(opts: {
+  directories?: unknown[]
+  mappings?: unknown[]
+  groups?: unknown[]
+} = {}) {
+  vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
+    const method = init?.method ?? 'GET'
+    if (path === '/org/scim/directories' && method === 'GET') return opts.directories ?? []
+    if (path === '/org/scim/group-role-mappings' && method === 'GET') return opts.mappings ?? []
+    if (path === '/org/scim/groups' && method === 'GET') return opts.groups ?? []
+    if (path === '/org/scim/directories' && method === 'POST') return { id: 'sd-new' }
+    if (path.startsWith('/org/scim/directories/') && method === 'DELETE') return { ok: true }
+    if (path === '/org/scim/group-role-mappings' && method === 'POST') return { id: 'm-new' }
+    if (path.startsWith('/org/scim/group-role-mappings/') && method === 'POST') return { id: 'm-1' }
+    if (path.startsWith('/org/scim/group-role-mappings/') && method === 'DELETE') return { ok: true }
+    return []
+  })
+}
+
 describe('<ScimDirectorySettingsPanel />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
@@ -27,14 +53,14 @@ describe('<ScimDirectorySettingsPanel />', () => {
   })
 
   it('renders the connect form when no directory exists', async () => {
-    vi.mocked(api).mockResolvedValueOnce([])
+    mockApi({ directories: [] })
     render(<ScimDirectorySettingsPanel />)
     expect(await screen.findByPlaceholderText(/directory_01…/)).toBeInTheDocument()
     expect(screen.getByText(/Connect directory/)).toBeInTheDocument()
   })
 
   it('renders the directory row when one is attached and hides the form', async () => {
-    vi.mocked(api).mockResolvedValueOnce([ROW_EXAMPLE])
+    mockApi({ directories: [ROW_EXAMPLE] })
     render(<ScimDirectorySettingsPanel />)
     await waitFor(() => {
       expect(screen.getByText('directory_01_test')).toBeInTheDocument()
@@ -48,16 +74,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
   })
 
   it('submits the attach form with trimmed values', async () => {
-    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === '/org/scim/directories' && (!init || init.method !== 'POST' && init.method !== 'DELETE')) {
-        return []
-      }
-      if (path === '/org/scim/directories' && init?.method === 'POST') {
-        return { id: 'sd-new' }
-      }
-      return []
-    })
-
+    mockApi({ directories: [] })
     render(<ScimDirectorySettingsPanel />)
     const idInput = await screen.findByPlaceholderText(/directory_01…/)
     fireEvent.change(idInput, { target: { value: '  directory_test  ' } })
@@ -80,16 +97,7 @@ describe('<ScimDirectorySettingsPanel />', () => {
   })
 
   it('confirms before revoking and calls the DELETE route', async () => {
-    vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === '/org/scim/directories' && (!init || init.method !== 'DELETE')) {
-        return [ROW_EXAMPLE]
-      }
-      if (path.startsWith('/org/scim/directories/') && init?.method === 'DELETE') {
-        return { ok: true }
-      }
-      return []
-    })
-
+    mockApi({ directories: [ROW_EXAMPLE] })
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
     render(<ScimDirectorySettingsPanel />)
     const button = await screen.findByRole('button', { name: /Disconnect/i })
@@ -97,6 +105,114 @@ describe('<ScimDirectorySettingsPanel />', () => {
 
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/org/scim/directories/sd-1', { method: 'DELETE' })
+    })
+    confirmSpy.mockRestore()
+  })
+
+  // === Group → role mappings ===
+
+  it('hides the mappings section when no active directory is attached', async () => {
+    mockApi({ directories: [] })
+    render(<ScimDirectorySettingsPanel />)
+    await screen.findByPlaceholderText(/directory_01…/)
+    expect(screen.queryByText(/Group → role mappings/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the no-synced-groups empty state when groups have not synced yet', async () => {
+    mockApi({ directories: [ROW_EXAMPLE], groups: [], mappings: [] })
+    render(<ScimDirectorySettingsPanel />)
+    expect(await screen.findByText(/Group → role mappings/i)).toBeInTheDocument()
+    expect(screen.getByText(/No synced groups yet/i)).toBeInTheDocument()
+  })
+
+  it('renders existing mappings with the group name and its role', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg1', role: 'editor' }],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    expect(await screen.findByText('Engineering')).toBeInTheDocument()
+    const roleSelect = screen.getByLabelText('Role for Engineering') as HTMLSelectElement
+    expect(roleSelect.value).toBe('editor')
+  })
+
+  it('keeps stale mappings removable when the synced group is no longer listed', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg_stale', role: 'editor' }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    render(<ScimDirectorySettingsPanel />)
+    expect(await screen.findByText('dg_stale')).toBeInTheDocument()
+    const removeButton = screen.getByRole('button', { name: /Remove mapping for dg_stale/i })
+    fireEvent.click(removeButton)
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/org/scim/group-role-mappings/m1', { method: 'DELETE' })
+    })
+    confirmSpy.mockRestore()
+  })
+
+  it('creates a mapping via the group picker', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [
+        { id: 'g1', providerGroupId: 'dg1', name: 'Engineering' },
+        { id: 'g2', providerGroupId: 'dg2', name: 'Sales' },
+      ],
+      mappings: [],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    await screen.findByText(/Group → role mappings/i)
+
+    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'dg2' } })
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'admin' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add mapping/i }))
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/org/scim/group-role-mappings',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ providerGroupId: 'dg2', role: 'admin' }),
+        }),
+      )
+    })
+  })
+
+  it('updates a mapping role inline via the per-row select', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg1', role: 'editor' }],
+    })
+    render(<ScimDirectorySettingsPanel />)
+    const roleSelect = await screen.findByLabelText('Role for Engineering')
+    fireEvent.change(roleSelect, { target: { value: 'admin' } })
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        '/org/scim/group-role-mappings/m1',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ role: 'admin' }) }),
+      )
+    })
+  })
+
+  it('removes a mapping after confirm', async () => {
+    mockApi({
+      directories: [ROW_EXAMPLE],
+      groups: [{ id: 'g1', providerGroupId: 'dg1', name: 'Engineering' }],
+      mappings: [{ id: 'm1', scimDirectoryId: 'sd-1', providerGroupId: 'dg1', role: 'editor' }],
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    render(<ScimDirectorySettingsPanel />)
+    const removeButton = await screen.findByRole('button', { name: /Remove mapping for Engineering/i })
+    fireEvent.click(removeButton)
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith('/org/scim/group-role-mappings/m1', { method: 'DELETE' })
     })
     confirmSpy.mockRestore()
   })
