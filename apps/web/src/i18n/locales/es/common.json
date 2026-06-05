@@ -851,6 +851,12 @@
   "scim.mappings.errorAdd": "no se pudo agregar el mapeo",
   "scim.mappings.errorUpdate": "no se pudo actualizar el mapeo",
   "scim.mappings.errorRemove": "no se pudo quitar el mapeo",
+  "scim.mappings.resync.button": "Re-sincronizar ahora",
+  "scim.mappings.resync.running": "Re-sincronizando…",
+  "scim.mappings.resync.aria": "Re-sincronizar el rol de cada miembro activo según los mapeos actuales",
+  "scim.mappings.resync.hint": "Un cambio de mapeo aplica a cada miembro en su próxima sincronización del directorio. Re-sincroniza ahora para aplicar los mapeos actuales a todos los miembros activos de inmediato.",
+  "scim.mappings.resync.toast": "Re-sincronizados {{members}} miembros ({{changed}} cambios de rol)",
+  "scim.mappings.resync.error": "no se pudieron re-sincronizar los roles",
 
   "dlq.kicker": "Operaciones",
   "dlq.queue": "Cola de recuperación",

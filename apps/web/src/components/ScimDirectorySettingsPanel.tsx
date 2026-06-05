@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ClipboardList, Link2, Plus, Save, Trash2 } from "lucide-react";
+import { ClipboardList, Link2, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
@@ -83,6 +83,7 @@ export function ScimDirectorySettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [addingMapping, setAddingMapping] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -216,6 +217,30 @@ export function ScimDirectorySettingsPanel() {
     }
   };
 
+  const resyncRoles = async () => {
+    setResyncing(true);
+    try {
+      const result = (await api("/org/scim/resync", { method: "POST" })) as {
+        membersResynced?: number;
+        membersChanged?: number;
+      };
+      addToast(
+        // NOTE: do not name the count variable `count` — i18next reserves it
+        // for pluralization, which would route to `_one`/`_other` keys.
+        t("scim.mappings.resync.toast", {
+          members: result?.membersResynced ?? 0,
+          changed: result?.membersChanged ?? 0,
+        }),
+        "success",
+      );
+      bumpPlatformVersion();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : (t("scim.mappings.resync.error") as string), "error");
+    } finally {
+      setResyncing(false);
+    }
+  };
+
   return (
     <section className="we-budget-settings" aria-labelledby="scim-heading">
       <header className="we-budget-settings__header">
@@ -325,8 +350,23 @@ export function ScimDirectorySettingsPanel() {
             <section className="we-scim-mappings" aria-labelledby="scim-mappings-heading">
               <header className="we-budget-settings__header">
                 <h4 id="scim-mappings-heading">{t("scim.mappings.heading")}</h4>
+                {mappings.length > 0 && (
+                  <button
+                    type="button"
+                    className="we-button we-button--ghost"
+                    onClick={resyncRoles}
+                    disabled={resyncing}
+                    aria-label={t("scim.mappings.resync.aria") as string}
+                  >
+                    <RefreshCw size={14} aria-hidden="true" />{" "}
+                    {resyncing ? t("scim.mappings.resync.running") : t("scim.mappings.resync.button")}
+                  </button>
+                )}
               </header>
               <p className="we-field__hint">{t("scim.mappings.intro")}</p>
+              {mappings.length > 0 && (
+                <p className="we-field__hint">{t("scim.mappings.resync.hint")}</p>
+              )}
 
               {mappings.length > 0 ? (
                 <table className="we-table we-table--compact" aria-label={t("scim.mappings.list.aria")}>

@@ -851,6 +851,12 @@
   "scim.mappings.errorAdd": "failed to add mapping",
   "scim.mappings.errorUpdate": "failed to update mapping",
   "scim.mappings.errorRemove": "failed to remove mapping",
+  "scim.mappings.resync.button": "Re-sync now",
+  "scim.mappings.resync.running": "Re-syncing…",
+  "scim.mappings.resync.aria": "Re-sync every active member's role from the current mappings",
+  "scim.mappings.resync.hint": "A mapping change applies to each member on their next directory sync. Re-sync now to apply the current mappings to every active member immediately.",
+  "scim.mappings.resync.toast": "Re-synced {{members}} members ({{changed}} role changes)",
+  "scim.mappings.resync.error": "failed to re-sync roles",
 
   "dlq.kicker": "Operations",
   "dlq.queue": "Recovery queue",
