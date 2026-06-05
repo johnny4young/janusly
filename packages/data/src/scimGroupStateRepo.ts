@@ -1,11 +1,13 @@
 /**
- * Per-(directory, IdP-side group) state. v1 captures group existence
- * + name so the data is available for future role-mapping; v2 will
- * add an explicit `scim_group_role_mappings` table for operator-
- * configured role overrides per group.
+ * Per-(directory, IdP-side group) state — a mirror of group existence +
+ * name. The companion `scim_group_role_mappings` table maps a group to a
+ * built-in role; this repo's `listScimGroupState` is the source the admin
+ * group→role picker validates against (the operator selects a synced group
+ * by name instead of typing a raw `directory_group_…` id).
  *
  * Used by:
  * - `apps/api/src/scim-event-handler.ts` (group event handlers).
+ * - `apps/api/src/routes/scim-routes.ts` (GET /org/scim/groups — the picker source).
  */
 
 import { and, eq } from "drizzle-orm";
@@ -83,6 +85,37 @@ export async function upsertScimGroupState(input: {
   });
   if (!created) throw new Error("scim_group_state row vanished after insert");
   return created;
+}
+
+/**
+ * All synced groups for one directory, org-scoped. Backs the admin
+ * group→role mapping picker (`GET /org/scim/groups`). Capped defensively
+ * like Janusly's other list endpoints; large IdP directories should page
+ * before flowing into a single select.
+ */
+export const SCIM_GROUP_STATE_DEFAULT_LIMIT = 100;
+export const SCIM_GROUP_STATE_MAX_LIMIT = 200;
+
+export async function listScimGroupState(
+  orgId: string,
+  scimDirectoryId: string,
+  limit = SCIM_GROUP_STATE_DEFAULT_LIMIT,
+): Promise<ScimGroupStateRow[]> {
+  const safeLimit = Math.min(
+    SCIM_GROUP_STATE_MAX_LIMIT,
+    Math.max(1, Math.floor(limit)),
+  );
+  const rows = await db
+    .select()
+    .from(scimGroupState)
+    .where(
+      and(
+        eq(scimGroupState.orgId, orgId),
+        eq(scimGroupState.scimDirectoryId, scimDirectoryId),
+      ),
+    )
+    .limit(safeLimit);
+  return rows.map(mapRow);
 }
 
 export async function deleteScimGroupState(input: { id: string }): Promise<void> {
