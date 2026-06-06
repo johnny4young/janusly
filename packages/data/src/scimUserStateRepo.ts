@@ -130,21 +130,26 @@ export async function upsertScimUserState(input: {
 
 /**
  * Hard cap on how many active members a single on-demand re-sync sweep
- * processes. Bounds the synchronous admin "re-sync now" loop so a very
+ * PROCESSES. Bounds the synchronous admin "re-sync now" loop so a very
  * large directory can't run unbounded; a directory beyond this needs a
- * queue-backed sweep (a follow-up). The caller surfaces a `capped` flag
- * when the result hits this limit.
+ * queue-backed sweep (a follow-up). The caller over-fetches `cap + 1` (see
+ * `listActiveScimUserState`'s `limit`) so it can tell a genuinely-truncated
+ * sweep (`> cap`) apart from one that exactly fills the cap.
  */
 export const SCIM_RESYNC_MAX_MEMBERS = 5000;
 
 /**
- * List the ACTIVE members of one directory, org-scoped, bounded by
- * `SCIM_RESYNC_MAX_MEMBERS`. Backs the bulk role re-sync — every row is a
- * candidate whose role gets re-derived from current group→role mappings.
+ * List the ACTIVE members of one directory, org-scoped. Backs the bulk role
+ * re-sync — every row is a candidate whose role gets re-derived from current
+ * group→role mappings. `limit` defaults to `SCIM_RESYNC_MAX_MEMBERS`; the
+ * re-sync caller passes `cap + 1` so an over-the-cap directory returns one
+ * extra row, letting it report truncation honestly (process the first `cap`,
+ * flag the rest for a follow-up sweep).
  */
 export async function listActiveScimUserState(
   orgId: string,
   scimDirectoryId: string,
+  limit: number = SCIM_RESYNC_MAX_MEMBERS,
 ): Promise<ScimUserStateRow[]> {
   const rows = await db
     .select()
@@ -156,7 +161,7 @@ export async function listActiveScimUserState(
         eq(scimUserState.active, true),
       ),
     )
-    .limit(SCIM_RESYNC_MAX_MEMBERS);
+    .limit(Math.max(1, Math.floor(limit)));
   return rows.map(mapRow);
 }
 
