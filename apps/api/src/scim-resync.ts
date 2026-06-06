@@ -30,8 +30,10 @@ export type ScimResyncChange = {
  * Outcome of a bulk re-sync. `membersResynced` is every active member the
  * sweep wrote (idempotent — most writes are no-ops); `membersChanged` is the
  * subset whose role actually moved; `skipped` counts per-user failures the
- * sweep tolerated; `capped` is true when the active-member count hit the cap
- * (a larger directory needs a queue-backed sweep — a follow-up).
+ * sweep tolerated; `capped` is true when the directory had MORE active members
+ * than the cap (only the first `cap` were processed — the rest need a
+ * queue-backed follow-up sweep). A directory that exactly fills the cap is
+ * fully processed and reports `capped: false`.
  */
 export type ScimResyncResult = {
   membersResynced: number;
@@ -46,6 +48,7 @@ export type ScimResyncDeps = {
   listActiveScimUserState: (
     orgId: string,
     scimDirectoryId: string,
+    limit?: number,
   ) => Promise<Array<{ providerUserId: string; email: string }>>;
   getScimGroupRoleMappingsMap: (orgId: string, scimDirectoryId: string) => Promise<Map<string, string>>;
   listScimUserGroupIds: (input: {
@@ -71,24 +74,31 @@ export type ScimResyncDeps = {
 export async function resyncScimMemberRoles(input: {
   scimDirectory: ScimDirectoryRow;
   deps: ScimResyncDeps;
-  /** Override the cap used to compute the `capped` flag (defaults to the repo
-   *  cap). The underlying reader applies its own hard `.limit`. */
+  /** Max members PROCESSED in one sweep (defaults to `SCIM_RESYNC_MAX_MEMBERS`).
+   *  The reader over-fetches `cap + 1`; a result of `> cap` rows means the
+   *  sweep was truncated (`capped: true`) and the first `cap` are processed. */
   cap?: number;
 }): Promise<ScimResyncResult> {
   const { scimDirectory, deps } = input;
   const orgId = scimDirectory.orgId;
   const cap = input.cap ?? SCIM_RESYNC_MAX_MEMBERS;
 
-  const [members, mappings] = await Promise.all([
-    deps.listActiveScimUserState(orgId, scimDirectory.id),
+  const [fetched, mappings] = await Promise.all([
+    // Over-fetch `cap + 1` so we can distinguish a genuinely-truncated sweep
+    // (`> cap` — more members remain, needs a follow-up) from one that
+    // exactly fills the cap. Process only the first `cap`.
+    deps.listActiveScimUserState(orgId, scimDirectory.id, cap + 1),
     deps.getScimGroupRoleMappingsMap(orgId, scimDirectory.id),
   ]);
+
+  const capped = fetched.length > cap;
+  const members = capped ? fetched.slice(0, cap) : fetched;
 
   const result: ScimResyncResult = {
     membersResynced: 0,
     membersChanged: 0,
     skipped: 0,
-    capped: members.length >= cap,
+    capped,
     changes: [],
   };
 
