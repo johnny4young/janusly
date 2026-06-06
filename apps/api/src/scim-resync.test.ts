@@ -123,7 +123,8 @@ describe("resyncScimMemberRoles", () => {
     expect(result.changes[0]).toMatchObject({ from: null, to: "admin" });
   });
 
-  it("flags capped when the active-member count hits the cap", async () => {
+  it("does NOT flag capped when the active-member count exactly fills the cap", async () => {
+    // Reader over-fetches cap+1; exactly `cap` rows come back → not truncated.
     const { deps } = makeDeps({
       members: [
         { providerUserId: "u1", email: "a@example.com" },
@@ -131,8 +132,24 @@ describe("resyncScimMemberRoles", () => {
       ],
     });
     const result = await resyncScimMemberRoles({ scimDirectory: fixtureDirectory(), deps, cap: 2 });
+    expect(result.capped).toBe(false);
+    expect(result.membersResynced).toBe(2);
+  });
+
+  it("flags capped and truncates to the cap when MORE members than the cap exist", async () => {
+    // cap+1 (3) rows come back for cap=2 → truncated: process the first 2, flag capped.
+    const { deps, captured } = makeDeps({
+      members: [
+        { providerUserId: "u1", email: "a@example.com" },
+        { providerUserId: "u2", email: "b@example.com" },
+        { providerUserId: "u3", email: "c@example.com" },
+      ],
+    });
+    const result = await resyncScimMemberRoles({ scimDirectory: fixtureDirectory(), deps, cap: 2 });
     expect(result.capped).toBe(true);
     expect(result.membersResynced).toBe(2);
+    // The 3rd member is left for a follow-up sweep — not written.
+    expect(captured.upserts.map((u) => u.email)).toEqual(["a@example.com", "b@example.com"]);
   });
 
   it("isolates a per-member fault into the skipped tally and keeps sweeping", async () => {
