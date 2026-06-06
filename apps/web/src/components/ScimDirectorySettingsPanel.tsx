@@ -192,6 +192,11 @@ export function ScimDirectorySettingsPanel() {
 
   const updateMappingRole = async (row: ScimGroupRoleMappingRow, role: DefaultRole) => {
     if (role === row.role) return;
+    const previousRole = row.role;
+    // Optimistically reflect the new role so the controlled <select> doesn't
+    // snap back to the old value while the POST + refetch are in flight (the
+    // select's `value` is bound to `mappings`). Revert on failure.
+    setMappings((current) => current.map((m) => (m.id === row.id ? { ...m, role } : m)));
     try {
       await api(`/org/scim/group-role-mappings/${row.id}`, {
         method: "POST",
@@ -200,6 +205,7 @@ export function ScimDirectorySettingsPanel() {
       addToast(t("scim.mappings.toast.updated"), "success");
       bumpPlatformVersion();
     } catch (err) {
+      setMappings((current) => current.map((m) => (m.id === row.id ? { ...m, role: previousRole } : m)));
       addToast(err instanceof Error ? err.message : (t("scim.mappings.errorUpdate") as string), "error");
     }
   };
