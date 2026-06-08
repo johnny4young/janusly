@@ -84,6 +84,9 @@ function makeDeps(input: {
   groupUserIdsForGroup?: Record<string, string[]>;
   /** providerGroupId → built-in role mapping for the directory. */
   groupRoleMappings?: Record<string, string>;
+  /** Seed pre-existing org_members rows keyed by lowercased email, so the
+   *  collision guards see a row at the target email. Default: no rows. */
+  existingMemberByEmail?: Record<string, { role: string; invitedBy: string | null; userId: string }>;
 }): { deps: ScimHandlerDeps; captured: Captured } {
   const captured: Captured = {
     upsertedUserState: [],
@@ -130,6 +133,7 @@ function makeDeps(input: {
       captured.upsertedByEmail.push(i);
       return null;
     },
+    findMemberByEmail: async (i) => input.existingMemberByEmail?.[i.email.toLowerCase()] ?? null,
     deleteMembership: async (i) => {
       captured.deletedMemberships.push(i);
       return 1;
@@ -286,6 +290,43 @@ describe("handleScimEvent — user.created", () => {
     });
     expect(result.processed).toBe(false);
     expect(captured.audits.some((a) => a.action === "scim.webhook.malformed_timestamp")).toBe(true);
+  });
+
+  it("refuses to overwrite a human-invited row at the same email (provision collision)", async () => {
+    const { deps, captured } = makeDeps({
+      existingMemberByEmail: {
+        "ada@example.com": { role: "admin", invitedBy: "user_admin", userId: "user_admin" },
+      },
+    });
+    const result = await handleScimEvent({
+      event: fixtureUserEvent(),
+      scimDirectory: fixtureDirectory({ defaultRole: "viewer" }),
+      deps,
+    });
+    expect(result).toEqual({ processed: false, reason: "provision_collision" });
+    // The human's row is never touched, and no SCIM state is advanced.
+    expect(captured.upsertedByEmail).toHaveLength(0);
+    expect(captured.upsertedUserState).toHaveLength(0);
+    const collision = captured.audits.find((a) => a.action === "scim.user.provision_collision");
+    expect(collision).toBeDefined();
+    expect(collision?.metadata).toMatchObject({ email: "ada@example.com", conflictingRole: "admin" });
+  });
+
+  it("absorbs a SCIM-owned row at the same email (re-attach / idempotent re-delivery)", async () => {
+    const { deps, captured } = makeDeps({
+      existingMemberByEmail: {
+        "ada@example.com": { role: "viewer", invitedBy: "scim:webhook", userId: "ada@example.com" },
+      },
+    });
+    const result = await handleScimEvent({
+      event: fixtureUserEvent(),
+      scimDirectory: fixtureDirectory({ defaultRole: "editor" }),
+      deps,
+    });
+    expect(result).toEqual({ processed: true, action: "provisioned" });
+    // SCIM-owned row is this directory's own lifecycle → proceed and re-derive.
+    expect(captured.upsertedByEmail[0]).toMatchObject({ email: "ada@example.com", role: "editor" });
+    expect(captured.audits.some((a) => a.action === "scim.user.provision_collision")).toBe(false);
   });
 });
 
@@ -463,6 +504,48 @@ describe("handleScimEvent — user.updated", () => {
     expect(captured.deletedMemberships).toHaveLength(1);
     expect(captured.deletedMemberships[0]).toMatchObject({ email: "old@example.com" });
     expect(captured.upsertedByEmail[0]).toMatchObject({ email: "new@example.com" });
+  });
+
+  it("refuses a re-key onto an email that already has a membership (rekey collision)", async () => {
+    const { deps, captured } = makeDeps({
+      existingState: {
+        id: "state_1",
+        orgId: "org-A",
+        email: "old@example.com",
+        active: true,
+        lastEventTimestamp: "2026-05-10T00:00:00Z",
+      },
+      // The NEW email is already occupied (here by another SCIM principal — any
+      // owner blocks on a re-key, since the new email should be empty).
+      existingMemberByEmail: {
+        "new@example.com": { role: "admin", invitedBy: "scim:webhook", userId: "new@example.com" },
+      },
+    });
+    const result = await handleScimEvent({
+      event: fixtureUserEvent({
+        id: "evt_upd_collide",
+        event: "dsync.user.updated",
+        created_at: "2026-05-14T18:30:00Z",
+        data: {
+          id: "directory_user_1",
+          directory_id: "directory_01",
+          first_name: "Ada",
+          last_name: "Lovelace",
+          emails: [{ primary: true, value: "new@example.com" }],
+        },
+      }),
+      scimDirectory: fixtureDirectory(),
+      deps,
+    });
+    expect(result).toEqual({ processed: false, reason: "rekey_collision" });
+    // The old membership is NOT deleted, the occupied email is NOT overwritten,
+    // and no SCIM state is advanced — both principals stay intact.
+    expect(captured.deletedMemberships).toHaveLength(0);
+    expect(captured.upsertedByEmail).toHaveLength(0);
+    expect(captured.upsertedUserState).toHaveLength(0);
+    const collision = captured.audits.find((a) => a.action === "scim.user.rekey_collision");
+    expect(collision).toBeDefined();
+    expect(collision?.metadata).toMatchObject({ fromEmail: "old@example.com", toEmail: "new@example.com" });
   });
 
   it("refuses to revive a deactivated user via update event", async () => {
