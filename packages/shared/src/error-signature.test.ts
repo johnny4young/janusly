@@ -166,6 +166,45 @@ describe("normalizeErrorSignature — unknown fallback + secret-shape scrub", ()
     const token = "ghp_abcdefghijklmnopqrstuv";
     expect(scrubSecretShapes(`notify_${token}.failed`)).toBe("notify_[redacted].failed");
   });
+
+  it("scrubs a GitHub fine-grained PAT IN FULL, including its second underscore segment", () => {
+    // Fine-grained PATs are `github_pat_<22>_<59>` — the internal `_` must not
+    // truncate the redaction, or the second segment would leak.
+    const seg1 = "11ABCDE0123456789abcde";
+    const seg2 = "AbCdEf0123456789AbCdEf0123456789AbCdEf0123456789AbCdEf0123456";
+    const token = `github_pat_${seg1}_${seg2}`;
+    const out = scrubSecretShapes(`GitHub said 401 for ${token} on push`);
+    expect(out).toContain("[redacted]");
+    expect(out).not.toContain(seg1);
+    expect(out).not.toContain(seg2);
+    expect(out).not.toContain("github_pat_");
+  });
+
+  it("scrubs the GitHub oauth / user / server / refresh token family", () => {
+    for (const prefix of ["gho_", "ghu_", "ghs_", "ghr_"]) {
+      const token = `${prefix}abcdefghijklmnopqrstuvwxyz0123`;
+      const out = scrubSecretShapes(`token ${token} rejected`);
+      expect(out).not.toContain(token);
+      expect(out).toContain("[redacted]");
+    }
+  });
+
+  it("scrubs a Google API key (AIza…)", () => {
+    const token = "AIzaSyA0123456789abcdefghijklmnopqrstuv"; // AIza + 35
+    const out = scrubSecretShapes(`maps error: key ${token} invalid`);
+    expect(out).not.toContain(token);
+    expect(out).toContain("[redacted]");
+  });
+
+  it("does NOT over-redact look-alike words that are not tokens", () => {
+    // None of these match a real token shape; they must survive untouched so
+    // the redactor stays low-false-positive. `gho_count_total` is the key
+    // case: it starts with a real token prefix (`gho_`) but is underscore-
+    // separated, so the underscore-excluding body never reaches its `{20,}`
+    // floor — an identifier can't be mistaken for a 36-char token.
+    const benign = "ghost_town github_actions github_repository_name AIza short gho_count_total";
+    expect(scrubSecretShapes(benign)).toBe(benign);
+  });
 });
 
 describe("sanitizeMcpToolDescription", () => {
