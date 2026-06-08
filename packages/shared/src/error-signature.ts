@@ -86,9 +86,19 @@ export const FALLBACK_SIGNATURE_MAX_LENGTH = 80;
  */
 export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
   /(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g, // OpenAI / Anthropic / similar prefix
-  /(^|[^A-Za-z0-9])(ghp_[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g, // GitHub personal access token
+  /(^|[^A-Za-z0-9])(ghp_[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g, // GitHub classic personal access token
+  // GitHub fine-grained PAT — the modern default. Body includes `_` so the
+  // greedy match spans the token's internal `…22chars_59chars` separator and
+  // redacts the WHOLE token (a `[A-Za-z0-9]`-only body would stop at the
+  // internal underscore and leak the second segment).
+  /(^|[^A-Za-z0-9])(github_pat_[A-Za-z0-9_]{20,})(?=$|[^A-Za-z0-9])/g,
+  // GitHub OAuth / user-to-server / server-to-server / refresh tokens — same
+  // family as `ghp_` (kept as a separate pattern so the classic one is
+  // untouched). Cannot false-match inside the word `github` (no `gh[ousr]_`).
+  /(^|[^A-Za-z0-9])(gh[ousr]_[A-Za-z0-9]{20,})(?=$|[^A-Za-z0-9])/g,
   /(^|[^A-Za-z0-9])(xox[baprs]-[A-Za-z0-9-]{10,})(?=$|[^A-Za-z0-9])/g, // Slack tokens
   /(^|[^A-Za-z0-9])(AKIA[0-9A-Z]{16})(?=$|[^A-Za-z0-9])/g, // AWS access key id
+  /(^|[^A-Za-z0-9])(AIza[A-Za-z0-9_-]{35})(?=$|[^A-Za-z0-9])/g, // Google API key (fixed 4-char prefix + 35)
   /(^|[^A-Za-z0-9])(Bearer\s+[A-Za-z0-9_\-.]{16,})(?=$|[^A-Za-z0-9])/gi, // Authorization header value
   /(^|[^A-Za-z0-9])(eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})(?=$|[^A-Za-z0-9])/g, // JWT (3-segment base64url)
 ];
@@ -163,8 +173,9 @@ function applyUnicodeHardening(input: string): string {
  *      Newlines are the easiest way for a malicious server description
  *      to break out of the surrounding list-item framing.
  *   2. Run `scrubSecretShapes` so a description that includes a token
- *      shape (sk-*, ghp_*, Bearer …, JWT, AWS key, Slack token) lands
- *      as `[redacted]` in the prompt.
+ *      shape (sk-*, ghp_*, github_pat_*, gh[ousr]_*, Bearer …, JWT, AWS
+ *      key, Slack token, Google AIza key) lands as `[redacted]` in the
+ *      prompt.
  *   3. Length-cap at 300 chars with an ellipsis. A single description
  *      can't inflate the system prompt unbounded; the per-org call to
  *      `listExposedMcpToolsForAi` then caps the total prose at 20 KB.
