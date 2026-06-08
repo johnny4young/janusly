@@ -423,6 +423,7 @@ export const scimRoutes: Route[] = [
           recordProcessedEvent,
           deleteProcessedEvent,
           upsertMembershipByEmail,
+          findMemberByEmail,
           deleteMembership,
           getAuthPolicyConfig,
           audit,
