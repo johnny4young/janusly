@@ -87,6 +87,18 @@ export type ScimHandlerDeps = {
     role: string;
     invitedBy?: string | null;
   }) => Promise<unknown>;
+  /**
+   * Read the `org_members` row for `(orgId, lower(email))`, or null. Used by
+   * the collision guards to detect when a SCIM membership write would land on
+   * an email that already belongs to a different principal (a human-invited
+   * admin, or a second SCIM user already at that address) BEFORE clobbering it.
+   * The production repo function returns a wider row; this narrowed shape is
+   * the subset the guards need.
+   */
+  findMemberByEmail: (input: {
+    orgId: string;
+    email: string;
+  }) => Promise<{ role: string; invitedBy: string | null; userId: string } | null>;
   deleteMembership: (input: { orgId: string; email: string }) => Promise<number>;
   getAuthPolicyConfig: (orgId: string) => Promise<{
     allowedEmailDomains: string[];
@@ -143,6 +155,21 @@ export type ScimHandlerResult =
   | { processed: false; reason: string };
 
 const SCIM_ACTOR = "scim:webhook";
+
+/**
+ * Is an existing `org_members` row owned by the SCIM webhook lifecycle (vs a
+ * human-invited principal)? A row provisioned by SCIM carries
+ * `invited_by = "scim:webhook"`. The create-path collision guard treats a
+ * SCIM-owned row at the same email as this directory's own lifecycle
+ * (re-attach after a hard-delete revoke, an idempotent re-delivery, or a
+ * group-event-before-create that already provisioned) and absorbs it; only a
+ * human-invited row blocks. The re-key guard does NOT use this — on an email
+ * change the new email should be empty, so ANY pre-existing row there is a
+ * different principal and blocks.
+ */
+function isScimOwnedMembership(row: { invitedBy: string | null }): boolean {
+  return row.invitedBy === SCIM_ACTOR;
+}
 
 /** Built-in role rank for highest-wins group→role derivation. Mirrors the
  *  `viewer < editor < admin` ordering in `apps/api/src/permissions.ts`; kept
@@ -346,6 +373,29 @@ async function handleUserCreated(input: {
 
   const wasReactivation = existing != null && !existing.active;
   const lowerEmail = email.toLowerCase();
+
+  // Collision guard: refuse to overwrite a membership that belongs to a
+  // DIFFERENT (human-invited) principal. When a directory is first attached,
+  // SCIM can provision a user at an email a human admin already invited (e.g.
+  // the founder made themselves admin); silently upserting would downgrade
+  // them to the SCIM-derived role and reassign invited_by. A SCIM-owned row at
+  // the same email is this directory's own lifecycle and is safe to absorb
+  // (re-attach / idempotent re-delivery / group-before-create), so only a
+  // human-invited row blocks. Returns BEFORE any state/membership write so the
+  // existing principal is left fully intact; the operator resolves via the
+  // audit trail. (A genuine reactivation has no row — deprovision deleted it.)
+  const existingMember = await deps.findMemberByEmail({ orgId, email: lowerEmail });
+  if (existingMember && !isScimOwnedMembership(existingMember)) {
+    await deps.audit(orgId, SCIM_ACTOR, "scim.user.provision_collision", "scim_user", providerUserId, {
+      email: lowerEmail,
+      conflictingRole: existingMember.role,
+      conflictingInvitedBy: existingMember.invitedBy,
+      scimDirectoryId: scimDirectory.id,
+      eventId: event.id,
+    });
+    return { processed: false, reason: "provision_collision" };
+  }
+
   await deps.upsertScimUserState({
     orgId,
     scimDirectoryId: scimDirectory.id,
@@ -447,6 +497,24 @@ async function handleUserUpdated(input: {
   // (`userId = lower(email)` for SCIM-provisioned rows). DELETE the
   // old row then INSERT the new one via upsertMembership.
   if (lowerEmail !== oldEmail) {
+    // Collision guard: on a re-key the NEW email should be empty. ANY
+    // pre-existing row there belongs to a different principal — a human-invited
+    // admin, OR a second SCIM user already at that address — and re-keying onto
+    // it would clobber their membership. Refuse, audit, and leave this user on
+    // their current email (no delete, no overwrite, no state advance) so both
+    // principals stay intact; the operator resolves via the audit trail.
+    const targetMember = await deps.findMemberByEmail({ orgId, email: lowerEmail });
+    if (targetMember) {
+      await deps.audit(orgId, SCIM_ACTOR, "scim.user.rekey_collision", "scim_user", providerUserId, {
+        fromEmail: oldEmail,
+        toEmail: lowerEmail,
+        conflictingRole: targetMember.role,
+        conflictingInvitedBy: targetMember.invitedBy,
+        scimDirectoryId: scimDirectory.id,
+        eventId: event.id,
+      });
+      return { processed: false, reason: "rekey_collision" };
+    }
     await deps.deleteMembership({ orgId, email: oldEmail });
   }
 
