@@ -27,6 +27,25 @@ export const DEFAULT_USER_AGENT = "janusly-sdk-node/0.0.1";
 
 const DEFAULT_RETRY_ON: ReadonlyArray<number> = [429, 502, 503, 504];
 
+/**
+ * Header names the SDK manages itself — a caller-supplied per-call header
+ * that collides with any of these is rejected (see `buildHeaders`). All
+ * lowercased for case-insensitive comparison. `authorization` / `x-org-id`
+ * / `x-user-id` carry auth + tenant identity (overriding them is an
+ * auth/tenant-confusion vector); `content-type` / `accept` / `user-agent`
+ * are set by the transport (e.g. the SDK JSON-encodes the body and sets
+ * `content-type: application/json`, so a caller override would silently
+ * break the request). Mirrors the Python SDK's `_RESERVED_HEADERS`.
+ */
+const RESERVED_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "accept",
+  "user-agent",
+  "x-org-id",
+  "x-user-id",
+  "content-type",
+]);
+
 export type SendRequestInput = {
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   path: string;
@@ -47,8 +66,12 @@ export async function sendApiRequest(
 ): Promise<unknown> {
   const logger: JanuslyLogger = config.logger ?? {};
   const retry = config.retry;
+  // Compose headers ONCE, before the retry loop. The reserved-header guard
+  // in `buildHeaders` is deterministic — composing inside the thunk would
+  // both re-run identical work each attempt AND retry the guard's throw.
+  const headers = buildHeaders(config, input, options);
   return withRetries(
-    () => performSingleRequest(config, input, options, logger),
+    () => performSingleRequest(config, input, options, logger, headers),
     retry,
     logger,
     options?.signal,
@@ -60,6 +83,7 @@ async function performSingleRequest(
   input: SendRequestInput,
   options: JanuslyRequestOptions | undefined,
   logger: JanuslyLogger,
+  headers: Record<string, string>,
 ): Promise<unknown> {
   const baseUrl = normalizeBaseUrl(config.baseUrl);
   const path = normalizePath(input.path);
@@ -72,7 +96,6 @@ async function performSingleRequest(
   if (options?.signal) signals.push(options.signal);
   const composedSignal = AbortSignal.any(signals);
 
-  const headers = buildHeaders(config, input, options);
   const init: RequestInit = { method: input.method, headers, signal: composedSignal };
   if (input.body !== undefined && input.method !== "GET") {
     init.body = JSON.stringify(input.body);
@@ -113,6 +136,14 @@ function normalizePath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+/**
+ * Compose the headers for one request: the SDK-managed set (accept,
+ * x-org-id, user-agent, conditionally content-type, plus auth) followed
+ * by any caller-supplied per-call headers. Throws `TypeError` when a
+ * caller header collides with a {@link RESERVED_HEADERS} name. The throw
+ * is deterministic, so callers MUST compose headers once before the retry
+ * loop (see `sendApiRequest`) — it must never be retried.
+ */
 function buildHeaders(
   config: JanuslyClientConfig,
   input: SendRequestInput,
@@ -135,7 +166,13 @@ function buildHeaders(
   if (options?.headers) {
     for (const [key, value] of Object.entries(options.headers)) {
       const lower = key.toLowerCase();
-      if (lower === "authorization" || lower === "x-org-id" || lower === "x-user-id") continue;
+      // Reject — don't silently drop — a collision with an SDK-managed
+      // header so a caller learns immediately rather than shipping a
+      // silently-broken request. Deterministic, so `buildHeaders` is
+      // composed once BEFORE the retry loop and this never retries.
+      if (RESERVED_HEADERS.has(lower)) {
+        throw new TypeError(`custom header "${key}" collides with a reserved header`);
+      }
       headers[lower] = value;
     }
   }
