@@ -9,7 +9,7 @@
  */
 
 import { db, scimProcessedEvents } from "@janusly/db";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 /**
  * Record an event id as processed. Returns `{ fresh: true }` if the
@@ -47,9 +47,22 @@ export async function recordProcessedEvent(input: {
  * Best-effort — DELETE failures are tolerated by the caller (the worst
  * case is a stuck dedup row and lost retries, which is exactly the
  * pre-release state the caller is trying to escape from).
+ *
+ * Scoped by `(event_id, org_id)`. The event id is a globally-unique
+ * WorkOS id, so the org predicate is defense-in-depth — it keeps the
+ * release a tenant-scoped write (per this module's multi-tenant
+ * invariant) so a release can never reach across orgs even if a future
+ * caller passes an id it does not own.
  */
-export async function deleteProcessedEvent(input: { eventId: string }): Promise<void> {
-  await db.execute(sql`DELETE FROM scim_processed_events WHERE event_id = ${input.eventId}`);
+export async function deleteProcessedEvent(input: { eventId: string; orgId: string }): Promise<void> {
+  await db
+    .delete(scimProcessedEvents)
+    .where(
+      and(
+        eq(scimProcessedEvents.eventId, input.eventId),
+        eq(scimProcessedEvents.orgId, input.orgId),
+      ),
+    );
 }
 
 export const DEFAULT_SCIM_EVENTS_PRUNE_BATCH_SIZE = 10_000;

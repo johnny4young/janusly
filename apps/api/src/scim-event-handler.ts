@@ -80,7 +80,7 @@ export type ScimHandlerDeps = {
     scimDirectoryId: string;
     eventType: string;
   }) => Promise<{ fresh: boolean }>;
-  deleteProcessedEvent: (input: { eventId: string }) => Promise<void>;
+  deleteProcessedEvent: (input: { eventId: string; orgId: string }) => Promise<void>;
   upsertMembershipByEmail: (input: {
     orgId: string;
     email: string;
@@ -287,7 +287,7 @@ export async function handleScimEvent(input: {
       // Invariant (AGENTS.md "SCIM directory sync"): release the dedup
       // claim on handler throws so WorkOS retries are not mistaken for
       // already-processed events after a transient DB failure.
-      await deps.deleteProcessedEvent({ eventId: event.id });
+      await deps.deleteProcessedEvent({ eventId: event.id, orgId });
     } catch {
       // Secondary release failure swallowed; original error rethrows below.
     }
