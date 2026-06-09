@@ -313,6 +313,18 @@ function computeSuccessRate(counts: RunStatusCounts): RecoveryMetric {
   };
 }
 
+/**
+ * Index into an ASCENDING-sorted, NON-EMPTY array for the nearest-rank
+ * percentile. `fraction` is in (0, 1] (0.5 = median, 0.95 = p95). The result is
+ * clamped to [0, length - 1] so a fraction of 1 maps to the last element and
+ * rounding can never overshoot the bounds. Both the p50 and p95 reported by
+ * `computeMttr` route through this single formula so the two percentiles can
+ * never drift to different index conventions for the same input.
+ */
+function nearestRankIndex(length: number, fraction: number): number {
+  return Math.min(Math.max(0, Math.ceil(length * fraction) - 1), length - 1);
+}
+
 function computeMttr(durations: number[]): RecoveryMetric {
   if (durations.length === 0) {
     return {
@@ -325,9 +337,8 @@ function computeMttr(durations: number[]): RecoveryMetric {
   }
   const avg = durations.reduce((sum, d) => sum + d, 0) / durations.length;
   const sorted = [...durations].sort((a, b) => a - b);
-  const p50 = sorted[Math.floor(sorted.length / 2)];
-  const p95Index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
-  const p95 = sorted[Math.min(p95Index, sorted.length - 1)];
+  const p50 = sorted[nearestRankIndex(sorted.length, 0.5)];
+  const p95 = sorted[nearestRankIndex(sorted.length, 0.95)];
   const severity: MetricSeverity = avg <= MTTR_BANDS_MS.healthy
     ? "healthy"
     : avg <= MTTR_BANDS_MS.warn ? "warn" : "unhealthy";

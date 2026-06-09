@@ -90,6 +90,19 @@ describe("composeRecoveryMetrics — MTTR formatting + bands", () => {
     expect(result.mttr.value).toBe(null);
     expect(result.mttr.severity).toBe("neutral");
   });
+
+  it("even-length window: p50 uses the nearest-rank index (lower of the middle pair)", () => {
+    // [10s, 20s] sorted → nearest-rank p50 is sorted[0] = 10s, matching p95's
+    // convention. The previous Math.floor(len/2) index wrongly picked sorted[1]
+    // (20s) on even-length windows. Severity reads avg (15s), so it must not move.
+    const result = composeRecoveryMetrics(
+      baseSignals({ mttrDurations: [10_000, 20_000] }),
+      30,
+    );
+    expect(result.mttr.rationaleMeta).toMatchObject({ p50: "10.0s", p95: "20.0s" });
+    expect(result.mttr.severity).toBe("healthy");
+    expect(result.mttr.display).toBe("15.0s");
+  });
 });
 
 describe("composeRecoveryMetrics — p95 latency", () => {
