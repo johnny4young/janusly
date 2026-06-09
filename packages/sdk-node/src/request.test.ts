@@ -76,17 +76,46 @@ describe("sendApiRequest — auth headers", () => {
     expect(headers["x-user-id"]).toBeUndefined();
   });
 
-  it("per-call headers cannot override authorization / x-org-id / x-user-id", async () => {
+  // Overriding any SDK-managed header is rejected (not silently dropped) so a
+  // caller learns immediately — matches the Python SDK's `_RESERVED_HEADERS`
+  // ValueError. Case-insensitive across all 6 reserved names.
+  it.each([
+    "Authorization",
+    "X-Org-Id",
+    "X-User-Id",
+    "Content-Type",
+    "Accept",
+    "User-Agent",
+  ])("rejects a per-call override of the reserved header %s", async (name) => {
     const { fetchImpl, captured } = captureRequest();
     const config = makeConfig({}, fetchImpl);
-    await sendApiRequest(config, GET_INPUT, {
-      headers: { "Authorization": "Bearer EVIL", "X-Org-Id": "other-org", "X-User-Id": "other", "X-Custom": "ok" },
-    });
+    await expect(
+      sendApiRequest(config, GET_INPUT, { headers: { [name]: "override" } }),
+    ).rejects.toThrow(/reserved header/);
+    // Deterministic + composed before the retry loop → fetch never fired.
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(captured).toHaveLength(0);
+  });
+
+  it("forwards a non-reserved per-call header", async () => {
+    const { fetchImpl, captured } = captureRequest();
+    const config = makeConfig({}, fetchImpl);
+    await sendApiRequest(config, GET_INPUT, { headers: { "X-Custom": "ok" } });
     const headers = captured[0]!.init.headers as Record<string, string>;
+    expect(headers["x-custom"]).toBe("ok");
+    // The SDK-managed headers are untouched.
     expect(headers["authorization"]).toBe("Bearer tk-secret");
     expect(headers["x-org-id"]).toBe("org-1");
-    expect(headers["x-user-id"]).toBe("sdk-user");
-    expect(headers["x-custom"]).toBe("ok");
+  });
+
+  it("does NOT retry the reserved-header rejection (composed once before the loop)", async () => {
+    const { fetchImpl } = captureRequest();
+    const config = makeConfig({ retry: { maxAttempts: 3, backoffMs: 1 } }, fetchImpl);
+    await expect(
+      sendApiRequest(config, GET_INPUT, { headers: { "Content-Type": "text/plain" } }),
+    ).rejects.toThrow(/reserved header/);
+    // A deterministic guard error must throw once, never re-attempt.
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
