@@ -211,7 +211,7 @@ export type JanuslyClientConfig = {
 export type JanuslyRequestOptions = {
   /** Abort the request (and any in-flight retry / poll cycle). */
   signal?: AbortSignal;
-  /** Additional headers merged into the request (must not collide with auth headers). */
+  /** Additional headers merged into the request (must not collide with SDK-managed headers). */
   headers?: Record<string, string>;
   /** Per-call timeout override. Defaults to 30s. */
   timeoutMs?: number;
