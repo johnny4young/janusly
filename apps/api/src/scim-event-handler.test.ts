@@ -56,7 +56,7 @@ type Captured = {
   audits: Array<{ orgId: string; userId: string; action: string; metadata?: unknown }>;
   syncBumps: unknown[];
   processedEventIds: Set<string>;
-  releasedEventIds: string[];
+  releasedEvents: Array<{ eventId: string; orgId: string }>;
   addedUserGroups: Array<{ providerUserId: string; providerGroupId: string }>;
   removedUserGroups: Array<{ providerUserId: string; providerGroupId: string }>;
   deletedUserGroupsForGroup: Array<{ providerGroupId: string }>;
@@ -98,7 +98,7 @@ function makeDeps(input: {
     audits: [],
     syncBumps: [],
     processedEventIds: input.processedEventIds ?? new Set(),
-    releasedEventIds: [],
+    releasedEvents: [],
     addedUserGroups: [],
     removedUserGroups: [],
     deletedUserGroupsForGroup: [],
@@ -139,7 +139,7 @@ function makeDeps(input: {
       return 1;
     },
     deleteProcessedEvent: async (i) => {
-      captured.releasedEventIds.push(i.eventId);
+      captured.releasedEvents.push(i);
     },
     getAuthPolicyConfig: async () => ({
       allowedEmailDomains: input.allowedDomains ?? [],
@@ -908,7 +908,9 @@ describe("handleScimEvent — release dedup claim on throw", () => {
       scimDirectory: fixtureDirectory(),
       deps,
     })).rejects.toThrow(/DB outage/);
-    expect(captured.releasedEventIds).toEqual(["evt_blip_1"]);
+    // The release is a tenant-scoped write: it must carry the directory's
+    // orgId, not just the event id (defense-in-depth on the dedup table).
+    expect(captured.releasedEvents).toEqual([{ eventId: "evt_blip_1", orgId: "org-A" }]);
   });
 
   it("tolerates a release failure without masking the original error", async () => {
