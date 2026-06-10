@@ -76,6 +76,7 @@ export * from "./scimUserStateRepo";
 export * from "./snippetsRepo";
 export * from "./ssoConnectionsRepo";
 export * from "./ssoStateNoncesRepo";
+export * from "./stalledNodesRepo";
 export * from "./triggerEventsRepo";
 export * from "./usageRepo";
 export * from "./verifiedDomainsRepo";
