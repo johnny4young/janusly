@@ -261,6 +261,57 @@ describe("HTTP bound execution", () => {
     await expect(fetchHttpTarget(aUrl, { maxRedirects: 1 })).rejects.toThrow(/redirect limit exceeded/);
   });
 
+  it("strips credential headers on a cross-origin redirect but keeps other headers", async () => {
+    // Two servers on different 127.0.0.1 ports = two different ORIGINS. The
+    // echo target reports which headers actually arrived after the redirect.
+    const echoUrl = await spawn((req, res) => {
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        authorization: req.headers.authorization ?? null,
+        cookie: req.headers.cookie ?? null,
+        custom: req.headers["x-custom"] ?? null,
+      }));
+    });
+    const redirectUrl = await spawn((_req, res) => {
+      res.statusCode = 302;
+      res.setHeader("Location", echoUrl);
+      res.end();
+    });
+
+    const result = await fetchHttpTarget(redirectUrl, {
+      headers: {
+        Authorization: "Bearer leak-me-not",
+        Cookie: "session=abc",
+        "x-custom": "survives",
+      },
+    });
+
+    // Credentials never cross origins; non-credential headers do.
+    expect(JSON.parse(result.body)).toEqual({ authorization: null, cookie: null, custom: "survives" });
+  });
+
+  it("keeps credential headers on a same-origin redirect", async () => {
+    // One server redirecting to ITSELF (same origin, different path). The
+    // strip must not fire — same-origin retries with auth are the common,
+    // legitimate redirect shape.
+    const url = await spawn((req, res) => {
+      if (req.url === "/") {
+        res.statusCode = 302;
+        res.setHeader("Location", "/final");
+        res.end();
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ authorization: req.headers.authorization ?? null }));
+    });
+
+    const result = await fetchHttpTarget(url, { headers: { Authorization: "Bearer stays" } });
+
+    expect(JSON.parse(result.body)).toEqual({ authorization: "Bearer stays" });
+  });
+
   it("returns a normal HttpResult for a sane upstream within all defaults", async () => {
     const url = await spawn((_req, res) => {
       res.statusCode = 200;

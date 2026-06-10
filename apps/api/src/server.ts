@@ -115,8 +115,24 @@ async function dispatchRequest(
 
     await matched.handler({ req, res: response, auth });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Server error";
     const statusCode = resolveErrorStatusCode(err);
+    if (statusCode === null) {
+      // Unexpected throw — no `statusCode` contract means nobody curated this
+      // message for clients. Echoing it would leak internals (DB hosts,
+      // driver errors, stack fragments), and until now nothing logged it
+      // server-side either, so unexpected 500s were both leaky AND silent.
+      // Keep the response generic and put the real error in the server log.
+      console.error("[api] unhandled route error", {
+        method: req.method,
+        url: req.url,
+        err,
+      });
+      sendJson(response, { error: "Server error" }, 500);
+      return;
+    }
+    // Deliberate HTTP error (`httpError(message, status)` and friends) — the
+    // message is operator-curated and client-facing by design.
+    const message = err instanceof Error ? err.message : "Server error";
     sendJson(response, { error: message }, statusCode);
   }
 }
@@ -128,9 +144,17 @@ function normalizeTimeout(value: number | undefined, fallback: number): number {
   return Math.trunc(value);
 }
 
-function resolveErrorStatusCode(err: unknown): number {
+/**
+ * Extract a deliberate HTTP status from a thrown error. Returns the status
+ * when the error carries a valid `statusCode` field in `[400, 600)` — the
+ * `httpError(message, status)` contract — and `null` for anything else
+ * (plain throws, driver errors, bugs). The dispatcher treats `null` as
+ * "unexpected": generic client response + server-side log, never the raw
+ * message.
+ */
+function resolveErrorStatusCode(err: unknown): number | null {
   if (!err || typeof err !== "object" || !("statusCode" in err)) {
-    return 500;
+    return null;
   }
 
   const statusCode = Number((err as { statusCode?: unknown }).statusCode);
@@ -138,5 +162,5 @@ function resolveErrorStatusCode(err: unknown): number {
     return statusCode;
   }
 
-  return 500;
+  return null;
 }

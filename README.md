@@ -269,6 +269,7 @@ Permissions are enforced per organization through `org_members`. In `dev-headers
 
 | Topic | File |
 | --- | --- |
+| The run model: persistence, status machine, observability, audit reconstruction | [`docs/architecture/run-model.md`](docs/architecture/run-model.md) |
 | Environment variables and runtime configuration | [`docs/configuration.md`](docs/configuration.md) |
 | Local AI configuration & verification | [`docs/ai.md`](docs/ai.md) |
 | Node types, configs, outputs, templating | [`docs/nodes.md`](docs/nodes.md) |

@@ -66,23 +66,6 @@ export function listSecretRefs(value: any): string[] {
   return Array.from(refs);
 }
 
-/** Identity rewriter for `{{secret.NAME}}` placeholders — preserves them for display without resolving. */
-export function maskSecrets(value: any): any {
-  if (typeof value === "string") {
-    return value.replace(/{{\s*secret\.([A-Z0-9_]+)\s*}}/gi, "{{secret.$1}}");
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(maskSecrets);
-  }
-
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, maskSecrets(item)]));
-  }
-
-  return value;
-}
-
 export type ResumeTokenPurpose = "human_form";
 
 export type ResumeTokenPayload = {

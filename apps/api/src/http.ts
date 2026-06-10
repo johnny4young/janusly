@@ -97,15 +97,28 @@ export function sendSseComment(res: http.ServerResponse, text: string) {
 /**
  * Read + parse a JSON body. Rejects 413 (`HttpError`) when bytes exceed
  * `maxBytes`. Resolves `{}` for empty bodies.
+ *
+ * Chunks are collected as Buffers and decoded once with `Buffer.concat`
+ * at the end — the same single-shot decode `readRawBody` uses. Incremental
+ * `body += chunk` would decode each chunk independently, mis-decoding any
+ * multi-byte UTF-8 character split across a chunk boundary into U+FFFD.
+ * Because U+FFFD is a valid character inside a JSON string, that corruption
+ * is SILENT: the body still parses and the mangled text gets persisted.
  */
 export async function readJson(req: http.IncomingMessage, maxBytes: number) {
   return new Promise<unknown>((resolve, reject) => {
-    let body = "";
+    const chunks: Buffer[] = [];
     let receivedBytes = 0;
     let rejected = false;
 
-    req.on("data", chunk => {
-      receivedBytes += chunk.length;
+    req.on("data", (chunk: Buffer | string) => {
+      // Real `IncomingMessage` streams emit Buffers (nothing in the API calls
+      // `setEncoding`), but normalize defensively so a string chunk (an
+      // encoding-set stream or a test double) can't break the single-shot
+      // decode below — and so the byte cap counts real UTF-8 bytes rather
+      // than UTF-16 code units.
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
+      receivedBytes += bytes.length;
 
       if (receivedBytes > maxBytes) {
         rejected = true;
@@ -114,11 +127,12 @@ export async function readJson(req: http.IncomingMessage, maxBytes: number) {
         return;
       }
 
-      body += chunk;
+      chunks.push(bytes);
     });
     req.on("error", reject);
     req.on("end", () => {
       if (rejected) return;
+      const body = Buffer.concat(chunks).toString("utf8");
       if (!body) return resolve({});
       try {
         resolve(JSON.parse(body));

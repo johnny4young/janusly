@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1056.0",
-    "@aws-sdk/s3-request-presigner": "^3.1056.0",
+    "@aws-sdk/client-s3": "^3.1065.0",
+    "@aws-sdk/s3-request-presigner": "^3.1065.0",
     "@janusly/ai": "workspace:*",
     "@janusly/data": "workspace:*",
     "@janusly/db": "workspace:*",
@@ -27,22 +27,22 @@
     "@opentelemetry/sdk-trace-base": "^2.7.1",
     "@opentelemetry/sdk-trace-node": "^2.7.1",
     "@opentelemetry/semantic-conventions": "^1.41.1",
-    "bullmq": "^5.77.6",
+    "bullmq": "^5.78.0",
     "cron-parser": "^5.5.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "1.0.0-rc.4-5d5b77c",
     "htmlparser2": "^12.0.0",
-    "ioredis": "^5.11.0",
-    "pdfkit": "^0.18.0",
+    "ioredis": "^5.11.1",
+    "pdfkit": "^0.19.0",
     "re2-wasm": "^1.0.2",
-    "undici": "^8.3.0",
+    "undici": "^8.4.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
+    "@types/node": "^25.9.2",
     "@types/pdfkit": "^0.17.6",
-    "tsx": "^4.22.3",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.8"
   }
 }
