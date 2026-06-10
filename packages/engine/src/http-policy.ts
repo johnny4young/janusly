@@ -67,6 +67,44 @@ const privateHostnames = new Set(["localhost", "localhost.localdomain"]);
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+/**
+ * Credential-bearing request headers that must NOT follow a redirect to a
+ * DIFFERENT origin. Mirrors the fetch spec (and undici's built-in redirect
+ * handling, which this module replaces with manual hops): a workflow author
+ * attaches `Authorization` for host A; if A responds with a redirect to host
+ * B (e.g. an open redirect on a legitimate API), forwarding the header would
+ * hand A's credential to B. Same-origin redirects keep their headers.
+ */
+const SENSITIVE_REDIRECT_HEADERS = new Set(["authorization", "proxy-authorization", "cookie"]);
+
+/**
+ * Strip credential-bearing headers from `init` when the redirect crosses
+ * origins (scheme + host + port). Returns `init` untouched for same-origin
+ * hops or when there is nothing to strip. Handles the three `HeadersInit`
+ * shapes (`Headers`, entry array, plain record); the stripped result is
+ * normalized to a plain record, which both `undici.fetch` and global `fetch`
+ * accept.
+ */
+function stripSensitiveHeadersOnCrossOrigin(
+  init: RequestInit | undefined,
+  fromUrl: string,
+  toUrl: string,
+): RequestInit | undefined {
+  if (!init?.headers) return init;
+  if (new URL(fromUrl).origin === new URL(toUrl).origin) return init;
+
+  const entries: Array<[string, string]> =
+    init.headers instanceof Headers
+      ? [...init.headers.entries()]
+      : Array.isArray(init.headers)
+        ? init.headers.map(([name, value]) => [String(name), String(value)] as [string, string])
+        : Object.entries(init.headers as Record<string, string>);
+
+  const kept = entries.filter(([name]) => !SENSITIVE_REDIRECT_HEADERS.has(name.toLowerCase()));
+  if (kept.length === entries.length) return init;
+  return { ...init, headers: Object.fromEntries(kept) };
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_000_000;
 const DEFAULT_MAX_REDIRECTS = 5;
@@ -680,6 +718,10 @@ async function fetchOneHop(
     if (res.status === 301 || res.status === 302 || res.status === 303) {
       nextInit = { ...(requestInit ?? {}), method: "GET", body: undefined };
     }
+    // Credential headers never follow a cross-origin redirect (fetch-spec
+    // behavior). Applied AFTER the method coercion so the stripped init is
+    // what actually flows to the next hop — and to every hop after it.
+    nextInit = stripSensitiveHeadersOnCrossOrigin(nextInit, url, nextUrl);
 
     return fetchOneHop(nextUrl, nextInit, controller, maxBytes, redirectsRemaining - 1, bodyMode);
   }

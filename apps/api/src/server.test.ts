@@ -95,6 +95,67 @@ describe("createApiServer", () => {
     }
   });
 
+  it("responds with a generic message and logs server-side when a handler throws without a statusCode", async () => {
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: "/explodes",
+        handler: async () => {
+          // Simulates an uncurated internal failure (driver error, bug). The
+          // raw message must never reach the client.
+          throw new Error("connection refused to db-internal-host:5432 (password=hunter2)");
+        },
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const response = await fetch(`${baseUrl}/explodes`, {
+        headers: { Origin: "http://localhost:5173" },
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({ error: "Server error" });
+      // The real error is preserved server-side for diagnosis.
+      expect(consoleError).toHaveBeenCalledWith(
+        "[api] unhandled route error",
+        expect.objectContaining({ method: "GET", url: "/explodes" }),
+      );
+    } finally {
+      consoleError.mockRestore();
+      await close(server);
+    }
+  });
+
+  it("keeps the curated message for deliberate httpError throws", async () => {
+    const routes: Route[] = [
+      {
+        method: "GET",
+        match: "/teapot",
+        handler: async () => {
+          const err = new Error("workflowId is required") as Error & { statusCode?: number };
+          err.statusCode = 422;
+          throw err;
+        },
+      },
+    ];
+    const server = createApiServer({ routes });
+    const baseUrl = await listen(server);
+
+    try {
+      const response = await fetch(`${baseUrl}/teapot`, {
+        headers: { Origin: "http://localhost:5173" },
+      });
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toEqual({ error: "workflowId is required" });
+    } finally {
+      await close(server);
+    }
+  });
+
   it("enforces declared permissions after auth and role gates", async () => {
     const routes: Route[] = [
       {

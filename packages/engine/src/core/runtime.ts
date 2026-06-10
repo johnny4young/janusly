@@ -333,14 +333,29 @@ export class WorkflowRuntime {
     const status = await this.store.getRunStatus(runId);
     if (status === "cancelled" || status === "failed") return 0;
     const context = await this.store.getRunContext(runId);
+
+    // Readiness reads come from the context snapshot loaded above — ONE query
+    // for the whole scan — instead of a per-dep + per-node `getNodeStatus`
+    // round-trip (O(nodes + edges) queries on every node completion, the
+    // hottest engine path). The map is seeded from every persisted row and
+    // updated in place when THIS scan writes (skip → "skipped", claim →
+    // "queued"), so an intra-scan skip cascade still unblocks downstream
+    // dependents exactly like the per-node fresh reads did. Concurrent
+    // external writes were equally racy under fresh reads; the atomic
+    // `tryClaimNodeForQueue` claim remains the multi-worker correctness gate,
+    // and every completion triggers its own scan, so a node a stale snapshot
+    // misses here is picked up by the completing sibling's scan.
+    const statuses = new Map<string, string | undefined>(
+      Object.entries(context as Record<string, { status?: string } | undefined>)
+        .map(([nodeId, entry]) => [nodeId, entry?.status]),
+    );
     let queued = 0;
 
     for (const node of workflow.nodes) {
       const incomingEdges = workflow.edges.filter((edge) => edge.to === node.id);
       const deps = incomingEdges.map((edge) => edge.from);
-      const depStatuses = await Promise.all(deps.map((depId) => this.store.getNodeStatus(runId, depId)));
-      const ready = depStatuses.every((status) => ["succeeded", "skipped"].includes(status));
-      const currentStatus = await this.store.getNodeStatus(runId, node.id);
+      const ready = deps.every((depId) => ["succeeded", "skipped"].includes(statuses.get(depId) ?? ""));
+      const currentStatus = statuses.get(node.id);
 
       if (!ready || currentStatus !== "pending") continue;
 
@@ -352,6 +367,7 @@ export class WorkflowRuntime {
       }
 
       if (!shouldRun) {
+        statuses.set(node.id, "skipped");
         await this.store.markNodeSkipped(runId, node.id, { reason: "Condition not met" });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.skipped", payload: { reason: "Condition not met" } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.skipped" });
@@ -360,6 +376,7 @@ export class WorkflowRuntime {
 
       const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
       if (!claimed) continue;
+      statuses.set(node.id, "queued");
       await this.queue.enqueueNode({ runId, workflow, node, attempt: 1 });
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });

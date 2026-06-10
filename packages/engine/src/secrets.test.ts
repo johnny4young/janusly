@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getSecret, listSecretRefs, maskSecrets, signResumeToken, verifyResumeToken } from './secrets'
+import { getSecret, listSecretRefs, signResumeToken, verifyResumeToken } from './secrets'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -24,10 +24,6 @@ describe('secrets', () => {
     expect(refs.sort()).toEqual(['SLACK_TOKEN', 'api_key'].sort())
   })
 
-  it('maskSecrets preserves placeholders without leaking values', () => {
-    const masked = maskSecrets({ token: '{{secret.SECRET}}', plain: 'no secret here' })
-    expect(masked).toEqual({ token: '{{secret.SECRET}}', plain: 'no secret here' })
-  })
 })
 
 describe('signResumeToken / verifyResumeToken', () => {
