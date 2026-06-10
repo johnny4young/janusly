@@ -88,6 +88,11 @@ import {
   handleConfidenceCalibrationTrigger,
   registerConfidenceCalibrationScheduler,
 } from "./confidence-calibration-scheduler";
+import {
+  handleStalledNodeReaperTrigger,
+  registerStalledNodeReaperScheduler,
+  STALLED_NODE_REAPER_JOB_NAME,
+} from "./stalled-node-reaper";
 
 await assertMigrationsApplied();
 
@@ -175,6 +180,19 @@ try {
   if (registered) console.log("[confidence-calibration] daily sweep scheduler registered");
 } catch (err) {
   console.error("[confidence-calibration] scheduler registration failed", err);
+}
+
+// Stalled-node reaper. Global (non-tenant) recurring job — `system:` id
+// prefix. Finds production-run nodes left `running` past the stall threshold
+// (the signature of a worker that crashed mid-node, which the atomic claim
+// cannot self-heal), fails them into the DLQ, and rolls their runs up to a
+// terminal status so a dead worker can't leave a run stuck forever. Same
+// never-throws boot posture as the retention sweeps.
+try {
+  const registered = await registerStalledNodeReaperScheduler();
+  if (registered) console.log("[stalled-node-reaper] sweep scheduler registered");
+} catch (err) {
+  console.error("[stalled-node-reaper] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -329,6 +347,10 @@ export const worker = new Worker(
     }
     if (job.name === CONFIDENCE_CALIBRATION_JOB_NAME) {
       await handleConfidenceCalibrationTrigger();
+      return;
+    }
+    if (job.name === STALLED_NODE_REAPER_JOB_NAME) {
+      await handleStalledNodeReaperTrigger();
       return;
     }
     // One-shot delayed job — scheduled on demand from the

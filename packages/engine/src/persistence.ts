@@ -237,6 +237,23 @@ export async function markNodeFailed(runId: string, nodeId: string, error: any) 
 }
 
 /**
+ * Conditionally fail a node that is STILL `running` (CAS). Returns `true` when
+ * the row flipped, `false` when it had already advanced (completed, was
+ * cancelled, or another sweep claimed it first). Used by the stalled-node
+ * reaper: the conditional WHERE is the claim, so a node that legitimately
+ * finished between the reaper's scan and its write is never clobbered, and two
+ * worker replicas sweeping concurrently can't both fail the same node. Same
+ * atomic-claim shape as `markWaitingNodeSucceeded` / `markNodeRunning`.
+ */
+export async function failStalledRunningNode(runId: string, nodeId: string, error: any): Promise<boolean> {
+  const failed = await db.update(runNodes)
+    .set({ status: "failed", errorJson: safePersistPayload(error, { maxBytes: ERROR_JSON_MAX_BYTES }), finishedAt: new Date() })
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId), eq(runNodes.status, "running")))
+    .returning({ id: runNodes.id });
+  return failed.length > 0;
+}
+
+/**
  * Subworkflow terminal-notifier hook. `subworkflow.ts` registers its
  * `notifyParentOnTerminal` here at module load via `setSubworkflowNotifier`
  * — `persistence.ts` then calls it after a terminal status flip, without
