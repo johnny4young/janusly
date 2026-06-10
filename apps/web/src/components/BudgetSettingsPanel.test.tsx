@@ -77,6 +77,18 @@ describe('<BudgetSettingsPanel />', () => {
     expect(screen.getByTestId('budget-workflow-policy')).toHaveValue('block')
   })
 
+  it('renders the workflow policy options with the descriptive labels, matching the org selector', async () => {
+    mockBudgetApi()
+
+    render(<BudgetSettingsPanel />)
+
+    // The workflow-level policy dropdown must show the same descriptive labels
+    // as the org-level selector — not the bare "warn" / "block" key names.
+    const wfPolicy = await screen.findByTestId('budget-workflow-policy')
+    expect(wfPolicy).toHaveTextContent('keep AI calls running')
+    expect(wfPolicy).toHaveTextContent('stop AI calls at the limit')
+  })
+
   it('saves org budget fields through the existing org config route and bumps platformVersion', async () => {
     mockBudgetApi()
     render(<BudgetSettingsPanel />)

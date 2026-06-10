@@ -998,8 +998,6 @@
   "budget.field.policy": "Política al exceder",
   "budget.policy.warnLabel": "Solo avisar — mantener las llamadas IA",
   "budget.policy.blockLabel": "Bloquear — frenar llamadas IA al alcanzar el límite",
-  "budget.policy.warn": "avisar",
-  "budget.policy.block": "bloquear",
   "budget.action.saveOrg": "Guardar presupuesto de org",
   "budget.saving": "Guardando…",
   "budget.toastOrgSaved": "Presupuesto IA actualizado",
