@@ -528,11 +528,12 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
 
   it('queues merge exactly once when all branches have succeeded', async () => {
     const store = makeStore({
-      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
-        if (nodeId === 'fork') return 'succeeded'
-        if (nodeId === 'a' || nodeId === 'b' || nodeId === 'c') return 'succeeded'
-        if (nodeId === 'merge') return 'pending'
-        return 'pending'
+      getRunContext: vi.fn().mockResolvedValue({
+        fork: { status: 'succeeded' },
+        a: { status: 'succeeded' },
+        b: { status: 'succeeded' },
+        c: { status: 'succeeded' },
+        merge: { status: 'pending' },
       }),
     })
     const queue = makeQueue()
@@ -548,12 +549,12 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
 
   it('does NOT queue merge while one branch is still running (pending fan-in)', async () => {
     const store = makeStore({
-      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
-        if (nodeId === 'fork') return 'succeeded'
-        if (nodeId === 'a' || nodeId === 'b') return 'succeeded'
-        if (nodeId === 'c') return 'running'
-        if (nodeId === 'merge') return 'pending'
-        return 'pending'
+      getRunContext: vi.fn().mockResolvedValue({
+        fork: { status: 'succeeded' },
+        a: { status: 'succeeded' },
+        b: { status: 'succeeded' },
+        c: { status: 'running' },
+        merge: { status: 'pending' },
       }),
     })
     const queue = makeQueue()
@@ -567,12 +568,12 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
 
   it('does NOT queue merge when one branch failed terminally (join never runs)', async () => {
     const store = makeStore({
-      getNodeStatus: vi.fn().mockImplementation((_runId, nodeId) => {
-        if (nodeId === 'fork') return 'succeeded'
-        if (nodeId === 'a' || nodeId === 'b') return 'succeeded'
-        if (nodeId === 'c') return 'failed'
-        if (nodeId === 'merge') return 'pending'
-        return 'pending'
+      getRunContext: vi.fn().mockResolvedValue({
+        fork: { status: 'succeeded' },
+        a: { status: 'succeeded' },
+        b: { status: 'succeeded' },
+        c: { status: 'failed' },
+        merge: { status: 'pending' },
       }),
     })
     const queue = makeQueue()
@@ -582,5 +583,76 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
 
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalledWith('r1', 'merge', expect.anything())
     expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'merge' }) }))
+  })
+})
+
+describe('enqueueReadyNodes — snapshot-based readiness', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('reads node statuses from one context snapshot, never via per-node getNodeStatus queries', async () => {
+    // The measurement behind the optimization: a scan used to issue one
+    // getNodeStatus query per dependency edge PLUS one per node (O(nodes +
+    // edges) round-trips on every node completion). It must now derive all
+    // readiness reads from the single getRunContext snapshot.
+    const chain = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'a', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} },
+        { id: 'c', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'c' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        a: { status: 'succeeded' },
+        b: { status: 'pending' },
+        c: { status: 'pending' },
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: chain })
+
+    expect(queued).toBe(1) // b is ready (a succeeded); c is not (b pending).
+    expect(store.getRunContext).toHaveBeenCalledTimes(1)
+    expect(store.getNodeStatus).not.toHaveBeenCalled()
+  })
+
+  it('a node skipped in this scan unblocks its dependent within the same scan (skip cascade)', async () => {
+    // a succeeded → edge with a false condition skips b → c (dep on b, no
+    // condition) must still queue in the SAME scan, because nothing external
+    // re-triggers a scan after a skip. This pins the in-place snapshot update
+    // that preserves the behavior the per-node fresh reads used to provide.
+    const cascade = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'a', type: 'noop' as const, config: {} },
+        { id: 'b', type: 'noop' as const, config: {} },
+        { id: 'c', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'a', to: 'b', condition: 'false' },
+        { from: 'b', to: 'c' },
+      ],
+    }
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        a: { status: 'succeeded' },
+        b: { status: 'pending' },
+        c: { status: 'pending' },
+      }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    const queued = await runtime.enqueueReadyNodes({ runId: 'r1', workflow: cascade })
+
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
+    expect(queued).toBe(1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'c' }) }))
   })
 })
