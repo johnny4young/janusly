@@ -368,8 +368,8 @@ export function BudgetSettingsPanel() {
                 disabled={!selectedWorkflowId}
                 data-testid="budget-workflow-policy"
               >
-                <option value="warn">{t("budget.policy.warn")}</option>
-                <option value="block">{t("budget.policy.block")}</option>
+                <option value="warn">{t("budget.policy.warnLabel")}</option>
+                <option value="block">{t("budget.policy.blockLabel")}</option>
               </select>
             </label>
             {wfStatus === "saved" && (

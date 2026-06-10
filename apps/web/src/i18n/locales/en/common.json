@@ -998,8 +998,6 @@
   "budget.field.policy": "Exceeded policy",
   "budget.policy.warnLabel": "Warn only — keep AI calls running",
   "budget.policy.blockLabel": "Block calls — stop AI calls at the limit",
-  "budget.policy.warn": "warn",
-  "budget.policy.block": "block",
   "budget.action.saveOrg": "Save org budget",
   "budget.saving": "Saving…",
   "budget.toastOrgSaved": "AI budget updated",
