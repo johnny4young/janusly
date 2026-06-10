@@ -1,1 +1,0 @@
-ALTER TABLE "mcp_connections" ADD COLUMN "expose_to_ai" boolean DEFAULT false NOT NULL;

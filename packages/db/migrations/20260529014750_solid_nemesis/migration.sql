@@ -1,1 +1,0 @@
-ALTER TABLE "credentials" ADD COLUMN "updated_at" timestamp(3) with time zone DEFAULT now();

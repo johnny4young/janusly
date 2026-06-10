@@ -1,1 +1,0 @@
-ALTER TABLE "runs" ADD COLUMN "output_json" jsonb;

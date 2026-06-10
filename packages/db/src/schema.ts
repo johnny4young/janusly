@@ -10,8 +10,10 @@
  *
  * Used by:
  * - Every Drizzle query across `packages/data`, `packages/engine`, `apps/api`.
- * - `packages/db/migrations/0000_tranquil_gravity.sql` — the initial migration
- *   was emitted from this exact shape.
+ * - `packages/db/migrations/20260610175420_baseline/migration.sql` — the
+ *   development baseline (pre-production squash of the first 31 migrations)
+ *   was emitted from this exact shape, plus the three documented hand-edits
+ *   drizzle-kit cannot generate (pgvector extension, GIN opclass, HNSW index).
  *
  * Tables:
  * - `organizations`, `users`, `org_members` — multi-tenant scope.
