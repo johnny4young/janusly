@@ -63,7 +63,10 @@ const PROVIDERS = {
       const ollama = createOllama({ baseURL: apiKey });
       return (modelId) => ollama(modelId);
     },
-    // No jsonModeOptions — Ollama JSON mode varies by model; rely on the prompt.
+    // No applyJsonMode — Ollama JSON mode varies by model; rely on the prompt.
+    // Providers with a native schema-less JSON mode wrap the model instead:
+    // applyJsonMode: (model) => wrapLanguageModel({ model, middleware:
+    //   defaultSettingsMiddleware({ settings: { responseFormat: { type: "json" } } }) })
   },
 };
 ```

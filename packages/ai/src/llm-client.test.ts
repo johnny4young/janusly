@@ -7,18 +7,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //
 // `vi.mock` is hoisted to the top of the file, so any variables it captures
 // must be declared via `vi.hoisted()` to share the same hoist phase.
-const { generateTextMock, outputObjectMock } = vi.hoisted(() => ({
-  generateTextMock: vi.fn(),
-  // Stub Output.object so tests can pass arbitrary schema sentinels without
-  // building real Zod schemas. The mocked `generateText` ignores the
-  // returned spec anyway — it just needs to type-check.
-  outputObjectMock: vi.fn((opts) => ({ __mockOutputSpec: true, ...opts })),
-}));
+const { generateTextMock, outputObjectMock, wrapLanguageModelMock, defaultSettingsMiddlewareMock } = vi.hoisted(
+  () => ({
+    generateTextMock: vi.fn(),
+    // Stub Output.object so tests can pass arbitrary schema sentinels without
+    // building real Zod schemas. The mocked `generateText` ignores the
+    // returned spec anyway — it just needs to type-check.
+    outputObjectMock: vi.fn((opts) => ({ __mockOutputSpec: true, ...opts })),
+    // Sentinel-returning stubs so tests can pin the JSON-mode model wrap
+    // (which model got wrapped, with which middleware settings) without
+    // exercising real SDK middleware machinery.
+    wrapLanguageModelMock: vi.fn(({ model, middleware }) => ({ __wrappedModel: true, model, middleware })),
+    defaultSettingsMiddlewareMock: vi.fn((opts) => ({ __mockMiddleware: true, ...opts })),
+  }),
+);
 vi.mock("ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("ai")>();
   return {
     ...actual,
     generateText: generateTextMock,
+    wrapLanguageModel: wrapLanguageModelMock,
+    defaultSettingsMiddleware: defaultSettingsMiddlewareMock,
     Output: { ...actual.Output, object: outputObjectMock },
   };
 });
@@ -42,6 +51,9 @@ const baseUsage = { inputTokens: 10, outputTokens: 20 };
 
 afterEach(() => {
   generateTextMock.mockReset();
+  // mockClear (not mockReset) — these two keep their sentinel implementations.
+  wrapLanguageModelMock.mockClear();
+  defaultSettingsMiddlewareMock.mockClear();
   _resetLlmClientForTests();
 });
 
@@ -147,18 +159,34 @@ describe("createLlmClient — happy paths", () => {
     expect(result.costUsd).toBeCloseTo(10 * 0.15 / 1e6 + 20 * 0.6 / 1e6, 9);
   });
 
-  it("threads the openai JSON-mode option when responseFormat is 'json'", async () => {
+  it("wraps the openai model with spec-level JSON-mode middleware when responseFormat is 'json'", async () => {
     const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({ prompt: "hi", responseFormat: "json" });
 
-    const opts = generateTextMock.mock.calls[0][0];
-    expect(opts.providerOptions).toEqual({
-      openai: { responseFormat: { type: "json_object" } },
+    // The middleware must inject the SPEC-LEVEL responseFormat (what the
+    // OpenAI model classes translate to the wire's json_object format) —
+    // provider options are not consulted for JSON mode.
+    expect(defaultSettingsMiddlewareMock).toHaveBeenCalledWith({
+      settings: { responseFormat: { type: "json" } },
     });
+    expect(wrapLanguageModelMock).toHaveBeenCalledTimes(1);
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.model).toMatchObject({ __wrappedModel: true });
+    expect(opts.providerOptions).toBeUndefined();
   });
 
-  it("does NOT add JSON-mode options for anthropic (relies on the prompt)", async () => {
+  it("does NOT wrap the openai model when responseFormat is absent", async () => {
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const client = createLlmClient(cfg);
+    await client.generateText({ prompt: "hi" });
+
+    expect(wrapLanguageModelMock).not.toHaveBeenCalled();
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.model).not.toMatchObject({ __wrappedModel: true });
+  });
+
+  it("does NOT add JSON-mode wiring for anthropic (relies on the prompt)", async () => {
     const cfg = resolveLlmConfig({
       JANUSLY_LLM_PROVIDER: "anthropic",
       ANTHROPIC_API_KEY: "sk-ant-x",
@@ -166,6 +194,7 @@ describe("createLlmClient — happy paths", () => {
     const client = createLlmClient(cfg);
     await client.generateText({ prompt: "hi", responseFormat: "json" });
 
+    expect(wrapLanguageModelMock).not.toHaveBeenCalled();
     const opts = generateTextMock.mock.calls[0][0];
     expect(opts.providerOptions).toBeUndefined();
   });
@@ -208,7 +237,7 @@ describe("createLlmClient — happy paths", () => {
     expect(result.model).toBe("claude-haiku-4-5");
   });
 
-  it("ignores `responseFormat: 'json'` mapping when overriding to a provider without jsonModeOptions", async () => {
+  it("ignores `responseFormat: 'json'` mapping when overriding to a provider without applyJsonMode", async () => {
     const cfg = resolveLlmConfig({
       OPENAI_API_KEY: "sk-x",
       ANTHROPIC_API_KEY: "sk-ant-x",
@@ -220,6 +249,7 @@ describe("createLlmClient — happy paths", () => {
       modelHint: "anthropic/claude-haiku-4-5",
     });
 
+    expect(wrapLanguageModelMock).not.toHaveBeenCalled();
     const opts = generateTextMock.mock.calls[0][0];
     expect(opts.providerOptions).toBeUndefined();
   });
