@@ -1,22 +1,33 @@
 /*
- * model-eval-compare.ts — isolated A/B/C/D model comparison for /ai/generate-workflow.
+ * model-eval-compare.ts — isolated cross-provider model comparison for /ai/generate-workflow.
  *
  * Runs the REAL generation pipeline (Pass1 -> promoteNoopPlaceholders -> sanitizeAiWorkflow
- * -> validateWorkflow) against the repo's own complex eval prompts, across 4 configs:
- *   A haiku        — constrained structured output via LlmClient (legacy path)
- *   B sonnet       — constrained structured output via LlmClient
- *   C haiku-think  — Anthropic Messages API direct (fetch), extended thinking ON, FREE-JSON
- *                    (thinking is incompatible with forced structured output on Anthropic)
- *   D haiku-free   — Anthropic Messages API direct (fetch), no thinking, FREE-JSON
- *                    (isolates the "no constrained decoding" penalty from the thinking benefit)
+ * -> validateWorkflow) against the repo's own complex eval prompts, across 6 configs:
+ *   A haiku           — constrained structured output via LlmClient (legacy path)
+ *   B sonnet          — constrained structured output via LlmClient
+ *   C haiku-think     — Anthropic Messages API direct (fetch), extended thinking ON, FREE-JSON
+ *                       (thinking is incompatible with forced structured output on Anthropic)
+ *   D haiku-free      — Anthropic Messages API direct (fetch), no thinking, FREE-JSON
+ *                       (isolates the "no constrained decoding" penalty from the thinking benefit)
+ *   E gpt4o-mini-free — OpenAI free-JSON through the PRODUCTION LlmClient.generateText path
+ *                       (responseFormat:"json" -> applyJsonMode wrap), i.e. the exact wire path
+ *                       a tenant with ai.provider=openai would exercise
+ *   F gpt41-mini-free — same path, one model tier up
  *
- * A blind Sonnet judge scores each final workflow. No ship code is modified.
+ * A blind Sonnet judge scores each final workflow (same judge for every provider, so the
+ * quality numbers are comparable across providers). No ship code is modified.
  * Run: pnpm --filter @janusly/api exec tsx ../../scripts/model-eval-compare.ts
- * Env: SMOKE=1 -> 1 prompt, only constrained-haiku + free-haiku (validates both code paths cheaply)
+ * Env: SMOKE=1 -> 1 prompt, constrained-haiku + free-haiku + gpt4o-mini-free (validates all
+ *      three code paths cheaply); SAMPLES=N; ONLY=key[,key...] (with ONLY set, SMOKE only
+ *      trims the prompt list — ONLY picks the configs);
+ *      PROMPT_SET=base|complex|all (base = the original 10 prompts, complex = 6 harder
+ *      multi-stage business cases, all = 16).
+ *      ANTHROPIC_API_KEY is always required (judge); OPENAI_API_KEY only when an OpenAI
+ *      config is in the selected set.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { createLlmClient, resolveLlmConfig, promoteNoopPlaceholders, type LlmClient } from "@janusly/ai";
-import { AiGenerationWorkflowSchema } from "../apps/api/src/ai-schemas";
+import { AiGenerationWorkflowSchema, AiGenerationWorkflowSchemaFreeJson } from "../apps/api/src/ai-schemas";
 import { GENERATE_WORKFLOW_SYSTEM_PROMPT, composeGenerationSystemPrompt } from "../apps/api/src/ai-prompts";
 import { sanitizeAiWorkflow } from "../apps/api/src/ai-runtime";
 
@@ -41,17 +52,34 @@ function loadEnv(path: string): void {
 loadEnv(new URL("../.env", import.meta.url).pathname);
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY ?? "";
+const OPENAI_KEY = process.env.OPENAI_API_KEY ?? "";
 const ANTHROPIC_VERSION = "2023-06-01";
 if (!ANTHROPIC_KEY) {
+  // Always required: the blind judge runs on Anthropic even for OpenAI configs.
   console.error("ANTHROPIC_API_KEY missing after .env load");
   process.exit(1);
 }
 
 const HAIKU = "claude-haiku-4-5-20251001";
 const SONNET = "claude-sonnet-4-6";
+const GPT4O_MINI = "gpt-4o-mini";
+const GPT41_MINI = "gpt-4.1-mini";
+const GPT4O = "gpt-4o";
+const GPT41 = "gpt-4.1";
+const GPT54_MINI = "gpt-5.4-mini";
+const GPT54_NANO = "gpt-5.4-nano";
+// Per-1M-token USD rates; keep in sync with packages/shared/src/llm-pricing.ts.
+// gpt-5.4-* are reasoning models — reasoning tokens bill as output tokens, so
+// the measured $/run can exceed what the nominal rate suggests.
 const PRICE: Record<string, { in: number; out: number }> = {
   [HAIKU]: { in: 1.0, out: 5.0 },
   [SONNET]: { in: 3.0, out: 15.0 },
+  [GPT4O_MINI]: { in: 0.15, out: 0.6 },
+  [GPT41_MINI]: { in: 0.4, out: 1.6 },
+  [GPT4O]: { in: 2.5, out: 10.0 },
+  [GPT41]: { in: 2.0, out: 8.0 },
+  [GPT54_MINI]: { in: 0.75, out: 4.5 },
+  [GPT54_NANO]: { in: 0.2, out: 1.25 },
 };
 function costUsd(model: string, inTok: number, outTok: number): number {
   const p = PRICE[model] ?? { in: 0, out: 0 };
@@ -61,15 +89,24 @@ function costUsd(model: string, inTok: number, outTok: number): number {
 type Config = {
   key: string;
   label: string;
+  /** Registry key in packages/ai PROVIDERS; drives the modelHint prefix + key guard. */
+  provider: "anthropic" | "openai";
   model: string;
   mode: "constrained" | "freejson";
   thinking: boolean;
 };
 const ALL_CONFIGS: Config[] = [
-  { key: "haiku", label: "Haiku 4.5 (constrained)", model: HAIKU, mode: "constrained", thinking: false },
-  { key: "sonnet", label: "Sonnet 4.6 (constrained)", model: SONNET, mode: "constrained", thinking: false },
-  { key: "haiku-think", label: "Haiku 4.5 +thinking (free-JSON)", model: HAIKU, mode: "freejson", thinking: true },
-  { key: "haiku-free", label: "Haiku 4.5 (free-JSON, no think)", model: HAIKU, mode: "freejson", thinking: false },
+  { key: "haiku", label: "Haiku 4.5 (constrained)", provider: "anthropic", model: HAIKU, mode: "constrained", thinking: false },
+  { key: "sonnet", label: "Sonnet 4.6 (constrained)", provider: "anthropic", model: SONNET, mode: "constrained", thinking: false },
+  { key: "haiku-think", label: "Haiku 4.5 +thinking (free-JSON)", provider: "anthropic", model: HAIKU, mode: "freejson", thinking: true },
+  { key: "haiku-free", label: "Haiku 4.5 (free-JSON, no think)", provider: "anthropic", model: HAIKU, mode: "freejson", thinking: false },
+  { key: "gpt4o-mini-free", label: "GPT-4o-mini (free-JSON, prod path)", provider: "openai", model: GPT4O_MINI, mode: "freejson", thinking: false },
+  { key: "gpt41-mini-free", label: "GPT-4.1-mini (free-JSON, prod path)", provider: "openai", model: GPT41_MINI, mode: "freejson", thinking: false },
+  { key: "sonnet-free", label: "Sonnet 4.6 (free-JSON, no think)", provider: "anthropic", model: SONNET, mode: "freejson", thinking: false },
+  { key: "gpt4o-free", label: "GPT-4o (free-JSON, prod path)", provider: "openai", model: GPT4O, mode: "freejson", thinking: false },
+  { key: "gpt41-free", label: "GPT-4.1 (free-JSON, prod path)", provider: "openai", model: GPT41, mode: "freejson", thinking: false },
+  { key: "gpt54-mini-free", label: "GPT-5.4-mini (free-JSON, prod path)", provider: "openai", model: GPT54_MINI, mode: "freejson", thinking: false },
+  { key: "gpt54-nano-free", label: "GPT-5.4-nano (free-JSON, prod path)", provider: "openai", model: GPT54_NANO, mode: "freejson", thinking: false },
 ];
 
 type EvalPrompt = { id: string; text: string };
@@ -86,13 +123,50 @@ const ALL_PROMPTS: EvalPrompt[] = [
   { id: "failed-workflow-recovery", text: "Receive a webhook with a customer and amount, call our internal billing API to charge them, then email the customer the confirmation. We want this workflow to be safely recoverable when the billing API is misconfigured." },
 ];
 
+// Harder, production-shaped business cases: multi-stage orchestration mixing
+// fork/join, conditional approval, human_form, loop, schedule, wait, and
+// multi-agent — the node families where cheaper models historically lose
+// judge points. Selected via PROMPT_SET=complex|all (default: base set only,
+// so prior sweep numbers stay comparable).
+const COMPLEX_PROMPTS: EvalPrompt[] = [
+  { id: "order-dispute-resolution", text: "When a payment dispute webhook arrives, fetch the order history from our commerce API, have AI classify liability, then in parallel compute the refund amount and run an AI fraud screen; once both finish, require finance approval for amounts over $200, call the billing system over a signed webhook, email the customer the outcome, and post a summary to the finance Slack channel" },
+  { id: "employee-onboarding", text: "When HR submits a new-hire intake form, create accounts in our identity, payroll, and project-tracker systems in parallel; after all three succeed, have AI draft a personalized 30-60-90 onboarding plan, email it to the hiring manager, post a welcome message to Slack, and schedule a 30-day check-in" },
+  { id: "invoice-reconciliation", text: "Every weeknight at 2am, fetch unpaid invoices from our ERP, loop over each one matching it against bank payments via API, have AI classify any discrepancies by root cause, route mismatches over $1,000 to a human reviewer, auto-resolve the small ones via the ERP API, and email a reconciliation digest to the controller" },
+  { id: "vendor-risk-review", text: "Given a vendor name and website, have an agent gather public information about the company, summarize security and financial risk with AI, then route by risk tier: high risk opens a GitHub issue and requires a human decision, medium risk emails procurement, low risk just records the assessment" },
+  { id: "churn-rescue", text: "When a subscription cancellation webhook fires, fetch the customer's usage history, have AI pick a personalized retention offer, require manager approval when the discount exceeds 20%, email the offer, wait three days, and if a follow-up webhook hasn't confirmed acceptance send a final offer and notify customer success in Slack" },
+  { id: "incident-postmortem", text: "After an incident-resolved webhook from our paging system, fetch the incident timeline from the status API, run three agents — an investigator, a writer, and a reviewer — to produce a postmortem, generate it as a PDF, create a GitHub issue with the action items, and schedule a 7-day follow-up review" },
+];
+
 const SMOKE = Boolean(process.env.SMOKE);
 const SAMPLES = Math.max(1, Number(process.env.SAMPLES ?? 1));
 const ONLY = (process.env.ONLY ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-const CONFIGS = (SMOKE ? ALL_CONFIGS.filter((c) => c.key === "haiku" || c.key === "haiku-free") : ALL_CONFIGS).filter(
-  (c) => ONLY.length === 0 || ONLY.includes(c.key),
-);
-const PROMPTS = SMOKE ? ALL_PROMPTS.slice(0, 1) : ALL_PROMPTS;
+const SMOKE_KEYS = new Set(["haiku", "haiku-free", "gpt4o-mini-free"]);
+// With an explicit ONLY, SMOKE just trims the prompt list — the caller picked
+// the configs; intersecting with SMOKE_KEYS would silently produce zero cells.
+const CONFIGS =
+  ONLY.length > 0
+    ? ALL_CONFIGS.filter((c) => ONLY.includes(c.key))
+    : SMOKE
+      ? ALL_CONFIGS.filter((c) => SMOKE_KEYS.has(c.key))
+      : ALL_CONFIGS;
+// PROMPT_SET: base (default, the original 10) | complex (the 6 hard cases) | all (16).
+// PROMPT_ONLY: comma-separated prompt ids — narrows further (e.g. to resume a
+// partially-killed sweep or iterate on one case).
+const PROMPT_SET = (process.env.PROMPT_SET ?? "base").toLowerCase();
+const PROMPT_ONLY = (process.env.PROMPT_ONLY ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const ACTIVE_PROMPTS = (
+  PROMPT_SET === "complex" ? COMPLEX_PROMPTS : PROMPT_SET === "all" ? [...ALL_PROMPTS, ...COMPLEX_PROMPTS] : ALL_PROMPTS
+).filter((p) => PROMPT_ONLY.length === 0 || PROMPT_ONLY.includes(p.id));
+const PROMPTS = SMOKE ? ACTIVE_PROMPTS.slice(0, 1) : ACTIVE_PROMPTS;
+// Set-scoped guard: an Anthropic-only selection must not demand the OpenAI key.
+if (CONFIGS.some((c) => c.provider === "openai") && !OPENAI_KEY) {
+  console.error(
+    `OPENAI_API_KEY missing after .env load (required by selected configs: ${CONFIGS.filter((c) => c.provider === "openai")
+      .map((c) => c.key)
+      .join(",")})`,
+  );
+  process.exit(1);
+}
 
 function extractJsonObject(text: string): string {
   let t = text.trim();
@@ -129,7 +203,7 @@ type CellResult = {
 
 async function pass1Constrained(
   llm: LlmClient,
-  model: string,
+  cfg: Config,
   system: string,
   prompt: string,
 ): Promise<{ object: unknown; inTok: number; outTok: number; latencyMs: number; parseOk: boolean }> {
@@ -139,7 +213,7 @@ async function pass1Constrained(
     schemaDescription: "Workflow DAG for /ai/generate-workflow.",
     system,
     prompt,
-    modelHint: `anthropic/${model}`,
+    modelHint: `${cfg.provider}/${cfg.model}`,
     context: { orgId: "eval", userId: "eval" },
   });
   return {
@@ -148,6 +222,42 @@ async function pass1Constrained(
     outTok: r.usage?.outputTokens ?? 0,
     latencyMs: r.latencyMs ?? 0,
     parseOk: true,
+  };
+}
+
+// Free-JSON through the PRODUCTION LlmClient path — the same
+// generateText({ responseFormat: "json" }) + provider applyJsonMode wiring
+// /ai/generate-workflow uses, so a failure here is a real finding about the
+// shipped path, not a harness artifact. Used for non-Anthropic providers;
+// the Anthropic free-JSON path stays on the direct Messages API fetch because
+// it also exercises extended thinking, which the SDK path doesn't expose here.
+async function pass1FreeJsonClient(
+  llm: LlmClient,
+  cfg: Config,
+  system: string,
+  prompt: string,
+): Promise<{ object: unknown; inTok: number; outTok: number; latencyMs: number; parseOk: boolean }> {
+  const r = await llm.generateText({
+    system,
+    prompt: `${prompt}\n\nReturn ONLY the JSON workflow object — no prose, no markdown fences.`,
+    responseFormat: "json",
+    modelHint: `${cfg.provider}/${cfg.model}`,
+    context: { orgId: "eval", userId: "eval" },
+  });
+  let object: unknown = null;
+  let parseOk = false;
+  try {
+    object = JSON.parse(extractJsonObject(r.text));
+    parseOk = true;
+  } catch {
+    parseOk = false;
+  }
+  return {
+    object,
+    inTok: r.usage?.inputTokens ?? 0,
+    outTok: r.usage?.outputTokens ?? 0,
+    latencyMs: r.latencyMs ?? 0,
+    parseOk,
   };
 }
 
@@ -269,14 +379,21 @@ async function runCell(
   try {
     const pass1 =
       cfg.mode === "constrained"
-        ? await pass1Constrained(baseLlm, cfg.model, system, p.text)
-        : await pass1FreeJson(cfg.model, system, p.text, cfg.thinking);
+        ? await pass1Constrained(baseLlm, cfg, system, p.text)
+        : cfg.provider === "anthropic"
+          ? await pass1FreeJson(cfg.model, system, p.text, cfg.thinking)
+          : await pass1FreeJsonClient(baseLlm, cfg, system, p.text);
     base.latencyMs = pass1.latencyMs;
     base.inTok += pass1.inTok;
     base.outTok += pass1.outTok;
 
-    // schema-validate pass1 (constrained: enforced; free-JSON: real gate)
-    const parsed = AiGenerationWorkflowSchema.safeParse(pass1.object);
+    // schema-validate pass1, mode-for-mode with production: constrained mode
+    // validates the 11-branch constrained schema (provider-enforced anyway);
+    // free-JSON validates the wider free-JSON schema — the same gate
+    // /ai/generate-workflow applies, whose system prompt teaches the extra
+    // shapes (parallel_fork / join) free-JSON may emit directly.
+    const schema = cfg.mode === "constrained" ? AiGenerationWorkflowSchema : AiGenerationWorkflowSchemaFreeJson;
+    const parsed = schema.safeParse(pass1.object);
     base.pass1ParseOk = pass1.parseOk && parsed.success;
     if (!base.pass1ParseOk) {
       base.error = parsed.success ? "freejson_parse_failed" : `schema:${parsed.error?.issues?.[0]?.message ?? "invalid"}`;
@@ -290,7 +407,7 @@ async function runCell(
       workflow: parsed.data as any,
       originalPrompt: p.text,
       context: { orgId: "eval", userId: "eval" },
-      modelHint: `anthropic/${cfg.model}`,
+      modelHint: `${cfg.provider}/${cfg.model}`,
     });
     base.promotionAttempts = promotion.promotionAttempts;
     base.promotionsSucceeded = promotion.promotionsSucceeded;

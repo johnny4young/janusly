@@ -111,7 +111,7 @@ OPENAI_TIMEOUT_MS=30000                    # historical env name; applies to eve
 OPENAI_MAX_RETRIES=2                       # historical env name; applies to every provider
 ```
 
-For OpenAI (registered for future expansion, currently unverified), `OPENAI_API_KEY=sk-...` plus `JANUSLY_LLM_PROVIDER=openai` is enough to exercise the provider abstraction. `free_json` removes the `/ai/generate-workflow` structured-output `oneOf` blocker, but OpenAI remains unsupported until it passes the eval harness and release smoke.
+For OpenAI (registered for future expansion, currently unverified), `OPENAI_API_KEY=sk-...` plus `JANUSLY_LLM_PROVIDER=openai` is enough to exercise the provider abstraction. `free_json` removes the `/ai/generate-workflow` structured-output `oneOf` blocker, but OpenAI remains unsupported: the 2026-06-10 eval-harness comparison measured gpt-4o-mini at 93% ai-mode (above the Haiku free-JSON baseline's 87%, at ~1/12 the cost) but ~13% lower blind-judge quality, missing the verification bar — so the supported posture stays Anthropic until product re-opens the trade-off or a newer model re-run passes.
 
 **Restart both the API and the worker** after editing `.env` — env is captured at process start:
 
@@ -220,10 +220,16 @@ For provider/model A/B work, run the manual comparison harness directly:
 SMOKE=1 pnpm --filter @janusly/api exec tsx ../../scripts/model-eval-compare.ts
 ```
 
-`SMOKE=1` runs one prompt against constrained Haiku and free-JSON Haiku. Omit
-it for the full A/B/C/D sweep, set `SAMPLES=N` for repeated samples, or set
-`ONLY=haiku-free,sonnet` to narrow configs. This harness calls Anthropic
-directly and always requires `ANTHROPIC_API_KEY`.
+`SMOKE=1` runs one prompt against constrained Haiku, free-JSON Haiku, and
+free-JSON GPT-4o-mini (all three code paths). Omit it for the full
+cross-provider sweep, set `SAMPLES=N` for repeated samples, or set
+`ONLY=haiku-free,gpt4o-mini-free` to narrow configs. The Anthropic free-JSON
+configs call the Messages API directly (extended-thinking support); the OpenAI
+free-JSON configs go through the production `LlmClient.generateText`
+JSON-mode path — the same wire path a tenant with `ai.provider=openai`
+exercises. `ANTHROPIC_API_KEY` is always required (the blind judge runs on
+Sonnet); `OPENAI_API_KEY` is required only when an OpenAI config is in the
+selected set.
 
 ---
 

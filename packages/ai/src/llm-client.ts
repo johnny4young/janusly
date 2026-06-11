@@ -40,7 +40,14 @@
  *   intentionally underscore-prefixed; production code must never call them.
  */
 
-import { generateText as aiGenerateText, Output, type LanguageModel, type SystemModelMessage } from "ai";
+import {
+  generateText as aiGenerateText,
+  Output,
+  defaultSettingsMiddleware,
+  wrapLanguageModel,
+  type LanguageModel,
+  type SystemModelMessage,
+} from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { computeCostUsd, getModelPrice } from "./pricing";
@@ -52,8 +59,9 @@ import { getUsageRecorder, type UsageRecord } from "./usage-recorder";
 // provider name. The four required fields are: which env vars hold the API
 // key + model id, the default model when none is set, and a `create(apiKey)`
 // closure that returns a `(modelId) => LanguageModel` factory bound to the
-// API key. Optional `jsonModeOptions` returns provider-specific kwargs for
-// `generateText` when JSON output is requested.
+// API key. Optional `applyJsonMode` wraps the model so the provider's native
+// JSON mode is enforced when `generateText` is called with
+// `responseFormat: "json"`.
 
 /** Shape of one entry in the `PROVIDERS` registry. */
 export type ProviderSpec = {
@@ -65,8 +73,14 @@ export type ProviderSpec = {
   defaultModel: string;
   /** Build a model factory bound to the given API key. */
   create: (apiKey: string) => (modelId: string) => LanguageModel;
-  /** Optional: provider-specific JSON-mode wiring spread into `generateText` opts. */
-  jsonModeOptions?: () => Record<string, unknown>;
+  /**
+   * Optional: wrap the model so the provider's native JSON mode applies when
+   * `generateText` is invoked with `responseFormat: "json"`. The wrapper must
+   * only inject call options (no output-parsing layer) — `generateText`
+   * consumers read `.text` and run their own parse/retry, so a malformed
+   * reply must come back as text, never as a thrown parse error.
+   */
+  applyJsonMode?: (model: LanguageModel) => LanguageModel;
 };
 
 const PROVIDERS: Record<string, ProviderSpec> = {
@@ -78,9 +92,20 @@ const PROVIDERS: Record<string, ProviderSpec> = {
       const openai = createOpenAI({ apiKey });
       return (modelId) => openai(modelId);
     },
-    jsonModeOptions: () => ({
-      providerOptions: { openai: { responseFormat: { type: "json_object" } } },
-    }),
+    // Spec-level `responseFormat: { type: "json" }` is what the OpenAI model
+    // classes translate to the wire's `json_object` format; provider options
+    // are NOT consulted for this, so the middleware wrap is the supported way
+    // to request JSON mode on a plain-text `generateText` call.
+    applyJsonMode: (model) =>
+      wrapLanguageModel({
+        // The factory always returns a concrete model instance; narrow the
+        // `LanguageModel` union (which also admits ids and v2 models) to the
+        // exact parameter type `wrapLanguageModel` accepts.
+        model: model as Parameters<typeof wrapLanguageModel>[0]["model"],
+        middleware: defaultSettingsMiddleware({
+          settings: { responseFormat: { type: "json" } },
+        }),
+      }),
   },
   anthropic: {
     envApiKey: "ANTHROPIC_API_KEY",
@@ -103,7 +128,8 @@ const PROVIDERS: Record<string, ProviderSpec> = {
       const anthropic = createAnthropic(baseURL ? { apiKey, baseURL } : { apiKey });
       return (modelId) => anthropic(modelId);
     },
-    // No jsonModeOptions — Anthropic relies on the prompt's "Output only JSON".
+    // No applyJsonMode — Anthropic has no schema-less JSON mode; it relies on
+    // the prompt's "Output only JSON".
   },
   // Add a new provider here. e.g. ollama / mistral / google. Four fields.
 };
@@ -385,13 +411,15 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       try {
         if (!spec) throw new Error(`unknown provider '${providerName}'`);
         const buildModel = factoryFor(providerName);
+        const baseModel = buildModel(modelId);
+        const model =
+          input.responseFormat === "json" && spec.applyJsonMode ? spec.applyJsonMode(baseModel) : baseModel;
         aiResult = await aiGenerateText({
-          model: buildModel(modelId),
+          model,
           system: buildSystemPrompt(providerName, input.system, input.cacheSystemPrompt),
           prompt: input.prompt,
           maxRetries: cfg.maxRetries,
           abortSignal: AbortSignal.timeout(cfg.timeoutMs),
-          ...(input.responseFormat === "json" && spec.jsonModeOptions ? spec.jsonModeOptions() : {}),
         });
       } catch (error) {
         const latencyMs = Date.now() - startedAt;
