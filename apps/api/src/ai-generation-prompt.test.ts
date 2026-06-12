@@ -11,6 +11,7 @@ import { fallbackWorkflowForPrompt, sanitizeAiWorkflow } from "./ai-runtime";
 import type { Workflow } from "@janusly/shared";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "./ai-prompts";
+import { parseGeneratedWorkflow } from "./ai-generate-freejson";
 
 describe("generate-workflow system prompt", () => {
   it("documents the free-JSON 13-node selection (11 base + direct parallel_fork/join)", () => {
@@ -77,6 +78,44 @@ describe("generate-workflow system prompt", () => {
 });
 
 describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
+  it("preserves retry config emitted by free-JSON generation on http and tool nodes", () => {
+    const parsed = parseGeneratedWorkflow(JSON.stringify({
+      dslVersion: "1.0",
+      id: "recoverable_external_calls",
+      name: "Recoverable external calls",
+      nodes: [
+        { id: "fetch", type: "http", config: { url: "https://api.example.com/status", retry: { maxAttempts: 3 } } },
+        { id: "charge", type: "tool", config: { tool: "http.request", input: { url: "https://api.example.com/charge" }, retry: { maxAttempts: 3 } } },
+      ],
+      edges: [{ from: "fetch", to: "charge" }],
+    }));
+
+    expect(parsed).not.toBeNull();
+    expect(parsed!.nodes[0]!.config).toMatchObject({ retry: { maxAttempts: 3 } });
+    expect(parsed!.nodes[1]!.config).toMatchObject({ retry: { maxAttempts: 3 } });
+    expect(validateWorkflow(parsed!)).toEqual({ valid: true, issues: [] });
+  });
+
+  it("drops a malformed retry instead of failing the whole draft (operator gets the readiness warning)", () => {
+    const parsed = parseGeneratedWorkflow(JSON.stringify({
+      dslVersion: "1.0",
+      id: "recoverable_bad_retry",
+      name: "Recoverable bad retry",
+      nodes: [
+        // maxAttempts: 1 violates the min(2) contract ("1" means no retry);
+        // the draft path discards the field rather than rejecting the draft.
+        { id: "fetch", type: "http", config: { url: "https://api.example.com/status", retry: { maxAttempts: 1 } } },
+        { id: "charge", type: "tool", config: { tool: "http.request", input: { url: "https://api.example.com/charge" }, retry: "three" } },
+      ],
+      edges: [{ from: "fetch", to: "charge" }],
+    }));
+
+    expect(parsed).not.toBeNull();
+    expect((parsed!.nodes[0]!.config as { retry?: unknown }).retry).toBeUndefined();
+    expect((parsed!.nodes[1]!.config as { retry?: unknown }).retry).toBeUndefined();
+    expect(validateWorkflow(parsed!)).toEqual({ valid: true, issues: [] });
+  });
+
   it("does NOT throw on a tool node with partial input (operator finishes in the Inspector)", () => {
     // Reproducer for the silent-fallback bug: pre-fix this threw
     // `httpError("AI returned a workflow with validation issues:
