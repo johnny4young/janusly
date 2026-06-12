@@ -324,6 +324,10 @@ async function judgeRaw(
     "You are a strict senior workflow engineer grading an auto-generated workflow DAG against a user request. " +
     "Score honestly and harshly. Leftover 'noop' placeholder stubs where real steps belong MUST lower completeness. " +
     "Reward correct node types, sensible connected edges, and full coverage of every requested step. " +
+    "PLATFORM SEMANTICS you MUST account for (the DAG runs on an engine with these rules): " +
+    "(1) `retry: { maxAttempts: N }` inside a node's config IS the retry mechanism — retries run inside the node and a node that exhausts them lands in the platform's recovery queue for operator replay; loop-back edges are forbidden (the graph must be acyclic), so do NOT penalize the absence of retry loops when a retry config is present. " +
+    "(2) An `approval` node upstream of a write-side action (charging, sending, deleting) is REQUIRED platform practice — do not penalize it as unrequested. " +
+    "(3) Trigger-style steps (webhooks, schedules, waits) are deliberately emitted as named `noop` placeholders (e.g. on_webhook, schedule_daily, wait_3_days) that the operator promotes after generation — penalize a noop ONLY where a concrete non-trigger action the user requested is missing. " +
     'Respond with ONLY a JSON object, no prose: {"intentCoverage":0-10,"structureSense":0-10,"completeness":0-10,"overall":0-100,"verdict":"<=200 chars"}.';
   const user = JSON.stringify({ userRequest: prompt, generatedWorkflow: { nodes: wf.nodes, edges: wf.edges } });
   try {

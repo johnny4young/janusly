@@ -63,13 +63,25 @@ const AiCandidateSchema = z.object({
   nodeId: z.string().min(1),
 });
 
+const AiRetryConfig = z.object({
+  maxAttempts: z.number().int().min(2).max(10),
+});
+
+// NOTE: the constrained-mode node shapes below are compiled into the
+// provider-sent structured-output grammar, which sits near Anthropic's
+// compiled-grammar size cap — adding fields here breaks `constrained`
+// generation outright ("compiled grammar is too large"). Resilience fields
+// like `retry` therefore live ONLY on the free-JSON variants further down,
+// which are validated server-side and never reach a provider grammar.
+const AiHttpConfigBase = z.object({
+  url: z.string().min(1),
+  method: z.string().optional(),
+});
+
 const AiHttpNode = z.object({
   id: z.string().min(1),
   type: z.literal("http"),
-  config: z.object({
-    url: z.string().min(1),
-    method: z.string().optional(),
-  }),
+  config: AiHttpConfigBase,
 });
 
 const AiNoopNode = z.object({
@@ -119,26 +131,28 @@ const AiToolInputValue = z.union([
   z.record(z.string(), AiToolInputScalar),
 ]);
 
+const AiToolConfigBase = z.object({
+  tool: z.string().min(1),
+  // Optional `input` lets the LLM forward fields the operator gave
+  // verbatim in the prompt (e.g. `to`, `subject` for email.send;
+  // `channel`, `text` for slack.post; `url` for http.request). The
+  // record is open because per-tool Zod schemas live in
+  // `packages/engine/src/tool-registry.ts` — `validateToolInput`
+  // enforces them at the strict consumption surfaces (`/start`,
+  // `/save`, `/validate`, `/workflows/readiness`). The draft path
+  // (`/ai/generate-workflow` → `sanitizeAiWorkflow` with
+  // `strictToolInputs: false`) accepts partial input so operators
+  // can finish in the Inspector. Without this field the LLM-emitted
+  // input would be silently stripped at Zod parse time. Values stay
+  // concrete rather than `z.unknown()` because Anthropic structured
+  // output rejects empty schemas.
+  input: z.record(z.string(), AiToolInputValue).optional(),
+});
+
 const AiToolNode = z.object({
   id: z.string().min(1),
   type: z.literal("tool"),
-  config: z.object({
-    tool: z.string().min(1),
-    // Optional `input` lets the LLM forward fields the operator gave
-    // verbatim in the prompt (e.g. `to`, `subject` for email.send;
-    // `channel`, `text` for slack.post; `url` for http.request). The
-    // record is open because per-tool Zod schemas live in
-    // `packages/engine/src/tool-registry.ts` — `validateToolInput`
-    // enforces them at the strict consumption surfaces (`/start`,
-    // `/save`, `/validate`, `/workflows/readiness`). The draft path
-    // (`/ai/generate-workflow` → `sanitizeAiWorkflow` with
-    // `strictToolInputs: false`) accepts partial input so operators
-    // can finish in the Inspector. Without this field the LLM-emitted
-    // input would be silently stripped at Zod parse time. Values stay
-    // concrete rather than `z.unknown()` because Anthropic structured
-    // output rejects empty schemas.
-    input: z.record(z.string(), AiToolInputValue).optional(),
-  }),
+  config: AiToolConfigBase,
 });
 
 const AiAgentNode = z.object({
@@ -324,16 +338,35 @@ const AiJoinNode = z.object({
   }),
 });
 
+// Free-JSON-only http/tool variants: same shapes as the constrained ones plus
+// the `retry` resilience field the generation prompt teaches for recoverable
+// workflows. Server-side validation only — keeping `retry` out of the
+// constrained variants keeps the provider-sent grammar under Anthropic's
+// compiled-size cap (adding it there breaks `constrained` mode outright).
+// `.catch(undefined)` keeps the draft path tolerant: a malformed retry (e.g.
+// `maxAttempts: 1`, a string, null) is DROPPED rather than failing the whole
+// workflow parse — the operator then gets the standard readiness warning for
+// a missing retry instead of a dead generation.
+const AiRetryConfigDraft = AiRetryConfig.optional().catch(undefined);
+
+const AiHttpNodeFreeJson = AiHttpNode.extend({
+  config: AiHttpConfigBase.extend({ retry: AiRetryConfigDraft }),
+});
+
+const AiToolNodeFreeJson = AiToolNode.extend({
+  config: AiToolConfigBase.extend({ retry: AiRetryConfigDraft }),
+});
+
 /** 13-branch node union for free-JSON validation: the 11 constrained shapes
- *  plus `parallel_fork` + `join`. NOT sent to any provider — used only by
- *  `parseGeneratedWorkflow` server-side. */
+ *  (http/tool widened with `retry`) plus `parallel_fork` + `join`. NOT sent
+ *  to any provider — used only by `parseGeneratedWorkflow` server-side. */
 export const AiNodeSchemaFreeJson = z.discriminatedUnion("type", [
   AiNoopNode,
-  AiHttpNode,
+  AiHttpNodeFreeJson,
   AiTransformNode,
   AiConditionNode,
   AiAiNode,
-  AiToolNode,
+  AiToolNodeFreeJson,
   AiAgentNode,
   AiRouterNode,
   AiApprovalNode,
@@ -427,9 +460,7 @@ export const AiGenerationWorkflowSchemaFreeJson = z.object({
 // values before applying the patch so they don't overwrite existing
 // config. Anthropic accepts the same nullable-field shape, so this
 // pattern unblocks both providers without per-provider code paths.
-const AiPatchRetryConfig = z.object({
-  maxAttempts: z.number().int().min(2).max(10),
-});
+const AiPatchRetryConfig = AiRetryConfig;
 
 /**
  * Bounded array-of-pairs patch form for fields that are normally a flat
