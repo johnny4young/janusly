@@ -30,7 +30,7 @@
  *   `{ mode: "fallback", aiError, ... }`. New error sources here (unknown
  *   provider, missing override key) intentionally throw so they flow through
  *   that same try/catch.
- * - `JANUSLY_LLM_PROVIDER` (default `"openai"`) selects the deploy-time
+ * - `JANUSLY_LLM_PROVIDER` (default `"anthropic"`) selects the deploy-time
  *   default. Per-call overrides go through `modelHint` — bare model id uses
  *   the configured provider, `"<provider>/<model>"` overrides for that call.
  *   A non-default provider key is enough for explicit overrides to work even
@@ -310,13 +310,19 @@ export type ResolvedLlmConfig = {
  * the real one.
  */
 export function resolveLlmConfig(env: NodeJS.ProcessEnv): ResolvedLlmConfig | null {
-  const providerName = (env.JANUSLY_LLM_PROVIDER ?? "openai").toLowerCase();
+  // Default provider is anthropic — the supported operating posture for LLM
+  // completions. A deployment that forgets JANUSLY_LLM_PROVIDER therefore
+  // resolves to the supported provider; if its API key is also missing, every
+  // un-overridden call degrades through the AI-fallback contract with a
+  // missing-key error naming the fix, instead of silently routing to another
+  // vendor.
+  const providerName = (env.JANUSLY_LLM_PROVIDER ?? "anthropic").toLowerCase();
   if (!PROVIDERS[providerName]) {
-    // Unknown provider — log via stderr and fall back to "openai".
+    // Unknown provider — log via stderr and fall back to "anthropic".
     // eslint-disable-next-line no-console
-    console.warn(`[llm-client] unknown JANUSLY_LLM_PROVIDER=${providerName}; falling back to openai`);
+    console.warn(`[llm-client] unknown JANUSLY_LLM_PROVIDER=${providerName}; falling back to anthropic`);
   }
-  const resolvedProvider = PROVIDERS[providerName] ? providerName : "openai";
+  const resolvedProvider = PROVIDERS[providerName] ? providerName : "anthropic";
 
   const apiKeys: Record<string, string> = {};
   const defaultModels: Record<string, string> = {};

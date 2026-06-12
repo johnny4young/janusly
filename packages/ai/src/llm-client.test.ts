@@ -62,12 +62,12 @@ describe("resolveLlmConfig", () => {
     expect(resolveLlmConfig({} as NodeJS.ProcessEnv)).toBeNull();
   });
 
-  it("defaults to openai when JANUSLY_LLM_PROVIDER is unset", () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv);
+  it("defaults to anthropic when JANUSLY_LLM_PROVIDER is unset (the supported posture)", () => {
+    const cfg = resolveLlmConfig({ ANTHROPIC_API_KEY: "sk-ant-x" } as NodeJS.ProcessEnv);
     expect(cfg).not.toBeNull();
-    expect(cfg!.provider).toBe("openai");
-    expect(cfg!.apiKeys).toEqual({ openai: "sk-x" });
-    expect(cfg!.defaultModels.openai).toBe("gpt-4o-mini");
+    expect(cfg!.provider).toBe("anthropic");
+    expect(cfg!.apiKeys).toEqual({ anthropic: "sk-ant-x" });
+    expect(cfg!.defaultModels.anthropic).toBe("claude-haiku-4-5-20251001");
   });
 
   it("picks anthropic when JANUSLY_LLM_PROVIDER=anthropic and the key is set", () => {
@@ -89,12 +89,16 @@ describe("resolveLlmConfig", () => {
   });
 
   it("returns a config when only a non-default provider key is set so explicit overrides can work", () => {
+    // Only the OpenAI key, no provider env: the DEFAULT resolves to anthropic
+    // (no key — un-overridden calls degrade through the fallback contract),
+    // but the config still carries the openai key so explicit
+    // `openai/<model>` overrides keep working.
     const cfg = resolveLlmConfig({
-      ANTHROPIC_API_KEY: "sk-ant-x",
+      OPENAI_API_KEY: "sk-x",
     } as NodeJS.ProcessEnv);
     expect(cfg).not.toBeNull();
-    expect(cfg!.provider).toBe("openai");
-    expect(cfg!.apiKeys).toEqual({ anthropic: "sk-ant-x" });
+    expect(cfg!.provider).toBe("anthropic");
+    expect(cfg!.apiKeys).toEqual({ openai: "sk-x" });
   });
 
   it("respects env-overridden default models", () => {
@@ -107,20 +111,20 @@ describe("resolveLlmConfig", () => {
     expect(cfg!.defaultModels.anthropic).toBe("claude-sonnet-4-5");
   });
 
-  it("falls back to openai with a warning when JANUSLY_LLM_PROVIDER is unknown", () => {
+  it("falls back to anthropic with a warning when JANUSLY_LLM_PROVIDER is unknown", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cfg = resolveLlmConfig({
       JANUSLY_LLM_PROVIDER: "bogus",
-      OPENAI_API_KEY: "sk-x",
+      ANTHROPIC_API_KEY: "sk-ant-x",
     } as NodeJS.ProcessEnv);
-    expect(cfg!.provider).toBe("openai");
+    expect(cfg!.provider).toBe("anthropic");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("unknown JANUSLY_LLM_PROVIDER=bogus"));
     warn.mockRestore();
   });
 
-  it("returns null when JANUSLY_LLM_PROVIDER=anthropic but no key is set", () => {
+  it("returns null when JANUSLY_LLM_PROVIDER=openai but no key is set", () => {
     expect(
-      resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "anthropic" } as NodeJS.ProcessEnv),
+      resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai" } as NodeJS.ProcessEnv),
     ).toBeNull();
   });
 });
@@ -135,7 +139,7 @@ describe("createLlmClient — happy paths", () => {
   });
 
   it("calls the AI SDK with the configured openai default and returns its text", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateText({ prompt: "hi" });
 
@@ -160,7 +164,7 @@ describe("createLlmClient — happy paths", () => {
   });
 
   it("wraps the openai model with spec-level JSON-mode middleware when responseFormat is 'json'", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({ prompt: "hi", responseFormat: "json" });
 
@@ -177,7 +181,7 @@ describe("createLlmClient — happy paths", () => {
   });
 
   it("does NOT wrap the openai model when responseFormat is absent", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({ prompt: "hi" });
 
@@ -200,7 +204,7 @@ describe("createLlmClient — happy paths", () => {
   });
 
   it("uses a bare modelHint with the configured provider", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateText({ prompt: "hi", modelHint: "gpt-4.1" });
 
@@ -257,7 +261,7 @@ describe("createLlmClient — happy paths", () => {
 
 describe("createLlmClient — error paths feed the fallback contract", () => {
   it("throws a descriptive error when the spec targets a provider with no key", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(
       client.generateText({ prompt: "hi", modelHint: "anthropic/claude-x" }),
@@ -265,15 +269,19 @@ describe("createLlmClient — error paths feed the fallback contract", () => {
   });
 
   it("throws through the fallback contract when the configured default provider has no key", async () => {
-    const cfg = resolveLlmConfig({ ANTHROPIC_API_KEY: "sk-ant-x" } as NodeJS.ProcessEnv)!;
+    // The misconfigured-deployment scenario: only the OpenAI key is set and
+    // no provider env, so the default resolves to anthropic (the supported
+    // posture) with no key — every un-overridden call fails LOUDLY with the
+    // missing-key error instead of silently routing to another vendor.
+    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(client.generateText({ prompt: "hi" })).rejects.toThrow(
-      /openai.*not configured.*OPENAI_API_KEY/,
+      /anthropic.*not configured.*ANTHROPIC_API_KEY/,
     );
   });
 
   it("throws when the spec targets an unknown provider", async () => {
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(client.generateText({ prompt: "hi", modelHint: "bogus/foo" })).rejects.toThrow(
       /unknown provider 'bogus'/,
@@ -282,7 +290,7 @@ describe("createLlmClient — error paths feed the fallback contract", () => {
 
   it("propagates AI SDK errors so the caller's try/catch can degrade", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("rate limit"));
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(client.generateText({ prompt: "hi" })).rejects.toThrow(/rate limit/);
   });
@@ -370,7 +378,8 @@ describe("getLlmClient (memoised singleton)", () => {
   });
 
   it("memoises the resolved client across calls", () => {
-    process.env.OPENAI_API_KEY = "sk-x";
+    delete process.env.OPENAI_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     delete process.env.JANUSLY_LLM_PROVIDER;
     const a = getLlmClient();
     const b = getLlmClient();
@@ -379,17 +388,18 @@ describe("getLlmClient (memoised singleton)", () => {
   });
 
   it("returns a client when only a non-default provider key is configured", () => {
-    delete process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-x";
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.JANUSLY_LLM_PROVIDER;
-    process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     expect(getLlmClient()).not.toBeNull();
   });
 
   it("respects a manual reset between env mutations", () => {
-    process.env.OPENAI_API_KEY = "sk-x";
+    delete process.env.OPENAI_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     const first = getLlmClient();
     _resetLlmClientForTests();
-    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
     const second = getLlmClient();
     expect(first).not.toBeNull();
     expect(second).toBeNull();
@@ -409,7 +419,7 @@ describe("usage recorder fires on success and failure", () => {
     });
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({
       prompt: "hi",
@@ -443,7 +453,7 @@ describe("usage recorder fires on success and failure", () => {
     generateTextMock.mockRejectedValueOnce(new Error("rate limit"));
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(
       client.generateText({ prompt: "hi", context: { orgId: "org-1" } }),
@@ -463,7 +473,7 @@ describe("usage recorder fires on success and failure", () => {
   it("records provider configuration failures before the SDK call", async () => {
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
 
     await expect(
@@ -496,7 +506,7 @@ describe("usage recorder fires on success and failure", () => {
     });
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({ prompt: "hi" });
     await Promise.resolve();
@@ -513,7 +523,7 @@ describe("usage recorder fires on success and failure", () => {
     setUsageRecorder(() => {
       throw new Error("recorder exploded");
     });
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateText({ prompt: "hi", context: { orgId: "org-1" } });
     expect(result.text).toBe("ok");
@@ -528,7 +538,7 @@ describe("usage recorder fires on success and failure", () => {
     setUsageRecorder(async () => {
       throw new Error("async recorder exploded");
     });
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateText({ prompt: "hi", context: { orgId: "org-1" } });
     expect(result.text).toBe("ok");
@@ -544,7 +554,7 @@ describe("usage recorder fires on success and failure", () => {
     });
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateText({
       prompt: "hi",
@@ -576,7 +586,7 @@ describe("generateObject (schema-aware generation)", () => {
       finishReason: "stop",
       usage: { inputTokens: 50, outputTokens: 25 },
     });
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateObject<{ id: string; nodes: unknown[]; edges: unknown[] }>({
       prompt: "build a workflow",
@@ -602,7 +612,7 @@ describe("generateObject (schema-aware generation)", () => {
       finishReason: "stop",
       usage: { inputTokens: 10, outputTokens: 5 },
     });
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateObject<{ id: string }>({
       prompt: "hi",
@@ -615,7 +625,7 @@ describe("generateObject (schema-aware generation)", () => {
     generateTextMock.mockRejectedValueOnce(new Error("NoObjectGeneratedError: schema invalid"));
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(
       client.generateObject({
@@ -641,7 +651,7 @@ describe("generateObject (schema-aware generation)", () => {
     });
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await expect(
       client.generateObject({
@@ -696,7 +706,7 @@ describe("generateObject (schema-aware generation)", () => {
     setUsageRecorder(() => {
       throw new Error("recorder exploded");
     });
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     const result = await client.generateObject<{ id: string }>({
       prompt: "hi",
@@ -713,7 +723,7 @@ describe("generateObject (schema-aware generation)", () => {
     });
     const recorder = vi.fn();
     setUsageRecorder(recorder);
-    const cfg = resolveLlmConfig({ OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
+    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
     const client = createLlmClient(cfg);
     await client.generateObject({ prompt: "hi", schema: mockSchema });
     await Promise.resolve();
