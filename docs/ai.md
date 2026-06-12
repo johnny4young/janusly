@@ -336,7 +336,7 @@ This is why we treat Janusly as an **AI operator**, not just a workflow engine: 
 
 ## 9. Privacy notes
 
-Janusly sends to the configured provider. The supported MVP deployment target is Anthropic (`JANUSLY_LLM_PROVIDER=anthropic`), even though the registry default remains OpenAI for backwards compatibility, by call:
+Janusly sends to the configured provider. The supported MVP deployment target is Anthropic (`JANUSLY_LLM_PROVIDER=anthropic`, also the default when the variable is unset), by call:
 
 - `/ai/generate-workflow` — only the user prompt.
 - `/ai/explain-workflow` — the workflow DAG JSON (no run data).

@@ -474,6 +474,7 @@ describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
 
   it("ai.provider (string with allowedValues, no validate hook) keeps existing enum check", () => {
     const def = findDef("ai.provider");
+    expect(def.defaultValue).toBe("anthropic");
     expect(normalizeOrgConfigValue(def, "openai")).toBe("openai");
     expect(normalizeOrgConfigValue(def, "anthropic")).toBe("anthropic");
     expect(() => normalizeOrgConfigValue(def, "unknown-vendor")).toThrow(/must be one of/);

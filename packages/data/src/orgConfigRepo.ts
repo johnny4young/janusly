@@ -292,7 +292,10 @@ export const ORG_CONFIG_DEFINITIONS = [
     category: "ai",
     description: "Default LLM provider for this tenant. Provider API keys still come from env or secret management.",
     valueType: "string",
-    defaultValue: "openai",
+    // Anthropic is the supported operating posture for LLM completions; the
+    // catalog default matches it so an unconfigured tenant lands on the
+    // supported provider instead of silently routing elsewhere.
+    defaultValue: "anthropic",
     envKeys: ["JANUSLY_LLM_PROVIDER"],
     allowedValues: ["openai", "anthropic"],
   },
