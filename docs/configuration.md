@@ -67,11 +67,11 @@ Guardrails:
 - Every tenant write goes through `POST /org/config`, admin RBAC, and the API
   audit log.
 
-> **MVP operating posture:** AGENTS.md locks runtime AI to **Anthropic only** (`claude-haiku-4-5-20251001`). The `openai` provider stays in the registry for future expansion but is unverified in production — do not switch a tenant's `ai.provider` away from `anthropic` unless a verification plan exists. Set `JANUSLY_LLM_PROVIDER=anthropic` in `.env`. Ignore the historical `openai` defaults below for any new deployment.
+> **MVP operating posture:** AGENTS.md locks runtime AI to **Anthropic only** (`claude-haiku-4-5-20251001`). The `openai` provider stays in the registry for future expansion but is unverified in production — do not switch a tenant's `ai.provider` away from `anthropic` unless a verification plan exists. Set `JANUSLY_LLM_PROVIDER=anthropic` in `.env` for deployment clarity; the tables below now match that default.
 
 | Config key | Env fallback | Default | Used by | Purpose |
 | --- | --- | --- | --- | --- |
-| `ai.provider` | `JANUSLY_LLM_PROVIDER` | `openai` (registry default; **set to `anthropic`** for MVP) | API AI endpoints, engine AI/agent nodes | Default provider for tenant-level LLM calls. API keys still come from env or secret management. |
+| `ai.provider` | `JANUSLY_LLM_PROVIDER` | `anthropic` (matches the supported posture; explicit set still recommended) | API AI endpoints, engine AI/agent nodes | Default provider for tenant-level LLM calls. API keys still come from env or secret management. |
 | `ai.openai.model` | `OPENAI_MODEL` | `gpt-4o-mini` | API AI endpoints, engine AI/agent nodes | Default OpenAI model for this tenant. Not a supported runtime target right now; tracked for future expansion. |
 | `ai.anthropic.model` | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | API AI endpoints, engine AI/agent nodes | Default Anthropic model for this tenant — the supported MVP target. |
 | `ai.timeoutMs` | `OPENAI_TIMEOUT_MS` | `30000` | API AI endpoints, engine AI/agent nodes | LLM request timeout in milliseconds (env name is historical; applies to every registered provider). |
@@ -164,7 +164,7 @@ only to select the safe provider/model/limit behavior.
 | `OPENAI_MAX_RETRIES` | `2` | `packages/ai`, `apps/api` | AI SDK retry count for LLM calls. |
 | `AI_PROMPT_MAX_CHARS` | `4000` | `apps/api` | Prompt length cap for AI endpoints. |
 | `AI_RATE_LIMIT_PER_MIN` | `30` | `apps/api` | Per-org AI rate limit window capacity. |
-| `JANUSLY_LLM_PROVIDER` | `openai` (registry default; **set to `anthropic`** for MVP deployments) | `packages/ai`, `apps/api` | Default provider registry key. Registered values: `openai`, `anthropic`. The supported runtime target is `anthropic` — see AGENTS.md "AI integration" for the operating posture. |
+| `JANUSLY_LLM_PROVIDER` | `anthropic` (matches the supported posture; explicit set still recommended) | `packages/ai`, `apps/api` | Default provider registry key. Registered values: `openai`, `anthropic`. The supported runtime target is `anthropic` — see AGENTS.md "AI integration" for the operating posture. |
 | `ANTHROPIC_API_KEY` | unset | `packages/ai` | Enables Anthropic-backed AI calls and explicit `anthropic/model` overrides. |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | `packages/ai`, `apps/api` | Default Anthropic model. |
 | `JANUSLY_LLM_PRICE_<MODEL>` | built-in pricing table | `packages/ai/src/pricing.ts` | Optional cost override as `<inputUsdPer1M>,<outputUsdPer1M>`, for example `JANUSLY_LLM_PRICE_GPT_4O_MINI=0.15,0.60` or `JANUSLY_LLM_PRICE_CLAUDE_HAIKU_4_5=1.00,5.00`. |
