@@ -2,7 +2,7 @@
 
 Every workflow is a DAG of `nodes` connected by `edges`. Each node has an `id`, a `type` (one of the supported types below), and a `config` object validated by the engine.
 
-The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; operators promote advanced runtime nodes in the Inspector or by editing the workflow JSON.
+The runtime supports the full closed node set from `packages/shared/src/workflow.ts`: `http`, `condition`, `tool`, `agent`, `multi_agent`, `agent_reflection`, `loop`, `router`, `router_llm`, `transform`, `ai`, `webhook`, `approval`, `human_form`, `noop`, `subworkflow`, `wait_until`, `parallel_fork`, `join`, `schedule`, `mcp_tool`, `email_received`, `file_dropped`, and `mcp_server_event`. `/ai/generate-workflow` emits only the smaller AI-generation subset; Pass 2 auto-promotes wired placeholder families (`wait_until`, `schedule`, and uniquely matched exposed `mcp_tool` noops), while operators promote the remaining advanced runtime nodes in the Inspector or by editing the workflow JSON.
 
 Templating is supported in any string config value via `{{...}}`:
 

@@ -137,7 +137,7 @@ export const aiRoutes: Route[] = [
         // the `exposeToAi` flag. When present, the connection's enabled
         // tool descriptors (with sanitised descriptions) are appended to
         // the system prompt as DATA so the LLM can reference them when
-        // emitting `noop` placeholders the operator promotes later. The
+        // emitting `noop` placeholders that Pass 2 may auto-promote. The
         // composer is a no-op when nothing is exposed → identical
         // behaviour to today for non-opt-in orgs.
         const exposedMcpTools = await listExposedMcpToolsForAi(auth.orgId);
@@ -225,6 +225,11 @@ export const aiRoutes: Route[] = [
           originalPrompt: promptText,
           context: { orgId: auth.orgId, userId: auth.userId },
           modelHint: surfaceModel,
+          // Reuse the exposed-tool list already fetched for the system
+          // prompt so the deterministic `mcp_tool` family can resolve any
+          // `mcp_<alias>_<tool>` noop into a typed node (empty list when
+          // no connection opted into exposeToAi → no mcp promotion).
+          availableMcpTools: exposedMcpTools,
         });
 
         // A draft can parse + shape-validate yet still fail the engine's
@@ -281,9 +286,10 @@ export const aiRoutes: Route[] = [
           promotionAttempts: promotion.promotionAttempts,
           promotionsSucceeded: promotion.promotionsSucceeded,
           // Per-family breakdown of the same totals — operators read
-          // this to see which intent families the LLM exercised. Wait
-          // and schedule are the only wired families today; future
-          // families add a new key here without breaking existing readers.
+          // this to see which intent families were exercised. Wired
+          // families: wait_until, schedule (LLM-extracted) and mcp_tool
+          // (deterministic id match); future families add a new key here
+          // without breaking existing readers.
           promotionsByFamily: promotion.promotionsByFamily,
         } });
         return sendJson(res, withBudgetWarning({ mode: "ai", model: genModel, provider: genProvider, candidateCount, ...workflow }, budgetGate));

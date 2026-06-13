@@ -215,11 +215,12 @@ const AiLoopNode = z.object({
 // below; 12+ rejects with "The compiled grammar is too large"). free-JSON is
 // validated server-side, so `AiNodeSchemaFreeJson` below widens only that path
 // with direct `parallel_fork` / `join`. Other operator-only types stay `noop`
-// placeholders named after the requested step (e.g. `crew_review`,
-// `wait_24h`) and the operator promotes them in the Inspector via the type
-// `<select>`. The engine's strict `WorkflowSchema` (used by /save, /start,
-// /validate) still accepts every runtime node type, so once a workflow leaves
-// AI generation it has full expressiveness.
+// placeholders named after the requested step; Pass 2 auto-promotes the wired
+// placeholder families (`wait_*`, `schedule_*`, and uniquely matched exposed
+// MCP `mcp_*` ids), while the remaining types are promoted manually in the
+// Inspector via the type `<select>`. The engine's strict `WorkflowSchema`
+// (used by /save, /start, /validate) still accepts every runtime node type, so
+// once a workflow leaves AI generation it has full expressiveness.
 //
 // CROSS-PROVIDER NOTE: this `discriminatedUnion` compiles to JSON Schema
 // `oneOf`, which OpenAI strict mode rejects (`'oneOf' is not permitted`).

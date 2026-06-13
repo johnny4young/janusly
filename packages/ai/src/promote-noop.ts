@@ -13,6 +13,13 @@
  * offending noop stays unpromoted. Pass 1's overall workflow is always
  * returned intact.
  *
+ * One family is DETERMINISTIC instead of LLM-backed: `mcp_tool`. A
+ * `mcp_<alias>_<tool>` noop already names the external MCP tool the
+ * operator wants, and that tool must exist in the org's exposed set, so
+ * promotion is a pure id-to-tool lookup (no extra round-trip, no
+ * `promoted-schemas` entry) — match the id against the supplied
+ * `availableMcpTools` and flip on a unique match.
+ *
  * Why id-based detection: an earlier design asked the LLM to set
  * `config.promote: "wait_until"` + `config.hint: "<phrase>"` on noop
  * nodes. Empirically the model ignores that instruction and emits an
@@ -61,7 +68,18 @@ const SCHEDULE_SCHEMA: LlmGenerateObjectInput<AiScheduleConfig>["schema"] =
   AiScheduleConfigSchema as unknown as LlmGenerateObjectInput<AiScheduleConfig>["schema"];
 
 /** Closed enum of promotion target node types. Adding one means a new family entry + a new dispatcher branch. */
-export type PromoteTarget = "wait_until" | "schedule";
+export type PromoteTarget = "wait_until" | "schedule" | "mcp_tool";
+
+/**
+ * Identity of an external MCP tool the operator's org has exposed to the
+ * LLM (the `(connectionAlias, toolName)` pair). The route supplies the
+ * exposed-tool list; the `mcp_tool` promoter matches a `mcp_*` noop id
+ * against it. The data-agnostic AI package never fetches this itself.
+ */
+export type ExposedMcpToolRef = {
+  connectionAlias: string;
+  toolName: string;
+};
 
 /** Telemetry context plumbed into each Pass-2 LLM call. Mirrors `LlmGenerateObjectInput.context`. */
 export type PromoteNoopContext = {
@@ -89,6 +107,14 @@ export type PromoteNoopInput = {
   context: PromoteNoopContext;
   /** Optional provider/model override (same `bare-id` or `provider/model` semantics as Pass 1). */
   modelHint?: string;
+  /**
+   * The org's MCP tools currently exposed to the LLM (the same list the
+   * route framed into the Pass-1 system prompt). The `mcp_tool` family
+   * resolves a `mcp_<alias>_<tool>` noop id against this set; an empty /
+   * omitted list (the default — no connection opted into `exposeToAi`)
+   * means no `mcp_*` noop can ever promote, so behavior is unchanged.
+   */
+  availableMcpTools?: ReadonlyArray<ExposedMcpToolRef>;
 };
 
 /** Per-family promotion counters. Used by the route audit to surface
@@ -135,6 +161,13 @@ export const PROMOTE_FAMILIES: ReadonlyArray<{ prefixes: readonly string[]; targ
     // `schedule_*`, `cron_*`, and natural cadence words operators commonly
     // use as placeholder ids when describing a recurring step.
     prefixes: ["schedule", "cron", "every", "daily", "weekly", "monthly", "hourly"],
+  },
+  {
+    target: "mcp_tool",
+    // Exactly the `mcp_<alias>_<tool>` convention the Pass-1 system prompt
+    // teaches for exposed external MCP tools. Only `mcp` — broader words
+    // like `tool` would false-match internal-tool-registry noops.
+    prefixes: ["mcp"],
   },
 ];
 
@@ -247,6 +280,58 @@ async function promoteToSchedule(
 }
 
 /**
+ * Fold an mcp-shaped id into a comparison key: lowercase, collapse every
+ * run of non-`[a-z0-9]` characters to a single `_`, and trim edge `_`.
+ * Bridges the separator gap between the underscore-joined noop id the LLM
+ * emits (`mcp_notion_pages_update`) and the descriptor's `toolName`, which
+ * may be dotted (`pages.update`) — both fold to the same key.
+ */
+function normalizeMcpKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * Pass-2 promoter for `mcp_tool`. Unlike the wait/schedule families this
+ * is DETERMINISTIC — no LLM call. The `mcp_<alias>_<tool>` noop id already
+ * encodes the operator's intent, and the alias/tool must reference a tool
+ * that actually exists for the org, so promotion is a pure lookup: fold
+ * each exposed tool's `mcp_<alias>_<tool>` form into a normalized key and
+ * promote only when the noop id resolves to EXACTLY ONE exposed tool. No
+ * match (`0`) or an ambiguous collision (`>=2`) returns `null`, leaving the
+ * noop for manual Inspector promotion — the same silent-degrade contract
+ * the LLM-backed families honour.
+ */
+function promoteToMcpTool(
+  node: WorkflowNode,
+  availableMcpTools: ReadonlyArray<ExposedMcpToolRef>,
+): { connectionAlias: string; toolName: string } | null {
+  if (availableMcpTools.length === 0) return null;
+  const nodeKey = normalizeMcpKey(node.id);
+  // `mcp_suspicious_*` is the prompt-injection escape-hatch noop id
+  // produced when an exposed tool description looked adversarial. It is
+  // deliberately NOT a callable MCP tool, even if an org happens to have
+  // a real connection named `suspicious`.
+  if (nodeKey === "mcp_suspicious" || nodeKey.startsWith("mcp_suspicious_")) return null;
+  const byKey = new Map<string, ExposedMcpToolRef[]>();
+  for (const tool of availableMcpTools) {
+    // `listExposedMcpToolsForAi` may append a synthetic footer when the
+    // prompt list is truncated. It is prompt metadata, not a real tool.
+    if (tool.connectionAlias === "_truncated" && tool.toolName === "_truncated") continue;
+    const key = normalizeMcpKey(`mcp_${tool.connectionAlias}_${tool.toolName}`);
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(tool);
+    else byKey.set(key, [tool]);
+  }
+  const matches = byKey.get(nodeKey);
+  if (!matches || matches.length !== 1) return null;
+  const [tool] = matches;
+  return { connectionAlias: tool.connectionAlias, toolName: tool.toolName };
+}
+
+/**
  * Walk the workflow's nodes and promote each one whose id matches a
  * known intent prefix. Returns a new workflow object with promoted
  * nodes replaced; the original input is not mutated. Edges and
@@ -257,11 +342,13 @@ export async function promoteNoopPlaceholders(
   input: PromoteNoopInput,
 ): Promise<PromoteNoopResult> {
   const { llm, workflow, originalPrompt, context, modelHint } = input;
+  const availableMcpTools = input.availableMcpTools ?? [];
   let promotionAttempts = 0;
   let promotionsSucceeded = 0;
   const promotionsByFamily: PromotionsByFamily = {
     wait_until: { attempts: 0, succeeded: 0 },
     schedule: { attempts: 0, succeeded: 0 },
+    mcp_tool: { attempts: 0, succeeded: 0 },
   };
 
   const promotedNodes: WorkflowNode[] = [];
@@ -294,6 +381,20 @@ export async function promoteNoopPlaceholders(
         promotedNodes.push({
           ...node,
           type: "schedule",
+          config: promotedConfig,
+        });
+        continue;
+      }
+    } else if (target === "mcp_tool") {
+      // Deterministic — no LLM call. Resolve the id against the org's
+      // exposed tools; promote only on a unique match.
+      const promotedConfig = promoteToMcpTool(node, availableMcpTools);
+      if (promotedConfig) {
+        promotionsSucceeded += 1;
+        promotionsByFamily.mcp_tool.succeeded += 1;
+        promotedNodes.push({
+          ...node,
+          type: "mcp_tool",
           config: promotedConfig,
         });
         continue;
