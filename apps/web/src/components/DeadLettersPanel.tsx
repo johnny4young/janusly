@@ -63,20 +63,33 @@ const STATUS_FILTER_KEYS: Record<DeadLetterStatusFilter, string> = {
   resolved: 'dlq.filter.resolved',
 }
 
+/** Owner-scope filter for the recovery queue. `'all'` shows the whole org
+ *  queue; `'mine'` narrows to the dead letters whose recovery item is owned
+ *  by the current operator (resolved server-side via `?owner=me`, which the
+ *  membership resolver maps to `auth.userId`). */
+type OwnerScope = 'all' | 'mine'
+
 /** Render the DLQ list with status filter, replay, and resolve controls. */
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const { t } = useT()
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
+  const [ownerScope, setOwnerScope] = useState<OwnerScope>('all')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
   const [recoveryItems, setRecoveryItems] = useState<
     Array<RecoveryItemBadgeData & RecoveryItemDrawerData>
   >([])
+  const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope>('all')
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
 
   useEffect(() => {
     let cancelled = false
-    api('/recovery/items?limit=200')
+    const scope = ownerScope
+    // Scope the overlay fetch to the operator's own incidents when "Mine"
+    // is active. `owner=me` is resolved to `auth.userId` server-side, and the
+    // server-side scope is correct under the 200-row cap (client-side
+    // filtering of an all-items page could miss mine beyond the cap).
+    api(`/recovery/items?limit=200${ownerScope === 'mine' ? '&owner=me' : ''}`)
       .then((resp: { items?: Array<{
         id: string
         deadLetterId: string
@@ -105,14 +118,18 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           lastOccurredAtIso: it.lastOccurredAt ?? it.slaTargetAt,
         }))
         setRecoveryItems(hydrated)
+        setRecoveryItemsScope(scope)
       })
       .catch(() => {
-        if (!cancelled) setRecoveryItems([])
+        if (!cancelled) {
+          setRecoveryItems([])
+          setRecoveryItemsScope(scope)
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [platformVersion])
+  }, [platformVersion, ownerScope])
 
   const recoveryByDeadLetterId = useMemo(() => {
     const map = new Map<string, RecoveryItemBadgeData & RecoveryItemDrawerData>()
@@ -128,9 +145,18 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const addToast = useWorkflowStore((state) => state.addToast)
 
   const filtered = useMemo(() => {
-    if (status === 'all') return deadLetters
-    return deadLetters.filter(item => item.status === status)
-  }, [deadLetters, status])
+    let rows = status === 'all' ? deadLetters : deadLetters.filter(item => item.status === status)
+    // "Mine" narrows to dead letters whose recovery item is owned by the
+    // current operator. The overlay map is already scoped to owner=me by the
+    // fetch above, so membership in it is the ownership test; a dead letter
+    // with no recovery item is unassigned and correctly hidden under "Mine".
+    if (ownerScope === 'mine') {
+      if (recoveryItemsScope !== 'mine') return []
+      rows = rows.filter(item => recoveryByDeadLetterId.has(item.id))
+    }
+    return rows
+  }, [deadLetters, status, ownerScope, recoveryItemsScope, recoveryByDeadLetterId])
+  const ownerScopedRecoveryLoading = ownerScope === 'mine' && recoveryItemsScope !== 'mine'
 
   const hasOpenEntry = deadLetters.some((item) => item.status === 'open')
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
@@ -155,7 +181,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     // reference even when the content is identical, and resetting
     // scroll there would jump the operator's view to row 0 on every
     // bump. The filter signal is the real "visible set changed" cue.
-    resetScrollKey: status,
+    resetScrollKey: `${status}|${ownerScope}`,
   })
 
   return (
@@ -183,13 +209,33 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never) as string}</option>)}
       </select>
 
+      <div className="field-label">{t('dlq.owner.label')}</div>
+      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria') as string}>
+        <button
+          type="button"
+          aria-pressed={ownerScope === 'all'}
+          onClick={() => setOwnerScope('all')}
+          data-testid="dlq-owner-all"
+        >
+          {t('dlq.owner.all')}
+        </button>
+        <button
+          type="button"
+          aria-pressed={ownerScope === 'mine'}
+          onClick={() => setOwnerScope('mine')}
+          data-testid="dlq-owner-mine"
+        >
+          {t('dlq.owner.mine')}
+        </button>
+      </div>
+
       <div className="panel-list">
-        {filtered.length === 0 && (
+        {filtered.length === 0 && !ownerScopedRecoveryLoading && (
           <EmptyState
             icon={<CircleCheck />}
-            kicker={t('emptyState.dlq.kicker') as string}
-            body={t('emptyState.dlq.body') as string}
-            testId="dlq-empty"
+            kicker={t(ownerScope === 'mine' ? 'emptyState.dlq.mine.kicker' : 'emptyState.dlq.kicker') as string}
+            body={t(ownerScope === 'mine' ? 'emptyState.dlq.mine.body' : 'emptyState.dlq.body') as string}
+            testId={ownerScope === 'mine' ? 'dlq-empty-mine' : 'dlq-empty'}
           />
         )}
         {filtered.length > 0 && (

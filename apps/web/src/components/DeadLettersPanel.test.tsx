@@ -31,10 +31,33 @@ function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLe
   }
 }
 
+// Minimal `/recovery/items` row shape the panel hydrates into overlay
+// badges (see DeadLettersPanel's fetch mapping). `deadLetterId` is the
+// join key onto the DLQ row the badge decorates.
+function mockRecoveryItem(id: string, deadLetterId: string) {
+  return {
+    id,
+    deadLetterId,
+    owner: 'dev-user',
+    severity: 'p2' as const,
+    status: 'open',
+    slaTargetAt: '2026-05-26T12:00:00Z',
+    resolutionReason: null,
+    comments: [] as Array<{ id: string; authorUserId: string; body: string; createdAt: string }>,
+    workflowId: null,
+    occurrenceCount: 1,
+    lastOccurredAt: '2026-05-25T12:00:00Z',
+  }
+}
+
 describe('<DeadLettersPanel />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
     vi.mocked(api).mockClear()
+    // Re-establish the empty-default implementation each test. Some cases
+    // below install a URL-aware `mockImplementation`; resetting here keeps
+    // tests order-independent (mockClear alone leaves a prior impl in place).
+    vi.mocked(api).mockImplementation(async () => ({ items: [], clusters: [], runs: [], proposals: [] }))
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
   })
 
@@ -120,5 +143,116 @@ describe('<DeadLettersPanel />', () => {
     const rowB = screen.getByTestId('dlq-row-b')
     fireEvent.click(rowB)
     expect(rowB).toBeInTheDocument()
+  })
+
+  it('renders the owner filter with All selected by default', async () => {
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-owner-all')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('clicking Mine scopes the recovery-items fetch with owner=me', async () => {
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-owner-mine')).toBeInTheDocument()
+    })
+    const recoveryCalls = () =>
+      vi.mocked(api).mock.calls.map(([p]) => String(p)).filter((p) => p.includes('/recovery/items'))
+    // The default ('all') mount fetch carries no owner scope.
+    expect(recoveryCalls().some((p) => p.includes('owner=me'))).toBe(false)
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      expect(recoveryCalls().some((p) => p.includes('owner=me'))).toBe(true)
+    })
+    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('Mine narrows the list to owned rows and All restores the full list', async () => {
+    // Owner-scoped fetch returns one recovery item mapped to dead letter 'a'.
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        return path.includes('owner=me') ? { items: [mockRecoveryItem('ri-a', 'a')] } : { items: [] }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [
+      mockDeadLetter('a', { status: 'open' }),
+      mockDeadLetter('b', { status: 'open' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    // 'all' (default): both open rows visible.
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
+    // 'mine': only the owned row 'a' survives once the owner=me fetch resolves.
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+      expect(screen.queryByTestId('dlq-row-b')).toBeNull()
+    })
+    // back to 'all': the unowned row returns.
+    fireEvent.click(screen.getByTestId('dlq-owner-all'))
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+  })
+
+  it('does not reuse the All recovery map while the Mine fetch is in flight', async () => {
+    let resolveMineFetch: ((value: { items: ReturnType<typeof mockRecoveryItem>[] }) => void) | null = null
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        if (path.includes('owner=me')) {
+          return new Promise<{ items: ReturnType<typeof mockRecoveryItem>[] }>((resolve) => {
+            resolveMineFetch = resolve
+          })
+        }
+        return { items: [mockRecoveryItem('ri-a', 'a'), mockRecoveryItem('ri-b', 'b')] }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [
+      mockDeadLetter('a', { status: 'open' }),
+      mockDeadLetter('b', { status: 'open' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getAllByTestId('recovery-item-badge')).toHaveLength(2)
+    })
+
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('dlq-row-b')).toBeNull()
+    })
+    expect(screen.queryByTestId('dlq-empty-mine')).toBeNull()
+
+    resolveMineFetch?.({ items: [mockRecoveryItem('ri-a', 'a')] })
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+      expect(screen.queryByTestId('dlq-row-b')).toBeNull()
+    })
+  })
+
+  it('shows the Mine empty state when no recovery items are assigned to the operator', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) return { items: [] } // none owned by the operator
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [mockDeadLetter('a', { status: 'open' })]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-empty-mine')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('dlq-row-a')).toBeNull()
+    // The generic "queue clear" empty state must NOT render under Mine.
+    expect(screen.queryByTestId('dlq-empty')).toBeNull()
   })
 })
