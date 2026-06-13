@@ -15,10 +15,13 @@ import { parseGeneratedWorkflow } from "./ai-generate-freejson";
 
 describe("generate-workflow system prompt", () => {
   it("documents the free-JSON 13-node selection (11 base + direct parallel_fork/join)", () => {
-    // free-JSON can emit the two structural fan-out/fan-in types directly; the
-    // operator-only list dropped to 10 (parallel_fork/join removed from it).
+    // free-JSON can emit the two structural fan-out/fan-in types directly;
+    // remaining runtime-only types either use Pass-2 placeholder promotion
+    // or stay manual Inspector promotions.
     expect(promptsSource).toContain("'loop', 'parallel_fork', 'join'");
-    expect(promptsSource).toContain("The platform supports 10 more operator-only types (multi_agent");
+    expect(promptsSource).toContain("The platform supports more runtime types outside this direct-emission subset");
+    expect(promptsSource).toContain("Pass 2 auto-promotes the wired families");
+    expect(promptsSource).toContain("the remaining operator-wired types (multi_agent");
     expect(promptsSource).toContain("email_received, file_dropped, mcp_server_event");
     expect(promptsSource).toContain("FORK/JOIN RULE");
     expect(promptsSource).toContain("Use 'human_form' when the prompt asks a person to provide structured data");
