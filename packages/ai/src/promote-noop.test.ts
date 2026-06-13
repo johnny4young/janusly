@@ -327,6 +327,7 @@ describe("promoteNoopPlaceholders — schedule happy path", () => {
     expect(result.promotionsByFamily).toEqual({
       wait_until: { attempts: 0, succeeded: 0 },
       schedule: { attempts: 1, succeeded: 1 },
+      mcp_tool: { attempts: 0, succeeded: 0 },
     });
 
     const promoted = result.workflow.nodes.find((n) => n.id === "schedule_weekdays_9am");
@@ -481,6 +482,7 @@ describe("promoteNoopPlaceholders — multi-family co-existence", () => {
     expect(result.promotionsByFamily).toEqual({
       wait_until: { attempts: 1, succeeded: 1 },
       schedule: { attempts: 1, succeeded: 1 },
+      mcp_tool: { attempts: 0, succeeded: 0 },
     });
 
     const wait = result.workflow.nodes.find((n) => n.id === "wait_3_days");
@@ -511,6 +513,7 @@ describe("promoteNoopPlaceholders — multi-family co-existence", () => {
     expect(result.promotionsByFamily).toEqual({
       wait_until: { attempts: 1, succeeded: 1 },
       schedule: { attempts: 1, succeeded: 0 },
+      mcp_tool: { attempts: 0, succeeded: 0 },
     });
 
     const flakySchedule = result.workflow.nodes.find((n) => n.id === "schedule_flaky");
@@ -536,6 +539,216 @@ describe("promoteNoopPlaceholders — multi-family co-existence", () => {
     expect(result.promotionsByFamily).toEqual({
       wait_until: { attempts: 0, succeeded: 0 },
       schedule: { attempts: 0, succeeded: 0 },
+      mcp_tool: { attempts: 0, succeeded: 0 },
     });
+  });
+});
+
+describe("promoteNoopPlaceholders — mcp_tool (deterministic, no LLM)", () => {
+  const exposed = [
+    { connectionAlias: "notion", toolName: "pages.update" },
+    { connectionAlias: "github", toolName: "issues_create" },
+  ];
+
+  it("flips a mcp_<alias>_<tool> noop into a typed mcp_tool node, no LLM call", async () => {
+    const llm = makeLlm(); // Empty queue — a stray LLM call would throw a no-result error.
+    const input = workflow([
+      { id: "mcp_notion_pages_update", type: "noop", config: {} },
+      { id: "finish", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "update the Notion page when the run finishes",
+      context: baseContext,
+      availableMcpTools: exposed,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(1);
+    expect(result.promotionsByFamily.mcp_tool).toEqual({ attempts: 1, succeeded: 1 });
+    // Deterministic — promotion must never reach the LLM.
+    expect(vi.mocked(llm.generateObject)).not.toHaveBeenCalled();
+
+    const promoted = result.workflow.nodes.find((n) => n.id === "mcp_notion_pages_update");
+    expect(promoted?.type).toBe("mcp_tool");
+    // The dotted descriptor toolName survives verbatim — only the id MATCH
+    // is normalized, not the stored config.
+    expect(promoted?.config).toEqual({ connectionAlias: "notion", toolName: "pages.update" });
+  });
+
+  it("matches an underscore-id descriptor toolName too (github_issues_create)", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_github_issues_create", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "open a GitHub issue",
+      context: baseContext,
+      availableMcpTools: exposed,
+    });
+
+    expect(result.promotionsSucceeded).toBe(1);
+    const promoted = result.workflow.nodes[0]!;
+    expect(promoted.type).toBe("mcp_tool");
+    expect(promoted.config).toEqual({ connectionAlias: "github", toolName: "issues_create" });
+  });
+
+  it("leaves the noop unpromoted when no exposed tool is supplied (exposeToAi off)", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_notion_pages_update", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "update the Notion page",
+      context: baseContext,
+      // availableMcpTools omitted → defaults to []
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+    expect(result.workflow.nodes[0]!.config).toEqual({});
+  });
+
+  it("leaves the noop unpromoted when the id resolves to no exposed tool", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_slack_post_message", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "post to slack",
+      context: baseContext,
+      availableMcpTools: exposed, // notion + github only — no slack
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("leaves the noop unpromoted on an ambiguous collision (two tools fold to the same key)", async () => {
+    const llm = makeLlm();
+    // `(notion, pages.update)` and `(notion_pages, update)` both normalize to
+    // `mcp_notion_pages_update` — ambiguous, so neither wins.
+    const collidingExposed = [
+      { connectionAlias: "notion", toolName: "pages.update" },
+      { connectionAlias: "notion_pages", toolName: "update" },
+    ];
+    const input = workflow([
+      { id: "mcp_notion_pages_update", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "update a notion page",
+      context: baseContext,
+      availableMcpTools: collidingExposed,
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("does NOT promote the prompt-injection escape-hatch mcp_suspicious noop", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_suspicious_pages_update", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "update a Notion page",
+      context: baseContext,
+      // A real `(suspicious, pages.update)` connection would fold to the
+      // same key; the escape hatch must still remain manual/noop.
+      availableMcpTools: [{ connectionAlias: "suspicious", toolName: "pages.update" }],
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("does NOT promote the synthetic truncation footer as a real MCP tool", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_truncated_truncated", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "use one of the exposed MCP tools",
+      context: baseContext,
+      availableMcpTools: [{ connectionAlias: "_truncated", toolName: "_truncated" }],
+    });
+
+    expect(result.promotionAttempts).toBe(1);
+    expect(result.promotionsSucceeded).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("noop");
+  });
+
+  it("does NOT match a non-noop node whose id starts with mcp_", async () => {
+    const llm = makeLlm();
+    const input = workflow([
+      { id: "mcp_notion_pages_update", type: "http", config: { url: "https://example.com" } },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "call an api",
+      context: baseContext,
+      availableMcpTools: exposed,
+    });
+
+    expect(result.promotionAttempts).toBe(0);
+    expect(result.workflow.nodes[0]!.type).toBe("http");
+  });
+
+  it("co-exists with wait + schedule families and tracks all three per-family counts", async () => {
+    const llm = makeLlm(
+      // Discovery order: wait first (LLM), schedule next (LLM); mcp is deterministic.
+      durationResult("P3D"),
+      cronResult("0 9 * * 1-5"),
+    );
+    const input = workflow([
+      { id: "wait_3_days", type: "noop", config: {} },
+      { id: "schedule_weekdays_9am", type: "noop", config: {} },
+      { id: "mcp_notion_pages_update", type: "noop", config: {} },
+    ]);
+
+    const result = await promoteNoopPlaceholders({
+      llm,
+      workflow: input,
+      originalPrompt: "wait 3 days, then every weekday at 9am update the notion page",
+      context: baseContext,
+      availableMcpTools: exposed,
+    });
+
+    expect(result.promotionAttempts).toBe(3);
+    expect(result.promotionsSucceeded).toBe(3);
+    expect(result.promotionsByFamily).toEqual({
+      wait_until: { attempts: 1, succeeded: 1 },
+      schedule: { attempts: 1, succeeded: 1 },
+      mcp_tool: { attempts: 1, succeeded: 1 },
+    });
+    expect(result.workflow.nodes.find((n) => n.id === "mcp_notion_pages_update")?.type).toBe("mcp_tool");
+    // The deterministic family added zero extra LLM round-trips.
+    expect(vi.mocked(llm.generateObject)).toHaveBeenCalledTimes(2);
   });
 });

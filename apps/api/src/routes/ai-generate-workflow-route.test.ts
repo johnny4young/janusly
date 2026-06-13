@@ -77,8 +77,12 @@ import { auditAction } from "../audit-helper";
 import { readJson, sendJson } from "../http";
 import type { Route } from "../routes";
 import { aiRoutes } from "./ai-routes";
+import { promoteNoopPlaceholders } from "@janusly/ai";
+import { listExposedMcpToolsForAi } from "@janusly/data";
 
 const orgLlmMock = vi.mocked(orgLlmRuntime);
+const promoteMock = vi.mocked(promoteNoopPlaceholders);
+const exposedMcpMock = vi.mocked(listExposedMcpToolsForAi);
 const exemplarsMock = vi.mocked(composeGenerationExemplars);
 const recordExemplarMock = vi.mocked(recordGenerationExemplar);
 const auditMock = vi.mocked(auditAction);
@@ -303,5 +307,32 @@ describe("POST /ai/generate-workflow — system-prompt caching + per-surface mod
     await callGenerate();
 
     expect(firstCall(llm.generateText).modelHint).toBe("anthropic/claude-opus-4");
+  });
+});
+
+describe("POST /ai/generate-workflow — MCP tool promotion wiring", () => {
+  it("threads the org's exposed MCP tools into the Pass-2 promoter", async () => {
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+    const tools = [{ connectionAlias: "notion", toolName: "pages.update", description: "Update a Notion page" }];
+    exposedMcpMock.mockResolvedValueOnce(tools as never);
+
+    await callGenerate();
+
+    // The route fetches the exposed-tool list once (for the system prompt)
+    // and hands the SAME list to the deterministic mcp_tool promotion family.
+    expect(promoteMock).toHaveBeenCalledTimes(1);
+    expect(promoteMock.mock.calls[0]![0].availableMcpTools).toEqual(tools);
+  });
+
+  it("passes the empty exposed-tool list through when no connection opts into exposeToAi", async () => {
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+    // Default mock already resolves []; assert the route forwards it verbatim.
+
+    await callGenerate();
+
+    expect(promoteMock).toHaveBeenCalledTimes(1);
+    expect(promoteMock.mock.calls[0]![0].availableMcpTools).toEqual([]);
   });
 });
