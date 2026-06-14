@@ -57,6 +57,7 @@ function mockRecoveryItem(
 describe('<DeadLettersPanel />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
+    localStorage.clear()
     vi.mocked(api).mockClear()
     // Re-establish the empty-default implementation each test. Some cases
     // below install a URL-aware `mockImplementation`; resetting here keeps
@@ -264,6 +265,7 @@ describe('<DeadLettersPanel />', () => {
 describe('<DeadLettersPanel /> — severity filter', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
+    localStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(async () => ({ items: [], clusters: [], runs: [], proposals: [] }))
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
@@ -381,5 +383,85 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     await waitFor(() => {
       expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
     })
+  })
+})
+
+describe('<DeadLettersPanel /> — filter persistence', () => {
+  const FILTERS_KEY = 'janusly:recoveryQueueFilters'
+
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    localStorage.clear()
+    vi.mocked(api).mockClear()
+    vi.mocked(api).mockImplementation(async () => ({ items: [], clusters: [], runs: [], proposals: [] }))
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('restores the persisted status / owner / severity selections on mount', async () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'resolved', ownerScope: 'mine', severityFilter: 'p2' }))
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+    })
+    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('resolved')
+    expect(screen.getByTestId('dlq-owner-mine')).toHaveAttribute('aria-pressed', 'true')
+    expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('p2')
+  })
+
+  it('writes filter changes back to localStorage', async () => {
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}')
+      expect(stored.severityFilter).toBe('p1')
+      expect(stored.ownerScope).toBe('mine')
+    })
+  })
+
+  it('falls back to the defaults when the stored blob is corrupt', async () => {
+    localStorage.setItem(FILTERS_KEY, 'not-json{')
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+    })
+    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+    expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
+  })
+
+  it('coerces unknown stored enum values to their defaults', async () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ status: 'bogus', ownerScope: 'weird', severityFilter: 'p9' }))
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+    })
+    expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+    expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+    expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
+  })
+
+  it('falls back to defaults when the localStorage accessor is unavailable', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage')
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('localStorage blocked', 'SecurityError')
+      },
+    })
+    try {
+      render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+      await waitFor(() => {
+        expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+      })
+      expect((screen.getByLabelText(/dlq\.show|show/i) as HTMLSelectElement).value).toBe('open')
+      expect(screen.getByTestId('dlq-owner-all')).toHaveAttribute('aria-pressed', 'true')
+      expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
+    } finally {
+      if (originalDescriptor) Object.defineProperty(window, 'localStorage', originalDescriptor)
+    }
   })
 })
