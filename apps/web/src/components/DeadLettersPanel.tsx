@@ -82,9 +82,13 @@ type SeverityFilter = 'all' | typeof SEVERITIES[number]
 /** Render the DLQ list with status filter, replay, and resolve controls. */
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const { t } = useT()
-  const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
-  const [ownerScope, setOwnerScope] = useState<OwnerScope>('all')
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')
+  // Filter selections persist across navigation + reload (localStorage).
+  // Read once on mount; each field is coercion-validated so stale/corrupt
+  // storage falls back to the defaults rather than breaking the panel.
+  const [initialFilters] = useState(readPersistedFilters)
+  const [status, setStatus] = useState<DeadLetterStatusFilter>(initialFilters.status)
+  const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
   const [recoveryItems, setRecoveryItems] = useState<
     Array<RecoveryItemBadgeData & RecoveryItemDrawerData>
@@ -142,6 +146,14 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
       cancelled = true
     }
   }, [platformVersion, ownerScope])
+
+  // Persist the operator's filter selections so they survive navigation
+  // away from the Runs view and a tab reload. Mirrors the localStorage
+  // posture used for the active org / locale; the no-op write on mount is
+  // harmless.
+  useEffect(() => {
+    writePersistedFilters({ status, ownerScope, severityFilter })
+  }, [status, ownerScope, severityFilter])
 
   const recoveryItemsReadyForCurrentScope = recoveryItemsScope === ownerScope
   const recoveryByDeadLetterId = useMemo(() => {
@@ -445,6 +457,70 @@ function toSeverityFilter(value: string): SeverityFilter {
     if (sev === value) return sev
   }
   return 'all'
+}
+
+/** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
+function toOwnerScope(value: string): OwnerScope {
+  return value === 'mine' ? 'mine' : 'all'
+}
+
+/** localStorage key holding the operator's recovery-queue filter selections.
+ *  Single global UI-pref blob, matching the `janusly:` prefix convention used
+ *  for the active org / locale. */
+const FILTERS_STORAGE_KEY = 'janusly:recoveryQueueFilters'
+
+/** The persisted recovery-queue filter selections. Every field is replayed
+ *  through its coercion guard on read, so a stale or malformed stored value
+ *  degrades to the default rather than corrupting the panel state. */
+type PersistedFilters = {
+  status: DeadLetterStatusFilter
+  ownerScope: OwnerScope
+  severityFilter: SeverityFilter
+}
+
+/** Read + coercion-validate the persisted filters, falling back to the
+ *  defaults (`open` / `all` / `all`) on missing / unavailable / corrupt
+ *  storage. Defensive about `window.localStorage` (private mode, SSR, jsdom)
+ *  mirroring `auth.ts`. */
+function readPersistedFilters(): PersistedFilters {
+  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all' }
+  const storage = getLocalStorage()
+  if (!storage) return fallback
+  try {
+    const raw = storage.getItem(FILTERS_STORAGE_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      status: toStatusFilter(String(parsed.status ?? '')),
+      ownerScope: toOwnerScope(String(parsed.ownerScope ?? '')),
+      severityFilter: toSeverityFilter(String(parsed.severityFilter ?? '')),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+/** Persist the current filter selections; non-fatal when storage is
+ *  unavailable (private mode / quota), mirroring `auth.ts`. */
+function writePersistedFilters(value: PersistedFilters): void {
+  const storage = getLocalStorage()
+  if (!storage) return
+  try {
+    storage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(value))
+  } catch {
+    // Non-fatal — storage may be disabled or full.
+  }
+}
+
+/** Best-effort storage accessor. Some browsers / privacy modes throw while
+ *  reading `window.localStorage` itself, before `getItem` / `setItem` runs. */
+function getLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage ?? null
+  } catch {
+    return null
+  }
 }
 
 /** Severity tone for a DLQ row: open → danger, replayed → success, else cobalt. */
