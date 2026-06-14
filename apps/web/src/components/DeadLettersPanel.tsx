@@ -6,9 +6,9 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
-import { api, downloadFromApi } from '../api'
+import { downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
 import { EmptyState } from './EmptyState'
@@ -17,10 +17,18 @@ import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
 const RecoveryDialog = lazy(() => import('./RecoveryDialog').then((m) => ({ default: m.RecoveryDialog })))
 import { ReplayLabDialog } from './ReplayLabDialog'
-import { RecoveryItemBadge, type RecoveryItemBadgeData } from './RecoveryItemBadge'
-import { RecoveryItemDrawer, type RecoveryItemDrawerData } from './RecoveryItemDrawer'
+import { RecoveryItemBadge } from './RecoveryItemBadge'
+import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
+import {
+  SEVERITIES,
+  STATUS_FILTER_KEYS,
+  statuses,
+  toSeverityFilter,
+  toStatusFilter,
+  useRecoveryQueueFilters,
+} from '../hooks/useRecoveryQueueFilters'
 
 /** Row PITCH in CSS pixels for the virtualized DLQ list — the full
  *  distance from one row's top to the next row's top in the flex
@@ -54,142 +62,32 @@ type DeadLettersPanelProps = {
   onResolve: (id: string) => void
 }
 
-const statuses = ['all', 'open', 'replayed', 'resolved'] as const
-type DeadLetterStatusFilter = typeof statuses[number]
-const STATUS_FILTER_KEYS: Record<DeadLetterStatusFilter, string> = {
-  all: 'dlq.filter.all',
-  open: 'dlq.filter.open',
-  replayed: 'dlq.filter.replayed',
-  resolved: 'dlq.filter.resolved',
-}
-
-/** Owner-scope filter for the recovery queue. `'all'` shows the whole org
- *  queue; `'mine'` narrows to the dead letters whose recovery item is owned
- *  by the current operator (resolved server-side via `?owner=me`, which the
- *  membership resolver maps to `auth.userId`). */
-type OwnerScope = 'all' | 'mine'
-
-/** The four closed recovery-item severities, highest-urgency first. Drives
- *  the severity filter's options; the labels reuse the `recoveryItems.severity.*`
- *  catalog the badge already renders. */
-const SEVERITIES = ['p1', 'p2', 'p3', 'p4'] as const
-/** Severity-scope filter for the recovery queue. `'all'` shows every severity;
- *  a `p1`–`p4` value narrows to dead letters whose recovery item carries that
- *  severity (a client-side refinement of the already-loaded set — severity is
- *  present on every item the overlay fetch returns). */
-type SeverityFilter = 'all' | typeof SEVERITIES[number]
-
 /** Render the DLQ list with status filter, replay, and resolve controls. */
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const { t } = useT()
-  // Filter selections persist across navigation + reload (localStorage).
-  // Read once on mount; each field is coercion-validated so stale/corrupt
-  // storage falls back to the defaults rather than breaking the panel.
-  const [initialFilters] = useState(readPersistedFilters)
-  const [status, setStatus] = useState<DeadLetterStatusFilter>(initialFilters.status)
-  const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
+  // Filter state + persistence + the recovery-item overlay + the visible-rows
+  // derivation all live in the hook; this component owns rendering, row
+  // selection, and the recovery / replay-lab dialogs.
+  const {
+    status,
+    setStatus,
+    ownerScope,
+    setOwnerScope,
+    severityFilter,
+    setSeverityFilter,
+    filtered,
+    recoveryFilterLoading,
+    recoveryByDeadLetterId,
+    recoveryItems,
+  } = useRecoveryQueueFilters(deadLetters)
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
-  const [recoveryItems, setRecoveryItems] = useState<
-    Array<RecoveryItemBadgeData & RecoveryItemDrawerData>
-  >([])
-  const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
-  const platformVersion = useWorkflowStore((s) => s.platformVersion)
-
-  useEffect(() => {
-    let cancelled = false
-    const scope = ownerScope
-    setRecoveryItemsScope(null)
-    // Scope the overlay fetch to the operator's own incidents when "Mine"
-    // is active. `owner=me` is resolved to `auth.userId` server-side, and the
-    // server-side scope is correct under the 200-row cap (client-side
-    // filtering of an all-items page could miss mine beyond the cap).
-    api(`/recovery/items?limit=200${ownerScope === 'mine' ? '&owner=me' : ''}`)
-      .then((resp: { items?: Array<{
-        id: string
-        deadLetterId: string
-        owner: string | null
-        severity: 'p1' | 'p2' | 'p3' | 'p4'
-        status: string
-        slaTargetAt: string
-        resolutionReason: string | null
-        comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
-        workflowId?: string | null
-        occurrenceCount?: number
-        lastOccurredAt?: string
-      }> }) => {
-        if (cancelled) return
-        const hydrated = (resp?.items ?? []).map((it) => ({
-          id: it.id,
-          deadLetterId: it.deadLetterId,
-          owner: it.owner,
-          severity: it.severity,
-          status: it.status as RecoveryItemBadgeData['status'],
-          slaTargetAtIso: it.slaTargetAt,
-          resolutionReason: (it.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
-          comments: it.comments ?? [],
-          workflowId: it.workflowId ?? null,
-          occurrenceCount: it.occurrenceCount ?? 1,
-          lastOccurredAtIso: it.lastOccurredAt ?? it.slaTargetAt,
-        }))
-        setRecoveryItems(hydrated)
-        setRecoveryItemsScope(scope)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecoveryItems([])
-          setRecoveryItemsScope(scope)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [platformVersion, ownerScope])
-
-  // Persist the operator's filter selections so they survive navigation
-  // away from the Runs view and a tab reload. Mirrors the localStorage
-  // posture used for the active org / locale; the no-op write on mount is
-  // harmless.
-  useEffect(() => {
-    writePersistedFilters({ status, ownerScope, severityFilter })
-  }, [status, ownerScope, severityFilter])
-
-  const recoveryItemsReadyForCurrentScope = recoveryItemsScope === ownerScope
-  const recoveryByDeadLetterId = useMemo(() => {
-    const map = new Map<string, RecoveryItemBadgeData & RecoveryItemDrawerData>()
-    for (const it of recoveryItems) map.set(it.deadLetterId, it)
-    return map
-  }, [recoveryItems])
-
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
     : null
   const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
-
-  const filtered = useMemo(() => {
-    let rows = status === 'all' ? deadLetters : deadLetters.filter(item => item.status === status)
-    // "Mine" narrows to dead letters whose recovery item is owned by the
-    // current operator. The overlay map is already scoped to owner=me by the
-    // fetch above, so membership in it is the ownership test; a dead letter
-    // with no recovery item is unassigned and correctly hidden under "Mine".
-    if (ownerScope === 'mine') {
-      if (!recoveryItemsReadyForCurrentScope) return []
-      rows = rows.filter(item => recoveryByDeadLetterId.has(item.id))
-    }
-    // Severity narrows to dead letters whose recovery item carries the
-    // selected severity. Client-side over the already-loaded overlay (every
-    // item ships its severity); a dead letter with no recovery item has no
-    // severity to match and is correctly excluded once a severity is picked.
-    if (severityFilter !== 'all') {
-      if (!recoveryItemsReadyForCurrentScope) return []
-      rows = rows.filter(item => recoveryByDeadLetterId.get(item.id)?.severity === severityFilter)
-    }
-    return rows
-  }, [deadLetters, status, ownerScope, recoveryItemsReadyForCurrentScope, recoveryByDeadLetterId, severityFilter])
-  const recoveryFilterLoading = (ownerScope === 'mine' || severityFilter !== 'all') && !recoveryItemsReadyForCurrentScope
 
   const hasOpenEntry = deadLetters.some((item) => item.status === 'open')
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
@@ -442,85 +340,6 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
       {open && <pre className="mini-pre">{JSON.stringify(value ?? {}, null, 2)}</pre>}
     </div>
   )
-}
-
-function toStatusFilter(value: string): DeadLetterStatusFilter {
-  for (const status of statuses) {
-    if (status === value) return status
-  }
-  return 'open'
-}
-
-/** Coerce a `<select>` value into a `SeverityFilter`, defaulting to `'all'`. */
-function toSeverityFilter(value: string): SeverityFilter {
-  for (const sev of SEVERITIES) {
-    if (sev === value) return sev
-  }
-  return 'all'
-}
-
-/** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
-function toOwnerScope(value: string): OwnerScope {
-  return value === 'mine' ? 'mine' : 'all'
-}
-
-/** localStorage key holding the operator's recovery-queue filter selections.
- *  Single global UI-pref blob, matching the `janusly:` prefix convention used
- *  for the active org / locale. */
-const FILTERS_STORAGE_KEY = 'janusly:recoveryQueueFilters'
-
-/** The persisted recovery-queue filter selections. Every field is replayed
- *  through its coercion guard on read, so a stale or malformed stored value
- *  degrades to the default rather than corrupting the panel state. */
-type PersistedFilters = {
-  status: DeadLetterStatusFilter
-  ownerScope: OwnerScope
-  severityFilter: SeverityFilter
-}
-
-/** Read + coercion-validate the persisted filters, falling back to the
- *  defaults (`open` / `all` / `all`) on missing / unavailable / corrupt
- *  storage. Defensive about `window.localStorage` (private mode, SSR, jsdom)
- *  mirroring `auth.ts`. */
-function readPersistedFilters(): PersistedFilters {
-  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all' }
-  const storage = getLocalStorage()
-  if (!storage) return fallback
-  try {
-    const raw = storage.getItem(FILTERS_STORAGE_KEY)
-    if (!raw) return fallback
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    return {
-      status: toStatusFilter(String(parsed.status ?? '')),
-      ownerScope: toOwnerScope(String(parsed.ownerScope ?? '')),
-      severityFilter: toSeverityFilter(String(parsed.severityFilter ?? '')),
-    }
-  } catch {
-    return fallback
-  }
-}
-
-/** Persist the current filter selections; non-fatal when storage is
- *  unavailable (private mode / quota), mirroring `auth.ts`. */
-function writePersistedFilters(value: PersistedFilters): void {
-  const storage = getLocalStorage()
-  if (!storage) return
-  try {
-    storage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(value))
-  } catch {
-    // Non-fatal — storage may be disabled or full.
-  }
-}
-
-/** Best-effort storage accessor. Some browsers / privacy modes throw while
- *  reading `window.localStorage` itself, before `getItem` / `setItem` runs. */
-function getLocalStorage(): Storage | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage ?? null
-  } catch {
-    return null
-  }
 }
 
 /** Severity tone for a DLQ row: open → danger, replayed → success, else cobalt. */
