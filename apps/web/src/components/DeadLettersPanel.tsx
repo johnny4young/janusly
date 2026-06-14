@@ -69,22 +69,34 @@ const STATUS_FILTER_KEYS: Record<DeadLetterStatusFilter, string> = {
  *  membership resolver maps to `auth.userId`). */
 type OwnerScope = 'all' | 'mine'
 
+/** The four closed recovery-item severities, highest-urgency first. Drives
+ *  the severity filter's options; the labels reuse the `recoveryItems.severity.*`
+ *  catalog the badge already renders. */
+const SEVERITIES = ['p1', 'p2', 'p3', 'p4'] as const
+/** Severity-scope filter for the recovery queue. `'all'` shows every severity;
+ *  a `p1`–`p4` value narrows to dead letters whose recovery item carries that
+ *  severity (a client-side refinement of the already-loaded set — severity is
+ *  present on every item the overlay fetch returns). */
+type SeverityFilter = 'all' | typeof SEVERITIES[number]
+
 /** Render the DLQ list with status filter, replay, and resolve controls. */
 export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const { t } = useT()
   const [status, setStatus] = useState<DeadLetterStatusFilter>('open')
   const [ownerScope, setOwnerScope] = useState<OwnerScope>('all')
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')
   const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
   const [recoveryItems, setRecoveryItems] = useState<
     Array<RecoveryItemBadgeData & RecoveryItemDrawerData>
   >([])
-  const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope>('all')
+  const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
 
   useEffect(() => {
     let cancelled = false
     const scope = ownerScope
+    setRecoveryItemsScope(null)
     // Scope the overlay fetch to the operator's own incidents when "Mine"
     // is active. `owner=me` is resolved to `auth.userId` server-side, and the
     // server-side scope is correct under the 200-row cap (client-side
@@ -131,6 +143,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     }
   }, [platformVersion, ownerScope])
 
+  const recoveryItemsReadyForCurrentScope = recoveryItemsScope === ownerScope
   const recoveryByDeadLetterId = useMemo(() => {
     const map = new Map<string, RecoveryItemBadgeData & RecoveryItemDrawerData>()
     for (const it of recoveryItems) map.set(it.deadLetterId, it)
@@ -151,12 +164,20 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     // fetch above, so membership in it is the ownership test; a dead letter
     // with no recovery item is unassigned and correctly hidden under "Mine".
     if (ownerScope === 'mine') {
-      if (recoveryItemsScope !== 'mine') return []
+      if (!recoveryItemsReadyForCurrentScope) return []
       rows = rows.filter(item => recoveryByDeadLetterId.has(item.id))
     }
+    // Severity narrows to dead letters whose recovery item carries the
+    // selected severity. Client-side over the already-loaded overlay (every
+    // item ships its severity); a dead letter with no recovery item has no
+    // severity to match and is correctly excluded once a severity is picked.
+    if (severityFilter !== 'all') {
+      if (!recoveryItemsReadyForCurrentScope) return []
+      rows = rows.filter(item => recoveryByDeadLetterId.get(item.id)?.severity === severityFilter)
+    }
     return rows
-  }, [deadLetters, status, ownerScope, recoveryItemsScope, recoveryByDeadLetterId])
-  const ownerScopedRecoveryLoading = ownerScope === 'mine' && recoveryItemsScope !== 'mine'
+  }, [deadLetters, status, ownerScope, recoveryItemsReadyForCurrentScope, recoveryByDeadLetterId, severityFilter])
+  const recoveryFilterLoading = (ownerScope === 'mine' || severityFilter !== 'all') && !recoveryItemsReadyForCurrentScope
 
   const hasOpenEntry = deadLetters.some((item) => item.status === 'open')
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
@@ -181,7 +202,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     // reference even when the content is identical, and resetting
     // scroll there would jump the operator's view to row 0 on every
     // bump. The filter signal is the real "visible set changed" cue.
-    resetScrollKey: `${status}|${ownerScope}`,
+    resetScrollKey: `${status}|${ownerScope}|${severityFilter}`,
   })
 
   return (
@@ -229,13 +250,45 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         </button>
       </div>
 
+      <label className="field-label" htmlFor="dlq-severity-filter">{t('dlq.severity.label')}</label>
+      <select
+        id="dlq-severity-filter"
+        className="text-field"
+        value={severityFilter}
+        onChange={event => setSeverityFilter(toSeverityFilter(event.target.value))}
+        data-testid="dlq-severity-filter"
+      >
+        <option value="all">{t('dlq.severity.all')}</option>
+        {SEVERITIES.map(sev => (
+          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never) as string}</option>
+        ))}
+      </select>
+
       <div className="panel-list">
-        {filtered.length === 0 && !ownerScopedRecoveryLoading && (
+        {filtered.length === 0 && !recoveryFilterLoading && (
           <EmptyState
             icon={<CircleCheck />}
-            kicker={t(ownerScope === 'mine' ? 'emptyState.dlq.mine.kicker' : 'emptyState.dlq.kicker') as string}
-            body={t(ownerScope === 'mine' ? 'emptyState.dlq.mine.body' : 'emptyState.dlq.body') as string}
-            testId={ownerScope === 'mine' ? 'dlq-empty-mine' : 'dlq-empty'}
+            kicker={t(
+              severityFilter !== 'all'
+                ? 'emptyState.dlq.severity.kicker'
+                : ownerScope === 'mine'
+                  ? 'emptyState.dlq.mine.kicker'
+                  : 'emptyState.dlq.kicker',
+            ) as string}
+            body={t(
+              severityFilter !== 'all'
+                ? 'emptyState.dlq.severity.body'
+                : ownerScope === 'mine'
+                  ? 'emptyState.dlq.mine.body'
+                  : 'emptyState.dlq.body',
+            ) as string}
+            testId={
+              severityFilter !== 'all'
+                ? 'dlq-empty-severity'
+                : ownerScope === 'mine'
+                  ? 'dlq-empty-mine'
+                  : 'dlq-empty'
+            }
           />
         )}
         {filtered.length > 0 && (
@@ -384,6 +437,14 @@ function toStatusFilter(value: string): DeadLetterStatusFilter {
     if (status === value) return status
   }
   return 'open'
+}
+
+/** Coerce a `<select>` value into a `SeverityFilter`, defaulting to `'all'`. */
+function toSeverityFilter(value: string): SeverityFilter {
+  for (const sev of SEVERITIES) {
+    if (sev === value) return sev
+  }
+  return 'all'
 }
 
 /** Severity tone for a DLQ row: open → danger, replayed → success, else cobalt. */
