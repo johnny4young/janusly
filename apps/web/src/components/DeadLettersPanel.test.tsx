@@ -34,12 +34,16 @@ function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLe
 // Minimal `/recovery/items` row shape the panel hydrates into overlay
 // badges (see DeadLettersPanel's fetch mapping). `deadLetterId` is the
 // join key onto the DLQ row the badge decorates.
-function mockRecoveryItem(id: string, deadLetterId: string) {
+function mockRecoveryItem(
+  id: string,
+  deadLetterId: string,
+  severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2',
+) {
   return {
     id,
     deadLetterId,
     owner: 'dev-user',
-    severity: 'p2' as const,
+    severity,
     status: 'open',
     slaTargetAt: '2026-05-26T12:00:00Z',
     resolutionReason: null,
@@ -254,5 +258,128 @@ describe('<DeadLettersPanel />', () => {
     expect(screen.queryByTestId('dlq-row-a')).toBeNull()
     // The generic "queue clear" empty state must NOT render under Mine.
     expect(screen.queryByTestId('dlq-empty')).toBeNull()
+  })
+})
+
+describe('<DeadLettersPanel /> — severity filter', () => {
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    vi.mocked(api).mockClear()
+    vi.mocked(api).mockImplementation(async () => ({ items: [], clusters: [], runs: [], proposals: [] }))
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('renders the severity filter defaulting to all', async () => {
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-severity-filter')).toBeInTheDocument()
+    })
+    expect((screen.getByTestId('dlq-severity-filter') as HTMLSelectElement).value).toBe('all')
+  })
+
+  it('narrows the list to the selected severity and All restores it', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        return { items: [mockRecoveryItem('ri-a', 'a', 'p1'), mockRecoveryItem('ri-b', 'b', 'p3')] }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [
+      mockDeadLetter('a', { status: 'open' }),
+      mockDeadLetter('b', { status: 'open' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
+    // pick p1 → only the p1 row (a) survives.
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
+    await waitFor(() => {
+      expect(screen.queryByTestId('dlq-row-b')).toBeNull()
+    })
+    expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    // back to all → both return.
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'all' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
+    })
+  })
+
+  it('composes the severity filter with the owner filter', async () => {
+    // Both items are owned by dev-user, so the owner=me fetch returns both.
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        return { items: [mockRecoveryItem('ri-a', 'a', 'p1'), mockRecoveryItem('ri-b', 'b', 'p3')] }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [
+      mockDeadLetter('a', { status: 'open' }),
+      mockDeadLetter('b', { status: 'open' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
+    // Mine: both are owned by dev-user, so both remain once owner=me resolves.
+    fireEvent.click(screen.getByTestId('dlq-owner-mine'))
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument()
+    })
+    // Mine + p1 → only the p1 row.
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
+    await waitFor(() => {
+      expect(screen.queryByTestId('dlq-row-b')).toBeNull()
+    })
+    expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+  })
+
+  it('shows the severity empty state when no item matches the selected severity', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) return { items: [mockRecoveryItem('ri-a', 'a', 'p3')] }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [mockDeadLetter('a', { status: 'open' })]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
+    // No p1 item exists → the severity-specific empty state, not the generic one.
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-empty-severity')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('dlq-row-a')).toBeNull()
+    expect(screen.queryByTestId('dlq-empty')).toBeNull()
+  })
+
+  it('does not show the severity empty state while the recovery overlay is still loading', async () => {
+    let resolveRecoveryFetch: ((value: { items: ReturnType<typeof mockRecoveryItem>[] }) => void) | null = null
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        return new Promise<{ items: ReturnType<typeof mockRecoveryItem>[] }>((resolve) => {
+          resolveRecoveryFetch = resolve
+        })
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [mockDeadLetter('a', { status: 'open' })]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+      expect(resolveRecoveryFetch).not.toBeNull()
+    })
+
+    fireEvent.change(screen.getByTestId('dlq-severity-filter'), { target: { value: 'p1' } })
+    await waitFor(() => {
+      expect(screen.queryByTestId('dlq-row-a')).toBeNull()
+    })
+    expect(screen.queryByTestId('dlq-empty-severity')).toBeNull()
+
+    resolveRecoveryFetch?.({ items: [mockRecoveryItem('ri-a', 'a', 'p1')] })
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    })
   })
 })
