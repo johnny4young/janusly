@@ -75,6 +75,26 @@ const POPULATED_RESPONSE = {
   ],
 }
 
+// One slot flagged anomalous by the server (failure-rate divergence): the
+// Wed 02:00 cell fails 4/5 while the rest of the grid is healthy.
+const ANOMALY_RESPONSE = {
+  workflowId: 'wf-1',
+  windowDays: 90,
+  rowCap: 1000,
+  capped: false,
+  heatmap: {
+    cells: [
+      { dayOfWeek: 1, hour: 9, total: 4, success: 4, fail: 0, anomaly: false },
+      { dayOfWeek: 3, hour: 2, total: 5, success: 1, fail: 4, anomaly: true },
+    ],
+    totalFires: 9,
+    totalSuccess: 5,
+    totalFail: 4,
+    timezone: 'UTC',
+  },
+  schedules: [],
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   storeState.currentWorkflowId = 'wf-1'
@@ -162,5 +182,37 @@ describe('ScheduleHistoryPanel', () => {
     // technical noun), but the kicker + body are translated.
     expect(container.textContent).toContain('Observabilidad de cron')
     expect(container.textContent).toContain('Aún no hay disparos programados registrados')
+  })
+})
+
+describe('ScheduleHistoryPanel — anomaly overlay', () => {
+  it('renders a corner dot + tooltip note for an anomalous cell', async () => {
+    apiMock.mockResolvedValueOnce(ANOMALY_RESPONSE)
+    const { container } = render(<ScheduleHistoryPanel />)
+    await waitFor(() => {
+      expect(container.querySelector('.we-schedule-heatmap')).not.toBeNull()
+    })
+    // Exactly one in-grid anomaly dot (the flagged cell), not the legend swatch.
+    const dots = container.querySelectorAll('.we-schedule-heatmap circle.we-schedule-heatmap__anomaly-dot')
+    expect(dots.length).toBe(1)
+    // The anomalous cell's tooltip carries the anomaly note.
+    const titles = Array.from(
+      container.querySelectorAll('.we-schedule-heatmap rect.we-schedule-heatmap__cell title'),
+    ).map((node) => node.textContent ?? '')
+    expect(titles.some((text) => text.includes('Elevated failure rate vs the schedule baseline'))).toBe(true)
+    // Legend exposes the anomaly marker + label.
+    expect(container.querySelector('.we-schedule-legend__anomaly-dot')).not.toBeNull()
+    expect(container.textContent).toContain('Anomaly')
+  })
+
+  it('renders no in-grid anomaly dot when no cell is flagged', async () => {
+    apiMock.mockResolvedValueOnce(POPULATED_RESPONSE)
+    const { container } = render(<ScheduleHistoryPanel />)
+    await waitFor(() => {
+      expect(container.querySelector('.we-schedule-heatmap')).not.toBeNull()
+    })
+    expect(
+      container.querySelectorAll('.we-schedule-heatmap circle.we-schedule-heatmap__anomaly-dot').length,
+    ).toBe(0)
   })
 })
