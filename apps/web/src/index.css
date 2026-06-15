@@ -5598,6 +5598,16 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-schedule-heatmap__cell--fail-2 { fill: color-mix(in srgb, var(--we-danger) 60%, transparent); }
 .we-schedule-heatmap__cell--fail-3 { fill: var(--we-danger); }
 
+/* Anomaly overlay dot — a danger-filled dot with a surface-colored ring so it
+   stays visible on both a light empty cell and a solid --we-danger fail-3
+   cell. Decorative; the meaning rides the cell's <title>. */
+.we-schedule-heatmap__anomaly-dot {
+  fill: var(--we-danger);
+  stroke: var(--we-surface);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
 .we-schedule-legend {
   display: flex;
   align-items: center;
@@ -5621,6 +5631,17 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .we-schedule-legend__swatch--gap {
   margin-left: 8px;
+}
+
+/* Legend marker for the anomaly overlay — a small round danger dot matching
+   the in-grid corner dot. */
+.we-schedule-legend__anomaly-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--we-danger);
+  border: 1px solid var(--we-surface);
 }
 
 .we-schedule-upcoming {

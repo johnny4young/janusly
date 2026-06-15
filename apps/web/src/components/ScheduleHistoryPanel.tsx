@@ -14,10 +14,10 @@
  * server gates the workflow lookup to the caller's org. Read-only (viewer
  * role) — no mutation, so no `bumpPlatformVersion()`.
  *
- * Anomaly seam: the response's per-cell `anomaly` flag is read but never
- * lights up today (the rolling-baseline signal isn't shipped). When it lands,
- * the red-dot overlay drops in here keyed on `cell.anomaly` with no other
- * change.
+ * Anomaly overlay: cells whose `anomaly` flag is set (failure rate diverging
+ * above the schedule baseline — scored server-side in `schedule-history.ts`)
+ * get a red corner dot, a tooltip note, and a legend entry. Healthy and
+ * uniformly-failing schedules light up nothing.
  *
  * Used by `RightPanel.tsx` (Inspector tab, mounted alongside the SLO +
  * metadata panels).
@@ -128,8 +128,12 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
   const locale = getResolvedLocale()
   const dayLabels = useMemo(() => {
     // Localized short weekday names (Sun..Sat) via Intl — respects the UI
-    // language without hardcoding English.
-    const fmt = new Intl.DateTimeFormat(locale, { weekday: 'short' })
+    // language without hardcoding English. `timeZone: 'UTC'` is load-bearing:
+    // the grid buckets fires by UTC day-of-week (and the hour labels are raw
+    // UTC), so the row labels must read the reference instant in UTC too —
+    // otherwise a negative-offset browser would shift every label back a day
+    // and mislabel the rows against their own data.
+    const fmt = new Intl.DateTimeFormat(locale, { weekday: 'short', timeZone: 'UTC' })
     // 2024-01-07 is a Sunday (UTC); +d days walks the week.
     return DAYS.map((d) => fmt.format(new Date(Date.UTC(2024, 0, 7 + d))))
   }, [locale])
@@ -232,7 +236,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
                     const cell = cellIndex.get(day * 24 + hour)
                     const x = ROW_LABEL_W + hour * (CELL + CELL_GAP)
                     const y = COL_LABEL_H + rowIdx * (CELL + CELL_GAP)
-                    const title = cell && cell.total > 0
+                    const baseTitle = cell && cell.total > 0
                       ? (t('scheduleHistory.cell.tooltip', {
                           day: dayLabels[rowIdx],
                           hour: String(hour).padStart(2, '0'),
@@ -244,21 +248,38 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
                           day: dayLabels[rowIdx],
                           hour: String(hour).padStart(2, '0'),
                         }) as string)
+                    // Anomalous cells append a note so the red dot's meaning
+                    // is reachable via the same hover tooltip.
+                    const title = cell?.anomaly
+                      ? `${baseTitle}\n${t('scheduleHistory.cell.anomaly') as string}`
+                      : baseTitle
                     return (
-                      <rect
-                        key={`c-${day}-${hour}`}
-                        className={`we-schedule-heatmap__cell ${cellClass(cell, maxTotal)}`}
-                        x={x}
-                        y={y}
-                        width={CELL}
-                        height={CELL}
-                        rx={2}
-                      >
-                        <title>{title}</title>
-                        {/* Anomaly seam: when `cell.anomaly` lights up
-                            (rolling-baseline divergence), a red dot drops in
-                            here. Today the flag is always false. */}
-                      </rect>
+                      <g key={`c-${day}-${hour}`}>
+                        <rect
+                          className={`we-schedule-heatmap__cell ${cellClass(cell, maxTotal)}`}
+                          x={x}
+                          y={y}
+                          width={CELL}
+                          height={CELL}
+                          rx={2}
+                        >
+                          <title>{title}</title>
+                        </rect>
+                        {/* Anomaly overlay: a red dot on the cell's top-right
+                            corner when the slot's failure rate diverges above
+                            the schedule baseline. Decorative (the meaning rides
+                            the rect's title); pointer-events:none keeps the
+                            rect tooltip on hover. */}
+                        {cell?.anomaly && (
+                          <circle
+                            className="we-schedule-heatmap__anomaly-dot"
+                            cx={x + CELL - 3}
+                            cy={y + 3}
+                            r={2.5}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </g>
                     )
                   })}
                 </g>
@@ -280,6 +301,8 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
             <span className="we-schedule-legend__label">{t('scheduleHistory.legend.more') as string}</span>
             <span className="we-schedule-heatmap__cell we-schedule-heatmap__cell--fail-2 we-schedule-legend__swatch we-schedule-legend__swatch--gap" />
             <span className="we-schedule-legend__label">{t('scheduleHistory.legend.fail') as string}</span>
+            <span className="we-schedule-legend__anomaly-dot we-schedule-legend__swatch--gap" aria-hidden="true" />
+            <span className="we-schedule-legend__label">{t('scheduleHistory.legend.anomaly') as string}</span>
           </div>
 
           {/* Next-fires preview per schedule entry. */}
