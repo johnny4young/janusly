@@ -1,9 +1,9 @@
 /**
  * Shared helpers for the demo-templates e2e spec. Driven against the
- * live API (default `http://localhost:3001` from the e2e harness) with
- * dev-headers auth so the spec can seed credentials, save workflows,
- * trigger runs, and poll terminal state without leaning on the web UI
- * for orchestration.
+ * live API with dev-headers auth so the spec can seed credentials, save
+ * workflows, trigger runs, and poll terminal state without leaning on the
+ * web UI for orchestration. The e2e harness sets `E2E_API_URL` to the API
+ * port it owns; the localhost:3001 fallback is only for direct manual runs.
  *
  * Keep these helpers narrow to what the demo spec actually needs — they
  * are not a general-purpose API client and intentionally do not retry.

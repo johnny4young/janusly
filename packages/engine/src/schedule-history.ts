@@ -24,10 +24,15 @@
  * - Bounds are enforced by the caller (`MAX_HISTORY_DAYS` / `MAX_FIRE_ROWS`)
  *   AND re-asserted here as a defensive `slice` so a future caller can't
  *   feed an unbounded array into the grid build.
- * - Rolling-baseline anomaly signals are NOT shipped yet. The grid carries a
- *   per-cell `anomaly: false` field as a forward-compat seam so the web
- *   red-dot overlay can light up without a response-shape change once a
- *   rolling baseline lands. Until then every cell reports `anomaly: false`.
+ * - Per-cell `anomaly` flags a (dayOfWeek, hour) slot whose failure rate
+ *   diverges sharply ABOVE the window's overall failure rate (see
+ *   `isAnomalousCell`) — the operator-meaningful "this slot fails far more
+ *   than this schedule normally does" signal that drives the web red-dot
+ *   overlay. The baseline is the window aggregate; a time-rolling baseline is
+ *   a future refinement behind the same boolean (no response-shape change).
+ *   Conservative by construction: a healthy schedule (no failures) and a
+ *   uniformly-failing one (no single slot stands out) both leave every cell
+ *   `anomaly: false`.
  */
 
 import { CronExpressionParser } from "cron-parser";
@@ -70,9 +75,9 @@ export type ScheduleHeatmapCell = {
   /** Fires whose run reached a failed terminal status. */
   fail: number;
   /**
-   * Forward-compat seam for rolling-baseline anomaly signals (baseline
-   * divergence → red dot). Always `false` today; the web overlay reads it
-   * but never lights up until baseline scoring ships.
+   * True when this slot's failure rate diverges sharply above the window
+   * baseline (see `isAnomalousCell`) — drives the web red-dot overlay.
+   * `false` for a healthy schedule and for a uniformly-failing one.
    */
   anomaly: boolean;
 };
@@ -93,6 +98,44 @@ export type ScheduleHeatmap = {
 
 /** Terminal run statuses that count as a failure for the success/fail ratio. */
 const FAILED_STATUSES = new Set(["failed", "cancelled", "canceled", "dead_letter", "error"]);
+
+/**
+ * Minimum fires in a cell before its failure rate is trusted for anomaly
+ * scoring — a 1-of-1 failure is noise, not a pattern.
+ */
+export const SCHEDULE_ANOMALY_MIN_SAMPLES = 3;
+
+/** A cell must fail at least this fraction of the time to even be a candidate. */
+export const SCHEDULE_ANOMALY_MIN_FAIL_RATE = 0.5;
+
+/**
+ * …and its failure rate must exceed the window's overall failure rate by at
+ * least this margin. This "divergence above baseline" gate is what keeps a
+ * uniformly-failing schedule from lighting up every cell — only a slot that
+ * fails markedly more than the schedule's norm is anomalous.
+ */
+export const SCHEDULE_ANOMALY_BASELINE_MARGIN = 0.25;
+
+/**
+ * Decide whether a heatmap cell is an anomaly: a slot whose failure rate is a
+ * clear outlier ABOVE the window baseline. Pure — `baselineFailRate` is the
+ * window-aggregate `totalFail / totalFires` the caller computes once.
+ *
+ * Returns `false` below `SCHEDULE_ANOMALY_MIN_SAMPLES` (too few fires to
+ * trust), and only `true` when the cell both fails at least
+ * `SCHEDULE_ANOMALY_MIN_FAIL_RATE` of the time AND exceeds the baseline by at
+ * least `SCHEDULE_ANOMALY_BASELINE_MARGIN`. A healthy schedule (baseline 0,
+ * no cell fails) and a uniformly-failing one (every cell ≈ baseline) both
+ * yield `false`.
+ */
+export function isAnomalousCell(cell: ScheduleHeatmapCell, baselineFailRate: number): boolean {
+  if (cell.total < SCHEDULE_ANOMALY_MIN_SAMPLES) return false;
+  const failRate = cell.fail / cell.total;
+  return (
+    failRate >= SCHEDULE_ANOMALY_MIN_FAIL_RATE &&
+    failRate >= baselineFailRate + SCHEDULE_ANOMALY_BASELINE_MARGIN
+  );
+}
 
 /**
  * Fold observed fires into a day-of-week × hour-of-day grid (UTC). Skips rows
@@ -145,6 +188,14 @@ export function bucketScheduleFires(fires: readonly ScheduleFire[]): ScheduleHea
   const cells = [...buckets.values()].sort((a, b) =>
     a.dayOfWeek === b.dayOfWeek ? a.hour - b.hour : a.dayOfWeek - b.dayOfWeek,
   );
+
+  // Flag slots whose failure rate diverges sharply above the window baseline.
+  // The baseline is the window-aggregate failure rate; an empty/failure-free
+  // grid yields 0, so no cell can be anomalous.
+  const baselineFailRate = totalFires > 0 ? totalFail / totalFires : 0;
+  for (const cell of cells) {
+    cell.anomaly = isAnomalousCell(cell, baselineFailRate);
+  }
 
   return { cells, totalFires, totalSuccess, totalFail, timezone: "UTC" };
 }

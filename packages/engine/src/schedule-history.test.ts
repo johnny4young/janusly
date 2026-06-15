@@ -2,10 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   bucketScheduleFires,
   computeNextFires,
+  isAnomalousCell,
   MAX_FIRE_ROWS,
   MAX_NEXT_FIRES,
+  SCHEDULE_ANOMALY_BASELINE_MARGIN,
+  SCHEDULE_ANOMALY_MIN_FAIL_RATE,
+  SCHEDULE_ANOMALY_MIN_SAMPLES,
   type ScheduleFire,
+  type ScheduleHeatmapCell,
 } from "./schedule-history";
+
+/** Build a heatmap cell for the pure `isAnomalousCell` unit cases. */
+function cell(total: number, fail: number): ScheduleHeatmapCell {
+  return { dayOfWeek: 1, hour: 9, total, success: total - fail, fail, anomaly: false };
+}
+
+/** N fires in one (day, hour) slot with the given status. */
+function firesAt(iso: string, count: number, status: string): ScheduleFire[] {
+  return Array.from({ length: count }, () => ({ firedAt: iso, status }));
+}
 
 describe("bucketScheduleFires", () => {
   it("buckets fires into day-of-week × hour-of-day cells (UTC)", () => {
@@ -23,7 +38,7 @@ describe("bucketScheduleFires", () => {
     expect(cell.total).toBe(3);
     expect(cell.success).toBe(2);
     expect(cell.fail).toBe(1);
-    expect(cell.anomaly).toBe(false); // anomaly seam — always false today
+    expect(cell.anomaly).toBe(false); // 1/3 fail rate is below the 0.5 anomaly floor
     expect(grid.timezone).toBe("UTC");
   });
 
@@ -90,6 +105,87 @@ describe("bucketScheduleFires", () => {
     }));
     const grid = bucketScheduleFires(fires);
     expect(grid.totalFires).toBe(MAX_FIRE_ROWS);
+  });
+});
+
+// Distinct (day, hour) slots used across the anomaly cases.
+const MON_02 = "2024-01-01T02:00:00.000Z"; // dayOfWeek 1, hour 2
+const TUE_09 = "2024-01-02T09:00:00.000Z";
+const WED_09 = "2024-01-03T09:00:00.000Z";
+const THU_09 = "2024-01-04T09:00:00.000Z";
+
+describe("bucketScheduleFires — anomaly detection", () => {
+  it("flags no cell for a healthy (all-success) schedule", () => {
+    const grid = bucketScheduleFires([...firesAt(MON_02, 4, "succeeded"), ...firesAt(TUE_09, 3, "succeeded")]);
+    expect(grid.cells.every((c) => !c.anomaly)).toBe(true);
+  });
+
+  it("flags only the slot whose failure rate diverges sharply above the baseline", () => {
+    // Mon 02 fails 4/4 (rate 1.0); three other slots all succeed → baseline
+    // 4/13 ≈ 0.31, so only the bad slot clears the 0.5 floor AND the
+    // baseline+0.25 margin.
+    const grid = bucketScheduleFires([
+      ...firesAt(MON_02, 4, "failed"),
+      ...firesAt(TUE_09, 3, "succeeded"),
+      ...firesAt(WED_09, 3, "succeeded"),
+      ...firesAt(THU_09, 3, "succeeded"),
+    ]);
+    const anomalies = grid.cells.filter((c) => c.anomaly);
+    expect(anomalies).toHaveLength(1);
+    expect(anomalies[0].dayOfWeek).toBe(1);
+    expect(anomalies[0].hour).toBe(2);
+  });
+
+  it("flags no cell for a uniformly-failing schedule (no slot stands out)", () => {
+    // Every slot fails → baseline ≈ 1.0, so no cell can exceed baseline+0.25.
+    const grid = bucketScheduleFires([
+      ...firesAt(MON_02, 3, "failed"),
+      ...firesAt(TUE_09, 3, "failed"),
+      ...firesAt(WED_09, 3, "failed"),
+    ]);
+    expect(grid.totalFail).toBe(9);
+    expect(grid.cells.every((c) => !c.anomaly)).toBe(true);
+  });
+
+  it("does not flag a bad slot with too few samples to trust", () => {
+    // Mon 02 fails 2/2 (rate 1.0) but only 2 fires — below the min-samples gate.
+    const grid = bucketScheduleFires([...firesAt(MON_02, 2, "failed"), ...firesAt(TUE_09, 5, "succeeded")]);
+    const bad = grid.cells.find((c) => c.dayOfWeek === 1 && c.hour === 2);
+    expect(bad?.fail).toBe(2);
+    expect(bad?.anomaly).toBe(false);
+    expect(grid.cells.every((c) => !c.anomaly)).toBe(true);
+  });
+});
+
+describe("isAnomalousCell", () => {
+  it("exposes the documented tuning constants", () => {
+    expect(SCHEDULE_ANOMALY_MIN_SAMPLES).toBe(3);
+    expect(SCHEDULE_ANOMALY_MIN_FAIL_RATE).toBe(0.5);
+    expect(SCHEDULE_ANOMALY_BASELINE_MARGIN).toBe(0.25);
+  });
+
+  it("returns false below the min-samples gate regardless of failure rate", () => {
+    expect(isAnomalousCell(cell(2, 2), 0)).toBe(false);
+  });
+
+  it("returns true when the cell clears both the fail-rate floor and the baseline margin", () => {
+    // 3/4 = 0.75 ≥ 0.5 floor AND ≥ 0.1 + 0.25 margin.
+    expect(isAnomalousCell(cell(4, 3), 0.1)).toBe(true);
+  });
+
+  it("returns false when the fail rate is below the 0.5 floor", () => {
+    // 4/10 = 0.4 < 0.5, even with a zero baseline.
+    expect(isAnomalousCell(cell(10, 4), 0)).toBe(false);
+  });
+
+  it("returns false when the fail rate does not exceed the baseline by the margin", () => {
+    // 6/10 = 0.6 clears the floor but not 0.5 + 0.25 = 0.75.
+    expect(isAnomalousCell(cell(10, 6), 0.5)).toBe(false);
+  });
+
+  it("treats both thresholds as inclusive at the boundary", () => {
+    // 2/4 = 0.5 == floor AND == 0.25 + 0.25 baseline margin.
+    expect(isAnomalousCell(cell(4, 2), 0.25)).toBe(true);
   });
 });
 
