@@ -23,9 +23,12 @@ import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
 import {
   SEVERITIES,
+  SORT_KEYS,
+  SORT_KEY_LABELS,
   STATUS_FILTER_KEYS,
   statuses,
   toSeverityFilter,
+  toSortKey,
   toStatusFilter,
   useRecoveryQueueFilters,
 } from '../hooks/useRecoveryQueueFilters'
@@ -75,6 +78,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     setOwnerScope,
     severityFilter,
     setSeverityFilter,
+    sortKey,
+    setSortKey,
     filtered,
     recoveryFilterLoading,
     recoveryByDeadLetterId,
@@ -112,7 +117,7 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     // reference even when the content is identical, and resetting
     // scroll there would jump the operator's view to row 0 on every
     // bump. The filter signal is the real "visible set changed" cue.
-    resetScrollKey: `${status}|${ownerScope}|${severityFilter}`,
+    resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}`,
   })
 
   return (
@@ -171,6 +176,19 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
         <option value="all">{t('dlq.severity.all')}</option>
         {SEVERITIES.map(sev => (
           <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never) as string}</option>
+        ))}
+      </select>
+
+      <label className="field-label" htmlFor="dlq-sort">{t('dlq.sort.label')}</label>
+      <select
+        id="dlq-sort"
+        className="text-field"
+        value={sortKey}
+        onChange={event => setSortKey(toSortKey(event.target.value))}
+        data-testid="dlq-sort"
+      >
+        {SORT_KEYS.map(key => (
+          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never) as string}</option>
         ))}
       </select>
 
