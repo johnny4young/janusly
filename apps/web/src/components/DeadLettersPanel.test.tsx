@@ -465,3 +465,50 @@ describe('<DeadLettersPanel /> — filter persistence', () => {
     }
   })
 })
+
+describe('<DeadLettersPanel /> — sort', () => {
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    localStorage.clear()
+    vi.mocked(api).mockClear()
+    vi.mocked(api).mockImplementation(async () => ({ items: [], clusters: [], runs: [], proposals: [] }))
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('renders the sort control defaulting to newest', async () => {
+    render(<DeadLettersPanel deadLetters={[]} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-sort')).toBeInTheDocument()
+    })
+    expect((screen.getByTestId('dlq-sort') as HTMLSelectElement).value).toBe('newest')
+  })
+
+  it('reorders the rendered rows when sorting by severity', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.includes('/recovery/items')) {
+        // Row 'a' is p3, row 'b' is p1 — severity sort must lift 'b' above 'a'.
+        return { items: [mockRecoveryItem('ri-a', 'a', 'p3'), mockRecoveryItem('ri-b', 'b', 'p1')] }
+      }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    const rows = [
+      mockDeadLetter('a', { status: 'open' }),
+      mockDeadLetter('b', { status: 'open' }),
+    ]
+    render(<DeadLettersPanel deadLetters={rows} onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    // Default (newest): same createdAt → stable → input order a, b.
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^dlq-row-/).map((e) => e.getAttribute('data-testid'))).toEqual([
+        'dlq-row-a',
+        'dlq-row-b',
+      ])
+    })
+    fireEvent.change(screen.getByTestId('dlq-sort'), { target: { value: 'severity' } })
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^dlq-row-/).map((e) => e.getAttribute('data-testid'))).toEqual([
+        'dlq-row-b',
+        'dlq-row-a',
+      ])
+    })
+  })
+})
