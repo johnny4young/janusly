@@ -1,9 +1,9 @@
 /**
- * Recovery-queue filter state for the DLQ / recovery panel. Owns the three
- * operator filters (status / owner / severity), their localStorage
+ * Recovery-queue view state for the DLQ / recovery panel. Owns the operator
+ * filters (status / owner / severity), the sort selection, their localStorage
  * persistence, the recovery-items overlay fetch + its scope race-guard, and
  * the derived visible-rows set. Extracted from `DeadLettersPanel` so the
- * filter machinery is independently testable and the panel can focus on
+ * view-state machinery is independently testable and the panel can focus on
  * rendering / selection / dialogs.
  *
  * Used by:
@@ -43,6 +43,19 @@ export const SEVERITIES = ['p1', 'p2', 'p3', 'p4'] as const
  *  present on every item the overlay fetch returns). */
 export type SeverityFilter = 'all' | typeof SEVERITIES[number]
 
+/** Sort keys for the recovery queue. `'newest'` (default) matches the server's
+ *  `createdAt desc` order so it is a no-op; the rest let an operator triage by
+ *  age, criticality, or SLA deadline. */
+export const SORT_KEYS = ['newest', 'oldest', 'severity', 'sla'] as const
+export type SortKey = typeof SORT_KEYS[number]
+/** i18n catalog keys for each sort option's label. */
+export const SORT_KEY_LABELS: Record<SortKey, string> = {
+  newest: 'dlq.sort.newest',
+  oldest: 'dlq.sort.oldest',
+  severity: 'dlq.sort.severity',
+  sla: 'dlq.sort.sla',
+}
+
 /** Coerce a `<select>` value into a `DeadLetterStatusFilter`, defaulting to `'open'`. */
 export function toStatusFilter(value: string): DeadLetterStatusFilter {
   for (const status of statuses) {
@@ -59,31 +72,41 @@ export function toSeverityFilter(value: string): SeverityFilter {
   return 'all'
 }
 
+/** Coerce a `<select>` value into a `SortKey`, defaulting to `'newest'`. */
+export function toSortKey(value: string): SortKey {
+  for (const key of SORT_KEYS) {
+    if (key === value) return key
+  }
+  return 'newest'
+}
+
 /** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
 function toOwnerScope(value: string): OwnerScope {
   return value === 'mine' ? 'mine' : 'all'
 }
 
-/** localStorage key holding the operator's recovery-queue filter selections.
- *  Single global UI-pref blob, matching the `janusly:` prefix convention used
- *  for the active org / locale. */
+/** localStorage key holding the operator's recovery-queue filter + sort
+ *  selections. Single global UI-pref blob, matching the `janusly:` prefix
+ *  convention used for the active org / locale. */
 const FILTERS_STORAGE_KEY = 'janusly:recoveryQueueFilters'
 
-/** The persisted recovery-queue filter selections. Every field is replayed
- *  through its coercion guard on read, so a stale or malformed stored value
- *  degrades to the default rather than corrupting the panel state. */
+/** The persisted recovery-queue filter + sort selections. Every field is
+ *  replayed through its coercion guard on read, so a stale or malformed
+ *  stored value degrades to the default rather than corrupting the panel
+ *  state. */
 type PersistedFilters = {
   status: DeadLetterStatusFilter
   ownerScope: OwnerScope
   severityFilter: SeverityFilter
+  sortKey: SortKey
 }
 
 /** Read + coercion-validate the persisted filters, falling back to the
- *  defaults (`open` / `all` / `all`) on missing / unavailable / corrupt
- *  storage. Defensive about `window.localStorage` (private mode, SSR, jsdom)
- *  mirroring `auth.ts`. */
+ *  defaults (`open` / `all` / `all` / `newest`) on missing / unavailable /
+ *  corrupt storage. Defensive about `window.localStorage` (private mode, SSR,
+ *  jsdom) mirroring `auth.ts`. */
 function readPersistedFilters(): PersistedFilters {
-  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all' }
+  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all', sortKey: 'newest' }
   const storage = getLocalStorage()
   if (!storage) return fallback
   try {
@@ -94,13 +117,14 @@ function readPersistedFilters(): PersistedFilters {
       status: toStatusFilter(String(parsed.status ?? '')),
       ownerScope: toOwnerScope(String(parsed.ownerScope ?? '')),
       severityFilter: toSeverityFilter(String(parsed.severityFilter ?? '')),
+      sortKey: toSortKey(String(parsed.sortKey ?? '')),
     }
   } catch {
     return fallback
   }
 }
 
-/** Persist the current filter selections; non-fatal when storage is
+/** Persist the current filter + sort selections; non-fatal when storage is
  *  unavailable (private mode / quota), mirroring `auth.ts`. */
 function writePersistedFilters(value: PersistedFilters): void {
   const storage = getLocalStorage()
@@ -127,8 +151,48 @@ function getLocalStorage(): Storage | null {
  *  panel hydrates each `/recovery/items` entry. */
 type RecoveryOverlayItem = RecoveryItemBadgeData & RecoveryItemDrawerData
 
-/** Everything the recovery queue needs to render its filter controls, the
- *  filtered DLQ rows, and the recovery-item overlay (badges + drawer). */
+/** Sort rank for severities — lower is more urgent; a dead letter with no
+ *  recovery item ranks last (4). */
+const SEVERITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }
+function severityRank(item: RecoveryOverlayItem | undefined): number {
+  return item ? SEVERITY_RANK[item.severity] ?? 4 : 4
+}
+
+/** Compare two dead-letter rows for the chosen sort key. `newest`/`oldest` use
+ *  the dead letter's ISO `createdAt`; `severity` + `sla` read the overlay and
+ *  tie-break newest-first; SLA-less rows sort last under `sla`. Pure — safe
+ *  inside a stable `Array.sort`. */
+function compareRows(
+  a: DeadLetter,
+  b: DeadLetter,
+  sortKey: SortKey,
+  overlay: Map<string, RecoveryOverlayItem>,
+): number {
+  const newestFirst = (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
+  switch (sortKey) {
+    case 'oldest':
+      return (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+    case 'severity': {
+      const delta = severityRank(overlay.get(a.id)) - severityRank(overlay.get(b.id))
+      return delta !== 0 ? delta : newestFirst
+    }
+    case 'sla': {
+      const sa = overlay.get(a.id)?.slaTargetAtIso ?? ''
+      const sb = overlay.get(b.id)?.slaTargetAtIso ?? ''
+      if (!sa && !sb) return newestFirst
+      if (!sa) return 1
+      if (!sb) return -1
+      return sa.localeCompare(sb) || newestFirst
+    }
+    case 'newest':
+    default:
+      return newestFirst
+  }
+}
+
+/** Everything the recovery queue needs to render its filter/sort controls, the
+ *  filtered + ordered DLQ rows, and the recovery-item overlay (badges +
+ *  drawer). */
 export type RecoveryQueueFilters = {
   status: DeadLetterStatusFilter
   setStatus: (value: DeadLetterStatusFilter) => void
@@ -136,7 +200,9 @@ export type RecoveryQueueFilters = {
   setOwnerScope: (value: OwnerScope) => void
   severityFilter: SeverityFilter
   setSeverityFilter: (value: SeverityFilter) => void
-  /** Visible DLQ rows after the status ∩ owner ∩ severity narrowing. */
+  sortKey: SortKey
+  setSortKey: (value: SortKey) => void
+  /** Visible DLQ rows after the status ∩ owner ∩ severity narrowing, ordered by `sortKey`. */
   filtered: DeadLetter[]
   /** True while the owner=me / severity overlay fetch is in flight for the
    *  current scope — callers suppress the empty state to avoid a false flash. */
@@ -148,20 +214,22 @@ export type RecoveryQueueFilters = {
 }
 
 /**
- * Manage the recovery-queue filters + the recovery-item overlay for a given
- * `deadLetters` list. The persisted filter selections restore on mount and
- * write back on change; the overlay fetch re-runs on `platformVersion` bumps
- * and owner-scope changes, with a readiness guard so a slow fetch never
- * filters against (or flashes an empty state over) a stale overlay.
+ * Manage the recovery-queue filters, sort selection, and recovery-item overlay
+ * for a given `deadLetters` list. The persisted view selections restore on
+ * mount and write back on change; the overlay fetch re-runs on
+ * `platformVersion` bumps and owner-scope changes, with a readiness guard so a
+ * slow fetch never filters against (or flashes an empty state over) a stale
+ * overlay.
  */
 export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueueFilters {
-  // Filter selections persist across navigation + reload (localStorage).
+  // Filter + sort selections persist across navigation + reload (localStorage).
   // Read once on mount; each field is coercion-validated so stale/corrupt
   // storage falls back to the defaults rather than breaking the panel.
   const [initialFilters] = useState(readPersistedFilters)
   const [status, setStatus] = useState<DeadLetterStatusFilter>(initialFilters.status)
   const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
+  const [sortKey, setSortKey] = useState<SortKey>(initialFilters.sortKey)
   const [recoveryItems, setRecoveryItems] = useState<RecoveryOverlayItem[]>([])
   const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope | null>(null)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
@@ -216,13 +284,13 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
     }
   }, [platformVersion, ownerScope])
 
-  // Persist the operator's filter selections so they survive navigation
+  // Persist the operator's filter + sort selections so they survive navigation
   // away from the Runs view and a tab reload. Mirrors the localStorage
   // posture used for the active org / locale; the no-op write on mount is
   // harmless.
   useEffect(() => {
-    writePersistedFilters({ status, ownerScope, severityFilter })
-  }, [status, ownerScope, severityFilter])
+    writePersistedFilters({ status, ownerScope, severityFilter, sortKey })
+  }, [status, ownerScope, severityFilter, sortKey])
 
   const recoveryItemsReadyForCurrentScope = recoveryItemsScope === ownerScope
   const recoveryByDeadLetterId = useMemo(() => {
@@ -249,8 +317,11 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
       if (!recoveryItemsReadyForCurrentScope) return []
       rows = rows.filter(item => recoveryByDeadLetterId.get(item.id)?.severity === severityFilter)
     }
-    return rows
-  }, [deadLetters, status, ownerScope, recoveryItemsReadyForCurrentScope, recoveryByDeadLetterId, severityFilter])
+    // Order the visible rows by the chosen sort key. Copy first — never mutate
+    // the filtered array (or the `deadLetters` prop); `Array.sort` is stable,
+    // so ties keep the incoming order (which is the server's `createdAt desc`).
+    return [...rows].sort((a, b) => compareRows(a, b, sortKey, recoveryByDeadLetterId))
+  }, [deadLetters, status, ownerScope, recoveryItemsReadyForCurrentScope, recoveryByDeadLetterId, severityFilter, sortKey])
   const recoveryFilterLoading = (ownerScope === 'mine' || severityFilter !== 'all') && !recoveryItemsReadyForCurrentScope
 
   return {
@@ -260,6 +331,8 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
     setOwnerScope,
     severityFilter,
     setSeverityFilter,
+    sortKey,
+    setSortKey,
     filtered,
     recoveryFilterLoading,
     recoveryByDeadLetterId,
