@@ -35,20 +35,20 @@ vi.mock("../dlq", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../dlq")>();
   return {
     ...actual,
-    listDeadLetters: vi.fn(),
+    listRecoveryQueue: vi.fn(),
   };
 });
 
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
-import { listDeadLetters } from "../dlq";
+import { listRecoveryQueue } from "../dlq";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
 
 const requireAuthMock = vi.mocked(requireAuth);
 const requireRoleMock = vi.mocked(requireRole);
-const listDeadLettersMock = vi.mocked(listDeadLetters);
+const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
 
 function findRoute(method: string, path: string): Route {
   const route = dlqRoutes.find((r) => {
@@ -111,7 +111,7 @@ describe("GET /dlq dispatcher gate", () => {
       const response = await fetch(`${baseUrl}/dlq`);
       expect(response.status).toBe(401);
       expect(requireRoleMock).not.toHaveBeenCalled();
-      expect(listDeadLettersMock).not.toHaveBeenCalled();
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -126,7 +126,7 @@ describe("GET /dlq dispatcher gate", () => {
       const response = await fetch(`${baseUrl}/dlq`);
       expect(response.status).toBe(403);
       expect(requireRoleMock).toHaveBeenCalledWith("org-1", "user-1", "viewer", "service-token");
-      expect(listDeadLettersMock).not.toHaveBeenCalled();
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -135,7 +135,7 @@ describe("GET /dlq dispatcher gate", () => {
   it("returns 200 with the DLQ list when the caller has viewer membership", async () => {
     requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValueOnce("viewer");
-    listDeadLettersMock.mockResolvedValueOnce([{ id: "dl-1", orgId: "org-1", runId: "r-1", nodeId: "n-1", status: "open" } as never]);
+    listRecoveryQueueMock.mockResolvedValueOnce([{ id: "dl-1", orgId: "org-1", runId: "r-1", nodeId: "n-1", status: "open" } as never]);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
@@ -144,7 +144,14 @@ describe("GET /dlq dispatcher gate", () => {
       const payload = await response.json() as Array<{ id: string }>;
       expect(payload).toHaveLength(1);
       expect(payload[0]?.id).toBe("dl-1");
-      expect(listDeadLettersMock).toHaveBeenCalledWith("org-1", null, undefined);
+      // Bare /dlq: no filters, no sort — the home-preview path.
+      expect(listRecoveryQueueMock).toHaveBeenCalledWith("org-1", {
+        status: null,
+        owner: null,
+        severity: undefined,
+        sort: undefined,
+        limit: undefined,
+      });
     } finally {
       await close(server);
     }
@@ -153,7 +160,7 @@ describe("GET /dlq dispatcher gate", () => {
   it("returns 200 byte-for-byte when the caller has editor or admin membership", async () => {
     requireAuthMock.mockResolvedValueOnce({ orgId: "org-2", userId: "user-2", mode: "dev-headers", source: "dev" });
     requireRoleMock.mockResolvedValueOnce("editor");
-    listDeadLettersMock.mockResolvedValueOnce([]);
+    listRecoveryQueueMock.mockResolvedValueOnce([]);
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
@@ -162,6 +169,57 @@ describe("GET /dlq dispatcher gate", () => {
       const payload = await response.json();
       expect(payload).toEqual([]);
       expect(requireRoleMock).toHaveBeenCalledWith("org-2", "user-2", "viewer", "dev-headers");
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("GET /dlq filter + sort param wiring", () => {
+  it("threads owner=me → auth.userId and passes severity + sort through to the query", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    listRecoveryQueueMock.mockResolvedValueOnce([]);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?owner=me&severity=p1&sort=severity&status=open&limit=200`);
+      expect(response.status).toBe(200);
+      expect(listRecoveryQueueMock).toHaveBeenCalledWith("org-1", {
+        status: "open",
+        owner: "user-1",
+        severity: "p1",
+        sort: "severity",
+        limit: 200,
+      });
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an unknown severity with 400 and never queries", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?severity=p9`);
+      expect(response.status).toBe(400);
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an unknown sort with 400 and never queries", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?sort=sideways`);
+      expect(response.status).toBe(400);
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
