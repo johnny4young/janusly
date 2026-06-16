@@ -1,8 +1,8 @@
 /**
  * Recovery-queue view state for the DLQ / recovery panel. Owns the operator
  * filters (status / owner / severity), the sort selection, their localStorage
- * persistence, the recovery-items overlay fetch + its scope race-guard, and
- * the derived visible-rows set. Extracted from `DeadLettersPanel` so the
+ * persistence, the server-driven `/dlq` fetch, and inline recovery-overlay
+ * hydration. Extracted from `DeadLettersPanel` so the
  * view-state machinery is independently testable and the panel can focus on
  * rendering / selection / dialogs.
  *
@@ -10,7 +10,7 @@
  * - `apps/web/src/components/DeadLettersPanel.tsx`
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
@@ -39,8 +39,8 @@ export type OwnerScope = 'all' | 'mine'
 export const SEVERITIES = ['p1', 'p2', 'p3', 'p4'] as const
 /** Severity-scope filter for the recovery queue. `'all'` shows every severity;
  *  a `p1`–`p4` value narrows to dead letters whose recovery item carries that
- *  severity (a client-side refinement of the already-loaded set — severity is
- *  present on every item the overlay fetch returns). */
+ *  severity. The hook sends the filter to `/dlq`, so the server applies it
+ *  before the 200-row cap. */
 export type SeverityFilter = 'all' | typeof SEVERITIES[number]
 
 /** Sort keys for the recovery queue. `'newest'` (default) matches the server's
@@ -147,48 +147,9 @@ function getLocalStorage(): Storage | null {
   }
 }
 
-/** A recovery-item overlay row: the badge + drawer shapes merged, as the
- *  panel hydrates each `/recovery/items` entry. */
+/** A recovery-item overlay row: the badge + drawer shapes merged, hydrated
+ *  from each recovery-queue row's inline `recovery` field. */
 type RecoveryOverlayItem = RecoveryItemBadgeData & RecoveryItemDrawerData
-
-/** Sort rank for severities — lower is more urgent; a dead letter with no
- *  recovery item ranks last (4). */
-const SEVERITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }
-function severityRank(item: RecoveryOverlayItem | undefined): number {
-  return item ? SEVERITY_RANK[item.severity] ?? 4 : 4
-}
-
-/** Compare two dead-letter rows for the chosen sort key. `newest`/`oldest` use
- *  the dead letter's ISO `createdAt`; `severity` + `sla` read the overlay and
- *  tie-break newest-first; SLA-less rows sort last under `sla`. Pure — safe
- *  inside a stable `Array.sort`. */
-function compareRows(
-  a: DeadLetter,
-  b: DeadLetter,
-  sortKey: SortKey,
-  overlay: Map<string, RecoveryOverlayItem>,
-): number {
-  const newestFirst = (b.createdAt ?? '').localeCompare(a.createdAt ?? '')
-  switch (sortKey) {
-    case 'oldest':
-      return (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
-    case 'severity': {
-      const delta = severityRank(overlay.get(a.id)) - severityRank(overlay.get(b.id))
-      return delta !== 0 ? delta : newestFirst
-    }
-    case 'sla': {
-      const sa = overlay.get(a.id)?.slaTargetAtIso ?? ''
-      const sb = overlay.get(b.id)?.slaTargetAtIso ?? ''
-      if (!sa && !sb) return newestFirst
-      if (!sa) return 1
-      if (!sb) return -1
-      return sa.localeCompare(sb) || newestFirst
-    }
-    case 'newest':
-    default:
-      return newestFirst
-  }
-}
 
 /** Everything the recovery queue needs to render its filter/sort controls, the
  *  filtered + ordered DLQ rows, and the recovery-item overlay (badges +
@@ -202,26 +163,30 @@ export type RecoveryQueueFilters = {
   setSeverityFilter: (value: SeverityFilter) => void
   sortKey: SortKey
   setSortKey: (value: SortKey) => void
-  /** Visible DLQ rows after the status ∩ owner ∩ severity narrowing, ordered by `sortKey`. */
+  /** The cap-correct recovery-queue page from the server — already filtered by
+   *  status ∩ owner ∩ severity and ordered by `sortKey` BEFORE the 200-row
+   *  cap, so a matching row surfaces regardless of its `createdAt`. */
   filtered: DeadLetter[]
-  /** True while the owner=me / severity overlay fetch is in flight for the
-   *  current scope — callers suppress the empty state to avoid a false flash. */
+  /** True while the `/dlq` fetch is in flight — callers suppress the empty
+   *  state to avoid a false flash before the first page lands. */
   recoveryFilterLoading: boolean
   /** Overlay map keyed by `deadLetterId` for the per-row recovery badge. */
   recoveryByDeadLetterId: Map<string, RecoveryOverlayItem>
   /** Overlay list, for the drawer's open-by-item-id lookup. */
   recoveryItems: RecoveryOverlayItem[]
+  /** Manually refetch the current server-side recovery-queue page. */
+  refresh: () => void
 }
 
 /**
- * Manage the recovery-queue filters, sort selection, and recovery-item overlay
- * for a given `deadLetters` list. The persisted view selections restore on
- * mount and write back on change; the overlay fetch re-runs on
- * `platformVersion` bumps and owner-scope changes, with a readiness guard so a
- * slow fetch never filters against (or flashes an empty state over) a stale
- * overlay.
+ * Own the recovery-queue's filter/sort state AND its data fetch. The persisted
+ * view selections restore on mount and write back on change; the `/dlq` fetch
+ * re-runs on any filter/sort change + `platformVersion` bump and asks the
+ * server to filter + sort BEFORE the 200-row cap (so a P1 older than the newest
+ * 200 still surfaces). Each row carries its recovery overlay inline, so there's
+ * one cap-correct source — no separate `/recovery/items` fetch.
  */
-export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueueFilters {
+export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Filter + sort selections persist across navigation + reload (localStorage).
   // Read once on mount; each field is coercion-validated so stale/corrupt
   // storage falls back to the defaults rather than breaking the panel.
@@ -230,59 +195,41 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
   const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
   const [sortKey, setSortKey] = useState<SortKey>(initialFilters.sortKey)
-  const [recoveryItems, setRecoveryItems] = useState<RecoveryOverlayItem[]>([])
-  const [recoveryItemsScope, setRecoveryItemsScope] = useState<OwnerScope | null>(null)
+  const [rows, setRows] = useState<DeadLetter[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshNonce, setRefreshNonce] = useState(0)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
+  const refresh = useCallback(() => {
+    setRefreshNonce((value) => value + 1)
+  }, [])
 
+  // Server-side filter + sort, cap-correct: the query narrows + orders before
+  // the 200-row limit. `owner=me` is resolved to `auth.userId` server-side.
+  // Re-runs on any filter/sort change so the page always matches the controls.
   useEffect(() => {
     let cancelled = false
-    const scope = ownerScope
-    setRecoveryItemsScope(null)
-    // Scope the overlay fetch to the operator's own incidents when "Mine"
-    // is active. `owner=me` is resolved to `auth.userId` server-side, and the
-    // server-side scope is correct under the 200-row cap (client-side
-    // filtering of an all-items page could miss mine beyond the cap).
-    api(`/recovery/items?limit=200${ownerScope === 'mine' ? '&owner=me' : ''}`)
-      .then((resp: { items?: Array<{
-        id: string
-        deadLetterId: string
-        owner: string | null
-        severity: 'p1' | 'p2' | 'p3' | 'p4'
-        status: string
-        slaTargetAt: string
-        resolutionReason: string | null
-        comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
-        workflowId?: string | null
-        occurrenceCount?: number
-        lastOccurredAt?: string
-      }> }) => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (status !== 'all') params.set('status', status)
+    if (ownerScope === 'mine') params.set('owner', 'me')
+    if (severityFilter !== 'all') params.set('severity', severityFilter)
+    params.set('sort', sortKey)
+    params.set('limit', '200')
+    api(`/dlq?${params.toString()}`)
+      .then((resp) => {
         if (cancelled) return
-        const hydrated = (resp?.items ?? []).map((it) => ({
-          id: it.id,
-          deadLetterId: it.deadLetterId,
-          owner: it.owner,
-          severity: it.severity,
-          status: it.status as RecoveryItemBadgeData['status'],
-          slaTargetAtIso: it.slaTargetAt,
-          resolutionReason: (it.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
-          comments: it.comments ?? [],
-          workflowId: it.workflowId ?? null,
-          occurrenceCount: it.occurrenceCount ?? 1,
-          lastOccurredAtIso: it.lastOccurredAt ?? it.slaTargetAt,
-        }))
-        setRecoveryItems(hydrated)
-        setRecoveryItemsScope(scope)
+        setRows(Array.isArray(resp) ? (resp as DeadLetter[]) : [])
+        setLoading(false)
       })
       .catch(() => {
-        if (!cancelled) {
-          setRecoveryItems([])
-          setRecoveryItemsScope(scope)
-        }
+        if (cancelled) return
+        setRows([])
+        setLoading(false)
       })
     return () => {
       cancelled = true
     }
-  }, [platformVersion, ownerScope])
+  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey])
 
   // Persist the operator's filter + sort selections so they survive navigation
   // away from the Runs view and a tab reload. Mirrors the localStorage
@@ -292,37 +239,36 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
     writePersistedFilters({ status, ownerScope, severityFilter, sortKey })
   }, [status, ownerScope, severityFilter, sortKey])
 
-  const recoveryItemsReadyForCurrentScope = recoveryItemsScope === ownerScope
+  // Hydrate the recovery overlay from each row's inline `recovery` field — one
+  // cap-correct source, no second fetch. Rows with no recovery item (e.g. a
+  // legacy tenant with auto-create off) simply contribute no overlay entry.
+  const recoveryItems = useMemo<RecoveryOverlayItem[]>(() => {
+    const out: RecoveryOverlayItem[] = []
+    for (const row of rows) {
+      const r = row.recovery
+      if (!r) continue
+      out.push({
+        id: r.id,
+        deadLetterId: row.id,
+        owner: r.owner,
+        severity: r.severity,
+        status: r.status as RecoveryItemBadgeData['status'],
+        slaTargetAtIso: r.slaTargetAt,
+        resolutionReason: (r.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
+        comments: r.comments ?? [],
+        workflowId: r.workflowId ?? null,
+        occurrenceCount: r.occurrenceCount ?? 1,
+        lastOccurredAtIso: r.lastOccurredAt ?? r.slaTargetAt,
+      })
+    }
+    return out
+  }, [rows])
+
   const recoveryByDeadLetterId = useMemo(() => {
     const map = new Map<string, RecoveryOverlayItem>()
     for (const it of recoveryItems) map.set(it.deadLetterId, it)
     return map
   }, [recoveryItems])
-
-  const filtered = useMemo(() => {
-    let rows = status === 'all' ? deadLetters : deadLetters.filter(item => item.status === status)
-    // "Mine" narrows to dead letters whose recovery item is owned by the
-    // current operator. The overlay map is already scoped to owner=me by the
-    // fetch above, so membership in it is the ownership test; a dead letter
-    // with no recovery item is unassigned and correctly hidden under "Mine".
-    if (ownerScope === 'mine') {
-      if (!recoveryItemsReadyForCurrentScope) return []
-      rows = rows.filter(item => recoveryByDeadLetterId.has(item.id))
-    }
-    // Severity narrows to dead letters whose recovery item carries the
-    // selected severity. Client-side over the already-loaded overlay (every
-    // item ships its severity); a dead letter with no recovery item has no
-    // severity to match and is correctly excluded once a severity is picked.
-    if (severityFilter !== 'all') {
-      if (!recoveryItemsReadyForCurrentScope) return []
-      rows = rows.filter(item => recoveryByDeadLetterId.get(item.id)?.severity === severityFilter)
-    }
-    // Order the visible rows by the chosen sort key. Copy first — never mutate
-    // the filtered array (or the `deadLetters` prop); `Array.sort` is stable,
-    // so ties keep the incoming order (which is the server's `createdAt desc`).
-    return [...rows].sort((a, b) => compareRows(a, b, sortKey, recoveryByDeadLetterId))
-  }, [deadLetters, status, ownerScope, recoveryItemsReadyForCurrentScope, recoveryByDeadLetterId, severityFilter, sortKey])
-  const recoveryFilterLoading = (ownerScope === 'mine' || severityFilter !== 'all') && !recoveryItemsReadyForCurrentScope
 
   return {
     status,
@@ -333,9 +279,10 @@ export function useRecoveryQueueFilters(deadLetters: DeadLetter[]): RecoveryQueu
     setSeverityFilter,
     sortKey,
     setSortKey,
-    filtered,
-    recoveryFilterLoading,
+    filtered: rows,
+    recoveryFilterLoading: loading,
     recoveryByDeadLetterId,
     recoveryItems,
+    refresh,
   }
 }

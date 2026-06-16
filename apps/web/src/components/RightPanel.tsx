@@ -31,7 +31,6 @@ import { WorkflowSloPanel } from './WorkflowSloPanel'
 import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
 import { ScheduleHistoryPanel } from './ScheduleHistoryPanel'
 import { CredentialRotateModal } from './CredentialRotateModal'
-import { type DeadLetter } from './DeadLettersPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { SolutionPacksPanel } from './SolutionPacksPanel'
@@ -59,7 +58,6 @@ export type RightPanelProps = {
   credentials: Credential[]
   runs: RunSummary[]
   activeRunId?: string | null
-  deadLetters: DeadLetter[]
   usage: Record<string, number>
   aiHealth: AiHealth | null
   currentWorkflowName: string
@@ -175,7 +173,6 @@ export function RightPanel(props: RightPanelProps) {
       usage={props.usage}
       runNodes={props.runNodes}
       activeRunId={props.activeRunId}
-      deadLetters={props.deadLetters}
       onOpenRun={props.onOpenRun}
       onRefreshPlatform={props.onRefreshPlatform}
       onApproveNode={props.onApproveNode}
