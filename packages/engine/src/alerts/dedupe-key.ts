@@ -65,6 +65,12 @@ export function buildDedupeKey(trigger: AlertTrigger, payload: Record<string, un
       const itemId = asString(payload.itemId);
       return itemId ? `sla:${itemId}` : NO_KEY;
     }
+    case "workflow.schedule_anomaly": {
+      // Per-workflow key: one alert per workflow per cooldown summarises all
+      // its anomalous slots, rather than spamming one alert per slot.
+      const workflowId = asString(payload.workflowId);
+      return workflowId ? `schedule:${workflowId}` : NO_KEY;
+    }
     default:
       return NO_KEY;
   }

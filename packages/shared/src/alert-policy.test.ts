@@ -134,6 +134,18 @@ describe('ALERT_PARAMS_SCHEMAS', () => {
     ).toBe(false)
   })
 
+  it('workflow.schedule_anomaly accepts an empty filter or a workflowIds allowlist, rejects unknown keys', () => {
+    expect(ALERT_PARAMS_SCHEMAS['workflow.schedule_anomaly'].safeParse({}).success).toBe(true)
+    expect(
+      ALERT_PARAMS_SCHEMAS['workflow.schedule_anomaly'].safeParse({ workflowIds: ['wf_1', 'wf_2'] })
+        .success,
+    ).toBe(true)
+    // v1 exposes no tunable thresholds — an unknown key is rejected by .strict().
+    expect(
+      ALERT_PARAMS_SCHEMAS['workflow.schedule_anomaly'].safeParse({ thresholdStdDev: 2 }).success,
+    ).toBe(false)
+  })
+
   it('recovery_item.sla_breached accepts a severities filter', () => {
     expect(ALERT_PARAMS_SCHEMAS['recovery_item.sla_breached'].safeParse({}).success).toBe(true)
     expect(

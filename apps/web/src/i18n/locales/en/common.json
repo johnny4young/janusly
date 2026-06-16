@@ -2159,6 +2159,7 @@
 
   "alerts.triggers.recovery_item.created": "Recovery item created",
   "alerts.triggers.recovery_item.sla_breached": "Recovery item SLA breached",
+  "alerts.triggers.workflow.schedule_anomaly": "Schedule anomaly",
 
   "recoveryItems.badge.open": "Recovery item — severity {{severity}}, status {{status}}",
   "recoveryItems.severity.p1": "P1 — critical",

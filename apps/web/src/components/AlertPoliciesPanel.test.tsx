@@ -78,6 +78,26 @@ describe('<AlertPoliciesPanel />', () => {
       within(triggerSelect).queryByRole('option', { name: /Rate limiter degraded/i }),
     ).not.toBeInTheDocument()
   })
+
+  it('exposes the schedule-anomaly trigger with a workflow-ids filter input', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/alerts/policies') return { policies: [] }
+      if (path === '/credentials') return []
+      return null
+    })
+
+    render(<AlertPoliciesPanel />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /New policy/i }))
+    const triggerSelect = screen.getByLabelText('Trigger')
+    expect(
+      within(triggerSelect).getByRole('option', { name: 'Schedule anomaly' }),
+    ).toBeInTheDocument()
+
+    // Selecting it reveals the workflow-ids allowlist input.
+    fireEvent.change(triggerSelect, { target: { value: 'workflow.schedule_anomaly' } })
+    expect(screen.getByLabelText(/Workflow ids/i)).toBeInTheDocument()
+  })
 })
 
 describe('<RecentAlertsCard />', () => {

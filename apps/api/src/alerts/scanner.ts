@@ -1,5 +1,5 @@
 /**
- * Periodic scanner for the four state-driven alert triggers:
+ * Periodic scanner for the five state-driven alert triggers:
  *   - `failure_cluster.threshold` — re-cluster recent failure samples and
  *     fire when a cluster's frequency crosses the policy's `minFrequency`.
  *   - `workflow.slo_breach` — re-evaluate SLO breaches per workflow with
@@ -8,6 +8,9 @@
  *     longer than `policy.parameters.stalledMinutes`.
  *   - `recovery_item.sla_breached` — find open recovery items past their
  *     SLA target.
+ *   - `workflow.schedule_anomaly` — re-bucket each actively-scheduled
+ *     workflow's recent fires and fire when a day/hour slot's failure rate
+ *     diverges above the schedule baseline.
  *
  * Event-driven triggers (`dlq.entry_created`, `budget.blocked`,
  * `limiter.degraded`, `recovery_item.created`) fire in-process via the DI
@@ -22,8 +25,8 @@
  *   - Skips entirely when `JANUSLY_ALERTS_ENABLED !== "true"`.
  */
 
-import { and, eq, sql } from "drizzle-orm";
-import { db, runNodes, runs, workflowVersions } from "@janusly/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { db, runNodes, runs, scheduleEntries, workflowVersions } from "@janusly/db";
 
 import {
   evaluateWorkflowSlo,
@@ -34,14 +37,25 @@ import {
 import {
   queryFailureSamples,
   queryHealthSignals,
+  queryScheduleFires,
   listOpenItemsWithBreachedSla,
   getEnabledPoliciesByTrigger,
   listOrgIdsWithEnabledPolicies,
   type AlertPolicy,
 } from "@janusly/data";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
+import {
+  bucketScheduleFires,
+  MAX_FIRE_ROWS,
+  MAX_HISTORY_DAYS,
+} from "@janusly/engine/src/schedule-history";
 
 import { dispatchAlert } from "@janusly/engine/src/alerts/dispatcher";
+
+/** Defensive cap on how many actively-scheduled workflows a single org scan
+ *  will fire-query + bucket per tick, so a tenant with thousands of schedules
+ *  can't make one scan unbounded. */
+const SCHEDULE_ANOMALY_MAX_WORKFLOWS = 200;
 
 export const ALERTS_SCAN_JOB_ID = "system:alerts-scanner";
 export const ALERTS_SCAN_JOB_NAME = "alerts-scan-trigger";
@@ -115,6 +129,7 @@ async function runOrgScan(orgId: string): Promise<void> {
   await scanWorkflowSloBreaches(orgId);
   await scanStalledApprovals(orgId);
   await scanRecoveryItemSlaBreaches(orgId);
+  await scanScheduleAnomalies(orgId);
 }
 
 // ─── failure_cluster.threshold ─────────────────────────────────────────────
@@ -335,6 +350,137 @@ async function scanRecoveryItemSlaBreaches(orgId: string): Promise<void> {
       },
     });
   }
+}
+
+// ─── workflow.schedule_anomaly ─────────────────────────────────────────────
+
+async function scanScheduleAnomalies(orgId: string): Promise<void> {
+  const policies = await getEnabledPoliciesByTrigger(orgId, "workflow.schedule_anomaly");
+  if (policies.length === 0) return;
+  const scanTarget = collectScheduleAnomalyWorkflowTargets(policies);
+
+  let workflowIds: string[];
+  try {
+    workflowIds = await listScheduledWorkflowIds(orgId, scanTarget);
+  } catch (err) {
+    console.warn("[alerts] listScheduledWorkflowIds failed", { orgId, err });
+    return;
+  }
+  if (workflowIds.length === 0) return;
+
+  for (const workflowId of workflowIds) {
+    let fires: Awaited<ReturnType<typeof queryScheduleFires>>;
+    try {
+      fires = await queryScheduleFires(orgId, workflowId, MAX_HISTORY_DAYS, MAX_FIRE_ROWS);
+    } catch (err) {
+      console.warn("[alerts] schedule fires query failed", { orgId, workflowId, err });
+      continue;
+    }
+
+    // Reuse the SAME aggregator the Inspector heatmap renders, so an alert
+    // fires for exactly the slots the operator would see flagged in the panel.
+    const heatmap = bucketScheduleFires(fires);
+    const anomalies = heatmap.cells.filter((cell) => cell.anomaly);
+    if (anomalies.length === 0) continue;
+
+    await dispatchAlert({
+      orgId,
+      trigger: "workflow.schedule_anomaly",
+      payload: {
+        workflowId,
+        windowDays: MAX_HISTORY_DAYS,
+        anomalousSlotCount: anomalies.length,
+        anomalousSlots: anomalies.slice(0, 10).map((cell) => ({
+          dayOfWeek: cell.dayOfWeek,
+          hour: cell.hour,
+          total: cell.total,
+          fail: cell.fail,
+        })),
+        totalFires: heatmap.totalFires,
+        totalFail: heatmap.totalFail,
+      },
+    });
+  }
+}
+
+export function collectScheduleAnomalyWorkflowTargets(
+  policies: Pick<AlertPolicy, "parameters">[],
+): { includeOtherScheduledWorkflows: boolean; priorityWorkflowIds: string[] } {
+  let includeOtherScheduledWorkflows = false;
+  const priorityWorkflowIds = new Set<string>();
+
+  for (const policy of policies) {
+    const workflowIds = (policy.parameters as Partial<AlertParamsByTrigger["workflow.schedule_anomaly"]>)
+      .workflowIds;
+    if (!Array.isArray(workflowIds) || workflowIds.length === 0) {
+      includeOtherScheduledWorkflows = true;
+      continue;
+    }
+    for (const workflowId of workflowIds) {
+      if (typeof workflowId === "string" && workflowId.length > 0) {
+        priorityWorkflowIds.add(workflowId);
+      }
+    }
+  }
+
+  if (priorityWorkflowIds.size > SCHEDULE_ANOMALY_MAX_WORKFLOWS) {
+    console.warn("[alerts] schedule-anomaly workflow allowlist capped", {
+      cap: SCHEDULE_ANOMALY_MAX_WORKFLOWS,
+    });
+  }
+
+  return {
+    includeOtherScheduledWorkflows,
+    priorityWorkflowIds: [...priorityWorkflowIds].slice(0, SCHEDULE_ANOMALY_MAX_WORKFLOWS),
+  };
+}
+
+/** Distinct workflow ids that have at least one ENABLED schedule entry for the
+ *  org — the actively-scheduled set the anomaly scan walks. Explicit
+ *  workflowIds filters are read first so a targeted policy cannot be hidden
+ *  behind the general 200-workflow defensive cap. */
+async function listScheduledWorkflowIds(
+  orgId: string,
+  target: { includeOtherScheduledWorkflows: boolean; priorityWorkflowIds: string[] },
+): Promise<string[]> {
+  const workflowIds = new Set<string>();
+
+  if (target.priorityWorkflowIds.length > 0) {
+    const priorityRows = await db
+      .selectDistinct({ workflowId: scheduleEntries.workflowId })
+      .from(scheduleEntries)
+      .where(
+        and(
+          eq(scheduleEntries.orgId, orgId),
+          eq(scheduleEntries.enabled, true),
+          inArray(scheduleEntries.workflowId, target.priorityWorkflowIds),
+        ),
+      )
+      .limit(SCHEDULE_ANOMALY_MAX_WORKFLOWS);
+    for (const row of priorityRows) workflowIds.add(row.workflowId);
+  }
+
+  if (!target.includeOtherScheduledWorkflows) return [...workflowIds];
+
+  const remaining = SCHEDULE_ANOMALY_MAX_WORKFLOWS - workflowIds.size;
+  if (remaining <= 0) return [...workflowIds];
+
+  const rows = await db
+    .selectDistinct({ workflowId: scheduleEntries.workflowId })
+    .from(scheduleEntries)
+    .where(and(eq(scheduleEntries.orgId, orgId), eq(scheduleEntries.enabled, true)))
+    .limit(remaining + 1);
+  if (rows.length > remaining) {
+    console.warn("[alerts] scheduled-workflow scan capped", {
+      orgId,
+      cap: SCHEDULE_ANOMALY_MAX_WORKFLOWS,
+    });
+  }
+  for (const row of rows) {
+    if (workflowIds.size >= SCHEDULE_ANOMALY_MAX_WORKFLOWS) break;
+    workflowIds.add(row.workflowId);
+  }
+  return [...workflowIds];
 }
 
 // Re-export trigger type so the bootstrap file can reference it.

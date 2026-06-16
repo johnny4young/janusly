@@ -135,6 +135,18 @@ describe("matchesPolicyFilter", () => {
     expect(matchesPolicyFilter(policy, { frequency: 5, windowDays: 7 })).toBe(true);
     expect(matchesPolicyFilter(policy, { frequency: 5, windowDays: 30 })).toBe(false);
   });
+
+  it("workflow.schedule_anomaly applies the workflowIds whitelist", () => {
+    const unfiltered = makePolicy({ trigger: "workflow.schedule_anomaly", parameters: {} });
+    expect(matchesPolicyFilter(unfiltered, { workflowId: "wf_anything" })).toBe(true);
+
+    const filtered = makePolicy({
+      trigger: "workflow.schedule_anomaly",
+      parameters: { workflowIds: ["wf_critical"] },
+    });
+    expect(matchesPolicyFilter(filtered, { workflowId: "wf_critical" })).toBe(true);
+    expect(matchesPolicyFilter(filtered, { workflowId: "wf_other" })).toBe(false);
+  });
 });
 
 describe("__dispatchOneChannelForTests", () => {
