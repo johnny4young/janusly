@@ -162,6 +162,14 @@ export function matchesPolicyFilter(
       }
       return true;
     }
+    case "workflow.schedule_anomaly": {
+      const p = params as Partial<AlertParamsByTrigger["workflow.schedule_anomaly"]>;
+      if (Array.isArray(p.workflowIds) && p.workflowIds.length > 0) {
+        const workflowId = typeof payload.workflowId === "string" ? payload.workflowId : "";
+        if (!p.workflowIds.includes(workflowId)) return false;
+      }
+      return true;
+    }
     default:
       return true;
   }

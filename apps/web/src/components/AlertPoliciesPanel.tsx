@@ -140,6 +140,10 @@ function buildParameters(form: typeof EMPTY_FORM): Record<string, unknown> {
         stalledMinutes: form.stalledMinutes,
         ...(workflowIds.length ? { workflowIds } : {}),
       }
+    case 'workflow.schedule_anomaly':
+      return {
+        ...(workflowIds.length ? { workflowIds } : {}),
+      }
     default:
       return {}
   }
@@ -377,6 +381,17 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 <option value="org">{t('alerts.form.scopeOrg')}</option>
                 <option value="workflow">{t('alerts.form.scopeWorkflow')}</option>
               </select>
+            </label>
+          )}
+          {form.trigger === 'workflow.schedule_anomaly' && (
+            <label>
+              {t('alerts.form.workflowIds')}
+              <input
+                type="text"
+                value={form.workflowIds}
+                onChange={(e) => setForm({ ...form, workflowIds: e.target.value })}
+                placeholder={t('alerts.form.placeholder.workflowIds') as string}
+              />
             </label>
           )}
 
