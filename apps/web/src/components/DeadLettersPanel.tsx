@@ -104,6 +104,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     loadMore,
     hasMore,
     loadingMore,
+    counts,
   } = useRecoveryQueueFilters()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
@@ -119,7 +120,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     void onRefresh()
   }
 
-  const hasOpenEntry = filtered.some((item) => item.status === 'open')
+  // Org-wide open count drives the warning stripe — there are opens to work
+  // somewhere in the queue, regardless of the filtered page being viewed.
+  const hasOpenEntry = counts.open > 0
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
@@ -158,11 +161,13 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
       </div>
 
+      {/* Org-wide queue-health summary from /dlq/counts — NOT the filtered /
+          paginated page, so the breakdown stays honest under any filter. */}
       <div className="mini-grid">
-        <span><strong>{filtered.length}</strong>{t('dlq.statTotal')}</span>
-        <span><strong>{filtered.filter(item => item.status === 'open').length}</strong>{t('dlq.statOpen')}</span>
-        <span><strong>{filtered.filter(item => item.status === 'replayed').length}</strong>{t('dlq.statRetried')}</span>
-        <span><strong>{filtered.filter(item => item.status === 'resolved').length}</strong>{t('dlq.statResolved')}</span>
+        <span><strong>{counts.total}</strong>{t('dlq.statTotal')}</span>
+        <span><strong>{counts.open}</strong>{t('dlq.statOpen')}</span>
+        <span><strong>{counts.replayed}</strong>{t('dlq.statRetried')}</span>
+        <span><strong>{counts.resolved}</strong>{t('dlq.statResolved')}</span>
       </div>
 
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>

@@ -39,7 +39,7 @@ test('Solution Packs install, sample-run, and failure injection flows work from 
   await incidentPack.getByRole('button', { name: 'Break a node', exact: true }).click()
   await expect(page.getByText('Demo failure injected')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
-  await expect(page.locator('[data-testid^="dlq-row-"]').filter({ hasText: 'page_oncall' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('[data-testid^="dlq-row-"]').filter({ hasText: 'page_oncall' }).first()).toBeVisible({ timeout: 30_000 })
 
   expect(browserErrors).toEqual([])
 })

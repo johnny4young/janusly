@@ -14,6 +14,11 @@ packages:
 # at all (peer-dep-locked) are silenced in auditConfig.ignoreGhsas with a
 # matching SECURITY.md section.
 overrides:
+  # GHSA-gv7w-rqvm-qjhr: esbuild <0.28.1 misses binary integrity verification.
+  # Tooling-only transitive via tsx / drizzle-kit / vite; pin to the first patched
+  # version until parents naturally carry it.
+  esbuild: "0.28.1"
+
   # ioredis dedup (not an advisory). bullmq pins ioredis to an exact older
   # patch (5.10.1) while the app's direct deps track 5.11.0. Two physical
   # ioredis copies make a Redis instance from one line fail BullMQ's
