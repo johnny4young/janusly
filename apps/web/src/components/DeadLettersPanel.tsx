@@ -101,6 +101,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     recoveryByDeadLetterId,
     recoveryItems,
     refresh: refreshQueue,
+    loadMore,
+    hasMore,
+    loadingMore,
   } = useRecoveryQueueFilters()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
@@ -242,6 +245,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           />
         )}
         {filtered.length > 0 && (
+          <>
           <div ref={virtualContainerRef} className="we-virtual-list" data-testid="dlq-virtual-list">
             <div style={{ height: virtualTotalHeight, position: 'relative' }}>
               <ul className="we-list" style={{ transform: `translateY(${virtualStartOffset}px)` }}>
@@ -283,6 +287,20 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               </ul>
             </div>
           </div>
+          {/* Sibling BELOW the scroll container — never buried inside the
+              virtual list's internal scroll, so it stays reachable. */}
+          {hasMore && (
+            <button
+              type="button"
+              className="small-command we-load-more"
+              onClick={() => { void loadMore() }}
+              disabled={loadingMore}
+              data-testid="dlq-load-more"
+            >
+              {loadingMore ? t('dlq.loadingMore') : t('dlq.loadMore')}
+            </button>
+          )}
+          </>
         )}
         {openRecoveryItem && (
           <RecoveryItemDrawer

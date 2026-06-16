@@ -12,7 +12,7 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, recoveryItems } from "@janusly/db";
-import { eq, desc, asc, and, sql, type SQL } from "drizzle-orm";
+import { eq, desc, asc, and, or, lt, gt, isNull, sql, type SQL } from "drizzle-orm";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
 /** Closed enum of DLQ row statuses. */
@@ -40,6 +40,78 @@ export type RecoveryQueueSort = typeof RECOVERY_QUEUE_SORTS[number];
 /** Type guard for `RecoveryQueueSort`. */
 export function isRecoveryQueueSort(value: unknown): value is RecoveryQueueSort {
   return typeof value === "string" && (RECOVERY_QUEUE_SORTS as readonly string[]).includes(value);
+}
+
+/** Default recovery-queue page size for keyset ("load more") paging. */
+export const RECOVERY_QUEUE_PAGE_DEFAULT = 50;
+/** Hard cap on a single recovery-queue page (keeps the `pageSize + 1`
+ *  over-fetch under {@link DLQ_LIST_MAX_LIMIT} so `hasMore` is honest). */
+export const RECOVERY_QUEUE_PAGE_MAX = 100;
+
+/**
+ * A decoded keyset position into the recovery queue. `createdAt` + `id` are the
+ * stable tie-break shared by every sort; `key` is the lead-sort value — the
+ * `severity` text for the `severity` sort, the `slaTargetAt` ISO string for the
+ * `sla` sort, and `null` for `newest`/`oldest` OR for a row with no recovery
+ * item (the `NULLS LAST` tail). The keyset predicate interprets `key` per sort.
+ */
+export type RecoveryQueueCursor = { createdAt: Date; id: string; key: string | null };
+
+/**
+ * Encode the keyset position of `row` (the last row of a page) under `sort`
+ * into an opaque, URL-safe cursor. The cursor is unsigned — it only names a
+ * sort position and every query re-applies `eq(deadLetters.orgId, orgId)`
+ * independently, so a tampered cursor can only reorder the caller's own org
+ * page (never reach another tenant). Mirrors the unsigned `<iso>|<id>` events
+ * cursor posture.
+ */
+export function encodeRecoveryQueueCursor(sort: RecoveryQueueSort, row: RecoveryQueueRow): string {
+  // `created_at` is `defaultNow()`, so a persisted DLQ row always carries it;
+  // the epoch fallback only guards the type's nominal `Date | null`.
+  const createdAtIso = (row.createdAt ?? new Date(0)).toISOString();
+  const key =
+    sort === "severity"
+      ? row.recovery?.severity ?? null
+      : sort === "sla"
+        ? row.recovery
+          ? row.recovery.slaTargetAt.toISOString()
+          : null
+        : null;
+  const payload = { s: sort, c: createdAtIso, i: row.id, k: key };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+/**
+ * Decode a cursor minted by {@link encodeRecoveryQueueCursor}. Defensive: a
+ * malformed / wrong-shape cursor, or one minted under a different sort than the
+ * caller now requests, returns `null` (the route then serves page 1 rather than
+ * erroring — the client only ever echoes a server-minted cursor, and the web
+ * resets it on a sort change). Mirrors `parseEventsCursor`'s null-on-bad posture.
+ */
+export function decodeRecoveryQueueCursor(
+  raw: string | null | undefined,
+  expectedSort: RecoveryQueueSort,
+): RecoveryQueueCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as {
+      s?: unknown;
+      c?: unknown;
+      i?: unknown;
+      k?: unknown;
+    };
+    if (parsed.s !== expectedSort) return null;
+    if (typeof parsed.c !== "string" || typeof parsed.i !== "string" || parsed.i === "") return null;
+    const createdAt = new Date(parsed.c);
+    if (Number.isNaN(createdAt.getTime())) return null;
+    const key = typeof parsed.k === "string" ? parsed.k : null;
+    // The `sla` lead key round-trips as an ISO timestamp; reject a corrupt one
+    // so the keyset never compares against an Invalid Date.
+    if (expectedSort === "sla" && key !== null && Number.isNaN(new Date(key).getTime())) return null;
+    return { createdAt, id: parsed.i, key };
+  } catch {
+    return null;
+  }
 }
 
 /** The recovery-item overlay surfaced inline on each recovery-queue row — the
@@ -73,23 +145,74 @@ export type RecoveryQueueQuery = {
   severity?: RecoveryItemSeverity | null;
   sort?: RecoveryQueueSort;
   limit?: number;
+  /** Decoded keyset position (from {@link decodeRecoveryQueueCursor}). When set,
+   *  the query returns only rows strictly AFTER it in the chosen sort order. */
+  cursor?: RecoveryQueueCursor | null;
 };
 
-/** Build the ORDER BY for a recovery-queue sort. `severity`/`sla` push rows
- *  with no recovery item last (`NULLS LAST`) and tie-break newest-first so the
- *  ordering is deterministic. */
+/** Build the ORDER BY for a recovery-queue sort. Every sort ends with a
+ *  `deadLetters.id` tie-break so the ordering is total — keyset paging needs a
+ *  unique final key or it can skip / repeat rows that share the lead value.
+ *  `severity`/`sla` push rows with no recovery item last (`NULLS LAST`). */
 function recoveryQueueOrderBy(sort: RecoveryQueueSort): SQL[] {
   switch (sort) {
     case "oldest":
-      return [asc(deadLetters.createdAt)];
+      return [asc(deadLetters.createdAt), asc(deadLetters.id)];
     case "severity":
       // Severity text sorts p1<p2<p3<p4 = rank order (most urgent first).
-      return [sql`${recoveryItems.severity} asc nulls last`, desc(deadLetters.createdAt)];
+      return [sql`${recoveryItems.severity} asc nulls last`, desc(deadLetters.createdAt), desc(deadLetters.id)];
     case "sla":
-      return [sql`${recoveryItems.slaTargetAt} asc nulls last`, desc(deadLetters.createdAt)];
+      return [sql`${recoveryItems.slaTargetAt} asc nulls last`, desc(deadLetters.createdAt), desc(deadLetters.id)];
     case "newest":
     default:
-      return [desc(deadLetters.createdAt)];
+      return [desc(deadLetters.createdAt), desc(deadLetters.id)];
+  }
+}
+
+/**
+ * The "strictly after the cursor row" keyset predicate for a recovery-queue
+ * sort, ANDed into the WHERE so a page continues exactly where the previous one
+ * ended. Mirrors {@link recoveryQueueOrderBy} exactly — change one and you must
+ * change the other.
+ *
+ * `newest`/`oldest` are a plain `(createdAt, id)` keyset. `severity`/`sla` are a
+ * composite `NULLS LAST` keyset: a row follows the cursor when its lead value is
+ * later (`>`), or it is in the null tail (`IS NULL`), or it ties the lead value
+ * and advances the `(createdAt DESC, id DESC)` tie-break. When the cursor itself
+ * sits in the null tail (`key === null`), only other null-lead rows can follow.
+ */
+function recoveryQueueKeysetPredicate(sort: RecoveryQueueSort, cursor: RecoveryQueueCursor): SQL | undefined {
+  const { createdAt, id, key } = cursor;
+  // `(createdAt, id)` advancing for a DESC scan (newest / the severity+sla tie-break).
+  const createdDescTie = or(
+    lt(deadLetters.createdAt, createdAt),
+    and(eq(deadLetters.createdAt, createdAt), lt(deadLetters.id, id)),
+  );
+  switch (sort) {
+    case "oldest":
+      return or(
+        gt(deadLetters.createdAt, createdAt),
+        and(eq(deadLetters.createdAt, createdAt), gt(deadLetters.id, id)),
+      );
+    case "severity":
+      if (key === null) return and(isNull(recoveryItems.severity), createdDescTie);
+      return or(
+        gt(recoveryItems.severity, key),
+        isNull(recoveryItems.severity),
+        and(eq(recoveryItems.severity, key), createdDescTie),
+      );
+    case "sla": {
+      if (key === null) return and(isNull(recoveryItems.slaTargetAt), createdDescTie);
+      const slaKey = new Date(key);
+      return or(
+        gt(recoveryItems.slaTargetAt, slaKey),
+        isNull(recoveryItems.slaTargetAt),
+        and(eq(recoveryItems.slaTargetAt, slaKey), createdDescTie),
+      );
+    }
+    case "newest":
+    default:
+      return createdDescTie;
   }
 }
 
@@ -105,6 +228,10 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
   if (isDeadLetterStatus(query.status)) filters.push(eq(deadLetters.status, query.status));
   if (query.owner) filters.push(eq(recoveryItems.owner, query.owner));
   if (query.severity) filters.push(eq(recoveryItems.severity, query.severity));
+  if (query.cursor) {
+    const keyset = recoveryQueueKeysetPredicate(query.sort ?? "newest", query.cursor);
+    if (keyset) filters.push(keyset);
+  }
 
   const limitValue =
     typeof query.limit === "number" && Number.isFinite(query.limit) && query.limit > 0
@@ -141,6 +268,56 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
         }
       : null,
   }));
+}
+
+/** One keyset page of the recovery queue. `nextCursor` is non-null exactly when
+ *  `hasMore` is true — the opaque cursor to pass back for the next page. */
+export type RecoveryQueuePage = {
+  items: RecoveryQueueRow[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+/**
+ * Pure page builder over an over-fetched (`pageSize + 1`) result set: trims to
+ * `pageSize`, sets `hasMore` from the extra row, and mints the next cursor from
+ * the last returned row under `sort`. Pure so it unit-tests without a DB (mirrors
+ * `buildAuditPage`).
+ */
+export function buildRecoveryQueuePage(
+  overfetched: RecoveryQueueRow[],
+  pageSize: number,
+  sort: RecoveryQueueSort,
+): RecoveryQueuePage {
+  const hasMore = overfetched.length > pageSize;
+  const items = hasMore ? overfetched.slice(0, pageSize) : overfetched;
+  const last = items[items.length - 1];
+  return {
+    items,
+    hasMore,
+    nextCursor: hasMore && last ? encodeRecoveryQueueCursor(sort, last) : null,
+  };
+}
+
+/**
+ * One keyset page of the recovery queue. Over-fetches `pageSize + 1` rows
+ * through {@link listRecoveryQueue} (so the JOIN/WHERE/ORDER live in one place)
+ * and folds them through {@link buildRecoveryQueuePage}. `pageSize` is clamped to
+ * `[1, RECOVERY_QUEUE_PAGE_MAX]`; the over-fetch therefore stays under
+ * {@link DLQ_LIST_MAX_LIMIT} so `hasMore` is never a false negative.
+ */
+export async function queryRecoveryQueuePage(
+  orgId: string,
+  query: RecoveryQueueQuery = {},
+  pageSize?: number,
+): Promise<RecoveryQueuePage> {
+  const size =
+    typeof pageSize === "number" && Number.isFinite(pageSize) && pageSize > 0
+      ? Math.min(Math.floor(pageSize), RECOVERY_QUEUE_PAGE_MAX)
+      : RECOVERY_QUEUE_PAGE_DEFAULT;
+  const sort = query.sort ?? "newest";
+  const rows = await listRecoveryQueue(orgId, { ...query, sort, limit: size + 1 });
+  return buildRecoveryQueuePage(rows, size, sort);
 }
 
 /** Fetch one DLQ row by id, scoped to the org. Returns `null` when absent. */

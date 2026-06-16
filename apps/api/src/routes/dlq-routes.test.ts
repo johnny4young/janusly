@@ -35,13 +35,16 @@ vi.mock("../dlq", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../dlq")>();
   return {
     ...actual,
+    // The list + page queries are mocked; the cursor codec stays real so the
+    // /dlq/queue wiring tests exercise the actual decode → thread path.
     listRecoveryQueue: vi.fn(),
+    queryRecoveryQueuePage: vi.fn(),
   };
 });
 
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
-import { listRecoveryQueue } from "../dlq";
+import { encodeRecoveryQueueCursor, listRecoveryQueue, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
@@ -49,6 +52,17 @@ import type { Route } from "../routes";
 const requireAuthMock = vi.mocked(requireAuth);
 const requireRoleMock = vi.mocked(requireRole);
 const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
+const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
+
+/** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
+function cursorFor(sort: "newest" | "oldest" | "severity" | "sla", id: string, severity = "p1"): string {
+  const row = {
+    id,
+    createdAt: new Date("2026-06-01T10:00:00.000Z"),
+    recovery: { severity, slaTargetAt: new Date("2026-06-02T10:00:00.000Z") },
+  } as unknown as RecoveryQueueRow;
+  return encodeRecoveryQueueCursor(sort, row);
+}
 
 function findRoute(method: string, path: string): Route {
   const route = dlqRoutes.find((r) => {
@@ -220,6 +234,88 @@ describe("GET /dlq filter + sort param wiring", () => {
       const response = await fetch(`${baseUrl}/dlq?sort=sideways`);
       expect(response.status).toBe(400);
       expect(listRecoveryQueueMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("GET /dlq/queue (keyset pagination)", () => {
+  it("declares role: viewer, matching the bare /dlq surface", () => {
+    expect(findRoute("GET", "/dlq/queue").role).toBe("viewer");
+  });
+
+  it("resolves to the paginated route BEFORE the /dlq wildcard (first-match-wins)", () => {
+    // Both routes match "/dlq/queue"; the registry must list the queue route
+    // first so the dispatcher reaches the page handler, not the bare array.
+    const matchesGet = (r: Route, url: string) =>
+      r.method === "GET" && (typeof r.match === "string" ? r.match === url : r.match(url));
+    const queueIdx = dlqRoutes.findIndex((r) => matchesGet(r, "/dlq/queue"));
+    // The catch-all is the GET route that swallows an arbitrary /dlq path.
+    const wildcardIdx = dlqRoutes.findIndex((r) => matchesGet(r, "/dlq/anything-else"));
+    expect(queueIdx).toBeGreaterThanOrEqual(0);
+    expect(wildcardIdx).toBeGreaterThanOrEqual(0);
+    expect(queueIdx).toBeLessThan(wildcardIdx);
+  });
+
+  it("returns the { items, nextCursor, hasMore } envelope and threads owner=me + filters + pageSize", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const envelope = { items: [{ id: "dl-1" } as never], nextCursor: "next-abc", hasMore: true };
+    queryRecoveryQueuePageMock.mockResolvedValueOnce(envelope);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const cursor = cursorFor("severity", "dl-9", "p2");
+      const response = await fetch(`${baseUrl}/dlq/queue?owner=me&severity=p1&sort=severity&status=open&limit=50&cursor=${encodeURIComponent(cursor)}`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(envelope);
+      // The raw cursor is DECODED (real codec) and threaded as the cursor object;
+      // pageSize rides as the 3rd arg; the bare /dlq path is untouched.
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
+      expect(queryRecoveryQueuePageMock).toHaveBeenCalledWith(
+        "org-1",
+        expect.objectContaining({
+          status: "open",
+          owner: "user-1",
+          severity: "p1",
+          sort: "severity",
+          cursor: expect.objectContaining({ id: "dl-9", key: "p2" }),
+        }),
+        50,
+      );
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("ignores a cursor minted under a different sort (→ page 1, cursor: null)", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    queryRecoveryQueuePageMock.mockResolvedValueOnce({ items: [], nextCursor: null, hasMore: false });
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      // cursor minted under "severity" but the request asks for "newest".
+      const cursor = cursorFor("severity", "dl-9");
+      const response = await fetch(`${baseUrl}/dlq/queue?sort=newest&cursor=${encodeURIComponent(cursor)}`);
+      expect(response.status).toBe(200);
+      const call = queryRecoveryQueuePageMock.mock.calls[0];
+      expect(call?.[1]?.cursor).toBeNull();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an unknown severity / sort with 400 and never queries", async () => {
+    requireAuthMock.mockResolvedValue({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValue("viewer");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      expect((await fetch(`${baseUrl}/dlq/queue?severity=p9`)).status).toBe(400);
+      expect((await fetch(`${baseUrl}/dlq/queue?sort=sideways`)).status).toBe(400);
+      expect(queryRecoveryQueuePageMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
