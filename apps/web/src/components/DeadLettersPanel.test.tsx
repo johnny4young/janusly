@@ -10,23 +10,26 @@ import { DeadLettersPanel, type DeadLetter, type DeadLetterRecovery } from './De
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
 // Child cards (FailureClustersCard / AutoHealingPendingCard) get empty defaults.
 vi.mock('../api', () => ({
-  api: vi.fn(async (path?: unknown) =>
-    typeof path === 'string' && path.startsWith('/dlq/queue')
-      ? { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
-      : { items: [], clusters: [], runs: [], proposals: [] },
-  ),
+  api: vi.fn(async (path?: unknown) => {
+    if (typeof path !== 'string') return { items: [], clusters: [], runs: [], proposals: [] }
+    if (path.startsWith('/dlq/counts')) return { total: 0, open: 0, replayed: 0, resolved: 0 }
+    if (path.startsWith('/dlq/queue')) return { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
+    return { items: [], clusters: [], runs: [], proposals: [] }
+  }),
   downloadFromApi: vi.fn(),
 }))
 
 const initialState = useWorkflowStore.getState()
 
-// The recovery-queue fetch is `/dlq/queue?…`; the sibling `/dlq/clusters` +
-// `/auto-healing/*` cards expect object shapes. Default to an empty keyset page
-// for `/dlq/queue?…` and card-safe objects for the rest.
-const defaultApiMock = async (path: string): Promise<unknown> =>
-  path.startsWith('/dlq/queue')
-    ? { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
-    : { items: [], clusters: [], runs: [], proposals: [] }
+// The recovery queue makes TWO fetches: `/dlq/queue?…` (the filtered/paginated
+// list) and `/dlq/counts` (the org-wide mini-grid summary). The sibling
+// `/dlq/clusters` + `/auto-healing/*` cards expect object shapes. Default to an
+// empty page / zero counts and card-safe objects for the rest.
+const defaultApiMock = async (path: string): Promise<unknown> => {
+  if (path.startsWith('/dlq/counts')) return { total: 0, open: 0, replayed: 0, resolved: 0 }
+  if (path.startsWith('/dlq/queue')) return { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
+  return { items: [], clusters: [], runs: [], proposals: [] }
+}
 
 function overlay(id: string, severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2'): DeadLetterRecovery {
   return {
@@ -60,12 +63,24 @@ function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLe
 
 const SEVERITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }
 
-/** Simulate the server `/dlq/queue` endpoint: filter + sort the full row set by
- *  the query params and return them as a single (no-more) keyset page, so a
- *  panel test exercises the real "server filters, panel renders" contract.
- *  Non-`/dlq/queue` calls (child cards) get empty defaults. */
+/** The org-wide status breakdown `/dlq/counts` returns — derived from the FULL
+ *  row set, never the filtered page (that is the endpoint's whole point). */
+function countsFromRows(rows: DeadLetter[]) {
+  return {
+    total: rows.length,
+    open: rows.filter((r) => r.status === 'open').length,
+    replayed: rows.filter((r) => r.status === 'replayed').length,
+    resolved: rows.filter((r) => r.status === 'resolved').length,
+  }
+}
+
+/** Simulate the server: `/dlq/counts` returns the org-wide breakdown of the FULL
+ *  row set; `/dlq/queue` filters + sorts by the query params and returns one
+ *  (no-more) keyset page — so a panel test exercises the real "server filters,
+ *  panel renders" contract. Other calls (child cards) get empty defaults. */
 function dlqMock(rows: DeadLetter[]) {
   return async (path: string): Promise<unknown> => {
+    if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
     if (!path.startsWith('/dlq/queue')) return { items: [], clusters: [], runs: [], proposals: [] }
     const params = new URL(path, 'http://x').searchParams
     let out = rows
@@ -199,11 +214,30 @@ describe('<DeadLettersPanel />', () => {
     await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
-  it('shows the warning stripe when the visible page has open rows', async () => {
-    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('open-1', { status: 'open' })]))
+  it('shows the warning stripe from the org-wide open count, not the visible page', async () => {
+    // Empty loaded page, but the org-wide counts report opens → stripe still on.
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return { total: 5, open: 3, replayed: 1, resolved: 1 }
+      if (path.startsWith('/dlq/queue')) return { items: [], nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
     const { container } = render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
-    await waitFor(() => expect(screen.getByTestId('dlq-row-open-1')).toBeInTheDocument())
-    expect(container.querySelector('[data-severity="warning"]')).not.toBeNull()
+    await waitFor(() => expect(container.querySelector('[data-severity="warning"]')).not.toBeNull())
+  })
+
+  it('renders the mini-grid from org-wide /dlq/counts, not the loaded page', async () => {
+    // The loaded page has 1 open row; the org-wide counts are 120/100/15/5.
+    // The mini-grid must show the org-wide breakdown instead of the filtered
+    // page, so paging or filters cannot make the queue-health summary drift.
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path.startsWith('/dlq/counts')) return { total: 120, open: 100, replayed: 15, resolved: 5 }
+      if (path.startsWith('/dlq/queue')) return { items: [mockDeadLetter('a', { status: 'open' })], nextCursor: null, hasMore: false }
+      return { items: [], clusters: [], runs: [], proposals: [] }
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
+    const values = [...document.querySelectorAll('.mini-grid strong')].map((s) => s.textContent)
+    expect(values).toEqual(['120', '100', '15', '5'])
   })
 
   it('clicking a DLQ row keeps the handler bound (selection smoke)', async () => {

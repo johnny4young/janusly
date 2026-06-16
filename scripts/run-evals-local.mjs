@@ -7,7 +7,7 @@
  * single command instead of remembering to start `pnpm dev` first.
  *
  * Lifecycle:
- *   1. `docker compose up -d redis postgres`
+ *   1. `docker compose up -d --renew-anon-volumes redis postgres`
  *   2. wait for Postgres to accept connections (`pg_isready`)
  *   3. `pnpm migrate` — applies the Drizzle migrations from packages/db
  *   4. spawn `apps/api` only (detached process group) on PORT 3001
@@ -34,6 +34,9 @@
  *   exclusively the synchronous `/ai/generate-workflow` route, which does no
  *   queue/worker work, so the worker would be dead weight.
  * - Always runs `docker compose down` on exit (AGENTS.md Compose lifecycle).
+ * - Postgres / Redis data must be clean for every run. Mirror the e2e runner
+ *   by renewing anonymous volumes on startup instead of using `down -v`, which
+ *   would delete the named Ollama model cache used by `pnpm dev`.
  * - SIGINT/SIGTERM handlers tear the stack down rather than orphaning
  *   containers.
  */
@@ -184,7 +187,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
-  await run("docker", ["compose", "up", "-d", "redis", "postgres"]);
+  await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "redis", "postgres"]);
 
   await waitForPostgres();
   await run("pnpm", ["migrate"]);

@@ -164,6 +164,16 @@ type RecoveryQueuePageResponse = {
   hasMore: boolean
 }
 
+/** The org-wide DLQ status breakdown returned by `GET /dlq/counts` — the
+ *  mini-grid's queue-health summary, independent of the filtered/paginated page. */
+type RecoveryQueueCounts = {
+  total: number
+  open: number
+  replayed: number
+  resolved: number
+}
+const EMPTY_COUNTS: RecoveryQueueCounts = { total: 0, open: 0, replayed: 0, resolved: 0 }
+
 /** Build the `/dlq/queue?…` path from the current filter/sort selections plus an
  *  optional keyset `cursor`. Shared by the first-page effect and `loadMore` so
  *  the next-page request is byte-identical to the first except for the cursor. */
@@ -219,6 +229,10 @@ export type RecoveryQueueFilters = {
   /** True while a {@link loadMore} fetch is in flight (drives the button's
    *  disabled / "loading" state without blanking the already-loaded rows). */
   loadingMore: boolean
+  /** Org-wide DLQ status breakdown for the mini-grid — total / open / replayed /
+   *  resolved across the WHOLE queue, NOT the filtered page. Refetched on
+   *  `platformVersion` / refresh only, never on a filter or sort change. */
+  counts: RecoveryQueueCounts
 }
 
 /**
@@ -245,6 +259,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [cursor, setCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [counts, setCounts] = useState<RecoveryQueueCounts>(EMPTY_COUNTS)
   const [refreshNonce, setRefreshNonce] = useState(0)
   // Bumped on every first-page fetch; `loadMore` captures it and drops a stale
   // append if a filter/sort/refresh landed mid-fetch (the page-1 reset wins).
@@ -281,6 +296,31 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
       cancelled = true
     }
   }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey])
+
+  // Org-wide status counts for the mini-grid. Keyed ONLY on platformVersion +
+  // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
+  // queue, not the filtered page. A failed fetch degrades to zeros.
+  useEffect(() => {
+    let cancelled = false
+    api('/dlq/counts')
+      .then((resp) => {
+        if (cancelled) return
+        const c = resp as Partial<RecoveryQueueCounts> | null
+        setCounts({
+          total: Number(c?.total) || 0,
+          open: Number(c?.open) || 0,
+          replayed: Number(c?.replayed) || 0,
+          resolved: Number(c?.resolved) || 0,
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        setCounts(EMPTY_COUNTS)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [platformVersion, refreshNonce])
 
   // Fetch the next keyset page and APPEND it. The epoch guard drops the result
   // if a filter/sort/refresh reset the queue mid-fetch (so stale rows never
@@ -360,5 +400,6 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     loadMore,
     hasMore,
     loadingMore,
+    counts,
   }
 }

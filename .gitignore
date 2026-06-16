@@ -13,6 +13,8 @@ output/
 # .ts is committed; its per-run results are not).
 scripts/model-eval-results.*
 .env
+.env.local
+.env.*.local
 .DS_Store
 
 # Python sibling at packages/sdk-python (first Python package in the monorepo)

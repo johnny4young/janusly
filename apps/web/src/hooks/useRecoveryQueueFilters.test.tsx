@@ -69,6 +69,11 @@ function queueFetchCount(): number {
   return vi.mocked(api).mock.calls.filter(([p]) => String(p).startsWith('/dlq/queue')).length
 }
 
+/** Count the `/dlq/counts` (org-wide mini-grid) fetches issued so far. */
+function countsFetchCount(): number {
+  return vi.mocked(api).mock.calls.filter(([p]) => String(p).startsWith('/dlq/counts')).length
+}
+
 // Minimal harness: render the hook's observable outputs + setter triggers as
 // DOM so the case asserts against the contract without `renderHook`.
 function Harness() {
@@ -85,6 +90,7 @@ function Harness() {
       <span data-testid="loading">{String(f.recoveryFilterLoading)}</span>
       <span data-testid="has-more">{String(f.hasMore)}</span>
       <span data-testid="loading-more">{String(f.loadingMore)}</span>
+      <span data-testid="counts">{`${f.counts.total}/${f.counts.open}/${f.counts.replayed}/${f.counts.resolved}`}</span>
       <button data-testid="load-more" onClick={() => f.loadMore()} />
       <button data-testid="set-status-all" onClick={() => f.setStatus('all')} />
       <button data-testid="set-status-resolved" onClick={() => f.setStatus('resolved')} />
@@ -270,16 +276,18 @@ describe('useRecoveryQueueFilters', () => {
   })
 
   it('flags recoveryFilterLoading while the first-page fetch is in flight', async () => {
-    let resolveFetch: ((value: ReturnType<typeof emptyPage>) => void) | null = null
-    vi.mocked(api).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve
-        }) as unknown as Promise<unknown>,
-    )
+    // Hang only the queue fetch (which drives `recoveryFilterLoading`); the
+    // sibling /dlq/counts fetch resolves immediately so it doesn't interfere.
+    let resolveQueue: ((value: ReturnType<typeof emptyPage>) => void) | null = null
+    vi.mocked(api).mockImplementation((path) => {
+      if (String(path).startsWith('/dlq/counts')) return Promise.resolve({ total: 0, open: 0, replayed: 0, resolved: 0 }) as unknown as Promise<unknown>
+      return new Promise((resolve) => {
+        resolveQueue = resolve
+      }) as unknown as Promise<unknown>
+    })
     render(<Harness />)
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('true'))
-    resolveFetch?.(emptyPage())
+    resolveQueue?.(emptyPage())
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
   })
 
@@ -291,5 +299,42 @@ describe('useRecoveryQueueFilters', () => {
       const stored = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}')
       expect(stored.sortKey).toBe('oldest')
     })
+  })
+
+  it('fetches org-wide counts from /dlq/counts and exposes the parsed breakdown', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (String(path).startsWith('/dlq/counts')) return { total: 42, open: 30, replayed: 8, resolved: 4 }
+      return page([])
+    })
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('counts')).toHaveTextContent('42/30/8/4'))
+  })
+
+  it('does NOT refetch counts on a filter/sort change (org-wide, not view-scoped)', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (String(path).startsWith('/dlq/counts')) return { total: 5, open: 5, replayed: 0, resolved: 0 }
+      return page([])
+    })
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('counts')).toHaveTextContent('5/5/0/0'))
+    const countsBefore = countsFetchCount()
+    const queueBefore = queueFetchCount()
+
+    fireEvent.click(screen.getByTestId('set-status-resolved'))
+    fireEvent.click(screen.getByTestId('set-sort-severity'))
+    // The queue refetches on filter/sort; the counts must NOT.
+    await waitFor(() => expect(lastQueueParams()?.get('status')).toBe('resolved'))
+    expect(queueFetchCount()).toBeGreaterThan(queueBefore)
+    expect(countsFetchCount()).toBe(countsBefore)
+  })
+
+  it('defaults counts to zero when the /dlq/counts fetch fails', async () => {
+    vi.mocked(api).mockImplementation(async (path) => {
+      if (String(path).startsWith('/dlq/counts')) throw new Error('boom')
+      return page([])
+    })
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('open'))
+    expect(screen.getByTestId('counts')).toHaveTextContent('0/0/0/0')
   })
 })

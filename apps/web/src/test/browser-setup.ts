@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { afterEach, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { initI18n } from '../i18n'
+import '../index.css'
 
 // Bootstrap i18next once for the browser-mode suite — components that route
 // through `useT()` need an initialised instance to look up strings. The

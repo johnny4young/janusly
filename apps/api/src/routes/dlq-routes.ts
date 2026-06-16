@@ -28,7 +28,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
-import { decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
+import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
   autoResolveRecoveryItemFromReplay,
@@ -118,6 +118,15 @@ export const dlqRoutes: Route[] = [
           pageSize,
         ),
       );
+    } },
+  // Recovery-queue mini-grid counts — the ORG-WIDE status breakdown
+  // (Total / Open / Retried / Resolved), unscoped by the operator's
+  // filter/sort/page. Registered BEFORE the generic /dlq dispatcher for the
+  // same first-match-wins reason as `/dlq/queue`. Separate from the filtered
+  // `/dlq/queue` page so the summary stays the whole-queue health snapshot.
+  { method: "GET", match: (url) => url === "/dlq/counts" || url.startsWith("/dlq/counts?"), role: "viewer",
+    handler: async ({ res, auth }) => {
+      return sendJson(res, await countDeadLettersByStatus(auth.orgId));
     } },
   // DLQ — viewer gate is symmetric with `/dlq/clusters` and
   // `/dlq/cluster-members` above; omitting `role:` lets any
