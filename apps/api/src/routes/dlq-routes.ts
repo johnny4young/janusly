@@ -28,7 +28,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
-import { getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
+import { decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
   autoResolveRecoveryItemFromReplay,
@@ -72,6 +72,52 @@ export const dlqRoutes: Route[] = [
       const limit = Number.isFinite(rawLimit) ? rawLimit : CLUSTER_MEMBERS_DEFAULT_LIMIT;
       const result = await findClusterMembers(auth.orgId, signature, windowDays, limit);
       return sendJson(res, { ...result, windowDays });
+    } },
+  // Recovery queue — keyset ("load more") pagination over the SAME cap-correct
+  // join as the bare `/dlq` array, returning a { items, nextCursor, hasMore }
+  // envelope. Registered BEFORE the generic /dlq dispatcher for the same
+  // first-match-wins reason as `/dlq/clusters`, and kept a SEPARATE route so
+  // bare `/dlq` stays an array for the home-preview + MCP `dlq.list` consumers.
+  { method: "GET", match: (url) => url === "/dlq/queue" || url.startsWith("/dlq/queue?"), role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const status = url.searchParams.get("status");
+      const severity = url.searchParams.get("severity");
+      const sortParam = url.searchParams.get("sort");
+      const ownerParam = url.searchParams.get("owner");
+      const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const pageSize = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
+
+      if (status && !isDeadLetterStatus(status)) {
+        return sendJson(res, { error: "Invalid DLQ status" }, 400);
+      }
+      if (severity && !(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(severity)) {
+        return sendJson(res, { error: "Invalid severity" }, 400);
+      }
+      if (sortParam && !isRecoveryQueueSort(sortParam)) {
+        return sendJson(res, { error: "Invalid sort" }, 400);
+      }
+      const sort = sortParam && isRecoveryQueueSort(sortParam) ? sortParam : undefined;
+      // `owner=me` resolves to the caller's stable user id (mirrors `/dlq`).
+      const owner = ownerParam === "me" ? auth.userId : ownerParam;
+      // Decode the cursor against the EFFECTIVE sort so a cursor minted under a
+      // different sort is ignored (→ page 1) rather than mis-ordering the page.
+      const cursor = decodeRecoveryQueueCursor(url.searchParams.get("cursor"), sort ?? "newest");
+
+      return sendJson(
+        res,
+        await queryRecoveryQueuePage(
+          auth.orgId,
+          {
+            status,
+            owner,
+            severity: severity ? (severity as RecoveryItemSeverity) : undefined,
+            sort,
+            cursor,
+          },
+          pageSize,
+        ),
+      );
     } },
   // DLQ — viewer gate is symmetric with `/dlq/clusters` and
   // `/dlq/cluster-members` above; omitting `role:` lets any
