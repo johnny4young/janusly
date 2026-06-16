@@ -32,6 +32,7 @@ export const ALERT_TRIGGERS = [
   'approval.stalled',
   'recovery_item.created',
   'recovery_item.sla_breached',
+  'workflow.schedule_anomaly',
 ] as const
 
 export const AlertTriggerSchema = z.enum(ALERT_TRIGGERS)
@@ -94,6 +95,15 @@ export const AlertParamsRecoveryItemSlaBreachedSchema = z
   })
   .strict()
 
+export const AlertParamsWorkflowScheduleAnomalySchema = z
+  .object({
+    // Optional allowlist of workflow ids to alert on. Empty/absent → every
+    // actively-scheduled workflow. The anomaly thresholds + 90-day window are
+    // fixed in the engine (not tunable per policy in v1).
+    workflowIds: z.array(z.string().min(1).max(120)).max(50).optional(),
+  })
+  .strict()
+
 /**
  * Per-trigger parameters dispatch table. Caller picks the schema by the
  * value of `policy.trigger` then runs `.safeParse(policy.parameters)`.
@@ -107,6 +117,7 @@ export const ALERT_PARAMS_SCHEMAS = {
   'approval.stalled': AlertParamsApprovalStalledSchema,
   'recovery_item.created': AlertParamsRecoveryItemCreatedSchema,
   'recovery_item.sla_breached': AlertParamsRecoveryItemSlaBreachedSchema,
+  'workflow.schedule_anomaly': AlertParamsWorkflowScheduleAnomalySchema,
 } as const satisfies Record<AlertTrigger, z.ZodTypeAny>
 
 export type AlertParamsByTrigger = {
@@ -118,6 +129,7 @@ export type AlertParamsByTrigger = {
   'approval.stalled': z.infer<typeof AlertParamsApprovalStalledSchema>
   'recovery_item.created': z.infer<typeof AlertParamsRecoveryItemCreatedSchema>
   'recovery_item.sla_breached': z.infer<typeof AlertParamsRecoveryItemSlaBreachedSchema>
+  'workflow.schedule_anomaly': z.infer<typeof AlertParamsWorkflowScheduleAnomalySchema>
 }
 
 // ---------- channels ----------

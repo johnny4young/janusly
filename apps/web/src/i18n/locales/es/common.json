@@ -2159,6 +2159,7 @@
 
   "alerts.triggers.recovery_item.created": "Incidente creado",
   "alerts.triggers.recovery_item.sla_breached": "SLA de incidente incumplido",
+  "alerts.triggers.workflow.schedule_anomaly": "Anomalía de horario",
 
   "recoveryItems.badge.open": "Incidente — severidad {{severity}}, estado {{status}}",
   "recoveryItems.severity.p1": "P1 — crítico",

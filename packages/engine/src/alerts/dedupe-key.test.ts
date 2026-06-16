@@ -63,4 +63,11 @@ describe("buildDedupeKey", () => {
     ).toBe("sla:ri_99");
     expect(buildDedupeKey("recovery_item.sla_breached", {})).toBe("__none__");
   });
+
+  it("workflow.schedule_anomaly keys per workflow so all its slots collapse into one alert", () => {
+    expect(
+      buildDedupeKey("workflow.schedule_anomaly", { workflowId: "wf_1", anomalousSlotCount: 3 }),
+    ).toBe("schedule:wf_1");
+    expect(buildDedupeKey("workflow.schedule_anomaly", {})).toBe("__none__");
+  });
 });
