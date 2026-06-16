@@ -64,6 +64,26 @@ Run all gates BEFORE staging. Every gate must be green. In order:
 
 Resolve every HIGH finding inline. List MED findings as Follow-ups in the Review Guide; they do not block delivery.
 
+### UI smoke — mandatory when the diff renders anything in `apps/web/**`
+
+Before tearing Compose down, drive the **ticket's own surface** through a real
+browser following [`ui-smoke.md`](ui-smoke.md). The five rules are non-negotiable:
+
+1. **Focus the changed element** (element screenshot by ref/selector) — never a
+   `fullPage` frame of the app shell. The change is the subject of the frame.
+2. **Hide unrelated overlays first** (onboarding banner, toasts, budget banner,
+   command palette) so they don't obstruct the surface — dismiss or inject CSS.
+3. **Capture each state the change introduces** (default / interacted / loading /
+   result / empty / error) as a separate PNG — not one screen.
+4. **Prove each frame shows the change** via a `browser_snapshot` / DOM probe
+   before saving (the probe doubles as the functional assertion).
+5. **Name by surface + state, seed real ticket data, both locales when copy
+   changed, console 0 errors.**
+
+A generic full-page screenshot — or one where an overlay covers the change — is
+NOT acceptable evidence and must be retaken. List every PNG path + the state it
+shows + its probe result in the report's Verification notes.
+
 ## Step 5 — Failure handling
 
 When a gate fails:

@@ -879,6 +879,13 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-weight: 600;
 }
 
+/* Recovery-queue "Load more" — sits centered below the virtual list (a sibling
+   of the scroll container, never inside its internal scroll). */
+.we-load-more {
+  align-self: center;
+  margin-top: 4px;
+}
+
 .small-command.danger {
   border-color: var(--we-line-strong);
   color: var(--we-danger);

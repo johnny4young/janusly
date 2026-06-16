@@ -4,14 +4,15 @@ import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { DeadLettersPanel, type DeadLetter, type DeadLetterRecovery } from './DeadLettersPanel'
 
-// `DeadLettersPanel`'s hook fetches `/dlq?…` itself now — the server filters +
-// sorts before the cap and folds the recovery overlay inline. The default stub
+// `DeadLettersPanel`'s hook fetches `/dlq/queue?…` itself now — the server
+// filters + sorts before the page cap, folds the recovery overlay inline, and
+// returns a { items, nextCursor, hasMore } keyset envelope. The default stub
 // returns an empty page; `dlqMock` simulates the server for filter/sort cases.
 // Child cards (FailureClustersCard / AutoHealingPendingCard) get empty defaults.
 vi.mock('../api', () => ({
   api: vi.fn(async (path?: unknown) =>
-    typeof path === 'string' && path.startsWith('/dlq?')
-      ? ([] as DeadLetter[])
+    typeof path === 'string' && path.startsWith('/dlq/queue')
+      ? { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
       : { items: [], clusters: [], runs: [], proposals: [] },
   ),
   downloadFromApi: vi.fn(),
@@ -19,11 +20,13 @@ vi.mock('../api', () => ({
 
 const initialState = useWorkflowStore.getState()
 
-// The recovery-queue fetch is `/dlq?…` (always has a query string); the sibling
-// `/dlq/clusters` + `/auto-healing/*` cards expect object shapes. Default to an
-// empty recovery-queue page for `/dlq?…` and card-safe objects for the rest.
+// The recovery-queue fetch is `/dlq/queue?…`; the sibling `/dlq/clusters` +
+// `/auto-healing/*` cards expect object shapes. Default to an empty keyset page
+// for `/dlq/queue?…` and card-safe objects for the rest.
 const defaultApiMock = async (path: string): Promise<unknown> =>
-  path.startsWith('/dlq?') ? ([] as DeadLetter[]) : { items: [], clusters: [], runs: [], proposals: [] }
+  path.startsWith('/dlq/queue')
+    ? { items: [] as DeadLetter[], nextCursor: null, hasMore: false }
+    : { items: [], clusters: [], runs: [], proposals: [] }
 
 function overlay(id: string, severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2'): DeadLetterRecovery {
   return {
@@ -57,12 +60,13 @@ function mockDeadLetter(id: string, overrides: Partial<DeadLetter> = {}): DeadLe
 
 const SEVERITY_RANK: Record<string, number> = { p1: 0, p2: 1, p3: 2, p4: 3 }
 
-/** Simulate the server `/dlq` endpoint: filter + sort the full row set by the
- *  query params, so a panel test exercises the real "server filters, panel
- *  renders" contract. Non-`/dlq` calls (child cards) get empty defaults. */
+/** Simulate the server `/dlq/queue` endpoint: filter + sort the full row set by
+ *  the query params and return them as a single (no-more) keyset page, so a
+ *  panel test exercises the real "server filters, panel renders" contract.
+ *  Non-`/dlq/queue` calls (child cards) get empty defaults. */
 function dlqMock(rows: DeadLetter[]) {
   return async (path: string): Promise<unknown> => {
-    if (!path.startsWith('/dlq?')) return { items: [], clusters: [], runs: [], proposals: [] }
+    if (!path.startsWith('/dlq/queue')) return { items: [], clusters: [], runs: [], proposals: [] }
     const params = new URL(path, 'http://x').searchParams
     let out = rows
     const status = params.get('status')
@@ -75,16 +79,16 @@ function dlqMock(rows: DeadLetter[]) {
         (a, b) => (SEVERITY_RANK[a.recovery?.severity ?? ''] ?? 4) - (SEVERITY_RANK[b.recovery?.severity ?? ''] ?? 4),
       )
     }
-    return out
+    return { items: out, nextCursor: null, hasMore: false }
   }
 }
 
-/** The query params of the most recent `/dlq` fetch the panel's hook issued. */
+/** The query params of the most recent `/dlq/queue` fetch the panel's hook issued. */
 function lastDlqParams(): URLSearchParams | null {
   const calls = vi.mocked(api).mock.calls
   for (let i = calls.length - 1; i >= 0; i -= 1) {
     const path = String(calls[i][0])
-    if (path.startsWith('/dlq?')) return new URL(path, 'http://x').searchParams
+    if (path.startsWith('/dlq/queue')) return new URL(path, 'http://x').searchParams
   }
   return null
 }
@@ -138,15 +142,61 @@ describe('<DeadLettersPanel />', () => {
     vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
     render(<DeadLettersPanel onRefresh={onRefresh} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
-    const initialDlqCalls = vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/dlq?')).length
+    const initialDlqCalls = vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/dlq/queue')).length
 
     fireEvent.click(screen.getByRole('button', { name: /dlq\.refresh|refresh/i }))
 
     await waitFor(() => {
-      const nextDlqCalls = vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/dlq?')).length
+      const nextDlqCalls = vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith('/dlq/queue')).length
       expect(nextDlqCalls).toBeGreaterThan(initialDlqCalls)
     })
     expect(onRefresh).toHaveBeenCalled()
+  })
+
+  it('renders Load more when the server reports a next page and appends on click', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (!path.startsWith('/dlq/queue')) return { items: [], clusters: [], runs: [], proposals: [] }
+      const params = new URL(path, 'http://x').searchParams
+      if (params.get('cursor') === 'c1') return { items: [mockDeadLetter('b')], nextCursor: null, hasMore: false }
+      return { items: [mockDeadLetter('a')], nextCursor: 'c1', hasMore: true }
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
+    const button = screen.getByTestId('dlq-load-more')
+    expect(button).toBeInTheDocument()
+
+    fireEvent.click(button)
+    await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
+    // Page 1's row remains (append, not replace); the button hides at the end.
+    expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument()
+    expect(screen.queryByTestId('dlq-load-more')).toBeNull()
+  })
+
+  it('hides Load more when the server reports no next page', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')])) // dlqMock → hasMore: false
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
+    expect(screen.queryByTestId('dlq-load-more')).toBeNull()
+  })
+
+  it('disables Load more while the next page is in flight', async () => {
+    let resolveNext: ((value: unknown) => void) | null = null
+    vi.mocked(api).mockImplementation((path: string) => {
+      if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
+      const params = new URL(path, 'http://x').searchParams
+      if (params.get('cursor') === 'c1') {
+        return new Promise((resolve) => {
+          resolveNext = resolve
+        }) as unknown as Promise<unknown>
+      }
+      return Promise.resolve({ items: [mockDeadLetter('a')], nextCursor: 'c1', hasMore: true })
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('dlq-load-more'))
+    await waitFor(() => expect(screen.getByTestId('dlq-load-more')).toBeDisabled())
+    resolveNext?.({ items: [mockDeadLetter('b')], nextCursor: null, hasMore: false })
+    await waitFor(() => expect(screen.getByTestId('dlq-row-b')).toBeInTheDocument())
   })
 
   it('shows the warning stripe when the visible page has open rows', async () => {
@@ -278,18 +328,18 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     expect(screen.queryByTestId('dlq-empty')).toBeNull()
   })
 
-  it('does not flash the severity empty state while the /dlq fetch is in flight', async () => {
+  it('does not flash the severity empty state while the /dlq/queue fetch is in flight', async () => {
     const rows = [mockDeadLetter('a', { recovery: overlay('ri-a', 'p3') })]
-    let resolvePending: ((value: DeadLetter[]) => void) | null = null
+    let resolvePending: ((value: unknown) => void) | null = null
     vi.mocked(api).mockImplementation((path: string) => {
-      if (!path.startsWith('/dlq?')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
+      if (!path.startsWith('/dlq/queue')) return Promise.resolve({ items: [], clusters: [], runs: [], proposals: [] })
       const params = new URL(path, 'http://x').searchParams
       if (params.get('severity') === 'p1') {
-        return new Promise<DeadLetter[]>((resolve) => {
+        return new Promise((resolve) => {
           resolvePending = resolve
         }) as unknown as Promise<unknown>
       }
-      return Promise.resolve(rows)
+      return Promise.resolve({ items: rows, nextCursor: null, hasMore: false })
     })
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('dlq-row-a')).toBeInTheDocument())
@@ -298,7 +348,7 @@ describe('<DeadLettersPanel /> — severity filter', () => {
     // (stale-while-loading) and must NOT flash the severity empty state.
     expect(screen.queryByTestId('dlq-empty-severity')).toBeNull()
     // Once the empty p1 page lands, the severity empty state renders.
-    resolvePending?.([])
+    resolvePending?.({ items: [], nextCursor: null, hasMore: false })
     await waitFor(() => expect(screen.getByTestId('dlq-empty-severity')).toBeInTheDocument())
   })
 })

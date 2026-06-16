@@ -879,6 +879,8 @@
   "dlq.kicker": "Operations",
   "dlq.queue": "Recovery queue",
   "dlq.refresh": "Refresh",
+  "dlq.loadMore": "Load more",
+  "dlq.loadingMore": "Loading…",
   "dlq.statTotal": "Total",
   "dlq.statOpen": "Open",
   "dlq.statRetried": "Retried",

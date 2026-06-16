@@ -10,7 +10,7 @@
  * - `apps/web/src/components/DeadLettersPanel.tsx`
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
@@ -151,6 +151,39 @@ function getLocalStorage(): Storage | null {
  *  from each recovery-queue row's inline `recovery` field. */
 type RecoveryOverlayItem = RecoveryItemBadgeData & RecoveryItemDrawerData
 
+/** Rows fetched per "load more" page. The server clamps to its own max, so this
+ *  is just the request size; smaller pages keep the first paint snappy. */
+const RECOVERY_QUEUE_PAGE_SIZE = 50
+
+/** The keyset page envelope returned by `GET /dlq/queue`: the rows for this
+ *  page, the opaque cursor for the next page (`null` at the end), and whether a
+ *  next page exists. */
+type RecoveryQueuePageResponse = {
+  items: DeadLetter[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+/** Build the `/dlq/queue?…` path from the current filter/sort selections plus an
+ *  optional keyset `cursor`. Shared by the first-page effect and `loadMore` so
+ *  the next-page request is byte-identical to the first except for the cursor. */
+function buildQueuePath(args: {
+  status: DeadLetterStatusFilter
+  ownerScope: OwnerScope
+  severityFilter: SeverityFilter
+  sortKey: SortKey
+  cursor: string | null
+}): string {
+  const params = new URLSearchParams()
+  if (args.status !== 'all') params.set('status', args.status)
+  if (args.ownerScope === 'mine') params.set('owner', 'me')
+  if (args.severityFilter !== 'all') params.set('severity', args.severityFilter)
+  params.set('sort', args.sortKey)
+  params.set('limit', String(RECOVERY_QUEUE_PAGE_SIZE))
+  if (args.cursor) params.set('cursor', args.cursor)
+  return `/dlq/queue?${params.toString()}`
+}
+
 /** Everything the recovery queue needs to render its filter/sort controls, the
  *  filtered + ordered DLQ rows, and the recovery-item overlay (badges +
  *  drawer). */
@@ -163,28 +196,40 @@ export type RecoveryQueueFilters = {
   setSeverityFilter: (value: SeverityFilter) => void
   sortKey: SortKey
   setSortKey: (value: SortKey) => void
-  /** The cap-correct recovery-queue page from the server — already filtered by
-   *  status ∩ owner ∩ severity and ordered by `sortKey` BEFORE the 200-row
-   *  cap, so a matching row surfaces regardless of its `createdAt`. */
+  /** The recovery-queue rows loaded so far — the first keyset page plus any
+   *  appended via {@link loadMore}. Server-filtered by status ∩ owner ∩ severity
+   *  and ordered by `sortKey` before the page cap, so a matching row surfaces
+   *  regardless of its `createdAt`. */
   filtered: DeadLetter[]
-  /** True while the `/dlq` fetch is in flight — callers suppress the empty
-   *  state to avoid a false flash before the first page lands. */
+  /** True while the FIRST-page fetch is in flight — callers suppress the empty
+   *  state to avoid a false flash before the first page lands. (A "load more"
+   *  fetch sets {@link loadingMore} instead, so it never blanks the list.) */
   recoveryFilterLoading: boolean
   /** Overlay map keyed by `deadLetterId` for the per-row recovery badge. */
   recoveryByDeadLetterId: Map<string, RecoveryOverlayItem>
   /** Overlay list, for the drawer's open-by-item-id lookup. */
   recoveryItems: RecoveryOverlayItem[]
-  /** Manually refetch the current server-side recovery-queue page. */
+  /** Manually refetch the queue from page 1 (resets pagination). */
   refresh: () => void
+  /** Fetch the next keyset page and APPEND it to {@link filtered}. No-op when
+   *  there is no next page or a load-more is already in flight. */
+  loadMore: () => void
+  /** Whether the server reported a next page after the most recent fetch. */
+  hasMore: boolean
+  /** True while a {@link loadMore} fetch is in flight (drives the button's
+   *  disabled / "loading" state without blanking the already-loaded rows). */
+  loadingMore: boolean
 }
 
 /**
  * Own the recovery-queue's filter/sort state AND its data fetch. The persisted
- * view selections restore on mount and write back on change; the `/dlq` fetch
- * re-runs on any filter/sort change + `platformVersion` bump and asks the
- * server to filter + sort BEFORE the 200-row cap (so a P1 older than the newest
- * 200 still surfaces). Each row carries its recovery overlay inline, so there's
- * one cap-correct source — no separate `/recovery/items` fetch.
+ * view selections restore on mount and write back on change; the `/dlq/queue`
+ * fetch re-runs on any filter/sort change + `platformVersion` bump and asks the
+ * server to filter + sort BEFORE the page cap (so a P1 older than the newest
+ * page still surfaces). Each row carries its recovery overlay inline, so there's
+ * one cap-correct source — no separate `/recovery/items` fetch. Paging is
+ * keyset ("load more"): {@link loadMore} appends the next page; any filter/sort
+ * change resets to page 1.
  */
 export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Filter + sort selections persist across navigation + reload (localStorage).
@@ -197,39 +242,67 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [sortKey, setSortKey] = useState<SortKey>(initialFilters.sortKey)
   const [rows, setRows] = useState<DeadLetter[]>([])
   const [loading, setLoading] = useState(true)
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [refreshNonce, setRefreshNonce] = useState(0)
+  // Bumped on every first-page fetch; `loadMore` captures it and drops a stale
+  // append if a filter/sort/refresh landed mid-fetch (the page-1 reset wins).
+  const requestEpochRef = useRef(0)
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
   const refresh = useCallback(() => {
     setRefreshNonce((value) => value + 1)
   }, [])
 
   // Server-side filter + sort, cap-correct: the query narrows + orders before
-  // the 200-row limit. `owner=me` is resolved to `auth.userId` server-side.
-  // Re-runs on any filter/sort change so the page always matches the controls.
+  // the page cap. `owner=me` is resolved to `auth.userId` server-side. Re-runs
+  // on any filter/sort/refresh change, which RESETS pagination to page 1.
   useEffect(() => {
     let cancelled = false
+    requestEpochRef.current += 1
     setLoading(true)
-    const params = new URLSearchParams()
-    if (status !== 'all') params.set('status', status)
-    if (ownerScope === 'mine') params.set('owner', 'me')
-    if (severityFilter !== 'all') params.set('severity', severityFilter)
-    params.set('sort', sortKey)
-    params.set('limit', '200')
-    api(`/dlq?${params.toString()}`)
+    api(buildQueuePath({ status, ownerScope, severityFilter, sortKey, cursor: null }))
       .then((resp) => {
         if (cancelled) return
-        setRows(Array.isArray(resp) ? (resp as DeadLetter[]) : [])
+        const page = resp as RecoveryQueuePageResponse
+        setRows(Array.isArray(page?.items) ? page.items : [])
+        setCursor(page?.nextCursor ?? null)
+        setHasMore(Boolean(page?.hasMore))
         setLoading(false)
       })
       .catch(() => {
         if (cancelled) return
         setRows([])
+        setCursor(null)
+        setHasMore(false)
         setLoading(false)
       })
     return () => {
       cancelled = true
     }
   }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey])
+
+  // Fetch the next keyset page and APPEND it. The epoch guard drops the result
+  // if a filter/sort/refresh reset the queue mid-fetch (so stale rows never
+  // graft onto the new page-1); the button always re-enables in `finally`.
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore) return
+    const epoch = requestEpochRef.current
+    setLoadingMore(true)
+    try {
+      const page = (await api(
+        buildQueuePath({ status, ownerScope, severityFilter, sortKey, cursor }),
+      )) as RecoveryQueuePageResponse
+      if (epoch !== requestEpochRef.current) return
+      setRows((prev) => [...prev, ...(Array.isArray(page?.items) ? page.items : [])])
+      setCursor(page?.nextCursor ?? null)
+      setHasMore(Boolean(page?.hasMore))
+    } catch {
+      if (epoch === requestEpochRef.current) setHasMore(false)
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [cursor, loadingMore, status, ownerScope, severityFilter, sortKey])
 
   // Persist the operator's filter + sort selections so they survive navigation
   // away from the Runs view and a tab reload. Mirrors the localStorage
@@ -284,5 +357,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     recoveryByDeadLetterId,
     recoveryItems,
     refresh,
+    loadMore,
+    hasMore,
+    loadingMore,
   }
 }
