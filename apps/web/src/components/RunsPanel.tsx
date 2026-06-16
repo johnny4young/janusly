@@ -24,7 +24,7 @@ import { formatStatusLabel } from '../constants'
 import { downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
-import { DeadLettersPanel, type DeadLetter } from './DeadLettersPanel'
+import { DeadLettersPanel } from './DeadLettersPanel'
 import { RunExplainChat } from './RunExplainChat'
 import { HumanFormDialog } from './HumanFormDialog'
 import { ReplayLabDialog } from './ReplayLabDialog'
@@ -78,7 +78,6 @@ type RunsPanelProps = {
   usage: Record<string, number>
   runNodes: RunNode[]
   activeRunId?: string | null
-  deadLetters: DeadLetter[]
   onOpenRun: (id: string) => void
   onRefreshPlatform: () => void
   onApproveNode: (nodeId: string) => void
@@ -104,7 +103,6 @@ export function RunsPanel({
   usage,
   runNodes,
   activeRunId,
-  deadLetters,
   onOpenRun,
   onRefreshPlatform,
   onApproveNode,
@@ -361,7 +359,6 @@ export function RunsPanel({
       )}
 
       <DeadLettersPanel
-        deadLetters={deadLetters}
         onRefresh={onRefreshPlatform}
         onReplay={onReplayDeadLetter}
         onResolve={onResolveDeadLetter}

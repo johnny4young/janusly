@@ -848,7 +848,6 @@ export default function App() {
       credentials={credentials}
       runs={runs}
       activeRunId={runId}
-      deadLetters={deadLetters}
       usage={usage}
       aiHealth={aiHealth}
       currentWorkflowName={currentWorkflowName}

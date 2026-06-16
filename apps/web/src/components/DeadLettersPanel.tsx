@@ -44,7 +44,23 @@ import {
  *  changes (row chrome height or `.we-list`'s gap). */
 const DLQ_ROW_HEIGHT = 54
 
-/** Web-side `dead_letters` row shape (matches the API's response). */
+/** The recovery-item overlay the API folds inline onto each recovery-queue
+ *  row, so the panel renders the badge/drawer from one cap-correct fetch. */
+export type DeadLetterRecovery = {
+  id: string
+  owner: string | null
+  severity: 'p1' | 'p2' | 'p3' | 'p4'
+  status: string
+  slaTargetAt: string
+  resolutionReason: string | null
+  comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
+  workflowId?: string | null
+  occurrenceCount?: number
+  lastOccurredAt?: string
+}
+
+/** Web-side `dead_letters` row shape (matches the API's response). `recovery`
+ *  is the inline overlay (null when the row has no paired recovery item). */
 export type DeadLetter = {
   id: string
   runId: string
@@ -56,20 +72,20 @@ export type DeadLetter = {
   errorJson: unknown
   createdAt?: string
   replayedAt?: string
+  recovery?: DeadLetterRecovery | null
 }
 
 type DeadLettersPanelProps = {
-  deadLetters: DeadLetter[]
-  onRefresh: () => void
+  onRefresh: () => void | Promise<void>
   onReplay: (id: string) => void
   onResolve: (id: string) => void
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
-export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
+export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLettersPanelProps) {
   const { t } = useT()
-  // Filter state + persistence + the recovery-item overlay + the visible-rows
-  // derivation all live in the hook; this component owns rendering, row
+  // Filter/sort state + persistence + the cap-correct server fetch + the
+  // recovery overlay all live in the hook; this component owns rendering, row
   // selection, and the recovery / replay-lab dialogs.
   const {
     status,
@@ -84,8 +100,9 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
     recoveryFilterLoading,
     recoveryByDeadLetterId,
     recoveryItems,
-  } = useRecoveryQueueFilters(deadLetters)
-  const [selectedId, setSelectedId] = useState<string | null>(deadLetters[0]?.id ?? null)
+    refresh: refreshQueue,
+  } = useRecoveryQueueFilters()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
@@ -94,7 +111,12 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
 
-  const hasOpenEntry = deadLetters.some((item) => item.status === 'open')
+  const handleRefresh = () => {
+    refreshQueue()
+    void onRefresh()
+  }
+
+  const hasOpenEntry = filtered.some((item) => item.status === 'open')
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
@@ -112,8 +134,8 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
   } = useVirtualList({
     items: filtered,
     rowHeight: DLQ_ROW_HEIGHT,
-    // Reset scroll on filter swap, NOT on every parent refetch — the
-    // `platformVersion`-driven refetch produces a new `deadLetters`
+    // Reset scroll on filter swap, NOT on every refetch — the
+    // `platformVersion`-driven refetch produces a new `filtered`
     // reference even when the content is identical, and resetting
     // scroll there would jump the operator's view to row 0 on every
     // bump. The filter signal is the real "visible set changed" cue.
@@ -130,14 +152,14 @@ export function DeadLettersPanel({ deadLetters, onRefresh, onReplay, onResolve }
           <div className="section-kicker">{t('dlq.kicker')}</div>
           <strong>{t('dlq.queue')}</strong>
         </div>
-        <button className="small-command" onClick={onRefresh}>{t('dlq.refresh')}</button>
+        <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
       </div>
 
       <div className="mini-grid">
-        <span><strong>{deadLetters.length}</strong>{t('dlq.statTotal')}</span>
-        <span><strong>{deadLetters.filter(item => item.status === 'open').length}</strong>{t('dlq.statOpen')}</span>
-        <span><strong>{deadLetters.filter(item => item.status === 'replayed').length}</strong>{t('dlq.statRetried')}</span>
-        <span><strong>{deadLetters.filter(item => item.status === 'resolved').length}</strong>{t('dlq.statResolved')}</span>
+        <span><strong>{filtered.length}</strong>{t('dlq.statTotal')}</span>
+        <span><strong>{filtered.filter(item => item.status === 'open').length}</strong>{t('dlq.statOpen')}</span>
+        <span><strong>{filtered.filter(item => item.status === 'replayed').length}</strong>{t('dlq.statRetried')}</span>
+        <span><strong>{filtered.filter(item => item.status === 'resolved').length}</strong>{t('dlq.statResolved')}</span>
       </div>
 
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>

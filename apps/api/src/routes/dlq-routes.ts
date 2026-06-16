@@ -28,7 +28,8 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
-import { getDeadLetter, isDeadLetterStatus, listDeadLetters, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
+import { getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved } from "../dlq";
+import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
   autoResolveRecoveryItemFromReplay,
   createRecoveryItemForDeadLetter,
@@ -81,6 +82,9 @@ export const dlqRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const id = url.searchParams.get("id");
       const status = url.searchParams.get("status");
+      const severity = url.searchParams.get("severity");
+      const sort = url.searchParams.get("sort");
+      const ownerParam = url.searchParams.get("owner");
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
 
@@ -92,8 +96,26 @@ export const dlqRoutes: Route[] = [
       if (status && !isDeadLetterStatus(status)) {
         return sendJson(res, { error: "Invalid DLQ status" }, 400);
       }
+      if (severity && !(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(severity)) {
+        return sendJson(res, { error: "Invalid severity" }, 400);
+      }
+      if (sort && !isRecoveryQueueSort(sort)) {
+        return sendJson(res, { error: "Invalid sort" }, 400);
+      }
+      // `owner=me` resolves to the caller's stable user id (mirrors
+      // `/recovery/items`); any other value is treated as a literal owner id.
+      const owner = ownerParam === "me" ? auth.userId : ownerParam;
 
-      return sendJson(res, await listDeadLetters(auth.orgId, status, limit));
+      return sendJson(
+        res,
+        await listRecoveryQueue(auth.orgId, {
+          status,
+          owner,
+          severity: severity ? (severity as RecoveryItemSeverity) : undefined,
+          sort: sort && isRecoveryQueueSort(sort) ? sort : undefined,
+          limit,
+        }),
+      );
     } },
   { method: "POST", match: "/dlq/resolve", role: "editor",
     handler: async ({ req, res, auth }) => {
