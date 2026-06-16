@@ -12,7 +12,7 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, recoveryItems } from "@janusly/db";
-import { eq, desc, asc, and, or, lt, gt, isNull, sql, type SQL } from "drizzle-orm";
+import { eq, desc, asc, and, or, lt, gt, isNull, count, sql, type SQL } from "drizzle-orm";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
 /** Closed enum of DLQ row statuses. */
@@ -318,6 +318,42 @@ export async function queryRecoveryQueuePage(
   const sort = query.sort ?? "newest";
   const rows = await listRecoveryQueue(orgId, { ...query, sort, limit: size + 1 });
   return buildRecoveryQueuePage(rows, size, sort);
+}
+
+/** The org-wide DLQ status breakdown for the recovery-queue mini-grid.
+ *  `total` is every dead letter in the org; the three named buckets are the
+ *  closed `deadLetterStatuses` enum. Unscoped by filter — it is the queue's
+ *  health summary, NOT the filtered/paginated page. */
+export type DeadLetterCounts = {
+  total: number;
+  open: number;
+  replayed: number;
+  resolved: number;
+};
+
+/**
+ * Count the org's dead letters grouped by status, for the recovery-queue
+ * mini-grid. Org-scoped but deliberately UNSCOPED by owner/severity/status —
+ * the mini-grid summarizes the whole queue, independent of the filtered page
+ * the operator is viewing. One `GROUP BY status` over the existing
+ * `(orgId, status, createdAt)` index, so it stays cheap.
+ */
+export async function countDeadLettersByStatus(orgId: string): Promise<DeadLetterCounts> {
+  const rows = await db
+    .select({ status: deadLetters.status, count: count() })
+    .from(deadLetters)
+    .where(eq(deadLetters.orgId, orgId))
+    .groupBy(deadLetters.status);
+
+  const counts: DeadLetterCounts = { total: 0, open: 0, replayed: 0, resolved: 0 };
+  for (const row of rows) {
+    const n = Number(row.count) || 0;
+    counts.total += n;
+    if (row.status === "open") counts.open = n;
+    else if (row.status === "replayed") counts.replayed = n;
+    else if (row.status === "resolved") counts.resolved = n;
+  }
+  return counts;
 }
 
 /** Fetch one DLQ row by id, scoped to the org. Returns `null` when absent. */

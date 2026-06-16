@@ -5,7 +5,7 @@
  * so Playwright can drive the real web UI through real API + worker processes.
  *
  * Lifecycle:
- *   1. `docker compose up -d redis postgres`
+ *   1. `docker compose up -d --renew-anon-volumes redis postgres`
  *   2. wait for Postgres to accept connections (`pg_isready`)
  *   3. `pnpm migrate` — applies the Drizzle migrations from packages/db
  *   4. spawn `apps/api` on a free local port (3001 when available) and
@@ -24,6 +24,11 @@
  * - The harness owns the full Compose lifecycle. Don't move Compose
  *   orchestration into the workflow YAML — local and CI must use the same
  *   path so behaviour stays identical.
+ * - Postgres / Redis data must be clean for every run. These images use
+ *   anonymous container volumes for data, so `docker compose down` alone is
+ *   not enough: the next `up` may reattach stale state. Always start infra
+ *   with `--renew-anon-volumes`; do not use `down -v`, because that also
+ *   deletes the named Ollama model cache used by `pnpm dev`.
  * - SIGINT/SIGTERM handlers are installed; Ctrl+C in dev tears everything
  *   down rather than orphaning containers.
  */
@@ -255,7 +260,7 @@ try {
   const apiPort = await resolveApiPort(DEFAULT_API_PORT);
   const apiUrl = `http://127.0.0.1:${apiPort}`;
 
-  await run("docker", ["compose", "up", "-d", "redis", "postgres"]);
+  await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "redis", "postgres"]);
 
   await waitForPostgres();
   await run("pnpm", ["migrate"]);

@@ -35,16 +35,17 @@ vi.mock("../dlq", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../dlq")>();
   return {
     ...actual,
-    // The list + page queries are mocked; the cursor codec stays real so the
-    // /dlq/queue wiring tests exercise the actual decode → thread path.
+    // The list + page + counts queries are mocked; the cursor codec stays real
+    // so the /dlq/queue wiring tests exercise the actual decode → thread path.
     listRecoveryQueue: vi.fn(),
     queryRecoveryQueuePage: vi.fn(),
+    countDeadLettersByStatus: vi.fn(),
   };
 });
 
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
-import { encodeRecoveryQueueCursor, listRecoveryQueue, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { countDeadLettersByStatus, encodeRecoveryQueueCursor, listRecoveryQueue, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
@@ -53,6 +54,7 @@ const requireAuthMock = vi.mocked(requireAuth);
 const requireRoleMock = vi.mocked(requireRole);
 const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
 const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
+const countDeadLettersByStatusMock = vi.mocked(countDeadLettersByStatus);
 
 /** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
 function cursorFor(sort: "newest" | "oldest" | "severity" | "sla", id: string, severity = "p1"): string {
@@ -315,6 +317,42 @@ describe("GET /dlq/queue (keyset pagination)", () => {
     try {
       expect((await fetch(`${baseUrl}/dlq/queue?severity=p9`)).status).toBe(400);
       expect((await fetch(`${baseUrl}/dlq/queue?sort=sideways`)).status).toBe(400);
+      expect(queryRecoveryQueuePageMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("GET /dlq/counts (org-wide mini-grid)", () => {
+  it("declares role: viewer", () => {
+    expect(findRoute("GET", "/dlq/counts").role).toBe("viewer");
+  });
+
+  it("resolves to the counts route BEFORE the /dlq wildcard (first-match-wins)", () => {
+    const matchesGet = (r: Route, url: string) =>
+      r.method === "GET" && (typeof r.match === "string" ? r.match === url : r.match(url));
+    const countsIdx = dlqRoutes.findIndex((r) => matchesGet(r, "/dlq/counts"));
+    const wildcardIdx = dlqRoutes.findIndex((r) => matchesGet(r, "/dlq/anything-else"));
+    expect(countsIdx).toBeGreaterThanOrEqual(0);
+    expect(wildcardIdx).toBeGreaterThanOrEqual(0);
+    expect(countsIdx).toBeLessThan(wildcardIdx);
+  });
+
+  it("returns the org-wide { total, open, replayed, resolved } envelope for the caller's org", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const envelope = { total: 120, open: 100, replayed: 15, resolved: 5 };
+    countDeadLettersByStatusMock.mockResolvedValueOnce(envelope);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/counts`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(envelope);
+      expect(countDeadLettersByStatusMock).toHaveBeenCalledWith("org-1");
+      // The summary is its own query — the list + page paths are untouched.
+      expect(listRecoveryQueueMock).not.toHaveBeenCalled();
       expect(queryRecoveryQueuePageMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
