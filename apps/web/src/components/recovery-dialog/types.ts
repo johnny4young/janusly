@@ -1,0 +1,114 @@
+/**
+ * Failure-recovery dialog — shared data-shape types.
+ *
+ * Zero React, zero runtime logic: just the type vocabulary the dialog's
+ * parent, pure helpers (`./helpers.ts`), and render bodies all share so
+ * imports stay one-directional (parent + bodies → types, never back).
+ *
+ * Used by: apps/web/src/components/RecoveryDialog.tsx (the parent owns the
+ * `Step` state machine + the apply-flow callbacks; the bodies render the
+ * per-step UI). Re-exports `PreSaveBeforeSnapshot` from `RecoveryDeltaCard`
+ * so consumers thread the delta-card snapshot type through one import.
+ */
+
+import type { EvidenceRow } from '@janusly/shared/src/ai-evidence'
+import type { WorkflowDefinition } from '../../types'
+import type { PreSaveBeforeSnapshot } from '../RecoveryDeltaCard'
+
+export type { PreSaveBeforeSnapshot }
+
+export type PatchApproachLabel =
+  | 'add_retry'
+  | 'raise_timeout'
+  | 'swap_secret_ref'
+  | 'add_approval'
+  | 'fix_url'
+  | 'other'
+
+export type SuggestionTab = {
+  workflow: WorkflowDefinition
+  rationale: string
+  approachLabel: PatchApproachLabel
+  /** The model's raw self-rated confidence (0-100). */
+  confidence: number
+  /**
+   * The calibrated confidence (0-100) — `confidence` mapped through the
+   * org's per-approach curve server-side. Equals `confidence` when no
+   * calibration is available (disabled / no fit yet / below the sample
+   * threshold). Optional so pre-calibration cached responses and legacy
+   * fixtures still parse; the renderer falls back to `confidence` when
+   * absent.
+   */
+  calibratedConfidence?: number
+}
+
+export type PatchSuggestion = {
+  mode: 'ai' | 'fallback'
+  /** Legacy mirror of `suggestions[0]` — kept so older test fixtures and callers still work. */
+  suggestedWorkflow: WorkflowDefinition
+  /** Legacy mirror of `suggestions[0].rationale`. */
+  rationale: string
+  /** 1-3 alternative patches sorted by confidence desc. The route guarantees length ≥ 1. */
+  suggestions: SuggestionTab[]
+  /**
+   * "Why this suggestion?" evidence — the context the prompt composer fed
+   * the model (past feedback, recalled memory, runbook excerpt, recent
+   * similar errors, the fired signature rule, the tool input contract).
+   * Optional so pre-evidence cached responses + legacy fixtures still parse;
+   * the renderer treats `undefined` as `[]` and hides the panel.
+   */
+  evidence?: EvidenceRow[]
+  model?: string
+  provider?: string
+  aiError?: string
+}
+
+export type ClusterApplyError = {
+  deadLetterId: string
+  error: string
+}
+
+export type ClusterApplyResult = {
+  replayed: number
+  failed: number
+  errors: ClusterApplyError[]
+}
+
+export type Step =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'review'; suggestion: PatchSuggestion }
+  | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
+  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
+  | {
+      kind: 'cancelling'
+      suggestion: PatchSuggestion
+      selectedIndex: number
+      // Where the operator came from — drives the back button when they
+      // change their mind. `validation-failed` returns to the failure
+      // body; `review` returns to the diff.
+      sourceStep: 'review' | 'validation-failed'
+      // Validation-failed cancels carry the runId / errorJson so the
+      // back button can restore the prior step without losing context.
+      runId?: string
+      errorJson?: unknown
+    }
+  | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
+  | {
+      kind: 'applied'
+      runId?: string
+      cluster?: ClusterApplyResult
+      // Threaded through to <RecoveryDeltaCard>. All optional so save-route
+      // responses without a parseable shape (defensive — the route's
+      // contract guarantees these) fall back to the legacy ribbon.
+      appliedWorkflowId?: string
+      appliedVersion?: number
+      priorFailureSignature?: string | null
+      preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+    }
+  | { kind: 'error'; message: string }
+
+export type RunStatusPayload = {
+  run?: { status?: string }
+  nodes?: Array<{ nodeId?: string; status?: string; errorJson?: unknown }>
+}

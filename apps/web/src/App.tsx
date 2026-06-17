@@ -42,10 +42,12 @@ import { useWorkflowStore } from './store'
 import { useShallow } from 'zustand/react/shallow'
 import { api } from './api'
 import { useRunEventStream } from './hooks/useRunEventStream'
+import { useBootstrapData } from './hooks/useBootstrapData'
+import { useRunPolling } from './hooks/useRunPolling'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
-import type { DeadLetter } from './components/DeadLettersPanel'
-import type { ActiveTab, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiMode, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { useT } from './i18n'
@@ -140,7 +142,6 @@ export default function App() {
     eventsCursor,
     eventsHasMore,
     setEventsPagination,
-    setStreamStatus,
     resetRun,
     addToast,
     updateEdgeCondition: storeUpdateEdgeCondition,
@@ -192,7 +193,6 @@ export default function App() {
     eventsCursor: s.eventsCursor,
     eventsHasMore: s.eventsHasMore,
     setEventsPagination: s.setEventsPagination,
-    setStreamStatus: s.setStreamStatus,
     resetRun: s.resetRun,
     addToast: s.addToast,
     updateEdgeCondition: s.updateEdgeCondition,
@@ -203,15 +203,21 @@ export default function App() {
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
-  const [tools, setTools] = useState<ToolSchema[]>([])
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [solutionPacks, setSolutionPacks] = useState<SolutionPackPublic[]>([])
-  const [credentials, setCredentials] = useState<Credential[]>([])
-  const [runs, setRuns] = useState<RunSummary[]>([])
-  const [savedWorkflows, setSavedWorkflows] = useState<SavedWorkflow[]>([])
-  const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([])
-  const [usage, setUsage] = useState<Record<string, number>>({})
-  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
+  // Server-data bootstrap (tools / templates / packs / credentials / runs /
+  // saved workflows / dead letters / usage / ai-health) + the `refreshPlatform`
+  // fan-out, fired once `authReady` flips.
+  const {
+    tools,
+    templates,
+    solutionPacks,
+    credentials,
+    runs,
+    savedWorkflows,
+    deadLetters,
+    usage,
+    aiHealth,
+    refreshPlatform,
+  } = useBootstrapData(authReady)
   // Run-input dialog state. Open when the active workflow declares typed
   // `inputs` and the user presses Run; closed otherwise. Server errors
   // (JSONPath strings) are stored separately so the dialog can surface
@@ -246,55 +252,43 @@ export default function App() {
     [activeTab],
   )
 
+  // Sign-out driver for the Ctrl+Shift+Q shortcut (same body as the original
+  // inline keydown handler: AuthProvider.signOut → clearAuth → toast).
+  const signOut = useCallback(async () => {
+    try {
+      await AuthProvider.signOut()
+      clearAuth()
+      addToast(t('toasts.signedOut'), 'info')
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
+    }
+  }, [addToast, clearAuth, t])
+
   // Global keyboard shortcuts:
   //   Cmd/Ctrl+K — toggle command palette
   //   ?         — open keyboard shortcuts overlay (when not typing in an input)
+  //   /         — focus the sidebar search (when not typing in an input)
   //   Ctrl+Shift+Q — sign out (matches the kbd shown in the user menu)
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      const isTypingInForm = !!target && (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      )
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        setPaletteOpen(prev => !prev)
-        return
-      }
-      if (event.key === '?' && !isTypingInForm && !event.metaKey && !event.ctrlKey) {
-        event.preventDefault()
-        setShortcutsOpen(prev => !prev)
-        return
-      }
-      if (event.key === '/' && !isTypingInForm && !event.metaKey && !event.ctrlKey) {
-        // Focus the sidebar search input via a stable data attribute so a
-        // future CSS class rename doesn't silently no-op the shortcut.
-        const search = document.querySelector<HTMLInputElement>('[data-shortcut="sidebar-search"]')
-        if (search) {
-          event.preventDefault()
-          search.focus()
-          search.select()
-        }
-        return
-      }
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'q') {
-        event.preventDefault()
-        void (async () => {
-          try {
-            await AuthProvider.signOut()
-            clearAuth()
-            addToast(t('toasts.signedOut'), 'info')
-          } catch (error) {
-            addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
-          }
-        })()
-      }
+  const togglePalette = useCallback(() => setPaletteOpen(prev => !prev), [])
+  const toggleShortcuts = useCallback(() => setShortcutsOpen(prev => !prev), [])
+  const focusSidebarSearch = useCallback(() => {
+    // Focus the sidebar search input via a stable data attribute so a
+    // future CSS class rename doesn't silently no-op the shortcut.
+    const search = document.querySelector<HTMLInputElement>('[data-shortcut="sidebar-search"]')
+    if (search) {
+      search.focus()
+      search.select()
+      return true
     }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [addToast, clearAuth, t])
+    return false
+  }, [])
+  const fireSignOut = useCallback(() => { void signOut() }, [signOut])
+  useKeyboardShortcuts({
+    onTogglePalette: togglePalette,
+    onToggleShortcuts: toggleShortcuts,
+    onFocusSidebarSearch: focusSidebarSearch,
+    onSignOut: fireSignOut,
+  })
 
   useEffect(() => {
     let mounted = true
@@ -323,117 +317,22 @@ export default function App() {
     }
   }, [clearAuth, setAuth, setAuthReady])
 
-  const refreshPlatform = useCallback(async () => {
-    const [toolData, templateData, packData, credentialData, runData, deadLetterData, usageData, aiHealthData, workflowsData] = await Promise.allSettled([
-      api('/tools'),
-      api('/templates'),
-      api('/solution-packs'),
-      api('/credentials'),
-      api('/runs'),
-      api('/dlq'),
-      api('/billing/usage'),
-      api('/ai/health'),
-      api('/workflows'),
-    ])
-
-    if (toolData.status === 'fulfilled') setTools(Array.isArray(toolData.value) ? toolData.value : [])
-    if (templateData.status === 'fulfilled') setTemplates(Array.isArray(templateData.value) ? templateData.value : [])
-    if (packData.status === 'fulfilled') {
-      const packs = (packData.value as { packs?: SolutionPackPublic[] } | null)?.packs
-      setSolutionPacks(Array.isArray(packs) ? packs : [])
-    }
-    if (credentialData.status === 'fulfilled') setCredentials(Array.isArray(credentialData.value) ? credentialData.value : [])
-    if (runData.status === 'fulfilled') setRuns(Array.isArray(runData.value) ? runData.value : [])
-    if (deadLetterData.status === 'fulfilled') setDeadLetters(Array.isArray(deadLetterData.value) ? deadLetterData.value : [])
-    if (usageData.status === 'fulfilled' && usageData.value && typeof usageData.value === 'object') {
-      setUsage(usageData.value as Record<string, number>)
-    }
-    if (aiHealthData.status === 'fulfilled' && aiHealthData.value && typeof aiHealthData.value === 'object') {
-      setAiHealth(aiHealthData.value as AiHealth)
-    }
-    if (workflowsData.status === 'fulfilled') setSavedWorkflows(Array.isArray(workflowsData.value) ? workflowsData.value : [])
-  }, [])
-
-  useEffect(() => {
-    if (authReady) void refreshPlatform()
-  }, [authReady, refreshPlatform])
-
-  const loadStatus = useCallback(async (id: string): Promise<RunResponse> => {
-    const status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
-    setRunNodes(status.nodes ?? [])
-    const statusEvents = status.events ?? []
-    addEvents(statusEvents)
-    // /status always describes the latest page. Once the user has loaded older
-    // pages, preserving the existing cursor prevents polling from rewinding the
-    // "Load older events" button back to the first page of history.
-    if (typeof status.eventsHasMore === 'boolean') {
-      const state = useWorkflowStore.getState()
-      const hasLoadedBeyondLatestPage = state.events.length > statusEvents.length
-      if (!status.eventsHasMore) {
-        setEventsPagination(null, false)
-      } else if (!state.eventsCursor && !hasLoadedBeyondLatestPage) {
-        setEventsPagination(status.eventsCursor ?? null, true)
-      }
-    }
-    return status
-  }, [addEvents, setEventsPagination, setRunNodes])
-
   // Live-run SSE stream (primary). Owns `streamTransport`; on first byte it
   // sets `streamStatus='connected'` and the poll loop below skips its tick. On
   // any stream fault it sets `'polling'` and the very next tick resumes.
   useRunEventStream(runId)
 
-  // Polling fallback. The original 1.5s `/status` loop loads the initial
-  // timeline and stays as the safety net. Its tick is a no-op while SSE is the
-  // live transport (a cheap in-memory check, no network) and resumes the moment
-  // SSE drops back to `'polling'`. Deps intentionally exclude `streamTransport`
-  // so a transport flip never tears the interval down (which would otherwise
-  // race the SSE hook's `streamStatus` write).
-  useEffect(() => {
-    if (!runId) return
+  // Terminal-run callback for the poll loop: bump platform version so
+  // independent panels re-fetch (cross-panel reactivity), then refetch the
+  // shell's platform data. Stable so the poll effect doesn't re-bind per render.
+  const onRunTerminal = useCallback(() => {
+    bumpPlatformVersion()
+    return refreshPlatform()
+  }, [bumpPlatformVersion, refreshPlatform])
 
-    let closed = false
-    let stopped = false
-    let loadedInitialStatus = false
-    setStreamStatus('connecting')
-
-    const tick = async () => {
-      // SSE is the live updater after the first status snapshot. Keep the
-      // initial `/status` fetch even when SSE connects first; otherwise a
-      // node.waiting event published before subscription can be missed and
-      // `runNodes` never materializes.
-      if (loadedInitialStatus && useWorkflowStore.getState().streamTransport === 'sse') return
-      try {
-        const status = await loadStatus(runId)
-        loadedInitialStatus = true
-        if (closed) return
-        setStreamStatus('connected')
-
-        if (isTerminalRunStatus(status.run?.status)) {
-          stopped = true
-          window.clearInterval(interval)
-          bumpPlatformVersion()
-          await refreshPlatform()
-        }
-      } catch (error) {
-        if (!closed) {
-          setStreamStatus('error')
-          addToast(error instanceof Error ? error.message : t('toasts.runStatusFailed'), 'error')
-        }
-      }
-    }
-
-    void tick()
-    const interval = window.setInterval(() => {
-      if (!stopped) void tick()
-    }, 1500)
-
-    return () => {
-      closed = true
-      window.clearInterval(interval)
-      setStreamStatus('closed')
-    }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, setStreamStatus, t])
+  // Polling fallback (1.5s `/status`). Loads the initial timeline + stays as the
+  // safety net behind SSE. `loadStatus` is reused by the run-action handlers.
+  const { loadStatus } = useRunPolling(runId, onRunTerminal)
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedEdge = useMemo(() => edges.find(edge => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
