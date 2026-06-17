@@ -11,6 +11,7 @@
     "stop": "docker compose stop",
     "clean": "docker compose down -v",
     "build": "pnpm -r build",
+    "bundle-report": "node scripts/bundle-report.mjs",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",
     "test:e2e": "node scripts/run-e2e.mjs",
