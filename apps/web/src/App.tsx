@@ -19,13 +19,15 @@
  *   radix/cva/clsx/tailwind-merge here.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Layout } from './Layout'
 import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
-import { CommandPalette } from './components/CommandPalette'
-import { SnippetInsertMenu } from './components/SnippetInsertMenu'
-import { ShortcutsModal } from './components/ShortcutsModal'
+// On-demand overlays — code-split so their JS loads on first open (each is
+// gated on its open flag in the overlay below), not in the eager App chunk.
+const CommandPalette = lazy(() => import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette })))
+const SnippetInsertMenu = lazy(() => import('./components/SnippetInsertMenu').then((m) => ({ default: m.SnippetInsertMenu })))
+const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })))
 import { WorkflowCanvas } from './components/WorkflowCanvas'
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
@@ -35,7 +37,7 @@ import { Login } from './components/Login'
 import { UserMenu } from './components/UserMenu'
 import { WorkflowReadinessBadge } from './components/WorkflowReadinessBadge'
 import { WorkflowHealthBadge } from './components/WorkflowHealthBadge'
-import { RunInputDialog } from './components/RunInputDialog'
+const RunInputDialog = lazy(() => import('./components/RunInputDialog').then((m) => ({ default: m.RunInputDialog })))
 import { Activity, ChevronRight, PlayCircle, Search, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { AuthProvider, consumeSsoSessionFragment, isSupabaseConfigured, normalizeAuth } from './auth'
 import { useWorkflowStore } from './store'
@@ -918,7 +920,7 @@ export default function App() {
       })()}
       panel={isCanvasTab(activeTab) ? rightPanelElement : null}
       overlay={
-        <>
+        <Suspense fallback={null}>
           <BudgetBlockedBanner onOpenTab={setActiveTab} />
           <OnboardingBanner onOpenTab={setActiveTab} />
           {runInputOpen && currentWorkflowInputs ? (
@@ -931,6 +933,7 @@ export default function App() {
               onCancel={() => setRunInputOpen(false)}
             />
           ) : null}
+          {paletteOpen && (
           <CommandPalette
             open={paletteOpen}
             onClose={closePalette}
@@ -966,9 +969,10 @@ export default function App() {
               }
             }}
           />
-          <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} />
-          <SnippetInsertMenu open={snippetMenuOpen} onClose={closeSnippetMenu} />
-        </>
+          )}
+          {shortcutsOpen && <ShortcutsModal open={shortcutsOpen} onClose={closeShortcuts} />}
+          {snippetMenuOpen && <SnippetInsertMenu open={snippetMenuOpen} onClose={closeSnippetMenu} />}
+        </Suspense>
       }
       statusBar={
         <>
