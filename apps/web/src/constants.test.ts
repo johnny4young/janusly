@@ -99,7 +99,7 @@ describe('node-type catalogue', () => {
     it('localizes seeded node defaults through the active locale', () => {
       changeAppLanguage('es')
 
-      expect(getNodePreset('approval')).toEqual({ message: 'Aprobá este paso del flujo.' })
+      expect(getNodePreset('approval')).toEqual({ message: 'Aprueba este paso del flujo.' })
       expect(getNodePreset('human_form')).toMatchObject({
         title: 'Recolectar detalles de la solicitud',
         schema: {
