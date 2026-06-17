@@ -23,22 +23,26 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
-import { MultiAgentTimeline } from '../MultiAgentTimeline'
-import { WorkflowsDashboard } from './WorkflowsDashboard'
-import { MembersPanel } from './MembersPanel'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { WorkflowSloPanel } from './WorkflowSloPanel'
 import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
 import { ScheduleHistoryPanel } from './ScheduleHistoryPanel'
-import { CredentialRotateModal } from './CredentialRotateModal'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
-import { SolutionPacksPanel } from './SolutionPacksPanel'
 import { EmptyView, PanelChrome } from './panel-primitives'
-// Operations pulls 11 admin sub-panels + alert/budget/scim/permission forms
-// that canvas/Home users never touch — code-split it out of the main chunk.
+// Tab-specific panels are code-split out of the eager App chunk: each is only
+// rendered when the operator navigates to its own tab (never on Home or the
+// default authoring tab), so it loads on demand behind the shared <Suspense> in
+// RightPanel. The inspector sub-panels, AI Studio, and Inspector stay eager
+// above — they're on the default authoring path. OperationsPage additionally
+// pulls ~11 admin sub-panels + alert/budget/scim/permission forms.
+const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then((m) => ({ default: m.MultiAgentTimeline })))
+const WorkflowsDashboard = lazy(() => import('./WorkflowsDashboard').then((m) => ({ default: m.WorkflowsDashboard })))
+const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default: m.MembersPanel })))
+const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
-import { RunsPanel } from './RunsPanel'
+const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
+const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
@@ -96,11 +100,24 @@ export type RightPanelProps = {
   onOpenTab: (tab: ActiveTab) => void
 }
 
-/** Tab-aware right-side panel router — picks the inner panel component for
- *  the active tab. The 'home' tab is intentionally handled by `App.tsx`
- *  at the layout level (panel slot is null, Recovery Center goes in the main area
- *  so it has hero-page real estate); this dispatcher never receives it. */
+/** Tab-aware right-side panel — wraps the tab→panel router in a single
+ *  <Suspense> so the lazy tab panels (multi-agent / workflows / members / packs
+ *  / operations / runs) render a brief fallback on first open instead of
+ *  shipping in the eager App chunk. */
 export function RightPanel(props: RightPanelProps) {
+  const { t } = useT()
+  return (
+    <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+      <RightPanelRouter {...props} />
+    </Suspense>
+  )
+}
+
+/** Tab→panel router — picks the inner panel component for the active tab. The
+ *  'home' tab is intentionally handled by `App.tsx` at the layout level (panel
+ *  slot is null, Recovery Center goes in the main area so it has hero-page real
+ *  estate); this dispatcher never receives it. */
+function RightPanelRouter(props: RightPanelProps) {
   const { t } = useT()
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
@@ -123,11 +140,7 @@ export function RightPanel(props: RightPanelProps) {
       <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
     </PanelChrome>
   )
-  if (props.tab === 'operations') return (
-    <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
-      <OperationsPage />
-    </Suspense>
-  )
+  if (props.tab === 'operations') return <OperationsPage />
   if (props.tab === 'members') return (
     <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
       <MembersPanel />
@@ -372,7 +385,11 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
           )
         })}
       </div>
-      {rotating && <CredentialRotateModal credentialName={rotating} onClose={() => setRotating(null)} />}
+      {rotating && (
+        <Suspense fallback={null}>
+          <CredentialRotateModal credentialName={rotating} onClose={() => setRotating(null)} />
+        </Suspense>
+      )}
     </PanelChrome>
   )
 }
