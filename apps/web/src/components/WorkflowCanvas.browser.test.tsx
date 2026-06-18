@@ -1,6 +1,7 @@
 import React from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
+import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 
@@ -143,5 +144,55 @@ describe('WorkflowCanvas (browser mode)', () => {
     // signature instead so we don't bind to a brittle class string.
     const dotPattern = background!.querySelector('pattern circle')
     expect(dotPattern).toBeTruthy()
+  })
+
+  it('preserves the viewport across a display:none hide/show cycle (operations-cycle mechanism)', async () => {
+    // The production layout hides the canvas via `display: none` on non-canvas
+    // non-home tabs (e.g. operations) WITHOUT unmounting it, so the <ReactFlow>
+    // instance — and its viewport — survives `inspector -> operations ->
+    // inspector`. Mirror that here: render under <ReactFlowProvider> (as the
+    // lazy CanvasWorkspace does), capture the post-fitView viewport, toggle the
+    // wrapper's `display` off and back on, and assert the SAME viewport element
+    // is still mounted with the SAME transform. A style toggle never unmounts a
+    // React subtree, so a changed element identity here would mean the canvas
+    // remounted and `fitView` re-ran — i.e. the viewport invariant regressed.
+    const props = {
+      nodes: [
+        makeNode('alpha', 'Alpha step', { x: 0, y: 0 }),
+        makeNode('beta', 'Beta step', { x: 240, y: 0 }),
+      ],
+      edges: [makeEdge('e1', 'alpha', 'beta')],
+      onNodesChange: vi.fn(),
+      onEdgesChange: vi.fn(),
+      onConnect: vi.fn(),
+      onNodeClick: vi.fn(),
+      onEdgeClick: vi.fn(),
+    }
+    const { container, findByText } = render(
+      <ReactFlowProvider>
+        <div data-testid="canvas-host" style={{ width: 1024, height: 720, position: 'relative' }}>
+          <WorkflowCanvas {...props} />
+        </div>
+      </ReactFlowProvider>,
+    )
+    await findByText('Alpha step')
+
+    let viewportBefore!: HTMLElement
+    await waitFor(() => {
+      viewportBefore = container.querySelector('.react-flow__viewport') as HTMLElement
+      expect(viewportBefore).toBeTruthy()
+      expect(viewportBefore.style.transform).toMatch(/translate|matrix/i)
+    })
+    const transformBefore = viewportBefore.style.transform
+
+    const host = container.querySelector('[data-testid="canvas-host"]') as HTMLElement
+    host.style.display = 'none'
+    host.style.display = ''
+
+    // Read synchronously — ResizeObserver callbacks are async, so no re-fit can
+    // race this assertion. Same DOM node => the instance was never unmounted.
+    const viewportAfter = container.querySelector('.react-flow__viewport') as HTMLElement
+    expect(viewportAfter).toBe(viewportBefore)
+    expect(viewportAfter.style.transform).toBe(transformBefore)
   })
 })

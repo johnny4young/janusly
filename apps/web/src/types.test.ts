@@ -14,6 +14,7 @@ const ALL_TABS: ActiveTab[] = [
   'copilot',
   'marketplace',
   'templates',
+  'packs',
   'credentials',
   'inspector',
   'runs',
@@ -86,6 +87,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
     'members',
     'marketplace',
     'templates',
+    'packs',
     'credentials',
     'runs',
     'reasoning',
@@ -95,9 +97,10 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
   it.each(NON_CANVAS_NON_HOME)(
     '%s: canvas mounted but HIDDEN, contextual slot renders',
     (tab) => {
-      // Canvas wrapper stays in the DOM so the root-level <ReactFlowProvider>
-      // keeps its viewport state alive; `display: none` hides it from the
-      // layout while the contextual main slot fills the visible space.
+      // Canvas wrapper stays in the DOM so the lazy CanvasWorkspace's
+      // <ReactFlowProvider> (and its <ReactFlow> instance) keeps its viewport
+      // state alive; `display: none` hides it from the layout while the
+      // contextual main slot fills the visible space.
       expect(getCanvasVisibility(tab)).toEqual({
         mounted: true,
         visible: false,
@@ -132,5 +135,31 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
       // `tab` in scope for debugging when this test fails.
       void tab
     }
+  })
+})
+
+describe('canvas mount boundary — viewport persistence contract', () => {
+  // The <ReactFlowProvider> and the <ReactFlow> instance live inside the
+  // lazy `CanvasWorkspace`, mounted via `getCanvasVisibility`. That instance
+  // holds the viewport (zoom/pan); React Flow's viewport is uncontrolled
+  // (`fitView` on mount), so it survives ONLY while the instance stays
+  // mounted. This pins the mount boundary that makes persistence work: the
+  // canvas is mounted for EVERY non-home tab, so navigating between non-home
+  // tabs (e.g. inspector -> operations -> inspector) never unmounts it and
+  // the viewport persists. A round-trip through home unmounts it, so the
+  // viewport re-fits on the next mount (accepted; unchanged from before).
+  // Real zoom/pan retention across a hide/show cycle is exercised in
+  // `WorkflowCanvas.browser.test.tsx`.
+  const NON_HOME = ALL_TABS.filter((tab) => tab !== 'home')
+
+  it('keeps the canvas mounted across every non-home tab', () => {
+    for (const tab of NON_HOME) {
+      expect({ tab, mounted: getCanvasVisibility(tab).mounted }).toEqual({ tab, mounted: true })
+    }
+  })
+
+  it('unmounts the canvas only on home', () => {
+    expect(getCanvasVisibility('home').mounted).toBe(false)
+    expect(NON_HOME.every((tab) => getCanvasVisibility(tab).mounted)).toBe(true)
   })
 })
