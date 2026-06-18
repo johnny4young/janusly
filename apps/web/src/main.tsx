@@ -7,7 +7,6 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { ReactFlowProvider } from '@xyflow/react'
 import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import './index.css'
@@ -25,18 +24,17 @@ initI18n(resolveAppLanguage(stored))
 bootTheme()
 
 void import('./App').then(({ default: App }) => {
-  // The `<ReactFlowProvider>` lives at the app root so the canvas's viewport
-  // (zoom / pan) survives `inspector → operations → inspector` navigation.
-  // Inside the provider, the `App.tsx` dispatcher keeps the canvas DOM
-  // mounted on every non-home tab — visible on canvas tabs, hidden via
-  // `display: none` on non-canvas tabs. Tearing the canvas wrapper down on
-  // each navigation would destroy the provider's per-canvas state and reset
-  // zoom + pan to defaults.
+  // `<App>` is dynamically imported so the entry chunk stays lean. The React
+  // Flow provider is deliberately NOT mounted here — it lives inside the lazy
+  // `CanvasWorkspace` (`apps/web/src/components/CanvasWorkspace.tsx`), mounted
+  // only when the operator first leaves home for a canvas-bearing tab. That
+  // keeps `@xyflow/react` (the bundle's heaviest dependency) off the boot
+  // path, so the Recovery Center landing downloads zero React Flow. The
+  // canvas wrapper stays mounted across every non-home tab, so the viewport
+  // (zoom / pan) still survives `inspector → operations → inspector`.
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <ReactFlowProvider>
-        <App />
-      </ReactFlowProvider>
+      <App />
     </React.StrictMode>
   )
 })

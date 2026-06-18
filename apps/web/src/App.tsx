@@ -28,7 +28,10 @@ import { BuilderSidebar } from './components/BuilderSidebar'
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette })))
 const SnippetInsertMenu = lazy(() => import('./components/SnippetInsertMenu').then((m) => ({ default: m.SnippetInsertMenu })))
 const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })))
-import { WorkflowCanvas } from './components/WorkflowCanvas'
+// The editor canvas (React Flow) is code-split so `@xyflow/react` — the
+// heaviest web dependency — loads on first navigation to a canvas-bearing
+// tab, not at boot. `CanvasWorkspace` owns the `<ReactFlowProvider>`.
+const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.CanvasWorkspace })))
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
@@ -875,9 +878,10 @@ export default function App() {
         //    because the right panel takes its place.
         //  - Every other tab (mounted: true, visible: false) keeps the
         //    canvas mounted but hidden via `display: none`. The
-        //    root-level `<ReactFlowProvider>` (see `main.tsx`) holds the
-        //    React Flow viewport state — destroying the wrapper would
-        //    reset zoom + pan on every navigation back to the editor.
+        //    `<ReactFlowProvider>` lives inside the lazy `CanvasWorkspace`,
+        //    so it stays mounted across non-home tabs and holds the React
+        //    Flow viewport state — destroying the wrapper would reset zoom +
+        //    pan on every navigation back to the editor.
         const visibility = getCanvasVisibility(activeTab)
         if (!visibility.mounted) {
           return (
@@ -900,17 +904,19 @@ export default function App() {
               data-canvas-visible={visibility.visible ? 'true' : 'false'}
               data-testid="workspace-canvas-wrapper"
             >
-              <WorkflowCanvas
-                nodes={visibleNodes}
-                edges={visibleEdges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={connect}
-                onNodeClick={handleNodeClick}
-                onEdgeClick={handleEdgeClick}
-                paletteNodeTypes={canvasPaletteTypes}
-                onAddNode={addNode}
-              />
+              <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+                <CanvasWorkspace
+                  nodes={visibleNodes}
+                  edges={visibleEdges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={connect}
+                  onNodeClick={handleNodeClick}
+                  onEdgeClick={handleEdgeClick}
+                  paletteNodeTypes={canvasPaletteTypes}
+                  onAddNode={addNode}
+                />
+              </Suspense>
             </div>
             {visibility.contextualSlot && (
               <div data-layout="contextual">{rightPanelElement}</div>

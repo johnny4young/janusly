@@ -23,7 +23,7 @@
  * Used by `apps/web/src/App.tsx`.
  */
 
-import { MarkerType, type EdgeMarker } from '@xyflow/react'
+import type { EdgeMarker } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode } from './types'
 
 /**
@@ -39,9 +39,14 @@ export type EdgeData = { condition?: string; hasCondition?: boolean }
  * Stable arrow marker shared by every projected workflow edge. Keeping
  * this module-scoped preserves React Flow identity checks while retaining
  * the directed-edge cue from the previous canvas renderer.
+ *
+ * The marker type is the literal `'arrowclosed'` (the value of
+ * `MarkerType.ArrowClosed`, accepted by `EdgeMarker`'s `` `${MarkerType}` ``
+ * branch) rather than the enum, so this boot-reachable module pulls no
+ * `@xyflow/react` runtime code — React Flow loads lazily with the canvas.
  */
 export const WORKFLOW_EDGE_MARKER_END: EdgeMarker = {
-  type: MarkerType.ArrowClosed,
+  type: 'arrowclosed',
   color: 'var(--we-faint)',
 }
 
