@@ -28,12 +28,27 @@
 
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
-import { applyEdgeChanges, applyNodeChanges, addEdge } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
 import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
+
+/**
+ * React Flow's change-appliers, registered lazily by `CanvasWorkspace` when
+ * the editor canvas chunk first loads. They live in the deferred
+ * `@xyflow/react` chunk, so importing them statically here would drag the
+ * (heavy) React Flow renderer back onto the boot path. The canvas must be
+ * mounted before any node-drag / edge-connect can fire a reducer, so
+ * `flowOps` is always populated by the time the three change reducers run;
+ * the `return state` guard is a defensive no-op for the impossible
+ * "change before canvas mount" case.
+ */
+type FlowOps = Pick<typeof import('@xyflow/react'), 'applyNodeChanges' | 'applyEdgeChanges' | 'addEdge'>
+let flowOps: FlowOps | null = null
+export function registerFlowOps(ops: FlowOps): void {
+  flowOps = ops
+}
 
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 /**
@@ -306,9 +321,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setWorkflowName: (currentWorkflowName) => set({ currentWorkflowName }),
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
-  onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
-  onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
-  connect: (connection) => set((state) => ({ edges: addEdge({ ...connection, data: {} }, state.edges) })),
+  onNodesChange: (changes) => set((state) => (flowOps ? { nodes: flowOps.applyNodeChanges(changes, state.nodes) } : state)),
+  onEdgesChange: (changes) => set((state) => (flowOps ? { edges: flowOps.applyEdgeChanges(changes, state.edges) } : state)),
+  connect: (connection) => set((state) => (flowOps ? { edges: flowOps.addEdge({ ...connection, data: {} }, state.edges) } : state)),
 
   selectNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),

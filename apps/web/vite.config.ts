@@ -18,7 +18,15 @@ export default defineConfig(({ mode }) => ({
       output: {
         manualChunks: (id) => {
           if (!id.includes('node_modules')) return undefined
-          if (id.includes('@xyflow/react')) return 'flow-vendor'
+          // `@xyflow/*` is reached ONLY through the dynamic `CanvasWorkspace`
+          // import (nothing on the boot path imports an `@xyflow` value — the
+          // store registers React Flow's change-appliers lazily from that
+          // chunk and `canvas-projections` uses the marker string literal), so
+          // leaving it unforced lets Rolldown keep the renderer in that
+          // on-demand chunk. The early return is REQUIRED so the `/react/`
+          // matcher below doesn't sweep `@xyflow/react` into the eager
+          // react-vendor bundle.
+          if (id.includes('@xyflow/')) return undefined
           if (id.includes('@supabase/supabase-js')) return 'supabase-vendor'
           if (id.includes('lucide-react')) return 'icons-vendor'
           if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor'
