@@ -11,7 +11,7 @@
  */
 
 import { db } from "@janusly/db";
-import { deadLetters, recoveryItems } from "@janusly/db";
+import { deadLetters, recoveryItems, workflows } from "@janusly/db";
 import { eq, desc, asc, and, or, lt, gt, isNull, count, sql, type SQL } from "drizzle-orm";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
@@ -126,6 +126,7 @@ export type RecoveryQueueOverlay = {
   resolutionReason: string | null;
   comments: unknown;
   workflowId: string | null;
+  metadataWorkflowId: string | null;
   occurrenceCount: number;
   lastOccurredAt: Date;
 };
@@ -239,17 +240,21 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
       : DLQ_LIST_DEFAULT_LIMIT;
 
   const rows = await db
-    .select({ dl: deadLetters, ri: recoveryItems })
+    .select({ dl: deadLetters, ri: recoveryItems, wf: workflows })
     .from(deadLetters)
     .leftJoin(
       recoveryItems,
       and(eq(recoveryItems.orgId, orgId), eq(recoveryItems.deadLetterId, deadLetters.id)),
     )
+    .leftJoin(
+      workflows,
+      and(eq(workflows.orgId, orgId), eq(workflows.id, recoveryItems.workflowId)),
+    )
     .where(and(...filters))
     .orderBy(...recoveryQueueOrderBy(query.sort ?? "newest"))
     .limit(limitValue);
 
-  return rows.map(({ dl, ri }) => ({
+  return rows.map(({ dl, ri, wf }) => ({
     ...dl,
     // `ri.id` is NOT NULL, so a present row always has it — guarding on it is
     // robust whether the LEFT JOIN miss surfaces as `null` or an all-null row.
@@ -263,6 +268,7 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
           resolutionReason: ri.resolutionReason,
           comments: ri.comments,
           workflowId: ri.workflowId,
+          metadataWorkflowId: wf?.id ?? null,
           occurrenceCount: ri.occurrenceCount,
           lastOccurredAt: ri.lastOccurredAt,
         }

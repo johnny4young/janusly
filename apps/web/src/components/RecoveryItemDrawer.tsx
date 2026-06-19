@@ -28,6 +28,16 @@ import { api, downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { WorkflowAboutCard } from './WorkflowAboutCard'
+import { ReportDeliveryDialog } from './ReportDeliveryDialog'
+
+/** Per-surface copy for the generalized delivery dialog (evidence variant). */
+const EVIDENCE_DELIVER_COPY = {
+  kicker: 'recoveryEvidence.deliver.kicker',
+  title: 'recoveryEvidence.deliver.title',
+  description: 'recoveryEvidence.deliver.description',
+  toastSent: 'recoveryEvidence.deliver.toastSent',
+  successMessage: 'recoveryEvidence.deliver.successMessage',
+}
 
 export type RecoveryItemDrawerData = {
   id: string
@@ -38,8 +48,10 @@ export type RecoveryItemDrawerData = {
   slaTargetAtIso: string
   resolutionReason: RecoveryItemResolutionReason | null
   comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
-  /** Linked workflow id (when the incident came from a saved workflow run). */
+  /** Source workflow id from the run payload; may be an unsaved demo/template id. */
   workflowId?: string | null
+  /** Persisted workflow id eligible for metadata lookups; null for unsaved templates. */
+  metadataWorkflowId?: string | null
   /** Number of DLQ failures collapsed into this incident by debounce. 1 means a single failure. */
   occurrenceCount: number
   /** ISO timestamp of the most recent occurrence — drives the "last seen" subtitle. */
@@ -144,6 +156,10 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
   // NOT bumpPlatformVersion — exporting is read-only from the operator's
   // POV (the server's audit row is a side effect, not panel state).
   const [evidenceBusy, setEvidenceBusy] = useState<'json' | 'markdown' | null>(null)
+  // Deliver the evidence report to Slack / GitHub / webhook via the generalized
+  // ReportDeliveryDialog pointed at the evidence endpoint (the dialog bumps
+  // platformVersion on success so the audit-log panel refreshes).
+  const [deliverOpen, setDeliverOpen] = useState(false)
   async function exportEvidence(format: 'json' | 'markdown'): Promise<void> {
     setEvidenceBusy(format)
     try {
@@ -373,8 +389,25 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           >
             <Download size={14} aria-hidden /> {t('recoveryItems.evidence.markdown')}
           </button>
+          <button
+            type="button"
+            className="we-btn we-btn--ghost we-btn--sm"
+            onClick={() => setDeliverOpen(true)}
+            disabled={evidenceBusy !== null}
+            data-testid="ri-evidence-deliver"
+          >
+            <Send size={14} aria-hidden /> {t('recoveryEvidence.deliver.action')}
+          </button>
         </div>
       </div>
+
+      {deliverOpen && (
+        <ReportDeliveryDialog
+          endpoint={`/recovery/items/${item.id}/evidence/deliver`}
+          copyKeys={EVIDENCE_DELIVER_COPY}
+          onClose={() => setDeliverOpen(false)}
+        />
+      )}
 
       {item.occurrenceCount > 1 && (
         <div className="we-recovery-occurrences" data-testid="recovery-item-occurrences-section">
@@ -538,7 +571,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
         </div>
       )}
 
-      {item.workflowId && <WorkflowAboutCard workflowId={item.workflowId} />}
+      {item.metadataWorkflowId && <WorkflowAboutCard workflowId={item.metadataWorkflowId} />}
 
       <div className="we-recovery-item-drawer__handoff" data-testid="recovery-item-handoff">
         <h4>

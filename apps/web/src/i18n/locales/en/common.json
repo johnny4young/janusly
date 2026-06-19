@@ -2216,6 +2216,12 @@
   "recoveryItems.evidence.markdown": "Export Markdown",
   "recoveryItems.evidence.toastOk": "Evidence export downloaded",
   "recoveryItems.evidence.toastFailed": "Evidence export failed",
+  "recoveryEvidence.deliver.action": "Deliver…",
+  "recoveryEvidence.deliver.kicker": "Deliver evidence",
+  "recoveryEvidence.deliver.title": "Send incident evidence",
+  "recoveryEvidence.deliver.description": "Send this incident's full evidence report to Slack, a GitHub issue, or a signed webhook.",
+  "recoveryEvidence.deliver.toastSent": "Evidence sent to {{destination}}",
+  "recoveryEvidence.deliver.successMessage": "Evidence delivered to {{destination}}.",
 
   "recoveryHandoff.heading": "Handoff",
   "recoveryHandoff.destinations.slack": "Slack",
