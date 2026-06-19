@@ -23,19 +23,18 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
-import { VersionHistoryPanel } from './VersionHistoryPanel'
-import { WorkflowSloPanel } from './WorkflowSloPanel'
-import { WorkflowMetadataPanel } from './WorkflowMetadataPanel'
-import { ScheduleHistoryPanel } from './ScheduleHistoryPanel'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { EmptyView, PanelChrome } from './panel-primitives'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
 // default authoring tab), so it loads on demand behind the shared <Suspense> in
-// RightPanel. The inspector sub-panels, AI Studio, and Inspector stay eager
-// above — they're on the default authoring path. OperationsPage additionally
-// pulls ~11 admin sub-panels + alert/budget/scim/permission forms.
+// RightPanel. AI Studio + the core Inspector (node/edge config) stay eager above
+// — they're the operator's immediate authoring surface. The inspector's auxiliary
+// sub-panels (version history / SLO / schedule history / metadata) are also lazy,
+// rendered behind an inner <Suspense> so the node config stays instant while they
+// load on first inspector visit. OperationsPage additionally pulls ~11 admin
+// sub-panels + alert/budget/scim/permission forms.
 const MultiAgentTimeline = lazy(() => import('../MultiAgentTimeline').then((m) => ({ default: m.MultiAgentTimeline })))
 const WorkflowsDashboard = lazy(() => import('./WorkflowsDashboard').then((m) => ({ default: m.WorkflowsDashboard })))
 const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default: m.MembersPanel })))
@@ -43,6 +42,10 @@ const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) =>
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
+const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
+const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ default: m.WorkflowSloPanel })))
+const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m) => ({ default: m.ScheduleHistoryPanel })))
+const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
@@ -162,10 +165,17 @@ function RightPanelRouter(props: RightPanelProps) {
         onUpdateEdgeCondition={props.onUpdateEdgeCondition}
         onInsertSnippet={props.onInsertSnippet}
       />
-      <VersionHistoryPanel />
-      <WorkflowSloPanel />
-      <ScheduleHistoryPanel />
-      <WorkflowMetadataPanel />
+      {/* Auxiliary inspector panels are lazy — an inner <Suspense> (below the
+          eager InspectorPanel) keeps the node config instant while these load on
+          first inspector visit. `null` fallback: they're secondary and three
+          self-gate to null on unsaved drafts, so a "Working…" line would flash
+          spuriously under a ready config. */}
+      <Suspense fallback={null}>
+        <VersionHistoryPanel />
+        <WorkflowSloPanel />
+        <ScheduleHistoryPanel />
+        <WorkflowMetadataPanel />
+      </Suspense>
     </PanelChrome>
   )
   if (props.tab === 'templates') return <TemplatesPanel templates={props.templates} onUseTemplate={props.onUseTemplate} />
