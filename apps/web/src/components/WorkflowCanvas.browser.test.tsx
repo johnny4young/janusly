@@ -195,4 +195,88 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(viewportAfter).toBe(viewportBefore)
     expect(viewportAfter.style.transform).toBe(transformBefore)
   })
+
+  it('restores a saved viewport (defaultViewport) instead of fitting to view when viewportWorkflowId is set', async () => {
+    // Seed a saved viewport, then mount with that workflow key. The canvas
+    // adopts it as `defaultViewport` and SKIPS `fitView`, so the
+    // `.react-flow__viewport` transform carries the seeded zoom (1.25) — a value
+    // an auto-fit of these nodes in a 1024x720 frame would not produce. The
+    // other tests pass no key, so they keep the fitView path.
+    const STORAGE_KEY = 'janusly:canvasViewport:wf-restore'
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ x: 123, y: -45, zoom: 1.25 }))
+    try {
+      const props = {
+        nodes: [
+          makeNode('alpha', 'Alpha step', { x: 0, y: 0 }),
+          makeNode('beta', 'Beta step', { x: 240, y: 0 }),
+        ],
+        edges: [makeEdge('e1', 'alpha', 'beta')],
+        onNodesChange: vi.fn(),
+        onEdgesChange: vi.fn(),
+        onConnect: vi.fn(),
+        onNodeClick: vi.fn(),
+        onEdgeClick: vi.fn(),
+        viewportWorkflowId: 'wf-restore',
+      }
+      const { container, findByText } = render(
+        <ReactFlowProvider>
+          <div style={{ width: 1024, height: 720, position: 'relative' }}>
+            <WorkflowCanvas {...props} />
+          </div>
+        </ReactFlowProvider>,
+      )
+      await findByText('Alpha step')
+
+      await waitFor(() => {
+        const viewport = container.querySelector('.react-flow__viewport') as HTMLElement
+        expect(viewport).toBeTruthy()
+        // React Flow renders the viewport as `translate(Xpx, Ypx) scale(Z)`.
+        expect(viewport.style.transform).toMatch(/translate\(\s*123px,\s*-45px\s*\)\s*scale\(\s*1\.25\s*\)/)
+      })
+    } finally {
+      window.localStorage.removeItem(STORAGE_KEY)
+    }
+  })
+
+  it('persists Control Panel zoom changes for a saved workflow', async () => {
+    // React Flow's built-in Controls produce a null onMoveEnd source event, the
+    // same shape used by automatic fit/restore. The canvas therefore persists
+    // toolbar zoom/fit explicitly through the Controls callbacks.
+    const STORAGE_KEY = 'janusly:canvasViewport:wf-controls'
+    window.localStorage.removeItem(STORAGE_KEY)
+    try {
+      const props = {
+        nodes: [makeNode('alpha', 'Alpha step', { x: 0, y: 0 })],
+        edges: [],
+        onNodesChange: vi.fn(),
+        onEdgesChange: vi.fn(),
+        onConnect: vi.fn(),
+        onNodeClick: vi.fn(),
+        onEdgeClick: vi.fn(),
+        viewportWorkflowId: 'wf-controls',
+      }
+      const { findByText, getByLabelText } = render(
+        <ReactFlowProvider>
+          <div style={{ width: 1024, height: 720, position: 'relative' }}>
+            <WorkflowCanvas {...props} />
+          </div>
+        </ReactFlowProvider>,
+      )
+      await findByText('Alpha step')
+
+      getByLabelText('Zoom Out').click()
+
+      await waitFor(() => {
+        const raw = window.localStorage.getItem(STORAGE_KEY)
+        expect(raw).toBeTruthy()
+        const saved = JSON.parse(raw!)
+        expect(Number.isFinite(saved.x)).toBe(true)
+        expect(Number.isFinite(saved.y)).toBe(true)
+        expect(Number.isFinite(saved.zoom)).toBe(true)
+        expect(saved.zoom).toBeGreaterThan(0)
+      })
+    } finally {
+      window.localStorage.removeItem(STORAGE_KEY)
+    }
+  })
 })

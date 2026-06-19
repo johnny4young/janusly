@@ -906,6 +906,10 @@ export default function App() {
             >
               <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
                 <CanvasWorkspace
+                  // React Flow only applies `defaultViewport` on mount. Remount
+                  // on workflow identity changes so opening a saved workflow
+                  // after a reload / Flows navigation can restore its viewport.
+                  key={currentWorkflowId ?? 'workflow-canvas'}
                   nodes={visibleNodes}
                   edges={visibleEdges}
                   onNodesChange={onNodesChange}
@@ -915,6 +919,7 @@ export default function App() {
                   onEdgeClick={handleEdgeClick}
                   paletteNodeTypes={canvasPaletteTypes}
                   onAddNode={addNode}
+                  viewportWorkflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined}
                 />
               </Suspense>
             </div>
