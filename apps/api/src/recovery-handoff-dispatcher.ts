@@ -1,9 +1,12 @@
 /**
- * Per-destination dispatch helper for recovery incident handoffs. Mirrors
- * `dispatchDelivery` in `reports-routes.ts:238-310` — every branch ends
- * with an `executeTool` call against the existing integration-tools
- * chokepoints so SSRF / body-cap / rate-limit / usage events / audit /
- * safe-persist all apply for free.
+ * Per-destination dispatch helper for recovery incident handoffs. Each branch
+ * routes through the shared per-tool invocation helpers in `report-delivery.ts`
+ * (`callSlackPost` / `callGithubCreateIssue` / `callGithubAddIssueComment` /
+ * `callWebhookSend`) — the same `executeTool` chokepoint `dispatchReportDelivery`
+ * uses — so SSRF / body-cap / rate-limit / usage events / audit / safe-persist all
+ * apply for free. Only the low-level tool-invocation layer is shared: this dispatcher
+ * keeps its own result mapping (`externalId` / `externalUrl` / `commentId`), wall-clock
+ * latency, and error cap, which legitimately differ from the report-deliver envelope.
  *
  * Branching summary:
  *  - **slack**: `slack.post` with composed markdown. v1 is post-only —
@@ -24,7 +27,6 @@
  * externalId?, externalUrl?, commentId? }` — NEVER throws.
  */
 
-import { executeTool } from "@janusly/engine/src/tool-registry";
 import {
   buildHandoffIdempotencyKey,
   composeHandoffMessage,
@@ -35,6 +37,13 @@ import {
 import {
   type RecoveryItemHandoff,
 } from "@janusly/data";
+
+import {
+  callGithubAddIssueComment,
+  callGithubCreateIssue,
+  callSlackPost,
+  callWebhookSend,
+} from "./report-delivery";
 
 export type DispatchContext = {
   orgId: string;
@@ -75,11 +84,9 @@ export function composeAppendMessage(
 async function dispatchSlack(ctx: DispatchContext): Promise<HandoffDispatchResult> {
   const started = Date.now();
   try {
-    const result = await executeTool(
-      "slack.post",
-      { credential: ctx.credentialName, text: ctx.message.markdown },
-      {},
+    const result = await callSlackPost(
       { orgId: ctx.orgId },
+      { credential: ctx.credentialName, text: ctx.message.markdown },
     );
     return {
       destination: "slack",
@@ -109,8 +116,8 @@ async function dispatchGithub(ctx: DispatchContext): Promise<HandoffDispatchResu
     // thread instead of spawning duplicates.
     if (ctx.existing && ctx.existing.externalId && /^\d+$/.test(ctx.existing.externalId)) {
       const issueNumber = Number.parseInt(ctx.existing.externalId, 10);
-      const result = await executeTool(
-        "github.add_issue_comment",
+      const result = await callGithubAddIssueComment(
+        { orgId: ctx.orgId },
         {
           credential: ctx.credentialName,
           owner,
@@ -118,8 +125,6 @@ async function dispatchGithub(ctx: DispatchContext): Promise<HandoffDispatchResu
           issueNumber,
           body: ctx.message.markdown,
         },
-        {},
-        { orgId: ctx.orgId },
       );
       const ok = result.ok === true;
       const commentUrl = typeof result.commentUrl === "string" ? result.commentUrl : null;
@@ -139,23 +144,17 @@ async function dispatchGithub(ctx: DispatchContext): Promise<HandoffDispatchResu
     }
 
     // Create branch.
-    const result = await executeTool(
-      "github.create_issue",
+    const result = await callGithubCreateIssue(
+      { orgId: ctx.orgId },
       {
         credential: ctx.credentialName,
         owner,
         repo,
         title: ctx.message.subject,
         body: ctx.message.markdown,
-        ...(ctx.request.labels && ctx.request.labels.length > 0
-          ? { labels: ctx.request.labels }
-          : {}),
-        ...(ctx.request.assignees && ctx.request.assignees.length > 0
-          ? { assignees: ctx.request.assignees }
-          : {}),
+        labels: ctx.request.labels,
+        assignees: ctx.request.assignees,
       },
-      {},
-      { orgId: ctx.orgId },
     );
     const ok = result.ok === true;
     const issueNumber = typeof result.issueNumber === "number" ? result.issueNumber : null;
@@ -188,8 +187,8 @@ async function dispatchWebhookOrLinear(
   const idempotencyKey = buildHandoffIdempotencyKey(ctx.recoveryItemId, destination);
 
   try {
-    const result = await executeTool(
-      "webhook.send",
+    const result = await callWebhookSend(
+      { orgId: ctx.orgId },
       {
         credential: ctx.credentialName,
         url,
@@ -201,8 +200,6 @@ async function dispatchWebhookOrLinear(
           "x-idempotency-key": idempotencyKey,
         },
       },
-      {},
-      { orgId: ctx.orgId },
     );
     return {
       destination,
