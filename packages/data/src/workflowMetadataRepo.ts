@@ -21,9 +21,12 @@
  *  - The repo doesn't re-validate inputs.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db, workflowMetadata } from "@janusly/db";
 import type { WorkflowMetadata, WorkflowMetadataRecord } from "@janusly/shared";
+
+/** Upper bound on the distinct-tag dropdown so a pathological org can't return an unbounded list. */
+const WORKFLOW_TAGS_DROPDOWN_MAX = 500;
 
 type WorkflowMetadataRow = typeof workflowMetadata.$inferSelect;
 
@@ -80,6 +83,25 @@ export async function listWorkflowMetadataForOrg(
     .orderBy(desc(workflowMetadata.updatedAt))
     .limit(safeLimit);
   return rows.map(hydrate);
+}
+
+/**
+ * The distinct set of tags used across an org's workflows, sorted ascending —
+ * powers the workflow-list tag-filter dropdown. Flattens every
+ * `workflow_metadata.tags` jsonb array via `jsonb_array_elements_text`, dedupes,
+ * and caps the result. Org-scoped (a tag from another org never appears).
+ */
+export async function listDistinctWorkflowTagsForOrg(orgId: string): Promise<string[]> {
+  // ORDER BY the SRF expression itself, NOT the result alias — drizzle emits a
+  // raw-sql `selectDistinct` field without an `AS tag`, so `ORDER BY tag` would
+  // reference a non-existent column.
+  const rows = await db
+    .selectDistinct({ tag: sql<string>`jsonb_array_elements_text(${workflowMetadata.tags})` })
+    .from(workflowMetadata)
+    .where(eq(workflowMetadata.orgId, orgId))
+    .orderBy(sql`jsonb_array_elements_text(${workflowMetadata.tags}) asc`)
+    .limit(WORKFLOW_TAGS_DROPDOWN_MAX);
+  return rows.map((r) => r.tag);
 }
 
 export type UpsertWorkflowMetadataInput = {
