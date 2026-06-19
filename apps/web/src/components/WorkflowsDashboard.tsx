@@ -14,6 +14,7 @@ import type { SavedWorkflow } from '../types'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, useT } from '../i18n'
+import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
 
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
  *  the server's terminal-failure set). */
@@ -26,12 +27,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<'recent' | 'name' | 'failed'>('recent')
+  // Tag / search / sort restore from localStorage on mount (per-browser) so the
+  // Flows view survives navigation + reload; persisted by the effect below. A
+  // missing / corrupt value degrades to the defaults via the helper.
+  const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
+  const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
   // Server-side tag filter (the dropdown lists ALL the org's tags + matches
-  // surface beyond the list cap); '' means "All tags". Inline state, not
-  // persisted — matches the dashboard's non-persisted name search.
-  const [tagFilter, setTagFilter] = useState('')
+  // surface beyond the list cap); '' means "All tags".
+  const [tagFilter, setTagFilter] = useState(() => readFlowsFilters()?.tag ?? '')
   const [tagOptions, setTagOptions] = useState<string[]>([])
 
   const load = useCallback(async () => {
@@ -53,6 +56,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     void load()
   }, [load, platformVersion])
 
+  // Persist the tag / search / sort view per-browser so it survives navigation
+  // + reload. The initial run re-writes the restored values (a harmless no-op).
+  useEffect(() => {
+    writeFlowsFilters({ tag: tagFilter, query, sort })
+  }, [tagFilter, query, sort])
+
   // The org's distinct tags for the filter dropdown. Refetched on
   // `platformVersion` so an inspector tag edit refreshes the options. A fetch
   // failure is non-fatal — the dropdown just stays empty; the list still works.
@@ -62,7 +71,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       try {
         const data = await api('/workflows/tags') as { tags?: unknown }
         const tags = Array.isArray(data?.tags) ? (data.tags as string[]) : []
-        if (!cancelled) setTagOptions(tags)
+        if (cancelled) return
+        setTagOptions(tags)
+        // Drop a restored tag the org no longer offers (e.g. deleted since the
+        // last visit) so the filter can't strand the list on an empty,
+        // un-clearable view. The functional update reads the current tagFilter
+        // without adding it to this effect's deps.
+        setTagFilter(current => (current !== '' && !tags.includes(current) ? '' : current))
       } catch {
         if (!cancelled) setTagOptions([])
       }

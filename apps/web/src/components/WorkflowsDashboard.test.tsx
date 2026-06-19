@@ -27,9 +27,12 @@ function mockApi(handler: (url: string) => unknown) {
   vi.mocked(api).mockImplementation(async (url: string) => handler(url))
 }
 
+const FILTERS_KEY = 'janusly:flowsFilters'
+
 describe('<WorkflowsDashboard />', () => {
   beforeEach(() => {
     vi.mocked(api).mockReset()
+    window.localStorage.clear()
   })
 
   it('renders each workflow with its tag pills', async () => {
@@ -81,5 +84,50 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'billing' } })
     await waitFor(() => expect(screen.queryByText('Onboarding email')).not.toBeInTheDocument())
     expect(screen.getByText('Billing sync')).toBeInTheDocument()
+  })
+
+  it('restores persisted tag + search from localStorage on mount', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'billing', query: 'bill', sort: 'name' }))
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url.startsWith('/workflows?tag=billing')) return [FLOWS[0]]
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const select = (await screen.findByTestId('workflows-tag-filter')) as HTMLSelectElement
+    expect(select.value).toBe('billing')
+    expect((screen.getByTestId('workflows-search') as HTMLInputElement).value).toBe('bill')
+  })
+
+  it('reconciles a persisted tag the org no longer offers (clears it + refetches unfiltered)', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'ghost', query: '', sort: 'recent' }))
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url.startsWith('/workflows?tag=ghost')) return [] // the stale tag matches nothing
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    // The stale tag is dropped once the (ghost-less) options load → select clears…
+    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe(''))
+    // …and the list refetches unfiltered.
+    await waitFor(() => expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument())
+    expect(calls).toContain('/workflows')
+  })
+
+  it('persists the selected tag to localStorage', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url.startsWith('/workflows?tag=billing')) return [FLOWS[0]]
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-tag-filter')
+    fireEvent.change(screen.getByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(FILTERS_KEY)
+      expect(raw && JSON.parse(raw).tag).toBe('billing')
+    })
   })
 })
