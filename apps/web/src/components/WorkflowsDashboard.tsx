@@ -28,22 +28,47 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<'recent' | 'name' | 'failed'>('recent')
+  // Server-side tag filter (the dropdown lists ALL the org's tags + matches
+  // surface beyond the list cap); '' means "All tags". Inline state, not
+  // persisted — matches the dashboard's non-persisted name search.
+  const [tagFilter, setTagFilter] = useState('')
+  const [tagOptions, setTagOptions] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api('/workflows')
+      const params = new URLSearchParams()
+      if (tagFilter) params.set('tag', tagFilter)
+      const qs = params.toString()
+      const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
       setWorkflows(Array.isArray(data) ? data : [])
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
     } finally {
       setLoading(false)
     }
-  }, [addToast, t])
+  }, [addToast, t, tagFilter])
 
   useEffect(() => {
     void load()
   }, [load, platformVersion])
+
+  // The org's distinct tags for the filter dropdown. Refetched on
+  // `platformVersion` so an inspector tag edit refreshes the options. A fetch
+  // failure is non-fatal — the dropdown just stays empty; the list still works.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const data = await api('/workflows/tags') as { tags?: unknown }
+        const tags = Array.isArray(data?.tags) ? (data.tags as string[]) : []
+        if (!cancelled) setTagOptions(tags)
+      } catch {
+        if (!cancelled) setTagOptions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [platformVersion])
 
   // Client-side filter + sort over the already-dense rows. `recent` keys on
   // the ISO updatedAt/createdAt (lexicographic desc == chronological desc);
@@ -64,6 +89,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     })
   }, [workflows, query, sort])
 
+  // Keep the toolbar visible whenever filtering is meaningful OR a filter is
+  // active — otherwise a tag filter that narrows the (server-filtered) list to
+  // ≤1 row would hide the toolbar and trap the user with no way to clear it.
+  const showToolbar = tagOptions.length > 0 || workflows.length > 1 || tagFilter !== '' || query.trim() !== ''
+
   return (
     <div className="panel-list">
       <div className="panel-toolbar">
@@ -76,7 +106,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </button>
       </div>
 
-      {workflows.length > 1 && (
+      {showToolbar && (
         <div className="we-list-toolbar">
           <span className="we-list-search">
             <Search size={14} aria-hidden="true" />
@@ -90,6 +120,20 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               data-testid="workflows-search"
             />
           </span>
+          {tagOptions.length > 0 && (
+            <select
+              className="text-field"
+              value={tagFilter}
+              onChange={event => setTagFilter(event.target.value)}
+              aria-label={t('workflowsDashboard.tagFilterAria') as string}
+              data-testid="workflows-tag-filter"
+            >
+              <option value="">{t('workflowsDashboard.allTags')}</option>
+              {tagOptions.map(tag => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+          )}
           <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria') as string}>
             <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
               {t('workflowsDashboard.sortRecent')}
@@ -104,7 +148,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </div>
       )}
 
-      {workflows.length === 0 && !loading && (
+      {workflows.length === 0 && !loading && tagFilter !== '' && (
+        <p className="helper-text" data-testid="workflows-no-tag-matches">
+          {t('workflowsDashboard.noTagMatches', { tag: tagFilter })}
+        </p>
+      )}
+
+      {workflows.length === 0 && !loading && tagFilter === '' && (
         <div className="we-allclear" data-testid="workflows-empty">
           <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
           <div className="we-allclear__copy">
@@ -135,6 +185,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 <div className="we-list-row__body">
                   <strong>{workflow.name}</strong>
                   <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
+                  {workflow.tags && workflow.tags.length > 0 && (
+                    <span className="we-list-row__tags">
+                      {workflow.tags.map(tag => (
+                        <span key={tag} className="we-pill we-pill--ghost">{tag}</span>
+                      ))}
+                    </span>
+                  )}
                 </div>
                 <div className="we-list-row__meta">
                   {workflow.lastRunStatus && (

@@ -21,7 +21,7 @@
 
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
-import { db, runs, workflows, workflowVersions } from "@janusly/db";
+import { db, runs, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
 
 /** One Flows-list row: the base workflow fields plus the run summary. */
 export type WorkflowListRow = {
@@ -36,21 +36,52 @@ export type WorkflowListRow = {
   status: string;
   /** Operator-visible reason when paused; null when active. */
   pausedReason: string | null;
+  /** Operator-assigned tags from `workflow_metadata` (empty when the workflow has no metadata row). */
+  tags: string[];
+};
+
+/** Optional filters for the Flows list. `tag` matches workflows whose `workflow_metadata.tags` contains it. */
+export type WorkflowListFilters = {
+  tag?: string;
 };
 
 /**
  * List an org's workflows (most-recent first, capped) with each row's
- * production run count and most-recent run status folded in.
+ * production run count, most-recent run status, and operator tags folded in.
+ *
+ * The `tag` filter (when set) is applied in the WHERE clause BEFORE the cap, so
+ * a tagged workflow surfaces even if it's older than the newest `limit` rows.
  */
 export async function listWorkflowsWithRunSummary(
   orgId: string,
   limit: number,
+  filters: WorkflowListFilters = {},
 ): Promise<WorkflowListRow[]> {
-  // 1. Base list — same shape/scope/cap the flat handler used.
+  // 1. Base list — LEFT JOIN workflow_metadata for tags; the optional tag
+  //    filter is a jsonb-containment predicate applied BEFORE the cap.
+  const conditions = [eq(workflows.orgId, orgId)];
+  if (filters.tag) {
+    // `tags @> '["<tag>"]'::jsonb` — true when the array contains the tag.
+    // A workflow with no metadata row (tags null) never matches, which is correct.
+    conditions.push(sql`${workflowMetadata.tags} @> ${JSON.stringify([filters.tag])}::jsonb`);
+  }
   const base = await db
-    .select()
+    .select({
+      id: workflows.id,
+      orgId: workflows.orgId,
+      name: workflows.name,
+      createdBy: workflows.createdBy,
+      createdAt: workflows.createdAt,
+      status: workflows.status,
+      pausedReason: workflows.pausedReason,
+      tags: workflowMetadata.tags,
+    })
     .from(workflows)
-    .where(eq(workflows.orgId, orgId))
+    .leftJoin(
+      workflowMetadata,
+      and(eq(workflowMetadata.orgId, orgId), eq(workflowMetadata.workflowId, workflows.id)),
+    )
+    .where(and(...conditions))
     .orderBy(desc(workflows.createdAt))
     .limit(limit);
   if (base.length === 0) return [];
@@ -88,5 +119,6 @@ export async function listWorkflowsWithRunSummary(
     runCount: byId.get(w.id)?.runCount ?? 0,
     status: w.status ?? "active",
     pausedReason: w.pausedReason ?? null,
+    tags: Array.isArray(w.tags) ? (w.tags as string[]) : [],
   }));
 }
