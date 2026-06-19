@@ -1,9 +1,10 @@
 /**
  * Per-destination dispatch helper for recovery incident handoffs. Each branch
- * routes through the shared per-tool invocation helpers in `report-delivery.ts`
- * (`callSlackPost` / `callGithubCreateIssue` / `callGithubAddIssueComment` /
- * `callWebhookSend`) — the same `executeTool` chokepoint `dispatchReportDelivery`
- * uses — so SSRF / body-cap / rate-limit / usage events / audit / safe-persist all
+ * routes through the shared per-tool invocation helpers in
+ * `@janusly/engine/src/integration-dispatch` (`callSlackPost` /
+ * `callGithubCreateIssue` / `callGithubAddIssueComment` / `callWebhookSend`) — the
+ * same `executeTool` chokepoint `dispatchReportDelivery` and the alert dispatcher
+ * use — so SSRF / body-cap / rate-limit / usage events / audit / safe-persist all
  * apply for free. Only the low-level tool-invocation layer is shared: this dispatcher
  * keeps its own result mapping (`externalId` / `externalUrl` / `commentId`), wall-clock
  * latency, and error cap, which legitimately differ from the report-deliver envelope.
@@ -43,7 +44,7 @@ import {
   callGithubCreateIssue,
   callSlackPost,
   callWebhookSend,
-} from "./report-delivery";
+} from "@janusly/engine/src/integration-dispatch";
 
 export type DispatchContext = {
   orgId: string;
@@ -66,9 +67,9 @@ export type DispatchContext = {
 
 /**
  * Build a fresh `HandoffMessageInput` for the append branch — the
- * dispatcher calls this when `existing` is present so the message lines
- * read "Recovery item update (dispatch #N)" instead of the create-mode
- * header.
+ * route calls this when a GitHub handoff already has an issue number so the
+ * message lines read "Recovery item update (dispatch #N)" instead of the
+ * create-mode header.
  */
 export function composeAppendMessage(
   base: HandoffMessageInput,
