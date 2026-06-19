@@ -186,9 +186,9 @@ export const recoveryHandoffRoutes: Route[] = [
       }
 
       // Build the composed message. When `existing` is present and the
-      // destination supports append (currently github only), the
-      // dispatcher will re-compose with `appendMode: true` so the
-      // message reads "Recovery item update".
+      // destination supports append (currently github only), compose the
+      // append variant here so the low-level dispatcher stays focused on
+      // tool invocation only.
       const errorSignature = normalizeErrorSignature(deadLetter.errorJson, {}).signature;
       const recentComments = item.comments.slice(-3).map((c) => ({
         authorUserId: c.authorUserId,
