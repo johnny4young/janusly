@@ -5,10 +5,6 @@ const { executeToolMock } = vi.hoisted(() => ({ executeToolMock: vi.fn() }));
 vi.mock("@janusly/engine/src/tool-registry", () => ({ executeTool: executeToolMock }));
 
 import {
-  callGithubAddIssueComment,
-  callGithubCreateIssue,
-  callSlackPost,
-  callWebhookSend,
   deliverDestinationSchema,
   dispatchReportDelivery,
   refineDeliveryDestination,
@@ -86,94 +82,5 @@ describe("dispatchReportDelivery — per-destination executeTool wiring", () => 
     executeToolMock.mockResolvedValueOnce({ ok: false, error: "credential secret missing for ops", latencyMs: 5 });
     const out = await dispatchReportDelivery({ ...base, destination: { kind: "slack", credentialName: "ops" } });
     expect(out).toMatchObject({ ok: false, error: "credential secret missing for ops", latencyMs: 5 });
-  });
-});
-
-describe("shared per-tool invocation helpers", () => {
-  // These thin helpers are the single source of truth for each tool's name +
-  // input arg shape, shared by dispatchReportDelivery AND the recovery /handoff
-  // dispatcher. The byte-identical `executeTool(name, input, {}, ctx)` args are
-  // what keeps both consumers behavior-preserving after the consolidation.
-  const ctx = { orgId: "org1", runId: "run-2" } as const;
-
-  it("callSlackPost → slack.post with {credential,text}", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true, latencyMs: 1 });
-    await callSlackPost(ctx, { credential: "ops", text: "hi" });
-    expect(executeToolMock).toHaveBeenCalledWith("slack.post", { credential: "ops", text: "hi" }, {}, ctx);
-  });
-
-  it("callGithubCreateIssue omits labels/assignees when absent", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true });
-    await callGithubCreateIssue(ctx, { credential: "gh", owner: "o", repo: "r", title: "t", body: "b" });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "github.create_issue",
-      { credential: "gh", owner: "o", repo: "r", title: "t", body: "b" },
-      {},
-      ctx,
-    );
-  });
-
-  it("callGithubCreateIssue omits empty-array labels/assignees", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true });
-    await callGithubCreateIssue(ctx, { credential: "gh", owner: "o", repo: "r", title: "t", body: "b", labels: [], assignees: [] });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "github.create_issue",
-      { credential: "gh", owner: "o", repo: "r", title: "t", body: "b" },
-      {},
-      ctx,
-    );
-  });
-
-  it("callGithubCreateIssue includes labels/assignees when present", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true });
-    await callGithubCreateIssue(ctx, {
-      credential: "gh", owner: "o", repo: "r", title: "t", body: "b", labels: ["incident"], assignees: ["u1"],
-    });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "github.create_issue",
-      { credential: "gh", owner: "o", repo: "r", title: "t", body: "b", labels: ["incident"], assignees: ["u1"] },
-      {},
-      ctx,
-    );
-  });
-
-  it("callGithubAddIssueComment → github.add_issue_comment with issueNumber + body", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true, commentId: 5 });
-    await callGithubAddIssueComment(ctx, { credential: "gh", owner: "o", repo: "r", issueNumber: 7, body: "b" });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "github.add_issue_comment",
-      { credential: "gh", owner: "o", repo: "r", issueNumber: 7, body: "b" },
-      {},
-      ctx,
-    );
-  });
-
-  it("callWebhookSend omits headers when absent", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true });
-    await callWebhookSend(ctx, { credential: "wh", url: "https://hooks.test/x", payload: { a: 1 } });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "webhook.send",
-      { credential: "wh", url: "https://hooks.test/x", payload: { a: 1 } },
-      {},
-      ctx,
-    );
-  });
-
-  it("callWebhookSend includes headers when present", async () => {
-    executeToolMock.mockResolvedValueOnce({ ok: true });
-    await callWebhookSend(ctx, {
-      credential: "wh", url: "https://hooks.test/x", payload: { a: 1 }, headers: { "x-idempotency-key": "k" },
-    });
-    expect(executeToolMock).toHaveBeenCalledWith(
-      "webhook.send",
-      { credential: "wh", url: "https://hooks.test/x", payload: { a: 1 }, headers: { "x-idempotency-key": "k" } },
-      {},
-      ctx,
-    );
-  });
-
-  it("helpers do not catch — a thrown executeTool propagates to the caller", async () => {
-    executeToolMock.mockRejectedValueOnce(new Error("boom"));
-    await expect(callSlackPost(ctx, { credential: "ops", text: "hi" })).rejects.toThrow("boom");
   });
 });

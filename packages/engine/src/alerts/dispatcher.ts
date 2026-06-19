@@ -37,6 +37,11 @@ import {
 } from "@janusly/data";
 
 import { executeTool } from "../tool-registry";
+import {
+  callGithubCreateIssue,
+  callSlackPost,
+  callWebhookSend,
+} from "../integration-dispatch";
 import { safePersistPayload } from "../safe-persist";
 import { buildDedupeKey } from "./dedupe-key";
 
@@ -193,11 +198,9 @@ async function dispatchOneChannel(input: ChannelDispatchInput): Promise<AlertCha
     let result: Record<string, unknown> | undefined;
     switch (input.channel.destination) {
       case "slack":
-        result = await executeTool(
-          "slack.post",
-          { credential: input.channel.credentialName, text: input.markdown },
-          {},
+        result = await callSlackPost(
           { orgId: input.orgId },
+          { credential: input.channel.credentialName, text: input.markdown },
         );
         break;
       case "webhook": {
@@ -205,11 +208,9 @@ async function dispatchOneChannel(input: ChannelDispatchInput): Promise<AlertCha
         if (!url) {
           return { ...base, ok: false, error: "webhook url missing", latencyMs: Date.now() - started };
         }
-        result = await executeTool(
-          "webhook.send",
-          { credential: input.channel.credentialName, url, payload: input.structured },
-          {},
+        result = await callWebhookSend(
           { orgId: input.orgId },
+          { credential: input.channel.credentialName, url, payload: input.structured },
         );
         break;
       }
@@ -225,19 +226,17 @@ async function dispatchOneChannel(input: ChannelDispatchInput): Promise<AlertCha
             latencyMs: Date.now() - started,
           };
         }
-        result = await executeTool(
-          "github.create_issue",
+        result = await callGithubCreateIssue(
+          { orgId: input.orgId },
           {
             credential: input.channel.credentialName,
             owner: params.owner,
             repo: params.repo,
             title: input.subject,
             body: input.markdown,
-            ...(params.labels && params.labels.length > 0 ? { labels: params.labels } : {}),
-            ...(params.assignees && params.assignees.length > 0 ? { assignees: params.assignees } : {}),
+            labels: params.labels,
+            assignees: params.assignees,
           },
-          {},
-          { orgId: input.orgId },
         );
         break;
       }
