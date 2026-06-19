@@ -24,6 +24,8 @@
  * Multi-tenant scope enforced by the repo (`eq(recoveryItems.orgId, orgId)`).
  */
 
+import { z } from "zod";
+
 import {
   AcknowledgeBodySchema,
   AssignOwnerBodySchema,
@@ -53,12 +55,21 @@ import {
   getWorkflowMetadata,
   resolveRecoveryEvidence,
 } from "@janusly/data";
-import { buildRecoveryEvidenceReport } from "@janusly/engine/src/recovery-evidence-report";
+import { buildRecoveryEvidenceReport, type RecoveryEvidenceReportJson } from "@janusly/engine/src/recovery-evidence-report";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
+import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendJson } from "../http";
 import type { CorsAwareResponse } from "../http";
+import { enforceRateLimit } from "../rate-limit";
+import {
+  REPORTS_DELIVER_RATE_LIMIT_BUCKET,
+  REPORTS_DELIVER_RATE_LIMIT_PER_MIN,
+  deliverDestinationSchema,
+  dispatchReportDelivery,
+  refineDeliveryDestination,
+} from "../report-delivery";
 import {
   buildReportFilename,
   contentDispositionAttachment,
@@ -92,6 +103,47 @@ function sendTransitionConflict(res: CorsAwareResponse, currentStatus: string): 
     },
     409,
   );
+}
+
+/**
+ * Body for `POST /recovery/items/:id/evidence/deliver` — the item id is in the
+ * path, so only the destination rides the body (the run-explain deliver shape
+ * minus `runId`). The shared `deliverDestinationSchema` + `refineDeliveryDestination`
+ * keep the per-kind required-field rules identical across both deliver routes.
+ */
+const evidenceDeliverBodySchema = z
+  .object({ destination: deliverDestinationSchema })
+  .superRefine((value, ctx) => refineDeliveryDestination(value.destination, ctx));
+
+/** Cap below Slack's per-block char limit; leaves headroom for the header. */
+const EVIDENCE_SLACK_TEXT_MAX = HTTP_CAPS.SLACK_BLOCK_CHARS;
+
+/**
+ * Render the Slack-bound text for an evidence delivery from the report's
+ * structured JSON (the source of truth — not the Markdown rendering). Surfaces
+ * the highest-signal incident fields first; truncated + ellipsised over the cap.
+ * The persisted JSON is already secret-scrubbed by the report builder.
+ */
+function buildEvidenceSlackText(json: RecoveryEvidenceReportJson): string {
+  const { incident } = json;
+  const displayName = incident.workflowId ?? "(ad-hoc workflow)";
+  const lines: string[] = [
+    `*Janusly incident evidence: ${displayName} – ${incident.severity} – ${incident.status}*`,
+  ];
+  const rootCause = incident.failureSignature ?? json.run?.rootCause?.signature ?? null;
+  if (rootCause) lines.push(`Root cause: ${rootCause}`);
+  if (json.run?.failedNode) {
+    lines.push(`Failed node: ${json.run.failedNode.nodeId} — ${json.run.failedNode.errorSummary}`);
+  }
+  const body = lines.join("\n");
+  return body.length <= EVIDENCE_SLACK_TEXT_MAX ? body : `${body.slice(0, EVIDENCE_SLACK_TEXT_MAX - 1)}…`;
+}
+
+/** GitHub issue title — `<workflow> – <severity> (<short_item_id>)`. */
+function buildEvidenceGitHubTitle(json: RecoveryEvidenceReportJson): string {
+  const { incident } = json;
+  const displayName = incident.workflowId ?? "(ad-hoc workflow)";
+  return `Janusly incident evidence: ${displayName} – ${incident.severity} (${incident.recoveryItemId.slice(0, 8)})`;
 }
 
 export const recoveryItemsRoutes: Route[] = [
@@ -526,6 +578,117 @@ export const recoveryItemsRoutes: Route[] = [
         ...corsHeaders(res),
       });
       res.end(report.markdown);
+    },
+  },
+  {
+    // POST /recovery/items/:id/evidence/deliver — dispatch the evidence report
+    // to Slack / a GitHub issue / a signed webhook through the SAME shared
+    // report-delivery layer run-explain deliver uses (executeTool → credential
+    // resolution, per-tool rate-limit, usage events, SSRF / body-cap / timeout
+    // guards). Multi-tenant gate lives in resolveRecoveryEvidence (uniform 404,
+    // no enumeration leak). NEVER throws — missing-credential / non-2xx /
+    // network failures return { ok: false, error } with the env-var name NEVER
+    // echoed. Audits report.evidence.delivered on BOTH success AND failure.
+    // Distinct from /handoff (a short incident notification, not the full report).
+    method: "POST",
+    match: (url) => /^\/recovery\/items\/[^/?]+\/evidence\/deliver$/.test(url.split("?")[0] ?? ""),
+    role: "editor",
+    permission: "recovery.read",
+    handler: async ({ req, res, auth }) => {
+      const id = idFromUrl(req.url, "evidence/deliver");
+      if (!id) return sendJson(res, { error: "id required" }, 400);
+
+      const rawBody = await readJson(req, MAX_JSON_BODY_BYTES);
+      const parsed = evidenceDeliverBodySchema.safeParse(rawBody);
+      if (!parsed.success) {
+        const firstIssue = parsed.error.issues[0];
+        const path = firstIssue?.path.join(".") ?? "body";
+        const message = firstIssue?.message ?? "invalid body";
+        return sendJson(res, { error: `Invalid request: ${path}: ${message}` }, 400);
+      }
+      const { destination } = parsed.data;
+
+      // `credentialName` is the operator-visible identifier — never the env-var
+      // that backs the secret. safePersistPayload (inside `audit`) is the final
+      // redaction, but the route never threads the env-var name in.
+      const writeAuditRow = async (fields: Record<string, unknown>): Promise<void> => {
+        await auditAction(auth, "report.evidence.delivered", {
+          targetType: "recovery-item",
+          targetId: id,
+          metadata: fields,
+        });
+      };
+
+      // Outer rate-limit (shared "reports.deliver" bucket). On exceed, record the
+      // bucket exercise then 429.
+      try {
+        await enforceRateLimit(auth.orgId, {
+          name: REPORTS_DELIVER_RATE_LIMIT_BUCKET,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+          max: REPORTS_DELIVER_RATE_LIMIT_PER_MIN,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "rate limit exceeded";
+        await writeAuditRow({
+          destination: destination.kind,
+          ok: false,
+          error: "rate_limit_exceeded",
+          latencyMs: 0,
+          credentialName: destination.credentialName,
+        });
+        return sendJson(res, { error: message }, 429);
+      }
+
+      const bundle = await resolveRecoveryEvidence(auth.orgId, id);
+      if (!bundle) {
+        return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      }
+
+      const report = buildRecoveryEvidenceReport({
+        recoveryItem: bundle.recoveryItem,
+        deadLetter: bundle.deadLetter,
+        originalRun: bundle.originalRun,
+        originalRunNodes: bundle.originalRunNodes,
+        originalRunEvents: bundle.originalRunEvents,
+        originalRunEventsTruncated: bundle.originalRunEventsTruncated,
+        validationRun: bundle.validationRun,
+        validationRunNodes: bundle.validationRunNodes,
+        auditRows: bundle.auditRows,
+        rollback: bundle.rollback,
+        appBaseUrl: process.env.JANUSLY_PUBLIC_APP_URL ?? null,
+      });
+
+      const outcome = await dispatchReportDelivery({
+        orgId: auth.orgId,
+        ...(bundle.deadLetter?.runId ? { runId: bundle.deadLetter.runId } : {}),
+        destination,
+        slackText: buildEvidenceSlackText(report.json),
+        githubTitle: buildEvidenceGitHubTitle(report.json),
+        githubBody: report.markdown,
+        webhookPayload: report.json as unknown as Record<string, unknown>,
+      });
+
+      await writeAuditRow({
+        destination: destination.kind,
+        ok: outcome.ok,
+        statusCode: outcome.statusCode,
+        error: outcome.error,
+        latencyMs: outcome.latencyMs,
+        deadLetterId: bundle.recoveryItem.deadLetterId,
+        workflowId: bundle.recoveryItem.workflowId,
+        runId: bundle.deadLetter?.runId ?? null,
+        credentialName: destination.credentialName,
+        deliveryId: outcome.deliveryId,
+      });
+
+      return sendJson(res, {
+        ok: outcome.ok,
+        destination: destination.kind,
+        statusCode: outcome.statusCode,
+        error: outcome.error,
+        latencyMs: outcome.latencyMs,
+        deliveryId: outcome.deliveryId,
+      });
     },
   },
 ];

@@ -370,6 +370,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
         resolutionReason: (r.resolutionReason as RecoveryItemDrawerData['resolutionReason']) ?? null,
         comments: r.comments ?? [],
         workflowId: r.workflowId ?? null,
+        metadataWorkflowId: r.metadataWorkflowId ?? null,
         occurrenceCount: r.occurrenceCount ?? 1,
         lastOccurredAtIso: r.lastOccurredAt ?? r.slaTargetAt,
       })

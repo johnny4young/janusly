@@ -1,6 +1,7 @@
 /**
- * Tests for the recovery-item audit-evidence export route:
+ * Tests for the recovery-item audit-evidence routes:
  *   POST /recovery/items/:id/evidence?format=json|markdown
+ *   POST /recovery/items/:id/evidence/deliver
  *
  * Coverage targets (the ticket AC):
  * - Tenant scope: the resolver is called with `auth.orgId`; a null bundle
@@ -11,6 +12,8 @@
  *   Content-Disposition attachment header.
  * - Markdown streams the rendered artefact with the markdown MIME type.
  * - An unknown `format` is rejected with 400.
+ * - Delivery uses the shared report-delivery chokepoint and writes
+ *   `report.evidence.delivered` audit rows on failed attempts.
  *
  * The pure builder + the resolver have their own focused suites
  * (`packages/engine/src/recovery-evidence-report.test.ts`,
@@ -18,7 +21,17 @@
  * module boundary so the route's wiring stays the unit under test.
  */
 
+import { Readable } from "node:stream";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { executeToolMock, enforceRateLimitMock } = vi.hoisted(() => ({
+  executeToolMock: vi.fn(),
+  enforceRateLimitMock: vi.fn(),
+}));
+
+vi.mock("@janusly/engine/src/tool-registry", () => ({ executeTool: executeToolMock }));
+vi.mock("../rate-limit", () => ({ enforceRateLimit: enforceRateLimitMock }));
 
 vi.mock("@janusly/data", () => ({
   // Only the symbols the route file imports from the barrel are stubbed.
@@ -66,6 +79,8 @@ const resolveEvidenceMock = vi.mocked(resolveRecoveryEvidence);
 const buildEvidenceMock = vi.mocked(buildRecoveryEvidenceReport);
 const auditMock = vi.mocked(audit);
 const sendJsonMock = vi.mocked(sendJson);
+const executeToolMocked = executeToolMock;
+const enforceRateLimitMocked = enforceRateLimitMock;
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -77,6 +92,17 @@ function findEvidenceRoute(): Route {
       : candidate.match("/recovery/items/ri_1/evidence");
   });
   if (!route) throw new Error("route not found: POST /recovery/items/:id/evidence");
+  return route;
+}
+
+function findEvidenceDeliverRoute(): Route {
+  const route = recoveryItemsRoutes.find((candidate) => {
+    if (candidate.method !== "POST") return false;
+    return typeof candidate.match === "string"
+      ? candidate.match === "/recovery/items/ri_1/evidence/deliver"
+      : candidate.match("/recovery/items/ri_1/evidence/deliver");
+  });
+  if (!route) throw new Error("route not found: POST /recovery/items/:id/evidence/deliver");
   return route;
 }
 
@@ -103,6 +129,13 @@ function makeRes(): CapturedRes {
 async function callEvidence(url: string, res: CapturedRes) {
   const route = findEvidenceRoute();
   return route.handler({ req: { url } as never, res: res as never, auth: auth as never });
+}
+
+async function callEvidenceDeliver(body: unknown, url = "/recovery/items/ri_1/evidence/deliver") {
+  const route = findEvidenceDeliverRoute();
+  const req = Readable.from([JSON.stringify(body)]) as never as NodeJS.ReadableStream & { url?: string };
+  req.url = url;
+  return route.handler({ req: req as never, res: makeRes() as never, auth: auth as never });
 }
 
 const bundle = {
@@ -138,7 +171,7 @@ const report = {
   markdown: "# Recovery Evidence Report — ri_1\n\n## Incident\n",
   json: {
     generatedAt: "2026-05-20T12:00:00.000Z",
-    incident: { recoveryItemId: "ri_1" },
+    incident: { recoveryItemId: "ri_1", workflowId: "wf_billing", severity: "p2", status: "resolved", failureSignature: "HTTP 401 on http node" },
     patchDiff: { summary: { totalChanges: 2 } },
     sandboxValidation: { validationRunId: "run_val", status: "succeeded" },
     auditTrail: [{ action: "recovery.item.resolved" }, { action: "ai.workflow.patch_suggested" }],
@@ -150,6 +183,9 @@ beforeEach(() => {
   buildEvidenceMock.mockReset();
   auditMock.mockReset();
   sendJsonMock.mockClear();
+  executeToolMocked.mockReset();
+  enforceRateLimitMocked.mockReset();
+  enforceRateLimitMocked.mockResolvedValue(undefined);
   auditMock.mockResolvedValue(undefined);
   resolveEvidenceMock.mockResolvedValue(bundle);
   buildEvidenceMock.mockReturnValue(report);
@@ -225,5 +261,73 @@ describe("POST /recovery/items/:id/evidence", () => {
     const route = findEvidenceRoute();
     expect(route.role).toBe("editor");
     expect(route.permission).toBe("recovery.read");
+  });
+});
+
+
+describe("POST /recovery/items/:id/evidence/deliver", () => {
+  it("declares editor role + recovery.read permission (defense in depth)", () => {
+    const route = findEvidenceDeliverRoute();
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("recovery.read");
+  });
+
+  it("scopes the evidence resolver to auth.orgId and dispatches through the shared tool chokepoint", async () => {
+    executeToolMocked.mockResolvedValueOnce({ ok: false, error: "credential secret missing for ops", latencyMs: 5 });
+
+    const result = (await callEvidenceDeliver({
+      destination: { kind: "slack", credentialName: "ops" },
+    })) as { payload?: { ok?: boolean; error?: string; destination?: string }; status?: number };
+
+    expect(enforceRateLimitMocked).toHaveBeenCalledWith("org-1", expect.objectContaining({ name: "reports.deliver" }));
+    expect(resolveEvidenceMock).toHaveBeenCalledWith("org-1", "ri_1");
+    expect(executeToolMocked).toHaveBeenCalledWith(
+      "slack.post",
+      expect.objectContaining({ credential: "ops", text: expect.stringContaining("Janusly incident evidence") }),
+      {},
+      { orgId: "org-1", runId: "run_orig" },
+    );
+    expect(result.status).toBe(200);
+    expect(result.payload).toMatchObject({ ok: false, error: "credential secret missing for ops", destination: "slack" });
+  });
+
+  it("writes report.evidence.delivered audit rows for failed delivery without leaking env var names", async () => {
+    executeToolMocked.mockResolvedValueOnce({ ok: false, error: "credential secret missing for ops", latencyMs: 5 });
+
+    await callEvidenceDeliver({ destination: { kind: "slack", credentialName: "ops" } });
+
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    const [orgId, userId, action, targetType, targetId, metadata] = auditMock.mock.calls[0] as [
+      string, string, string, string, string, Record<string, unknown>,
+    ];
+    expect(orgId).toBe("org-1");
+    expect(userId).toBe("user-1");
+    expect(action).toBe("report.evidence.delivered");
+    expect(targetType).toBe("recovery-item");
+    expect(targetId).toBe("ri_1");
+    expect(metadata).toMatchObject({
+      destination: "slack",
+      ok: false,
+      error: "credential secret missing for ops",
+      latencyMs: 5,
+      deadLetterId: "dlq_1",
+      workflowId: "wf_billing",
+      runId: "run_orig",
+      credentialName: "ops",
+    });
+    expect(JSON.stringify(metadata)).not.toContain("SECRET");
+  });
+
+  it("404s uniformly when the recovery item is absent / cross-org", async () => {
+    resolveEvidenceMock.mockResolvedValue(null);
+
+    const result = (await callEvidenceDeliver({
+      destination: { kind: "slack", credentialName: "ops" },
+    }, "/recovery/items/ri_unknown/evidence/deliver")) as { status?: number; payload?: { code?: string } };
+
+    expect(result.status).toBe(404);
+    expect(result.payload?.code).toBe("recovery_item_not_found");
+    expect(executeToolMocked).not.toHaveBeenCalled();
+    expect(auditMock).not.toHaveBeenCalled();
   });
 });

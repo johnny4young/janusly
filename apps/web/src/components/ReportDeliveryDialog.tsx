@@ -1,9 +1,10 @@
 /**
- * Report Delivery dialog — routes the existing run-explain report
- * through the integration-tool chokepoint (`slack.post` /
- * `github.create_issue` / `webhook.send`) to land in the right team
- * surface. Reuses the same Markdown / JSON the GET /reports/run-explain
- * route renders; no new vendor SDK, no new credential kind.
+ * Report Delivery dialog — routes a server-rendered report through the
+ * integration-tool chokepoint (`slack.post` / `github.create_issue` /
+ * `webhook.send`) to land in the right team surface. Surface-agnostic: the
+ * `endpoint` + `copyKeys` props point it at either `/reports/run-explain/deliver`
+ * (default, run-explain report) or `/recovery/items/:id/evidence/deliver`
+ * (recovery-incident evidence). No new vendor SDK, no new credential kind.
  *
  * State machine:
  *
@@ -17,8 +18,8 @@
  * Backdrop / ESC / close-button are gated while submitting so the
  * operator can't accidentally double-fire the delivery.
  *
- * Used by `RightPanel.tsx` (Send-to button next to the run-history
- * Export button).
+ * Used by `RightPanel.tsx` (Send-to button next to the run-history Export
+ * button) and `RecoveryItemDrawer.tsx` (Deliver button in the evidence section).
  */
 
 import React, { useEffect, useRef, useState } from 'react'
@@ -51,11 +52,40 @@ type DeliveryEnvelope = {
   deliveryId?: string
 }
 
+/** The i18n keys whose copy varies per delivery surface (run-explain vs
+ *  recovery-evidence). Everything else (field labels, destination helpers,
+ *  buttons) is shared `reportDelivery.*` copy. */
+type DeliveryCopyKeys = {
+  kicker: string
+  title: string
+  description: string
+  toastSent: string
+  successMessage: string
+}
+
+const RUN_EXPLAIN_COPY: DeliveryCopyKeys = {
+  kicker: 'reportDelivery.kicker',
+  title: 'reportDelivery.title',
+  description: 'reportDelivery.description',
+  toastSent: 'reportDelivery.toastSent',
+  successMessage: 'reportDelivery.successMessage',
+}
+
 export function ReportDeliveryDialog({
   sourceRun,
+  endpoint = '/reports/run-explain/deliver',
+  copyKeys = RUN_EXPLAIN_COPY,
   onClose,
 }: {
-  sourceRun: SourceRun
+  /** When present, the source-run summary section renders AND the request body
+   *  carries `{ runId: sourceRun.id }`. Omitted for the evidence variant (the
+   *  recovery item id is in the endpoint path; the drawer shows the context). */
+  sourceRun?: SourceRun
+  /** The deliver endpoint. Defaults to run-explain; the evidence caller passes
+   *  `/recovery/items/:id/evidence/deliver`. */
+  endpoint?: string
+  /** Per-surface copy overrides (defaults to the run-explain keys). */
+  copyKeys?: DeliveryCopyKeys
   onClose: () => void
 }) {
   const { t } = useT()
@@ -108,7 +138,7 @@ export function ReportDeliveryDialog({
     setStep({ kind: 'submitting' })
     try {
       const body: Record<string, unknown> = {
-        runId: sourceRun.id,
+        ...(sourceRun ? { runId: sourceRun.id } : {}),
         destination: {
           kind: destination,
           credentialName: credentialName.trim(),
@@ -129,7 +159,7 @@ export function ReportDeliveryDialog({
         ;(body.destination as Record<string, unknown>).url = webhookUrl.trim()
       }
 
-      const result = await api('/reports/run-explain/deliver', {
+      const result = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify(body),
       }) as DeliveryEnvelope
@@ -138,7 +168,7 @@ export function ReportDeliveryDialog({
 
       if (result.ok) {
         setStep({ kind: 'succeeded', deliveryId: result.deliveryId, statusCode: result.statusCode })
-        addToast(t('reportDelivery.toastSent', { destination }), 'success')
+        addToast(t(copyKeys.toastSent, { destination }), 'success')
         // The audit-log panel can refresh against the new
         // `report.run_explain.delivered` row.
         bumpPlatformVersion()
@@ -169,9 +199,9 @@ export function ReportDeliveryDialog({
             <Send size={18} />
           </span>
           <div className="run-input-dialog__heading">
-            <div className="section-kicker">{t('reportDelivery.kicker')}</div>
-            <h2 id="report-delivery-title">{t('reportDelivery.title')}</h2>
-            <p className="helper-text">{t('reportDelivery.description')}</p>
+            <div className="section-kicker">{t(copyKeys.kicker)}</div>
+            <h2 id="report-delivery-title">{t(copyKeys.title)}</h2>
+            <p className="helper-text">{t(copyKeys.description)}</p>
           </div>
           <button
             type="button"
@@ -185,25 +215,27 @@ export function ReportDeliveryDialog({
         </header>
 
         <div className="run-input-dialog__body">
-          <section className="we-replay-lab-source">
-            <div className="section-kicker">{t('reportDelivery.sourceRun')}</div>
-            <dl className="we-replay-lab-source-grid">
-              <div>
-                <dt>{t('reportDelivery.runId')}</dt>
-                <dd className="we-replay-lab-id">{sourceRun.id}</dd>
-              </div>
-              <div>
-                <dt>{t('reportDelivery.status')}</dt>
-                <dd>{formatStatusLabel(sourceRun.status)}</dd>
-              </div>
-              {sourceRun.workflowName && (
+          {sourceRun && (
+            <section className="we-replay-lab-source">
+              <div className="section-kicker">{t('reportDelivery.sourceRun')}</div>
+              <dl className="we-replay-lab-source-grid">
                 <div>
-                  <dt>{t('reportDelivery.workflow')}</dt>
-                  <dd>{sourceRun.workflowName}</dd>
+                  <dt>{t('reportDelivery.runId')}</dt>
+                  <dd className="we-replay-lab-id">{sourceRun.id}</dd>
                 </div>
-              )}
-            </dl>
-          </section>
+                <div>
+                  <dt>{t('reportDelivery.status')}</dt>
+                  <dd>{formatStatusLabel(sourceRun.status)}</dd>
+                </div>
+                {sourceRun.workflowName && (
+                  <div>
+                    <dt>{t('reportDelivery.workflow')}</dt>
+                    <dd>{sourceRun.workflowName}</dd>
+                  </div>
+                )}
+              </dl>
+            </section>
+          )}
 
           {step.kind !== 'succeeded' && (
             <section className="we-report-delivery-form">
@@ -340,7 +372,7 @@ export function ReportDeliveryDialog({
             <section className="we-report-delivery-result" aria-live="polite">
               <div className="run-input-form-success" role="status">
                 <CheckCircle2 size={14} aria-hidden="true" />
-                <div>{t('reportDelivery.successMessage', { destination })}</div>
+                <div>{t(copyKeys.successMessage, { destination })}</div>
               </div>
               {step.deliveryId && /^https?:\/\//i.test(step.deliveryId) ? (
                 <a

@@ -39,7 +39,11 @@ function dlqRow(id: string, opts: { status?: string; recovery?: DeadLetterRecove
   }
 }
 
-function overlay(id: string, severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2'): DeadLetterRecovery {
+function overlay(
+  id: string,
+  severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2',
+  overrides: Partial<DeadLetterRecovery> = {},
+): DeadLetterRecovery {
   return {
     id,
     owner: 'dev-user',
@@ -51,6 +55,7 @@ function overlay(id: string, severity: 'p1' | 'p2' | 'p3' | 'p4' = 'p2'): DeadLe
     workflowId: null,
     occurrenceCount: 1,
     lastOccurredAt: '2026-05-25T12:00:00Z',
+    ...overrides,
   }
 }
 
@@ -87,6 +92,8 @@ function Harness() {
       <span data-testid="filtered">{f.filtered.map((r) => r.id).join(',')}</span>
       <span data-testid="overlay-keys">{[...f.recoveryByDeadLetterId.keys()].join(',')}</span>
       <span data-testid="overlay-a-sev">{f.recoveryByDeadLetterId.get('a')?.severity ?? ''}</span>
+      <span data-testid="overlay-a-workflow">{f.recoveryByDeadLetterId.get('a')?.workflowId ?? ''}</span>
+      <span data-testid="overlay-a-metadata-workflow">{f.recoveryByDeadLetterId.get('a')?.metadataWorkflowId ?? ''}</span>
       <span data-testid="loading">{String(f.recoveryFilterLoading)}</span>
       <span data-testid="has-more">{String(f.hasMore)}</span>
       <span data-testid="loading-more">{String(f.loadingMore)}</span>
@@ -167,6 +174,40 @@ describe('useRecoveryQueueFilters', () => {
     // Only the row carrying an inline recovery contributes an overlay entry.
     expect(screen.getByTestId('overlay-keys')).toHaveTextContent('a')
     expect(screen.getByTestId('overlay-a-sev')).toHaveTextContent('p1')
+  })
+
+  it('keeps unsaved template workflow ids out of metadata lookups', async () => {
+    vi.mocked(api).mockImplementation(async () =>
+      page([
+        dlqRow('a', {
+          recovery: overlay('ri-a', 'p2', {
+            workflowId: 'failed-workflow-recovery',
+            metadataWorkflowId: null,
+          }),
+        }),
+      ]),
+    )
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('overlay-keys')).toHaveTextContent('a'))
+    expect(screen.getByTestId('overlay-a-workflow')).toHaveTextContent('failed-workflow-recovery')
+    expect(screen.getByTestId('overlay-a-metadata-workflow')).toHaveTextContent('')
+  })
+
+  it('threads persisted workflow ids separately for the recovery metadata card', async () => {
+    vi.mocked(api).mockImplementation(async () =>
+      page([
+        dlqRow('a', {
+          recovery: overlay('ri-a', 'p2', {
+            workflowId: 'template-source-id',
+            metadataWorkflowId: 'wf_saved_1',
+          }),
+        }),
+      ]),
+    )
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('overlay-keys')).toHaveTextContent('a'))
+    expect(screen.getByTestId('overlay-a-workflow')).toHaveTextContent('template-source-id')
+    expect(screen.getByTestId('overlay-a-metadata-workflow')).toHaveTextContent('wf_saved_1')
   })
 
   it('appends the next page and threads the cursor on loadMore', async () => {
