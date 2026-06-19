@@ -54,7 +54,10 @@ export type DeadLetterRecovery = {
   slaTargetAt: string
   resolutionReason: string | null
   comments: Array<{ id: string; authorUserId: string; body: string; createdAt: string }>
+  /** Source workflow id from the run payload; may be an unsaved demo/template id. */
   workflowId?: string | null
+  /** Persisted workflow id eligible for metadata lookups; null for unsaved templates. */
+  metadataWorkflowId?: string | null
   occurrenceCount?: number
   lastOccurredAt?: string
 }

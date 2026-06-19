@@ -20,12 +20,17 @@ import {
   queryRecoveryMetricsSignals,
   getOrgConfigSnapshot,
 } from "@janusly/data";
-import { executeTool } from "@janusly/engine/src/tool-registry";
-
 import { auditAction } from "../audit-helper";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
+import {
+  REPORTS_DELIVER_RATE_LIMIT_BUCKET,
+  REPORTS_DELIVER_RATE_LIMIT_PER_MIN,
+  deliverDestinationSchema,
+  dispatchReportDelivery,
+  refineDeliveryDestination,
+} from "../report-delivery";
 import {
   buildReportFilename,
   contentDispositionAttachment,
@@ -47,40 +52,12 @@ import type { Route } from "../routes";
 const deliverRequestSchema = z
   .object({
     runId: z.string().min(1),
-    destination: z.object({
-      kind: z.enum(["slack", "github", "webhook"]),
-      credentialName: z.string().min(1),
-      // GitHub-only fields.
-      owner: z.string().min(1).optional(),
-      repo: z.string().min(1).optional(),
-      labels: z.array(z.string().min(1)).max(10).optional(),
-      // Webhook-only field.
-      url: z.string().url().optional(),
-    }),
+    destination: deliverDestinationSchema,
   })
-  .superRefine((value, ctx) => {
-    const dest = value.destination;
-    if (dest.kind === "github") {
-      if (!dest.owner) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "owner"], message: "owner is required for github destination" });
-      }
-      if (!dest.repo) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "repo"], message: "repo is required for github destination" });
-      }
-    }
-    if (dest.kind === "webhook") {
-      if (!dest.url) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["destination", "url"], message: "url is required for webhook destination" });
-      }
-    }
-  });
+  .superRefine((value, ctx) => refineDeliveryDestination(value.destination, ctx));
 
 /** Cap below Slack's per-block 3000-char limit; leaves headroom for the header + footer. */
 const SLACK_TEXT_MAX = HTTP_CAPS.SLACK_BLOCK_CHARS;
-/** Outer route-level rate-limit bucket. Inner per-tool bucket (`tool.<name>`) is enforced inside the chokepoint. */
-const REPORTS_DELIVER_RATE_LIMIT_BUCKET = "reports.deliver";
-/** Outer-bucket default — 60/min/org for report delivery. */
-const REPORTS_DELIVER_RATE_LIMIT_PER_MIN = 60;
 
 /**
  * Build the Slack-bound text body from the report's structured JSON.
@@ -141,112 +118,6 @@ function buildGitHubTitle(args: {
   const shortId = args.runId.slice(0, 8);
   const displayName = args.workflowName ?? "(ad-hoc workflow)";
   return `Janusly run explain: ${displayName} – ${args.runStatus} (${shortId})`;
-}
-
-type DeliveryOutcome = {
-  ok: boolean;
-  statusCode?: number;
-  error?: string;
-  latencyMs: number;
-  deliveryId?: string;
-};
-
-/**
- * Translate the report into the destination tool's input shape and call
- * `executeTool`. The chokepoint enforces credential resolution, per-tool
- * rate-limit, usage events, and SSRF/body-cap/timeout guards via
- * `fetchHttpTarget`. The dispatcher itself never throws on runtime
- * failure (missing credential, non-2xx, network blip) — it returns
- * `{ ok: false, error, ... }` so the route can audit and respond
- * uniformly.
- *
- * dryRun posture: writeSide tools normally honour `executionContext.dryRun`
- * to skip the upstream call from a `replayMode="validation"` workflow run.
- * This route runs outside a workflow run, so the runtime dryRun gate isn't
- * applicable here; the rate-limit + credential + audit gates are the
- * right safeguards at this layer.
- */
-async function dispatchDelivery(args: {
-  orgId: string;
-  runId: string;
-  destination: z.infer<typeof deliverRequestSchema>["destination"];
-  report: RunExplainReport;
-  workflowName: string | null;
-}): Promise<DeliveryOutcome> {
-  const { orgId, runId, destination, report, workflowName } = args;
-  const ctx = {
-    orgId,
-    // Pass the source runId for traceability in usage_events. The
-    // integration tool's recorder writes runId verbatim; nodeId /
-    // workflowId stay unset (this is a route-level call, not a
-    // workflow-node execution).
-    runId,
-  };
-
-  try {
-    if (destination.kind === "slack") {
-      const text = buildSlackText({ report, workflowName, runId });
-      const result = await executeTool(
-        "slack.post",
-        { credential: destination.credentialName, text },
-        {},
-        ctx,
-      );
-      return normalizeDeliveryResult(result);
-    }
-
-    if (destination.kind === "github") {
-      const result = await executeTool(
-        "github.create_issue",
-        {
-          credential: destination.credentialName,
-          owner: destination.owner!,
-          repo: destination.repo!,
-          title: buildGitHubTitle({ workflowName, runStatus: report.json.summary.status, runId }),
-          body: report.markdown,
-          ...(destination.labels && destination.labels.length > 0 ? { labels: destination.labels } : {}),
-        },
-        {},
-        ctx,
-      );
-      const issueUrl = typeof result.url === "string" ? result.url : undefined;
-      return { ...normalizeDeliveryResult(result), deliveryId: issueUrl };
-    }
-
-    // webhook
-    const result = await executeTool(
-      "webhook.send",
-      {
-        credential: destination.credentialName,
-        url: destination.url!,
-        // The structured JSON envelope is the most useful shape for an
-        // automated webhook receiver. The exact serialised body is what
-        // the tool's HMAC-SHA256 path signs — the receiver verifies with
-        // the same shared secret.
-        payload: report.json as Record<string, unknown>,
-      },
-      {},
-      ctx,
-    );
-    return normalizeDeliveryResult(result);
-  } catch (err) {
-    // executeTool throws on (a) unknown tool name or (b) zod input/output
-    // validation failure. Neither is reachable in practice given the route
-    // gates inputs upfront, but the route mirrors the tool contract by
-    // never propagating throws — convert to a `{ ok: false }` envelope so
-    // the outer audit row still gets written.
-    const message = err instanceof Error ? err.message : "delivery failed";
-    return { ok: false, error: message, latencyMs: 0 };
-  }
-}
-
-function normalizeDeliveryResult(result: Record<string, unknown>): DeliveryOutcome {
-  return {
-    ok: result.ok === true,
-    statusCode: typeof result.statusCode === "number" ? result.statusCode : undefined,
-    error: typeof result.error === "string" ? result.error : undefined,
-    latencyMs: typeof result.latencyMs === "number" ? result.latencyMs : 0,
-  };
 }
 
 /**
@@ -591,12 +462,14 @@ export const reportsRoutes: Route[] = [
       const inputJson = loaded.runInputJson as { workflow?: { id?: unknown } } | null;
       const workflowId = typeof inputJson?.workflow?.id === "string" ? inputJson.workflow.id : null;
 
-      const outcome = await dispatchDelivery({
+      const outcome = await dispatchReportDelivery({
         orgId: auth.orgId,
         runId,
         destination,
-        report: loaded.report,
-        workflowName: loaded.workflowName,
+        slackText: buildSlackText({ report: loaded.report, workflowName: loaded.workflowName, runId }),
+        githubTitle: buildGitHubTitle({ workflowName: loaded.workflowName, runStatus: loaded.report.json.summary.status, runId }),
+        githubBody: loaded.report.markdown,
+        webhookPayload: loaded.report.json as Record<string, unknown>,
       });
 
       await writeAuditRow({
