@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const limitMock = vi.fn();
 const orderByMock = vi.fn();
 const onConflictMock = vi.fn();
+// `listDistinctWorkflowTagsForOrg` uses db.selectDistinct(...).from().where().orderBy().limit().
+const distinctLimitMock = vi.fn();
 
 vi.mock("@janusly/db", () => ({
   db: {
@@ -12,6 +14,15 @@ vi.mock("@janusly/db", () => ({
           limit: limitMock,
           orderBy: vi.fn(() => ({
             limit: orderByMock,
+          })),
+        })),
+      })),
+    })),
+    selectDistinct: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          orderBy: vi.fn(() => ({
+            limit: distinctLimitMock,
           })),
         })),
       })),
@@ -41,6 +52,7 @@ vi.mock("@janusly/db", () => ({
 
 import {
   getWorkflowMetadata,
+  listDistinctWorkflowTagsForOrg,
   listWorkflowMetadataForOrg,
   upsertWorkflowMetadata,
 } from "./workflowMetadataRepo";
@@ -66,6 +78,7 @@ beforeEach(() => {
   limitMock.mockReset();
   orderByMock.mockReset();
   onConflictMock.mockReset();
+  distinctLimitMock.mockReset();
 });
 
 afterEach(() => {
@@ -106,6 +119,22 @@ describe("listWorkflowMetadataForOrg", () => {
     const result = await listWorkflowMetadataForOrg("default", 5000);
     expect(result).toHaveLength(1);
     expect(result[0].workflowId).toBe("wf_1");
+  });
+});
+
+describe("listDistinctWorkflowTagsForOrg", () => {
+  it("maps the distinct unnested rows to a flat string[]", async () => {
+    // The query unnests `tags` via jsonb_array_elements_text, so each row is a
+    // single `{ tag }`; the repo flattens to the tag strings.
+    distinctLimitMock.mockResolvedValueOnce([{ tag: "billing" }, { tag: "onboarding" }, { tag: "urgent" }]);
+    const result = await listDistinctWorkflowTagsForOrg("default");
+    expect(result).toEqual(["billing", "onboarding", "urgent"]);
+  });
+
+  it("returns [] when the org has no tagged workflows", async () => {
+    distinctLimitMock.mockResolvedValueOnce([]);
+    const result = await listDistinctWorkflowTagsForOrg("default");
+    expect(result).toEqual([]);
   });
 });
 

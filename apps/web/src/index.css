@@ -9133,6 +9133,15 @@ button.we-ops-metric-card--button {
   gap: 6px;
 }
 
+/* Tag pills under a workflow name in the Flows list row. */
+.we-list-row__tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .we-workflow-about-card__owner-list {
   list-style: none;
   margin: 0;

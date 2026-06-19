@@ -30,6 +30,7 @@ import {
   DEFAULT_HEALTH_WINDOW_DAYS,
   findScheduleEntriesForWorkflow,
   getWorkflowSlo,
+  listDistinctWorkflowTagsForOrg,
   listWorkflowsWithRunSummary,
   queryScheduleFires,
   setWorkflowSlo,
@@ -87,12 +88,24 @@ export const workflowsRoutes: Route[] = [
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
     } },
+  // The org's distinct workflow tags, for the Flows-list tag-filter dropdown.
+  // Registered BEFORE the `/workflows` list route (which excludes `/workflows/`)
+  // so first-match-wins routes it correctly; org-scoped in the repo.
+  { method: "GET", match: (url) => url.startsWith("/workflows/tags"), permission: "workflows.read",
+    handler: async ({ res, auth }) => {
+      const tags = await listDistinctWorkflowTagsForOrg(auth.orgId);
+      return sendJson(res, { tags });
+    } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue);
+      // Optional `?tag=` filters the list to workflows tagged with it (applied
+      // before the cap in the repo). Trim + length-guard against junk input.
+      const tagParam = url.searchParams.get("tag")?.trim();
+      const tag = tagParam && tagParam.length > 0 && tagParam.length <= 40 ? tagParam : undefined;
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tag });
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
