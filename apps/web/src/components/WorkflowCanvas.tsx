@@ -1,20 +1,21 @@
 /**
  * React Flow canvas wrapper — the workflow editor's main surface. The
  * `workflowNodeTypes` map (from `./WorkflowStepNode`) plugs the custom
- * step renderer in. The 6 browser-mode tests in `WorkflowCanvas.browser.test.tsx`
+ * step renderer in. The browser-mode tests in `WorkflowCanvas.browser.test.tsx`
  * lock its render contract; before changing the DOM structure
  * inspect those tests for selector breakage.
  *
  * Used by `App.tsx` (the workspace's main pane).
  */
 
-import React from 'react'
+import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/react'
-import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
+import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { getNodeHelper, getNodeLabel } from '../constants'
+import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
 import '@xyflow/react/dist/style.css'
 
@@ -31,13 +32,53 @@ type WorkflowCanvasProps = {
    *  browser tests (which pass neither prop) are unaffected. */
   paletteNodeTypes?: string[]
   onAddNode?: (type: string) => void
+  /** When present, the canvas restores this workflow's last saved viewport
+   *  (zoom + pan) on mount instead of fitting-to-view, and persists user
+   *  pan/zoom under it. Omitted (e.g. unsaved drafts, the locked browser
+   *  tests) → always fit-to-view, no persistence. */
+  viewportWorkflowId?: string
 }
 
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId }: WorkflowCanvasProps) {
   const { t } = useT()
+  // Restore the saved viewport on mount (read once per workflow key); when none
+  // exists we fall back to `fitView`. React Flow ignores `defaultViewport` while
+  // `fitView` is set, so the two are mutually exclusive below.
+  const restoredViewport = useMemo(
+    () => (viewportWorkflowId ? readCanvasViewport(viewportWorkflowId) : null),
+    [viewportWorkflowId],
+  )
+  const latestViewportRef = useRef<Viewport | null>(restoredViewport)
+  useEffect(() => {
+    latestViewportRef.current = restoredViewport
+  }, [restoredViewport, viewportWorkflowId])
+  const handleMove = useCallback<OnMove>((_, viewport) => {
+    latestViewportRef.current = viewport
+  }, [])
+  // Persist only deliberate operator pan/zoom — the automatic fitView / restore
+  // fires `onMoveEnd` with a null event, which we skip so the stored viewport
+  // always reflects a user gesture.
+  const handleMoveEnd = useCallback<OnMoveEnd>(
+    (event, viewport) => {
+      latestViewportRef.current = viewport
+      if (viewportWorkflowId && event !== null) writeCanvasViewport(viewportWorkflowId, viewport)
+    },
+    [viewportWorkflowId],
+  )
+  // React Flow's built-in Controls trigger viewport changes with a null source
+  // event too, so the onMoveEnd guard above intentionally skips them along with
+  // automatic fit/restore. Persist those explicit toolbar clicks via their
+  // callbacks after React Flow has applied the new viewport.
+  const persistCurrentViewport = useCallback(() => {
+    if (!viewportWorkflowId || typeof window === 'undefined') return
+    window.requestAnimationFrame(() => {
+      const viewport = latestViewportRef.current
+      if (viewport) writeCanvasViewport(viewportWorkflowId, viewport)
+    })
+  }, [viewportWorkflowId])
   return (
     <div className="canvas-frame">
       <div className="canvas-toolbar" aria-label={t('canvas.flowMapSummary')}>
@@ -72,13 +113,16 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
-        fitView
+        fitView={!restoredViewport}
         fitViewOptions={{ padding: 0.22 }}
+        defaultViewport={restoredViewport ?? undefined}
+        onMove={handleMove}
+        onMoveEnd={handleMoveEnd}
         minZoom={0.45}
         maxZoom={1.35}
       >
         <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
-        <Controls />
+        <Controls onZoomIn={persistCurrentViewport} onZoomOut={persistCurrentViewport} onFitView={persistCurrentViewport} />
       </ReactFlow>
     </div>
   )
