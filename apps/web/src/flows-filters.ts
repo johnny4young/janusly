@@ -22,19 +22,28 @@ export const SORT_KEYS = ['recent', 'name', 'failed'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 
 /** The persisted Flows-list view: the selected tag (`''` = all), the name-search
- *  query, and the sort. */
+ *  query, the sort, and the set of collapsed folder sections (folder names; the
+ *  empty string `''` is the sentinel for the "Ungrouped" section, which a real
+ *  folder name — min length 1 — can never collide with). */
 export type FlowsFilters = {
   tag: string
   query: string
   sort: SortKey
+  collapsedFolders: string[]
 }
 
 function isSortKey(value: unknown): value is SortKey {
   return typeof value === 'string' && (SORT_KEYS as readonly string[]).includes(value)
 }
 
-/** True only for a fully-shaped `{ tag, query, sort }` object — rejects a
- *  corrupt / outdated / partial localStorage value. */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+}
+
+/** True for an object carrying at least the `{ tag, query, sort }` triple —
+ *  rejects a corrupt / outdated / partial localStorage value. `collapsedFolders`
+ *  is read leniently in `readFlowsFilters` so a pre-`collapsedFolders` stored
+ *  value still restores the tag / query / sort. */
 function isFlowsFilters(value: unknown): value is FlowsFilters {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
@@ -42,27 +51,39 @@ function isFlowsFilters(value: unknown): value is FlowsFilters {
 }
 
 /** Read the saved Flows filters, or `null` when none / unavailable / corrupt.
- *  Safe to call during render (used as a lazy `useState` initializer). */
+ *  Safe to call during render (used as a lazy `useState` initializer). A stored
+ *  value without `collapsedFolders` (written before folders shipped) still
+ *  restores; its collapsed set defaults to empty. */
 export function readFlowsFilters(): FlowsFilters | null {
   if (typeof window === 'undefined' || !window.localStorage) return null
   try {
     const raw = window.localStorage.getItem(KEY)
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
-    return isFlowsFilters(parsed) ? { tag: parsed.tag, query: parsed.query, sort: parsed.sort } : null
+    if (!isFlowsFilters(parsed)) return null
+    const collapsedFolders = isStringArray((parsed as Record<string, unknown>).collapsedFolders)
+      ? (parsed as { collapsedFolders: string[] }).collapsedFolders
+      : []
+    return { tag: parsed.tag, query: parsed.query, sort: parsed.sort, collapsedFolders }
   } catch {
     return null
   }
 }
 
 /** Persist the Flows filters; failure is non-fatal (storage unavailable /
- *  private mode / quota). Only the `{ tag, query, sort }` triple is stored. */
+ *  private mode / quota). Only the closed `{ tag, query, sort, collapsedFolders }`
+ *  shape is stored. */
 export function writeFlowsFilters(filters: FlowsFilters): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   try {
     window.localStorage.setItem(
       KEY,
-      JSON.stringify({ tag: filters.tag, query: filters.query, sort: filters.sort }),
+      JSON.stringify({
+        tag: filters.tag,
+        query: filters.query,
+        sort: filters.sort,
+        collapsedFolders: filters.collapsedFolders,
+      }),
     )
   } catch {
     /* swallow — storage may be unavailable (private mode / quota). */

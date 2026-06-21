@@ -1488,6 +1488,8 @@ export const workflowMetadata = pgTable(
     description: text("description"),
     /** Operator-chosen labels (closed bounded array). */
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    /** Operator-chosen folder name — a single organizing home for the Flows list. Nullable = ungrouped. */
+    folder: text("folder"),
     /** Slack channel reference like `#alerts-prod` — bare string, no URL construction server-side. */
     slackChannel: text("slack_channel"),
     /** Linear project URL (https://linear.app/...) OR slug. */
