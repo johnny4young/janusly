@@ -21,12 +21,15 @@
  *  - The repo doesn't re-validate inputs.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { db, workflowMetadata } from "@janusly/db";
 import type { WorkflowMetadata, WorkflowMetadataRecord } from "@janusly/shared";
 
 /** Upper bound on the distinct-tag dropdown so a pathological org can't return an unbounded list. */
 const WORKFLOW_TAGS_DROPDOWN_MAX = 500;
+
+/** Upper bound on the distinct-folder dropdown so a pathological org can't return an unbounded list. */
+const WORKFLOW_FOLDERS_DROPDOWN_MAX = 500;
 
 type WorkflowMetadataRow = typeof workflowMetadata.$inferSelect;
 
@@ -103,6 +106,23 @@ export async function listDistinctWorkflowTagsForOrg(orgId: string): Promise<str
     .orderBy(sql`jsonb_array_elements_text(${workflowMetadata.tags}) asc`)
     .limit(WORKFLOW_TAGS_DROPDOWN_MAX);
   return rows.map((r) => r.tag);
+}
+
+/**
+ * The distinct set of folders used across an org's workflows, sorted ascending —
+ * powers the workflow-list folder-filter dropdown. Folder is a scalar column, so
+ * this is a plain `selectDistinct` on it (no jsonb unnest) filtered to non-null
+ * values. Org-scoped (a folder from another org never appears).
+ */
+export async function listDistinctWorkflowFoldersForOrg(orgId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ folder: workflowMetadata.folder })
+    .from(workflowMetadata)
+    .where(and(eq(workflowMetadata.orgId, orgId), isNotNull(workflowMetadata.folder)))
+    .orderBy(workflowMetadata.folder)
+    .limit(WORKFLOW_FOLDERS_DROPDOWN_MAX);
+  // `isNotNull` guarantees non-null, but narrow defensively for the string[] return.
+  return rows.map((r) => r.folder).filter((f): f is string => f !== null);
 }
 
 export type UpsertWorkflowMetadataInput = {

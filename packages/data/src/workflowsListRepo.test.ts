@@ -80,4 +80,20 @@ describe("listWorkflowsWithRunSummary", () => {
     expect(rows[1]?.tags).toEqual([]); // a null metadata join coalesces to []
     expect(rows[1]?.folder).toBeNull(); // a null folder stays null (ungrouped)
   });
+
+  it("exercises the folder filter branch (scalar equality, before the cap)", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: "Billing" },
+    ];
+    aggRows = [];
+
+    // `{ folder }` exercises the `eq(workflowMetadata.folder, …)` predicate
+    // construction without throwing; the chain mock ignores the WHERE, so this
+    // asserts the branch + folder fold (the real filtering is smoke-verified
+    // against Postgres).
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, { folder: "Billing" });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.folder).toBe("Billing");
+  });
 });

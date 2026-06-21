@@ -82,3 +82,36 @@ test('Flows list groups by folder and persists a collapsed section across reload
   // Folder B (never collapsed) stays open.
   await expect(sectionB.locator(`[data-testid="workflows-row-${gammaId}"]`)).toBeVisible()
 })
+
+test('Flows list folder filter narrows the list server-side and clears back to all', async ({ page, request }) => {
+  const stamp = Date.now()
+  const aId = `e2e-ff-a-${stamp}`
+  const bId = `e2e-ff-b-${stamp}`
+  const folderA = `e2e-ff-A-${stamp}`
+  const folderB = `e2e-ff-B-${stamp}`
+
+  await saveWorkflow(request, aId, `E2E FF Alpha ${stamp}`)
+  await saveWorkflow(request, bId, `E2E FF Beta ${stamp}`)
+  await setFolder(request, aId, folderA)
+  await setFolder(request, bId, folderB)
+
+  await page.goto('/')
+  await expect(page.getByText('dev-user')).toBeVisible()
+  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Refresh' }).click()
+
+  const aRow = page.locator(`[data-testid="workflows-row-${aId}"]`)
+  const bRow = page.locator(`[data-testid="workflows-row-${bId}"]`)
+  await expect(aRow).toBeVisible()
+  await expect(bRow).toBeVisible()
+
+  // Filter to folder A (server-side) → only A's workflow remains.
+  await page.getByTestId('workflows-folder-filter').selectOption(folderA)
+  await expect(aRow).toBeVisible()
+  await expect(bRow).toHaveCount(0)
+
+  // Clear back to "All folders" → both return.
+  await page.getByTestId('workflows-folder-filter').selectOption('')
+  await expect(aRow).toBeVisible()
+  await expect(bRow).toBeVisible()
+})

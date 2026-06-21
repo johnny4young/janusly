@@ -52,6 +52,7 @@ vi.mock("@janusly/db", () => ({
 
 import {
   getWorkflowMetadata,
+  listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowMetadataForOrg,
   upsertWorkflowMetadata,
@@ -138,6 +139,28 @@ describe("listDistinctWorkflowTagsForOrg", () => {
   it("returns [] when the org has no tagged workflows", async () => {
     distinctLimitMock.mockResolvedValueOnce([]);
     const result = await listDistinctWorkflowTagsForOrg("default");
+    expect(result).toEqual([]);
+  });
+});
+
+describe("listDistinctWorkflowFoldersForOrg", () => {
+  it("maps the distinct scalar folder rows to a flat string[]", async () => {
+    // folder is a scalar column (no jsonb unnest), so each row is a `{ folder }`.
+    distinctLimitMock.mockResolvedValueOnce([{ folder: "Billing" }, { folder: "Onboarding" }]);
+    const result = await listDistinctWorkflowFoldersForOrg("default");
+    expect(result).toEqual(["Billing", "Onboarding"]);
+  });
+
+  it("defensively drops any null folder from the result", async () => {
+    // The query filters IS NOT NULL, but the map narrows defensively for string[].
+    distinctLimitMock.mockResolvedValueOnce([{ folder: "Billing" }, { folder: null }]);
+    const result = await listDistinctWorkflowFoldersForOrg("default");
+    expect(result).toEqual(["Billing"]);
+  });
+
+  it("returns [] when the org has no foldered workflows", async () => {
+    distinctLimitMock.mockResolvedValueOnce([]);
+    const result = await listDistinctWorkflowFoldersForOrg("default");
     expect(result).toEqual([]);
   });
 });
