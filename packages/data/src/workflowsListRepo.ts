@@ -42,30 +42,43 @@ export type WorkflowListRow = {
   folder: string | null;
 };
 
-/** Optional filters for the Flows list. `tag` matches workflows whose `workflow_metadata.tags` contains it. */
+/**
+ * Optional filters for the Flows list. `tag` matches workflows whose
+ * `workflow_metadata.tags` contains it; `folder` matches workflows whose
+ * `workflow_metadata.folder` equals it. Both are applied BEFORE the cap.
+ */
 export type WorkflowListFilters = {
   tag?: string;
+  folder?: string;
 };
 
 /**
  * List an org's workflows (most-recent first, capped) with each row's
- * production run count, most-recent run status, and operator tags folded in.
+ * production run count, most-recent run status, and operator tags + folder
+ * folded in.
  *
- * The `tag` filter (when set) is applied in the WHERE clause BEFORE the cap, so
- * a tagged workflow surfaces even if it's older than the newest `limit` rows.
+ * The `tag` / `folder` filters (when set) are applied in the WHERE clause
+ * BEFORE the cap, so a matching workflow surfaces even if it's older than the
+ * newest `limit` rows.
  */
 export async function listWorkflowsWithRunSummary(
   orgId: string,
   limit: number,
   filters: WorkflowListFilters = {},
 ): Promise<WorkflowListRow[]> {
-  // 1. Base list — LEFT JOIN workflow_metadata for tags; the optional tag
-  //    filter is a jsonb-containment predicate applied BEFORE the cap.
+  // 1. Base list — LEFT JOIN workflow_metadata for tags + folder; the optional
+  //    filters are applied BEFORE the cap (tag = jsonb-containment, folder =
+  //    scalar equality).
   const conditions = [eq(workflows.orgId, orgId)];
   if (filters.tag) {
     // `tags @> '["<tag>"]'::jsonb` — true when the array contains the tag.
     // A workflow with no metadata row (tags null) never matches, which is correct.
     conditions.push(sql`${workflowMetadata.tags} @> ${JSON.stringify([filters.tag])}::jsonb`);
+  }
+  if (filters.folder) {
+    // Scalar equality on the single folder column. A workflow with no metadata
+    // row (folder null) never matches, which is correct.
+    conditions.push(eq(workflowMetadata.folder, filters.folder));
   }
   const base = await db
     .select({

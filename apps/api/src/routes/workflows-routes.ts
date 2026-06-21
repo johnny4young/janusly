@@ -30,6 +30,7 @@ import {
   DEFAULT_HEALTH_WINDOW_DAYS,
   findScheduleEntriesForWorkflow,
   getWorkflowSlo,
+  listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowsWithRunSummary,
   queryScheduleFires,
@@ -96,16 +97,27 @@ export const workflowsRoutes: Route[] = [
       const tags = await listDistinctWorkflowTagsForOrg(auth.orgId);
       return sendJson(res, { tags });
     } },
+  // The org's distinct workflow folders, for the Flows-list folder-filter
+  // dropdown. Registered BEFORE the `/workflows` list route (same first-match
+  // reason as `/workflows/tags`); org-scoped in the repo.
+  { method: "GET", match: (url) => url.startsWith("/workflows/folders"), permission: "workflows.read",
+    handler: async ({ res, auth }) => {
+      const folders = await listDistinctWorkflowFoldersForOrg(auth.orgId);
+      return sendJson(res, { folders });
+    } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      // Optional `?tag=` filters the list to workflows tagged with it (applied
-      // before the cap in the repo). Trim + length-guard against junk input.
+      // Optional `?tag=` / `?folder=` filter the list (both applied before the
+      // cap in the repo). Trim + length-guard against junk input (tag ≤40,
+      // folder ≤60 — matching their Zod maxes).
       const tagParam = url.searchParams.get("tag")?.trim();
       const tag = tagParam && tagParam.length > 0 && tagParam.length <= 40 ? tagParam : undefined;
-      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tag });
+      const folderParam = url.searchParams.get("folder")?.trim();
+      const folder = folderParam && folderParam.length > 0 && folderParam.length <= 60 ? folderParam : undefined;
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tag, folder });
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",

@@ -218,4 +218,84 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument()
     expect(screen.queryByTestId('workflows-row-wf3')).not.toBeInTheDocument()
   })
+
+  it('populates the folder dropdown from GET /workflows/folders ("All folders" + one per org folder)', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const select = (await screen.findByTestId('workflows-folder-filter')) as HTMLSelectElement
+    const values = Array.from(select.options).map((o) => o.value)
+    expect(values).toEqual(['', 'Billing', 'Onboarding'])
+  })
+
+  it('threads ?folder= into the list fetch when a folder is selected', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/folders') return { folders: ['Billing'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url.startsWith('/workflows?folder=Billing')) return [FOLDERED[0]]
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-filter')
+    fireEvent.change(screen.getByTestId('workflows-folder-filter'), { target: { value: 'Billing' } })
+    await waitFor(() => expect(calls).toContain('/workflows?folder=Billing'))
+  })
+
+  it('reconciles a persisted folder the org no longer offers (clears it + refetches unfiltered)', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: '', folder: 'ghost', query: '', sort: 'recent', collapsedFolders: [] }))
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/folders') return { folders: ['Billing'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url.startsWith('/workflows?folder=ghost')) return [] // the stale folder matches nothing
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    // The stale folder is dropped once the (ghost-less) options load → select clears…
+    await waitFor(() => expect((screen.getByTestId('workflows-folder-filter') as HTMLSelectElement).value).toBe(''))
+    // …and the list refetches unfiltered.
+    await waitFor(() => expect(calls).toContain('/workflows'))
+  })
+
+  it('shows the no-folder-matches state when a folder filter returns nothing', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url.startsWith('/workflows?folder=Billing')) return [] // folder emptied since the dropdown loaded
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-filter')
+    fireEvent.change(screen.getByTestId('workflows-folder-filter'), { target: { value: 'Billing' } })
+    await waitFor(() => expect(screen.getByTestId('workflows-no-folder-matches')).toBeInTheDocument())
+  })
+
+  it('forces a previously-collapsed folder open when it is filtered to', async () => {
+    // Billing is restored as collapsed; filtering to it must override the
+    // persisted collapse so the operator doesn't land on an empty-looking section.
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: '', folder: '', query: '', sort: 'recent', collapsedFolders: ['Billing'] }))
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url.startsWith('/workflows?folder=Billing')) return [FOLDERED[0], FOLDERED[1]]
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    // Unfiltered grouped view: Billing starts collapsed (restored from storage).
+    const billing = (await screen.findByTestId('workflows-folder-Billing')) as HTMLDetailsElement
+    expect(billing.open).toBe(false)
+    // Filter to Billing → its section is forced open despite the persisted collapse.
+    fireEvent.change(screen.getByTestId('workflows-folder-filter'), { target: { value: 'Billing' } })
+    await waitFor(() => expect((screen.getByTestId('workflows-folder-Billing') as HTMLDetailsElement).open).toBe(true))
+    // Clearing the filter restores the original collapse preference; the force-open
+    // path must not silently erase it.
+    fireEvent.change(screen.getByTestId('workflows-folder-filter'), { target: { value: '' } })
+    await waitFor(() => expect((screen.getByTestId('workflows-folder-Billing') as HTMLDetailsElement).open).toBe(false))
+  })
 })

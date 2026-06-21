@@ -1,10 +1,10 @@
 /**
- * Flows-list filter persistence (tag + name search + sort).
+ * Flows-list view persistence (tag + folder + name search + sort + collapsed sections).
  *
- * The Flows dashboard's tag filter, name search, and sort are inline state that
- * reset on every visit — navigating away and back, or an F5 reload, drops them.
- * These helpers persist the operator's view to `localStorage` (a single
- * per-browser key) so it's restored on the next mount.
+ * The Flows dashboard's filters, name search, sort, and folder-collapse state are
+ * inline state that reset on every visit — navigating away and back, or an F5
+ * reload, drops them. These helpers persist the operator's view to `localStorage`
+ * (a single per-browser key) so it's restored on the next mount.
  *
  * Defensive in the same way as the canvas-viewport / locale / theme helpers:
  * every access is guarded (storage may be absent in non-browser/test contexts,
@@ -21,12 +21,14 @@ const KEY = 'janusly:flowsFilters'
 export const SORT_KEYS = ['recent', 'name', 'failed'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 
-/** The persisted Flows-list view: the selected tag (`''` = all), the name-search
- *  query, the sort, and the set of collapsed folder sections (folder names; the
- *  empty string `''` is the sentinel for the "Ungrouped" section, which a real
- *  folder name — min length 1 — can never collide with). */
+/** The persisted Flows-list view: the selected tag (`''` = all), the selected
+ *  folder (`''` = all), the name-search query, the sort, and the set of
+ *  collapsed folder sections (folder names; the empty string `''` is the
+ *  sentinel for the "Ungrouped" section, which a real folder name — min length
+ *  1 — can never collide with). */
 export type FlowsFilters = {
   tag: string
+  folder: string
   query: string
   sort: SortKey
   collapsedFolders: string[]
@@ -61,18 +63,22 @@ export function readFlowsFilters(): FlowsFilters | null {
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (!isFlowsFilters(parsed)) return null
-    const collapsedFolders = isStringArray((parsed as Record<string, unknown>).collapsedFolders)
-      ? (parsed as { collapsedFolders: string[] }).collapsedFolders
+    const record = parsed as Record<string, unknown>
+    const collapsedFolders = isStringArray(record.collapsedFolders)
+      ? (record.collapsedFolders as string[])
       : []
-    return { tag: parsed.tag, query: parsed.query, sort: parsed.sort, collapsedFolders }
+    // `folder` is read leniently (default '' when absent) so a value written
+    // before the folder filter shipped still restores the rest of the view.
+    const folder = typeof record.folder === 'string' ? record.folder : ''
+    return { tag: parsed.tag, folder, query: parsed.query, sort: parsed.sort, collapsedFolders }
   } catch {
     return null
   }
 }
 
 /** Persist the Flows filters; failure is non-fatal (storage unavailable /
- *  private mode / quota). Only the closed `{ tag, query, sort, collapsedFolders }`
- *  shape is stored. */
+ *  private mode / quota). Only the closed `{ tag, folder, query, sort,
+ *  collapsedFolders }` shape is stored. */
 export function writeFlowsFilters(filters: FlowsFilters): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   try {
@@ -80,6 +86,7 @@ export function writeFlowsFilters(filters: FlowsFilters): void {
       KEY,
       JSON.stringify({
         tag: filters.tag,
+        folder: filters.folder,
         query: filters.query,
         sort: filters.sort,
         collapsedFolders: filters.collapsedFolders,
