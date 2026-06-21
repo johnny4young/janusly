@@ -27,6 +27,7 @@ type WorkflowMetadataForm = {
   runbookMarkdown: string
   description: string
   tags: string[]
+  folder: string
   slackChannel: string
   linearProject: string
   severityDefault: RecoveryItemSeverity | ''
@@ -37,10 +38,13 @@ const EMPTY_FORM: WorkflowMetadataForm = {
   runbookMarkdown: '',
   description: '',
   tags: [],
+  folder: '',
   slackChannel: '',
   linearProject: '',
   severityDefault: '',
 }
+
+const WORKFLOW_METADATA_FOLDER_MAX_LENGTH = 60
 
 const WORKFLOW_METADATA_RUNBOOK_MAX_BYTES = 32 * 1024
 
@@ -87,6 +91,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             runbookMarkdown: metadata.runbookMarkdown ?? '',
             description: metadata.description ?? '',
             tags: metadata.tags ?? [],
+            folder: metadata.folder ?? '',
             slackChannel: metadata.slackChannel ?? '',
             linearProject: metadata.linearProject ?? '',
             severityDefault: metadata.severityDefault ?? '',
@@ -125,6 +130,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
         runbookMarkdown: form.runbookMarkdown.trim().length > 0 ? form.runbookMarkdown : null,
         description: form.description.trim().length > 0 ? form.description : null,
         tags: parseChipList(tagsRaw),
+        folder: form.folder.trim().length > 0 ? form.folder.trim() : null,
         slackChannel: form.slackChannel.trim().length > 0 ? form.slackChannel.trim() : null,
         linearProject: form.linearProject.trim().length > 0 ? form.linearProject.trim() : null,
         severityDefault: form.severityDefault === '' ? null : form.severityDefault,
@@ -184,6 +190,19 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             onChange={(e) => setTagsRaw(e.target.value)}
             placeholder={t('workflowMetadata.field.tagsPlaceholder') as string}
             disabled={loading || saving}
+          />
+        </label>
+
+        <label className="we-field">
+          <span>{t('workflowMetadata.field.folder') as string}</span>
+          <input
+            type="text"
+            value={form.folder}
+            maxLength={WORKFLOW_METADATA_FOLDER_MAX_LENGTH}
+            onChange={(e) => setForm({ ...form, folder: e.target.value })}
+            placeholder={t('workflowMetadata.field.folderPlaceholder') as string}
+            disabled={loading || saving}
+            data-testid="workflow-metadata-folder"
           />
         </label>
 

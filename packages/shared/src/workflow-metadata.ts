@@ -1,7 +1,7 @@
 /**
  * Per-workflow metadata contract — owners, runbook Markdown, description,
- * tags, Slack / Linear coordinates, and a default severity for incidents
- * spawned from the workflow.
+ * tags, folder, Slack / Linear coordinates, and a default severity for
+ * incidents spawned from the workflow.
  *
  * Pure, zero-I/O — safe to import from web bundle + engine + api + data.
  *
@@ -24,6 +24,8 @@
  *    a full URL at display time.
  *  - `severityDefault` reuses the closed `RECOVERY_ITEM_SEVERITIES` enum;
  *    no separate severity vocabulary lives here.
+ *  - `folder` is a single flat organizing name (no nesting); null /
+ *    absent means the workflow is ungrouped in the Flows list.
  */
 
 import { z } from 'zod'
@@ -38,6 +40,13 @@ export const WORKFLOW_METADATA_OWNERS_MAX = 10
 
 /** Maximum operator-supplied tags per workflow. */
 export const WORKFLOW_METADATA_TAGS_MAX = 10
+
+/**
+ * Maximum length of a workflow's folder name. A folder is the single
+ * organizing home a workflow appears under in the Flows list (one folder
+ * per workflow, flat — no nesting). Null / absent means "ungrouped".
+ */
+export const WORKFLOW_METADATA_FOLDER_MAX_LENGTH = 60
 
 /** Slack channel must start with `#` (encourages copy-paste safety; avoids URL guessing). */
 const SlackChannelSchema = z
@@ -84,6 +93,7 @@ export const WorkflowMetadataSchema = z
       .optional(),
     description: z.string().max(2000).nullable().optional(),
     tags: z.array(z.string().min(1).max(40)).max(WORKFLOW_METADATA_TAGS_MAX).default([]),
+    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable().optional(),
     slackChannel: SlackChannelSchema.nullable().optional(),
     linearProject: LinearProjectSchema.nullable().optional(),
     severityDefault: z.enum(RECOVERY_ITEM_SEVERITIES).nullable().optional(),

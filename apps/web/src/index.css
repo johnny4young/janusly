@@ -9142,6 +9142,58 @@ button.we-ops-metric-card--button {
   margin-top: 4px;
 }
 
+/* Folder-grouped Flows list: one collapsible <details> section per folder. */
+.we-list-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.we-list-folder {
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface-muted);
+  padding: 6px;
+}
+
+.we-list-folder__summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  padding: 4px 6px;
+  user-select: none;
+}
+
+.we-list-folder__summary::-webkit-details-marker {
+  display: none;
+}
+
+.we-list-folder__summary::before {
+  content: '▸';
+  color: var(--we-muted);
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+
+.we-list-folder[open] > .we-list-folder__summary::before {
+  transform: rotate(90deg);
+}
+
+.we-list-folder__name {
+  flex: 1 1 auto;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-list-folder > .we-list {
+  margin-top: 6px;
+}
+
 .we-workflow-about-card__owner-list {
   list-style: none;
   margin: 0;

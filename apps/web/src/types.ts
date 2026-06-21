@@ -70,7 +70,7 @@ export type SolutionPackPublic = {
   failureFixtureIds: string[]
 }
 export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; tags?: string[] }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; tags?: string[]; folder?: string | null }
 export type RunSummary = {
   id: string
   orgId?: string

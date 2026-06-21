@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const limitMock = vi.fn();
 const orderByMock = vi.fn();
 const onConflictMock = vi.fn();
+const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictMock }));
 // `listDistinctWorkflowTagsForOrg` uses db.selectDistinct(...).from().where().orderBy().limit().
 const distinctLimitMock = vi.fn();
 
@@ -28,9 +29,7 @@ vi.mock("@janusly/db", () => ({
       })),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoUpdate: onConflictMock,
-      })),
+      values: valuesMock,
     })),
   },
   workflowMetadata: {
@@ -41,6 +40,7 @@ vi.mock("@janusly/db", () => ({
     runbookMarkdown: "runbook_col",
     description: "description_col",
     tags: "tags_col",
+    folder: "folder_col",
     slackChannel: "slack_col",
     linearProject: "linear_col",
     severityDefault: "severity_col",
@@ -65,6 +65,7 @@ const SAMPLE_ROW = {
   runbookMarkdown: "# hi",
   description: "demo",
   tags: ["billing"],
+  folder: "Billing",
   slackChannel: "#ops",
   linearProject: "acme/ops",
   severityDefault: "p1",
@@ -78,6 +79,8 @@ beforeEach(() => {
   limitMock.mockReset();
   orderByMock.mockReset();
   onConflictMock.mockReset();
+  valuesMock.mockReset();
+  valuesMock.mockReturnValue({ onConflictDoUpdate: onConflictMock });
   distinctLimitMock.mockReset();
 });
 
@@ -101,6 +104,7 @@ describe("getWorkflowMetadata", () => {
       runbookMarkdown: "# hi",
       severityDefault: "p1",
       slackChannel: "#ops",
+      folder: "Billing",
     });
     expect(typeof result?.createdAt).toBe("string");
     expect(typeof result?.updatedAt).toBe("string");
@@ -174,6 +178,40 @@ describe("upsertWorkflowMetadata", () => {
 
     expect(previous).toBeNull();
     expect(record.workflowId).toBe("wf_1");
+  });
+
+  it("writes the folder through both .values() and the ON CONFLICT set", async () => {
+    limitMock.mockResolvedValueOnce([]); // no previous
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, folder: "Onboarding" }]); // record after insert
+
+    const { record } = await upsertWorkflowMetadata({
+      orgId: "default",
+      workflowId: "wf_1",
+      metadata: { owners: [], tags: [], folder: "Onboarding" },
+      actorUserId: "alice",
+    });
+
+    expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ folder: "Onboarding" }));
+    expect(onConflictMock).toHaveBeenCalledWith(
+      expect.objectContaining({ set: expect.objectContaining({ folder: "Onboarding" }) }),
+    );
+    expect(record.folder).toBe("Onboarding");
+  });
+
+  it("coerces an absent folder to null on write (ungrouped)", async () => {
+    limitMock.mockResolvedValueOnce([]);
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, folder: null }]);
+
+    await upsertWorkflowMetadata({
+      orgId: "default",
+      workflowId: "wf_1",
+      metadata: { owners: [], tags: [] },
+      actorUserId: "alice",
+    });
+
+    expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ folder: null }));
   });
 
   it("throws when the post-upsert lookup returns nothing (DB inconsistency)", async () => {

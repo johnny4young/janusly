@@ -38,6 +38,8 @@ export type WorkflowListRow = {
   pausedReason: string | null;
   /** Operator-assigned tags from `workflow_metadata` (empty when the workflow has no metadata row). */
   tags: string[];
+  /** Operator-assigned folder from `workflow_metadata` (null = ungrouped / no metadata row). Drives the Flows-list grouping. */
+  folder: string | null;
 };
 
 /** Optional filters for the Flows list. `tag` matches workflows whose `workflow_metadata.tags` contains it. */
@@ -75,6 +77,7 @@ export async function listWorkflowsWithRunSummary(
       status: workflows.status,
       pausedReason: workflows.pausedReason,
       tags: workflowMetadata.tags,
+      folder: workflowMetadata.folder,
     })
     .from(workflows)
     .leftJoin(
@@ -120,5 +123,6 @@ export async function listWorkflowsWithRunSummary(
     status: w.status ?? "active",
     pausedReason: w.pausedReason ?? null,
     tags: Array.isArray(w.tags) ? (w.tags as string[]) : [],
+    folder: w.folder ?? null,
   }));
 }

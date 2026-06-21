@@ -13,6 +13,7 @@ type Flow = {
   orgId: string
   name: string
   tags?: string[]
+  folder?: string | null
   lastRunStatus?: string | null
   runCount?: number
   updatedAt?: string
@@ -21,6 +22,15 @@ type Flow = {
 const FLOWS: Flow[] = [
   { id: 'wf1', orgId: 'o', name: 'Billing sync', tags: ['billing', 'urgent'], lastRunStatus: 'succeeded', runCount: 3, updatedAt: '2026-06-02T00:00:00.000Z' },
   { id: 'wf2', orgId: 'o', name: 'Onboarding email', tags: ['onboarding'], runCount: 0, updatedAt: '2026-06-01T00:00:00.000Z' },
+]
+
+// Two flows in "Billing", one in "Onboarding", one ungrouped — drives the
+// folder-grouping cases.
+const FOLDERED: Flow[] = [
+  { id: 'wf1', orgId: 'o', name: 'Billing sync', folder: 'Billing', runCount: 0, updatedAt: '2026-06-04T00:00:00.000Z' },
+  { id: 'wf2', orgId: 'o', name: 'Billing retry', folder: 'Billing', runCount: 0, updatedAt: '2026-06-03T00:00:00.000Z' },
+  { id: 'wf3', orgId: 'o', name: 'Welcome email', folder: 'Onboarding', runCount: 0, updatedAt: '2026-06-02T00:00:00.000Z' },
+  { id: 'wf4', orgId: 'o', name: 'Ad hoc cleanup', runCount: 0, updatedAt: '2026-06-01T00:00:00.000Z' },
 ]
 
 function mockApi(handler: (url: string) => unknown) {
@@ -129,5 +139,83 @@ describe('<WorkflowsDashboard />', () => {
       const raw = window.localStorage.getItem(FILTERS_KEY)
       expect(raw && JSON.parse(raw).tag).toBe('billing')
     })
+  })
+
+  it('renders a flat list (no folder sections) when no workflow has a folder', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-folder-groups')).not.toBeInTheDocument()
+  })
+
+  it('groups rows into folder sections with the Ungrouped section last', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    const { container } = render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-groups')
+
+    // One <details> per named folder + the ungrouped bucket.
+    const billing = screen.getByTestId('workflows-folder-Billing')
+    expect(within(billing).getByTestId('workflows-row-wf1')).toBeInTheDocument()
+    expect(within(billing).getByTestId('workflows-row-wf2')).toBeInTheDocument()
+    expect(within(billing).getByText('2 flows')).toBeInTheDocument() // count pill
+    expect(screen.getByTestId('workflows-folder-Onboarding')).toBeInTheDocument()
+
+    // Ungrouped renders last (named folders alphabetical, then ungrouped).
+    const sections = Array.from(container.querySelectorAll('[data-testid^="workflows-folder-"]'))
+      .map((el) => el.getAttribute('data-testid'))
+      .filter((id) => id !== 'workflows-folder-groups')
+    expect(sections).toEqual(['workflows-folder-Billing', 'workflows-folder-Onboarding', 'workflows-folder-ungrouped'])
+  })
+
+  it('restores a persisted collapsed folder (section starts closed)', async () => {
+    window.localStorage.setItem(
+      FILTERS_KEY,
+      JSON.stringify({ tag: '', query: '', sort: 'recent', collapsedFolders: ['Billing'] }),
+    )
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const billing = (await screen.findByTestId('workflows-folder-Billing')) as HTMLDetailsElement
+    expect(billing.open).toBe(false) // restored as collapsed
+    expect((screen.getByTestId('workflows-folder-Onboarding') as HTMLDetailsElement).open).toBe(true)
+  })
+
+  it('persists a folder collapse to localStorage', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const billing = (await screen.findByTestId('workflows-folder-Billing')) as HTMLDetailsElement
+    // Simulate the operator collapsing the section (jsdom doesn't auto-toggle on
+    // summary click, so drive the native open state + toggle event directly).
+    billing.open = false
+    fireEvent(billing, new Event('toggle'))
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(FILTERS_KEY)
+      expect(raw && JSON.parse(raw).collapsedFolders).toContain('Billing')
+    })
+  })
+
+  it('keeps the name search narrowing within folder sections', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'billing' } })
+    // Only the two Billing-folder rows survive; the Onboarding section disappears.
+    await waitFor(() => expect(screen.queryByTestId('workflows-folder-Onboarding')).not.toBeInTheDocument())
+    expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-row-wf3')).not.toBeInTheDocument()
   })
 })
