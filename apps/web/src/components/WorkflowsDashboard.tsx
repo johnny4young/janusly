@@ -44,6 +44,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // surface beyond the list cap); '' means "All tags".
   const [tagFilter, setTagFilter] = useState(() => readFlowsFilters()?.tag ?? '')
   const [tagOptions, setTagOptions] = useState<string[]>([])
+  // Server-side folder filter — same shape as the tag filter (the dropdown lists
+  // ALL the org's folders + matches surface beyond the list cap, which is what
+  // makes a folder's members visible past the 100/200 cap that the client-side
+  // grouping alone can't reach); '' means "All folders".
+  const [folderFilter, setFolderFilter] = useState(() => readFlowsFilters()?.folder ?? '')
+  const [folderOptions, setFolderOptions] = useState<string[]>([])
   // Collapsed folder sections (persisted per-browser). A stale entry (folder
   // renamed/deleted since) simply matches no rendered section — a harmless no-op.
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>(
@@ -55,6 +61,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     try {
       const params = new URLSearchParams()
       if (tagFilter) params.set('tag', tagFilter)
+      if (folderFilter) params.set('folder', folderFilter)
       const qs = params.toString()
       const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
       setWorkflows(Array.isArray(data) ? data : [])
@@ -63,18 +70,18 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     } finally {
       setLoading(false)
     }
-  }, [addToast, t, tagFilter])
+  }, [addToast, t, tagFilter, folderFilter])
 
   useEffect(() => {
     void load()
   }, [load, platformVersion])
 
-  // Persist the tag / search / sort / collapsed-folders view per-browser so it
-  // survives navigation + reload. The initial run re-writes the restored values
-  // (a harmless no-op).
+  // Persist the tag / folder / search / sort / collapsed-folders view
+  // per-browser so it survives navigation + reload. The initial run re-writes
+  // the restored values (a harmless no-op).
   useEffect(() => {
-    writeFlowsFilters({ tag: tagFilter, query, sort, collapsedFolders })
-  }, [tagFilter, query, sort, collapsedFolders])
+    writeFlowsFilters({ tag: tagFilter, folder: folderFilter, query, sort, collapsedFolders })
+  }, [tagFilter, folderFilter, query, sort, collapsedFolders])
 
   // The org's distinct tags for the filter dropdown. Refetched on
   // `platformVersion` so an inspector tag edit refreshes the options. A fetch
@@ -94,6 +101,26 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setTagFilter(current => (current !== '' && !tags.includes(current) ? '' : current))
       } catch {
         if (!cancelled) setTagOptions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [platformVersion])
+
+  // The org's distinct folders for the folder-filter dropdown — mirror of the
+  // tag-options effect (refetch on `platformVersion` so an inspector folder edit
+  // refreshes the options; non-fatal on failure; reconcile a stale restored
+  // folder the org no longer offers).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const data = await api('/workflows/folders') as { folders?: unknown }
+        const folders = Array.isArray(data?.folders) ? (data.folders as string[]) : []
+        if (cancelled) return
+        setFolderOptions(folders)
+        setFolderFilter(current => (current !== '' && !folders.includes(current) ? '' : current))
+      } catch {
+        if (!cancelled) setFolderOptions([])
       }
     })()
     return () => { cancelled = true }
@@ -119,9 +146,15 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   }, [workflows, query, sort])
 
   // Keep the toolbar visible whenever filtering is meaningful OR a filter is
-  // active — otherwise a tag filter that narrows the (server-filtered) list to
-  // ≤1 row would hide the toolbar and trap the user with no way to clear it.
-  const showToolbar = tagOptions.length > 0 || workflows.length > 1 || tagFilter !== '' || query.trim() !== ''
+  // active — otherwise a tag/folder filter that narrows the (server-filtered)
+  // list to ≤1 row would hide the toolbar and trap the user with no way to clear it.
+  const showToolbar =
+    tagOptions.length > 0 ||
+    folderOptions.length > 0 ||
+    workflows.length > 1 ||
+    tagFilter !== '' ||
+    folderFilter !== '' ||
+    query.trim() !== ''
 
   // Group the already-filtered+sorted rows by folder. Named folders come first
   // (alphabetical, locale-aware); the "Ungrouped" bucket is always last. The
@@ -233,6 +266,20 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               ))}
             </select>
           )}
+          {folderOptions.length > 0 && (
+            <select
+              className="text-field"
+              value={folderFilter}
+              onChange={event => setFolderFilter(event.target.value)}
+              aria-label={t('workflowsDashboard.folderFilterAria') as string}
+              data-testid="workflows-folder-filter"
+            >
+              <option value="">{t('workflowsDashboard.allFolders')}</option>
+              {folderOptions.map(folder => (
+                <option key={folder} value={folder}>{folder}</option>
+              ))}
+            </select>
+          )}
           <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria') as string}>
             <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
               {t('workflowsDashboard.sortRecent')}
@@ -247,13 +294,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </div>
       )}
 
-      {workflows.length === 0 && !loading && tagFilter !== '' && (
+      {workflows.length === 0 && !loading && folderFilter !== '' && (
+        <p className="helper-text" data-testid="workflows-no-folder-matches">
+          {t('workflowsDashboard.noFolderMatches', { folder: folderFilter })}
+        </p>
+      )}
+
+      {workflows.length === 0 && !loading && folderFilter === '' && tagFilter !== '' && (
         <p className="helper-text" data-testid="workflows-no-tag-matches">
           {t('workflowsDashboard.noTagMatches', { tag: tagFilter })}
         </p>
       )}
 
-      {workflows.length === 0 && !loading && tagFilter === '' && (
+      {workflows.length === 0 && !loading && folderFilter === '' && tagFilter === '' && (
         <div className="we-allclear" data-testid="workflows-empty">
           <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
           <div className="we-allclear__copy">
@@ -281,8 +334,23 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               <details
                 key={group.key === UNGROUPED ? '__ungrouped__' : group.key}
                 className="we-list-folder"
-                open={!collapsedFolders.includes(group.key)}
-                onToggle={event => toggleFolder(group.key, (event.currentTarget as HTMLDetailsElement).open)}
+                // When a folder filter is active there's exactly one matching
+                // section and the operator explicitly asked to see it, so force
+                // it open even if it was previously collapsed — otherwise
+                // filtering to a collapsed folder shows an empty-looking section.
+                // The collapse preference is untouched, so it's respected again
+                // once the filter is cleared.
+                open={folderFilter !== '' || !collapsedFolders.includes(group.key)}
+                onToggle={event => {
+                  const target = event.currentTarget as HTMLDetailsElement
+                  if (folderFilter !== '') {
+                    // The active filter owns visibility. Re-open after a native
+                    // toggle attempt without mutating the saved collapse set.
+                    if (!target.open) target.open = true
+                    return
+                  }
+                  toggleFolder(group.key, target.open)
+                }}
                 data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
               >
                 <summary className="we-list-folder__summary">

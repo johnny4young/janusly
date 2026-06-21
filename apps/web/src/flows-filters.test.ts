@@ -9,8 +9,8 @@ afterEach(() => {
 
 describe('flows-filters persistence', () => {
   it('round-trips a written view', () => {
-    writeFlowsFilters({ tag: 'billing', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
-    expect(readFlowsFilters()).toEqual({ tag: 'billing', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
+    writeFlowsFilters({ tag: 'billing', folder: 'Ops', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
+    expect(readFlowsFilters()).toEqual({ tag: 'billing', folder: 'Ops', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
   })
 
   it('returns null when no entry exists', () => {
@@ -39,11 +39,22 @@ describe('flows-filters persistence', () => {
     expect(readFlowsFilters()).toBeNull()
   })
 
-  it('restores a pre-folders value (no collapsedFolders) with an empty collapsed set', () => {
-    // A value written before folders shipped carries only { tag, query, sort };
-    // it must still restore, defaulting collapsedFolders to [].
+  it('restores a pre-folders value (no folder / collapsedFolders) defaulting them', () => {
+    // A value written before the folder field shipped carries only
+    // { tag, query, sort }; it must still restore, defaulting folder to '' and
+    // collapsedFolders to [].
     window.localStorage.setItem(KEY, JSON.stringify({ tag: 'billing', query: 'q', sort: 'recent' }))
-    expect(readFlowsFilters()).toEqual({ tag: 'billing', query: 'q', sort: 'recent', collapsedFolders: [] })
+    expect(readFlowsFilters()).toEqual({ tag: 'billing', folder: '', query: 'q', sort: 'recent', collapsedFolders: [] })
+  })
+
+  it('restores a pre-folder-filter value (collapsedFolders but no folder) defaulting folder to \'\'', () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ tag: '', query: '', sort: 'recent', collapsedFolders: ['A'] }))
+    expect(readFlowsFilters()).toEqual({ tag: '', folder: '', query: '', sort: 'recent', collapsedFolders: ['A'] })
+  })
+
+  it('coerces a non-string folder to \'\'', () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ tag: '', folder: 7, query: '', sort: 'recent', collapsedFolders: [] }))
+    expect(readFlowsFilters()?.folder).toBe('')
   })
 
   it('coerces a non-array or non-string collapsedFolders to []', () => {
@@ -54,8 +65,8 @@ describe('flows-filters persistence', () => {
   })
 
   it('stores only the closed shape (strips extra keys)', () => {
-    const dirty = { tag: 'a', query: 'b', sort: 'recent', collapsedFolders: ['A'], extra: 'nope' } as Parameters<typeof writeFlowsFilters>[0]
+    const dirty = { tag: 'a', folder: 'F', query: 'b', sort: 'recent', collapsedFolders: ['A'], extra: 'nope' } as Parameters<typeof writeFlowsFilters>[0]
     writeFlowsFilters(dirty)
-    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ tag: 'a', query: 'b', sort: 'recent', collapsedFolders: ['A'] })
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ tag: 'a', folder: 'F', query: 'b', sort: 'recent', collapsedFolders: ['A'] })
   })
 })
