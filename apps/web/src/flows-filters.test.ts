@@ -8,9 +8,9 @@ afterEach(() => {
 })
 
 describe('flows-filters persistence', () => {
-  it('round-trips a written triple', () => {
-    writeFlowsFilters({ tag: 'billing', query: 'foo', sort: 'name' })
-    expect(readFlowsFilters()).toEqual({ tag: 'billing', query: 'foo', sort: 'name' })
+  it('round-trips a written view', () => {
+    writeFlowsFilters({ tag: 'billing', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
+    expect(readFlowsFilters()).toEqual({ tag: 'billing', query: 'foo', sort: 'name', collapsedFolders: ['Billing'] })
   })
 
   it('returns null when no entry exists', () => {
@@ -39,9 +39,23 @@ describe('flows-filters persistence', () => {
     expect(readFlowsFilters()).toBeNull()
   })
 
-  it('stores only the tag/query/sort triple (strips extra keys)', () => {
-    const dirty = { tag: 'a', query: 'b', sort: 'recent', extra: 'nope' } as Parameters<typeof writeFlowsFilters>[0]
+  it('restores a pre-folders value (no collapsedFolders) with an empty collapsed set', () => {
+    // A value written before folders shipped carries only { tag, query, sort };
+    // it must still restore, defaulting collapsedFolders to [].
+    window.localStorage.setItem(KEY, JSON.stringify({ tag: 'billing', query: 'q', sort: 'recent' }))
+    expect(readFlowsFilters()).toEqual({ tag: 'billing', query: 'q', sort: 'recent', collapsedFolders: [] })
+  })
+
+  it('coerces a non-array or non-string collapsedFolders to []', () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ tag: '', query: '', sort: 'recent', collapsedFolders: 'nope' }))
+    expect(readFlowsFilters()?.collapsedFolders).toEqual([])
+    window.localStorage.setItem(KEY, JSON.stringify({ tag: '', query: '', sort: 'recent', collapsedFolders: ['ok', 3] }))
+    expect(readFlowsFilters()?.collapsedFolders).toEqual([])
+  })
+
+  it('stores only the closed shape (strips extra keys)', () => {
+    const dirty = { tag: 'a', query: 'b', sort: 'recent', collapsedFolders: ['A'], extra: 'nope' } as Parameters<typeof writeFlowsFilters>[0]
     writeFlowsFilters(dirty)
-    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ tag: 'a', query: 'b', sort: 'recent' })
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({ tag: 'a', query: 'b', sort: 'recent', collapsedFolders: ['A'] })
   })
 })

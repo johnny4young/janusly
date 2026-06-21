@@ -37,6 +37,7 @@ function hydrate(row: WorkflowMetadataRow): WorkflowMetadataRecord {
     runbookMarkdown: row.runbookMarkdown,
     description: row.description,
     tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    folder: row.folder ?? null,
     slackChannel: row.slackChannel,
     linearProject: row.linearProject,
     severityDefault:
@@ -134,6 +135,7 @@ export async function upsertWorkflowMetadata(
       runbookMarkdown: input.metadata.runbookMarkdown ?? null,
       description: input.metadata.description ?? null,
       tags: input.metadata.tags ?? [],
+      folder: input.metadata.folder ?? null,
       slackChannel: input.metadata.slackChannel ?? null,
       linearProject: input.metadata.linearProject ?? null,
       severityDefault: input.metadata.severityDefault ?? null,
@@ -148,6 +150,7 @@ export async function upsertWorkflowMetadata(
         runbookMarkdown: input.metadata.runbookMarkdown ?? null,
         description: input.metadata.description ?? null,
         tags: input.metadata.tags ?? [],
+        folder: input.metadata.folder ?? null,
         slackChannel: input.metadata.slackChannel ?? null,
         linearProject: input.metadata.linearProject ?? null,
         severityDefault: input.metadata.severityDefault ?? null,

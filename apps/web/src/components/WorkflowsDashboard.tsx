@@ -20,6 +20,14 @@ import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filt
  *  the server's terminal-failure set). */
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 
+/** Sentinel key for the "Ungrouped" folder section. A real folder name is
+ *  `min(1)` chars, so the empty string can never collide with one. */
+const UNGROUPED = ''
+
+/** One Flows-list folder section: the folder key (`UNGROUPED` = no folder) and
+ *  its workflows, in the same order the global filter+sort produced. */
+type FolderGroup = { key: string; items: SavedWorkflow[] }
+
 /** Render the saved-workflows list with click-to-open + manual refresh. */
 export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const { t } = useT()
@@ -36,6 +44,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // surface beyond the list cap); '' means "All tags".
   const [tagFilter, setTagFilter] = useState(() => readFlowsFilters()?.tag ?? '')
   const [tagOptions, setTagOptions] = useState<string[]>([])
+  // Collapsed folder sections (persisted per-browser). A stale entry (folder
+  // renamed/deleted since) simply matches no rendered section — a harmless no-op.
+  const [collapsedFolders, setCollapsedFolders] = useState<string[]>(
+    () => readFlowsFilters()?.collapsedFolders ?? [],
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,11 +69,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     void load()
   }, [load, platformVersion])
 
-  // Persist the tag / search / sort view per-browser so it survives navigation
-  // + reload. The initial run re-writes the restored values (a harmless no-op).
+  // Persist the tag / search / sort / collapsed-folders view per-browser so it
+  // survives navigation + reload. The initial run re-writes the restored values
+  // (a harmless no-op).
   useEffect(() => {
-    writeFlowsFilters({ tag: tagFilter, query, sort })
-  }, [tagFilter, query, sort])
+    writeFlowsFilters({ tag: tagFilter, query, sort, collapsedFolders })
+  }, [tagFilter, query, sort, collapsedFolders])
 
   // The org's distinct tags for the filter dropdown. Refetched on
   // `platformVersion` so an inspector tag edit refreshes the options. A fetch
@@ -108,6 +122,76 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // active — otherwise a tag filter that narrows the (server-filtered) list to
   // ≤1 row would hide the toolbar and trap the user with no way to clear it.
   const showToolbar = tagOptions.length > 0 || workflows.length > 1 || tagFilter !== '' || query.trim() !== ''
+
+  // Group the already-filtered+sorted rows by folder. Named folders come first
+  // (alphabetical, locale-aware); the "Ungrouped" bucket is always last. The
+  // in-bucket order is preserved, so the global sort still applies within a
+  // folder. No extra fetch — folders ride on the same list row.
+  const groups = useMemo<FolderGroup[]>(() => {
+    const buckets = new Map<string, SavedWorkflow[]>()
+    for (const workflow of visible) {
+      const key = workflow.folder && workflow.folder.trim() ? workflow.folder : UNGROUPED
+      const existing = buckets.get(key)
+      if (existing) existing.push(workflow)
+      else buckets.set(key, [workflow])
+    }
+    const named = [...buckets.keys()]
+      .filter((key) => key !== UNGROUPED)
+      .sort((a, b) => a.localeCompare(b, getResolvedLocale()))
+    const ordered = buckets.has(UNGROUPED) ? [...named, UNGROUPED] : named
+    return ordered.map((key) => ({ key, items: buckets.get(key) ?? [] }))
+  }, [visible])
+
+  // Only render folder sections once at least one workflow has a folder —
+  // otherwise the list stays the flat `<ul>` (byte-for-byte the pre-folders UI),
+  // so an org that never uses folders sees no change.
+  const hasFolders = groups.some((group) => group.key !== UNGROUPED)
+
+  const toggleFolder = useCallback((key: string, open: boolean) => {
+    setCollapsedFolders((prev) => {
+      const collapsed = prev.includes(key)
+      if (open && collapsed) return prev.filter((entry) => entry !== key)
+      if (!open && !collapsed) return [...prev, key]
+      return prev
+    })
+  }, [])
+
+  const renderRow = (workflow: SavedWorkflow) => (
+    <li key={workflow.id}>
+      <div
+        className="we-list-row"
+        data-clickable="true"
+        data-severity="cobalt"
+        data-testid={`workflows-row-${workflow.id}`}
+        onClick={() => onOpen(workflow.id)}
+      >
+        <span className="we-list-row__avatar" aria-hidden="true">
+          <Workflow size={14} />
+        </span>
+        <div className="we-list-row__body">
+          <strong>{workflow.name}</strong>
+          <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
+          {workflow.tags && workflow.tags.length > 0 && (
+            <span className="we-list-row__tags">
+              {workflow.tags.map(tag => (
+                <span key={tag} className="we-pill we-pill--ghost">{tag}</span>
+              ))}
+            </span>
+          )}
+        </div>
+        <div className="we-list-row__meta">
+          {workflow.lastRunStatus && (
+            <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
+          )}
+          {typeof workflow.runCount === 'number' && (
+            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
+          )}
+          <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
+          <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
+        </div>
+      </div>
+    </li>
+  )
 
   return (
     <div className="panel-list">
@@ -183,45 +267,35 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         <p className="helper-text" data-testid="workflows-no-matches">{t('workflowsDashboard.noMatches')}</p>
       )}
 
-      {visible.length > 0 && (
+      {visible.length > 0 && !hasFolders && (
         <ul className="we-list">
-          {visible.map(workflow => (
-            <li key={workflow.id}>
-              <div
-                className="we-list-row"
-                data-clickable="true"
-                data-severity="cobalt"
-                data-testid={`workflows-row-${workflow.id}`}
-                onClick={() => onOpen(workflow.id)}
-              >
-                <span className="we-list-row__avatar" aria-hidden="true">
-                  <Workflow size={14} />
-                </span>
-                <div className="we-list-row__body">
-                  <strong>{workflow.name}</strong>
-                  <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
-                  {workflow.tags && workflow.tags.length > 0 && (
-                    <span className="we-list-row__tags">
-                      {workflow.tags.map(tag => (
-                        <span key={tag} className="we-pill we-pill--ghost">{tag}</span>
-                      ))}
-                    </span>
-                  )}
-                </div>
-                <div className="we-list-row__meta">
-                  {workflow.lastRunStatus && (
-                    <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
-                  )}
-                  {typeof workflow.runCount === 'number' && (
-                    <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
-                  )}
-                  <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
-                  <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
-                </div>
-              </div>
-            </li>
-          ))}
+          {visible.map(renderRow)}
         </ul>
+      )}
+
+      {visible.length > 0 && hasFolders && (
+        <div className="we-list-folders" data-testid="workflows-folder-groups">
+          {groups.map(group => {
+            const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder') as string) : group.key
+            return (
+              <details
+                key={group.key === UNGROUPED ? '__ungrouped__' : group.key}
+                className="we-list-folder"
+                open={!collapsedFolders.includes(group.key)}
+                onToggle={event => toggleFolder(group.key, (event.currentTarget as HTMLDetailsElement).open)}
+                data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
+              >
+                <summary className="we-list-folder__summary">
+                  <span className="we-list-folder__name">{label}</span>
+                  <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
+                </summary>
+                <ul className="we-list">
+                  {group.items.map(renderRow)}
+                </ul>
+              </details>
+            )
+          })}
+        </div>
       )}
     </div>
   )

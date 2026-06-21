@@ -29,6 +29,7 @@ type WorkflowMetadataRecord = {
   runbookMarkdown: string | null
   description: string | null
   tags: string[]
+  folder: string | null
   slackChannel: string | null
   linearProject: string | null
   severityDefault: RecoveryItemSeverity | null
@@ -138,6 +139,7 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
     Boolean(metadata.runbookMarkdown) ||
     Boolean(metadata.description) ||
     metadata.tags.length > 0 ||
+    Boolean(metadata.folder) ||
     Boolean(metadata.slackChannel) ||
     Boolean(metadata.linearProject) ||
     Boolean(metadata.severityDefault)
@@ -185,6 +187,13 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
           >
             {metadata.severityDefault.toUpperCase()}
           </span>
+        </div>
+      )}
+
+      {metadata.folder && (
+        <div className="we-workflow-about-card__folder" data-testid="workflow-about-card-folder">
+          <span className="we-list-row__hint">{t('workflowMetadata.field.folder')}</span>
+          <span className="we-pill we-pill--cobalt">{metadata.folder}</span>
         </div>
       )}
 
