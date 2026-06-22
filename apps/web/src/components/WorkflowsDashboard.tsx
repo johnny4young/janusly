@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, GripVertical, RefreshCw, Search, Workflow } from 'lucide-react'
+import { CircleCheck, Folder, GripVertical, RefreshCw, Search, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -230,7 +230,15 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [workflows, addToast, bumpPlatformVersion, t],
   )
 
-  const renderRow = (workflow: SavedWorkflow) => (
+  const renderRow = (workflow: SavedWorkflow) => {
+    // Folder choices for the per-row "Move to folder" select: the org-wide
+    // folder list plus the row's own folder if a stale value isn't already in it
+    // (so the native select can always render its current value as a real option).
+    const folderChoices =
+      workflow.folder && !folderOptions.includes(workflow.folder)
+        ? [workflow.folder, ...folderOptions]
+        : folderOptions
+    return (
     <li key={workflow.id}>
       <div
         className="we-list-row"
@@ -241,8 +249,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         onClick={() => onOpen(workflow.id)}
       >
         {/* Drag handle — only rendered once folders exist (otherwise there's no
-            section to drop onto). Mouse-only native DnD; the Inspector folder
-            field stays the keyboard-accessible path. */}
+            section to drop onto). Native DnD is mouse-only; the per-row select
+            below and the Inspector folder field stay keyboard-accessible. */}
         {hasFolders && (
           <span
             className="we-list-row__drag"
@@ -277,6 +285,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               ))}
             </span>
           )}
+          {workflow.folder && (
+            <span className="we-list-row__folder">
+              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder }) as string}>
+                <Folder size={12} aria-hidden="true" /> {workflow.folder}
+              </span>
+            </span>
+          )}
         </div>
         <div className="we-list-row__meta">
           {workflow.lastRunStatus && (
@@ -286,11 +301,31 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
           )}
           <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
+          {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
+              <select> is operable without a mouse. Only rendered once folders
+              exist (same gate as the drag handle), so the flat no-folder list is
+              unchanged. Reuses the same moveToFolder path the drag drop uses. */}
+          {hasFolders && (
+            <select
+              className="we-list-row__folder-select"
+              value={workflow.folder ?? ''}
+              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name }) as string}
+              onClick={(event) => event.stopPropagation()}
+              onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
+              data-testid={`workflows-move-folder-${workflow.id}`}
+            >
+              <option value="">{t('workflowsDashboard.ungroupedFolder')}</option>
+              {folderChoices.map(folder => (
+                <option key={folder} value={folder}>{folder}</option>
+              ))}
+            </select>
+          )}
           <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
         </div>
       </div>
     </li>
-  )
+    )
+  }
 
   return (
     <div className="panel-list">

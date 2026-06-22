@@ -9225,6 +9225,40 @@ button.we-ops-metric-card--button {
   border-radius: 8px;
 }
 
+/* Per-row folder affordances. The pill shows the row's folder inline (glance);
+   the <select> is the keyboard / screen-reader equivalent of the mouse-only
+   drag-to-folder (act) — a native control so it needs no custom a11y wiring. */
+.we-list-row__folder {
+  align-items: center;
+  display: inline-flex;
+  margin-top: 4px;
+}
+
+.we-list-row__folder .we-pill {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.we-list-row__folder-select {
+  background: transparent;
+  border: 1px solid var(--we-line);
+  border-radius: 6px;
+  color: var(--we-muted);
+  font-size: 11px;
+  max-width: 120px;
+  padding: 2px 4px;
+}
+
+.we-list-row__folder-select:hover {
+  border-color: var(--we-primary);
+}
+
+.we-list-row__folder-select:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
 .we-workflow-about-card__owner-list {
   list-style: none;
   margin: 0;

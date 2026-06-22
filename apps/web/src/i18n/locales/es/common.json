@@ -574,6 +574,8 @@
   "workflowsDashboard.movedToFolder": "Movido a {{folder}}",
   "workflowsDashboard.movedToUngrouped": "Quitado de la carpeta",
   "workflowsDashboard.moveFailed": "No se pudo mover el flujo. Inténtalo de nuevo.",
+  "workflowsDashboard.moveToFolderAria": "Mover {{name}} a una carpeta",
+  "workflowsDashboard.inFolder": "Carpeta: {{folder}}",
 
   "budgetBanner.exceeded": "Se superó el presupuesto de IA de la {{scope}} — llamada bloqueada.",
   "budgetBanner.detail": "Llevas gastado <0>${{spent}}</0> del límite mensual de <1>${{limit}}</1>. Sube el presupuesto en Operaciones o cambia la política a solo aviso para que sigan las llamadas de IA.",
