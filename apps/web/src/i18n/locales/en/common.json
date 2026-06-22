@@ -574,6 +574,8 @@
   "workflowsDashboard.movedToFolder": "Moved to {{folder}}",
   "workflowsDashboard.movedToUngrouped": "Removed from folder",
   "workflowsDashboard.moveFailed": "Couldn't move the flow. Try again.",
+  "workflowsDashboard.moveToFolderAria": "Move {{name}} to a folder",
+  "workflowsDashboard.inFolder": "Folder: {{folder}}",
 
   "budgetBanner.exceeded": "AI {{scope}} budget exceeded — call blocked.",
   "budgetBanner.detail": "You've spent <0>${{spent}}</0> of the <1>${{limit}}</1> monthly limit. Raise the budget in Operations or change the policy to warn only to keep AI calls running.",
