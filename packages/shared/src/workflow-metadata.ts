@@ -109,6 +109,25 @@ export const UpsertWorkflowMetadataBodySchema = z.object({
 
 export type UpsertWorkflowMetadataBody = z.infer<typeof UpsertWorkflowMetadataBodySchema>
 
+/**
+ * Body of the narrow folder-only reassignment route (`POST /workflows/:id/folder`).
+ *
+ * `folder` is REQUIRED here (not `.optional()` like the field on
+ * `WorkflowMetadataSchema`): a real name (1..60 chars) moves the workflow into
+ * that folder; `null` removes it (back to "Ungrouped"). Unlike the full
+ * metadata upsert, the write behind this body changes ONLY the `folder` column
+ * and never touches owners / tags / runbook / Slack / Linear / severity — so a
+ * drag-to-folder reassign from the Flows list (which only knows the row's
+ * folder) can't clobber the rest of a workflow's metadata.
+ */
+export const SetWorkflowFolderBodySchema = z
+  .object({
+    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable(),
+  })
+  .strict()
+
+export type SetWorkflowFolderBody = z.infer<typeof SetWorkflowFolderBodySchema>
+
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {
   workflowId: string

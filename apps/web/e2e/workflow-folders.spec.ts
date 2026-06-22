@@ -115,3 +115,44 @@ test('Flows list folder filter narrows the list server-side and clears back to a
   await expect(aRow).toBeVisible()
   await expect(bRow).toBeVisible()
 })
+
+test('Flows list drag-to-folder reassigns a workflow by dropping its row on a folder section', async ({ page, request }) => {
+  const stamp = Date.now()
+  const aId = `e2e-dnd-a-${stamp}`
+  const bId = `e2e-dnd-b-${stamp}`
+  const folderA = `e2e-dnd-A-${stamp}`
+  const folderB = `e2e-dnd-B-${stamp}`
+
+  await saveWorkflow(request, aId, `E2E DnD Alpha ${stamp}`)
+  await saveWorkflow(request, bId, `E2E DnD Beta ${stamp}`)
+  await setFolder(request, aId, folderA)
+  await setFolder(request, bId, folderB)
+
+  await page.goto('/')
+  await expect(page.getByText('dev-user')).toBeVisible()
+  await page.getByRole('button', { name: 'Flows' }).click()
+  await page.getByRole('button', { name: 'Refresh' }).click()
+
+  const sectionA = page.locator(`[data-testid="workflows-folder-${folderA}"]`)
+  const sectionB = page.locator(`[data-testid="workflows-folder-${folderB}"]`)
+  const handleB = page.locator(`[data-testid="workflows-drag-${bId}"]`)
+
+  // bId starts in folder B; its drag handle is rendered (folders exist).
+  await expect(sectionB.locator(`[data-testid="workflows-row-${bId}"]`)).toBeVisible()
+  await expect(handleB).toBeVisible()
+
+  // Native HTML5 drag-drop: share ONE DataTransfer across the dispatched events
+  // (Playwright's reliable pattern — dragstart's setData persists into drop's getData).
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer())
+  await handleB.dispatchEvent('dragstart', { dataTransfer })
+  await sectionA.dispatchEvent('dragover', { dataTransfer })
+  await sectionA.dispatchEvent('drop', { dataTransfer })
+
+  // The row moves into folder A (optimistic, then confirmed by the refetch).
+  await expect(sectionA.locator(`[data-testid="workflows-row-${bId}"]`)).toBeVisible()
+  await expect(sectionB.locator(`[data-testid="workflows-row-${bId}"]`)).toHaveCount(0)
+
+  // The move persisted through the narrow folder route.
+  const res = await request.get(`${API_URL}/workflows/${bId}/metadata`, { headers: DEV_HEADERS })
+  expect(((await res.json()) as { metadata: { folder: string } }).metadata.folder).toBe(folderA)
+})

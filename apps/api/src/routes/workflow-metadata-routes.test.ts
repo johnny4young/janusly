@@ -24,6 +24,7 @@ vi.mock("../http", async (importOriginal) => {
 vi.mock("@janusly/data/src/workflowMetadataRepo", () => ({
   getWorkflowMetadata: vi.fn(),
   upsertWorkflowMetadata: vi.fn(),
+  setWorkflowFolder: vi.fn(),
   listWorkflowMetadataForOrg: vi.fn(),
 }));
 
@@ -47,6 +48,7 @@ import { workflowMetadataRoutes } from "./workflow-metadata-routes";
 import { readJson, sendJson } from "../http";
 import {
   getWorkflowMetadata,
+  setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "@janusly/data/src/workflowMetadataRepo";
 import { audit } from "../audit";
@@ -56,6 +58,7 @@ const sendJsonMock = vi.mocked(sendJson);
 const readJsonMock = vi.mocked(readJson);
 const getMetadataMock = vi.mocked(getWorkflowMetadata);
 const upsertMock = vi.mocked(upsertWorkflowMetadata);
+const setFolderMock = vi.mocked(setWorkflowFolder);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -211,6 +214,110 @@ describe("POST /workflows/:id/metadata", () => {
   });
 });
 
+describe("POST /workflows/:id/folder", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/wf-1/folder");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 404 when the workflow doesn't belong to the caller's org", async () => {
+    limitMock.mockResolvedValueOnce([]);
+    readJsonMock.mockResolvedValueOnce({ folder: "Billing" });
+    await callRoute("POST", "/workflows/wf-1/folder");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(404);
+    expect(setFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 on an invalid folder body (empty string)", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ folder: "" });
+    await callRoute("POST", "/workflows/wf-1/folder");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(setFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("reassigns the folder + audits workflow.metadata.set on success", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ folder: "Onboarding" });
+    setFolderMock.mockResolvedValueOnce({
+      record: {
+        workflowId: "wf-1",
+        owners: ["alice"],
+        runbookMarkdown: "# keep me",
+        description: null,
+        tags: ["billing"],
+        folder: "Onboarding",
+        slackChannel: "#ops",
+        linearProject: null,
+        severityDefault: "p1",
+        createdBy: "user-1",
+        createdAt: "2026-05-23T00:00:00.000Z",
+        updatedAt: "2026-05-23T01:00:00.000Z",
+      },
+      previous: {
+        workflowId: "wf-1",
+        owners: ["alice"],
+        runbookMarkdown: "# keep me",
+        description: null,
+        tags: ["billing"],
+        folder: "Billing",
+        slackChannel: "#ops",
+        linearProject: null,
+        severityDefault: "p1",
+        createdBy: "user-1",
+        createdAt: "2026-05-23T00:00:00.000Z",
+        updatedAt: "2026-05-23T00:30:00.000Z",
+      },
+    });
+    await callRoute("POST", "/workflows/wf-1/folder");
+    expect(setFolderMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      workflowId: "wf-1",
+      folder: "Onboarding",
+      actorUserId: "user-1",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.metadata.set",
+      "workflow",
+      "wf-1",
+      expect.objectContaining({
+        workflowId: "wf-1",
+        before: expect.objectContaining({ folder: "Billing" }),
+        after: expect.objectContaining({ folder: "Onboarding" }),
+      }),
+    );
+  });
+
+  it("accepts folder: null (ungroup)", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ folder: null });
+    setFolderMock.mockResolvedValueOnce({
+      record: {
+        workflowId: "wf-1",
+        owners: [],
+        runbookMarkdown: null,
+        description: null,
+        tags: [],
+        folder: null,
+        slackChannel: null,
+        linearProject: null,
+        severityDefault: null,
+        createdBy: "user-1",
+        createdAt: "2026-05-23T00:00:00.000Z",
+        updatedAt: "2026-05-23T01:00:00.000Z",
+      },
+      previous: null,
+    });
+    await callRoute("POST", "/workflows/wf-1/folder");
+    expect(setFolderMock).toHaveBeenCalledWith(
+      expect.objectContaining({ folder: null }),
+    );
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -218,7 +325,20 @@ describe("route matcher", () => {
     expect(matcher("/workflows/wf-1/metadata")).toBe(true);
     expect(matcher("/workflows/wf-1/metadata?include=x")).toBe(true);
     expect(matcher("/workflows/wf-1/slo")).toBe(false);
+    expect(matcher("/workflows/wf-1/folder")).toBe(false);
     expect(matcher("/workflows/wf-1/metadata/extra")).toBe(false);
+    expect(matcher("/workflows/wf-1")).toBe(false);
+  });
+
+  it("matches /workflows/:id/folder exactly (and not /metadata or /slo)", () => {
+    const route = findRoute("POST", "/workflows/wf-1/folder");
+    const matcher = typeof route.match === "string" ? () => true : route.match;
+    expect(matcher("/workflows/wf-1/folder")).toBe(true);
+    expect(matcher("/workflows/wf-1/folder?x=1")).toBe(true);
+    expect(matcher("/workflows/wf-1/metadata")).toBe(false);
+    expect(matcher("/workflows/wf-1/slo")).toBe(false);
+    expect(matcher("/workflows/wf-1/folder/extra")).toBe(false);
+    expect(matcher("/workflows/folders")).toBe(false);
     expect(matcher("/workflows/wf-1")).toBe(false);
   });
 });
