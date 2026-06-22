@@ -424,4 +424,93 @@ describe('<WorkflowsDashboard />', () => {
       within(screen.getByTestId('workflows-folder-Billing')).queryByTestId('workflows-row-wf3'),
     ).not.toBeInTheDocument()
   })
+
+  it('shows a folder pill on a foldered row and omits it when ungrouped', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    // wf1 is in "Billing" → pill carries the folder via its title.
+    expect(within(screen.getByTestId('workflows-row-wf1')).getByTitle('Folder: Billing')).toBeInTheDocument()
+    // wf4 is ungrouped → no folder pill.
+    expect(within(screen.getByTestId('workflows-row-wf4')).queryByTitle(/^Folder:/)).not.toBeInTheDocument()
+  })
+
+  it('renders a keyboard-accessible per-row folder select with the org folders + Ungrouped', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    const select = screen.getByTestId('workflows-move-folder-wf1') as HTMLSelectElement
+    // First option is Ungrouped ('') then each org folder; current value = wf1's folder.
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'Billing', 'Onboarding'])
+    expect(select.value).toBe('Billing')
+  })
+
+  it('omits the per-row folder select on the flat list when no workflow has a folder', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-move-folder-wf1')).not.toBeInTheDocument()
+  })
+
+  it('reassigns a workflow via the per-row select (POST /workflows/:id/folder)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    // Move wf3 (Onboarding) → Billing via the keyboard-operable select.
+    fireEvent.change(screen.getByTestId('workflows-move-folder-wf3'), { target: { value: 'Billing' } })
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/wf3/folder', body: { folder: 'Billing' } }),
+    )
+  })
+
+  it('clears the folder via the per-row select choosing Ungrouped (folder: null)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.change(screen.getByTestId('workflows-move-folder-wf1'), { target: { value: '' } })
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/wf1/folder', body: { folder: null } }),
+    )
+  })
+
+  it('rolls the row back when the per-row select reassignment POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    fireEvent.change(screen.getByTestId('workflows-move-folder-wf3'), { target: { value: 'Billing' } })
+    await waitFor(() => expect(calls).toHaveLength(1)) // POST attempted
+    // The optimistic move is undone — wf3 ends back under Onboarding.
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('workflows-folder-Onboarding')).getByTestId('workflows-row-wf3'),
+      ).toBeInTheDocument(),
+    )
+  })
+
+  it('clicking the per-row folder select does not open the workflow (stopPropagation)', async () => {
+    const onOpen = vi.fn()
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={onOpen} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-move-folder-wf3'))
+    expect(onOpen).not.toHaveBeenCalled()
+  })
 })
