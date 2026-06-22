@@ -9194,6 +9194,37 @@ button.we-ops-metric-card--button {
   margin-top: 6px;
 }
 
+/* Drag-to-folder. The grip column only appears on rows that carry the handle
+   (i.e. once folders exist); the flat no-folder list keeps its 3-column grid. */
+.we-list-row:has(.we-list-row__drag) {
+  grid-template-columns: auto auto 1fr auto;
+}
+
+.we-list-row__drag {
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  color: var(--we-muted);
+  flex-shrink: 0;
+}
+
+.we-list-row__drag:active {
+  cursor: grabbing;
+}
+
+.we-list-row[data-dragging="true"] {
+  opacity: 0.5;
+}
+
+.we-list-folder[data-drop-target="true"] {
+  border-color: var(--we-primary);
+}
+
+.we-list-folder[data-drop-target="true"] > .we-list-folder__summary {
+  background: var(--we-surface);
+  border-radius: 8px;
+}
+
 .we-workflow-about-card__owner-list {
   list-style: none;
   margin: 0;

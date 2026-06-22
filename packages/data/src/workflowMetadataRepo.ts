@@ -183,4 +183,61 @@ export async function upsertWorkflowMetadata(
   return { record, previous };
 }
 
+/** Input for the narrow folder-only writer. `folder` of `null` ungroups the workflow. */
+export type SetWorkflowFolderInput = {
+  orgId: string;
+  workflowId: string;
+  folder: string | null;
+  actorUserId: string | null;
+};
+
+/**
+ * Reassign ONLY a workflow's `folder` without touching the rest of its
+ * metadata. Atomic `INSERT … ON CONFLICT DO UPDATE` whose conflict `set`
+ * carries just `{ folder, updatedAt }` — owners / tags / runbook / Slack /
+ * Linear / severity on an existing row are left intact. When no row exists yet
+ * it inserts a defaults row carrying only the folder. Returns the previous row
+ * (when present) alongside the new one so the API can audit `{ before, after }`
+ * without an extra round-trip, mirroring `upsertWorkflowMetadata`.
+ *
+ * This is the SOLE narrow folder writer (the Flows-list drag-to-folder path);
+ * a full-object `upsertWorkflowMetadata` from a surface that only knows the
+ * folder would clobber every other field, which is exactly what this avoids.
+ */
+export async function setWorkflowFolder(
+  input: SetWorkflowFolderInput,
+): Promise<{ record: WorkflowMetadataRecord; previous: WorkflowMetadataRecord | null }> {
+  const previous = await getWorkflowMetadata(input.orgId, input.workflowId);
+  const now = new Date();
+
+  await db
+    .insert(workflowMetadata)
+    .values({
+      id: previous ? `existing-${input.workflowId}` : crypto.randomUUID(),
+      orgId: input.orgId,
+      workflowId: input.workflowId,
+      owners: [],
+      runbookMarkdown: null,
+      description: null,
+      tags: [],
+      folder: input.folder,
+      slackChannel: null,
+      linearProject: null,
+      severityDefault: null,
+      createdBy: input.actorUserId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [workflowMetadata.orgId, workflowMetadata.workflowId],
+      // ONLY the folder + updatedAt move on conflict — every other column on an
+      // existing row is deliberately untouched.
+      set: { folder: input.folder, updatedAt: now },
+    });
+
+  const record = await getWorkflowMetadata(input.orgId, input.workflowId);
+  if (!record) throw new Error("workflow_metadata row missing immediately after setWorkflowFolder");
+  return { record, previous };
+}
+
 // Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

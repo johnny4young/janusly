@@ -7,13 +7,13 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, RefreshCw, Search, Workflow } from 'lucide-react'
+import { CircleCheck, GripVertical, RefreshCw, Search, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
-import { getResolvedLocale, useT } from '../i18n'
+import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
 
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
@@ -33,8 +33,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const platformVersion = useWorkflowStore(state => state.platformVersion)
+  const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
+  // Drag-to-folder transient state. `draggingId` is the row being dragged;
+  // `dropTarget` is the folder key (`UNGROUPED` = '') currently hovered, used
+  // only for the highlight. Both clear on drop / drag-end.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
   // Tag / search / sort restore from localStorage on mount (per-browser) so the
   // Flows view survives navigation + reload; persisted by the effect below. A
   // missing / corrupt value degrades to the defaults via the helper.
@@ -189,15 +195,75 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     })
   }, [])
 
+  // Reassign a workflow's folder by dropping its row onto a folder section.
+  // `folderKey === UNGROUPED` clears the folder (null). Optimistic: re-group
+  // the row immediately, POST the narrow folder-only route, then bump so the
+  // folder dropdown options + authoritative rows refresh. Roll back on failure.
+  const moveToFolder = useCallback(
+    async (workflowId: string, folderKey: string) => {
+      const folder = folderKey === UNGROUPED ? null : folderKey
+      const current = workflows.find((w) => w.id === workflowId)
+      if (!current) return
+      const previousFolder = current.folder ?? null
+      if (previousFolder === folder) return // already in this folder — no-op
+
+      setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, folder } : w)))
+      try {
+        await api(`/workflows/${encodeURIComponent(workflowId)}/folder`, {
+          method: 'POST',
+          body: JSON.stringify({ folder }),
+        })
+        addToast(
+          folder
+            ? (t('workflowsDashboard.movedToFolder', { folder }) as string)
+            : (t('workflowsDashboard.movedToUngrouped') as string),
+          'success',
+        )
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) =>
+          prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
+        )
+        addToast(tApiError(err) || (t('workflowsDashboard.moveFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
   const renderRow = (workflow: SavedWorkflow) => (
     <li key={workflow.id}>
       <div
         className="we-list-row"
         data-clickable="true"
         data-severity="cobalt"
+        data-dragging={draggingId === workflow.id ? 'true' : undefined}
         data-testid={`workflows-row-${workflow.id}`}
         onClick={() => onOpen(workflow.id)}
       >
+        {/* Drag handle — only rendered once folders exist (otherwise there's no
+            section to drop onto). Mouse-only native DnD; the Inspector folder
+            field stays the keyboard-accessible path. */}
+        {hasFolders && (
+          <span
+            className="we-list-row__drag"
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData('text/plain', workflow.id)
+              event.dataTransfer.effectAllowed = 'move'
+              setDraggingId(workflow.id)
+            }}
+            onDragEnd={() => {
+              setDraggingId(null)
+              setDropTarget(null)
+            }}
+            onClick={(event) => event.stopPropagation()}
+            title={t('workflowsDashboard.dragHandleTitle') as string}
+            aria-label={t('workflowsDashboard.dragHandleTitle') as string}
+            data-testid={`workflows-drag-${workflow.id}`}
+          >
+            <GripVertical size={14} aria-hidden="true" />
+          </span>
+        )}
         <span className="we-list-row__avatar" aria-hidden="true">
           <Workflow size={14} />
         </span>
@@ -351,6 +417,22 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                   }
                   toggleFolder(group.key, target.open)
                 }}
+                // The whole section is a drop zone for a dragged row. dragOver
+                // continuously sets the hovered key (so moving between sections
+                // updates the highlight); drop reassigns the row's folder.
+                onDragOver={draggingId ? (event) => {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'move'
+                  if (dropTarget !== group.key) setDropTarget(group.key)
+                } : undefined}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  const droppedId = event.dataTransfer.getData('text/plain') || draggingId
+                  setDropTarget(null)
+                  setDraggingId(null)
+                  if (droppedId) void moveToFolder(droppedId, group.key)
+                }}
+                data-drop-target={dropTarget === group.key && draggingId ? 'true' : undefined}
                 data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
               >
                 <summary className="we-list-folder__summary">
