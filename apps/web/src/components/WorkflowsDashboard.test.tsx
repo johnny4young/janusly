@@ -37,6 +37,41 @@ function mockApi(handler: (url: string) => unknown) {
   vi.mocked(api).mockImplementation(async (url: string) => handler(url))
 }
 
+// jsdom's DataTransfer is inert, so hand a minimal stand-in to the fired drag
+// events: dragStart's handler calls setData; drop reads it back via getData.
+function makeDataTransfer() {
+  const store: Record<string, string> = {}
+  return {
+    effectAllowed: '',
+    dropEffect: '',
+    setData(type: string, value: string) {
+      store[type] = value
+    },
+    getData(type: string) {
+      return store[type] ?? ''
+    },
+  }
+}
+
+// A list mock that also records folder-reassign POSTs. `postResult` lets a case
+// force the POST to reject (rollback path).
+function mockListWithFolderPost(
+  rows: Flow[],
+  calls: Array<{ url: string; body: unknown }>,
+  postResult: 'ok' | 'reject' = 'ok',
+) {
+  vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+    if (options?.method === 'POST') {
+      calls.push({ url, body: JSON.parse(String(options.body)) })
+      if (postResult === 'reject') throw new Error('move failed')
+      return { workflowId: url, metadata: null }
+    }
+    if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+    if (url === '/workflows/tags') return { tags: [] }
+    return rows
+  })
+}
+
 const FILTERS_KEY = 'janusly:flowsFilters'
 
 describe('<WorkflowsDashboard />', () => {
@@ -297,5 +332,96 @@ describe('<WorkflowsDashboard />', () => {
     // path must not silently erase it.
     fireEvent.change(screen.getByTestId('workflows-folder-filter'), { target: { value: '' } })
     await waitFor(() => expect((screen.getByTestId('workflows-folder-Billing') as HTMLDetailsElement).open).toBe(false))
+  })
+
+  it('renders a drag handle on grouped rows', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    expect(screen.getByTestId('workflows-drag-wf1')).toBeInTheDocument()
+  })
+
+  it('omits the drag handle on the flat list when no workflow has a folder', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-drag-wf1')).not.toBeInTheDocument()
+  })
+
+  it('reassigns a workflow to the dropped folder (POST /workflows/:id/folder)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+
+    // Drag wf3 (in Onboarding) onto the Billing section.
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf3'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-folder-Billing'), { dataTransfer })
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/wf3/folder', body: { folder: 'Billing' } }),
+    )
+  })
+
+  it('clears the folder when a row is dropped on the Ungrouped section (folder: null)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-ungrouped')
+
+    // Drag wf1 (in Billing) onto the Ungrouped section.
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-folder-ungrouped'), { dataTransfer })
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/wf1/folder', body: { folder: null } }),
+    )
+  })
+
+  it('does not POST when a row is dropped on its own folder (no-op)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+
+    // Drag wf1 (already in Billing) onto the Billing section.
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-folder-Billing'), { dataTransfer })
+
+    // Give any microtasks a tick, then assert no POST fired.
+    await Promise.resolve()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('rolls the row back to its original folder when the folder POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+
+    // Drag wf3 (Onboarding) onto Billing; the POST rejects, so wf3 must end back
+    // under Onboarding — never stranded in Billing by the optimistic move.
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf3'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-folder-Billing'), { dataTransfer })
+
+    await waitFor(() => expect(calls).toHaveLength(1)) // the POST was attempted
+    await waitFor(() =>
+      expect(
+        within(screen.getByTestId('workflows-folder-Onboarding')).getByTestId('workflows-row-wf3'),
+      ).toBeInTheDocument(),
+    )
+    expect(
+      within(screen.getByTestId('workflows-folder-Billing')).queryByTestId('workflows-row-wf3'),
+    ).not.toBeInTheDocument()
   })
 })

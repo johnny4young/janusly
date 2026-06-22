@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
+  WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
   WORKFLOW_METADATA_OWNERS_MAX,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
   WORKFLOW_METADATA_TAGS_MAX,
@@ -127,5 +129,32 @@ describe('UpsertWorkflowMetadataBodySchema', () => {
 
   it('rejects a bare metadata payload at the top level', () => {
     expect(UpsertWorkflowMetadataBodySchema.safeParse({ owners: ['alpha'] }).success).toBe(false)
+  })
+})
+
+describe('SetWorkflowFolderBodySchema', () => {
+  it('accepts a real folder name', () => {
+    expect(SetWorkflowFolderBodySchema.safeParse({ folder: 'Billing' }).success).toBe(true)
+  })
+
+  it('accepts null (ungroup)', () => {
+    expect(SetWorkflowFolderBodySchema.safeParse({ folder: null }).success).toBe(true)
+  })
+
+  it('rejects an empty-string folder', () => {
+    expect(SetWorkflowFolderBodySchema.safeParse({ folder: '' }).success).toBe(false)
+  })
+
+  it(`rejects a folder over ${WORKFLOW_METADATA_FOLDER_MAX_LENGTH} chars`, () => {
+    const tooLong = 'x'.repeat(WORKFLOW_METADATA_FOLDER_MAX_LENGTH + 1)
+    expect(SetWorkflowFolderBodySchema.safeParse({ folder: tooLong }).success).toBe(false)
+  })
+
+  it('requires the folder field (a missing folder is rejected, unlike the optional metadata field)', () => {
+    expect(SetWorkflowFolderBodySchema.safeParse({}).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(SetWorkflowFolderBodySchema.safeParse({ folder: 'Billing', extra: 1 }).success).toBe(false)
   })
 })

@@ -570,6 +570,10 @@
   "workflowsDashboard.empty": "Aún no hay flujos guardados",
   "workflowsDashboard.emptyHelper": "Arma un flujo en el canvas, valídalo y haz clic en Guardar.",
   "workflowsDashboard.openFlow": "Abrir flujo",
+  "workflowsDashboard.dragHandleTitle": "Arrastrar a una carpeta",
+  "workflowsDashboard.movedToFolder": "Movido a {{folder}}",
+  "workflowsDashboard.movedToUngrouped": "Quitado de la carpeta",
+  "workflowsDashboard.moveFailed": "No se pudo mover el flujo. Inténtalo de nuevo.",
 
   "budgetBanner.exceeded": "Se superó el presupuesto de IA de la {{scope}} — llamada bloqueada.",
   "budgetBanner.detail": "Llevas gastado <0>${{spent}}</0> del límite mensual de <1>${{limit}}</1>. Sube el presupuesto en Operaciones o cambia la política a solo aviso para que sigan las llamadas de IA.",

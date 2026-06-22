@@ -55,6 +55,7 @@ import {
   listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowMetadataForOrg,
+  setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "./workflowMetadataRepo";
 
@@ -250,5 +251,84 @@ describe("upsertWorkflowMetadata", () => {
         actorUserId: null,
       }),
     ).rejects.toThrow(/missing immediately after upsert/);
+  });
+});
+
+describe("setWorkflowFolder", () => {
+  it("updates ONLY folder + updatedAt on conflict (other columns untouched)", async () => {
+    limitMock.mockResolvedValueOnce([SAMPLE_ROW]); // previous exists
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, folder: "Onboarding" }]); // after
+
+    const { record, previous } = await setWorkflowFolder({
+      orgId: "default",
+      workflowId: "wf_1",
+      folder: "Onboarding",
+      actorUserId: "alice",
+    });
+
+    const conflictArg = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    // The narrow writer must NOT carry owners/tags/runbook/etc into the conflict set.
+    expect(Object.keys(conflictArg.set).sort()).toEqual(["folder", "updatedAt"]);
+    expect(conflictArg.set.folder).toBe("Onboarding");
+    expect(previous?.folder).toBe("Billing");
+    expect(record.folder).toBe("Onboarding");
+  });
+
+  it("inserts a defaults row carrying only the folder when none exists", async () => {
+    limitMock.mockResolvedValueOnce([]); // no previous
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([
+      { ...SAMPLE_ROW, owners: [], tags: [], folder: "Billing", runbookMarkdown: null },
+    ]);
+
+    const { previous } = await setWorkflowFolder({
+      orgId: "default",
+      workflowId: "wf_1",
+      folder: "Billing",
+      actorUserId: "alice",
+    });
+
+    expect(previous).toBeNull();
+    expect(valuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        folder: "Billing",
+        owners: [],
+        tags: [],
+        runbookMarkdown: null,
+        description: null,
+        slackChannel: null,
+        linearProject: null,
+        severityDefault: null,
+      }),
+    );
+  });
+
+  it("clears the folder (null) without touching other columns", async () => {
+    limitMock.mockResolvedValueOnce([SAMPLE_ROW]);
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([{ ...SAMPLE_ROW, folder: null }]);
+
+    const { record } = await setWorkflowFolder({
+      orgId: "default",
+      workflowId: "wf_1",
+      folder: null,
+      actorUserId: "alice",
+    });
+
+    const conflictArg = onConflictMock.mock.calls[0][0] as { set: Record<string, unknown> };
+    expect(Object.keys(conflictArg.set).sort()).toEqual(["folder", "updatedAt"]);
+    expect(conflictArg.set.folder).toBeNull();
+    expect(record.folder).toBeNull();
+  });
+
+  it("throws when the post-write lookup returns nothing (DB inconsistency)", async () => {
+    limitMock.mockResolvedValueOnce([]); // no previous
+    onConflictMock.mockResolvedValueOnce(undefined);
+    limitMock.mockResolvedValueOnce([]); // record missing
+
+    await expect(
+      setWorkflowFolder({ orgId: "default", workflowId: "wf_1", folder: "X", actorUserId: null }),
+    ).rejects.toThrow(/missing immediately after setWorkflowFolder/);
   });
 });

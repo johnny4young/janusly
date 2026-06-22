@@ -570,6 +570,10 @@
   "workflowsDashboard.empty": "No flows saved yet",
   "workflowsDashboard.emptyHelper": "Build a flow on the canvas, validate it, then click Save.",
   "workflowsDashboard.openFlow": "Open flow",
+  "workflowsDashboard.dragHandleTitle": "Drag to a folder",
+  "workflowsDashboard.movedToFolder": "Moved to {{folder}}",
+  "workflowsDashboard.movedToUngrouped": "Removed from folder",
+  "workflowsDashboard.moveFailed": "Couldn't move the flow. Try again.",
 
   "budgetBanner.exceeded": "AI {{scope}} budget exceeded — call blocked.",
   "budgetBanner.detail": "You've spent <0>${{spent}}</0> of the <1>${{limit}}</1> monthly limit. Raise the budget in Operations or change the policy to warn only to keep AI calls running.",
