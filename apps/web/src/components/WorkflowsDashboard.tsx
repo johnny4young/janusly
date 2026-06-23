@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, Folder, GripVertical, RefreshCw, Search, Workflow } from 'lucide-react'
+import { CircleCheck, Folder, GripVertical, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -61,6 +61,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>(
     () => readFlowsFilters()?.collapsedFolders ?? [],
   )
+  // Folder management (rename / delete) transient state — at most one folder is
+  // being renamed or delete-confirmed at a time. `renameDraft` holds the in-progress
+  // new name while `renamingFolder` is set.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -225,6 +231,59 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
         )
         addToast(tApiError(err) || (t('workflowsDashboard.moveFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Rename a folder across ALL its members in one bulk write. Optimistic: re-key
+  // every matching row locally (tracked by id so the rollback is exact even if
+  // `to` already existed and merged), POST the collection route, bump on success,
+  // roll back on failure. Whitespace-only / unchanged names are a no-op.
+  const renameFolder = useCallback(
+    async (from: string, to: string) => {
+      setRenamingFolder(null)
+      const trimmed = to.trim()
+      if (!trimmed || trimmed === from) return
+      const affectedIds = new Set(workflows.filter((w) => w.folder === from).map((w) => w.id))
+      if (affectedIds.size === 0) return
+
+      setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: trimmed } : w)))
+      try {
+        await api('/workflows/folders/rename', {
+          method: 'POST',
+          body: JSON.stringify({ from, to: trimmed }),
+        })
+        addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }) as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: from } : w)))
+        addToast(tApiError(err) || (t('workflowsDashboard.renameFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Delete a folder by moving every member to Ungrouped (folder: null). The
+  // workflows are untouched — only the label is cleared, so it's reversible.
+  // Optimistic, tracked by id for an exact rollback.
+  const deleteFolder = useCallback(
+    async (folder: string) => {
+      setConfirmDeleteFolder(null)
+      const affectedIds = new Set(workflows.filter((w) => w.folder === folder).map((w) => w.id))
+      if (affectedIds.size === 0) return
+
+      setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: null } : w)))
+      try {
+        await api('/workflows/folders/delete', {
+          method: 'POST',
+          body: JSON.stringify({ folder }),
+        })
+        addToast(t('workflowsDashboard.folderDeleted') as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -471,8 +530,73 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
               >
                 <summary className="we-list-folder__summary">
-                  <span className="we-list-folder__name">{label}</span>
-                  <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
+                  {renamingFolder === group.key ? (
+                    // Inline rename: the controls preventDefault so a click never
+                    // toggles the <details>; Enter saves, Esc cancels.
+                    <span className="we-list-folder__rename" onClick={event => { event.preventDefault(); event.stopPropagation() }}>
+                      <input
+                        className="text-field we-list-folder__rename-input"
+                        value={renameDraft}
+                        autoFocus
+                        maxLength={60}
+                        aria-label={t('workflowsDashboard.renameFolderLabel') as string}
+                        onChange={event => setRenameDraft(event.target.value)}
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') { event.preventDefault(); void renameFolder(group.key, renameDraft) }
+                          else if (event.key === 'Escape') { event.preventDefault(); setRenamingFolder(null) }
+                        }}
+                        data-testid={`workflows-renamefolder-input-${group.key}`}
+                      />
+                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); void renameFolder(group.key, renameDraft) }} data-testid={`workflows-renamefolder-save-${group.key}`}>
+                        {t('workflowsDashboard.saveRename')}
+                      </button>
+                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null) }}>
+                        {t('workflowsDashboard.cancelAction')}
+                      </button>
+                    </span>
+                  ) : confirmDeleteFolder === group.key ? (
+                    <span className="we-list-folder__confirm" onClick={event => { event.preventDefault(); event.stopPropagation() }}>
+                      <span className="we-list-folder__confirm-text">{t('workflowsDashboard.deleteFolderConfirm', { folder: group.key, count: group.items.length })}</span>
+                      <button type="button" className="small-command danger" onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteFolder(group.key) }} data-testid={`workflows-deletefolder-confirm-${group.key}`}>
+                        {t('workflowsDashboard.confirmDeleteCta')}
+                      </button>
+                      <button type="button" className="small-command" onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null) }}>
+                        {t('workflowsDashboard.cancelAction')}
+                      </button>
+                    </span>
+                  ) : (
+                    <>
+                      <span className="we-list-folder__name">{label}</span>
+                      <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
+                      {/* Rename / delete only for NAMED folders — "Ungrouped" is a
+                          synthetic bucket, not a real folder to manage. */}
+                      {group.key !== UNGROUPED && (
+                        <span className="we-list-folder__actions">
+                          <button
+                            type="button"
+                            className="small-command"
+                            onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null); setRenameDraft(group.key); setRenamingFolder(group.key) }}
+                            title={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
+                            aria-label={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
+                            data-testid={`workflows-renamefolder-${group.key}`}
+                          >
+                            <Pencil size={12} aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            className="small-command danger"
+                            onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null); setConfirmDeleteFolder(group.key) }}
+                            title={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
+                            aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
+                            data-testid={`workflows-deletefolder-${group.key}`}
+                          >
+                            <Trash2 size={12} aria-hidden="true" />
+                          </button>
+                        </span>
+                      )}
+                    </>
+                  )}
                 </summary>
                 <ul className="we-list">
                   {group.items.map(renderRow)}

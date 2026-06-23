@@ -513,4 +513,88 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-move-folder-wf3'))
     expect(onOpen).not.toHaveBeenCalled()
   })
+
+  it('offers rename + delete on a named folder but not on Ungrouped', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    expect(screen.getByTestId('workflows-renamefolder-Billing')).toBeInTheDocument()
+    expect(screen.getByTestId('workflows-deletefolder-Billing')).toBeInTheDocument()
+    expect(screen.getByLabelText('Rename Billing folder')).toBeInTheDocument()
+    expect(screen.getByLabelText('Delete Billing folder')).toBeInTheDocument()
+    // The synthetic "Ungrouped" bucket is not a real folder — no manage controls.
+    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTitle(/^Rename/)).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTitle(/^Delete/)).not.toBeInTheDocument()
+  })
+
+  it('renames a folder via the inline input (POST /workflows/folders/rename)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-Billing'))
+    const input = screen.getByTestId('workflows-renamefolder-input-Billing')
+    fireEvent.change(input, { target: { value: 'Invoicing' } })
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-save-Billing'))
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/folders/rename', body: { from: 'Billing', to: 'Invoicing' } }),
+    )
+  })
+
+  it('does not POST a rename when the name is unchanged (no-op)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-Billing'))
+    // Draft starts as the current name; saving without editing is a no-op.
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-save-Billing'))
+    await Promise.resolve()
+    expect(calls.filter((c) => c.url === '/workflows/folders/rename')).toHaveLength(0)
+  })
+
+  it('rolls the rename back when the POST fails (section stays under the old name)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-Billing'))
+    fireEvent.change(screen.getByTestId('workflows-renamefolder-input-Billing'), { target: { value: 'Invoicing' } })
+    fireEvent.click(screen.getByTestId('workflows-renamefolder-save-Billing'))
+    await waitFor(() => expect(calls).toHaveLength(1)) // POST attempted
+    // Optimistic re-key is reverted — Billing survives, Invoicing never sticks.
+    await waitFor(() => expect(screen.getByTestId('workflows-folder-Billing')).toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-folder-Invoicing')).not.toBeInTheDocument()
+  })
+
+  it('deletes a folder after confirm (POST /workflows/folders/delete)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    fireEvent.click(screen.getByTestId('workflows-deletefolder-Onboarding'))
+    // The confirm row replaces the summary content until confirmed.
+    fireEvent.click(screen.getByTestId('workflows-deletefolder-confirm-Onboarding'))
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/folders/delete', body: { folder: 'Onboarding' } }),
+    )
+  })
+
+  it('rolls the delete back when the POST fails (members stay in the folder)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    fireEvent.click(screen.getByTestId('workflows-deletefolder-Onboarding'))
+    fireEvent.click(screen.getByTestId('workflows-deletefolder-confirm-Onboarding'))
+    await waitFor(() => expect(calls).toHaveLength(1)) // POST attempted
+    // Optimistic null-out is reverted — wf3 stays under Onboarding.
+    await waitFor(() =>
+      expect(within(screen.getByTestId('workflows-folder-Onboarding')).getByTestId('workflows-row-wf3')).toBeInTheDocument(),
+    )
+  })
 })
