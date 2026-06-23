@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DeleteWorkflowFolderBodySchema,
+  RenameWorkflowFolderBodySchema,
   SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
@@ -156,5 +158,49 @@ describe('SetWorkflowFolderBodySchema', () => {
 
   it('rejects unknown extra keys (strict)', () => {
     expect(SetWorkflowFolderBodySchema.safeParse({ folder: 'Billing', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('RenameWorkflowFolderBodySchema', () => {
+  it('accepts a from/to pair of real names', () => {
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: 'Billing', to: 'Invoicing' }).success).toBe(true)
+  })
+
+  it('requires both from and to', () => {
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: 'Billing' }).success).toBe(false)
+    expect(RenameWorkflowFolderBodySchema.safeParse({ to: 'Invoicing' }).success).toBe(false)
+  })
+
+  it('rejects empty-string names', () => {
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: '', to: 'X' }).success).toBe(false)
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: 'X', to: '' }).success).toBe(false)
+  })
+
+  it(`rejects a name over ${WORKFLOW_METADATA_FOLDER_MAX_LENGTH} chars`, () => {
+    const tooLong = 'x'.repeat(WORKFLOW_METADATA_FOLDER_MAX_LENGTH + 1)
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: 'Billing', to: tooLong }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(RenameWorkflowFolderBodySchema.safeParse({ from: 'A', to: 'B', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('DeleteWorkflowFolderBodySchema', () => {
+  it('accepts a real folder name', () => {
+    expect(DeleteWorkflowFolderBodySchema.safeParse({ folder: 'Billing' }).success).toBe(true)
+  })
+
+  it('requires the folder field (null is NOT accepted here — there is nothing to delete)', () => {
+    expect(DeleteWorkflowFolderBodySchema.safeParse({}).success).toBe(false)
+    expect(DeleteWorkflowFolderBodySchema.safeParse({ folder: null }).success).toBe(false)
+  })
+
+  it('rejects an empty-string folder', () => {
+    expect(DeleteWorkflowFolderBodySchema.safeParse({ folder: '' }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(DeleteWorkflowFolderBodySchema.safeParse({ folder: 'Billing', extra: 1 }).success).toBe(false)
   })
 })
