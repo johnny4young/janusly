@@ -24,8 +24,8 @@
  *  - The repo doesn't re-validate inputs.
  */
 
-import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
-import { db, workflowMetadata } from "@janusly/db";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { db, workflowMetadata, workflows } from "@janusly/db";
 import type { WorkflowMetadata, WorkflowMetadataRecord } from "@janusly/shared";
 
 /** Upper bound on the distinct-tag dropdown so a pathological org can't return an unbounded list. */
@@ -287,6 +287,68 @@ export async function deleteWorkflowFolder(
     .update(workflowMetadata)
     .set({ folder: null, updatedAt: new Date() })
     .where(and(eq(workflowMetadata.orgId, input.orgId), eq(workflowMetadata.folder, input.folder)))
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
+}
+
+/** Input for the bulk folder-assign writer. `folder` of `null` moves the listed workflows to "Ungrouped". */
+export type AssignWorkflowsToFolderInput = {
+  orgId: string;
+  workflowIds: string[];
+  folder: string | null;
+  actorUserId: string | null;
+};
+
+/**
+ * Move many workflows into one folder (or to "Ungrouped" with `null`) in a single
+ * batched upsert. Unlike `renameWorkflowFolder` / `deleteWorkflowFolder` (which
+ * UPDATE rows that already carry a folder), this targets arbitrary workflows that
+ * may not have a metadata row yet — so it INSERTs a defaults row for those while
+ * touching ONLY `folder` + `updatedAt` on existing rows (the same narrow guarantee
+ * as `setWorkflowFolder`, batched). Cross-tenant safe: the ids are first filtered
+ * to the caller's own `workflows`, so a foreign id is silently dropped, never
+ * written. Returns the affected `workflowIds` for the API audit + response.
+ */
+export async function assignWorkflowsToFolder(
+  input: AssignWorkflowsToFolderInput,
+): Promise<{ workflowIds: string[] }> {
+  if (input.workflowIds.length === 0) return { workflowIds: [] };
+
+  // Ownership gate: keep only ids that belong to this org's workflows.
+  const owned = await db
+    .select({ id: workflows.id })
+    .from(workflows)
+    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds)));
+  const validIds = owned.map((r) => r.id);
+  if (validIds.length === 0) return { workflowIds: [] };
+
+  const now = new Date();
+  const rows = await db
+    .insert(workflowMetadata)
+    .values(
+      validIds.map((workflowId) => ({
+        id: crypto.randomUUID(),
+        orgId: input.orgId,
+        workflowId,
+        owners: [],
+        runbookMarkdown: null,
+        description: null,
+        tags: [],
+        folder: input.folder,
+        slackChannel: null,
+        linearProject: null,
+        severityDefault: null,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [workflowMetadata.orgId, workflowMetadata.workflowId],
+      // Existing rows move ONLY folder + updatedAt — owners / tags / runbook /
+      // Slack / Linear / severity are deliberately untouched.
+      set: { folder: input.folder, updatedAt: now },
+    })
     .returning({ workflowId: workflowMetadata.workflowId });
   return { workflowIds: rows.map((r) => r.workflowId) };
 }

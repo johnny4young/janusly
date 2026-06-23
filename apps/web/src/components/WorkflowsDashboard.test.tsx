@@ -4,8 +4,8 @@ import { api } from '../api'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
-// The per-row health badge fetches on its own; stub it so this test stays
-// focused on the list's tag filter + pills.
+// The per-row health badge fetches on its own; stub it so these tests stay
+// focused on Flows-list filtering, grouping, and folder-management behavior.
 vi.mock('./WorkflowHealthBadge', () => ({ WorkflowHealthBadge: () => null }))
 
 type Flow = {
@@ -53,7 +53,7 @@ function makeDataTransfer() {
   }
 }
 
-// A list mock that also records folder-reassign POSTs. `postResult` lets a case
+// A list mock that also records folder-management POSTs. `postResult` lets a case
 // force the POST to reject (rollback path).
 function mockListWithFolderPost(
   rows: Flow[],
@@ -512,6 +512,81 @@ describe('<WorkflowsDashboard />', () => {
     await screen.findByTestId('workflows-folder-Billing')
     fireEvent.click(screen.getByTestId('workflows-move-folder-wf3'))
     expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('reveals bulk-select checkboxes only after the Select toggle is on', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-select-row-wf1')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    expect(screen.getByTestId('workflows-select-row-wf1')).toBeInTheDocument()
+    expect(screen.getByTestId('workflows-select-row-wf2')).toBeInTheDocument()
+  })
+
+  it('bulk-assigns the selected flows to a NEW folder (POST /workflows/folders/assign)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FLOWS, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf2'))
+    // A brand-new folder name (not in folderOptions) is accepted via the datalist input.
+    fireEvent.change(screen.getByTestId('workflows-bulk-folder-input'), { target: { value: 'Q3 Launch' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-move'))
+    await waitFor(() => {
+      const assign = calls.find((c) => c.url === '/workflows/folders/assign')
+      expect(assign?.body).toEqual({ workflowIds: ['wf1', 'wf2'], folder: 'Q3 Launch' })
+    })
+  })
+
+  it('bulk-ungroups the selected flows (folder: null)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-bulk-ungroup'))
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/folders/assign', body: { workflowIds: ['wf1'], folder: null } }),
+    )
+  })
+
+  it('rolls a bulk assign back when the POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf3'))
+    fireEvent.change(screen.getByTestId('workflows-bulk-folder-input'), { target: { value: 'Billing' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-move'))
+    await waitFor(() => expect(calls.some((c) => c.url === '/workflows/folders/assign')).toBe(true))
+    // wf3 ends back under Onboarding — the optimistic move is undone.
+    await waitFor(() =>
+      expect(within(screen.getByTestId('workflows-folder-Onboarding')).getByTestId('workflows-row-wf3')).toBeInTheDocument(),
+    )
+  })
+
+  it('Clear empties the selection (bulk bar disappears)', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    expect(screen.getByTestId('workflows-bulk-bar')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Clear'))
+    expect(screen.queryByTestId('workflows-bulk-bar')).not.toBeInTheDocument()
   })
 
   it('offers rename + delete on a named folder but not on Ungrouped', async () => {
