@@ -602,6 +602,9 @@
   "workflowsDashboard.bulkMovedUngrouped_one": "Se movió {{count}} flujo a Sin carpeta",
   "workflowsDashboard.bulkMovedUngrouped_other": "Se movieron {{count}} flujos a Sin carpeta",
   "workflowsDashboard.bulkMoveFailed": "No se pudieron mover los flujos. Inténtalo de nuevo.",
+  "workflowsDashboard.selectAllCount": "Seleccionar todo ({{count}})",
+  "workflowsDashboard.deselectAll": "Quitar selección",
+  "workflowsDashboard.selectAllInFolderAria": "Seleccionar todo en {{folder}}",
 
   "budgetBanner.exceeded": "Se superó el presupuesto de IA de la {{scope}} — llamada bloqueada.",
   "budgetBanner.detail": "Llevas gastado <0>${{spent}}</0> del límite mensual de <1>${{limit}}</1>. Sube el presupuesto en Operaciones o cambia la política a solo aviso para que sigan las llamadas de IA.",

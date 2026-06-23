@@ -589,6 +589,73 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.queryByTestId('workflows-bulk-bar')).not.toBeInTheDocument()
   })
 
+  it('Select all ticks every visible row and reveals the bulk bar', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-all'))
+    expect((screen.getByTestId('workflows-select-row-wf1') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('workflows-select-row-wf2') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByTestId('workflows-bulk-bar')).toBeInTheDocument()
+  })
+
+  it('Select all toggles back to Deselect all and clears the selection', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    const selectAll = screen.getByTestId('workflows-select-all')
+    fireEvent.click(selectAll)
+    expect(selectAll.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(selectAll)
+    expect(screen.queryByTestId('workflows-bulk-bar')).not.toBeInTheDocument()
+    expect(screen.getByTestId('workflows-select-all').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('per-folder Select all ticks only that folder and drives a scoped bulk move', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-folder-Billing'))
+    // Billing has wf1 + wf2; wf3 (Onboarding) and wf4 (Ungrouped) stay untouched.
+    expect((screen.getByTestId('workflows-select-row-wf1') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('workflows-select-row-wf2') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('workflows-select-row-wf3') as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByTestId('workflows-select-folder-Billing').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.change(screen.getByTestId('workflows-bulk-folder-input'), { target: { value: 'Q3 Launch' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-move'))
+    await waitFor(() => {
+      const assign = calls.find((c) => c.url === '/workflows/folders/assign')
+      expect(assign?.body).toEqual({ workflowIds: ['wf1', 'wf2'], folder: 'Q3 Launch' })
+    })
+  })
+
+  it('hides the select-all controls until selection mode is on', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    expect(screen.queryByTestId('workflows-select-all')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-select-folder-Billing')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    expect(screen.getByTestId('workflows-select-all')).toBeInTheDocument()
+    expect(screen.getByTestId('workflows-select-folder-Billing')).toBeInTheDocument()
+  })
+
   it('offers rename + delete on a named folder but not on Ungrouped', async () => {
     mockApi((url) => {
       if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }

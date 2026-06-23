@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, Folder, GripVertical, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
+import { CircleCheck, Folder, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -163,6 +163,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     })
   }, [workflows, query, sort])
 
+  // Ids of the currently-visible (filtered + sorted) rows — the universe for the
+  // "Select all" control. Bounded by the list page cap, so well under the
+  // bulk-assign cap; no extra bound needed.
+  const visibleIds = useMemo(() => visible.map((w) => w.id), [visible])
+  // True when every visible row is already ticked — drives the global toggle's
+  // label ("Select all" vs "Deselect all") and pressed state.
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
+
   // Keep the toolbar visible whenever filtering is meaningful OR a filter is
   // active — otherwise a tag/folder filter that narrows the (server-filtered)
   // list to ≤1 row would hide the toolbar and trap the user with no way to clear it.
@@ -301,6 +309,32 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       const next = new Set(prev)
       if (next.has(workflowId)) next.delete(workflowId)
       else next.add(workflowId)
+      return next
+    })
+  }, [])
+
+  // Select (or clear) every visible row at once. "All selected?" is recomputed
+  // INSIDE the updater against `prev` so a rapid double-click can't act on a
+  // stale snapshot.
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const all = visibleIds.length > 0 && visibleIds.every((id) => prev.has(id))
+      return all ? new Set<string>() : new Set(visibleIds)
+    })
+  }, [visibleIds])
+
+  // Select-or-clear all rows in one folder section, leaving other sections'
+  // selections untouched (add the folder's ids if not all are ticked, else
+  // remove just them).
+  const toggleSelectFolder = useCallback((items: SavedWorkflow[]) => {
+    const ids = items.map((w) => w.id)
+    setSelectedIds((prev) => {
+      const all = ids.length > 0 && ids.every((id) => prev.has(id))
+      const next = new Set(prev)
+      for (const id of ids) {
+        if (all) next.delete(id)
+        else next.add(id)
+      }
       return next
     })
   }, [])
@@ -531,6 +565,22 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           >
             {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
           </button>
+          {/* Select-all toggle — lives in the toolbar (not the bulk bar, which
+              only appears once ≥1 row is ticked) so it's reachable at 0 selected.
+              Operates on `visible`, so it works in flat AND foldered views. */}
+          {selectionMode && (
+            <button
+              type="button"
+              className="small-command"
+              aria-pressed={allVisibleSelected}
+              onClick={toggleSelectAll}
+              data-testid="workflows-select-all"
+            >
+              {allVisibleSelected
+                ? t('workflowsDashboard.deselectAll')
+                : t('workflowsDashboard.selectAllCount', { count: visibleIds.length })}
+            </button>
+          )}
         </div>
       )}
 
@@ -688,6 +738,24 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                     </span>
                   ) : (
                     <>
+                      {/* Select-all-in-folder — a button (not a checkbox): inside a
+                          <summary>, preventDefault is needed to stop the native
+                          <details> toggle, and that would also cancel a checkbox's
+                          own tick. Same preventDefault+stopPropagation as the
+                          rename/delete controls. Only in selection mode. */}
+                      {selectionMode && (
+                        <button
+                          type="button"
+                          className="small-command we-list-folder__selectall"
+                          aria-pressed={group.items.every((w) => selectedIds.has(w.id))}
+                          onClick={event => { event.preventDefault(); event.stopPropagation(); toggleSelectFolder(group.items) }}
+                          title={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
+                          aria-label={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
+                          data-testid={`workflows-select-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
+                        >
+                          <ListChecks size={12} aria-hidden="true" />
+                        </button>
+                      )}
                       <span className="we-list-folder__name">{label}</span>
                       <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
                       {/* Rename / delete only for NAMED folders — "Ungrouped" is a
