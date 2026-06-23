@@ -164,6 +164,8 @@ export type AuditAction =
   | "org.sso.connection_revoked"
   // workflows
   | "workflow.metadata.set"
+  | "workflow.folder.renamed"
+  | "workflow.folder.deleted"
   | "workflow.saved"
   | "workflow.rolled_back"
   | "workflow.slo.set"

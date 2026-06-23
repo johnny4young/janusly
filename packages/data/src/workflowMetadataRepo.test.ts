@@ -6,6 +6,10 @@ const onConflictMock = vi.fn();
 const valuesMock = vi.fn(() => ({ onConflictDoUpdate: onConflictMock }));
 // `listDistinctWorkflowTagsForOrg` uses db.selectDistinct(...).from().where().orderBy().limit().
 const distinctLimitMock = vi.fn();
+// `renameWorkflowFolder` / `deleteWorkflowFolder` use db.update(...).set().where().returning().
+const updateReturningMock = vi.fn();
+const updateWhereMock = vi.fn(() => ({ returning: updateReturningMock }));
+const updateSetMock = vi.fn(() => ({ where: updateWhereMock }));
 
 vi.mock("@janusly/db", () => ({
   db: {
@@ -31,6 +35,9 @@ vi.mock("@janusly/db", () => ({
     insert: vi.fn(() => ({
       values: valuesMock,
     })),
+    update: vi.fn(() => ({
+      set: updateSetMock,
+    })),
   },
   workflowMetadata: {
     id: "id_col",
@@ -51,10 +58,12 @@ vi.mock("@janusly/db", () => ({
 }));
 
 import {
+  deleteWorkflowFolder,
   getWorkflowMetadata,
   listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowMetadataForOrg,
+  renameWorkflowFolder,
   setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "./workflowMetadataRepo";
@@ -84,6 +93,11 @@ beforeEach(() => {
   valuesMock.mockReset();
   valuesMock.mockReturnValue({ onConflictDoUpdate: onConflictMock });
   distinctLimitMock.mockReset();
+  updateReturningMock.mockReset();
+  updateWhereMock.mockReset();
+  updateWhereMock.mockReturnValue({ returning: updateReturningMock });
+  updateSetMock.mockReset();
+  updateSetMock.mockReturnValue({ where: updateWhereMock });
 });
 
 afterEach(() => {
@@ -330,5 +344,41 @@ describe("setWorkflowFolder", () => {
     await expect(
       setWorkflowFolder({ orgId: "default", workflowId: "wf_1", folder: "X", actorUserId: null }),
     ).rejects.toThrow(/missing immediately after setWorkflowFolder/);
+  });
+});
+
+describe("renameWorkflowFolder", () => {
+  it("re-keys every matching row to the new name and returns the affected ids", async () => {
+    updateReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }, { workflowId: "wf_2" }]);
+
+    const { workflowIds } = await renameWorkflowFolder({ orgId: "default", from: "Billing", to: "Invoicing" });
+
+    expect(workflowIds).toEqual(["wf_1", "wf_2"]);
+    // The bulk write sets folder=to (not the old name) + bumps updatedAt.
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ folder: "Invoicing" }));
+  });
+
+  it("returns [] when no workflow carries the source folder (idempotent)", async () => {
+    updateReturningMock.mockResolvedValueOnce([]);
+    const { workflowIds } = await renameWorkflowFolder({ orgId: "default", from: "Ghost", to: "X" });
+    expect(workflowIds).toEqual([]);
+  });
+});
+
+describe("deleteWorkflowFolder", () => {
+  it("nulls the folder on every matching row (move to Ungrouped) and returns ids", async () => {
+    updateReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }, { workflowId: "wf_2" }]);
+
+    const { workflowIds } = await deleteWorkflowFolder({ orgId: "default", folder: "Billing" });
+
+    expect(workflowIds).toEqual(["wf_1", "wf_2"]);
+    // Delete clears the label — folder set to null, workflows otherwise untouched.
+    expect(updateSetMock).toHaveBeenCalledWith(expect.objectContaining({ folder: null }));
+  });
+
+  it("returns [] when the folder has no members", async () => {
+    updateReturningMock.mockResolvedValueOnce([]);
+    const { workflowIds } = await deleteWorkflowFolder({ orgId: "default", folder: "Ghost" });
+    expect(workflowIds).toEqual([]);
   });
 });

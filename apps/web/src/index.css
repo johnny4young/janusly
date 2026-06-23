@@ -9194,6 +9194,41 @@ button.we-ops-metric-card--button {
   margin-top: 6px;
 }
 
+/* Folder management (rename / delete) controls inside the section summary. The
+   rename input + the confirm row take the full summary width; the action button
+   cluster sits at the end. Tokens only. */
+.we-list-folder__actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.we-list-folder__rename,
+.we-list-folder__confirm {
+  align-items: center;
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.we-list-folder__rename-input {
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
+.we-list-folder__confirm-text {
+  color: var(--we-muted);
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Drag-to-folder. The grip column only appears on rows that carry the handle
    (i.e. once folders exist); the flat no-folder list keeps its 3-column grid. */
 .we-list-row:has(.we-list-row__drag) {

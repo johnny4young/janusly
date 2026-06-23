@@ -16,8 +16,11 @@
  *
  * Invariants:
  *  - Every read filters by `orgId`. No helper bypasses the predicate.
- *  - `upsertWorkflowMetadata` is the SOLE write path; closed-enum
- *    validation lives in `@janusly/shared/src/workflow-metadata` (Zod).
+ *  - Writes stay intentionally narrow: `upsertWorkflowMetadata` replaces the
+ *    full row, `setWorkflowFolder` changes only one workflow's folder, and the
+ *    bulk folder writers touch only the `folder` + `updatedAt` columns.
+ *    Closed-enum validation lives in `@janusly/shared/src/workflow-metadata`
+ *    (Zod).
  *  - The repo doesn't re-validate inputs.
  */
 
@@ -238,6 +241,54 @@ export async function setWorkflowFolder(
   const record = await getWorkflowMetadata(input.orgId, input.workflowId);
   if (!record) throw new Error("workflow_metadata row missing immediately after setWorkflowFolder");
   return { record, previous };
+}
+
+/** Input for the bulk folder-rename writer. */
+export type RenameWorkflowFolderInput = {
+  orgId: string;
+  from: string;
+  to: string;
+};
+
+/**
+ * Re-key every workflow in an org whose `folder` is `from` to `to`, in a single
+ * bulk UPDATE. Touches ONLY rows that already carry the folder (no upsert) and
+ * is org-scoped, so another org's same-named folder is never affected. When `to`
+ * already exists the rows simply merge into it (rename-into-existing = merge).
+ * Returns the affected `workflowIds` for the API audit + response.
+ */
+export async function renameWorkflowFolder(
+  input: RenameWorkflowFolderInput,
+): Promise<{ workflowIds: string[] }> {
+  const rows = await db
+    .update(workflowMetadata)
+    .set({ folder: input.to, updatedAt: new Date() })
+    .where(and(eq(workflowMetadata.orgId, input.orgId), eq(workflowMetadata.folder, input.from)))
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
+}
+
+/** Input for the bulk folder-delete writer. */
+export type DeleteWorkflowFolderInput = {
+  orgId: string;
+  folder: string;
+};
+
+/**
+ * Delete a folder by moving every member back to "Ungrouped" — a single bulk
+ * UPDATE setting `folder` null where it currently equals `folder`. The workflows
+ * themselves are untouched (this only clears the label, so it's reversible).
+ * Org-scoped; returns the affected `workflowIds` for the API audit + response.
+ */
+export async function deleteWorkflowFolder(
+  input: DeleteWorkflowFolderInput,
+): Promise<{ workflowIds: string[] }> {
+  const rows = await db
+    .update(workflowMetadata)
+    .set({ folder: null, updatedAt: new Date() })
+    .where(and(eq(workflowMetadata.orgId, input.orgId), eq(workflowMetadata.folder, input.folder)))
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
 }
 
 // Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

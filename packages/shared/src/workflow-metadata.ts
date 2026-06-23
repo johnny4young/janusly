@@ -128,6 +128,34 @@ export const SetWorkflowFolderBodySchema = z
 
 export type SetWorkflowFolderBody = z.infer<typeof SetWorkflowFolderBodySchema>
 
+/**
+ * Body of the folder-rename collection route (`POST /workflows/folders/rename`).
+ * Re-keys every workflow whose folder is `from` to `to` in one write. Both are
+ * required real names (1..60 chars). If `to` already exists the members merge
+ * into it — renaming into an existing folder is a deliberate merge, not an error.
+ */
+export const RenameWorkflowFolderBodySchema = z
+  .object({
+    from: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
+    to: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
+  })
+  .strict()
+
+export type RenameWorkflowFolderBody = z.infer<typeof RenameWorkflowFolderBodySchema>
+
+/**
+ * Body of the folder-delete collection route (`POST /workflows/folders/delete`).
+ * Moves every member of `folder` back to "Ungrouped" (sets `folder` null). The
+ * workflows themselves are untouched — delete only clears the folder label.
+ */
+export const DeleteWorkflowFolderBodySchema = z
+  .object({
+    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH),
+  })
+  .strict()
+
+export type DeleteWorkflowFolderBody = z.infer<typeof DeleteWorkflowFolderBodySchema>
+
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {
   workflowId: string

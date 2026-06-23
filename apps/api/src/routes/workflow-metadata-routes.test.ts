@@ -25,6 +25,8 @@ vi.mock("@janusly/data/src/workflowMetadataRepo", () => ({
   getWorkflowMetadata: vi.fn(),
   upsertWorkflowMetadata: vi.fn(),
   setWorkflowFolder: vi.fn(),
+  renameWorkflowFolder: vi.fn(),
+  deleteWorkflowFolder: vi.fn(),
   listWorkflowMetadataForOrg: vi.fn(),
 }));
 
@@ -47,7 +49,9 @@ vi.mock("../audit", () => ({
 import { workflowMetadataRoutes } from "./workflow-metadata-routes";
 import { readJson, sendJson } from "../http";
 import {
+  deleteWorkflowFolder,
   getWorkflowMetadata,
+  renameWorkflowFolder,
   setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "@janusly/data/src/workflowMetadataRepo";
@@ -59,6 +63,8 @@ const readJsonMock = vi.mocked(readJson);
 const getMetadataMock = vi.mocked(getWorkflowMetadata);
 const upsertMock = vi.mocked(upsertWorkflowMetadata);
 const setFolderMock = vi.mocked(setWorkflowFolder);
+const renameFolderMock = vi.mocked(renameWorkflowFolder);
+const deleteFolderMock = vi.mocked(deleteWorkflowFolder);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -318,6 +324,68 @@ describe("POST /workflows/:id/folder", () => {
   });
 });
 
+describe("POST /workflows/folders/rename", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/folders/rename");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 422 on an invalid body (missing 'to')", async () => {
+    readJsonMock.mockResolvedValueOnce({ from: "Billing" });
+    await callRoute("POST", "/workflows/folders/rename");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(renameFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("renames + audits workflow.folder.renamed with the affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ from: "Billing", to: "Invoicing" });
+    renameFolderMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"] });
+    await callRoute("POST", "/workflows/folders/rename");
+    expect(renameFolderMock).toHaveBeenCalledWith({ orgId: "org-1", from: "Billing", to: "Invoicing" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.folder.renamed",
+      "folder",
+      "Invoicing",
+      expect.objectContaining({ from: "Billing", to: "Invoicing", count: 2, workflowIds: ["wf-1", "wf-2"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ from: "Billing", to: "Invoicing", count: 2 });
+  });
+});
+
+describe("POST /workflows/folders/delete", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/folders/delete");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 422 on an invalid body (empty folder)", async () => {
+    readJsonMock.mockResolvedValueOnce({ folder: "" });
+    await callRoute("POST", "/workflows/folders/delete");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(deleteFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes + audits workflow.folder.deleted with the affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ folder: "Billing" });
+    deleteFolderMock.mockResolvedValueOnce({ workflowIds: ["wf-1"] });
+    await callRoute("POST", "/workflows/folders/delete");
+    expect(deleteFolderMock).toHaveBeenCalledWith({ orgId: "org-1", folder: "Billing" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.folder.deleted",
+      "folder",
+      "Billing",
+      expect.objectContaining({ folder: "Billing", count: 1, workflowIds: ["wf-1"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ folder: "Billing", count: 1 });
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -340,5 +408,22 @@ describe("route matcher", () => {
     expect(matcher("/workflows/wf-1/folder/extra")).toBe(false);
     expect(matcher("/workflows/folders")).toBe(false);
     expect(matcher("/workflows/wf-1")).toBe(false);
+    // The per-id folder matcher must NOT swallow the collection routes.
+    expect(matcher("/workflows/folders/rename")).toBe(false);
+    expect(matcher("/workflows/folders/delete")).toBe(false);
+  });
+
+  it("matches the folder collection ops exactly (rename ≠ delete ≠ per-id)", () => {
+    const rename = findRoute("POST", "/workflows/folders/rename");
+    const del = findRoute("POST", "/workflows/folders/delete");
+    const renameMatch = typeof rename.match === "string" ? () => true : rename.match;
+    const delMatch = typeof del.match === "string" ? () => true : del.match;
+    expect(renameMatch("/workflows/folders/rename")).toBe(true);
+    expect(renameMatch("/workflows/folders/rename?x=1")).toBe(true);
+    expect(renameMatch("/workflows/folders/delete")).toBe(false);
+    expect(renameMatch("/workflows/wf-1/folder")).toBe(false);
+    expect(delMatch("/workflows/folders/delete")).toBe(true);
+    expect(delMatch("/workflows/folders/rename")).toBe(false);
+    expect(delMatch("/workflows/wf-1/folder")).toBe(false);
   });
 });
