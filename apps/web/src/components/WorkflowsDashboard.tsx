@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, Folder, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
+import { CircleCheck, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -41,6 +41,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // only for the highlight. Both clear on drop / drag-end.
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  // Drag-to-create-folder transient state. A row dropped on the "+ New folder"
+  // zone is held in `newFolderDropFor` while its inline name input is open;
+  // `newFolderDraft` is that input's text, `newFolderHover` the drop highlight.
+  const [newFolderHover, setNewFolderHover] = useState(false)
+  const [newFolderDropFor, setNewFolderDropFor] = useState<string | null>(null)
+  const [newFolderDraft, setNewFolderDraft] = useState('')
   // Tag / search / sort restore from localStorage on mount (per-browser) so the
   // Flows view survives navigation + reload; persisted by the effect below. A
   // missing / corrupt value degrades to the defaults via the helper.
@@ -249,6 +255,25 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     },
     [workflows, addToast, bumpPlatformVersion, t],
   )
+
+  // Create a folder by naming the row dropped on the "+ New folder" zone. Folders
+  // are derived from each row's `folder` value, so assigning a never-seen name via
+  // the existing `moveToFolder` makes the section spring into existence — no new
+  // route. An empty / whitespace-only name cancels silently (the row stays put).
+  const commitNewFolder = useCallback(() => {
+    const id = newFolderDropFor
+    const name = newFolderDraft.trim()
+    setNewFolderDropFor(null)
+    setNewFolderDraft('')
+    if (!id || !name) return
+    void moveToFolder(id, name)
+  }, [newFolderDropFor, newFolderDraft, moveToFolder])
+
+  // Dismiss the new-folder input without moving the dropped row.
+  const cancelNewFolder = useCallback(() => {
+    setNewFolderDropFor(null)
+    setNewFolderDraft('')
+  }, [])
 
   // Rename a folder across ALL its members in one bulk write. Optimistic: re-key
   // every matching row locally (tracked by id so the rollback is exact even if
@@ -793,6 +818,58 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               </details>
             )
           })}
+          {/* Drag-to-create-folder zone — only while dragging a row, or naming a
+              just-dropped one. Dropping opens an inline name input; the row is
+              assigned to that name via the same moveToFolder path the drag-to-
+              existing-folder drop uses, and the section springs into existence
+              (folders derive from each row's folder value — no folders table). */}
+          {newFolderDropFor !== null ? (
+            <div className="we-list-folder-new we-list-folder-new--naming">
+              <input
+                className="text-field we-list-folder-new__input"
+                value={newFolderDraft}
+                autoFocus
+                maxLength={60}
+                placeholder={t('workflowsDashboard.newFolderPlaceholder') as string}
+                aria-label={t('workflowsDashboard.newFolderLabel') as string}
+                onChange={event => setNewFolderDraft(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') { event.preventDefault(); commitNewFolder() }
+                  else if (event.key === 'Escape') { event.preventDefault(); cancelNewFolder() }
+                }}
+                data-testid="workflows-newfolder-input"
+              />
+              <button type="button" className="small-command" onClick={commitNewFolder} data-testid="workflows-newfolder-save">
+                {t('workflowsDashboard.saveNewFolder')}
+              </button>
+              <button type="button" className="small-command" onClick={cancelNewFolder}>
+                {t('workflowsDashboard.cancelAction')}
+              </button>
+            </div>
+          ) : draggingId ? (
+            <div
+              className="we-list-folder-new"
+              data-drop-target={newFolderHover ? 'true' : undefined}
+              onDragOver={event => {
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                if (!newFolderHover) setNewFolderHover(true)
+              }}
+              onDragLeave={() => setNewFolderHover(false)}
+              onDrop={event => {
+                event.preventDefault()
+                const droppedId = event.dataTransfer.getData('text/plain') || draggingId
+                setNewFolderHover(false)
+                setDropTarget(null)
+                setDraggingId(null)
+                if (droppedId) { setNewFolderDraft(''); setNewFolderDropFor(droppedId) }
+              }}
+              data-testid="workflows-newfolder-dropzone"
+            >
+              <FolderPlus size={14} aria-hidden="true" />
+              <span>{t('workflowsDashboard.newFolderDropzone')}</span>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
