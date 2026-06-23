@@ -156,6 +156,28 @@ export const DeleteWorkflowFolderBodySchema = z
 
 export type DeleteWorkflowFolderBody = z.infer<typeof DeleteWorkflowFolderBodySchema>
 
+/**
+ * Upper bound on a single bulk folder-assignment request. The Flows list caps at
+ * 100/200 rows, so 500 is safe headroom while still bounding the IN-list size.
+ */
+export const WORKFLOW_BULK_ASSIGN_MAX = 500
+
+/**
+ * Body of the bulk folder-assign collection route (`POST /workflows/folders/assign`).
+ * Moves every listed workflow into `folder` (a real name, possibly NEW) in one
+ * write, or to "Ungrouped" when `folder` is null. Unlike rename/delete this
+ * targets arbitrary workflows that may not have a metadata row yet, so the write
+ * behind it upserts. `workflowIds` are validated against the caller's org server-side.
+ */
+export const AssignWorkflowsToFolderBodySchema = z
+  .object({
+    workflowIds: z.array(z.string().min(1)).min(1).max(WORKFLOW_BULK_ASSIGN_MAX),
+    folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable(),
+  })
+  .strict()
+
+export type AssignWorkflowsToFolderBody = z.infer<typeof AssignWorkflowsToFolderBodySchema>
+
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {
   workflowId: string

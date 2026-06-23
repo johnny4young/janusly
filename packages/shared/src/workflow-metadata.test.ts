@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
   RenameWorkflowFolderBodySchema,
   SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
+  WORKFLOW_BULK_ASSIGN_MAX,
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
   WORKFLOW_METADATA_OWNERS_MAX,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
@@ -202,5 +204,33 @@ describe('DeleteWorkflowFolderBodySchema', () => {
 
   it('rejects unknown extra keys (strict)', () => {
     expect(DeleteWorkflowFolderBodySchema.safeParse({ folder: 'Billing', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('AssignWorkflowsToFolderBodySchema', () => {
+  it('accepts workflowIds + a real folder name', () => {
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ['wf1', 'wf2'], folder: 'Billing' }).success).toBe(true)
+  })
+
+  it('accepts folder: null (bulk ungroup)', () => {
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ['wf1'], folder: null }).success).toBe(true)
+  })
+
+  it('requires at least one workflowId', () => {
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: [], folder: 'Billing' }).success).toBe(false)
+  })
+
+  it(`rejects more than ${WORKFLOW_BULK_ASSIGN_MAX} workflowIds`, () => {
+    const ids = Array.from({ length: WORKFLOW_BULK_ASSIGN_MAX + 1 }, (_, i) => `wf${i}`)
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ids, folder: 'Billing' }).success).toBe(false)
+  })
+
+  it('rejects an empty-string id or an empty folder', () => {
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: [''], folder: 'Billing' }).success).toBe(false)
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ['wf1'], folder: '' }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ['wf1'], folder: 'Billing', extra: 1 }).success).toBe(false)
   })
 })

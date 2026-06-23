@@ -8,11 +8,13 @@
  *   - `POST /workflows/:id/folder`      (editor, workflows.write)
  *   - `POST /workflows/folders/rename`  (editor, workflows.write) — bulk re-key folder=from → to
  *   - `POST /workflows/folders/delete`  (editor, workflows.write) — bulk move folder members to Ungrouped
+ *   - `POST /workflows/folders/assign`  (editor, workflows.write) — bulk move listed workflows into a folder
  *
- * The two `folders/*` collection routes operate on the org's metadata rows in
- * bulk (no per-workflow id), so they validate the body + scope by `orgId` in the
- * repo rather than calling `assertWorkflowBelongsToOrg`. They audit
- * `workflow.folder.renamed` / `_deleted` with the affected workflow ids.
+ * The `folders/*` collection routes operate in bulk (no per-workflow URL id), so
+ * they validate the body and enforce org scope in the repo rather than calling
+ * `assertWorkflowBelongsToOrg`. Rename/delete scope by `workflow_metadata.org_id`;
+ * assign first filters requested ids through the org's `workflows` rows, then
+ * upserts metadata for that owned subset. All three audit with affected ids.
  *
  * The GET returns `{ metadata: WorkflowMetadataRecord | null }` — a
  * missing row is a 200 with `metadata: null` (not a 404) so the
@@ -40,12 +42,14 @@
 import { and, eq } from "drizzle-orm";
 import { db, workflows } from "@janusly/db";
 import {
+  AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
   RenameWorkflowFolderBodySchema,
   SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
 } from "@janusly/shared";
 import {
+  assignWorkflowsToFolder,
   deleteWorkflowFolder,
   getWorkflowMetadata,
   renameWorkflowFolder,
@@ -103,6 +107,11 @@ function matchFolderRenamePath(url: string): boolean {
 /** Match `/workflows/folders/delete` — the bulk folder-delete collection route. */
 function matchFolderDeletePath(url: string): boolean {
   return (url.split("?")[0] ?? "") === "/workflows/folders/delete";
+}
+
+/** Match `/workflows/folders/assign` — the bulk folder-assign collection route. */
+function matchFolderAssignPath(url: string): boolean {
+  return (url.split("?")[0] ?? "") === "/workflows/folders/assign";
 }
 
 async function assertWorkflowBelongsToOrg(
@@ -185,6 +194,46 @@ export const workflowMetadataRoutes: Route[] = [
       await auditAction(auth, "workflow.folder.deleted", {
         targetType: "folder",
         targetId: folder,
+        metadata: { folder, count: workflowIds.length, workflowIds },
+      });
+
+      return sendJson(res, { folder, count: workflowIds.length, workflowIds });
+    },
+  },
+  {
+    method: "POST",
+    match: matchFolderAssignPath,
+    role: "editor",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = AssignWorkflowsToFolderBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(
+          res,
+          {
+            error: "invalid folder assign body",
+            code: "workflow_metadata_invalid",
+            issues: parsed.error.issues.map((iss) => ({
+              path: iss.path.join("."),
+              message: iss.message,
+            })),
+          },
+          422,
+        );
+      }
+
+      const { workflowIds: requestedIds, folder } = parsed.data;
+      const { workflowIds } = await assignWorkflowsToFolder({
+        orgId: auth.orgId,
+        workflowIds: requestedIds,
+        folder,
+        actorUserId: auth.userId,
+      });
+
+      await auditAction(auth, "workflow.folder.bulk_assigned", {
+        targetType: "folder",
+        targetId: folder ?? "(ungrouped)",
         metadata: { folder, count: workflowIds.length, workflowIds },
       });
 
