@@ -27,6 +27,7 @@ vi.mock("@janusly/data/src/workflowMetadataRepo", () => ({
   setWorkflowFolder: vi.fn(),
   renameWorkflowFolder: vi.fn(),
   deleteWorkflowFolder: vi.fn(),
+  assignWorkflowsToFolder: vi.fn(),
   listWorkflowMetadataForOrg: vi.fn(),
 }));
 
@@ -49,6 +50,7 @@ vi.mock("../audit", () => ({
 import { workflowMetadataRoutes } from "./workflow-metadata-routes";
 import { readJson, sendJson } from "../http";
 import {
+  assignWorkflowsToFolder,
   deleteWorkflowFolder,
   getWorkflowMetadata,
   renameWorkflowFolder,
@@ -65,6 +67,7 @@ const upsertMock = vi.mocked(upsertWorkflowMetadata);
 const setFolderMock = vi.mocked(setWorkflowFolder);
 const renameFolderMock = vi.mocked(renameWorkflowFolder);
 const deleteFolderMock = vi.mocked(deleteWorkflowFolder);
+const assignFolderMock = vi.mocked(assignWorkflowsToFolder);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -386,6 +389,57 @@ describe("POST /workflows/folders/delete", () => {
   });
 });
 
+describe("POST /workflows/folders/assign", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/folders/assign");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 422 on an invalid body (empty workflowIds)", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: [], folder: "Billing" });
+    await callRoute("POST", "/workflows/folders/assign");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(assignFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("assigns + audits workflow.folder.bulk_assigned with the affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"], folder: "Billing" });
+    assignFolderMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"] });
+    await callRoute("POST", "/workflows/folders/assign");
+    expect(assignFolderMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      workflowIds: ["wf-1", "wf-2"],
+      folder: "Billing",
+      actorUserId: "user-1",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.folder.bulk_assigned",
+      "folder",
+      "Billing",
+      expect.objectContaining({ folder: "Billing", count: 2, workflowIds: ["wf-1", "wf-2"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ folder: "Billing", count: 2 });
+  });
+
+  it("accepts folder: null (bulk ungroup) and audits with the (ungrouped) target", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: ["wf-1"], folder: null });
+    assignFolderMock.mockResolvedValueOnce({ workflowIds: ["wf-1"] });
+    await callRoute("POST", "/workflows/folders/assign");
+    expect(assignFolderMock).toHaveBeenCalledWith(expect.objectContaining({ folder: null }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.folder.bulk_assigned",
+      "folder",
+      "(ungrouped)",
+      expect.objectContaining({ folder: null, count: 1 }),
+    );
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -425,5 +479,15 @@ describe("route matcher", () => {
     expect(delMatch("/workflows/folders/delete")).toBe(true);
     expect(delMatch("/workflows/folders/rename")).toBe(false);
     expect(delMatch("/workflows/wf-1/folder")).toBe(false);
+
+    const assign = findRoute("POST", "/workflows/folders/assign");
+    const assignMatch = typeof assign.match === "string" ? () => true : assign.match;
+    expect(assignMatch("/workflows/folders/assign")).toBe(true);
+    expect(assignMatch("/workflows/folders/rename")).toBe(false);
+    expect(assignMatch("/workflows/wf-1/folder")).toBe(false);
+    // The per-id folder matcher must not swallow the assign collection route.
+    const folderRoute = findRoute("POST", "/workflows/wf-1/folder");
+    const folderMatch = typeof folderRoute.match === "string" ? () => true : folderRoute.match;
+    expect(folderMatch("/workflows/folders/assign")).toBe(false);
   });
 });

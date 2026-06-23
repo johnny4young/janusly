@@ -67,6 +67,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null)
+  // Bulk folder assignment. `selectionMode` toggles per-row checkboxes (off by
+  // default so the list is unchanged); `selectedIds` are the ticked rows;
+  // `bulkFolderDraft` is the target folder typed/picked in the bulk bar.
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const [bulkFolderDraft, setBulkFolderDraft] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -289,6 +295,56 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [workflows, addToast, bumpPlatformVersion, t],
   )
 
+  // Toggle one row's checkbox in selection mode.
+  const toggleSelected = useCallback((workflowId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(workflowId)) next.delete(workflowId)
+      else next.add(workflowId)
+      return next
+    })
+  }, [])
+
+  // Move every selected workflow into `folder` (null = Ungrouped) in one request.
+  // Optimistic: re-fold the selected rows locally (capturing each prior folder for
+  // an exact rollback), POST the bulk route, bump + toast + clear on success, roll
+  // back on failure.
+  const bulkAssign = useCallback(
+    async (folder: string | null) => {
+      const ids = [...selectedIds]
+      if (ids.length === 0) return
+      const idSet = new Set(ids)
+      const priorFolders = new Map(
+        workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.folder ?? null]),
+      )
+
+      setWorkflows((prev) => prev.map((w) => (idSet.has(w.id) ? { ...w, folder } : w)))
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+      setBulkFolderDraft('')
+      try {
+        const result = (await api('/workflows/folders/assign', {
+          method: 'POST',
+          body: JSON.stringify({ workflowIds: ids, folder }),
+        })) as { count?: number }
+        const count = typeof result?.count === 'number' ? result.count : ids.length
+        addToast(
+          folder
+            ? (t('workflowsDashboard.bulkMoved', { folder, count }) as string)
+            : (t('workflowsDashboard.bulkMovedUngrouped', { count }) as string),
+          'success',
+        )
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) =>
+          prev.map((w) => (priorFolders.has(w.id) ? { ...w, folder: priorFolders.get(w.id) ?? null } : w)),
+        )
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkMoveFailed') as string), 'error')
+      }
+    },
+    [selectedIds, workflows, addToast, bumpPlatformVersion, t],
+  )
+
   const renderRow = (workflow: SavedWorkflow) => {
     // Folder choices for the per-row "Move to folder" select: the org-wide
     // folder list plus the row's own folder if a stale value isn't already in it
@@ -307,6 +363,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         data-testid={`workflows-row-${workflow.id}`}
         onClick={() => onOpen(workflow.id)}
       >
+        {/* Bulk-select checkbox — only in selection mode. stopPropagation so
+            ticking a row never opens it. */}
+        {selectionMode && (
+          <input
+            type="checkbox"
+            className="we-list-row__select"
+            checked={selectedIds.has(workflow.id)}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
+            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
+            data-testid={`workflows-select-row-${workflow.id}`}
+          />
+        )}
         {/* Drag handle — only rendered once folders exist (otherwise there's no
             section to drop onto). Native DnD is mouse-only; the per-row select
             below and the Inspector folder field stay keyboard-accessible. */}
@@ -451,6 +520,58 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               {t('workflowsDashboard.sortFailed')}
             </button>
           </div>
+          {/* Bulk-select toggle — reveals per-row checkboxes + the bulk bar. Off
+              by default so the list is unchanged. */}
+          <button
+            type="button"
+            className="small-command"
+            aria-pressed={selectionMode}
+            onClick={() => { setSelectionMode((on) => !on); setSelectedIds(new Set()) }}
+            data-testid="workflows-select-toggle"
+          >
+            {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
+          </button>
+        </div>
+      )}
+
+      {selectionMode && selectedIds.size > 0 && (
+        <div className="we-list-bulk-bar" data-testid="workflows-bulk-bar">
+          <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
+          <input
+            className="text-field we-list-bulk-bar__input"
+            list="we-bulk-folder-options"
+            value={bulkFolderDraft}
+            maxLength={60}
+            onChange={event => setBulkFolderDraft(event.target.value)}
+            placeholder={t('workflowsDashboard.bulkFolderPlaceholder') as string}
+            aria-label={t('workflowsDashboard.bulkFolderPlaceholder') as string}
+            data-testid="workflows-bulk-folder-input"
+          />
+          <datalist id="we-bulk-folder-options">
+            {folderOptions.map(folder => (
+              <option key={folder} value={folder} />
+            ))}
+          </datalist>
+          <button
+            type="button"
+            className="small-command"
+            disabled={!bulkFolderDraft.trim()}
+            onClick={() => void bulkAssign(bulkFolderDraft.trim())}
+            data-testid="workflows-bulk-move"
+          >
+            {t('workflowsDashboard.bulkMoveCta')}
+          </button>
+          <button
+            type="button"
+            className="small-command"
+            onClick={() => void bulkAssign(null)}
+            data-testid="workflows-bulk-ungroup"
+          >
+            {t('workflowsDashboard.bulkUngroupCta')}
+          </button>
+          <button type="button" className="small-command" onClick={() => setSelectedIds(new Set())}>
+            {t('workflowsDashboard.clearSelection')}
+          </button>
         </div>
       )}
 
