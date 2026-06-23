@@ -602,6 +602,9 @@
   "workflowsDashboard.bulkMovedUngrouped_one": "Moved {{count}} flow to Ungrouped",
   "workflowsDashboard.bulkMovedUngrouped_other": "Moved {{count}} flows to Ungrouped",
   "workflowsDashboard.bulkMoveFailed": "Couldn't move the flows. Try again.",
+  "workflowsDashboard.selectAllCount": "Select all ({{count}})",
+  "workflowsDashboard.deselectAll": "Deselect all",
+  "workflowsDashboard.selectAllInFolderAria": "Select all in {{folder}}",
 
   "budgetBanner.exceeded": "AI {{scope}} budget exceeded — call blocked.",
   "budgetBanner.detail": "You've spent <0>${{spent}}</0> of the <1>${{limit}}</1> monthly limit. Raise the budget in Operations or change the policy to warn only to keep AI calls running.",
