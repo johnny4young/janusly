@@ -605,6 +605,10 @@
   "workflowsDashboard.selectAllCount": "Select all ({{count}})",
   "workflowsDashboard.deselectAll": "Deselect all",
   "workflowsDashboard.selectAllInFolderAria": "Select all in {{folder}}",
+  "workflowsDashboard.newFolderDropzone": "New folder",
+  "workflowsDashboard.newFolderPlaceholder": "Folder name",
+  "workflowsDashboard.newFolderLabel": "New folder name",
+  "workflowsDashboard.saveNewFolder": "Create",
 
   "budgetBanner.exceeded": "AI {{scope}} budget exceeded — call blocked.",
   "budgetBanner.detail": "You've spent <0>${{spent}}</0> of the <1>${{limit}}</1> monthly limit. Raise the budget in Operations or change the policy to warn only to keep AI calls running.",

@@ -9260,6 +9260,40 @@ button.we-ops-metric-card--button {
   border-radius: 8px;
 }
 
+/* Drag-to-create-folder zone (foldered view; shown only while dragging a row or
+   naming a just-dropped one). Dashed to read as a drop affordance; mirrors the
+   folder section's data-drop-target highlight. */
+.we-list-folder-new {
+  align-items: center;
+  border: 1px dashed var(--we-line);
+  border-radius: 10px;
+  color: var(--we-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  justify-content: center;
+  padding: 10px;
+}
+
+.we-list-folder-new[data-drop-target="true"] {
+  background: var(--we-surface);
+  border-color: var(--we-primary);
+  color: var(--we-primary);
+}
+
+.we-list-folder-new--naming {
+  border-style: solid;
+  justify-content: flex-start;
+}
+
+.we-list-folder-new__input {
+  flex: 1 1 160px;
+  font-size: 12px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
 /* Per-row folder affordances. The pill shows the row's folder inline (glance);
    the <select> is the keyboard / screen-reader equivalent of the mouse-only
    drag-to-folder (act) — a native control so it needs no custom a11y wiring. */

@@ -402,6 +402,68 @@ describe('<WorkflowsDashboard />', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('reveals the New folder drop zone only while dragging a row', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/folders') return { folders: ['Billing', 'Onboarding'] }
+      if (url === '/workflows/tags') return { tags: [] }
+      return FOLDERED
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    expect(screen.queryByTestId('workflows-newfolder-dropzone')).not.toBeInTheDocument()
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    expect(screen.getByTestId('workflows-newfolder-dropzone')).toBeInTheDocument()
+  })
+
+  it('drops a row on New folder, names it, and creates the folder (POST {folder})', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-newfolder-dropzone'), { dataTransfer })
+    const input = screen.getByTestId('workflows-newfolder-input')
+    fireEvent.change(input, { target: { value: 'Q3 Launch' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: '/workflows/wf1/folder', body: { folder: 'Q3 Launch' } }),
+    )
+  })
+
+  it('cancels the New folder input (Escape) without moving the row', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-newfolder-dropzone'), { dataTransfer })
+    const input = screen.getByTestId('workflows-newfolder-input')
+    fireEvent.change(input, { target: { value: 'Throwaway' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+    await Promise.resolve()
+    expect(screen.queryByTestId('workflows-newfolder-input')).not.toBeInTheDocument()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('does not create a folder when the typed name is blank', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    const dataTransfer = makeDataTransfer()
+    fireEvent.dragStart(screen.getByTestId('workflows-drag-wf1'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('workflows-newfolder-dropzone'), { dataTransfer })
+    const input = screen.getByTestId('workflows-newfolder-input')
+    fireEvent.change(input, { target: { value: '   ' } })
+    fireEvent.click(screen.getByTestId('workflows-newfolder-save'))
+    await Promise.resolve()
+    expect(screen.queryByTestId('workflows-newfolder-input')).not.toBeInTheDocument()
+    expect(calls).toHaveLength(0)
+  })
+
   it('rolls the row back to its original folder when the folder POST fails', async () => {
     const calls: Array<{ url: string; body: unknown }> = []
     mockListWithFolderPost(FOLDERED, calls, 'reject')
