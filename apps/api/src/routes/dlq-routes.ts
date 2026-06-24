@@ -193,6 +193,58 @@ export const dlqRoutes: Route[] = [
 
       return sendJson(res, { ok: true });
     } },
+  // Bulk-dismiss several dead letters in one request — the multi-select
+  // equivalent of POST /dlq/resolve. Mirrors /dlq/cluster-apply's loop +
+  // partial-success envelope, but resolves (accepts the loss) instead of
+  // replaying. Each entry is the same operation as a single resolve, so it
+  // reuses the `dlq.resolved` audit action (metadata.bulk flags the batch).
+  { method: "POST", match: "/dlq/bulk-resolve", role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const idsRaw = body.deadLetterIds;
+      if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
+        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+      }
+      if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
+        return sendJson(res, { error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}` }, 400);
+      }
+      const deadLetterIds: string[] = [];
+      for (const candidate of idsRaw) {
+        if (typeof candidate !== "string" || candidate.length === 0) {
+          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+        }
+        deadLetterIds.push(candidate);
+      }
+
+      const errors: Array<{ deadLetterId: string; error: string }> = [];
+      let resolved = 0;
+
+      for (const id of deadLetterIds) {
+        const item = await getDeadLetter(auth.orgId, id);
+        if (!item) {
+          errors.push({ deadLetterId: id, error: "DLQ entry not found" });
+          continue;
+        }
+        try {
+          await markDeadLetterResolved(auth.orgId, id);
+          await auditAction(auth, "dlq.resolved", { targetType: "dlq", targetId: id, metadata: { bulk: true } });
+          // Manual dismiss is not a replay — keep the linked recovery item's
+          // resolution reason honest (accepted_loss), mirroring single resolve.
+          await autoResolveRecoveryItemFromReplay({
+            orgId: auth.orgId,
+            deadLetterId: id,
+            actor: auth.userId,
+            resolutionReason: "accepted_loss",
+            via: "dlq_resolve",
+          });
+          resolved += 1;
+        } catch (err) {
+          errors.push({ deadLetterId: id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      return sendJson(res, { resolved, failed: errors.length, errors });
+    } },
   // Sandbox replay — execute the failing DLQ entry against a proposed
   // workflow patch in a fresh validation run WITHOUT writing a
   // `workflow_versions` row. Recovery dialog calls this between Review

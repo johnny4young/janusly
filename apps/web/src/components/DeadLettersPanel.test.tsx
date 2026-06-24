@@ -79,7 +79,11 @@ function countsFromRows(rows: DeadLetter[]) {
  *  (no-more) keyset page — so a panel test exercises the real "server filters,
  *  panel renders" contract. Other calls (child cards) get empty defaults. */
 function dlqMock(rows: DeadLetter[]) {
-  return async (path: string): Promise<unknown> => {
+  return async (path: string, options?: RequestInit): Promise<unknown> => {
+    if (path === '/dlq/bulk-resolve') {
+      const ids = JSON.parse(String(options?.body ?? '{}')).deadLetterIds as string[] | undefined
+      return { resolved: ids?.length ?? 0, failed: 0, errors: [] }
+    }
     if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
     if (!path.startsWith('/dlq/queue')) return { items: [], clusters: [], runs: [], proposals: [] }
     const params = new URL(path, 'http://x').searchParams
@@ -494,5 +498,67 @@ describe('<DeadLettersPanel /> — sort', () => {
         'dlq-row-a',
       ])
     })
+  })
+
+  it('bulk-resolves the ticked rows in one /dlq/bulk-resolve request', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b'), mockDeadLetter('c')]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    // Enter selection mode → per-row checkboxes appear; tick two rows.
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
+
+    fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+    await waitFor(() => {
+      const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-resolve')
+      expect(call).toBeTruthy()
+      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'] })
+    })
+    // A successful bulk resolve exits selection mode → the bar disappears.
+    await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
+  })
+
+  it('keeps failed rows selected and warns on a partial-success bulk resolve', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/dlq/bulk-resolve') {
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        return { resolved: 1, failed: 1, errors: [{ deadLetterId: 'b', error: 'DLQ entry not found' }] }
+      }
+      return dlqMock(rows)(path, options)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    fireEvent.click(screen.getByTestId('dlq-bulk-resolve'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')
+      expect(screen.getByTestId('dlq-select-row-a')).not.toBeChecked()
+      expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
+      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 resolved, 1 failed')
+    })
+  })
+
+  it('hides the Resolve action until a row is ticked; select-all ticks every loaded row', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b'), mockDeadLetter('c')]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    // Selection mode on, nothing ticked → no Resolve button yet.
+    expect(screen.queryByTestId('dlq-bulk-resolve')).not.toBeInTheDocument()
+    // Select all → every loaded row ticked → the count reflects all three.
+    fireEvent.click(screen.getByTestId('dlq-select-all'))
+    expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('3 selected')
+    expect(screen.getByTestId('dlq-bulk-resolve')).toBeInTheDocument()
   })
 })
