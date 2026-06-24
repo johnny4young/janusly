@@ -173,6 +173,55 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.getByText('Billing sync')).toBeInTheDocument()
   })
 
+  it('sends a debounced ?q= name search to the list fetch', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'billing' } })
+    await waitFor(() => expect(calls.some((u) => u.includes('q=billing'))).toBe(true), { timeout: 2000 })
+  })
+
+  it('back-fills a beyond-cap match returned only by the ?q= fetch', async () => {
+    // The initial unfiltered load returns only wf1; the ?q=onboarding fetch
+    // returns wf2 — a row absent from the first page (a beyond-cap match the
+    // client-only filter could never surface). The org tag keeps the toolbar
+    // (and its search box) visible even with a single loaded row.
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: ['onboarding'] }
+      if (url.includes('q=onboarding')) return [FLOWS[1]]
+      return [FLOWS[0]]
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByText('Billing sync')
+    expect(screen.queryByText('Onboarding email')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'onboarding' } })
+    await waitFor(() => expect(screen.getByText('Onboarding email')).toBeInTheDocument(), { timeout: 2000 })
+  })
+
+  it('shows the search empty-state (not the all-clear) when the ?q= fetch returns nothing', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url.includes('q=')) return [] // the server finds no match for the term
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'zzz-nothing' } })
+    // The debounced server fetch fires and returns [] …
+    await waitFor(() => expect(calls.some((u) => u.includes('q=zzz-nothing'))).toBe(true), { timeout: 2000 })
+    // … and an empty result under an active search shows the search no-match
+    // state, never the all-clear "no flows at all" panel.
+    await waitFor(() => expect(screen.getByTestId('workflows-no-matches')).toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-empty')).not.toBeInTheDocument()
+  })
+
   it('migrates a persisted legacy scalar tag into a filter chip on mount', async () => {
     window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'billing', query: 'bill', sort: 'name' }))
     mockApi((url) => {
