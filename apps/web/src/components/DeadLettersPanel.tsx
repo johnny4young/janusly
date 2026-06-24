@@ -8,7 +8,7 @@
 
 import { lazy, Suspense, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
-import { downloadFromApi } from '../api'
+import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
 import { EmptyState } from './EmptyState'
@@ -78,6 +78,20 @@ export type DeadLetter = {
   recovery?: DeadLetterRecovery | null
 }
 
+type BulkResolveResult = {
+  resolved: number
+  failed: number
+  errors: Array<{ deadLetterId: string; error: string }>
+}
+
+function isBulkResolveResult(value: unknown): value is BulkResolveResult {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<BulkResolveResult>
+  return typeof candidate.resolved === 'number'
+    && typeof candidate.failed === 'number'
+    && Array.isArray(candidate.errors)
+}
+
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string) => void
@@ -117,10 +131,72 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const [recoveryDeadLetter, setRecoveryDeadLetter] = useState<DeadLetter | null>(null)
   const [labSourceRunId, setLabSourceRunId] = useState<string | null>(null)
   const addToast = useWorkflowStore((state) => state.addToast)
+  const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
+  // Multi-select for bulk resolve. `selectionMode` reveals per-row checkboxes;
+  // `selectedIds` holds the ticked rows. Orthogonal to `selectedId` (the
+  // single-row detail box), which is hidden while selecting.
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 
   const handleRefresh = () => {
     refreshQueue()
     void onRefresh()
+  }
+
+  // Select-all operates over the loaded (filtered) rows, so appended
+  // "Load more" pages are included; the virtual window is only a render detail.
+  const loadedIds = filtered.map((item) => item.id)
+  const allLoadedSelected = loadedIds.length > 0 && loadedIds.every((id) => selectedIds.has(id))
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) =>
+      loadedIds.length > 0 && loadedIds.every((id) => prev.has(id)) ? new Set<string>() : new Set(loadedIds),
+    )
+  }
+
+  const exitSelection = () => {
+    setSelectionMode(false)
+    setSelectedIds(new Set())
+  }
+
+  // Dismiss every ticked dead letter in one request. Mirrors the single
+  // resolve's post-success behavior (bump + refetch + toast). The API uses a
+  // 200 partial-success envelope, so inspect it before deciding whether to
+  // clear or keep the remaining failed selections.
+  const bulkResolve = async () => {
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    try {
+      const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
+      if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed') as string)
+
+      if (result.resolved > 0) {
+        bumpPlatformVersion()
+        refreshQueue()
+        void onRefresh()
+      }
+
+      if (result.failed > 0) {
+        const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
+        setSelectedIds(new Set(failedIds))
+        addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }) as string, 'error')
+        return
+      }
+
+      addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }) as string, 'success')
+      exitSelection()
+    } catch (error) {
+      addToast(tApiError(error) || (t('dlq.bulkResolveFailed') as string), 'error')
+    }
   }
 
   // Org-wide open count drives the warning stripe — there are opens to work
@@ -161,7 +237,18 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           <div className="section-kicker">{t('dlq.kicker')}</div>
           <strong>{t('dlq.queue')}</strong>
         </div>
-        <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
+        <div className="split-row">
+          <button
+            type="button"
+            className="small-command"
+            aria-pressed={selectionMode}
+            onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+            data-testid="dlq-select-toggle"
+          >
+            {selectionMode ? t('dlq.selectDone') : t('dlq.selectRows')}
+          </button>
+          <button className="small-command" onClick={handleRefresh}>{t('dlq.refresh')}</button>
+        </div>
       </div>
 
       {/* Org-wide queue-health summary from /dlq/counts — NOT the filtered /
@@ -225,6 +312,36 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         ))}
       </select>
 
+      {/* Bulk-select bar — a Select-all toggle (always, in selection mode) plus
+          the count + "Resolve selected" once at least one row is ticked. Reuses
+          the Flows-list bulk-bar styling. */}
+      {selectionMode && (
+        <div className="we-list-bulk-bar" data-testid="dlq-bulk-bar">
+          <button
+            type="button"
+            className="small-command"
+            onClick={toggleSelectAll}
+            data-testid="dlq-select-all"
+          >
+            {allLoadedSelected ? t('dlq.deselectAll') : t('dlq.selectAllCount', { count: loadedIds.length })}
+          </button>
+          {selectedIds.size > 0 && (
+            <>
+              <span className="we-list-bulk-bar__divider" aria-hidden="true" />
+              <span className="we-list-bulk-bar__count">{t('dlq.bulkSelectedCount', { count: selectedIds.size })}</span>
+              <button
+                type="button"
+                className="small-command small-command--primary"
+                onClick={() => { void bulkResolve() }}
+                data-testid="dlq-bulk-resolve"
+              >
+                {t('dlq.bulkResolveCta')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="panel-list">
         {filtered.length === 0 && !recoveryFilterLoading && (
           <EmptyState
@@ -266,8 +383,19 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                         data-clickable="true"
                         data-severity={severity}
                         data-testid={`dlq-row-${item.id}`}
-                        onClick={() => setSelectedId(item.id)}
+                        onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
                       >
+                        {selectionMode && (
+                          <input
+                            type="checkbox"
+                            className="we-list-row__select"
+                            checked={selectedIds.has(item.id)}
+                            onClick={event => event.stopPropagation()}
+                            onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
+                            aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
+                            data-testid={`dlq-select-row-${item.id}`}
+                          />
+                        )}
                         <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
                         <div className="we-list-row__body">
                           <strong>{item.nodeId}</strong>
@@ -318,7 +446,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         )}
       </div>
 
-      {selected && (
+      {selected && !selectionMode && (
         <section className="detail-box">
           <div className="split-row">
             <div>
