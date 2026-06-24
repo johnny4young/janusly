@@ -9,12 +9,16 @@
  *   - `POST /workflows/folders/rename`  (editor, workflows.write) — bulk re-key folder=from → to
  *   - `POST /workflows/folders/delete`  (editor, workflows.write) — bulk move folder members to Ungrouped
  *   - `POST /workflows/folders/assign`  (editor, workflows.write) — bulk move listed workflows into a folder
+ *   - `POST /workflows/tags/assign`     (editor, workflows.write) — bulk add/remove one tag on listed workflows
+ *   - `POST /workflows/tags/rename`     (editor, workflows.write) — bulk re-key tag=from → to
+ *   - `POST /workflows/tags/delete`     (editor, workflows.write) — bulk remove a tag from every workflow
  *
- * The `folders/*` collection routes operate in bulk (no per-workflow URL id), so
- * they validate the body and enforce org scope in the repo rather than calling
- * `assertWorkflowBelongsToOrg`. Rename/delete scope by `workflow_metadata.org_id`;
- * assign first filters requested ids through the org's `workflows` rows, then
- * upserts metadata for that owned subset. All three audit with affected ids.
+ * The `folders/*` and `tags/*` collection routes operate in bulk (no
+ * per-workflow URL id), so they validate the body and enforce org scope in the
+ * repo rather than calling `assertWorkflowBelongsToOrg`. Folder/tag
+ * rename/delete scope by `workflow_metadata.org_id`; assign-style routes first
+ * filter requested ids through the org's `workflows` rows, then upsert metadata
+ * for that owned subset. All collection routes audit with affected ids.
  *
  * The GET returns `{ metadata: WorkflowMetadataRecord | null }` — a
  * missing row is a 200 with `metadata: null` (not a 404) so the
@@ -36,7 +40,7 @@
  *
  * Multi-tenant scope: per-workflow routes verify the workflow belongs to the
  * caller's org via the `workflows` table before touching metadata; collection
- * folder ops scope their bulk update by `workflow_metadata.org_id` in the repo.
+ * folder/tag ops scope their bulk updates by org in the repo.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -45,7 +49,9 @@ import {
   AssignTagToWorkflowsBodySchema,
   AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
+  DeleteWorkflowTagBodySchema,
   RenameWorkflowFolderBodySchema,
+  RenameWorkflowTagBodySchema,
   SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
 } from "@janusly/shared";
@@ -53,8 +59,10 @@ import {
   assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
+  deleteWorkflowTag,
   getWorkflowMetadata,
   renameWorkflowFolder,
+  renameWorkflowTag,
   setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "@janusly/data";
@@ -121,6 +129,16 @@ function matchTagAssignPath(url: string): boolean {
   return (url.split("?")[0] ?? "") === "/workflows/tags/assign";
 }
 
+/** Match `/workflows/tags/rename` — the org-wide tag-rename collection route. */
+function matchTagRenamePath(url: string): boolean {
+  return (url.split("?")[0] ?? "") === "/workflows/tags/rename";
+}
+
+/** Match `/workflows/tags/delete` — the org-wide tag-delete collection route. */
+function matchTagDeletePath(url: string): boolean {
+  return (url.split("?")[0] ?? "") === "/workflows/tags/delete";
+}
+
 async function assertWorkflowBelongsToOrg(
   orgId: string,
   workflowId: string,
@@ -134,7 +152,7 @@ async function assertWorkflowBelongsToOrg(
 }
 
 export const workflowMetadataRoutes: Route[] = [
-  // Folder-collection ops (exact matchers, placed first so they can't be
+  // Folder/tag collection ops (exact matchers, placed first so they can't be
   // confused with the per-workflow `/:id/folder` | `/:id/metadata` matchers,
   // which require a 2-segment `<id>/folder` shape). Org-scoped in the repo.
   {
@@ -286,6 +304,76 @@ export const workflowMetadataRoutes: Route[] = [
       });
 
       return sendJson(res, { tag, op, count: workflowIds.length, workflowIds });
+    },
+  },
+  {
+    method: "POST",
+    match: matchTagRenamePath,
+    role: "editor",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = RenameWorkflowTagBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(
+          res,
+          {
+            error: "invalid tag rename body",
+            code: "workflow_metadata_invalid",
+            issues: parsed.error.issues.map((iss) => ({
+              path: iss.path.join("."),
+              message: iss.message,
+            })),
+          },
+          422,
+        );
+      }
+
+      const { from, to } = parsed.data;
+      const { workflowIds } = await renameWorkflowTag({ orgId: auth.orgId, from, to });
+
+      await auditAction(auth, "workflow.tag.renamed", {
+        targetType: "tag",
+        targetId: from,
+        metadata: { from, to, count: workflowIds.length, workflowIds },
+      });
+
+      return sendJson(res, { from, to, count: workflowIds.length, workflowIds });
+    },
+  },
+  {
+    method: "POST",
+    match: matchTagDeletePath,
+    role: "editor",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = DeleteWorkflowTagBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(
+          res,
+          {
+            error: "invalid tag delete body",
+            code: "workflow_metadata_invalid",
+            issues: parsed.error.issues.map((iss) => ({
+              path: iss.path.join("."),
+              message: iss.message,
+            })),
+          },
+          422,
+        );
+      }
+
+      const { tag } = parsed.data;
+      const { workflowIds } = await deleteWorkflowTag({ orgId: auth.orgId, tag });
+
+      await auditAction(auth, "workflow.tag.deleted", {
+        targetType: "tag",
+        targetId: tag,
+        metadata: { tag, count: workflowIds.length, workflowIds },
+      });
+
+      return sendJson(res, { tag, count: workflowIds.length, workflowIds });
     },
   },
   {

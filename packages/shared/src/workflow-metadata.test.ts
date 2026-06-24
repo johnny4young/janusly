@@ -4,7 +4,9 @@ import {
   AssignTagToWorkflowsBodySchema,
   AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
+  DeleteWorkflowTagBodySchema,
   RenameWorkflowFolderBodySchema,
+  RenameWorkflowTagBodySchema,
   SetWorkflowFolderBodySchema,
   UpsertWorkflowMetadataBodySchema,
   WORKFLOW_BULK_ASSIGN_MAX,
@@ -264,5 +266,39 @@ describe('AssignTagToWorkflowsBodySchema', () => {
 
   it('rejects unknown extra keys (strict)', () => {
     expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: 'urgent', op: 'add', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('RenameWorkflowTagBodySchema', () => {
+  it('accepts from + to tag names', () => {
+    expect(RenameWorkflowTagBodySchema.safeParse({ from: 'billing', to: 'finance' }).success).toBe(true)
+  })
+
+  it('rejects an empty from or to', () => {
+    expect(RenameWorkflowTagBodySchema.safeParse({ from: '', to: 'finance' }).success).toBe(false)
+    expect(RenameWorkflowTagBodySchema.safeParse({ from: 'billing', to: '' }).success).toBe(false)
+  })
+
+  it('rejects a tag over the per-tag length cap', () => {
+    expect(RenameWorkflowTagBodySchema.safeParse({ from: 'billing', to: 'x'.repeat(41) }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(RenameWorkflowTagBodySchema.safeParse({ from: 'a', to: 'b', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('DeleteWorkflowTagBodySchema', () => {
+  it('accepts a tag name', () => {
+    expect(DeleteWorkflowTagBodySchema.safeParse({ tag: 'billing' }).success).toBe(true)
+  })
+
+  it('rejects an empty tag or one over the cap', () => {
+    expect(DeleteWorkflowTagBodySchema.safeParse({ tag: '' }).success).toBe(false)
+    expect(DeleteWorkflowTagBodySchema.safeParse({ tag: 'x'.repeat(41) }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(DeleteWorkflowTagBodySchema.safeParse({ tag: 'billing', extra: 1 }).success).toBe(false)
   })
 })

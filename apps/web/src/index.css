@@ -9220,6 +9220,25 @@ button.we-ops-metric-card--button {
   padding: 2px 6px;
 }
 
+/* Rename / delete controls for the active tag filter (toolbar). */
+.we-list-tag-manage {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.we-list-tag-manage__input {
+  flex: 0 1 160px;
+  font-size: 12px;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
+.we-list-tag-manage__confirm {
+  color: var(--we-muted);
+  font-size: 12px;
+}
+
 .we-list-folder__confirm-text {
   color: var(--we-muted);
   flex: 1 1 auto;
