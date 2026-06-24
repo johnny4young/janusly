@@ -93,18 +93,18 @@ describe('<WorkflowsDashboard />', () => {
     expect(within(row2).getByText('onboarding')).toBeInTheDocument()
   })
 
-  it('populates the tag dropdown from GET /workflows/tags ("All tags" + one option per org tag)', async () => {
+  it('populates the add-tag picker from GET /workflows/tags (placeholder + one option per org tag)', async () => {
     mockApi((url) => {
       if (url === '/workflows/tags') return { tags: ['billing', 'onboarding'] }
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    const select = (await screen.findByTestId('workflows-tag-filter')) as HTMLSelectElement
+    const select = (await screen.findByTestId('workflows-tag-filter-add')) as HTMLSelectElement
     const values = Array.from(select.options).map((o) => o.value)
     expect(values).toEqual(['', 'billing', 'onboarding'])
   })
 
-  it('threads ?tag= into the list fetch when a tag is selected', async () => {
+  it('threads ?tag= into the list fetch when a tag is added to the filter', async () => {
     const calls: string[] = []
     mockApi((url) => {
       calls.push(url)
@@ -114,8 +114,50 @@ describe('<WorkflowsDashboard />', () => {
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
-    fireEvent.change(screen.getByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     await waitFor(() => expect(calls).toContain('/workflows?tag=billing'))
+  })
+
+  it('ANDs several tags into the list fetch as repeated ?tag= params', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
+    await waitFor(() => expect(calls.some((u) => u.startsWith('/workflows?tag=billing'))).toBe(true))
+    // The picker now only offers the still-unselected 'urgent'.
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'urgent' } })
+    await waitFor(() =>
+      expect(calls.some((u) => u.includes('tag=billing') && u.includes('tag=urgent'))).toBe(true),
+    )
+    // Both selected tags render as removable chips.
+    expect(screen.getByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument()
+    expect(screen.getByTestId('workflows-tag-filter-remove-urgent')).toBeInTheDocument()
+  })
+
+  it('removing a chip widens the filter (drops that tag param)', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'urgent' } })
+    await screen.findByTestId('workflows-tag-filter-remove-urgent')
+    fireEvent.click(screen.getByTestId('workflows-tag-filter-remove-urgent'))
+    await waitFor(() =>
+      expect(screen.queryByTestId('workflows-tag-filter-remove-urgent')).not.toBeInTheDocument(),
+    )
+    // 'billing' remains filtered; the single-tag-only ?tag=billing fetch is re-issued.
+    expect(screen.getByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((u) => u.startsWith('/workflows?tag=billing'))).toBe(true))
   })
 
   it('keeps the client-side name search narrowing the fetched list', async () => {
@@ -131,7 +173,7 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.getByText('Billing sync')).toBeInTheDocument()
   })
 
-  it('restores persisted tag + search from localStorage on mount', async () => {
+  it('migrates a persisted legacy scalar tag into a filter chip on mount', async () => {
     window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'billing', query: 'bill', sort: 'name' }))
     mockApi((url) => {
       if (url === '/workflows/tags') return { tags: ['billing'] }
@@ -139,13 +181,24 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    const select = (await screen.findByTestId('workflows-tag-filter')) as HTMLSelectElement
-    expect(select.value).toBe('billing')
+    // Legacy `{ tag: 'billing' }` (written before multi-tag) restores as one chip.
+    expect(await screen.findByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument()
     expect((screen.getByTestId('workflows-search') as HTMLInputElement).value).toBe('bill')
   })
 
-  it('reconciles a persisted tag the org no longer offers (clears it + refetches unfiltered)', async () => {
-    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'ghost', query: '', sort: 'recent' }))
+  it('restores a persisted multi-tag array as chips on mount', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tags: ['billing', 'urgent'], query: '', sort: 'recent' }))
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    expect(await screen.findByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument()
+    expect(screen.getByTestId('workflows-tag-filter-remove-urgent')).toBeInTheDocument()
+  })
+
+  it('reconciles a persisted tag the org no longer offers (drops the chip + refetches unfiltered)', async () => {
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tags: ['ghost'], query: '', sort: 'recent' }))
     const calls: string[] = []
     mockApi((url) => {
       calls.push(url)
@@ -154,25 +207,27 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    // The stale tag is dropped once the (ghost-less) options load → select clears…
-    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe(''))
+    // The stale tag is dropped once the (ghost-less) options load → chip disappears…
+    await waitFor(() =>
+      expect(screen.queryByTestId('workflows-tag-filter-remove-ghost')).not.toBeInTheDocument(),
+    )
     // …and the list refetches unfiltered.
     await waitFor(() => expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument())
     expect(calls).toContain('/workflows')
   })
 
-  it('persists the selected tag to localStorage', async () => {
+  it('persists the selected tags to localStorage', async () => {
     mockApi((url) => {
       if (url === '/workflows/tags') return { tags: ['billing'] }
       if (url.startsWith('/workflows?tag=billing')) return [FLOWS[0]]
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    await screen.findByTestId('workflows-tag-filter')
-    fireEvent.change(screen.getByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    await screen.findByTestId('workflows-tag-filter-add')
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     await waitFor(() => {
       const raw = window.localStorage.getItem(FILTERS_KEY)
-      expect(raw && JSON.parse(raw).tag).toBe('billing')
+      expect(raw && JSON.parse(raw).tags).toEqual(['billing'])
     })
   })
 
@@ -690,7 +745,7 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
     fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'finance' } })
     fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
@@ -709,13 +764,13 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
     fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'finance' } })
     fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
 
     await waitFor(() => expect(calls.some((c) => c.url === '/workflows/tags/rename')).toBe(true))
-    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe('billing'))
+    await waitFor(() => expect(screen.getByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument())
     expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
     expect(within(screen.getByTestId('workflows-row-wf1')).queryByText('finance')).not.toBeInTheDocument()
   })
@@ -729,7 +784,7 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
     fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'billing' } })
     fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
@@ -746,7 +801,7 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     fireEvent.click(await screen.findByTestId('workflows-tag-delete'))
     fireEvent.click(await screen.findByTestId('workflows-tag-delete-confirm'))
     await waitFor(() => {
@@ -764,12 +819,12 @@ describe('<WorkflowsDashboard />', () => {
       return FLOWS
     })
     render(<WorkflowsDashboard onOpen={() => {}} />)
-    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
     fireEvent.click(await screen.findByTestId('workflows-tag-delete'))
     fireEvent.click(await screen.findByTestId('workflows-tag-delete-confirm'))
 
     await waitFor(() => expect(calls.some((c) => c.url === '/workflows/tags/delete')).toBe(true))
-    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe('billing'))
+    await waitFor(() => expect(screen.getByTestId('workflows-tag-filter-remove-billing')).toBeInTheDocument())
     expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
   })
 

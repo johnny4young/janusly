@@ -21,13 +21,13 @@ const KEY = 'janusly:flowsFilters'
 export const SORT_KEYS = ['recent', 'name', 'failed'] as const
 export type SortKey = (typeof SORT_KEYS)[number]
 
-/** The persisted Flows-list view: the selected tag (`''` = all), the selected
- *  folder (`''` = all), the name-search query, the sort, and the set of
- *  collapsed folder sections (folder names; the empty string `''` is the
- *  sentinel for the "Ungrouped" section, which a real folder name — min length
- *  1 — can never collide with). */
+/** The persisted Flows-list view: the selected tags (`[]` = all; multiple AND
+ *  together), the selected folder (`''` = all), the name-search query, the sort,
+ *  and the set of collapsed folder sections (folder names; the empty string `''`
+ *  is the sentinel for the "Ungrouped" section, which a real folder name — min
+ *  length 1 — can never collide with). */
 export type FlowsFilters = {
-  tag: string
+  tags: string[]
   folder: string
   query: string
   sort: SortKey
@@ -42,14 +42,15 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
 }
 
-/** True for an object carrying at least the `{ tag, query, sort }` triple —
- *  rejects a corrupt / outdated / partial localStorage value. `collapsedFolders`
- *  is read leniently in `readFlowsFilters` so a pre-`collapsedFolders` stored
- *  value still restores the tag / query / sort. */
+/** True for an object carrying at least the `{ query, sort }` pair — rejects a
+ *  corrupt / outdated / partial localStorage value. `tags` / `folder` /
+ *  `collapsedFolders` are read leniently in `readFlowsFilters` so a value written
+ *  before any of them shipped (or with the legacy scalar `tag`) still restores
+ *  the query / sort. */
 function isFlowsFilters(value: unknown): value is FlowsFilters {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
-  return typeof v.tag === 'string' && typeof v.query === 'string' && isSortKey(v.sort)
+  return typeof v.query === 'string' && isSortKey(v.sort)
 }
 
 /** Read the saved Flows filters, or `null` when none / unavailable / corrupt.
@@ -70,14 +71,21 @@ export function readFlowsFilters(): FlowsFilters | null {
     // `folder` is read leniently (default '' when absent) so a value written
     // before the folder filter shipped still restores the rest of the view.
     const folder = typeof record.folder === 'string' ? record.folder : ''
-    return { tag: parsed.tag, folder, query: parsed.query, sort: parsed.sort, collapsedFolders }
+    // `tags` is read leniently WITH a migration from the legacy scalar `tag`
+    // (written before the multi-tag filter): a non-empty `tag` becomes `[tag]`.
+    const tags = isStringArray(record.tags)
+      ? (record.tags as string[])
+      : typeof record.tag === 'string' && record.tag.length > 0
+        ? [record.tag]
+        : []
+    return { tags, folder, query: parsed.query, sort: parsed.sort, collapsedFolders }
   } catch {
     return null
   }
 }
 
 /** Persist the Flows filters; failure is non-fatal (storage unavailable /
- *  private mode / quota). Only the closed `{ tag, folder, query, sort,
+ *  private mode / quota). Only the closed `{ tags, folder, query, sort,
  *  collapsedFolders }` shape is stored. */
 export function writeFlowsFilters(filters: FlowsFilters): void {
   if (typeof window === 'undefined' || !window.localStorage) return
@@ -85,7 +93,7 @@ export function writeFlowsFilters(filters: FlowsFilters): void {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
-        tag: filters.tag,
+        tags: filters.tags,
         folder: filters.folder,
         query: filters.query,
         sort: filters.sort,
