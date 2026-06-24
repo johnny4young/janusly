@@ -19,7 +19,7 @@
  *   never aggregated.
  */
 
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 
 import { db, runs, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
 
@@ -47,12 +47,16 @@ export type WorkflowListRow = {
  * `tags` is an AND set — a row must contain EVERY listed tag (one jsonb
  * containment over the whole array). `folder` is scalar equality. `search` is a
  * case-insensitive substring over the workflow name OR id (mirrors the web's
- * client-side filter) — a non-empty term narrows to matching rows.
+ * client-side filter) — a non-empty term narrows to matching rows. `before` is a
+ * keyset cursor — return only rows strictly OLDER than this `(createdAt, id)` in
+ * the list's `(createdAt DESC, id DESC)` order, so "Load more" pages forward
+ * without the offset drift of numeric paging.
  */
 export type WorkflowListFilters = {
   tags?: string[];
   folder?: string;
   search?: string;
+  before?: { createdAt: Date; id: string };
 };
 
 /**
@@ -101,6 +105,19 @@ export async function listWorkflowsWithRunSummary(
     const pattern = `%${escapeLikePattern(filters.search)}%`;
     conditions.push(or(ilike(workflows.name, pattern), ilike(workflows.id, pattern))!);
   }
+  if (filters.before) {
+    // Keyset cursor — rows strictly after `(createdAt, id)` in the
+    // `(createdAt DESC, id DESC)` order: older createdAt, or the same createdAt
+    // with a smaller id (the unique PK tiebreaker). Composes with the filters
+    // above via the shared `and(...conditions)`, so paging stays within the
+    // filtered set. Applied BEFORE the cap, so it pages past it.
+    conditions.push(
+      or(
+        lt(workflows.createdAt, filters.before.createdAt),
+        and(eq(workflows.createdAt, filters.before.createdAt), lt(workflows.id, filters.before.id)),
+      )!,
+    );
+  }
   const base = await db
     .select({
       id: workflows.id,
@@ -119,7 +136,11 @@ export async function listWorkflowsWithRunSummary(
       and(eq(workflowMetadata.orgId, orgId), eq(workflowMetadata.workflowId, workflows.id)),
     )
     .where(and(...conditions))
-    .orderBy(desc(workflows.createdAt))
+    // `id` (the unique PK) is the tiebreaker so the order is total — required for
+    // the `before` keyset to never skip or repeat a row across pages. The
+    // `(org_id, created_at DESC)` index still serves the range scan; equal-
+    // createdAt ties (rare) sort by id in memory.
+    .orderBy(desc(workflows.createdAt), desc(workflows.id))
     .limit(limit);
   if (base.length === 0) return [];
 

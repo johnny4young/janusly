@@ -568,6 +568,7 @@
   "workflowsDashboard.noTagMatches": "No flows have every selected tag: {{tags}}.",
   "workflowsDashboard.noMatches": "No flows match your search.",
   "workflowsDashboard.loading": "Loading…",
+  "workflowsDashboard.loadMore": "Load more",
   "workflowsDashboard.empty": "No flows saved yet",
   "workflowsDashboard.emptyHelper": "Build a flow on the canvas, validate it, then click Save.",
   "workflowsDashboard.openFlow": "Open flow",
