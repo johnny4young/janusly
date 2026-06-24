@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow, X } from 'lucide-react'
+import { CircleCheck, FilterX, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -220,6 +220,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // rename/delete manage affordance, which operates on one tag at a time.
   const soleTagFilter = tagFilters.length === 1 ? tagFilters[0] : undefined
 
+  // Whether ANY of the three stackable filters (search / tags / folder) is
+  // active — gates the "Clear filters" reset. Sort, collapsed sections, and
+  // selection mode are NOT filters and are intentionally excluded.
+  const hasActiveFilters = query.trim() !== '' || tagFilters.length > 0 || folderFilter !== ''
+
   // Group the already-filtered+sorted rows by folder. Named folders come first
   // (alphabetical, locale-aware); the "Ungrouped" bucket is always last. The
   // in-bucket order is preserved, so the global sort still applies within a
@@ -251,6 +256,18 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       if (!open && !collapsed) return [...prev, key]
       return prev
     })
+  }, [])
+
+  // Reset the three stackable filters (search / tags / folder) in one click.
+  // `debouncedQuery` is reset alongside `query` so the unfiltered refetch fires
+  // immediately instead of after the search debounce settles; the four setStates
+  // batch into a single `load` refetch. Sort / collapsed sections / selection
+  // mode are deliberately left untouched (they aren't filters).
+  const clearAllFilters = useCallback(() => {
+    setQuery('')
+    setDebouncedQuery('')
+    setTagFilters([])
+    setFolderFilter('')
   }, [])
 
   // Reassign a workflow's folder by dropping its row onto a folder section.
@@ -874,6 +891,20 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 <option key={folder} value={folder}>{folder}</option>
               ))}
             </select>
+          )}
+          {/* One-click reset of the active search / tag / folder filters. Only
+              shown when at least one is active; leaves sort + view state intact. */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              className="small-command"
+              onClick={clearAllFilters}
+              aria-label={t('workflowsDashboard.clearFilters') as string}
+              data-testid="workflows-clear-filters"
+            >
+              <FilterX size={12} aria-hidden="true" />
+              {t('workflowsDashboard.clearFilters')}
+            </button>
           )}
           <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria') as string}>
             <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>

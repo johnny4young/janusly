@@ -560,6 +560,7 @@
   "workflowsDashboard.removeTagFromFilterAria": "Quitar {{tag}} del filtro",
   "workflowsDashboard.folderFilterAria": "Filtrar flujos por carpeta",
   "workflowsDashboard.allFolders": "Todas las carpetas",
+  "workflowsDashboard.clearFilters": "Limpiar filtros",
   "workflowsDashboard.noFolderMatches": "Ningún flujo en la carpeta \"{{folder}}\".",
   "workflowsDashboard.ungroupedFolder": "Sin carpeta",
   "workflowsDashboard.folderCount_one": "{{count}} flujo",

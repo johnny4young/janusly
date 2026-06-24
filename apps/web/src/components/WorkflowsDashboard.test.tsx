@@ -222,6 +222,42 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.queryByTestId('workflows-empty')).not.toBeInTheDocument()
   })
 
+  it('clears all active filters (search + tag) in one click and refetches unfiltered', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    // Stack two filters: a tag chip + a search term.
+    fireEvent.change(screen.getByTestId('workflows-tag-filter-add'), { target: { value: 'billing' } })
+    await screen.findByTestId('workflows-tag-filter-remove-billing')
+    fireEvent.change(screen.getByTestId('workflows-search'), { target: { value: 'onboard' } })
+    const clearBtn = await screen.findByTestId('workflows-clear-filters')
+    calls.length = 0
+    fireEvent.click(clearBtn)
+    // The chip + search box reset…
+    await waitFor(() => expect(screen.queryByTestId('workflows-tag-filter-remove-billing')).not.toBeInTheDocument())
+    expect((screen.getByTestId('workflows-search') as HTMLInputElement).value).toBe('')
+    // …and the post-clear list fetch carries no filter params (unfiltered).
+    await waitFor(() => expect(calls.some((u) => u === '/workflows')).toBe(true))
+    expect(calls.every((u) => !u.includes('tag=') && !u.includes('q=') && !u.includes('folder='))).toBe(true)
+    // The button disappears once nothing is filtered.
+    await waitFor(() => expect(screen.queryByTestId('workflows-clear-filters')).not.toBeInTheDocument())
+  })
+
+  it('does not show the clear-filters button when no filter is active', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    expect(screen.queryByTestId('workflows-clear-filters')).not.toBeInTheDocument()
+  })
+
   it('migrates a persisted legacy scalar tag into a filter chip on mount', async () => {
     window.localStorage.setItem(FILTERS_KEY, JSON.stringify({ tag: 'billing', query: 'bill', sort: 'name' }))
     mockApi((url) => {
