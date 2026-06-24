@@ -27,6 +27,7 @@
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, workflowMetadata, workflows } from "@janusly/db";
 import type { WorkflowMetadata, WorkflowMetadataRecord } from "@janusly/shared";
+import { WORKFLOW_METADATA_TAGS_MAX } from "@janusly/shared";
 
 /** Upper bound on the distinct-tag dropdown so a pathological org can't return an unbounded list. */
 const WORKFLOW_TAGS_DROPDOWN_MAX = 500;
@@ -348,6 +349,100 @@ export async function assignWorkflowsToFolder(
       // Existing rows move ONLY folder + updatedAt — owners / tags / runbook /
       // Slack / Linear / severity are deliberately untouched.
       set: { folder: input.folder, updatedAt: now },
+    })
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
+}
+
+/**
+ * Input for {@link assignTagToWorkflows}. `op` picks the set operation on each
+ * workflow's tag array; `tag` is the single tag being added or removed.
+ */
+export type AssignTagToWorkflowsInput = {
+  orgId: string;
+  workflowIds: string[];
+  tag: string;
+  op: "add" | "remove";
+  actorUserId: string | null;
+};
+
+/**
+ * Add or remove ONE tag across many workflows. Tags are a multi-value jsonb
+ * array (unlike the scalar folder), so `add` is an atomic append-on-conflict
+ * guarded by "tag absent AND below the cap"; `remove` is an atomic org-scoped
+ * UPDATE that filters the current jsonb array. A no-op per workflow
+ * (already-present add / absent remove / add at the cap) is skipped — never
+ * counted. Cross-tenant safe: ids are first filtered to the org's own
+ * `workflows`, so a foreign id is silently dropped. Returns the workflowIds
+ * whose tags actually changed (for the API audit + response).
+ */
+export async function assignTagToWorkflows(
+  input: AssignTagToWorkflowsInput,
+): Promise<{ workflowIds: string[] }> {
+  if (input.workflowIds.length === 0) return { workflowIds: [] };
+
+  // Ownership gate: keep only ids that belong to this org's workflows.
+  const owned = await db
+    .select({ id: workflows.id })
+    .from(workflows)
+    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds)));
+  const validIds = owned.map((r) => r.id);
+  if (validIds.length === 0) return { workflowIds: [] };
+
+  const tagJson = JSON.stringify([input.tag]);
+  const now = new Date();
+
+  if (input.op === "remove") {
+    const rows = await db
+      .update(workflowMetadata)
+      .set({
+        tags: sql`coalesce((
+          select jsonb_agg(tag_value.value order by tag_value.ordinality)
+          from jsonb_array_elements_text(${workflowMetadata.tags}) with ordinality as tag_value(value, ordinality)
+          where tag_value.value <> ${input.tag}
+        ), '[]'::jsonb)`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(workflowMetadata.orgId, input.orgId),
+          inArray(workflowMetadata.workflowId, validIds),
+          sql`${workflowMetadata.tags} @> ${tagJson}::jsonb`,
+        ),
+      )
+      .returning({ workflowId: workflowMetadata.workflowId });
+    return { workflowIds: rows.map((r) => r.workflowId) };
+  }
+
+  const rows = await db
+    .insert(workflowMetadata)
+    .values(
+      validIds.map((workflowId) => ({
+        id: crypto.randomUUID(),
+        orgId: input.orgId,
+        workflowId,
+        owners: [],
+        runbookMarkdown: null,
+        description: null,
+        tags: [input.tag],
+        folder: null,
+        slackChannel: null,
+        linearProject: null,
+        severityDefault: null,
+        createdBy: input.actorUserId,
+        createdAt: now,
+        updatedAt: now,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [workflowMetadata.orgId, workflowMetadata.workflowId],
+      // Existing rows touch ONLY tags + updatedAt — owners / folder / runbook /
+      // Slack / Linear / severity stay intact. The conflict WHERE keeps this an
+      // atomic set-union: concurrent different tag adds append to the latest row
+      // instead of overwriting each other with a stale read snapshot.
+      set: { tags: sql`${workflowMetadata.tags} || ${tagJson}::jsonb`, updatedAt: now },
+      setWhere: sql`jsonb_array_length(${workflowMetadata.tags}) < ${WORKFLOW_METADATA_TAGS_MAX}
+        and not (${workflowMetadata.tags} @> ${tagJson}::jsonb)`,
     })
     .returning({ workflowId: workflowMetadata.workflowId });
   return { workflowIds: rows.map((r) => r.workflowId) };

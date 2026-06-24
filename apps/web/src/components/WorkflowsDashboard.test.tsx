@@ -636,6 +636,51 @@ describe('<WorkflowsDashboard />', () => {
     )
   })
 
+  it('bulk-adds a tag to the selected flows (POST op:add)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf2'))
+    fireEvent.change(screen.getByTestId('workflows-bulk-tag-input'), { target: { value: 'urgent' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-tag-add'))
+    await waitFor(() => {
+      const assign = calls.find((c) => c.url === '/workflows/tags/assign')
+      expect(assign?.body).toEqual({ workflowIds: ['wf1', 'wf2'], tag: 'urgent', op: 'add' })
+    })
+  })
+
+  it('bulk-removes a tag from the selected flows (POST op:remove)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls)
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Billing')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    fireEvent.change(screen.getByTestId('workflows-bulk-tag-input'), { target: { value: 'billing' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-tag-remove'))
+    await waitFor(() => {
+      const assign = calls.find((c) => c.url === '/workflows/tags/assign')
+      expect(assign?.body).toEqual({ workflowIds: ['wf1'], tag: 'billing', op: 'remove' })
+    })
+  })
+
+  it('rolls the optimistic tag change back when the tag POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    mockListWithFolderPost(FOLDERED, calls, 'reject')
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-folder-Onboarding')
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf3'))
+    fireEvent.change(screen.getByTestId('workflows-bulk-tag-input'), { target: { value: 'rollme' } })
+    fireEvent.click(screen.getByTestId('workflows-bulk-tag-add'))
+    await waitFor(() => expect(calls.some((c) => c.url === '/workflows/tags/assign')).toBe(true))
+    // The optimistic 'rollme' pill is removed once the failure rolls back.
+    await waitFor(() => expect(screen.queryByText('rollme')).not.toBeInTheDocument())
+  })
+
   it('Clear empties the selection (bulk bar disappears)', async () => {
     mockApi((url) => {
       if (url === '/workflows/folders') return { folders: [] }

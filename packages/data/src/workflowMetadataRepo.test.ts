@@ -68,7 +68,9 @@ vi.mock("@janusly/db", () => ({
   },
 }));
 
+import { WORKFLOW_METADATA_TAGS_MAX } from "@janusly/shared";
 import {
+  assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
   getWorkflowMetadata,
@@ -481,5 +483,105 @@ describe("assignWorkflowsToFolder", () => {
 
     const conflictArg = onConflictMock.mock.calls.at(-1)?.[0] as { set: Record<string, unknown> };
     expect(conflictArg.set.folder).toBeNull();
+  });
+});
+
+describe("assignTagToWorkflows", () => {
+  // The fn first runs the ownership gate. Add then uses one INSERT ... ON
+  // CONFLICT with a conflict WHERE that atomically skips already-present / at-cap
+  // rows; remove uses one org-scoped UPDATE whose WHERE returns only changed rows.
+  it("returns [] without touching the DB on empty input", async () => {
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: [], tag: "urgent", op: "add", actorUserId: "alice",
+    });
+    expect(workflowIds).toEqual([]);
+    expect(valuesMock).not.toHaveBeenCalled();
+  });
+
+  it("add inserts candidate [tag] rows and atomically unions ONLY tags + updatedAt on conflict", async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_1" }, { id: "wf_2" }]));
+    insertReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_1", "wf_2"], tag: "urgent", op: "add", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual(["wf_1"]);
+    const insertedRows = valuesMock.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(insertedRows).toHaveLength(2);
+    expect(insertedRows.map((row) => row.workflowId)).toEqual(["wf_1", "wf_2"]);
+    expect(insertedRows.every((row) => JSON.stringify(row.tags) === JSON.stringify(["urgent"]))).toBe(true);
+    const conflictArg = onConflictMock.mock.calls.at(-1)?.[0] as { set: Record<string, unknown>; setWhere?: unknown };
+    expect(Object.keys(conflictArg.set).sort()).toEqual(["tags", "updatedAt"]);
+    expect(conflictArg.setWhere).toBeDefined();
+  });
+
+  it("add creates a defaults row carrying [tag] for a workflow with no metadata row", async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_3" }]));
+    insertReturningMock.mockResolvedValueOnce([{ workflowId: "wf_3" }]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_3"], tag: "new", op: "add", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual(["wf_3"]);
+    const insertedRows = valuesMock.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(insertedRows[0]).toMatchObject({ workflowId: "wf_3", tags: ["new"], owners: [], folder: null });
+  });
+
+  it(`add delegates already-present / at-${WORKFLOW_METADATA_TAGS_MAX} cap no-ops to the conflict WHERE`, async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_1" }]));
+    insertReturningMock.mockResolvedValueOnce([]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_1"], tag: "overflow", op: "add", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual([]);
+    expect(valuesMock).toHaveBeenCalled();
+    const conflictArg = onConflictMock.mock.calls.at(-1)?.[0] as { setWhere?: unknown };
+    expect(conflictArg.setWhere).toBeDefined();
+  });
+
+  it("remove filters the tag with a narrow org-scoped UPDATE", async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_1" }]));
+    updateReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_1"], tag: "urgent", op: "remove", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual(["wf_1"]);
+    expect(valuesMock).not.toHaveBeenCalled();
+    const updateCall = updateSetMock.mock.calls.at(-1) as unknown as [Record<string, unknown>] | undefined;
+    const updateArg = updateCall?.[0] ?? {};
+    expect(Object.keys(updateArg).sort()).toEqual(["tags", "updatedAt"]);
+    expect(updateWhereMock).toHaveBeenCalled();
+  });
+
+  it("remove of an absent tag returns [] when the UPDATE changes no rows", async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_1" }]));
+    updateReturningMock.mockResolvedValueOnce([]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_1"], tag: "ghost", op: "remove", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual([]);
+    expect(valuesMock).not.toHaveBeenCalled();
+    expect(updateReturningMock).toHaveBeenCalled();
+  });
+
+  it("drops cross-org ids (only the ownership-validated subset is considered)", async () => {
+    ownedRowsMock.mockReturnValueOnce(Promise.resolve([{ id: "wf_1" }]));
+    insertReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }]);
+
+    const { workflowIds } = await assignTagToWorkflows({
+      orgId: "default", workflowIds: ["wf_1", "wf_other_org"], tag: "x", op: "add", actorUserId: "alice",
+    });
+
+    expect(workflowIds).toEqual(["wf_1"]);
+    const insertedRows = valuesMock.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+    expect(insertedRows).toHaveLength(1);
   });
 });

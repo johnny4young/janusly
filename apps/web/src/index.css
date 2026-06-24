@@ -9355,6 +9355,14 @@ button.we-ops-metric-card--button {
   font-weight: 600;
 }
 
+/* Vertical rule separating the folder group from the tag group in the bulk bar. */
+.we-list-bulk-bar__divider {
+  align-self: stretch;
+  border-left: 1px solid var(--we-line);
+  margin: 0 2px;
+  width: 0;
+}
+
 .we-list-bulk-bar__input {
   flex: 1 1 160px;
   font-size: 12px;

@@ -28,6 +28,7 @@ vi.mock("@janusly/data/src/workflowMetadataRepo", () => ({
   renameWorkflowFolder: vi.fn(),
   deleteWorkflowFolder: vi.fn(),
   assignWorkflowsToFolder: vi.fn(),
+  assignTagToWorkflows: vi.fn(),
   listWorkflowMetadataForOrg: vi.fn(),
 }));
 
@@ -50,6 +51,7 @@ vi.mock("../audit", () => ({
 import { workflowMetadataRoutes } from "./workflow-metadata-routes";
 import { readJson, sendJson } from "../http";
 import {
+  assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
   getWorkflowMetadata,
@@ -68,6 +70,7 @@ const setFolderMock = vi.mocked(setWorkflowFolder);
 const renameFolderMock = vi.mocked(renameWorkflowFolder);
 const deleteFolderMock = vi.mocked(deleteWorkflowFolder);
 const assignFolderMock = vi.mocked(assignWorkflowsToFolder);
+const assignTagMock = vi.mocked(assignTagToWorkflows);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -440,6 +443,58 @@ describe("POST /workflows/folders/assign", () => {
   });
 });
 
+describe("POST /workflows/tags/assign", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/tags/assign");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 422 on an invalid op", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: ["wf-1"], tag: "urgent", op: "toggle" });
+    await callRoute("POST", "/workflows/tags/assign");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(assignTagMock).not.toHaveBeenCalled();
+  });
+
+  it("adds + audits workflow.tags.bulk_assigned with the tag, op, and affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"], tag: "urgent", op: "add" });
+    assignTagMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"] });
+    await callRoute("POST", "/workflows/tags/assign");
+    expect(assignTagMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      workflowIds: ["wf-1", "wf-2"],
+      tag: "urgent",
+      op: "add",
+      actorUserId: "user-1",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.tags.bulk_assigned",
+      "tag",
+      "urgent",
+      expect.objectContaining({ tag: "urgent", op: "add", count: 2, workflowIds: ["wf-1", "wf-2"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ tag: "urgent", op: "add", count: 2 });
+  });
+
+  it("supports op: remove", async () => {
+    readJsonMock.mockResolvedValueOnce({ workflowIds: ["wf-1"], tag: "urgent", op: "remove" });
+    assignTagMock.mockResolvedValueOnce({ workflowIds: ["wf-1"] });
+    await callRoute("POST", "/workflows/tags/assign");
+    expect(assignTagMock).toHaveBeenCalledWith(expect.objectContaining({ op: "remove" }));
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.tags.bulk_assigned",
+      "tag",
+      "urgent",
+      expect.objectContaining({ op: "remove", count: 1 }),
+    );
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -489,5 +544,21 @@ describe("route matcher", () => {
     const folderRoute = findRoute("POST", "/workflows/wf-1/folder");
     const folderMatch = typeof folderRoute.match === "string" ? () => true : folderRoute.match;
     expect(folderMatch("/workflows/folders/assign")).toBe(false);
+  });
+
+  it("matches /workflows/tags/assign exactly (and no per-id matcher swallows it)", () => {
+    const tagAssign = findRoute("POST", "/workflows/tags/assign");
+    const tagMatch = typeof tagAssign.match === "string" ? () => true : tagAssign.match;
+    expect(tagMatch("/workflows/tags/assign")).toBe(true);
+    expect(tagMatch("/workflows/tags/assign?x=1")).toBe(true);
+    expect(tagMatch("/workflows/folders/assign")).toBe(false);
+    expect(tagMatch("/workflows/wf-1/folder")).toBe(false);
+    // The per-id folder + metadata matchers must not swallow the tag collection route.
+    const folderRoute = findRoute("POST", "/workflows/wf-1/folder");
+    const folderMatch = typeof folderRoute.match === "string" ? () => true : folderRoute.match;
+    expect(folderMatch("/workflows/tags/assign")).toBe(false);
+    const metaRoute = findRoute("GET", "/workflows/wf-1/metadata");
+    const metaMatch = typeof metaRoute.match === "string" ? () => true : metaRoute.match;
+    expect(metaMatch("/workflows/tags/assign")).toBe(false);
   });
 });

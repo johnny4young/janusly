@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  AssignTagToWorkflowsBodySchema,
   AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
   RenameWorkflowFolderBodySchema,
@@ -10,6 +11,7 @@ import {
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
   WORKFLOW_METADATA_OWNERS_MAX,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
+  WORKFLOW_METADATA_TAG_MAX_LENGTH,
   WORKFLOW_METADATA_TAGS_MAX,
   WorkflowMetadataSchema,
 } from './workflow-metadata'
@@ -232,5 +234,35 @@ describe('AssignWorkflowsToFolderBodySchema', () => {
 
   it('rejects unknown extra keys (strict)', () => {
     expect(AssignWorkflowsToFolderBodySchema.safeParse({ workflowIds: ['wf1'], folder: 'Billing', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('AssignTagToWorkflowsBodySchema', () => {
+  it('accepts workflowIds + a tag + op add/remove', () => {
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1', 'wf2'], tag: 'urgent', op: 'add' }).success).toBe(true)
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: 'urgent', op: 'remove' }).success).toBe(true)
+  })
+
+  it('rejects an op other than add/remove', () => {
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: 'urgent', op: 'toggle' }).success).toBe(false)
+  })
+
+  it('requires at least one workflowId', () => {
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: [], tag: 'urgent', op: 'add' }).success).toBe(false)
+  })
+
+  it(`rejects more than ${WORKFLOW_BULK_ASSIGN_MAX} workflowIds`, () => {
+    const ids = Array.from({ length: WORKFLOW_BULK_ASSIGN_MAX + 1 }, (_, i) => `wf${i}`)
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ids, tag: 'urgent', op: 'add' }).success).toBe(false)
+  })
+
+  it('rejects an empty tag or one over the per-tag length cap', () => {
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: '', op: 'add' }).success).toBe(false)
+    const longTag = 'x'.repeat(WORKFLOW_METADATA_TAG_MAX_LENGTH + 1)
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: longTag, op: 'add' }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict)', () => {
+    expect(AssignTagToWorkflowsBodySchema.safeParse({ workflowIds: ['wf1'], tag: 'urgent', op: 'add', extra: 1 }).success).toBe(false)
   })
 })
