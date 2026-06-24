@@ -40,12 +40,24 @@ vi.mock("../dlq", async (importOriginal) => {
     listRecoveryQueue: vi.fn(),
     queryRecoveryQueuePage: vi.fn(),
     countDeadLettersByStatus: vi.fn(),
+    // Bulk-resolve writers (the loop touches these per entry).
+    getDeadLetter: vi.fn(),
+    markDeadLetterResolved: vi.fn(),
   };
 });
 
+// Bulk-resolve also audits per entry + auto-closes the linked recovery item.
+vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
+vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
+  autoResolveRecoveryItemFromReplay: vi.fn(),
+  createRecoveryItemForDeadLetter: vi.fn(),
+}));
+
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
-import { countDeadLettersByStatus, encodeRecoveryQueueCursor, listRecoveryQueue, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { auditAction } from "../audit-helper";
+import { autoResolveRecoveryItemFromReplay } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
@@ -55,6 +67,10 @@ const requireRoleMock = vi.mocked(requireRole);
 const listRecoveryQueueMock = vi.mocked(listRecoveryQueue);
 const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
 const countDeadLettersByStatusMock = vi.mocked(countDeadLettersByStatus);
+const getDeadLetterMock = vi.mocked(getDeadLetter);
+const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
+const auditActionMock = vi.mocked(auditAction);
+const autoResolveMock = vi.mocked(autoResolveRecoveryItemFromReplay);
 
 /** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
 function cursorFor(sort: "newest" | "oldest" | "severity" | "sla", id: string, severity = "p1"): string {
@@ -354,6 +370,106 @@ describe("GET /dlq/counts (org-wide mini-grid)", () => {
       // The summary is its own query — the list + page paths are untouched.
       expect(listRecoveryQueueMock).not.toHaveBeenCalled();
       expect(queryRecoveryQueuePageMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/bulk-resolve", () => {
+  it("declares role editor on the registry entry", () => {
+    expect(findRoute("POST", "/dlq/bulk-resolve").role).toBe("editor");
+  });
+
+  it("resolves every listed open entry + audits each as a bulk dlq.resolved", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never));
+    markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: ["dl-1", "dl-2"] }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ resolved: 2, failed: 0, errors: [] });
+      // Each id is org-scoped, marked resolved, audited (bulk flag), auto-closed.
+      expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-1");
+      expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-2");
+      expect(auditActionMock).toHaveBeenCalledTimes(2);
+      expect(auditActionMock).toHaveBeenCalledWith(expect.anything(), "dlq.resolved", expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: { bulk: true } }));
+      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", resolutionReason: "accepted_loss", via: "dlq_resolve" }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("reports a not-found / cross-org id in errors without aborting the batch (partial success)", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    // dl-1 exists in the org; ghost is not found (cross-org / bogus → null).
+    getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never) : (null as never)));
+    markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: ["dl-1", "ghost"] }),
+      });
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { resolved: number; failed: number; errors: Array<{ deadLetterId: string }> };
+      expect(payload.resolved).toBe(1);
+      expect(payload.failed).toBe(1);
+      expect(payload.errors[0]?.deadLetterId).toBe("ghost");
+      // The unresolvable id never reaches the writer.
+      expect(markDeadLetterResolvedMock).toHaveBeenCalledTimes(1);
+      expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-1");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an empty or missing deadLetterIds array with 400", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: [] }),
+      });
+      expect(response.status).toBe(400);
+      expect(getDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an over-cap batch with 400", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const tooMany = Array.from({ length: 101 }, (_, i) => `dl-${i}`);
+      const response = await fetch(`${baseUrl}/dlq/bulk-resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: tooMany }),
+      });
+      expect(response.status).toBe(400);
+      expect(markDeadLetterResolvedMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
