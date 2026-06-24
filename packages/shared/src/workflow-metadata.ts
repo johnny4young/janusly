@@ -41,6 +41,10 @@ export const WORKFLOW_METADATA_OWNERS_MAX = 10
 /** Maximum operator-supplied tags per workflow. */
 export const WORKFLOW_METADATA_TAGS_MAX = 10
 
+/** Maximum length of a single tag. Shared by the metadata schema and the bulk
+ *  tag-assign body so the two bounds can't drift. */
+export const WORKFLOW_METADATA_TAG_MAX_LENGTH = 40
+
 /**
  * Maximum length of a workflow's folder name. A folder is the single
  * organizing home a workflow appears under in the Flows list (one folder
@@ -92,7 +96,7 @@ export const WorkflowMetadataSchema = z
       .nullable()
       .optional(),
     description: z.string().max(2000).nullable().optional(),
-    tags: z.array(z.string().min(1).max(40)).max(WORKFLOW_METADATA_TAGS_MAX).default([]),
+    tags: z.array(z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH)).max(WORKFLOW_METADATA_TAGS_MAX).default([]),
     folder: z.string().min(1).max(WORKFLOW_METADATA_FOLDER_MAX_LENGTH).nullable().optional(),
     slackChannel: SlackChannelSchema.nullable().optional(),
     linearProject: LinearProjectSchema.nullable().optional(),
@@ -177,6 +181,25 @@ export const AssignWorkflowsToFolderBodySchema = z
   .strict()
 
 export type AssignWorkflowsToFolderBody = z.infer<typeof AssignWorkflowsToFolderBodySchema>
+
+/**
+ * Body of the bulk tag-assign collection route (`POST /workflows/tags/assign`).
+ * Adds or removes ONE `tag` across every listed workflow in a single write.
+ * Unlike folder (a scalar, one per workflow), tags are a multi-value set, so
+ * `op` picks the set operation: `'add'` unions the tag in (dedup, capped at
+ * `WORKFLOW_METADATA_TAGS_MAX`), `'remove'` filters it out. A no-op per workflow
+ * (already-present add / absent remove) is silently skipped server-side.
+ * `workflowIds` are validated against the caller's org server-side.
+ */
+export const AssignTagToWorkflowsBodySchema = z
+  .object({
+    workflowIds: z.array(z.string().min(1)).min(1).max(WORKFLOW_BULK_ASSIGN_MAX),
+    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
+    op: z.enum(['add', 'remove']),
+  })
+  .strict()
+
+export type AssignTagToWorkflowsBody = z.infer<typeof AssignTagToWorkflowsBodySchema>
 
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {

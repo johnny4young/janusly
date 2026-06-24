@@ -42,6 +42,7 @@
 import { and, eq } from "drizzle-orm";
 import { db, workflows } from "@janusly/db";
 import {
+  AssignTagToWorkflowsBodySchema,
   AssignWorkflowsToFolderBodySchema,
   DeleteWorkflowFolderBodySchema,
   RenameWorkflowFolderBodySchema,
@@ -49,6 +50,7 @@ import {
   UpsertWorkflowMetadataBodySchema,
 } from "@janusly/shared";
 import {
+  assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
   getWorkflowMetadata,
@@ -112,6 +114,11 @@ function matchFolderDeletePath(url: string): boolean {
 /** Match `/workflows/folders/assign` — the bulk folder-assign collection route. */
 function matchFolderAssignPath(url: string): boolean {
   return (url.split("?")[0] ?? "") === "/workflows/folders/assign";
+}
+
+/** Match `/workflows/tags/assign` — the bulk tag-assign collection route. */
+function matchTagAssignPath(url: string): boolean {
+  return (url.split("?")[0] ?? "") === "/workflows/tags/assign";
 }
 
 async function assertWorkflowBelongsToOrg(
@@ -238,6 +245,47 @@ export const workflowMetadataRoutes: Route[] = [
       });
 
       return sendJson(res, { folder, count: workflowIds.length, workflowIds });
+    },
+  },
+  {
+    method: "POST",
+    match: matchTagAssignPath,
+    role: "editor",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = AssignTagToWorkflowsBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(
+          res,
+          {
+            error: "invalid tag assign body",
+            code: "workflow_metadata_invalid",
+            issues: parsed.error.issues.map((iss) => ({
+              path: iss.path.join("."),
+              message: iss.message,
+            })),
+          },
+          422,
+        );
+      }
+
+      const { workflowIds: requestedIds, tag, op } = parsed.data;
+      const { workflowIds } = await assignTagToWorkflows({
+        orgId: auth.orgId,
+        workflowIds: requestedIds,
+        tag,
+        op,
+        actorUserId: auth.userId,
+      });
+
+      await auditAction(auth, "workflow.tags.bulk_assigned", {
+        targetType: "tag",
+        targetId: tag,
+        metadata: { tag, op, count: workflowIds.length, workflowIds },
+      });
+
+      return sendJson(res, { tag, op, count: workflowIds.length, workflowIds });
     },
   },
   {
