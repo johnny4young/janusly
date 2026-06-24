@@ -143,4 +143,22 @@ describe("listWorkflowsWithRunSummary", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe("A");
   });
+
+  it("exercises the `before` keyset branch (rows older than the cursor)", async () => {
+    baseRows = [
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null },
+    ];
+    aggRows = [];
+
+    // `{ before }` exercises the `or(lt(createdAt), and(eq(createdAt), lt(id)))`
+    // keyset predicate construction without throwing; the chain mock ignores the
+    // WHERE, so this asserts the branch + row fold (the real keyset paging — no
+    // overlap, no skip across pages — is smoke-verified against Postgres).
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, {
+      before: { createdAt: new Date("2026-02-01T00:00:00Z"), id: "wf-c" },
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("wf-b");
+  });
 });
