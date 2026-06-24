@@ -51,6 +51,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // Flows view survives navigation + reload; persisted by the effect below. A
   // missing / corrupt value degrades to the defaults via the helper.
   const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
+  // Debounced mirror of `query` that drives the SERVER-side search refetch. The
+  // instant client-side filter keys off `query` (no lag while typing); the
+  // server fetch waits for typing to settle so a beyond-cap name match
+  // back-fills without a request per keystroke. Initialized to the restored
+  // `query` so the first load already carries the persisted search term.
+  const [debouncedQuery, setDebouncedQuery] = useState(() => readFlowsFilters()?.query ?? '')
   const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
   // Server-side tag filter — multiple tags AND together (a row must carry ALL of
   // them). The picker lists ALL the org's tags + matches surface beyond the list
@@ -96,6 +102,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       // Repeated `?tag=` params — the server ANDs them.
       tagFilters.forEach(tag => params.append('tag', tag))
       if (folderFilter) params.set('folder', folderFilter)
+      // `?q=` name/id search (server-side, before the cap) — debounced so a
+      // beyond-cap match back-fills once typing settles.
+      const trimmedQuery = debouncedQuery.trim()
+      if (trimmedQuery) params.set('q', trimmedQuery)
       const qs = params.toString()
       const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
       setWorkflows(Array.isArray(data) ? data : [])
@@ -104,11 +114,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     } finally {
       setLoading(false)
     }
-  }, [addToast, t, tagFilters, folderFilter])
+  }, [addToast, t, tagFilters, folderFilter, debouncedQuery])
 
   useEffect(() => {
     void load()
   }, [load, platformVersion])
+
+  // Settle `query` into `debouncedQuery` ~300ms after the last keystroke so the
+  // server search fires once per pause, not per character. The cleanup cancels a
+  // pending settle on each change, so rapid typing coalesces to one refetch.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(query), 300)
+    return () => clearTimeout(id)
+  }, [query])
 
   // Persist the tag / folder / search / sort / collapsed-folders view
   // per-browser so it survives navigation + reload. The initial run re-writes
@@ -976,30 +994,31 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </div>
       )}
 
-      {workflows.length === 0 && !loading && folderFilter !== '' && (
-        <p className="helper-text" data-testid="workflows-no-folder-matches">
-          {t('workflowsDashboard.noFolderMatches', { folder: folderFilter })}
-        </p>
-      )}
-
-      {workflows.length === 0 && !loading && folderFilter === '' && tagFilters.length > 0 && (
-        <p className="helper-text" data-testid="workflows-no-tag-matches">
-          {t('workflowsDashboard.noTagMatches', { tags: tagFilters.join(', ') })}
-        </p>
-      )}
-
-      {workflows.length === 0 && !loading && folderFilter === '' && tagFilters.length === 0 && (
-        <div className="we-allclear" data-testid="workflows-empty">
-          <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
-          <div className="we-allclear__copy">
-            <strong>{t('workflowsDashboard.empty')}</strong>
-            <span>{t('workflowsDashboard.emptyHelper')}</span>
+      {/* Empty-state precedence — one chain over `visible.length === 0` (covers
+          both an empty server result and a client-narrowed page). The active
+          search wins the message (it's the most recent narrowing, and the
+          server `?q=` can itself yield 0 rows), then folder, then tag, then the
+          genuine all-clear (no flows, no filters). */}
+      {visible.length === 0 && !loading && (
+        query.trim() !== '' ? (
+          <p className="helper-text" data-testid="workflows-no-matches">{t('workflowsDashboard.noMatches')}</p>
+        ) : folderFilter !== '' ? (
+          <p className="helper-text" data-testid="workflows-no-folder-matches">
+            {t('workflowsDashboard.noFolderMatches', { folder: folderFilter })}
+          </p>
+        ) : tagFilters.length > 0 ? (
+          <p className="helper-text" data-testid="workflows-no-tag-matches">
+            {t('workflowsDashboard.noTagMatches', { tags: tagFilters.join(', ') })}
+          </p>
+        ) : (
+          <div className="we-allclear" data-testid="workflows-empty">
+            <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
+            <div className="we-allclear__copy">
+              <strong>{t('workflowsDashboard.empty')}</strong>
+              <span>{t('workflowsDashboard.emptyHelper')}</span>
+            </div>
           </div>
-        </div>
-      )}
-
-      {workflows.length > 0 && visible.length === 0 && (
-        <p className="helper-text" data-testid="workflows-no-matches">{t('workflowsDashboard.noMatches')}</p>
+        )
       )}
 
       {visible.length > 0 && !hasFolders && (
