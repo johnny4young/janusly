@@ -557,6 +557,61 @@ describe("POST /workflows/tags/delete", () => {
   });
 });
 
+describe("POST /workflows/:id/tags", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/wf-1/tags");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 404 when the workflow doesn't belong to the caller's org", async () => {
+    limitMock.mockResolvedValueOnce([]);
+    readJsonMock.mockResolvedValueOnce({ tag: "urgent", op: "add" });
+    await callRoute("POST", "/workflows/wf-1/tags");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(404);
+    expect(assignTagMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 on a bad op", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ tag: "urgent", op: "toggle" });
+    await callRoute("POST", "/workflows/wf-1/tags");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(assignTagMock).not.toHaveBeenCalled();
+  });
+
+  it("adds the tag via assignTagToWorkflows([id]) + audits workflow.tag.set", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ tag: "urgent", op: "add" });
+    assignTagMock.mockResolvedValueOnce({ workflowIds: ["wf-1"] });
+    await callRoute("POST", "/workflows/wf-1/tags");
+    expect(assignTagMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      workflowIds: ["wf-1"],
+      tag: "urgent",
+      op: "add",
+      actorUserId: "user-1",
+    });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.tag.set",
+      "workflow",
+      "wf-1",
+      expect.objectContaining({ workflowId: "wf-1", tag: "urgent", op: "add", changed: true }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", tag: "urgent", op: "add", changed: true });
+  });
+
+  it("reports changed:false when the op was a no-op (empty workflowIds)", async () => {
+    limitMock.mockResolvedValueOnce([{ id: "wf-1" }]);
+    readJsonMock.mockResolvedValueOnce({ tag: "urgent", op: "add" });
+    assignTagMock.mockResolvedValueOnce({ workflowIds: [] });
+    await callRoute("POST", "/workflows/wf-1/tags");
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ changed: false });
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -640,5 +695,23 @@ describe("route matcher", () => {
     const folderMatch = typeof folderRoute.match === "string" ? () => true : folderRoute.match;
     expect(folderMatch("/workflows/tags/rename")).toBe(false);
     expect(folderMatch("/workflows/tags/delete")).toBe(false);
+  });
+
+  it("matches /workflows/:id/tags exactly (distinct from /tags/* collection routes + /:id/folder)", () => {
+    const route = findRoute("POST", "/workflows/wf-1/tags");
+    const matcher = typeof route.match === "string" ? () => true : route.match;
+    expect(matcher("/workflows/wf-1/tags")).toBe(true);
+    expect(matcher("/workflows/wf-1/tags?x=1")).toBe(true);
+    expect(matcher("/workflows/wf-1/folder")).toBe(false);
+    expect(matcher("/workflows/wf-1/metadata")).toBe(false);
+    expect(matcher("/workflows/wf-1")).toBe(false);
+    // The per-id /:id/tags matcher must NOT swallow the tag collection routes.
+    expect(matcher("/workflows/tags/assign")).toBe(false);
+    expect(matcher("/workflows/tags/rename")).toBe(false);
+    expect(matcher("/workflows/tags/delete")).toBe(false);
+    // ...and the bulk tag-assign matcher must not swallow the per-id /:id/tags route.
+    const assign = findRoute("POST", "/workflows/tags/assign");
+    const assignMatch = typeof assign.match === "string" ? () => true : assign.match;
+    expect(assignMatch("/workflows/wf-1/tags")).toBe(false);
   });
 });

@@ -170,6 +170,7 @@ export type AuditAction =
   | "workflow.tags.bulk_assigned"
   | "workflow.tag.renamed"
   | "workflow.tag.deleted"
+  | "workflow.tag.set"
   | "workflow.saved"
   | "workflow.rolled_back"
   | "workflow.slo.set"
