@@ -8,6 +8,7 @@ import {
   RenameWorkflowFolderBodySchema,
   RenameWorkflowTagBodySchema,
   SetWorkflowFolderBodySchema,
+  SetWorkflowTagBodySchema,
   UpsertWorkflowMetadataBodySchema,
   WORKFLOW_BULK_ASSIGN_MAX,
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
@@ -300,5 +301,22 @@ describe('DeleteWorkflowTagBodySchema', () => {
 
   it('rejects unknown extra keys (strict)', () => {
     expect(DeleteWorkflowTagBodySchema.safeParse({ tag: 'billing', extra: 1 }).success).toBe(false)
+  })
+})
+
+describe('SetWorkflowTagBodySchema', () => {
+  it('accepts a tag + op add/remove (the per-row body)', () => {
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: 'urgent', op: 'add' }).success).toBe(true)
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: 'urgent', op: 'remove' }).success).toBe(true)
+  })
+
+  it('rejects a bad op, empty tag, or one over the cap', () => {
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: 'urgent', op: 'toggle' }).success).toBe(false)
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: '', op: 'add' }).success).toBe(false)
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: 'x'.repeat(41), op: 'add' }).success).toBe(false)
+  })
+
+  it('rejects unknown extra keys (strict) — workflowIds belongs in the URL, not the body', () => {
+    expect(SetWorkflowTagBodySchema.safeParse({ tag: 'urgent', op: 'add', workflowIds: ['wf1'] }).success).toBe(false)
   })
 })

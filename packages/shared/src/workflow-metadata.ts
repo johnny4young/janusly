@@ -230,6 +230,21 @@ export const DeleteWorkflowTagBodySchema = z
 
 export type DeleteWorkflowTagBody = z.infer<typeof DeleteWorkflowTagBodySchema>
 
+/**
+ * Body of the narrow per-row tag route (`POST /workflows/:id/tags`). Adds or
+ * removes ONE `tag` on the single workflow named in the URL — the inline
+ * equivalent of the bulk assign for one row. `op` picks the set operation;
+ * `add` is a dedup-safe union, `remove` filters the tag out.
+ */
+export const SetWorkflowTagBodySchema = z
+  .object({
+    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
+    op: z.enum(['add', 'remove']),
+  })
+  .strict()
+
+export type SetWorkflowTagBody = z.infer<typeof SetWorkflowTagBodySchema>
+
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {
   workflowId: string

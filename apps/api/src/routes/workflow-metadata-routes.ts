@@ -53,6 +53,7 @@ import {
   RenameWorkflowFolderBodySchema,
   RenameWorkflowTagBodySchema,
   SetWorkflowFolderBodySchema,
+  SetWorkflowTagBodySchema,
   UpsertWorkflowMetadataBodySchema,
 } from "@janusly/shared";
 import {
@@ -99,6 +100,16 @@ function matchFolderPath(url: string): boolean {
   return segments.length === 2 && segments[1] === "folder" && segments[0].length > 0;
 }
 
+/** Match `/workflows/<id>/tags` (the narrow per-row tag add/remove route). The
+ *  2-segment `<id>/tags` shape can't be confused with the `/workflows/tags/*`
+ *  collection routes (whose second segment is assign/rename/delete). */
+function matchTagsPath(url: string): boolean {
+  if (!url.startsWith("/workflows/")) return false;
+  const rest = url.slice("/workflows/".length).split("?")[0];
+  const segments = rest.split("/");
+  return segments.length === 2 && segments[1] === "tags" && segments[0].length > 0;
+}
+
 function workflowIdFromFolderUrl(url: string | undefined): string | null {
   if (!url) return null;
   const path = url.split("?")[0] ?? "";
@@ -106,6 +117,16 @@ function workflowIdFromFolderUrl(url: string | undefined): string | null {
   const rest = path.slice("/workflows/".length);
   const segments = rest.split("/");
   if (segments.length !== 2 || segments[1] !== "folder") return null;
+  return segments[0] || null;
+}
+
+function workflowIdFromTagsUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  const path = url.split("?")[0] ?? "";
+  if (!path.startsWith("/workflows/")) return null;
+  const rest = path.slice("/workflows/".length);
+  const segments = rest.split("/");
+  if (segments.length !== 2 || segments[1] !== "tags") return null;
   return segments[0] || null;
 }
 
@@ -483,6 +504,57 @@ export const workflowMetadataRoutes: Route[] = [
       } });
 
       return sendJson(res, { workflowId, metadata: record });
+    },
+  },
+  {
+    method: "POST",
+    match: matchTagsPath,
+    role: "editor",
+    permission: "workflows.write",
+    handler: async ({ req, res, auth }) => {
+      const workflowId = workflowIdFromTagsUrl(req.url);
+      if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
+
+      if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
+        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      }
+
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsed = SetWorkflowTagBodySchema.safeParse(body);
+      if (!parsed.success) {
+        return sendJson(
+          res,
+          {
+            error: "invalid workflow tag body",
+            code: "workflow_metadata_invalid",
+            issues: parsed.error.issues.map((iss) => ({
+              path: iss.path.join("."),
+              message: iss.message,
+            })),
+          },
+          422,
+        );
+      }
+
+      const { tag, op } = parsed.data;
+      // Reuse the bulk add/remove writer for the single id in the URL — its
+      // atomic jsonb SQL already dedups (add) / filters (remove) one row.
+      const { workflowIds } = await assignTagToWorkflows({
+        orgId: auth.orgId,
+        workflowIds: [workflowId],
+        tag,
+        op,
+        actorUserId: auth.userId,
+      });
+      const changed = workflowIds.length > 0;
+
+      await auditAction(auth, "workflow.tag.set", {
+        targetType: "workflow",
+        targetId: workflowId,
+        metadata: { workflowId, tag, op, changed },
+      });
+
+      return sendJson(res, { workflowId, tag, op, changed });
     },
   },
 ];

@@ -773,6 +773,57 @@ describe('<WorkflowsDashboard />', () => {
     expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
   })
 
+  it('adds a tag to a single row via the per-row "+ tag" picker (POST /workflows/:id/tags op:add)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent', 'finance'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    // wf1 already has billing + urgent, so 'finance' is the addable option.
+    fireEvent.change(screen.getByTestId('workflows-row-tag-add-wf1'), { target: { value: 'finance' } })
+    await waitFor(() => {
+      const post = calls.find((c) => c.url === '/workflows/wf1/tags')
+      expect(post?.body).toEqual({ tag: 'finance', op: 'add' })
+    })
+  })
+
+  it('removes a tag from a single row via the pill ✕ (POST /workflows/:id/tags op:remove)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-row-tag-remove-wf1-billing'))
+    await waitFor(() => {
+      const post = calls.find((c) => c.url === '/workflows/wf1/tags')
+      expect(post?.body).toEqual({ tag: 'billing', op: 'remove' })
+    })
+  })
+
+  it('rolls the per-row tag change back when the POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); throw new Error('row tag failed') }
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+    fireEvent.click(screen.getByTestId('workflows-row-tag-remove-wf1-billing'))
+    await waitFor(() => expect(calls.some((c) => c.url === '/workflows/wf1/tags')).toBe(true))
+    // The optimistic removal rolls back → the billing pill's ✕ button is back.
+    await waitFor(() => expect(screen.getByTestId('workflows-row-tag-remove-wf1-billing')).toBeInTheDocument())
+  })
+
   it('Clear empties the selection (bulk bar disappears)', async () => {
     mockApi((url) => {
       if (url === '/workflows/folders') return { folders: [] }
