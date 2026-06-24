@@ -48,7 +48,7 @@ import {
 import { computeWorkflowHealth, MIN_RUNS_FOR_DELTA } from "@janusly/engine/src/workflow-health";
 import { checkWorkflowReadiness, type ReadinessIssue, type ReadinessResult } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
-import { UpstreamHealthSourceTagsSchema, WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
+import { UpstreamHealthSourceTagsSchema, WORKFLOW_METADATA_TAGS_MAX, WorkflowSchema, WorkflowSloSchema } from "@janusly/shared";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { z } from "zod";
 
@@ -89,7 +89,7 @@ export const workflowsRoutes: Route[] = [
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
     } },
-  // The org's distinct workflow tags, for the Flows-list tag-filter dropdown.
+  // The org's distinct workflow tags, for the Flows-list tag-filter picker.
   // Registered BEFORE the `/workflows` list route (which excludes `/workflows/`)
   // so first-match-wins routes it correctly; org-scoped in the repo.
   { method: "GET", match: (url) => url.startsWith("/workflows/tags"), permission: "workflows.read",
@@ -110,14 +110,22 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      // Optional `?tag=` / `?folder=` filter the list (both applied before the
-      // cap in the repo). Trim + length-guard against junk input (tag ≤40,
-      // folder ≤60 — matching their Zod maxes).
-      const tagParam = url.searchParams.get("tag")?.trim();
-      const tag = tagParam && tagParam.length > 0 && tagParam.length <= 40 ? tagParam : undefined;
+      // Optional `?tag=` (repeatable — multiple AND together) / `?folder=` filter
+      // the list (both applied before the cap in the repo). Trim + length-guard
+      // against junk input (tag ≤40, folder ≤60 — matching their Zod maxes);
+      // dedupe + cap the tag set (a row carries ≤ WORKFLOW_METADATA_TAGS_MAX tags,
+      // so a longer AND can never match — bounding it keeps the containment small).
+      const tags = [
+        ...new Set(
+          url.searchParams
+            .getAll("tag")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0 && t.length <= 40),
+        ),
+      ].slice(0, WORKFLOW_METADATA_TAGS_MAX);
       const folderParam = url.searchParams.get("folder")?.trim();
       const folder = folderParam && folderParam.length > 0 && folderParam.length <= 60 ? folderParam : undefined;
-      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tag, folder });
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder });
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",

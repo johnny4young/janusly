@@ -52,9 +52,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // missing / corrupt value degrades to the defaults via the helper.
   const [query, setQuery] = useState(() => readFlowsFilters()?.query ?? '')
   const [sort, setSort] = useState<SortKey>(() => readFlowsFilters()?.sort ?? 'recent')
-  // Server-side tag filter (the dropdown lists ALL the org's tags + matches
-  // surface beyond the list cap); '' means "All tags".
-  const [tagFilter, setTagFilter] = useState(() => readFlowsFilters()?.tag ?? '')
+  // Server-side tag filter — multiple tags AND together (a row must carry ALL of
+  // them). The picker lists ALL the org's tags + matches surface beyond the list
+  // cap; `[]` means "All tags".
+  const [tagFilters, setTagFilters] = useState<string[]>(() => readFlowsFilters()?.tags ?? [])
   const [tagOptions, setTagOptions] = useState<string[]>([])
   // Server-side folder filter — same shape as the tag filter (the dropdown lists
   // ALL the org's folders + matches surface beyond the list cap, which is what
@@ -74,8 +75,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [renameDraft, setRenameDraft] = useState('')
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null)
   // Tag management for the active tag filter — rename / delete the one selected
-  // tag across the whole org. Only one tag is filterable at a time, so these are
-  // simple flags keyed off the current `tagFilter`.
+  // tag across the whole org. Shown only when EXACTLY one tag is filtered, so
+  // these are simple flags keyed off `tagFilters[0]`.
   const [renamingTag, setRenamingTag] = useState(false)
   const [tagRenameDraft, setTagRenameDraft] = useState('')
   const [confirmDeleteTag, setConfirmDeleteTag] = useState(false)
@@ -92,7 +93,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     setLoading(true)
     try {
       const params = new URLSearchParams()
-      if (tagFilter) params.set('tag', tagFilter)
+      // Repeated `?tag=` params — the server ANDs them.
+      tagFilters.forEach(tag => params.append('tag', tag))
       if (folderFilter) params.set('folder', folderFilter)
       const qs = params.toString()
       const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
@@ -102,7 +104,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     } finally {
       setLoading(false)
     }
-  }, [addToast, t, tagFilter, folderFilter])
+  }, [addToast, t, tagFilters, folderFilter])
 
   useEffect(() => {
     void load()
@@ -112,8 +114,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // per-browser so it survives navigation + reload. The initial run re-writes
   // the restored values (a harmless no-op).
   useEffect(() => {
-    writeFlowsFilters({ tag: tagFilter, folder: folderFilter, query, sort, collapsedFolders })
-  }, [tagFilter, folderFilter, query, sort, collapsedFolders])
+    writeFlowsFilters({ tags: tagFilters, folder: folderFilter, query, sort, collapsedFolders })
+  }, [tagFilters, folderFilter, query, sort, collapsedFolders])
 
   // The org's distinct tags for the filter dropdown. Refetched on
   // `platformVersion` so an inspector tag edit refreshes the options. A fetch
@@ -126,11 +128,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         const tags = Array.isArray(data?.tags) ? (data.tags as string[]) : []
         if (cancelled) return
         setTagOptions(tags)
-        // Drop a restored tag the org no longer offers (e.g. deleted since the
-        // last visit) so the filter can't strand the list on an empty,
-        // un-clearable view. The functional update reads the current tagFilter
-        // without adding it to this effect's deps.
-        setTagFilter(current => (current !== '' && !tags.includes(current) ? '' : current))
+        // Drop restored filter tags the org no longer offers (e.g. deleted since
+        // the last visit) so the filter can't strand the list on an empty,
+        // un-clearable view. The functional update reads the current filters
+        // without adding them to this effect's deps.
+        setTagFilters(current => current.filter(tg => tags.includes(tg)))
       } catch {
         if (!cancelled) setTagOptions([])
       }
@@ -192,9 +194,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     tagOptions.length > 0 ||
     folderOptions.length > 0 ||
     workflows.length > 1 ||
-    tagFilter !== '' ||
+    tagFilters.length > 0 ||
     folderFilter !== '' ||
     query.trim() !== ''
+
+  // The single tag being filtered, when EXACTLY one is selected — drives the
+  // rename/delete manage affordance, which operates on one tag at a time.
+  const soleTagFilter = tagFilters.length === 1 ? tagFilters[0] : undefined
 
   // Group the already-filtered+sorted rows by folder. Named folders come first
   // (alphabetical, locale-aware); the "Ungrouped" bucket is always last. The
@@ -396,7 +402,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         if (!next.includes(trimmed)) next.push(trimmed)
         return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
       })
-      setTagFilter(trimmed)
+      setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === from ? trimmed : tg)))])
       try {
         await api('/workflows/tags/rename', { method: 'POST', body: JSON.stringify({ from, to: trimmed }) })
         addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }) as string, 'success')
@@ -408,7 +414,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           if (!next.includes(from)) next.push(from)
           return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
         })
-        setTagFilter(from)
+        setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === trimmed ? from : tg)))])
         addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed') as string), 'error')
       }
     },
@@ -429,7 +435,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         prev.map((w) => (idSet.has(w.id) ? { ...w, tags: (w.tags ?? []).filter((tg) => tg !== tag) } : w)),
       )
       setTagOptions((prev) => prev.filter((tg) => tg !== tag))
-      setTagFilter('')
+      setTagFilters((prev) => prev.filter((tg) => tg !== tag))
       try {
         await api('/workflows/tags/delete', { method: 'POST', body: JSON.stringify({ tag }) })
         addToast(t('workflowsDashboard.tagDeleted') as string, 'success')
@@ -437,7 +443,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
         setTagOptions((prev) => (prev.includes(tag) ? prev : [...prev, tag].sort((a, b) => a.localeCompare(b, getResolvedLocale()))))
-        setTagFilter(tag)
+        setTagFilters((prev) => (prev.includes(tag) ? prev : [...prev, tag]))
         addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed') as string), 'error')
       }
     },
@@ -741,24 +747,45 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               data-testid="workflows-search"
             />
           </span>
-          {tagOptions.length > 0 && (
-            <select
-              className="text-field"
-              value={tagFilter}
-              onChange={event => setTagFilter(event.target.value)}
-              aria-label={t('workflowsDashboard.tagFilterAria') as string}
-              data-testid="workflows-tag-filter"
-            >
-              <option value="">{t('workflowsDashboard.allTags')}</option>
-              {tagOptions.map(tag => (
-                <option key={tag} value={tag}>{tag}</option>
+          {/* Multi-tag filter — selected tags are chips (✕ to drop one), and a
+              "+ tag" picker adds another. Several tags AND together server-side. */}
+          {(tagOptions.length > 0 || tagFilters.length > 0) && (
+            <span className="we-list-filter-tags" data-testid="workflows-tag-filter">
+              {tagFilters.map(tag => (
+                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+                  {tag}
+                  <button
+                    type="button"
+                    className="we-list-row__tag-remove"
+                    aria-label={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
+                    title={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
+                    onClick={() => setTagFilters(prev => prev.filter(tg => tg !== tag))}
+                    data-testid={`workflows-tag-filter-remove-${tag}`}
+                  >
+                    <X size={10} aria-hidden="true" />
+                  </button>
+                </span>
               ))}
-            </select>
+              {tagOptions.some(tag => !tagFilters.includes(tag)) && (
+                <select
+                  className="text-field we-list-row__tag-add"
+                  value=""
+                  aria-label={t('workflowsDashboard.tagFilterAria') as string}
+                  onChange={event => { if (event.target.value) setTagFilters(prev => prev.includes(event.target.value) ? prev : [...prev, event.target.value]) }}
+                  data-testid="workflows-tag-filter-add"
+                >
+                  <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
+                  {tagOptions.filter(tag => !tagFilters.includes(tag)).map(tag => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              )}
+            </span>
           )}
           {/* Manage the currently-filtered tag — rename it (re-key across the org)
-              or delete it (strip from every workflow). Only shown when one tag is
-              selected in the filter; mirrors the folder-section rename/delete. */}
-          {tagFilter !== '' && (
+              or delete it (strip from every workflow). Only shown when EXACTLY one
+              tag is filtered; mirrors the folder-section rename/delete. */}
+          {soleTagFilter && (
             renamingTag ? (
               <span className="we-list-tag-manage">
                 <input
@@ -769,12 +796,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                   aria-label={t('workflowsDashboard.renameTagLabel') as string}
                   onChange={event => setTagRenameDraft(event.target.value)}
                   onKeyDown={event => {
-                    if (event.key === 'Enter') { event.preventDefault(); void renameTag(tagFilter, tagRenameDraft) }
+                    if (event.key === 'Enter') { event.preventDefault(); void renameTag(soleTagFilter, tagRenameDraft) }
                     else if (event.key === 'Escape') { event.preventDefault(); setRenamingTag(false) }
                   }}
                   data-testid="workflows-tag-rename-input"
                 />
-                <button type="button" className="small-command" onClick={() => void renameTag(tagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
+                <button type="button" className="small-command" onClick={() => void renameTag(soleTagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
                   {t('workflowsDashboard.saveRename')}
                 </button>
                 <button type="button" className="small-command" onClick={() => setRenamingTag(false)}>
@@ -783,8 +810,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
               </span>
             ) : confirmDeleteTag ? (
               <span className="we-list-tag-manage">
-                <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: tagFilter })}</span>
-                <button type="button" className="small-command danger" onClick={() => void deleteTag(tagFilter)} data-testid="workflows-tag-delete-confirm">
+                <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: soleTagFilter })}</span>
+                <button type="button" className="small-command danger" onClick={() => void deleteTag(soleTagFilter)} data-testid="workflows-tag-delete-confirm">
                   {t('workflowsDashboard.confirmDeleteCta')}
                 </button>
                 <button type="button" className="small-command" onClick={() => setConfirmDeleteTag(false)}>
@@ -796,9 +823,9 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 <button
                   type="button"
                   className="small-command"
-                  onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(tagFilter); setRenamingTag(true) }}
-                  title={t('workflowsDashboard.renameTag', { tag: tagFilter }) as string}
-                  aria-label={t('workflowsDashboard.renameTag', { tag: tagFilter }) as string}
+                  onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(soleTagFilter); setRenamingTag(true) }}
+                  title={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
+                  aria-label={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
                   data-testid="workflows-tag-rename"
                 >
                   <Pencil size={12} aria-hidden="true" />
@@ -807,8 +834,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                   type="button"
                   className="small-command danger"
                   onClick={() => { setRenamingTag(false); setConfirmDeleteTag(true) }}
-                  title={t('workflowsDashboard.deleteTag', { tag: tagFilter }) as string}
-                  aria-label={t('workflowsDashboard.deleteTag', { tag: tagFilter }) as string}
+                  title={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
+                  aria-label={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
                   data-testid="workflows-tag-delete"
                 >
                   <Trash2 size={12} aria-hidden="true" />
@@ -955,13 +982,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </p>
       )}
 
-      {workflows.length === 0 && !loading && folderFilter === '' && tagFilter !== '' && (
+      {workflows.length === 0 && !loading && folderFilter === '' && tagFilters.length > 0 && (
         <p className="helper-text" data-testid="workflows-no-tag-matches">
-          {t('workflowsDashboard.noTagMatches', { tag: tagFilter })}
+          {t('workflowsDashboard.noTagMatches', { tags: tagFilters.join(', ') })}
         </p>
       )}
 
-      {workflows.length === 0 && !loading && folderFilter === '' && tagFilter === '' && (
+      {workflows.length === 0 && !loading && folderFilter === '' && tagFilters.length === 0 && (
         <div className="we-allclear" data-testid="workflows-empty">
           <span className="we-allclear__ring" aria-hidden="true"><CircleCheck size={18} /></span>
           <div className="we-allclear__copy">

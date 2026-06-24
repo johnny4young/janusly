@@ -43,12 +43,12 @@ export type WorkflowListRow = {
 };
 
 /**
- * Optional filters for the Flows list. `tag` matches workflows whose
- * `workflow_metadata.tags` contains it; `folder` matches workflows whose
- * `workflow_metadata.folder` equals it. Both are applied BEFORE the cap.
+ * Optional Flows-list filters, applied in the WHERE clause before the cap.
+ * `tags` is an AND set — a row must contain EVERY listed tag (one jsonb
+ * containment over the whole array). `folder` is scalar equality.
  */
 export type WorkflowListFilters = {
-  tag?: string;
+  tags?: string[];
   folder?: string;
 };
 
@@ -57,9 +57,9 @@ export type WorkflowListFilters = {
  * production run count, most-recent run status, and operator tags + folder
  * folded in.
  *
- * The `tag` / `folder` filters (when set) are applied in the WHERE clause
- * BEFORE the cap, so a matching workflow surfaces even if it's older than the
- * newest `limit` rows.
+ * The `tags` (AND set) / `folder` filters (when set) are applied in the WHERE
+ * clause BEFORE the cap, so a matching workflow surfaces even if it's older than
+ * the newest `limit` rows.
  */
 export async function listWorkflowsWithRunSummary(
   orgId: string,
@@ -67,13 +67,14 @@ export async function listWorkflowsWithRunSummary(
   filters: WorkflowListFilters = {},
 ): Promise<WorkflowListRow[]> {
   // 1. Base list — LEFT JOIN workflow_metadata for tags + folder; the optional
-  //    filters are applied BEFORE the cap (tag = jsonb-containment, folder =
+  //    filters are applied BEFORE the cap (tags = jsonb-containment, folder =
   //    scalar equality).
   const conditions = [eq(workflows.orgId, orgId)];
-  if (filters.tag) {
-    // `tags @> '["<tag>"]'::jsonb` — true when the array contains the tag.
-    // A workflow with no metadata row (tags null) never matches, which is correct.
-    conditions.push(sql`${workflowMetadata.tags} @> ${JSON.stringify([filters.tag])}::jsonb`);
+  if (filters.tags && filters.tags.length > 0) {
+    // `tags @> '["a","b"]'::jsonb` — true only when the row's array contains ALL
+    // listed tags, so multiple tags AND together in one containment. A workflow
+    // with no metadata row (tags null) never matches, which is correct.
+    conditions.push(sql`${workflowMetadata.tags} @> ${JSON.stringify(filters.tags)}::jsonb`);
   }
   if (filters.folder) {
     // Scalar equality on the single folder column. A workflow with no metadata

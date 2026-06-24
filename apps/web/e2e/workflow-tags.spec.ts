@@ -1,17 +1,11 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 
 /**
- * Focused e2e for the workflow-list tag filter. Seeds two tagged
+ * Focused e2e for the workflow-list multi-tag filter. Seeds two tagged
  * workflows via the live API (dev-headers auth, the demo-helpers pattern), then
- * drives the Flows UI to verify: tag filter narrows the list (lista), a name
- * search within a tag filter shows the no-match state (no matches), and "All
- * tags" + cleared search restores the full list (clear filter).
- *
- * Note: the tag-specific empty state (`workflows-no-tag-matches`) is defensive
- * and not cleanly reachable here — metadata requires an existing workflow and a
- * workflow delete cascades its metadata, so every dropdown tag always matches
- * ≥1 workflow. The reachable "no matches" surface under a filter is the list's
- * `workflows-no-matches` (name search yields nothing), which this exercises.
+ * drives the Flows UI to verify: adding one tag narrows the list, adding a
+ * second tag ANDs the filter into the tag-specific empty state, removing a chip
+ * widens back to one tag, and clearing the final chip restores the full list.
  */
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
@@ -58,20 +52,34 @@ test('Flows list filters by tag, shows the no-match state, and clears the filter
   // The alpha row renders its tag pill.
   await expect(alphaRow.getByText(alphaTag)).toBeVisible()
 
-  // lista: filter by the alpha tag (server-side) → only alpha remains.
-  await page.getByTestId('workflows-tag-filter').selectOption(alphaTag)
+  // Filter by the alpha tag (server-side) → only alpha remains.
+  await page.getByTestId('workflows-tag-filter-add').selectOption(alphaTag)
+  await expect(page.getByTestId(`workflows-tag-filter-remove-${alphaTag}`)).toBeVisible()
   await expect(alphaRow).toBeVisible()
   await expect(betaRow).toHaveCount(0)
 
-  // no matches: with the tag filter active, a name search matching nothing
-  // surfaces the list's no-match state.
+  // Add beta too: the query becomes alpha AND beta, so neither one-tag row
+  // matches and the tag-specific empty state is reachable.
+  await page.getByTestId('workflows-tag-filter-add').selectOption(betaTag)
+  await expect(page.getByTestId(`workflows-tag-filter-remove-${betaTag}`)).toBeVisible()
+  await expect(page.getByTestId('workflows-no-tag-matches')).toBeVisible()
+  await expect(alphaRow).toHaveCount(0)
+  await expect(betaRow).toHaveCount(0)
+
+  // Remove beta: the filter widens back to alpha-only.
+  await page.getByTestId(`workflows-tag-filter-remove-${betaTag}`).click()
+  await expect(alphaRow).toBeVisible()
+  await expect(betaRow).toHaveCount(0)
+
+  // no matches: with the alpha filter active, a name search matching nothing
+  // surfaces the list's search no-match state.
   await page.getByTestId('workflows-search').fill(`zzz-no-match-${stamp}`)
   await expect(page.getByTestId('workflows-no-matches')).toBeVisible()
   await expect(alphaRow).toHaveCount(0)
 
-  // clear filter: clear the search + select "All tags" → both rows return.
+  // clear filter: clear the search + remove the last tag chip → both rows return.
   await page.getByTestId('workflows-search').fill('')
-  await page.getByTestId('workflows-tag-filter').selectOption('')
+  await page.getByTestId(`workflows-tag-filter-remove-${alphaTag}`).click()
   await expect(alphaRow).toBeVisible()
   await expect(betaRow).toBeVisible()
 })

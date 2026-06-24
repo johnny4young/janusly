@@ -9256,6 +9256,16 @@ button.we-ops-metric-card--button {
   padding: 2px 6px;
 }
 
+/* Multi-tag filter in the Flows toolbar: the selected tags render as removable
+   chips and a "+ tag" picker adds another (several tags AND together). Reuses the
+   per-row pill (.we-list-row__tag) + picker (.we-list-row__tag-add) styling. */
+.we-list-filter-tags {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Rename / delete controls for the active tag filter (toolbar). */
 .we-list-tag-manage {
   align-items: center;

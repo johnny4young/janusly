@@ -4,8 +4,8 @@
  * aggregate resolves at `.groupBy()`. Coverage: empty-org short-circuit
  * (no aggregate query), the LEFT fold (agg passthrough + zero-run workflows
  * defaulting to runCount 0 / lastRunStatus null), and the tag column fold
- * (workflow_metadata.tags onto each row; null → []; the `{ tag }` filter
- * branch is exercised — the real jsonb-containment SQL is smoke-verified
+ * (workflow_metadata.tags onto each row; null → []; the `{ tags }` AND-set
+ * filter branch is exercised — the real jsonb-containment SQL is smoke-verified
  * against Postgres, since the chain mock ignores the WHERE).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -63,22 +63,38 @@ describe("listWorkflowsWithRunSummary", () => {
     ]);
   });
 
-  it("folds workflow_metadata.tags + folder onto each row (null → [] / null) and exercises the tag filter branch", async () => {
+  it("folds workflow_metadata.tags + folder onto each row (null → [] / null) and exercises the multi-tag AND filter branch", async () => {
     baseRows = [
       { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: ["billing", "urgent"], folder: "Billing" },
       { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), status: "active", pausedReason: null, tags: null, folder: null },
     ];
     aggRows = [];
 
-    // `{ tag }` exercises the jsonb-containment predicate construction without
-    // throwing; the chain mock ignores the WHERE, so this asserts the tag +
-    // folder mapping (the real filtering is smoke-verified against Postgres).
-    const rows = await listWorkflowsWithRunSummary("org-1", 100, { tag: "billing" });
+    // A multi-tag `{ tags }` exercises the single jsonb-containment predicate
+    // construction (ALL listed tags = AND) without throwing; the chain mock
+    // ignores the WHERE, so this asserts the tag + folder mapping (the real
+    // AND filtering is smoke-verified against Postgres).
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, { tags: ["billing", "urgent"] });
 
     expect(rows[0]?.tags).toEqual(["billing", "urgent"]);
     expect(rows[0]?.folder).toBe("Billing");
     expect(rows[1]?.tags).toEqual([]); // a null metadata join coalesces to []
     expect(rows[1]?.folder).toBeNull(); // a null folder stays null (ungrouped)
+  });
+
+  it("adds no tag predicate for an empty/absent tags set (the AND filter is opt-in)", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: ["billing"], folder: null },
+    ];
+    aggRows = [];
+
+    // `tags: []` takes the guard's false branch (no containment pushed); the
+    // call must still resolve the full list. `undefined` (no filters) is the
+    // same path, covered by the aggregate tests above.
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, { tags: [] });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tags).toEqual(["billing"]);
   });
 
   it("exercises the folder filter branch (scalar equality, before the cap)", async () => {
