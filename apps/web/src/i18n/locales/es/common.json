@@ -568,6 +568,7 @@
   "workflowsDashboard.noTagMatches": "Ningún flujo tiene todas las etiquetas seleccionadas: {{tags}}.",
   "workflowsDashboard.noMatches": "Ningún flujo coincide con tu búsqueda.",
   "workflowsDashboard.loading": "Cargando…",
+  "workflowsDashboard.loadMore": "Cargar más",
   "workflowsDashboard.empty": "Aún no hay flujos guardados",
   "workflowsDashboard.emptyHelper": "Arma un flujo en el canvas, valídalo y haz clic en Guardar.",
   "workflowsDashboard.openFlow": "Abrir flujo",

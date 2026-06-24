@@ -20,6 +20,12 @@ import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filt
  *  the server's terminal-failure set). */
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
 
+/** Flows-list page size — the initial load and each "Load more" page fetch this
+ *  many rows. A full page (`=== PAGE_SIZE`) means another page may exist; a short
+ *  page ends pagination. Matches the server list default so a bare first load is
+ *  unchanged. Kept ≤ the route's 200 cap. */
+const PAGE_SIZE = 100
+
 /** Sentinel key for the "Ungrouped" folder section. A real folder name is
  *  `min(1)` chars, so the empty string can never collide with one. */
 const UNGROUPED = ''
@@ -36,6 +42,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
+  // "Load more" keyset pagination. `hasMore` is true when the last page came back
+  // full (so another page may exist); `loadingMore` guards the in-flight append.
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   // Drag-to-folder transient state. `draggingId` is the row being dragged;
   // `dropTarget` is the folder key (`UNGROUPED` = '') currently hovered, used
   // only for the highlight. Both clear on drop / drag-end.
@@ -95,26 +105,59 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // `bulkTagDraft` is the tag typed/picked for the bulk add/remove buttons.
   const [bulkTagDraft, setBulkTagDraft] = useState('')
 
+  // Shared query-string for the list fetch — the active tag / folder / search
+  // filters. Both the initial load and "Load more" use it, so the cursor always
+  // pages within exactly the filtered set. No explicit `limit`: the server
+  // defaults to PAGE_SIZE, which is what the hasMore inference compares against.
+  const buildListParams = useCallback(() => {
+    const params = new URLSearchParams()
+    // Repeated `?tag=` params — the server ANDs them.
+    tagFilters.forEach(tag => params.append('tag', tag))
+    if (folderFilter) params.set('folder', folderFilter)
+    // `?q=` name/id search (server-side, before the cap) — debounced so a
+    // beyond-cap match back-fills once typing settles.
+    const trimmedQuery = debouncedQuery.trim()
+    if (trimmedQuery) params.set('q', trimmedQuery)
+    return params
+  }, [tagFilters, folderFilter, debouncedQuery])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams()
-      // Repeated `?tag=` params — the server ANDs them.
-      tagFilters.forEach(tag => params.append('tag', tag))
-      if (folderFilter) params.set('folder', folderFilter)
-      // `?q=` name/id search (server-side, before the cap) — debounced so a
-      // beyond-cap match back-fills once typing settles.
-      const trimmedQuery = debouncedQuery.trim()
-      if (trimmedQuery) params.set('q', trimmedQuery)
-      const qs = params.toString()
+      const qs = buildListParams().toString()
       const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
-      setWorkflows(Array.isArray(data) ? data : [])
+      const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
+      setWorkflows(page)
+      // A full page means another may exist; a short page ends pagination.
+      setHasMore(page.length === PAGE_SIZE)
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
     } finally {
       setLoading(false)
     }
-  }, [addToast, t, tagFilters, folderFilter, debouncedQuery])
+  }, [addToast, t, buildListParams])
+
+  // Append the next keyset page after the oldest loaded row. `workflows` is in
+  // server order (createdAt DESC), so its last element is the global oldest; its
+  // `(createdAt, id)` is the `?before=` cursor. URLSearchParams encodes the `|`.
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return
+    const oldest = workflows[workflows.length - 1]
+    if (!oldest?.createdAt) return
+    setLoadingMore(true)
+    try {
+      const params = buildListParams()
+      params.set('before', `${oldest.createdAt}|${oldest.id}`)
+      const data = await api(`/workflows?${params.toString()}`)
+      const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
+      setWorkflows(prev => [...prev, ...page])
+      setHasMore(page.length === PAGE_SIZE)
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, workflows, buildListParams, addToast, t])
 
   useEffect(() => {
     void load()
@@ -1247,6 +1290,21 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             </div>
           ) : null}
         </div>
+      )}
+
+      {/* Keyset "Load more" — appends the next page after the oldest loaded row.
+          Shown below both the flat and folder-grouped views when the last page
+          came back full. */}
+      {hasMore && (
+        <button
+          type="button"
+          className="small-command we-load-more"
+          onClick={() => { void loadMore() }}
+          disabled={loadingMore}
+          data-testid="workflows-load-more"
+        >
+          {loadingMore ? t('workflowsDashboard.loading') : t('workflowsDashboard.loadMore')}
+        </button>
       )}
     </div>
   )

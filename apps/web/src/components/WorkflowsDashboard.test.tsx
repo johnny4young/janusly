@@ -17,7 +17,17 @@ type Flow = {
   lastRunStatus?: string | null
   runCount?: number
   updatedAt?: string
+  createdAt?: string
 }
+
+// A descending-createdAt page of `count` rows starting at index `startIdx` — the
+// server returns rows in createdAt-DESC order, so the LAST element is the oldest
+// (the "Load more" cursor). Distinct createdAt per row keeps the keyset stable.
+const pageOfFlows = (count: number, startIdx = 0): Flow[] =>
+  Array.from({ length: count }, (_, k) => {
+    const i = startIdx + k
+    return { id: `wf${i}`, orgId: 'o', name: `Flow ${i}`, runCount: 0, createdAt: new Date(Date.UTC(2026, 0, 1) - i * 1000).toISOString() }
+  })
 
 const FLOWS: Flow[] = [
   { id: 'wf1', orgId: 'o', name: 'Billing sync', tags: ['billing', 'urgent'], lastRunStatus: 'succeeded', runCount: 3, updatedAt: '2026-06-02T00:00:00.000Z' },
@@ -256,6 +266,41 @@ describe('<WorkflowsDashboard />', () => {
     render(<WorkflowsDashboard onOpen={() => {}} />)
     await screen.findByTestId('workflows-row-wf1')
     expect(screen.queryByTestId('workflows-clear-filters')).not.toBeInTheDocument()
+  })
+
+  it('shows "Load more" after a full page and appends the next keyset page on click', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      if (url === '/workflows/tags') return { tags: [] }
+      // The ?before= page is short (30 rows) → pagination ends after it.
+      if (url.includes('before=')) return pageOfFlows(30, 100)
+      // Page 1 is exactly full (PAGE_SIZE = 100) → "Load more" appears.
+      return pageOfFlows(100, 0)
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    const btn = await screen.findByTestId('workflows-load-more')
+    expect(screen.getAllByTestId(/^workflows-row-wf\d+$/).length).toBe(100)
+    fireEvent.click(btn)
+    // The next page is requested with a ?before= cursor built from the OLDEST
+    // loaded row (wf99 — the last element of the createdAt-DESC page).
+    await waitFor(() => expect(calls.some((u) => u.includes('before='))).toBe(true))
+    const beforeCall = calls.find((u) => u.includes('before='))!
+    expect(new URL(beforeCall, 'http://x').searchParams.get('before')?.endsWith('|wf99')).toBe(true)
+    // …and the page is APPENDED (not replaced): 100 + 30 = 130 rows.
+    await waitFor(() => expect(screen.getAllByTestId(/^workflows-row-wf\d+$/).length).toBe(130))
+    // A short page ends pagination → the button disappears.
+    await waitFor(() => expect(screen.queryByTestId('workflows-load-more')).not.toBeInTheDocument())
+  })
+
+  it('does not show "Load more" when the first page is short', async () => {
+    mockApi((url) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      return pageOfFlows(3, 0)
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf0')
+    expect(screen.queryByTestId('workflows-load-more')).not.toBeInTheDocument()
   })
 
   it('migrates a persisted legacy scalar tag into a filter chip on mount', async () => {

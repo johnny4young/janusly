@@ -69,6 +69,23 @@ import type { Route } from "../routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
 
+/**
+ * Parse a `?before=<iso>|<id>` keyset cursor for the Flows-list "Load more" into
+ * the `{ createdAt, id }` the repo expects, or `undefined` for a missing /
+ * malformed value (so it degrades to the first page). Splits on the LAST `|` so
+ * an id containing a pipe survives; rejects an unparseable date or empty id.
+ * Mirrors `parseEventsCursor` (run-pagination.ts) without coupling to it.
+ */
+function parseBeforeCursor(raw: string | null): { createdAt: Date; id: string } | undefined {
+  if (!raw) return undefined;
+  const sep = raw.lastIndexOf("|");
+  if (sep === -1) return undefined;
+  const id = raw.slice(sep + 1);
+  if (!id) return undefined;
+  const createdAt = new Date(raw.slice(0, sep));
+  return Number.isNaN(createdAt.getTime()) ? undefined : { createdAt, id };
+}
+
 export const workflowsRoutes: Route[] = [
   // Workflows — list + version reads + save
   // NOTE: `/workflows/versions` and `/workflows/latest` come BEFORE `/workflows`
@@ -130,7 +147,12 @@ export const workflowsRoutes: Route[] = [
       // length-guarded (≤100) to bound the ILIKE pattern.
       const qParam = url.searchParams.get("q")?.trim();
       const search = qParam && qParam.length > 0 && qParam.length <= 100 ? qParam : undefined;
-      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder, search });
+      // Optional `?before=<iso>|<id>` keyset cursor for "Load more" — pages past
+      // the cap by returning rows older than the given `(createdAt, id)`. Parsed
+      // defensively (split on the LAST `|`, reject NaN dates / empty id) → a
+      // malformed cursor degrades to the unpaginated first page.
+      const before = parseBeforeCursor(url.searchParams.get("before"));
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder, search, before });
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
