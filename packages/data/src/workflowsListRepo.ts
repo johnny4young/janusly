@@ -19,7 +19,7 @@
  *   never aggregated.
  */
 
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { db, runs, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
 
@@ -45,21 +45,34 @@ export type WorkflowListRow = {
 /**
  * Optional Flows-list filters, applied in the WHERE clause before the cap.
  * `tags` is an AND set — a row must contain EVERY listed tag (one jsonb
- * containment over the whole array). `folder` is scalar equality.
+ * containment over the whole array). `folder` is scalar equality. `search` is a
+ * case-insensitive substring over the workflow name OR id (mirrors the web's
+ * client-side filter) — a non-empty term narrows to matching rows.
  */
 export type WorkflowListFilters = {
   tags?: string[];
   folder?: string;
+  search?: string;
 };
+
+/**
+ * Escape the LIKE/ILIKE metacharacters (`\` `%` `_`) in a user search term so it
+ * matches literally — Postgres uses `\` as the default LIKE escape, so a name
+ * containing a literal `%` isn't treated as a wildcard. The term is already
+ * parameter-bound by drizzle (no SQL injection); this is match-correctness only.
+ */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
 
 /**
  * List an org's workflows (most-recent first, capped) with each row's
  * production run count, most-recent run status, and operator tags + folder
  * folded in.
  *
- * The `tags` (AND set) / `folder` filters (when set) are applied in the WHERE
- * clause BEFORE the cap, so a matching workflow surfaces even if it's older than
- * the newest `limit` rows.
+ * The `tags` (AND set) / `folder` / `search` filters (when set) are applied in
+ * the WHERE clause BEFORE the cap, so a matching workflow surfaces even if it's
+ * older than the newest `limit` rows.
  */
 export async function listWorkflowsWithRunSummary(
   orgId: string,
@@ -80,6 +93,13 @@ export async function listWorkflowsWithRunSummary(
     // Scalar equality on the single folder column. A workflow with no metadata
     // row (folder null) never matches, which is correct.
     conditions.push(eq(workflowMetadata.folder, filters.folder));
+  }
+  if (filters.search) {
+    // Case-insensitive substring over name OR id (mirrors the client filter).
+    // Applied before the cap, so a name match surfaces beyond the newest page
+    // — the same beyond-cap reach the tag/folder filters already give.
+    const pattern = `%${escapeLikePattern(filters.search)}%`;
+    conditions.push(or(ilike(workflows.name, pattern), ilike(workflows.id, pattern))!);
   }
   const base = await db
     .select({

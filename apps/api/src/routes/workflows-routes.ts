@@ -125,7 +125,12 @@ export const workflowsRoutes: Route[] = [
       ].slice(0, WORKFLOW_METADATA_TAGS_MAX);
       const folderParam = url.searchParams.get("folder")?.trim();
       const folder = folderParam && folderParam.length > 0 && folderParam.length <= 60 ? folderParam : undefined;
-      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder });
+      // Optional `?q=` name/id search (case-insensitive substring, applied before
+      // the cap in the repo so a match surfaces beyond the newest page). Trimmed +
+      // length-guarded (≤100) to bound the ILIKE pattern.
+      const qParam = url.searchParams.get("q")?.trim();
+      const search = qParam && qParam.length > 0 && qParam.length <= 100 ? qParam : undefined;
+      const rows = await listWorkflowsWithRunSummary(auth.orgId, limitValue, { tags, folder, search });
       return sendJson(res, rows);
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",

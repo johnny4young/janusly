@@ -112,4 +112,35 @@ describe("listWorkflowsWithRunSummary", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.folder).toBe("Billing");
   });
+
+  it("exercises the name/id search branch (case-insensitive substring, before the cap)", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "Acme onboarding", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null },
+    ];
+    aggRows = [];
+
+    // `{ search }` exercises the `or(ilike(name), ilike(id))` predicate
+    // construction (incl. the LIKE-metacharacter escape) without throwing; the
+    // chain mock ignores the WHERE, so this asserts the branch + row fold (the
+    // real substring filtering is smoke-verified against Postgres). A `%` in the
+    // term is escaped, not treated as a wildcard.
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, { search: "acme 100%" });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBe("Acme onboarding");
+  });
+
+  it("adds no search predicate for an empty/absent search (the filter is opt-in)", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null },
+    ];
+    aggRows = [];
+
+    // `search: ""` takes the guard's false branch (no ILIKE pushed); the call
+    // still resolves the full list.
+    const rows = await listWorkflowsWithRunSummary("org-1", 100, { search: "" });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.name).toBe("A");
+  });
 });
