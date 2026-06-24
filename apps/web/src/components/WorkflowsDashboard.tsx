@@ -79,6 +79,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [bulkFolderDraft, setBulkFolderDraft] = useState('')
+  // `bulkTagDraft` is the tag typed/picked for the bulk add/remove buttons.
+  const [bulkTagDraft, setBulkTagDraft] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -404,6 +406,58 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
   )
 
+  // Add or remove one tag across every selected workflow in a single request.
+  // Optimistic: re-tag the selected rows locally (add → union+dedupe, remove →
+  // filter), capturing each prior tag array for an exact rollback, then POST the
+  // bulk route. Tags are multi-value, so unlike `bulkAssign` (one folder) this
+  // unions/filters rather than replacing.
+  const bulkAssignTag = useCallback(
+    async (op: 'add' | 'remove') => {
+      const ids = [...selectedIds]
+      const tag = bulkTagDraft.trim()
+      if (ids.length === 0 || !tag) return
+      const idSet = new Set(ids)
+      const priorTags = new Map(
+        workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]),
+      )
+
+      setWorkflows((prev) =>
+        prev.map((w) => {
+          if (!idSet.has(w.id)) return w
+          const current = w.tags ?? []
+          const tags =
+            op === 'add'
+              ? current.includes(tag) ? current : [...current, tag]
+              : current.filter((t) => t !== tag)
+          return { ...w, tags }
+        }),
+      )
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+      setBulkTagDraft('')
+      try {
+        const result = (await api('/workflows/tags/assign', {
+          method: 'POST',
+          body: JSON.stringify({ workflowIds: ids, tag, op }),
+        })) as { count?: number }
+        const count = typeof result?.count === 'number' ? result.count : ids.length
+        addToast(
+          op === 'add'
+            ? (t('workflowsDashboard.bulkTagAdded', { tag, count }) as string)
+            : (t('workflowsDashboard.bulkTagRemoved', { tag, count }) as string),
+          'success',
+        )
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) =>
+          prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)),
+        )
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkTagFailed') as string), 'error')
+      }
+    },
+    [selectedIds, bulkTagDraft, workflows, addToast, bumpPlatformVersion, t],
+  )
+
   const renderRow = (workflow: SavedWorkflow) => {
     // Folder choices for the per-row "Move to folder" select: the org-wide
     // folder list plus the row's own folder if a stale value isn't already in it
@@ -643,6 +697,43 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             data-testid="workflows-bulk-ungroup"
           >
             {t('workflowsDashboard.bulkUngroupCta')}
+          </button>
+          {/* Tag group — add OR remove ONE tag across the selected rows. A tag is
+              multi-value (a workflow can carry several), so unlike the folder
+              Move/Ungroup this has two verbs instead of a single target. */}
+          <span className="we-list-bulk-bar__divider" aria-hidden="true" />
+          <input
+            className="text-field we-list-bulk-bar__input"
+            list="we-bulk-tag-options"
+            value={bulkTagDraft}
+            maxLength={40}
+            onChange={event => setBulkTagDraft(event.target.value)}
+            placeholder={t('workflowsDashboard.bulkTagPlaceholder') as string}
+            aria-label={t('workflowsDashboard.bulkTagPlaceholder') as string}
+            data-testid="workflows-bulk-tag-input"
+          />
+          <datalist id="we-bulk-tag-options">
+            {tagOptions.map(tag => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
+          <button
+            type="button"
+            className="small-command"
+            disabled={!bulkTagDraft.trim()}
+            onClick={() => void bulkAssignTag('add')}
+            data-testid="workflows-bulk-tag-add"
+          >
+            {t('workflowsDashboard.bulkTagAddCta')}
+          </button>
+          <button
+            type="button"
+            className="small-command"
+            disabled={!bulkTagDraft.trim()}
+            onClick={() => void bulkAssignTag('remove')}
+            data-testid="workflows-bulk-tag-remove"
+          >
+            {t('workflowsDashboard.bulkTagRemoveCta')}
           </button>
           <button type="button" className="small-command" onClick={() => setSelectedIds(new Set())}>
             {t('workflowsDashboard.clearSelection')}
