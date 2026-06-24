@@ -681,6 +681,98 @@ describe('<WorkflowsDashboard />', () => {
     await waitFor(() => expect(screen.queryByText('rollme')).not.toBeInTheDocument())
   })
 
+  it('renames the active-filter tag across the org (POST /workflows/tags/rename)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
+    fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'finance' } })
+    fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
+    await waitFor(() => {
+      const rename = calls.find((c) => c.url === '/workflows/tags/rename')
+      expect(rename?.body).toEqual({ from: 'billing', to: 'finance' })
+    })
+  })
+
+  it('rolls back the active tag rename when the POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); throw new Error('rename failed') }
+      if (url === '/workflows/tags') return { tags: ['billing', 'urgent'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
+    fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'finance' } })
+    fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/workflows/tags/rename')).toBe(true))
+    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe('billing'))
+    expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
+    expect(within(screen.getByTestId('workflows-row-wf1')).queryByText('finance')).not.toBeInTheDocument()
+  })
+
+  it('does not POST a tag rename when the name is unchanged', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.click(await screen.findByTestId('workflows-tag-rename'))
+    fireEvent.change(screen.getByTestId('workflows-tag-rename-input'), { target: { value: 'billing' } })
+    fireEvent.keyDown(screen.getByTestId('workflows-tag-rename-input'), { key: 'Enter' })
+    await Promise.resolve()
+    expect(calls.some((c) => c.url === '/workflows/tags/rename')).toBe(false)
+  })
+
+  it('deletes the active-filter tag from all flows (POST /workflows/tags/delete)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); return { workflowId: url } }
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.click(await screen.findByTestId('workflows-tag-delete'))
+    fireEvent.click(await screen.findByTestId('workflows-tag-delete-confirm'))
+    await waitFor(() => {
+      const del = calls.find((c) => c.url === '/workflows/tags/delete')
+      expect(del?.body).toEqual({ tag: 'billing' })
+    })
+  })
+
+  it('rolls back the active tag delete when the POST fails', async () => {
+    const calls: Array<{ url: string; body: unknown }> = []
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { calls.push({ url, body: JSON.parse(String(options.body)) }); throw new Error('delete failed') }
+      if (url === '/workflows/tags') return { tags: ['billing'] }
+      if (url === '/workflows/folders') return { folders: [] }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.change(await screen.findByTestId('workflows-tag-filter'), { target: { value: 'billing' } })
+    fireEvent.click(await screen.findByTestId('workflows-tag-delete'))
+    fireEvent.click(await screen.findByTestId('workflows-tag-delete-confirm'))
+
+    await waitFor(() => expect(calls.some((c) => c.url === '/workflows/tags/delete')).toBe(true))
+    await waitFor(() => expect((screen.getByTestId('workflows-tag-filter') as HTMLSelectElement).value).toBe('billing'))
+    expect(within(screen.getByTestId('workflows-row-wf1')).getByText('billing')).toBeInTheDocument()
+  })
+
   it('Clear empties the selection (bulk bar disappears)', async () => {
     mockApi((url) => {
       if (url === '/workflows/folders') return { folders: [] }

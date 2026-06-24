@@ -448,4 +448,75 @@ export async function assignTagToWorkflows(
   return { workflowIds: rows.map((r) => r.workflowId) };
 }
 
+/** Input for {@link renameWorkflowTag}. Both are real tag names. */
+export type RenameWorkflowTagInput = {
+  orgId: string;
+  from: string;
+  to: string;
+};
+
+/**
+ * Rename one tag to another across every workflow in an org that carries it, in
+ * a single org-scoped UPDATE. Uses the jsonb `-` operator (`tags - from` removes
+ * all `from` occurrences and yields `[]` for an emptied array — never NULL) then
+ * appends `to` ONLY when it's not already present, so a workflow that already had
+ * both `from` and `to` MERGES into a single `to` (no duplicate). The swap can't
+ * exceed `WORKFLOW_METADATA_TAGS_MAX` (one tag out, at most one in). Org-scoped,
+ * so another org's same-named tag is never touched. Returns affected workflowIds.
+ */
+export async function renameWorkflowTag(
+  input: RenameWorkflowTagInput,
+): Promise<{ workflowIds: string[] }> {
+  const fromJson = JSON.stringify([input.from]);
+  const toJson = JSON.stringify([input.to]);
+  const rows = await db
+    .update(workflowMetadata)
+    .set({
+      tags: sql`case
+        when (${workflowMetadata.tags} - ${input.from}) @> ${toJson}::jsonb
+          then ${workflowMetadata.tags} - ${input.from}
+        else (${workflowMetadata.tags} - ${input.from}) || ${toJson}::jsonb
+      end`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(workflowMetadata.orgId, input.orgId),
+        sql`${workflowMetadata.tags} @> ${fromJson}::jsonb`,
+      ),
+    )
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
+}
+
+/** Input for {@link deleteWorkflowTag}. */
+export type DeleteWorkflowTagInput = {
+  orgId: string;
+  tag: string;
+};
+
+/**
+ * Delete one tag from every workflow in an org that carries it, in a single
+ * org-scoped UPDATE via the jsonb `-` operator (`tags - tag` removes all
+ * occurrences and yields `[]` for an emptied array — never NULL, so no coalesce
+ * is needed). The workflows are untouched; only the label is removed (reversible
+ * by re-adding). Org-scoped; returns the affected workflowIds.
+ */
+export async function deleteWorkflowTag(
+  input: DeleteWorkflowTagInput,
+): Promise<{ workflowIds: string[] }> {
+  const tagJson = JSON.stringify([input.tag]);
+  const rows = await db
+    .update(workflowMetadata)
+    .set({ tags: sql`${workflowMetadata.tags} - ${input.tag}`, updatedAt: new Date() })
+    .where(
+      and(
+        eq(workflowMetadata.orgId, input.orgId),
+        sql`${workflowMetadata.tags} @> ${tagJson}::jsonb`,
+      ),
+    )
+    .returning({ workflowId: workflowMetadata.workflowId });
+  return { workflowIds: rows.map((r) => r.workflowId) };
+}
+
 // Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

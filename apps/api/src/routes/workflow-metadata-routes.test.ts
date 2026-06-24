@@ -29,6 +29,8 @@ vi.mock("@janusly/data/src/workflowMetadataRepo", () => ({
   deleteWorkflowFolder: vi.fn(),
   assignWorkflowsToFolder: vi.fn(),
   assignTagToWorkflows: vi.fn(),
+  renameWorkflowTag: vi.fn(),
+  deleteWorkflowTag: vi.fn(),
   listWorkflowMetadataForOrg: vi.fn(),
 }));
 
@@ -54,8 +56,10 @@ import {
   assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
+  deleteWorkflowTag,
   getWorkflowMetadata,
   renameWorkflowFolder,
+  renameWorkflowTag,
   setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "@janusly/data/src/workflowMetadataRepo";
@@ -71,6 +75,8 @@ const renameFolderMock = vi.mocked(renameWorkflowFolder);
 const deleteFolderMock = vi.mocked(deleteWorkflowFolder);
 const assignFolderMock = vi.mocked(assignWorkflowsToFolder);
 const assignTagMock = vi.mocked(assignTagToWorkflows);
+const renameTagMock = vi.mocked(renameWorkflowTag);
+const deleteTagMock = vi.mocked(deleteWorkflowTag);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -495,6 +501,62 @@ describe("POST /workflows/tags/assign", () => {
   });
 });
 
+describe("POST /workflows/tags/rename", () => {
+  it("declares role: editor + permission: workflows.write", () => {
+    const route = findRoute("POST", "/workflows/tags/rename");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("workflows.write");
+  });
+
+  it("returns 422 on an invalid body (empty from)", async () => {
+    readJsonMock.mockResolvedValueOnce({ from: "", to: "finance" });
+    await callRoute("POST", "/workflows/tags/rename");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(renameTagMock).not.toHaveBeenCalled();
+  });
+
+  it("renames + audits workflow.tag.renamed with from/to + affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ from: "billing", to: "finance" });
+    renameTagMock.mockResolvedValueOnce({ workflowIds: ["wf-1", "wf-2"] });
+    await callRoute("POST", "/workflows/tags/rename");
+    expect(renameTagMock).toHaveBeenCalledWith({ orgId: "org-1", from: "billing", to: "finance" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.tag.renamed",
+      "tag",
+      "billing",
+      expect.objectContaining({ from: "billing", to: "finance", count: 2, workflowIds: ["wf-1", "wf-2"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ from: "billing", to: "finance", count: 2 });
+  });
+});
+
+describe("POST /workflows/tags/delete", () => {
+  it("returns 422 on an invalid body (empty tag)", async () => {
+    readJsonMock.mockResolvedValueOnce({ tag: "" });
+    await callRoute("POST", "/workflows/tags/delete");
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(422);
+    expect(deleteTagMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes + audits workflow.tag.deleted with the tag + affected ids", async () => {
+    readJsonMock.mockResolvedValueOnce({ tag: "billing" });
+    deleteTagMock.mockResolvedValueOnce({ workflowIds: ["wf-1"] });
+    await callRoute("POST", "/workflows/tags/delete");
+    expect(deleteTagMock).toHaveBeenCalledWith({ orgId: "org-1", tag: "billing" });
+    expect(auditMock).toHaveBeenCalledWith(
+      "org-1",
+      "user-1",
+      "workflow.tag.deleted",
+      "tag",
+      "billing",
+      expect.objectContaining({ tag: "billing", count: 1, workflowIds: ["wf-1"] }),
+    );
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ tag: "billing", count: 1 });
+  });
+});
+
 describe("route matcher", () => {
   it("matches /workflows/:id/metadata exactly", () => {
     const route = findRoute("GET", "/workflows/wf-1/metadata");
@@ -560,5 +622,23 @@ describe("route matcher", () => {
     const metaRoute = findRoute("GET", "/workflows/wf-1/metadata");
     const metaMatch = typeof metaRoute.match === "string" ? () => true : metaRoute.match;
     expect(metaMatch("/workflows/tags/assign")).toBe(false);
+  });
+
+  it("matches the tag rename/delete collection ops exactly (distinct from assign + per-id)", () => {
+    const rename = findRoute("POST", "/workflows/tags/rename");
+    const del = findRoute("POST", "/workflows/tags/delete");
+    const renameMatch = typeof rename.match === "string" ? () => true : rename.match;
+    const delMatch = typeof del.match === "string" ? () => true : del.match;
+    expect(renameMatch("/workflows/tags/rename")).toBe(true);
+    expect(renameMatch("/workflows/tags/rename?x=1")).toBe(true);
+    expect(renameMatch("/workflows/tags/delete")).toBe(false);
+    expect(renameMatch("/workflows/tags/assign")).toBe(false);
+    expect(delMatch("/workflows/tags/delete")).toBe(true);
+    expect(delMatch("/workflows/tags/rename")).toBe(false);
+    // The per-id folder matcher must not swallow the tag collection routes.
+    const folderRoute = findRoute("POST", "/workflows/wf-1/folder");
+    const folderMatch = typeof folderRoute.match === "string" ? () => true : folderRoute.match;
+    expect(folderMatch("/workflows/tags/rename")).toBe(false);
+    expect(folderMatch("/workflows/tags/delete")).toBe(false);
   });
 });

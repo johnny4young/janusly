@@ -201,6 +201,35 @@ export const AssignTagToWorkflowsBodySchema = z
 
 export type AssignTagToWorkflowsBody = z.infer<typeof AssignTagToWorkflowsBodySchema>
 
+/**
+ * Body of the tag-rename collection route (`POST /workflows/tags/rename`).
+ * Renames the `from` tag to `to` across EVERY workflow in the org that carries
+ * it, in one write. If a workflow already has `to`, the two merge (the renamed
+ * tag is deduped, never doubled) — rename-into-existing is a deliberate merge.
+ */
+export const RenameWorkflowTagBodySchema = z
+  .object({
+    from: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
+    to: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
+  })
+  .strict()
+
+export type RenameWorkflowTagBody = z.infer<typeof RenameWorkflowTagBodySchema>
+
+/**
+ * Body of the tag-delete collection route (`POST /workflows/tags/delete`).
+ * Strips `tag` from EVERY workflow in the org that carries it. The workflows
+ * themselves are untouched — delete only removes the label, so it's reversible
+ * by adding the tag back.
+ */
+export const DeleteWorkflowTagBodySchema = z
+  .object({
+    tag: z.string().min(1).max(WORKFLOW_METADATA_TAG_MAX_LENGTH),
+  })
+  .strict()
+
+export type DeleteWorkflowTagBody = z.infer<typeof DeleteWorkflowTagBodySchema>
+
 /** Hydrated row shape returned by the data repo + the GET route. */
 export type WorkflowMetadataRecord = WorkflowMetadata & {
   workflowId: string
