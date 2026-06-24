@@ -625,6 +625,12 @@
   "workflowsDashboard.tagDeleted": "Etiqueta eliminada",
   "workflowsDashboard.renameTagFailed": "No se pudo renombrar la etiqueta. Inténtalo de nuevo.",
   "workflowsDashboard.deleteTagFailed": "No se pudo eliminar la etiqueta. Inténtalo de nuevo.",
+  "workflowsDashboard.addTagPlaceholder": "+ etiqueta",
+  "workflowsDashboard.addTagAria": "Agregar una etiqueta a {{name}}",
+  "workflowsDashboard.removeTagAria": "Quitar etiqueta {{tag}}",
+  "workflowsDashboard.rowTagAdded": "Se agregó {{tag}}",
+  "workflowsDashboard.rowTagRemoved": "Se quitó {{tag}}",
+  "workflowsDashboard.rowTagFailed": "No se pudo actualizar la etiqueta. Inténtalo de nuevo.",
 
   "budgetBanner.exceeded": "Se superó el presupuesto de IA de la {{scope}} — llamada bloqueada.",
   "budgetBanner.detail": "Llevas gastado <0>${{spent}}</0> del límite mensual de <1>${{limit}}</1>. Sube el presupuesto en Operaciones o cambia la política a solo aviso para que sigan las llamadas de IA.",

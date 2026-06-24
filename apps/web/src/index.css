@@ -9142,6 +9142,42 @@ button.we-ops-metric-card--button {
   margin-top: 4px;
 }
 
+/* Per-row editable tag pills: each pill carries a ✕; a "+ tag" picker adds one. */
+.we-list-row__tag {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.we-list-row__tag-remove {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--we-muted);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 0;
+}
+
+.we-list-row__tag-remove:hover {
+  color: var(--we-danger);
+}
+
+.we-list-row__tag-add {
+  background: transparent;
+  border: 1px dashed var(--we-line);
+  border-radius: 6px;
+  color: var(--we-muted);
+  font-size: 11px;
+  max-width: 110px;
+  padding: 2px 4px;
+}
+
+.we-list-row__tag-add:hover {
+  border-color: var(--we-primary);
+}
+
 /* Folder-grouped Flows list: one collapsible <details> section per folder. */
 .we-list-folders {
   display: flex;

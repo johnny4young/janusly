@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow } from 'lucide-react'
+import { CircleCheck, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -259,6 +259,41 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
         )
         addToast(tApiError(err) || (t('workflowsDashboard.moveFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Add or remove ONE tag on a single row inline (the per-row equivalent of the
+  // bulk tag bar). Optimistic: re-tag the row (add → append, remove → filter),
+  // capturing the prior tags for an exact rollback, then POST the narrow per-id
+  // route. `tagOptions` is left to the reload — add only offers existing tags, and
+  // remove is org-wide distinct, so the dropdown reconciles on the bump.
+  const setRowTag = useCallback(
+    async (workflowId: string, tag: string, op: 'add' | 'remove') => {
+      const current = workflows.find((w) => w.id === workflowId)
+      if (!current) return
+      const prior = current.tags ?? []
+      if (op === 'add' && prior.includes(tag)) return
+      if (op === 'remove' && !prior.includes(tag)) return
+      const next = op === 'add' ? [...prior, tag] : prior.filter((t) => t !== tag)
+
+      setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, tags: next } : w)))
+      try {
+        await api(`/workflows/${encodeURIComponent(workflowId)}/tags`, {
+          method: 'POST',
+          body: JSON.stringify({ tag, op }),
+        })
+        addToast(
+          op === 'add'
+            ? (t('workflowsDashboard.rowTagAdded', { tag }) as string)
+            : (t('workflowsDashboard.rowTagRemoved', { tag }) as string),
+          'success',
+        )
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, tags: prior } : w)))
+        addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed') as string), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -545,6 +580,9 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       workflow.folder && !folderOptions.includes(workflow.folder)
         ? [workflow.folder, ...folderOptions]
         : folderOptions
+    // Org tags not already on this row — the per-row "+ tag" add options.
+    const rowTags = workflow.tags ?? []
+    const addableTags = tagOptions.filter((tg) => !rowTags.includes(tg))
     return (
     <li key={workflow.id}>
       <div
@@ -598,11 +636,41 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         <div className="we-list-row__body">
           <strong>{workflow.name}</strong>
           <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
-          {workflow.tags && workflow.tags.length > 0 && (
+          {/* Tag pills are editable inline: each carries a ✕ to remove it, and a
+              "+ tag" picker adds an existing org tag — the per-row equivalent of
+              the bulk tag bar. Controls stopPropagation so they never open the row. */}
+          {(rowTags.length > 0 || addableTags.length > 0) && (
             <span className="we-list-row__tags">
-              {workflow.tags.map(tag => (
-                <span key={tag} className="we-pill we-pill--ghost">{tag}</span>
+              {rowTags.map(tag => (
+                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+                  {tag}
+                  <button
+                    type="button"
+                    className="we-list-row__tag-remove"
+                    aria-label={t('workflowsDashboard.removeTagAria', { tag }) as string}
+                    title={t('workflowsDashboard.removeTagAria', { tag }) as string}
+                    onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
+                    data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
+                  >
+                    <X size={10} aria-hidden="true" />
+                  </button>
+                </span>
               ))}
+              {addableTags.length > 0 && (
+                <select
+                  className="we-list-row__tag-add"
+                  value=""
+                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name }) as string}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
+                  data-testid={`workflows-row-tag-add-${workflow.id}`}
+                >
+                  <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
+                  {addableTags.map(tag => (
+                    <option key={tag} value={tag}>{tag}</option>
+                  ))}
+                </select>
+              )}
             </span>
           )}
           {workflow.folder && (
