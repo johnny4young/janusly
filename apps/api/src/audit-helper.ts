@@ -168,6 +168,8 @@ export type AuditAction =
   | "workflow.folder.deleted"
   | "workflow.folder.bulk_assigned"
   | "workflow.tags.bulk_assigned"
+  | "workflow.tag.renamed"
+  | "workflow.tag.deleted"
   | "workflow.saved"
   | "workflow.rolled_back"
   | "workflow.slo.set"

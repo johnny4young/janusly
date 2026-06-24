@@ -73,6 +73,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null)
+  // Tag management for the active tag filter — rename / delete the one selected
+  // tag across the whole org. Only one tag is filterable at a time, so these are
+  // simple flags keyed off the current `tagFilter`.
+  const [renamingTag, setRenamingTag] = useState(false)
+  const [tagRenameDraft, setTagRenameDraft] = useState('')
+  const [confirmDeleteTag, setConfirmDeleteTag] = useState(false)
   // Bulk folder assignment. `selectionMode` toggles per-row checkboxes (off by
   // default so the list is unchanged); `selectedIds` are the ticked rows;
   // `bulkFolderDraft` is the target folder typed/picked in the bulk bar.
@@ -325,6 +331,79 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
         addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Rename the active-filter tag to `to` across the whole org. Optimistic: re-map
+  // every loaded row's tags (from → to, deduped), refresh the tag dropdown, and
+  // point the filter at the new name so the view follows. Org-scoped server-side;
+  // prior tags captured for an exact rollback. No-op on empty / unchanged name.
+  const renameTag = useCallback(
+    async (from: string, to: string) => {
+      setRenamingTag(false)
+      const trimmed = to.trim()
+      if (!trimmed || trimmed === from) return
+      const idSet = new Set(workflows.filter((w) => (w.tags ?? []).includes(from)).map((w) => w.id))
+      const priorTags = new Map(workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
+
+      setWorkflows((prev) =>
+        prev.map((w) => {
+          if (!idSet.has(w.id)) return w
+          const next = (w.tags ?? []).filter((tg) => tg !== from)
+          if (!next.includes(trimmed)) next.push(trimmed)
+          return { ...w, tags: next }
+        }),
+      )
+      setTagOptions((prev) => {
+        const next = prev.filter((tg) => tg !== from)
+        if (!next.includes(trimmed)) next.push(trimmed)
+        return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
+      })
+      setTagFilter(trimmed)
+      try {
+        await api('/workflows/tags/rename', { method: 'POST', body: JSON.stringify({ from, to: trimmed }) })
+        addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }) as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
+        setTagOptions((prev) => {
+          const next = prev.filter((tg) => tg !== trimmed)
+          if (!next.includes(from)) next.push(from)
+          return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
+        })
+        setTagFilter(from)
+        addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Delete the active-filter tag from every workflow in the org. Optimistic:
+  // strip it from each loaded row, drop it from the dropdown, clear the filter.
+  // The workflows themselves are untouched (only the label is removed). Rollback
+  // on failure.
+  const deleteTag = useCallback(
+    async (tag: string) => {
+      setConfirmDeleteTag(false)
+      const idSet = new Set(workflows.filter((w) => (w.tags ?? []).includes(tag)).map((w) => w.id))
+      const priorTags = new Map(workflows.filter((w) => idSet.has(w.id)).map((w) => [w.id, w.tags ?? []]))
+
+      setWorkflows((prev) =>
+        prev.map((w) => (idSet.has(w.id) ? { ...w, tags: (w.tags ?? []).filter((tg) => tg !== tag) } : w)),
+      )
+      setTagOptions((prev) => prev.filter((tg) => tg !== tag))
+      setTagFilter('')
+      try {
+        await api('/workflows/tags/delete', { method: 'POST', body: JSON.stringify({ tag }) })
+        addToast(t('workflowsDashboard.tagDeleted') as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
+        setTagOptions((prev) => (prev.includes(tag) ? prev : [...prev, tag].sort((a, b) => a.localeCompare(b, getResolvedLocale()))))
+        setTagFilter(tag)
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed') as string), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -607,6 +686,67 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 <option key={tag} value={tag}>{tag}</option>
               ))}
             </select>
+          )}
+          {/* Manage the currently-filtered tag — rename it (re-key across the org)
+              or delete it (strip from every workflow). Only shown when one tag is
+              selected in the filter; mirrors the folder-section rename/delete. */}
+          {tagFilter !== '' && (
+            renamingTag ? (
+              <span className="we-list-tag-manage">
+                <input
+                  className="text-field we-list-tag-manage__input"
+                  value={tagRenameDraft}
+                  autoFocus
+                  maxLength={40}
+                  aria-label={t('workflowsDashboard.renameTagLabel') as string}
+                  onChange={event => setTagRenameDraft(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') { event.preventDefault(); void renameTag(tagFilter, tagRenameDraft) }
+                    else if (event.key === 'Escape') { event.preventDefault(); setRenamingTag(false) }
+                  }}
+                  data-testid="workflows-tag-rename-input"
+                />
+                <button type="button" className="small-command" onClick={() => void renameTag(tagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
+                  {t('workflowsDashboard.saveRename')}
+                </button>
+                <button type="button" className="small-command" onClick={() => setRenamingTag(false)}>
+                  {t('workflowsDashboard.cancelAction')}
+                </button>
+              </span>
+            ) : confirmDeleteTag ? (
+              <span className="we-list-tag-manage">
+                <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: tagFilter })}</span>
+                <button type="button" className="small-command danger" onClick={() => void deleteTag(tagFilter)} data-testid="workflows-tag-delete-confirm">
+                  {t('workflowsDashboard.confirmDeleteCta')}
+                </button>
+                <button type="button" className="small-command" onClick={() => setConfirmDeleteTag(false)}>
+                  {t('workflowsDashboard.cancelAction')}
+                </button>
+              </span>
+            ) : (
+              <span className="we-list-tag-manage">
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(tagFilter); setRenamingTag(true) }}
+                  title={t('workflowsDashboard.renameTag', { tag: tagFilter }) as string}
+                  aria-label={t('workflowsDashboard.renameTag', { tag: tagFilter }) as string}
+                  data-testid="workflows-tag-rename"
+                >
+                  <Pencil size={12} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="small-command danger"
+                  onClick={() => { setRenamingTag(false); setConfirmDeleteTag(true) }}
+                  title={t('workflowsDashboard.deleteTag', { tag: tagFilter }) as string}
+                  aria-label={t('workflowsDashboard.deleteTag', { tag: tagFilter }) as string}
+                  data-testid="workflows-tag-delete"
+                >
+                  <Trash2 size={12} aria-hidden="true" />
+                </button>
+              </span>
+            )
           )}
           {folderOptions.length > 0 && (
             <select

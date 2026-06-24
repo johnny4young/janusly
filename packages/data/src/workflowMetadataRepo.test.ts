@@ -73,11 +73,13 @@ import {
   assignTagToWorkflows,
   assignWorkflowsToFolder,
   deleteWorkflowFolder,
+  deleteWorkflowTag,
   getWorkflowMetadata,
   listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowMetadataForOrg,
   renameWorkflowFolder,
+  renameWorkflowTag,
   setWorkflowFolder,
   upsertWorkflowMetadata,
 } from "./workflowMetadataRepo";
@@ -583,5 +585,41 @@ describe("assignTagToWorkflows", () => {
     expect(workflowIds).toEqual(["wf_1"]);
     const insertedRows = valuesMock.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
     expect(insertedRows).toHaveLength(1);
+  });
+});
+
+describe("renameWorkflowTag", () => {
+  it("re-keys the tag org-wide via one UPDATE, setting ONLY tags + updatedAt", async () => {
+    updateReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }, { workflowId: "wf_2" }]);
+    const { workflowIds } = await renameWorkflowTag({ orgId: "default", from: "billing", to: "finance" });
+    expect(workflowIds).toEqual(["wf_1", "wf_2"]);
+    const updateArg = ((updateSetMock.mock.calls.at(-1) as unknown as [Record<string, unknown>] | undefined)?.[0] ?? {}) as Record<string, unknown>;
+    expect(Object.keys(updateArg).sort()).toEqual(["tags", "updatedAt"]);
+    expect(updateWhereMock).toHaveBeenCalled();
+    expect(valuesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when no workflow carries the tag", async () => {
+    updateReturningMock.mockResolvedValueOnce([]);
+    const { workflowIds } = await renameWorkflowTag({ orgId: "default", from: "ghost", to: "x" });
+    expect(workflowIds).toEqual([]);
+  });
+});
+
+describe("deleteWorkflowTag", () => {
+  it("strips the tag org-wide via one UPDATE, setting ONLY tags + updatedAt", async () => {
+    updateReturningMock.mockResolvedValueOnce([{ workflowId: "wf_1" }]);
+    const { workflowIds } = await deleteWorkflowTag({ orgId: "default", tag: "billing" });
+    expect(workflowIds).toEqual(["wf_1"]);
+    const updateArg = ((updateSetMock.mock.calls.at(-1) as unknown as [Record<string, unknown>] | undefined)?.[0] ?? {}) as Record<string, unknown>;
+    expect(Object.keys(updateArg).sort()).toEqual(["tags", "updatedAt"]);
+    expect(updateWhereMock).toHaveBeenCalled();
+    expect(valuesMock).not.toHaveBeenCalled();
+  });
+
+  it("returns [] when no workflow carries the tag", async () => {
+    updateReturningMock.mockResolvedValueOnce([]);
+    const { workflowIds } = await deleteWorkflowTag({ orgId: "default", tag: "ghost" });
+    expect(workflowIds).toEqual([]);
   });
 });
