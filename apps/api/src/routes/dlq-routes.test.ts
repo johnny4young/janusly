@@ -271,6 +271,37 @@ describe("GET /dlq filter + sort param wiring", () => {
       await close(server);
     }
   });
+
+  it("threads a trimmed ?search= term through to the bare /dlq query", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    listRecoveryQueueMock.mockResolvedValueOnce([]);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?search=${encodeURIComponent("  timeout  ")}`);
+      expect(response.status).toBe(200);
+      expect(listRecoveryQueueMock).toHaveBeenCalledWith("org-1", expect.objectContaining({ search: "timeout" }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("drops an over-cap (>100) ?search= so search stays undefined", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    listRecoveryQueueMock.mockResolvedValueOnce([]);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?search=${encodeURIComponent("x".repeat(101))}`);
+      expect(response.status).toBe(200);
+      const call = listRecoveryQueueMock.mock.calls[0];
+      expect(call?.[1]?.search).toBeUndefined();
+    } finally {
+      await close(server);
+    }
+  });
 });
 
 describe("GET /dlq/queue (keyset pagination)", () => {
@@ -316,6 +347,25 @@ describe("GET /dlq/queue (keyset pagination)", () => {
           cursor: expect.objectContaining({ id: "dl-9", key: "p2" }),
         }),
         50,
+      );
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("threads ?search= through to the paginated query", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    queryRecoveryQueuePageMock.mockResolvedValueOnce({ items: [], nextCursor: null, hasMore: false });
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/queue?search=${encodeURIComponent("run-abc")}`);
+      expect(response.status).toBe(200);
+      expect(queryRecoveryQueuePageMock).toHaveBeenCalledWith(
+        "org-1",
+        expect.objectContaining({ search: "run-abc" }),
+        undefined,
       );
     } finally {
       await close(server);

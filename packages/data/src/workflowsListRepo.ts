@@ -65,7 +65,7 @@ export type WorkflowListFilters = {
  * containing a literal `%` isn't treated as a wildcard. The term is already
  * parameter-bound by drizzle (no SQL injection); this is match-correctness only.
  */
-function escapeLikePattern(value: string): string {
+export function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 

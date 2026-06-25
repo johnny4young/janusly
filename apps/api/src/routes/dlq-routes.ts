@@ -87,6 +87,11 @@ export const dlqRoutes: Route[] = [
       const ownerParam = url.searchParams.get("owner");
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const pageSize = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
+      // Optional `?search=` substring over node id / run id / error message
+      // (case-insensitive, applied server-side before the page cap). Length-
+      // guarded (≤100) to bound the ILIKE pattern, mirroring the Flows `?q=`.
+      const searchParam = url.searchParams.get("search")?.trim();
+      const search = searchParam && searchParam.length > 0 && searchParam.length <= 100 ? searchParam : undefined;
 
       if (status && !isDeadLetterStatus(status)) {
         return sendJson(res, { error: "Invalid DLQ status" }, 400);
@@ -112,6 +117,7 @@ export const dlqRoutes: Route[] = [
             status,
             owner,
             severity: severity ? (severity as RecoveryItemSeverity) : undefined,
+            search,
             sort,
             cursor,
           },
@@ -142,6 +148,11 @@ export const dlqRoutes: Route[] = [
       const ownerParam = url.searchParams.get("owner");
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
       const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
+      // Optional `?search=` substring over node id / run id / error message,
+      // symmetric with `/dlq/queue` (and available to the MCP `dlq.list`
+      // consumer). Length-guarded (≤100) to bound the ILIKE pattern.
+      const searchParam = url.searchParams.get("search")?.trim();
+      const search = searchParam && searchParam.length > 0 && searchParam.length <= 100 ? searchParam : undefined;
 
       if (id) {
         const item = await getDeadLetter(auth.orgId, id);
@@ -167,6 +178,7 @@ export const dlqRoutes: Route[] = [
           status,
           owner,
           severity: severity ? (severity as RecoveryItemSeverity) : undefined,
+          search,
           sort: sort && isRecoveryQueueSort(sort) ? sort : undefined,
           limit,
         }),

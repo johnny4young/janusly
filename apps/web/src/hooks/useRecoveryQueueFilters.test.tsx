@@ -105,6 +105,9 @@ function Harness() {
       <button data-testid="set-sev-p1" onClick={() => f.setSeverityFilter('p1')} />
       <button data-testid="set-sort-severity" onClick={() => f.setSortKey('severity')} />
       <button data-testid="set-sort-oldest" onClick={() => f.setSortKey('oldest')} />
+      <span data-testid="search">{f.searchInput}</span>
+      <button data-testid="set-search" onClick={() => f.setSearchInput('run-7')} />
+      <button data-testid="clear-search" onClick={() => f.setSearchInput('')} />
     </div>
   )
 }
@@ -377,5 +380,42 @@ describe('useRecoveryQueueFilters', () => {
     render(<Harness />)
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('open'))
     expect(screen.getByTestId('counts')).toHaveTextContent('0/0/0/0')
+  })
+
+  it('debounces the search box and sends the search= param, resetting to page 1', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(lastQueueParams()).not.toBeNull())
+    fireEvent.click(screen.getByTestId('set-search'))
+    // The raw input updates immediately; the server param follows after debounce.
+    expect(screen.getByTestId('search')).toHaveTextContent('run-7')
+    await waitFor(() => expect(lastQueueParams()?.get('search')).toBe('run-7'))
+    // A search change resets pagination to page 1 (no cursor on the refetch).
+    expect(lastQueueParams()?.get('cursor')).toBeNull()
+  })
+
+  it('refetches without search= when the search box is cleared', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(lastQueueParams()).not.toBeNull())
+    fireEvent.click(screen.getByTestId('set-search'))
+    await waitFor(() => expect(lastQueueParams()?.get('search')).toBe('run-7'))
+    fireEvent.click(screen.getByTestId('clear-search'))
+    await waitFor(() => expect(lastQueueParams()?.get('search')).toBeNull())
+  })
+
+  it('persists the debounced search term', async () => {
+    render(<Harness />)
+    await waitFor(() => expect(lastQueueParams()).not.toBeNull())
+    fireEvent.click(screen.getByTestId('set-search'))
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(FILTERS_KEY) ?? '{}')
+      expect(stored.search).toBe('run-7')
+    })
+  })
+
+  it('restores a persisted search term on mount and sends it on the first fetch', async () => {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ search: 'persisted-term' }))
+    render(<Harness />)
+    await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('persisted-term'))
+    expect(lastQueueParams()?.get('search')).toBe('persisted-term')
   })
 })

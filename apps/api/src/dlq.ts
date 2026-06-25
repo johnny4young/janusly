@@ -12,7 +12,8 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, recoveryItems, workflows } from "@janusly/db";
-import { eq, desc, asc, and, or, lt, gt, isNull, count, sql, type SQL } from "drizzle-orm";
+import { eq, desc, asc, and, or, lt, gt, ilike, isNull, count, sql, type SQL } from "drizzle-orm";
+import { escapeLikePattern } from "@janusly/data";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
 /** Closed enum of DLQ row statuses. */
@@ -144,6 +145,10 @@ export type RecoveryQueueQuery = {
   status?: string | null;
   owner?: string | null;
   severity?: RecoveryItemSeverity | null;
+  /** Case-insensitive substring matched against the dead letter's node id, run
+   *  id, or error message (`error_json->>'message'`). Applied with the other
+   *  filters BEFORE the cap, so a match older than the newest page surfaces. */
+  search?: string | null;
   sort?: RecoveryQueueSort;
   limit?: number;
   /** Decoded keyset position (from {@link decodeRecoveryQueueCursor}). When set,
@@ -229,6 +234,20 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
   if (isDeadLetterStatus(query.status)) filters.push(eq(deadLetters.status, query.status));
   if (query.owner) filters.push(eq(recoveryItems.owner, query.owner));
   if (query.severity) filters.push(eq(recoveryItems.severity, query.severity));
+  if (query.search) {
+    // Case-insensitive substring over the dead letter's node id, run id, or
+    // error message. LIKE metacharacters are escaped so the term matches
+    // literally; the term is parameter-bound by drizzle (no injection). Applied
+    // with the other filters → before the cap, ANDed into the org-scoped WHERE.
+    const pattern = `%${escapeLikePattern(query.search)}%`;
+    filters.push(
+      or(
+        ilike(deadLetters.nodeId, pattern),
+        ilike(deadLetters.runId, pattern),
+        ilike(sql`${deadLetters.errorJson}->>'message'`, pattern),
+      )!,
+    );
+  }
   if (query.cursor) {
     const keyset = recoveryQueueKeysetPredicate(query.sort ?? "newest", query.cursor);
     if (keyset) filters.push(keyset);
