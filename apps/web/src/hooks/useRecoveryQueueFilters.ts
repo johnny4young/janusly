@@ -80,6 +80,12 @@ export function toSortKey(value: string): SortKey {
   return 'newest'
 }
 
+/** Coerce an arbitrary stored value into a bounded search term (≤100 chars, the
+ *  server's cap). A non-string degrades to the empty term. */
+function toSearchTerm(value: unknown): string {
+  return typeof value === 'string' ? value.slice(0, 100) : ''
+}
+
 /** Coerce an arbitrary value into an `OwnerScope`, defaulting to `'all'`. */
 function toOwnerScope(value: string): OwnerScope {
   return value === 'mine' ? 'mine' : 'all'
@@ -99,6 +105,7 @@ type PersistedFilters = {
   ownerScope: OwnerScope
   severityFilter: SeverityFilter
   sortKey: SortKey
+  search: string
 }
 
 /** Read + coercion-validate the persisted filters, falling back to the
@@ -106,7 +113,7 @@ type PersistedFilters = {
  *  corrupt storage. Defensive about `window.localStorage` (private mode, SSR,
  *  jsdom) mirroring `auth.ts`. */
 function readPersistedFilters(): PersistedFilters {
-  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all', sortKey: 'newest' }
+  const fallback: PersistedFilters = { status: 'open', ownerScope: 'all', severityFilter: 'all', sortKey: 'newest', search: '' }
   const storage = getLocalStorage()
   if (!storage) return fallback
   try {
@@ -118,6 +125,7 @@ function readPersistedFilters(): PersistedFilters {
       ownerScope: toOwnerScope(String(parsed.ownerScope ?? '')),
       severityFilter: toSeverityFilter(String(parsed.severityFilter ?? '')),
       sortKey: toSortKey(String(parsed.sortKey ?? '')),
+      search: toSearchTerm(parsed.search),
     }
   } catch {
     return fallback
@@ -182,12 +190,14 @@ function buildQueuePath(args: {
   ownerScope: OwnerScope
   severityFilter: SeverityFilter
   sortKey: SortKey
+  search: string
   cursor: string | null
 }): string {
   const params = new URLSearchParams()
   if (args.status !== 'all') params.set('status', args.status)
   if (args.ownerScope === 'mine') params.set('owner', 'me')
   if (args.severityFilter !== 'all') params.set('severity', args.severityFilter)
+  if (args.search) params.set('search', args.search)
   params.set('sort', args.sortKey)
   params.set('limit', String(RECOVERY_QUEUE_PAGE_SIZE))
   if (args.cursor) params.set('cursor', args.cursor)
@@ -206,6 +216,11 @@ export type RecoveryQueueFilters = {
   setSeverityFilter: (value: SeverityFilter) => void
   sortKey: SortKey
   setSortKey: (value: SortKey) => void
+  /** Raw (un-debounced) value of the search box — bind the `<input>` to this.
+   *  Its debounced mirror drives the server fetch (substring over node id / run
+   *  id / error message), so typing doesn't issue a request per keystroke. */
+  searchInput: string
+  setSearchInput: (value: string) => void
   /** The recovery-queue rows loaded so far — the first keyset page plus any
    *  appended via {@link loadMore}. Server-filtered by status ∩ owner ∩ severity
    *  and ordered by `sortKey` before the page cap, so a matching row surfaces
@@ -254,6 +269,10 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [ownerScope, setOwnerScope] = useState<OwnerScope>(initialFilters.ownerScope)
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(initialFilters.severityFilter)
   const [sortKey, setSortKey] = useState<SortKey>(initialFilters.sortKey)
+  // Raw search box value vs the debounced term that drives the server fetch.
+  // Both seed from the persisted term so the first load already carries it.
+  const [searchInput, setSearchInput] = useState<string>(initialFilters.search)
+  const [search, setSearch] = useState<string>(initialFilters.search)
   const [rows, setRows] = useState<DeadLetter[]>([])
   const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
@@ -276,7 +295,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     let cancelled = false
     requestEpochRef.current += 1
     setLoading(true)
-    api(buildQueuePath({ status, ownerScope, severityFilter, sortKey, cursor: null }))
+    api(buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, cursor: null }))
       .then((resp) => {
         if (cancelled) return
         const page = resp as RecoveryQueuePageResponse
@@ -295,7 +314,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     return () => {
       cancelled = true
     }
-  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey])
+  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey, search])
 
   // Org-wide status counts for the mini-grid. Keyed ONLY on platformVersion +
   // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
@@ -331,7 +350,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     setLoadingMore(true)
     try {
       const page = (await api(
-        buildQueuePath({ status, ownerScope, severityFilter, sortKey, cursor }),
+        buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, cursor }),
       )) as RecoveryQueuePageResponse
       if (epoch !== requestEpochRef.current) return
       setRows((prev) => [...prev, ...(Array.isArray(page?.items) ? page.items : [])])
@@ -342,15 +361,25 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     } finally {
       setLoadingMore(false)
     }
-  }, [cursor, loadingMore, status, ownerScope, severityFilter, sortKey])
+  }, [cursor, loadingMore, status, ownerScope, severityFilter, sortKey, search])
 
-  // Persist the operator's filter + sort selections so they survive navigation
-  // away from the Runs view and a tab reload. Mirrors the localStorage
-  // posture used for the active org / locale; the no-op write on mount is
-  // harmless.
+  // Settle `searchInput` into the debounced `search` ~300ms after the last
+  // keystroke so typing doesn't fire a request per character (mirrors the
+  // Flows-list search debounce). The fetch effect keys off `search`, so a
+  // settled change resets pagination to page 1. The term is trimmed + capped to
+  // the server's ≤100 bound here so the persisted + sent value is normalized.
   useEffect(() => {
-    writePersistedFilters({ status, ownerScope, severityFilter, sortKey })
-  }, [status, ownerScope, severityFilter, sortKey])
+    const id = setTimeout(() => setSearch(searchInput.trim().slice(0, 100)), 300)
+    return () => clearTimeout(id)
+  }, [searchInput])
+
+  // Persist the operator's filter + sort + search selections so they survive
+  // navigation away from the Runs view and a tab reload. Mirrors the
+  // localStorage posture used for the active org / locale; the no-op write on
+  // mount is harmless. Persists the debounced `search` (trimmed/capped).
+  useEffect(() => {
+    writePersistedFilters({ status, ownerScope, severityFilter, sortKey, search })
+  }, [status, ownerScope, severityFilter, sortKey, search])
 
   // Hydrate the recovery overlay from each row's inline `recovery` field — one
   // cap-correct source, no second fetch. Rows with no recovery item (e.g. a
@@ -393,6 +422,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     setSeverityFilter,
     sortKey,
     setSortKey,
+    searchInput,
+    setSearchInput,
     filtered: rows,
     recoveryFilterLoading: loading,
     recoveryByDeadLetterId,
