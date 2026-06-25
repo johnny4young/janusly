@@ -129,6 +129,8 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     setSeverityFilter,
     sortKey,
     setSortKey,
+    searchInput,
+    setSearchInput,
     filtered,
     recoveryFilterLoading,
     recoveryByDeadLetterId,
@@ -308,6 +310,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         <span><strong>{counts.resolved}</strong>{t('dlq.statResolved')}</span>
       </div>
 
+      <label className="field-label" htmlFor="dlq-search">{t('dlq.search.label')}</label>
+      <input
+        id="dlq-search"
+        type="search"
+        className="text-field"
+        value={searchInput}
+        onChange={event => setSearchInput(event.target.value)}
+        placeholder={t('dlq.search.placeholder') as string}
+        data-testid="dlq-search"
+      />
+
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>
       <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
         {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never) as string}</option>)}
@@ -405,25 +418,31 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           <EmptyState
             icon={<CircleCheck />}
             kicker={t(
-              severityFilter !== 'all'
-                ? 'emptyState.dlq.severity.kicker'
-                : ownerScope === 'mine'
-                  ? 'emptyState.dlq.mine.kicker'
-                  : 'emptyState.dlq.kicker',
+              searchInput.trim() !== ''
+                ? 'emptyState.dlq.search.kicker'
+                : severityFilter !== 'all'
+                  ? 'emptyState.dlq.severity.kicker'
+                  : ownerScope === 'mine'
+                    ? 'emptyState.dlq.mine.kicker'
+                    : 'emptyState.dlq.kicker',
             ) as string}
             body={t(
-              severityFilter !== 'all'
-                ? 'emptyState.dlq.severity.body'
-                : ownerScope === 'mine'
-                  ? 'emptyState.dlq.mine.body'
-                  : 'emptyState.dlq.body',
+              searchInput.trim() !== ''
+                ? 'emptyState.dlq.search.body'
+                : severityFilter !== 'all'
+                  ? 'emptyState.dlq.severity.body'
+                  : ownerScope === 'mine'
+                    ? 'emptyState.dlq.mine.body'
+                    : 'emptyState.dlq.body',
             ) as string}
             testId={
-              severityFilter !== 'all'
-                ? 'dlq-empty-severity'
-                : ownerScope === 'mine'
-                  ? 'dlq-empty-mine'
-                  : 'dlq-empty'
+              searchInput.trim() !== ''
+                ? 'dlq-empty-search'
+                : severityFilter !== 'all'
+                  ? 'dlq-empty-severity'
+                  : ownerScope === 'mine'
+                    ? 'dlq-empty-mine'
+                    : 'dlq-empty'
             }
           />
         )}

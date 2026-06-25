@@ -97,6 +97,16 @@ function dlqMock(rows: DeadLetter[]) {
     if (params.get('owner') === 'me') out = out.filter((r) => r.recovery?.owner === 'dev-user')
     const severity = params.get('severity')
     if (severity) out = out.filter((r) => r.recovery?.severity === severity)
+    const search = params.get('search')
+    if (search) {
+      const q = search.toLowerCase()
+      out = out.filter(
+        (r) =>
+          r.nodeId.toLowerCase().includes(q) ||
+          r.runId.toLowerCase().includes(q) ||
+          String((r.errorJson as { message?: string })?.message ?? '').toLowerCase().includes(q),
+      )
+    }
     if (params.get('sort') === 'severity') {
       out = [...out].sort(
         (a, b) => (SEVERITY_RANK[a.recovery?.severity ?? ''] ?? 4) - (SEVERITY_RANK[b.recovery?.severity ?? ''] ?? 4),
@@ -636,5 +646,41 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
       expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
       expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 replayed, 1 failed')
     })
+  })
+})
+
+describe('<DeadLettersPanel /> — search', () => {
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    localStorage.clear()
+    vi.mocked(api).mockClear()
+    vi.mocked(api).mockImplementation(defaultApiMock)
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('filters the queue by the search box (server honors ?search=)', async () => {
+    const rows = [mockDeadLetter('alpha'), mockDeadLetter('beta')]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-alpha')
+    expect(screen.getByTestId('dlq-row-beta')).toBeInTheDocument()
+
+    // Typing settles through the debounce, then the server filters by `search`.
+    fireEvent.change(screen.getByTestId('dlq-search'), { target: { value: 'alpha' } })
+    await waitFor(() => {
+      expect(lastDlqParams()?.get('search')).toBe('alpha')
+      expect(screen.queryByTestId('dlq-row-beta')).toBeNull()
+    })
+    expect(screen.getByTestId('dlq-row-alpha')).toBeInTheDocument()
+  })
+
+  it('shows the search empty state when no failure matches', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('alpha')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-alpha')
+    fireEvent.change(screen.getByTestId('dlq-search'), { target: { value: 'zzz-no-match' } })
+    await waitFor(() => expect(screen.getByTestId('dlq-empty-search')).toBeInTheDocument())
+    expect(screen.queryByTestId('dlq-row-alpha')).toBeNull()
+    expect(screen.queryByTestId('dlq-empty')).toBeNull()
   })
 })
