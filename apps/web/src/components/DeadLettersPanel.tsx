@@ -92,6 +92,22 @@ function isBulkResolveResult(value: unknown): value is BulkResolveResult {
     && Array.isArray(candidate.errors)
 }
 
+/** Partial-success envelope returned by POST /dlq/bulk-replay (sibling of
+ *  BulkResolveResult, but counts replayed rows rather than resolved ones). */
+type BulkReplayResult = {
+  replayed: number
+  failed: number
+  errors: Array<{ deadLetterId: string; error: string }>
+}
+
+function isBulkReplayResult(value: unknown): value is BulkReplayResult {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<BulkReplayResult>
+  return typeof candidate.replayed === 'number'
+    && typeof candidate.failed === 'number'
+    && Array.isArray(candidate.errors)
+}
+
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string) => void
@@ -196,6 +212,38 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       exitSelection()
     } catch (error) {
       addToast(tApiError(error) || (t('dlq.bulkResolveFailed') as string), 'error')
+    }
+  }
+
+  // Re-run every ticked dead letter in one request — the retry-many sibling of
+  // bulkResolve. Same 200 partial-success envelope: on partial failure keep the
+  // failed rows ticked so they stay visible for another pass; on full success
+  // exit selection. Only `open` rows are replayable server-side, so an
+  // already-replayed/resolved row in the selection comes back in the failed set.
+  const bulkReplay = async () => {
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    try {
+      const result = await api('/dlq/bulk-replay', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
+      if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
+
+      if (result.replayed > 0) {
+        bumpPlatformVersion()
+        refreshQueue()
+        void onRefresh()
+      }
+
+      if (result.failed > 0) {
+        const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
+        setSelectedIds(new Set(failedIds))
+        addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }) as string, 'error')
+        return
+      }
+
+      addToast(t('dlq.bulkReplaySuccess', { count: result.replayed }) as string, 'success')
+      exitSelection()
+    } catch (error) {
+      addToast(tApiError(error) || (t('dlq.bulkReplayFailed') as string), 'error')
     }
   }
 
@@ -329,9 +377,19 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             <>
               <span className="we-list-bulk-bar__divider" aria-hidden="true" />
               <span className="we-list-bulk-bar__count">{t('dlq.bulkSelectedCount', { count: selectedIds.size })}</span>
+              {/* Replay (recover) is the primary path; Resolve (accept the loss)
+                  is the secondary dismiss. Both act on the same ticked set. */}
               <button
                 type="button"
                 className="small-command small-command--primary"
+                onClick={() => { void bulkReplay() }}
+                data-testid="dlq-bulk-replay"
+              >
+                {t('dlq.bulkReplayCta')}
+              </button>
+              <button
+                type="button"
+                className="small-command"
                 onClick={() => { void bulkResolve() }}
                 data-testid="dlq-bulk-resolve"
               >
