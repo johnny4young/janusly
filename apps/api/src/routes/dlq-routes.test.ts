@@ -40,9 +40,10 @@ vi.mock("../dlq", async (importOriginal) => {
     listRecoveryQueue: vi.fn(),
     queryRecoveryQueuePage: vi.fn(),
     countDeadLettersByStatus: vi.fn(),
-    // Bulk-resolve writers (the loop touches these per entry).
+    // Bulk-resolve + bulk-replay writers (the loops touch these per entry).
     getDeadLetter: vi.fn(),
     markDeadLetterResolved: vi.fn(),
+    markDeadLetterReplayed: vi.fn(),
   };
 });
 
@@ -53,9 +54,22 @@ vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
   createRecoveryItemForDeadLetter: vi.fn(),
 }));
 
+// Bulk-replay drives the shared DLQReplayAdapter instance created at module
+// load; stub it with a REAL class so `new DLQReplayAdapter()` constructs
+// cleanly (vitest `Reflect.construct`s a `new`-ed mock — an arrow factory
+// would throw "not a constructor"). Each instance's replayDeadLetter is the
+// shared hoisted mock we assert on / make reject.
+const { replayDeadLetterMock } = vi.hoisted(() => ({ replayDeadLetterMock: vi.fn() }));
+vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
+  DLQReplayAdapter: class {
+    replayDeadLetter = replayDeadLetterMock;
+    replayDeadLetterAsValidation = vi.fn();
+  },
+}));
+
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
-import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
+import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
 import { autoResolveRecoveryItemFromReplay } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { createApiServer } from "../server";
@@ -69,6 +83,7 @@ const queryRecoveryQueuePageMock = vi.mocked(queryRecoveryQueuePage);
 const countDeadLettersByStatusMock = vi.mocked(countDeadLettersByStatus);
 const getDeadLetterMock = vi.mocked(getDeadLetter);
 const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
+const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
 const autoResolveMock = vi.mocked(autoResolveRecoveryItemFromReplay);
 
@@ -470,6 +485,163 @@ describe("POST /dlq/bulk-resolve", () => {
       });
       expect(response.status).toBe(400);
       expect(markDeadLetterResolvedMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/bulk-replay", () => {
+  // An open DLQ row whose stored JSONs pass the real Workflow/Node schemas, so
+  // the route reaches the (mocked) replay adapter instead of erroring at parse.
+  const openItem = (id: string, status = "open") => ({
+    id,
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n",
+    status,
+    workflowJson: { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "noop", config: {} }], edges: [] },
+    nodeJson: { id: "n", type: "noop", config: {} },
+  });
+
+  it("declares editor role + dlq.replay permission on the registry entry", () => {
+    const route = findRoute("POST", "/dlq/bulk-replay");
+    expect(route.role).toBe("editor");
+    expect(route.permission).toBe("dlq.replay");
+  });
+
+  it("replays every listed open entry + audits each as a bulk dlq.replayed", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => openItem(id) as never);
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: ["dl-1", "dl-2"] }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ replayed: 2, failed: 0, errors: [] });
+      // Each id is replayed via the shared adapter, marked replayed, audited
+      // (bulk flag), and its recovery item auto-closed.
+      expect(replayDeadLetterMock).toHaveBeenCalledTimes(2);
+      expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-1");
+      expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-2");
+      expect(auditActionMock).toHaveBeenCalledTimes(2);
+      expect(auditActionMock).toHaveBeenCalledWith(
+        expect.anything(),
+        "dlq.replayed",
+        expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: expect.objectContaining({ bulk: true }) }),
+      );
+      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", actor: "user-1" }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("reports a not-found / cross-org id in errors without aborting the batch (partial success)", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    // dl-1 exists in the org; ghost is not found (cross-org / bogus → null).
+    getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? (openItem(id) as never) : (null as never)));
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: ["dl-1", "ghost"] }),
+      });
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as { replayed: number; failed: number; errors: Array<{ deadLetterId: string }> };
+      expect(payload.replayed).toBe(1);
+      expect(payload.failed).toBe(1);
+      expect(payload.errors[0]?.deadLetterId).toBe("ghost");
+      // The unreplayable id never reaches the replay adapter.
+      expect(replayDeadLetterMock).toHaveBeenCalledTimes(1);
+      expect(markDeadLetterReplayedMock).toHaveBeenCalledTimes(1);
+      expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-1");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("skips a non-open entry (status guard) and never replays it", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    // dl-1 is open; dl-2 was already replayed by another path → must be skipped.
+    getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) =>
+      id === "dl-2" ? (openItem(id, "replayed") as never) : (openItem(id) as never),
+    );
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: ["dl-1", "dl-2"] }),
+      });
+      expect(response.status).toBe(200);
+      const payload = (await response.json()) as { replayed: number; failed: number; errors: Array<{ deadLetterId: string; error: string }> };
+      expect(payload.replayed).toBe(1);
+      expect(payload.failed).toBe(1);
+      expect(payload.errors[0]).toEqual({ deadLetterId: "dl-2", error: "DLQ entry already replayed" });
+      // Only the open row reaches the adapter — no double-enqueue on dl-2.
+      expect(replayDeadLetterMock).toHaveBeenCalledTimes(1);
+      expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-1");
+      expect(markDeadLetterReplayedMock).not.toHaveBeenCalledWith("org-1", "dl-2");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an empty or missing deadLetterIds array with 400", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/bulk-replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: [] }),
+      });
+      expect(response.status).toBe(400);
+      expect(getDeadLetterMock).not.toHaveBeenCalled();
+      expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects an over-cap batch with 400", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const tooMany = Array.from({ length: 101 }, (_, i) => `dl-${i}`);
+      const response = await fetch(`${baseUrl}/dlq/bulk-replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterIds: tooMany }),
+      });
+      expect(response.status).toBe(400);
+      expect(replayDeadLetterMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }

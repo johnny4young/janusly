@@ -84,6 +84,10 @@ function dlqMock(rows: DeadLetter[]) {
       const ids = JSON.parse(String(options?.body ?? '{}')).deadLetterIds as string[] | undefined
       return { resolved: ids?.length ?? 0, failed: 0, errors: [] }
     }
+    if (path === '/dlq/bulk-replay') {
+      const ids = JSON.parse(String(options?.body ?? '{}')).deadLetterIds as string[] | undefined
+      return { replayed: ids?.length ?? 0, failed: 0, errors: [] }
+    }
     if (path.startsWith('/dlq/counts')) return countsFromRows(rows)
     if (!path.startsWith('/dlq/queue')) return { items: [], clusters: [], runs: [], proposals: [] }
     const params = new URL(path, 'http://x').searchParams
@@ -560,5 +564,77 @@ describe('<DeadLettersPanel /> — sort', () => {
     fireEvent.click(screen.getByTestId('dlq-select-all'))
     expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('3 selected')
     expect(screen.getByTestId('dlq-bulk-resolve')).toBeInTheDocument()
+  })
+})
+
+describe('<DeadLettersPanel /> — bulk replay', () => {
+  beforeEach(() => {
+    __resetBumpCoalesceForTests()
+    localStorage.clear()
+    vi.mocked(api).mockClear()
+    vi.mocked(api).mockImplementation(defaultApiMock)
+    useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
+  })
+
+  it('offers Replay selected alongside Resolve selected once a row is ticked', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    // Nothing ticked yet → neither bulk action is shown.
+    expect(screen.queryByTestId('dlq-bulk-replay')).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
+    expect(screen.getByTestId('dlq-bulk-replay')).toBeInTheDocument()
+    expect(screen.getByTestId('dlq-bulk-resolve')).toBeInTheDocument()
+  })
+
+  it('bulk-replays the ticked rows in one /dlq/bulk-replay request', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b'), mockDeadLetter('c')]
+    vi.mocked(api).mockImplementation(dlqMock(rows))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    // Enter selection mode → per-row checkboxes appear; tick two rows.
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
+
+    fireEvent.click(screen.getByTestId('dlq-bulk-replay'))
+    await waitFor(() => {
+      const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-replay')
+      expect(call).toBeTruthy()
+      expect(JSON.parse(String((call![1] as RequestInit).body))).toEqual({ deadLetterIds: ['a', 'b'] })
+    })
+    // A successful bulk replay exits selection mode → the bar disappears.
+    await waitFor(() => expect(screen.queryByTestId('dlq-bulk-bar')).not.toBeInTheDocument())
+  })
+
+  it('keeps failed rows selected and warns on a partial-success bulk replay', async () => {
+    const rows = [mockDeadLetter('a'), mockDeadLetter('b')]
+    vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/dlq/bulk-replay') {
+        expect(JSON.parse(String(options?.body))).toEqual({ deadLetterIds: ['a', 'b'] })
+        // dl-b was already replayed by another path → reported in the failed set.
+        return { replayed: 1, failed: 1, errors: [{ deadLetterId: 'b', error: 'DLQ entry already replayed' }] }
+      }
+      return dlqMock(rows)(path, options)
+    })
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    await screen.findByTestId('dlq-row-a')
+
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+    fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
+    fireEvent.click(screen.getByTestId('dlq-select-row-b'))
+    fireEvent.click(screen.getByTestId('dlq-bulk-replay'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')
+      expect(screen.getByTestId('dlq-select-row-a')).not.toBeChecked()
+      expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
+      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 replayed, 1 failed')
+    })
   })
 })

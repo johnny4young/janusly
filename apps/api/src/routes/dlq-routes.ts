@@ -398,6 +398,75 @@ export const dlqRoutes: Route[] = [
 
       return sendJson(res, { replayed, failed: errors.length, errors });
     } },
+  // Bulk replay across an arbitrary multi-select — the multi-select
+  // equivalent of POST /dlq/replay, and the retry-many sibling of
+  // /dlq/bulk-resolve. Unlike /dlq/cluster-apply it does NOT require the
+  // selected rows to share an error-cluster signature, so an operator can
+  // replay a mixed batch ("upstream is back — retry all of these") in one
+  // request. Mirrors bulk-resolve's loop + 200 partial-success envelope; each
+  // replayed row reuses the `dlq.replayed` audit action (metadata.bulk flags
+  // the batch). Only `open` rows are replayed — an already-replayed/resolved
+  // selection is reported in `errors` so a large batch can't double-enqueue
+  // downstream work. Carries `dlq.replay` permission to match single replay.
+  { method: "POST", match: "/dlq/bulk-replay", role: "editor", permission: "dlq.replay",
+    handler: async ({ req, res, auth }) => {
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const idsRaw = body.deadLetterIds;
+      if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
+        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+      }
+      if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
+        return sendJson(res, { error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}` }, 400);
+      }
+      const deadLetterIds: string[] = [];
+      for (const candidate of idsRaw) {
+        if (typeof candidate !== "string" || candidate.length === 0) {
+          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+        }
+        deadLetterIds.push(candidate);
+      }
+
+      const errors: Array<{ deadLetterId: string; error: string }> = [];
+      let replayed = 0;
+      const total = deadLetterIds.length;
+
+      for (let i = 0; i < deadLetterIds.length; i += 1) {
+        const id = deadLetterIds[i]!;
+        const item = await getDeadLetter(auth.orgId, id);
+        if (!item) {
+          errors.push({ deadLetterId: id, error: "DLQ entry not found" });
+          continue;
+        }
+        // Only open entries are replayable. Re-firing an already-replayed row
+        // across a batch would double-enqueue downstream work, so skip-and-report
+        // instead (mirrors /dlq/cluster-apply's status guard).
+        if (item.status !== "open") {
+          errors.push({ deadLetterId: id, error: `DLQ entry already ${item.status}` });
+          continue;
+        }
+        try {
+          await dlqReplay.replayDeadLetter({
+            runId: item.runId,
+            workflow: WorkflowSchema.parse(item.workflowJson),
+            node: NodeSchema.parse(item.nodeJson),
+          });
+          await markDeadLetterReplayed(auth.orgId, id);
+          await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: id, metadata: { bulk: true, sequenceIndex: i, total } });
+          // Auto-close the recovery_item linked to this DLQ row, if any —
+          // mirrors single /dlq/replay (no cluster-apply ensure-then-close).
+          await autoResolveRecoveryItemFromReplay({
+            orgId: auth.orgId,
+            deadLetterId: id,
+            actor: auth.userId,
+          });
+          replayed += 1;
+        } catch (err) {
+          errors.push({ deadLetterId: id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      return sendJson(res, { replayed, failed: errors.length, errors });
+    } },
   { method: "POST", match: "/dlq/replay", role: "editor", permission: "dlq.replay",
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
