@@ -38,15 +38,23 @@ vi.mock('./memory', () => ({
   summarizeMemory: vi.fn(() => []),
 }))
 
+vi.mock('./agent-memory', () => ({
+  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: '', count: 0 }),
+  recordAgentEpisode: vi.fn().mockResolvedValue(undefined),
+}))
+
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
 import { verifyResumeToken } from './secrets'
 import { setMailerForTests, type MailerProvider } from './mailer'
+import { recallAgentEpisodes, recordAgentEpisode } from './agent-memory'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 const appendEventMock = vi.mocked(appendEvent)
+const recallAgentEpisodesMock = vi.mocked(recallAgentEpisodes)
+const recordAgentEpisodeMock = vi.mocked(recordAgentEpisode)
 
 const baseCtx: Omit<NodeContext, 'config'> = {
   runId: 'run-1',
@@ -61,6 +69,10 @@ beforeEach(() => {
   fetchHttpTargetMock.mockReset()
   consumeStreamToPreviewMock.mockReset()
   appendEventMock.mockReset()
+  // mockClear (not mockReset) so the default resolved values from the mock
+  // factory survive across cases.
+  recallAgentEpisodesMock.mockClear()
+  recordAgentEpisodeMock.mockClear()
   setMailerForTests(null)
 })
 
@@ -367,6 +379,30 @@ describe('agent node — dryRun gating', () => {
       'tool.dry_run.skipped',
       expect.objectContaining({ tool: 'email.send' }),
     )
+    // Write-back is gated off in dryRun so sandbox runs don't pollute memory.
+    expect(recordAgentEpisodeMock).not.toHaveBeenCalled()
+  })
+
+  it('records an episode on completion in production mode (rules planner skips recall)', async () => {
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: {
+        maxSteps: 1,
+        goal: 'uppercase the greeting',
+        tool: 'text.uppercase',
+        input: { value: 'hi' },
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(recordAgentEpisodeMock).toHaveBeenCalledTimes(1)
+    expect(recordAgentEpisodeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: 'org-1', runId: 'run-1', goal: 'uppercase the greeting', stepCount: 1 }),
+    )
+    // The deterministic rules planner ignores memory, so no recall/embedding fires.
+    expect(recallAgentEpisodesMock).not.toHaveBeenCalled()
   })
 })
 

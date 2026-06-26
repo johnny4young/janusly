@@ -358,7 +358,8 @@ Implementation status:
 - ENG-115 shipped the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, scrubbed content, embedding, provider/model/dimension metadata, bounded metadata jsonb, created_at, retain_until`, plus `commitMemory(entry)`, `recallMemory({ orgId, kind?, query })`, `deleteExpiredMemory({ orgId? })`, and purge helpers.
 - ENG-116 feeds recalled recovery memory into `/ai/patch-workflow` via `extraContext.memorySnippets`, with the same data-framing / suspicion-framing posture as other AI prompts.
 - ENG-254 shipped the explicit memory tools `vector.search` / `vector.upsert` (`packages/engine/src/vector-tools.ts`) — thin wrappers over `recallMemory` / `commitMemory` that expose the durable substrate to any workflow `tool` node under a dedicated `workflow_vector` kind, honoring the same two-flag consent.
-- Still future: durable recall wired into the generic `agent` / `multi_agent` planner prompts (the live loop still reads only current-run events), export UI/API, and provider implementations beyond the v1 Ollama embedding path.
+- ENG-255 shipped durable cross-run episodic recall for the `agent` / `multi_agent` loop (`packages/engine/src/agent-memory.ts`): on completion the loop commits an `agent_episode` (goal + outcome) and the LLM planner recalls semantically-similar prior episodes into its prompt — the same two-flag consent + DATA-framing posture as the recovery/generation recall paths. This closes ENG-025's last open thread.
+- Still future: export UI/API and provider implementations beyond the v1 Ollama embedding path.
 
 ### 7.2 RL — make it actually decide
 

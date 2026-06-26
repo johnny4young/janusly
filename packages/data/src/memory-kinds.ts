@@ -33,6 +33,10 @@ export const MEMORY_KINDS = [
   // workflow tools — a dedicated namespace kept apart from the internal
   // recovery kinds above.
   "workflow_vector",
+  // Cross-run episodic memory written + recalled by the `agent` / `multi_agent`
+  // loop (goal + outcome of a completed agent run) so the planner can learn
+  // from similar past episodes.
+  "agent_episode",
 ] as const;
 
 export type MemoryKind = (typeof MEMORY_KINDS)[number];
