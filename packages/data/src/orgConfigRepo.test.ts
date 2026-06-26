@@ -89,10 +89,11 @@ describe("normalizeOrgConfigValue — memory.allowedKinds CSV validator", () => 
 
   it("accepts a single closed-enum kind", () => {
     expect(normalizeOrgConfigValue(def, "recovery_rationale")).toBe("recovery_rationale");
+    expect(normalizeOrgConfigValue(def, "workflow_vector")).toBe("workflow_vector");
   });
 
   it("accepts the full closed enum", () => {
-    const all = "recovery_rationale,run_summary,runbook_fragment,patch_rationale,generated_workflow";
+    const all = "recovery_rationale,run_summary,runbook_fragment,patch_rationale,generated_workflow,workflow_vector";
     expect(normalizeOrgConfigValue(def, all)).toBe(all);
   });
 
@@ -174,6 +175,8 @@ describe("normalizeOrgConfigValue — memory.retentionDaysByKind JSON validator"
     expect(() => normalizeOrgConfigValue(def, '{"patch_rationale":731}')).toThrow(/must be <=/);
     // generated_workflow max is 730 days
     expect(() => normalizeOrgConfigValue(def, '{"generated_workflow":731}')).toThrow(/must be <=/);
+    // workflow_vector max is 730 days
+    expect(() => normalizeOrgConfigValue(def, '{"workflow_vector":731}')).toThrow(/must be <=/);
   });
 
   it("accepts each kind at its per-kind maximum", () => {
@@ -182,6 +185,7 @@ describe("normalizeOrgConfigValue — memory.retentionDaysByKind JSON validator"
     expect(normalizeOrgConfigValue(def, '{"runbook_fragment":36500}')).toBeTruthy();
     expect(normalizeOrgConfigValue(def, '{"patch_rationale":730}')).toBeTruthy();
     expect(normalizeOrgConfigValue(def, '{"generated_workflow":730}')).toBeTruthy();
+    expect(normalizeOrgConfigValue(def, '{"workflow_vector":730}')).toBeTruthy();
   });
 });
 

@@ -21,6 +21,8 @@
 import { db, orgConfigs } from "@janusly/db";
 import { and, eq, inArray } from "drizzle-orm";
 
+import { MEMORY_KINDS, isMemoryKind } from "./memory-kinds";
+
 export type OrgConfigValueType = "string" | "number" | "boolean";
 export type OrgConfigSource = "default" | "env" | "tenant";
 
@@ -164,16 +166,9 @@ const ALLOWED_CATEGORIES = [
   "onboarding",
 ] as const;
 
-/** Closed enum of memory kinds eligible for persistence. Mirrors the memory
- *  policy's eligibility and retention tables. Used by `memory.allowedKinds`
- *  (CSV) and `memory.retentionDaysByKind` (JSON keys). */
-const MEMORY_KINDS = [
-  "recovery_rationale",
-  "run_summary",
-  "runbook_fragment",
-  "patch_rationale",
-  "generated_workflow",
-] as const;
+// `MEMORY_KINDS` + `isMemoryKind` are the single source of truth in
+// `./memory-kinds` (a leaf module shared with `memoryEntriesRepo` without an
+// import cycle). This layer owns only the config-validation MAXIMUM retention.
 
 /** Per-kind maximum retention in days from the memory policy. */
 const MEMORY_RETENTION_MAX_DAYS: Record<(typeof MEMORY_KINDS)[number], number> = {
@@ -183,11 +178,8 @@ const MEMORY_RETENTION_MAX_DAYS: Record<(typeof MEMORY_KINDS)[number], number> =
   runbook_fragment: 36_500,
   patch_rationale: 730,
   generated_workflow: 730,
+  workflow_vector: 730,
 };
-
-function isMemoryKind(value: string): value is (typeof MEMORY_KINDS)[number] {
-  return (MEMORY_KINDS as readonly string[]).includes(value);
-}
 
 function validateMemoryAllowedKinds(value: string | number | boolean): void {
   if (typeof value !== "string") throw new Error("memory.allowedKinds must be a string");
@@ -667,7 +659,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     key: "memory.allowedKinds",
     category: "memory",
     description:
-      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale, generated_workflow. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
+      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale, generated_workflow, workflow_vector. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
     allowEmpty: true,

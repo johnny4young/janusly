@@ -306,8 +306,8 @@ Pre-packaged connections (GitHub / Slack / Filesystem) remain a follow-up.
 | Node | Why |
 | ---- | --- |
 | `event_subscribe` | Subscribe to internal Janusly events (run completed, DLQ entry created, audit log) — enables workflow-of-workflows. External event triggers already exist separately. |
-| `vector_search` | RAG primitive. Query the org's vector store, return top-k. |
-| `vector_upsert` | Write to vector store from any context value. |
+| `vector_search` | RAG primitive. Query the org's vector store, return top-k. Shipped as `vector.search` (ENG-254). |
+| `vector_upsert` | Write to vector store from any context value. Shipped as `vector.upsert` (ENG-254). |
 | `db_query` | Execute parameterized SQL against an org-registered customer Postgres connection; v1 is Postgres-only through credential-backed `db.schema.describe` / `db.query.*` tools. |
 
 ### 6.4 Add (lower priority but distinctive)
@@ -357,7 +357,8 @@ Implementation status:
 - ENG-114 landed the privacy and retention policy first — see [`docs/memory-policy.md`](memory-policy.md) for the canonical doc covering eligibility, the two-flag opt-in consent model, per-kind retention, deletion/export, embedding provider posture, prompt-injection framing, the `org_configs.memory.*` catalog, audit actions, DPA language, and incident response.
 - ENG-115 shipped the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, scrubbed content, embedding, provider/model/dimension metadata, bounded metadata jsonb, created_at, retain_until`, plus `commitMemory(entry)`, `recallMemory({ orgId, kind?, query })`, `deleteExpiredMemory({ orgId? })`, and purge helpers.
 - ENG-116 feeds recalled recovery memory into `/ai/patch-workflow` via `extraContext.memorySnippets`, with the same data-framing / suspicion-framing posture as other AI prompts.
-- Still future: durable recall for generic `agent` / `multi_agent` planners, explicit memory nodes such as `vector_search` / `vector_upsert`, export UI/API, and provider implementations beyond the v1 Ollama embedding path.
+- ENG-254 shipped the explicit memory tools `vector.search` / `vector.upsert` (`packages/engine/src/vector-tools.ts`) — thin wrappers over `recallMemory` / `commitMemory` that expose the durable substrate to any workflow `tool` node under a dedicated `workflow_vector` kind, honoring the same two-flag consent.
+- Still future: durable recall wired into the generic `agent` / `multi_agent` planner prompts (the live loop still reads only current-run events), export UI/API, and provider implementations beyond the v1 Ollama embedding path.
 
 ### 7.2 RL — make it actually decide
 
@@ -420,7 +421,7 @@ The native tool catalog is the bridge between LLM-drafted workflows and useful b
 - `pdf.generate` (Markdown or sanitized HTML to PDF via `pdfkit` + `htmlparser2`; no Chromium or hosted renderer dependency).
 - `image.transform` (Sharp).
 - `db.schema.describe`, `db.query.read`, `db.query.write`, and `db.query.transaction` (Postgres-only v1; credential-backed, bounded, and approval-warned for writes).
-- `vector.search` / `vector.upsert` (§7.1).
+- `vector.search` / `vector.upsert` (§7.1) — shipped (ENG-254), backed by the `memory_entries` substrate under a `workflow_vector` kind.
 - `embedding.create`.
 
 **Layer 3: SaaS adapters** (lean on MCP §5.2).

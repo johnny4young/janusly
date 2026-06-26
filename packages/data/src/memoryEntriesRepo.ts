@@ -49,22 +49,18 @@ import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
 import { SENSITIVE_KEY_PATTERN } from "@janusly/shared/src/sensitive-keys";
 
 import { isMemoryAllowed } from "./memoryConsent";
+import { MEMORY_KINDS, isMemoryKind, type MemoryKind } from "./memory-kinds";
 import { getMemoryUsageRecorder, type MemoryUsageMetric } from "./memoryUsage";
 import { listOrgConfig, type OrgConfigEntry } from "./orgConfigRepo";
 import { withAuditTx } from "./audit-tx";
 
 // ─── Closed sets shared with the policy + catalog ───────────────────────────
 
-/** Memory kind closed enum from the canonical memory policy. */
-export const MEMORY_KINDS = [
-  "recovery_rationale",
-  "run_summary",
-  "runbook_fragment",
-  "patch_rationale",
-  "generated_workflow",
-] as const;
-
-export type MemoryKind = (typeof MEMORY_KINDS)[number];
+// The kind enum + guard are the single source of truth in `./memory-kinds`
+// (a leaf module, so `orgConfigRepo` can share it without an import cycle).
+// Re-exported here so `@janusly/data` consumers keep importing them from the repo.
+export { MEMORY_KINDS };
+export type { MemoryKind };
 
 /** Per-kind default retention in days (from the canonical memory policy). */
 const DEFAULT_RETENTION_DAYS: Record<MemoryKind, number> = {
@@ -73,11 +69,8 @@ const DEFAULT_RETENTION_DAYS: Record<MemoryKind, number> = {
   runbook_fragment: 365,
   patch_rationale: 365,
   generated_workflow: 365,
+  workflow_vector: 180,
 };
-
-function isMemoryKind(value: string): value is MemoryKind {
-  return (MEMORY_KINDS as readonly string[]).includes(value);
-}
 
 // ─── Memory config narrow reader ────────────────────────────────────────────
 

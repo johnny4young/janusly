@@ -1075,8 +1075,8 @@ export const memoryEntries = pgTable(
     orgId: text("org_id").notNull(),
     workflowId: text("workflow_id"),
     runId: text("run_id"),
-    // Closed enum validated at the repo layer: 'recovery_rationale' |
-    // 'run_summary' | 'runbook_fragment' | 'patch_rationale'.
+    // Closed enum validated at the repo layer — see `MEMORY_KINDS` in
+    // `packages/data/src/memory-kinds.ts` for the authoritative list.
     kind: text("kind").notNull(),
     // Already scrubbed via `scrubSecretShapes` at commit time;
     // re-scrubbed at recall time as defense-in-depth.

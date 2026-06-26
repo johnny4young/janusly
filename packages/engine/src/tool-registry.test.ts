@@ -19,7 +19,7 @@ describe('tool-registry', () => {
 
   it('listTools exposes the registered schemas', () => {
     const names = listTools().map(tool => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.pick', 'db.schema.describe', 'db.query.read', 'db.query.write', 'db.query.transaction']))
+    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.pick', 'db.schema.describe', 'db.query.read', 'db.query.write', 'db.query.transaction', 'vector.search', 'vector.upsert']))
   })
 
   it('validateToolInput rejects unknown tools', () => {
@@ -148,6 +148,8 @@ describe('tool-registry', () => {
     expect(isToolWriteSide('db.query.transaction')).toBe(true)
     expect(isToolWriteSide('db.query.read')).toBe(false)
     expect(isToolWriteSide('db.schema.describe')).toBe(false)
+    expect(isToolWriteSide('vector.upsert')).toBe(true)
+    expect(isToolWriteSide('vector.search')).toBe(false)
     expect(isToolWriteSide('text.uppercase')).toBe(false)
     expect(isToolWriteSide('json.pick')).toBe(false)
     expect(isToolWriteSide('time.now')).toBe(false)
@@ -174,6 +176,12 @@ describe('tool-registry', () => {
     const dbRead = tools.find(tool => tool.name === 'db.query.read')
     expect(dbRead?.required).toEqual(['credential', 'sql'])
     expect(dbRead?.optional?.slice().sort()).toEqual(['maxRows', 'params', 'timeoutMs'])
+    const vectorSearch = tools.find(tool => tool.name === 'vector.search')
+    expect(vectorSearch?.required).toEqual(['query'])
+    expect(vectorSearch?.optional).toEqual(['topK'])
+    const vectorUpsert = tools.find(tool => tool.name === 'vector.upsert')
+    expect(vectorUpsert?.required).toEqual(['content'])
+    expect(vectorUpsert?.optional).toEqual(['metadata'])
   })
 
   /* -------- text.* -------- */

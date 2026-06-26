@@ -1909,6 +1909,8 @@
   "tools.db-query-read.description": "Ejecuta un SELECT parametrizado contra una credencial Postgres guardada y devuelve filas acotadas.",
   "tools.db-query-write.description": "Ejecuta un INSERT, UPDATE o DELETE parametrizado contra una credencial Postgres guardada.",
   "tools.db-query-transaction.description": "Ejecuta una transacción acotada de sentencias Postgres parametrizadas SELECT/DML.",
+  "tools.vector-search.description": "Busca por similitud en la memoria vectorial de la organización y devuelve las entradas más cercanas.",
+  "tools.vector-upsert.description": "Genera el embedding de un texto y lo guarda en la memoria vectorial de la organización para recuperarlo después por similitud.",
   "tools.text-uppercase.description": "Convierte el texto a mayúsculas.",
   "tools.text-lowercase.description": "Convierte el texto a minúsculas.",
   "tools.text-trim.description": "Quita los espacios al inicio y al final del texto.",
