@@ -75,6 +75,8 @@ const SENSITIVE_TOOL_NAMES = new Set([
   "slack.post",
   "github.create_issue",
   "linear.create_issue",
+  "db.query.write",
+  "db.query.transaction",
 ]);
 const SENSITIVE_TOOL_SUFFIXES = [".write", ".create", ".send", ".delete", ".update"];
 

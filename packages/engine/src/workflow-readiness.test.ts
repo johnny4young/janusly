@@ -123,6 +123,23 @@ describe('checkWorkflowReadiness', () => {
     }))
   })
 
+  it('flags write-side db query tools as sensitive actions', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'write_db', type: 'tool', config: { tool: 'db.query.write', input: { credential: 'customer-db', sql: 'update customers set active = $1', params: [true] }, retry: { maxAttempts: 3 } } },
+        { id: 'read_db', type: 'tool', config: { tool: 'db.query.read', input: { credential: 'customer-db', sql: 'select id from customers' }, retry: { maxAttempts: 3 } } },
+      ],
+      edges: [{ from: 'start', to: 'write_db' }, { from: 'write_db', to: 'read_db' }],
+    })
+    const result = checkWorkflowReadiness(workflow)
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'sensitive_action_missing_approval',
+      nodeId: 'write_db',
+    }))
+    expect(result.issues.find((issue) => issue.code === 'sensitive_action_missing_approval' && issue.nodeId === 'read_db')).toBeUndefined()
+  })
+
   it('flags every mcp_tool node as a sensitive action (fail-safe — workflow JSON has no visibility into the descriptor writeSide flag)', () => {
     const workflow = makeWorkflow({
       nodes: [

@@ -247,6 +247,28 @@ describe('tool node — dryRun gating', () => {
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ tool: 'text.uppercase', result: { value: 'HI' } })
   })
+
+  it.each(['db.query.write', 'db.query.transaction'])(
+    'skips %s in dryRun mode and emits tool.dry_run.skipped',
+    async (tool) => {
+      const result = await nodeRegistry.tool({
+        ...baseCtx,
+        dryRun: true,
+        config: { tool, input: { credential: 'customer-db', sql: 'update customers set active = $1', params: [true] } },
+      })
+
+      expect(result).toEqual({
+        status: 'completed',
+        output: { tool, dryRun: true, skipped: true },
+      })
+      expect(appendEventMock).toHaveBeenCalledWith(
+        'run-1',
+        'fetch',
+        'tool.dry_run.skipped',
+        expect.objectContaining({ tool }),
+      )
+    },
+  )
 })
 
 describe('human_form node — waiting metadata', () => {
