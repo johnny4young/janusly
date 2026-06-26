@@ -19,7 +19,7 @@ describe('tool-registry', () => {
 
   it('listTools exposes the registered schemas', () => {
     const names = listTools().map(tool => tool.name)
-    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.pick']))
+    expect(names).toEqual(expect.arrayContaining(['http.request', 'text.uppercase', 'json.pick', 'db.schema.describe', 'db.query.read', 'db.query.write', 'db.query.transaction']))
   })
 
   it('validateToolInput rejects unknown tools', () => {
@@ -144,6 +144,10 @@ describe('tool-registry', () => {
 
   it('isToolWriteSide flags http.request and ignores read-side tools', () => {
     expect(isToolWriteSide('http.request')).toBe(true)
+    expect(isToolWriteSide('db.query.write')).toBe(true)
+    expect(isToolWriteSide('db.query.transaction')).toBe(true)
+    expect(isToolWriteSide('db.query.read')).toBe(false)
+    expect(isToolWriteSide('db.schema.describe')).toBe(false)
     expect(isToolWriteSide('text.uppercase')).toBe(false)
     expect(isToolWriteSide('json.pick')).toBe(false)
     expect(isToolWriteSide('time.now')).toBe(false)
@@ -167,6 +171,9 @@ describe('tool-registry', () => {
     const textUpper = tools.find(tool => tool.name === 'text.uppercase')
     expect(textUpper?.required).toEqual(['value'])
     expect(textUpper?.optional).toBeUndefined()
+    const dbRead = tools.find(tool => tool.name === 'db.query.read')
+    expect(dbRead?.required).toEqual(['credential', 'sql'])
+    expect(dbRead?.optional?.slice().sort()).toEqual(['maxRows', 'params', 'timeoutMs'])
   })
 
   /* -------- text.* -------- */

@@ -308,7 +308,7 @@ Pre-packaged connections (GitHub / Slack / Filesystem) remain a follow-up.
 | `event_subscribe` | Subscribe to internal Janusly events (run completed, DLQ entry created, audit log) — enables workflow-of-workflows. External event triggers already exist separately. |
 | `vector_search` | RAG primitive. Query the org's vector store, return top-k. |
 | `vector_upsert` | Write to vector store from any context value. |
-| `db_query` | Execute parameterized SQL against an org-registered customer Postgres connection (read-only by default). Still gated until concrete customer pull. |
+| `db_query` | Execute parameterized SQL against an org-registered customer Postgres connection; v1 is Postgres-only through credential-backed `db.schema.describe` / `db.query.*` tools. |
 
 ### 6.4 Add (lower priority but distinctive)
 
@@ -419,7 +419,7 @@ The native tool catalog is the bridge between LLM-drafted workflows and useful b
 - `sms.send` (Twilio).
 - `pdf.generate` (Markdown or sanitized HTML to PDF via `pdfkit` + `htmlparser2`; no Chromium or hosted renderer dependency).
 - `image.transform` (Sharp).
-- `db.query.read` and `db.query.write` (separate to keep audit clear; gated until concrete customer pull and schema discovery).
+- `db.schema.describe`, `db.query.read`, `db.query.write`, and `db.query.transaction` (Postgres-only v1; credential-backed, bounded, and approval-warned for writes).
 - `vector.search` / `vector.upsert` (§7.1).
 - `embedding.create`.
 
@@ -453,6 +453,8 @@ manual registry rewrite.
 ### §8.0 Status Update
 
 ENG-035 shipped the first native expansion in-tree: text transforms, JSON set/merge/jq, CSV parse/stringify/filter, time parse/format/diff/add, and crypto hash/HMAC/UUID helpers are now registered with Zod input/output schemas. The remaining gap in this section is no longer another manual registry rewrite; it is wiring these definitions into provider-native tool-call APIs and adding stateful or SaaS tools behind explicit credentials/audit.
+
+ENG-038 shipped the first DB slice from this section as a narrow Postgres-only capability: `db.schema.describe` for schema discovery plus `db.query.read`, `db.query.write`, and `db.query.transaction` for parameterized SQL. The implementation deliberately keeps tenant isolation credential-scoped (DSN/role/schema/RLS/views), not SQL-rewrite-based, and keeps write/transaction tools on the existing approval-warning + validation-mode skip posture.
 
 ```ts
 const httpRequestTool = defineTool({
@@ -594,7 +596,7 @@ Current execution focus:
    routing + Anthropic prompt caching across generation/review/patch/suggest);
    the cluster is closed, no remaining refinement ticket is pickable until
    provider decisions land.
-5. **Deferred/gated context** — ENG-025, ENG-026, ENG-087, and ENG-038 remain
+5. **Deferred/gated context** — ENG-025, ENG-026, and ENG-087 remain
    non-pickable until their blockers change.
 
 Historical phase framing is now descriptive only:
@@ -691,7 +693,7 @@ execution queue is intentionally short and mirrors `docs/ROADMAP.md` §3a:
    routing + Anthropic prompt caching across generation/review/patch/suggest);
    the cluster is closed, no remaining refinement ticket is pickable until
    provider decisions land.
-5. **Gated/deferred context:** ENG-025, ENG-026, ENG-087, and ENG-038 remain
+5. **Gated/deferred context:** ENG-025, ENG-026, and ENG-087 remain
    non-pickable until their blockers change.
 
 Tactical rule: `docs/ROADMAP.md` is the live sprint/backlog surface. §3b is the
@@ -841,11 +843,11 @@ Demo-ready core:
 - `github.create_issue`
 - `linear.create_issue`
 - `webhook.signed`
+- `db.schema.describe`, `db.query.read` (Postgres; writes only with scoped credential + approval posture)
 - `json.merge`, `json.diff`, `time.now`, `time.format`
 
 Gated until concrete customer pull:
 
-- Generic `db.query.*` / `db.query.read`.
 - Stripe payment/refund/retry primitives.
 
 ### 16.6 Landing page structure
@@ -930,7 +932,7 @@ Product defaults for this strategy:
 - Keep `/ai/generate-workflow` capped at the current 11 AI-generation node shapes: `noop`, `http`, `transform`, `condition`, `ai`, `tool`, `agent`, `router`, `approval`, `human_form`, and `loop`. In default `free_json` mode this cap is enforced locally by `AiGenerationWorkflowSchema`; in legacy `constrained` mode it is also the provider grammar cap.
 - Keep advanced/operator-only node types on the placeholder-promotion path. Selectively add Pass-2 promotion only when the schema stays provider-strict and the generated workflow quality improves.
 - Raise the practical priority of canonical demos: failed workflow recovery, refund triage, and incident triage. These demos should show the Recovery Queue, explanation, patch, diff, replay, health, audit, and MTTR story.
-- Keep broad integration bets such as generic `db.query.*` and Stripe primitives gated until there is concrete customer pull. The commercial wedge is recovery and operational trust, not a large catalog.
+- Keep broad integration bets such as Stripe primitives gated until there is concrete customer pull. The commercial wedge is recovery and operational trust, not a large catalog; the Postgres DB-query slice is intentionally narrow, credential-backed, and schema-discovery-led rather than a broad integration catalog.
 
 Roadmap implications:
 
@@ -940,6 +942,10 @@ Roadmap implications:
 - ENG-094 extends MCP from "Janusly as a server" toward "safe external MCP tools as workflow steps" without opening arbitrary execution.
 - ENG-095 packages the market narrative against Zapier, Make, n8n, Workato, Pipedream, Relay, and Gumloop.
 - ENG-096..ENG-101 add the enterprise-auth path: shared `AuthContext`, hardened membership resolution, WorkOS SSO, SCIM, org auth policies, and fine-grained permissions.
+
+### §16.0 Status Update — Postgres query tools
+
+The concrete customer-pull gate for the DB slice is satisfied only for Postgres v1. `db.schema.describe` + `db.query.*` are now demo-eligible when the operator supplies a scoped Postgres credential, but the broader product default remains unchanged: do not chase a wide database or payments catalog without customer evidence and a recovery-shaped demo.
 
 ### 16.10 Planning input archive
 

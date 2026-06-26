@@ -423,7 +423,12 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       "email.send",
       "slack.post",
       "github.create_issue",
+      "github.add_issue_comment",
       "webhook.send",
+      "db.schema.describe",
+      "db.query.read",
+      "db.query.write",
+      "db.query.transaction",
     ]);
     const orgConfig = tenantAwareTools.has(tool)
       ? await getOrgConfigSnapshot(ctx.orgId)
