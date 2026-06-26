@@ -48,6 +48,12 @@ import {
   slackPostTool,
   webhookSendTool,
 } from "./integration-tools";
+import {
+  dbQueryReadTool,
+  dbQueryTransactionTool,
+  dbQueryWriteTool,
+  dbSchemaDescribeTool,
+} from "./db-query-tools";
 
 /**
  * Public-facing tool metadata returned by `listTools()` for the AI Studio.
@@ -110,6 +116,7 @@ export type ToolExecutionContext = {
     github?: { rateLimitPerMin?: number };
     webhook?: { rateLimitPerMin?: number };
     pdf?: { rateLimitPerMin?: number };
+    db?: { rateLimitPerMin?: number };
   };
   /**
    * Per-tenant overrides for the object-store that backs `pdf.generate`.
@@ -956,6 +963,10 @@ const tools = {
   "github.create_issue": defineTool(githubCreateIssueTool),
   "github.add_issue_comment": defineTool(githubAddIssueCommentTool),
   "webhook.send": defineTool(webhookSendTool),
+  "db.schema.describe": defineTool(dbSchemaDescribeTool),
+  "db.query.read": defineTool(dbQueryReadTool),
+  "db.query.write": defineTool(dbQueryWriteTool),
+  "db.query.transaction": defineTool(dbQueryTransactionTool),
   "text.uppercase": defineTool({
     name: "text.uppercase",
     description: "Convert text to uppercase.",

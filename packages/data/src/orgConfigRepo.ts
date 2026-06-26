@@ -117,6 +117,9 @@ export type OrgConfigSnapshot = {
     pdf: {
       rateLimitPerMin: number;
     };
+    db: {
+      rateLimitPerMin: number;
+    };
   };
   objectstore: {
     provider: string;
@@ -608,6 +611,15 @@ export const ORG_CONFIG_DEFINITIONS = [
     min: 1,
   },
   {
+    key: "db.rateLimitPerMin",
+    category: "integrations",
+    description: "Per-org db.schema.describe / db.query.* tool calls per minute.",
+    valueType: "number",
+    defaultValue: 60,
+    envKeys: ["JANUSLY_DB_TOOL_RATE_LIMIT_PER_MIN"],
+    min: 1,
+  },
+  {
     key: "objectstore.provider",
     category: "objectstore",
     description: "Object-store backend used by pdf.generate. Provider credentials still come from env.",
@@ -1094,6 +1106,9 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       pdf: {
         rateLimitPerMin: readNumber(values, "pdf.rateLimitPerMin"),
       },
+      db: {
+        rateLimitPerMin: readNumber(values, "db.rateLimitPerMin"),
+      },
     },
     objectstore: {
       provider: readString(values, "objectstore.provider"),
@@ -1346,6 +1361,7 @@ export function applyOrgConfigToEnv(
     JANUSLY_GITHUB_RATE_LIMIT_PER_MIN: String(config.integrations.github.rateLimitPerMin),
     JANUSLY_WEBHOOK_RATE_LIMIT_PER_MIN: String(config.integrations.webhook.rateLimitPerMin),
     JANUSLY_PDF_RATE_LIMIT_PER_MIN: String(config.integrations.pdf.rateLimitPerMin),
+    JANUSLY_DB_TOOL_RATE_LIMIT_PER_MIN: String(config.integrations.db.rateLimitPerMin),
     JANUSLY_OBJECT_STORE_PROVIDER: config.objectstore.provider,
   };
 }

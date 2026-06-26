@@ -278,7 +278,7 @@ const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
 
 /** Connection kinds the integration chokepoint recognizes. Free-form on the
  *  server, but the select keeps operators on the known set. */
-const CREDENTIAL_KINDS = ['generic', 'github_token', 'slack_webhook', 'webhook_secret'] as const
+const CREDENTIAL_KINDS = ['generic', 'github_token', 'slack_webhook', 'webhook_secret', 'postgres'] as const
 
 function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelProps, 'credentials' | 'onCreateCredential'>) {
   const { t } = useT()
