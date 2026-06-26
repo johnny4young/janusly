@@ -1909,6 +1909,8 @@
   "tools.db-query-read.description": "Run a parameterized SELECT against a stored Postgres credential and return bounded rows.",
   "tools.db-query-write.description": "Run one parameterized INSERT, UPDATE, or DELETE against a stored Postgres credential.",
   "tools.db-query-transaction.description": "Run a bounded transaction of parameterized Postgres SELECT/DML statements.",
+  "tools.vector-search.description": "Semantically search the org's vector memory store and return the closest stored entries.",
+  "tools.vector-upsert.description": "Embed and store a text value in the org's vector memory store for later semantic recall.",
   "tools.text-uppercase.description": "Convert text to uppercase.",
   "tools.text-lowercase.description": "Convert text to lowercase.",
   "tools.text-trim.description": "Trim leading and trailing whitespace from text.",

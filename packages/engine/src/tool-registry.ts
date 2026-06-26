@@ -54,6 +54,7 @@ import {
   dbQueryWriteTool,
   dbSchemaDescribeTool,
 } from "./db-query-tools";
+import { vectorSearchTool, vectorUpsertTool } from "./vector-tools";
 
 /**
  * Public-facing tool metadata returned by `listTools()` for the AI Studio.
@@ -967,6 +968,8 @@ const tools = {
   "db.query.read": defineTool(dbQueryReadTool),
   "db.query.write": defineTool(dbQueryWriteTool),
   "db.query.transaction": defineTool(dbQueryTransactionTool),
+  "vector.search": defineTool(vectorSearchTool),
+  "vector.upsert": defineTool(vectorUpsertTool),
   "text.uppercase": defineTool({
     name: "text.uppercase",
     description: "Convert text to uppercase.",
