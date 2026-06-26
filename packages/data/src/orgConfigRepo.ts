@@ -179,6 +179,7 @@ const MEMORY_RETENTION_MAX_DAYS: Record<(typeof MEMORY_KINDS)[number], number> =
   patch_rationale: 730,
   generated_workflow: 730,
   workflow_vector: 730,
+  agent_episode: 730,
 };
 
 function validateMemoryAllowedKinds(value: string | number | boolean): void {
@@ -659,7 +660,7 @@ export const ORG_CONFIG_DEFINITIONS = [
     key: "memory.allowedKinds",
     category: "memory",
     description:
-      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale, generated_workflow, workflow_vector. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
+      "Comma-separated list of memory kinds eligible for write in this org. Closed enum: recovery_rationale, run_summary, runbook_fragment, patch_rationale, generated_workflow, workflow_vector, agent_episode. Empty = no kinds enabled (memory feature is on but no writes accepted yet). See docs/memory-policy.md.",
     valueType: "string",
     defaultValue: "",
     allowEmpty: true,
