@@ -269,6 +269,25 @@ describe('tool node — dryRun gating', () => {
       )
     },
   )
+
+  it('skips vector.upsert in dryRun mode and emits tool.dry_run.skipped', async () => {
+    const result = await nodeRegistry.tool({
+      ...baseCtx,
+      dryRun: true,
+      config: { tool: 'vector.upsert', input: { content: 'cus_1 churned', metadata: { customerId: 'cus_1' } } },
+    })
+
+    expect(result).toEqual({
+      status: 'completed',
+      output: { tool: 'vector.upsert', dryRun: true, skipped: true },
+    })
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'fetch',
+      'tool.dry_run.skipped',
+      expect.objectContaining({ tool: 'vector.upsert' }),
+    )
+  })
 })
 
 describe('human_form node — waiting metadata', () => {

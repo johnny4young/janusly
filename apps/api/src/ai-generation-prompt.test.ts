@@ -33,6 +33,7 @@ describe("generate-workflow system prompt", () => {
   it("keeps AI generation aware of write-side tools without expanding the node-type grammar", () => {
     expect(promptsSource).toContain("'email.send'|'pdf.generate'|'slack.post'|'github.create_issue'|'webhook.send'");
     expect(promptsSource).toContain("'db.schema.describe'|'db.query.read'|'db.query.write'|'db.query.transaction'");
+    expect(promptsSource).toContain("'vector.search'|'vector.upsert'");
     // The tool rule now asks the LLM to forward fields the operator
     // gave verbatim (closing the bug where every tool-using prompt
     // silently fell back). Pin the new phrasing so a future edit
@@ -171,6 +172,8 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
       { tool: "http.request", input: { url: "https://api.example.com/status" } },
       { tool: "db.query.write", input: { credential: "customer_db", sql: "update customers set status = $1 where id = $2", params: ["active", "cus_1"] } },
       { tool: "db.query.transaction", input: { credential: "customer_db", statements: [{ sql: "update customers set status = $1 where id = $2", params: ["active", "cus_1"] }] } },
+      { tool: "vector.search", input: { query: "customers likely to churn", topK: 5 } },
+      { tool: "vector.upsert", input: { content: "Customer cus_1 churned after a failed payment", metadata: { customerId: "cus_1" } } },
     ];
 
     for (const { tool, input } of cases) {
