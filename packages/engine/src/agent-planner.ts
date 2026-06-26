@@ -121,6 +121,13 @@ export async function planAgentToolWithLLM(
    * fill it from the executor `NodeContext`.
    */
   telemetryContext?: { orgId: string; userId?: string; runId?: string; nodeId?: string; workflowId?: string },
+  /**
+   * Optional DATA-framed block of recalled prior episodes (cross-run memory),
+   * rendered by `agent-memory.ts:recallAgentEpisodes`. Surfaced as a distinct
+   * `recalledEpisodes` field in the prompt so its data framing stays legible.
+   * Empty / omitted when memory is off — the prompt is then byte-for-byte today's.
+   */
+  recalledEpisodes?: string,
 ): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
@@ -199,6 +206,7 @@ export async function planAgentToolWithLLM(
         context,
         history,
         availableTools,
+        ...(recalledEpisodes ? { recalledEpisodes } : {}),
         requiredJsonShape: {
           done: "boolean optional",
           finalAnswer: "string optional",

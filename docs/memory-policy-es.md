@@ -146,6 +146,7 @@ coincidencia.
 | `patch_rationale` | Rationale de parche de recuperación post-aceptación | 365 días | 730 días | Sólo el rationale — el workflow JSON parchado NO se guarda aquí (vive en `workflow_versions`). |
 | `generated_workflow` | `/ai/generate-workflow` exitoso (fire-and-forget) | 365 días | 730 días | Prior de few-shot: `content` es el prompt de generación (la clave del embedding); `metadata.workflowShape` guarda SOLO tipos de nodos + cantidad de edges + claves de outputs — nunca valores de config. Se recupera como ejemplos DATA etiquetados para guiar futuras generaciones. |
 | `workflow_vector` | Herramienta de workflow `vector.upsert` | 180 días | 730 días | Memoria RAG escrita por el operador desde herramientas de workflow y recuperada sólo por el filtro de kind dedicado de `vector.search`. |
+| `agent_episode` | Loop `agent` / `multi_agent` | 180 días | 730 días | Memoria episódica cross-run (objetivo + resultado de un run de agente completado), escrita al terminar y recuperada en el prompt del planner LLM; se recupera sólo por su filtro de kind dedicado. |
 
 Los defaults de retención viven en `org_configs.memory.retentionDaysByKind`
 como una cadena JSON validada contra el set cerrado de kinds y los rangos
@@ -339,7 +340,7 @@ si parecen credenciales.
 | Clave | Tipo | Default | Rangos | Notas |
 | --- | --- | --- | --- | --- |
 | `memory.enabled` | boolean | `false` | n/a | Master switch del tenant. Requerido true (junto con `JANUSLY_MEMORY_ENABLED=true`) para cualquier escritura de memoria. |
-| `memory.allowedKinds` | csv | `""` (vacío = ninguno) | enum cerrado: `recovery_rationale,run_summary,runbook_fragment,patch_rationale,generated_workflow,workflow_vector` | Opt-in por kind. CSV vacío con `memory.enabled=true` es un estado válido "funcionalidad de memoria encendida pero sin kinds activos todavía". |
+| `memory.allowedKinds` | csv | `""` (vacío = ninguno) | enum cerrado: `recovery_rationale,run_summary,runbook_fragment,patch_rationale,generated_workflow,workflow_vector,agent_episode` | Opt-in por kind. CSV vacío con `memory.enabled=true` es un estado válido "funcionalidad de memoria encendida pero sin kinds activos todavía". |
 | `memory.retentionDaysByKind` | cadena JSON | `""` (usa defaults por kind; `{}` también aceptado) | cada valor en el rango máximo por kind de §5 | Valida el set cerrado de claves; rechaza kinds desconocidos. |
 | `memory.recallMaxEntries` | number | `8` | `1..32` | Tope duro de entradas devueltas por recall. |
 | `memory.recallMaxBytes` | number | `8192` | `1024..65536` | Tope duro de bytes totales devueltos por recall. |

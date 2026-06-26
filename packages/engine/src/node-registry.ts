@@ -40,6 +40,7 @@ import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
 import { appendEvent } from "./persistence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
+import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
 import { mapInput } from "./template";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
 import { hasFailureSignal } from "./failure-signal";
@@ -172,6 +173,18 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
   const memory = await getRunMemory(ctx.runId);
   const summarizedMemory = summarizeMemory(memory);
 
+  // Cross-run episodic recall feeds the LLM planner only (the deterministic
+  // rules planner ignores memory) — skip the embedding call otherwise. Empty
+  // when memory is off / the episodic kind is disallowed, so the prompt is then
+  // byte-for-byte today's.
+  const episodicBlock = planner === "openai"
+    ? (await recallAgentEpisodes({
+        orgId: ctx.orgId,
+        workflowId: ctx.workflowId ?? undefined,
+        goal: agentConfig.goal ?? "",
+      })).block
+    : "";
+
   await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.started`, {
     name: agentConfig.name,
     role: agentConfig.role,
@@ -197,7 +210,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
           runId: ctx.runId,
           nodeId: ctx.nodeId,
           workflowId: ctx.workflowId ?? undefined,
-        })
+        }, episodicBlock)
       : planAgentTool(agentConfig, planningContext);
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
@@ -210,6 +223,20 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
         steps,
         reflection: lastReflection,
       });
+
+      // Record the episode for cross-run recall. Skipped in dry-run/validation
+      // so sandbox runs don't pollute durable memory; never throws.
+      if (!ctx.dryRun) {
+        await recordAgentEpisode({
+          orgId: ctx.orgId,
+          workflowId: ctx.workflowId ?? undefined,
+          runId: ctx.runId,
+          goal: agentConfig.goal ?? "",
+          outcome: String((plan as any).finalAnswer ?? "Done"),
+          success: true,
+          stepCount: steps.length,
+        });
+      }
 
       return { memory: summarizedMemory, steps, finalAnswer: (plan as any).finalAnswer, reflection: lastReflection };
     }
@@ -290,7 +317,32 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
     reflection: lastReflection,
   });
 
+  // Record the episode (step budget exhausted without an explicit `done`).
+  // Skipped in dry-run/validation; never throws.
+  if (!ctx.dryRun) {
+    await recordAgentEpisode({
+      orgId: ctx.orgId,
+      workflowId: ctx.workflowId ?? undefined,
+      runId: ctx.runId,
+      goal: agentConfig.goal ?? "",
+      outcome: `Reached step budget (${steps.length}) without completing. Last result: ${safeOutcome(lastResult)}`,
+      success: false,
+      stepCount: steps.length,
+    });
+  }
+
   return { memory: summarizedMemory, steps, finalResult: lastResult, reflection: lastReflection };
+}
+
+/** Compact, JSON-safe one-line projection of an agent's last tool result for an
+ *  episode summary (bounded; the substrate scrubs + caps the final content). */
+function safeOutcome(value: unknown): string {
+  if (value == null) return "none";
+  try {
+    return JSON.stringify(value).slice(0, 500);
+  } catch {
+    return String(value).slice(0, 500);
+  }
 }
 
 function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {

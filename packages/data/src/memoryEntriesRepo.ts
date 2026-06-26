@@ -70,6 +70,7 @@ const DEFAULT_RETENTION_DAYS: Record<MemoryKind, number> = {
   patch_rationale: 365,
   generated_workflow: 365,
   workflow_vector: 180,
+  agent_episode: 180,
 };
 
 // ─── Memory config narrow reader ────────────────────────────────────────────
