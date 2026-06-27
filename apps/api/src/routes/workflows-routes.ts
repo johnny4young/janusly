@@ -224,6 +224,12 @@ export const workflowsRoutes: Route[] = [
         }, 409);
       }
 
+      // A soft-deleted workflow behaves as "not found" for writes too —
+      // saving never silently resurrects it; restore it first.
+      if (result.kind === "deleted") {
+        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      }
+
       const auditMetadata: Record<string, unknown> = {
         version: result.version,
         attempts: result.attempts,
@@ -250,6 +256,10 @@ export const workflowsRoutes: Route[] = [
         sourceVersionId,
       });
       if (!result.ok) {
+        // A soft-deleted workflow behaves as "not found" for writes too.
+        if (result.code === "deleted") {
+          return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        }
         return sendJson(res, { error: "Source version not found" }, 404);
       }
       await auditAction(auth, "workflow.rolled_back", { targetType: "workflow", targetId: workflowId, metadata: rollbackAuditMetadata(result) });
