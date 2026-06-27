@@ -24,6 +24,7 @@ The Python SDK mirrors the TypeScript SDK's four resource bindings. `JanuslyClie
 | `client.runs` | `poll_until_terminal(run_id, interval_ms=1000, timeout_ms=300_000)` | `GET /run` repeatedly |
 | `client.runs` | `stream_events(run_id, interval_ms=1000, since_cursor=None)` → `Iterator[dict]` | `GET /run` head-poll |
 | `client.runs` | `resume_node(run_id, node_id, input=None, resume_token=None)` | `POST /resume` |
+| `client.runs` | `cancel(run_id, reason=None)` | `POST /run/cancel` |
 | `client.reports` | `export_run_explain(run_id, format="markdown" | "json")` | `GET /reports/run-explain` |
 | `client.recovery` | `get_metrics(window_days=30)` | `GET /recovery/metrics` |
 | `client.webhooks` | `verify_signature(body, signature_header, secret, …)` | local (no HTTP) |

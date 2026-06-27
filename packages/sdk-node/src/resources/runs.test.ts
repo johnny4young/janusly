@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { JanuslyTimeoutError } from "../errors.ts";
+import { JanuslyApiError, JanuslyTimeoutError } from "../errors.ts";
 import { RunsResource } from "./runs.ts";
 import type { JanuslyClientConfig, RunDetails, RunSummary } from "../types.ts";
 
@@ -308,5 +308,52 @@ describe("RunsResource.resumeNode", () => {
       input: { approved: true },
       resumeToken: "tok-abc",
     });
+  });
+});
+
+describe("RunsResource.cancel", () => {
+  it("POSTs /run/cancel with the runId + reason and returns the cancelled envelope", async () => {
+    const captured: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (url: unknown, init?: RequestInit) => {
+      captured.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ runId: "run-1", status: "cancelled" });
+    }) as unknown as FakeFetch;
+    const runs = new RunsResource(makeConfig(fetchImpl));
+
+    const result = await runs.cancel({ runId: "run-1", reason: "stuck on a bad input" });
+
+    expect(result).toEqual({ runId: "run-1", status: "cancelled" });
+    expect(captured[0]!.url).toBe("https://api.test.example.com/run/cancel");
+    expect(captured[0]!.init.method).toBe("POST");
+    expect(JSON.parse(captured[0]!.init.body as string)).toEqual({
+      runId: "run-1",
+      reason: "stuck on a bad input",
+    });
+  });
+
+  it("omits the reason field when not supplied", async () => {
+    const captured: Array<{ init: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      captured.push({ init: init ?? {} });
+      return jsonResponse({ runId: "run-1", status: "cancelled" });
+    }) as unknown as FakeFetch;
+    const runs = new RunsResource(makeConfig(fetchImpl));
+
+    await runs.cancel({ runId: "run-1" });
+
+    expect(JSON.parse(captured[0]!.init.body as string)).toEqual({ runId: "run-1" });
+  });
+
+  it("throws a typed JanuslyApiError (statusCode 409) when the run is already terminal", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "Run is already succeeded; cannot cancel" }), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as unknown as FakeFetch;
+    const runs = new RunsResource(makeConfig(fetchImpl));
+
+    await expect(runs.cancel({ runId: "run-1" })).rejects.toThrow(JanuslyApiError);
+    await expect(runs.cancel({ runId: "run-1" })).rejects.toMatchObject({ statusCode: 409 });
   });
 });
