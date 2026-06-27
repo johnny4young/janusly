@@ -24,7 +24,7 @@
  *  - The repo doesn't re-validate inputs.
  */
 
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, workflowMetadata, workflows } from "@janusly/db";
 import type { WorkflowMetadata, WorkflowMetadataRecord } from "@janusly/shared";
 import { WORKFLOW_METADATA_TAGS_MAX } from "@janusly/shared";
@@ -103,10 +103,13 @@ export async function listDistinctWorkflowTagsForOrg(orgId: string): Promise<str
   // ORDER BY the SRF expression itself, NOT the result alias — drizzle emits a
   // raw-sql `selectDistinct` field without an `AS tag`, so `ORDER BY tag` would
   // reference a non-existent column.
+  // INNER JOIN workflows + `deletedAt IS NULL` so a soft-deleted workflow's
+  // tags don't linger in the filter dropdown.
   const rows = await db
     .selectDistinct({ tag: sql<string>`jsonb_array_elements_text(${workflowMetadata.tags})` })
     .from(workflowMetadata)
-    .where(eq(workflowMetadata.orgId, orgId))
+    .innerJoin(workflows, and(eq(workflows.id, workflowMetadata.workflowId), eq(workflows.orgId, workflowMetadata.orgId)))
+    .where(and(eq(workflowMetadata.orgId, orgId), isNull(workflows.deletedAt)))
     .orderBy(sql`jsonb_array_elements_text(${workflowMetadata.tags}) asc`)
     .limit(WORKFLOW_TAGS_DROPDOWN_MAX);
   return rows.map((r) => r.tag);
@@ -122,7 +125,8 @@ export async function listDistinctWorkflowFoldersForOrg(orgId: string): Promise<
   const rows = await db
     .selectDistinct({ folder: workflowMetadata.folder })
     .from(workflowMetadata)
-    .where(and(eq(workflowMetadata.orgId, orgId), isNotNull(workflowMetadata.folder)))
+    .innerJoin(workflows, and(eq(workflows.id, workflowMetadata.workflowId), eq(workflows.orgId, workflowMetadata.orgId)))
+    .where(and(eq(workflowMetadata.orgId, orgId), isNotNull(workflowMetadata.folder), isNull(workflows.deletedAt)))
     .orderBy(workflowMetadata.folder)
     .limit(WORKFLOW_FOLDERS_DROPDOWN_MAX);
   // `isNotNull` guarantees non-null, but narrow defensively for the string[] return.
@@ -319,7 +323,7 @@ export async function assignWorkflowsToFolder(
   const owned = await db
     .select({ id: workflows.id })
     .from(workflows)
-    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds)));
+    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds), isNull(workflows.deletedAt)));
   const validIds = owned.map((r) => r.id);
   if (validIds.length === 0) return { workflowIds: [] };
 
@@ -385,7 +389,7 @@ export async function assignTagToWorkflows(
   const owned = await db
     .select({ id: workflows.id })
     .from(workflows)
-    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds)));
+    .where(and(eq(workflows.orgId, input.orgId), inArray(workflows.id, input.workflowIds), isNull(workflows.deletedAt)));
   const validIds = owned.map((r) => r.id);
   if (validIds.length === 0) return { workflowIds: [] };
 

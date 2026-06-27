@@ -43,7 +43,7 @@
  * folder/tag ops scope their bulk updates by org in the repo.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, workflows } from "@janusly/db";
 import {
   AssignTagToWorkflowsBodySchema,
@@ -167,7 +167,7 @@ async function assertWorkflowBelongsToOrg(
   const owned = await db
     .select({ id: workflows.id })
     .from(workflows)
-    .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)))
+    .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId), isNull(workflows.deletedAt)))
     .limit(1);
   return owned.length > 0;
 }

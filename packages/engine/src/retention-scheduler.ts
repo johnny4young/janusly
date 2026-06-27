@@ -1,17 +1,19 @@
 /**
  * Daily sweep that enforces per-org configurable retention across the
- * five high-volume tenant tables: `run_events`, `audit_logs`,
- * `usage_events`, `recovery_feedback`, `memory_entries`. Unlike the
+ * six tenant data families: the five high-volume append-only tables
+ * (`run_events`, `audit_logs`, `usage_events`, `recovery_feedback`,
+ * `memory_entries`) plus soft-deleted workflow tombstones. Unlike the
  * three standalone sweeps (`audit-logs` / `scim-events` / `memory`
  * retention), this one is per-ORG: it iterates every tenant with
  * retention-eligible data, reads that org's `retention.*` config bounds,
  * and runs one batched DELETE per table scoped to that org.
  *
  * Built ON TOP of the existing retention schedulers (same `system:` id
- * prefix, same `validateCronExpression` warn-fallback, same 10k-row
- * batched DELETE + `maxBatches` cap, same never-throws posture). The
- * difference is the per-org config read + the per-row `hold_until`
- * legal-hold bypass that the repo helpers apply.
+ * prefix, same `validateCronExpression` warn-fallback, same never-throws
+ * posture). The append-only table helpers use the 10k-row batched DELETE
+ * + `maxBatches` cap and the per-row `hold_until` legal-hold bypass;
+ * soft-deleted workflows use a single atomic deferred-cascade statement
+ * keyed by `deleted_at`.
  *
  * Cadence comes from `JANUSLY_RETENTION_CRON` with a `0 5 * * *` UTC
  * default — runs AFTER the audit-logs (02:00), memory (03:00), and
@@ -34,8 +36,10 @@
  *   DELETE; this scheduler reads each org's bounds in isolation. One org
  *   per `retention.purged` audit row — never a row mixing tenants.
  * - Legal-hold bypass: a future-dated `hold_until` row survives the
- *   sweep (the repo helpers add the `(hold_until IS NULL OR hold_until
- *   <= now())` conjunct).
+ *   append-only table sweeps (the repo helpers add the `(hold_until IS
+ *   NULL OR hold_until <= now())` conjunct). Workflow tombstones do not
+ *   have hold columns; their recovery window is `deleted_at` +
+ *   `retention.deletedWorkflowsDays`.
  * - Export-before-delete: when an exporter is registered via
  *   `setRetentionExporter`, the sweep invokes it (best-effort, never
  *   throws) BEFORE the per-table purge for that org.
@@ -47,6 +51,7 @@ import {
   deleteExpiredMemoryEntriesForOrg,
   deleteExpiredRecoveryFeedbackForOrg,
   deleteExpiredRunEventsForOrg,
+  deleteExpiredSoftDeletedWorkflowsForOrg,
   deleteExpiredUsageEventsForOrg,
   getRetentionPolicyConfig,
   listOrgIdsForRetention,
@@ -68,7 +73,7 @@ export const RETENTION_JOB_NAME = "retention-trigger";
  *  scim-events (04:00) sweeps so the four don't overlap. */
 export const DEFAULT_RETENTION_CRON = "0 5 * * *";
 
-/** The five tables the sweep purges, paired with their per-org config
+/** The tenant tables/data families the sweep purges, paired with their per-org config
  *  field and the repo helper that purges them. */
 const RETENTION_TARGETS: ReadonlyArray<{
   table: RetentionTable;
@@ -77,7 +82,8 @@ const RETENTION_TARGETS: ReadonlyArray<{
     | "auditLogsDays"
     | "usageEventsDays"
     | "recoveryFeedbackDays"
-    | "memoryEntriesDays";
+    | "memoryEntriesDays"
+    | "deletedWorkflowsDays";
   purge: typeof deleteExpiredRunEventsForOrg;
 }> = [
   { table: "run_events", configKey: "runEventsDays", purge: deleteExpiredRunEventsForOrg },
@@ -92,6 +98,13 @@ const RETENTION_TARGETS: ReadonlyArray<{
     table: "memory_entries",
     configKey: "memoryEntriesDays",
     purge: deleteExpiredMemoryEntriesForOrg,
+  },
+  {
+    // Soft-deleted workflows: hard-purge the tombstoned rows + their versions
+    // + metadata once `deleted_at` is older than the recovery window.
+    table: "workflows",
+    configKey: "deletedWorkflowsDays",
+    purge: deleteExpiredSoftDeletedWorkflowsForOrg,
   },
 ];
 

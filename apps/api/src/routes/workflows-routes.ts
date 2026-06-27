@@ -15,7 +15,7 @@
  * MCP-source traffic so a misbehaving client can't flood a tenant.
  */
 
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, isNotNull } from "drizzle-orm";
 
 import {
   db,
@@ -36,7 +36,7 @@ import {
   queryScheduleFires,
   setWorkflowSlo,
 } from "@janusly/data";
-import { unregisterAllForWorkflow } from "@janusly/engine/src/schedule-scheduler";
+import { unregisterAllForWorkflow, syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
 import {
   bucketScheduleFires,
   computeNextFires,
@@ -95,6 +95,12 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions);
     } },
@@ -103,6 +109,12 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      const owned = await db
+        .select({ id: workflows.id })
+        .from(workflows)
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
+        .limit(1);
+      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
     } },
@@ -271,7 +283,7 @@ export const workflowsRoutes: Route[] = [
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
@@ -322,7 +334,7 @@ export const workflowsRoutes: Route[] = [
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
@@ -371,13 +383,14 @@ export const workflowsRoutes: Route[] = [
       });
     } },
 
-  // DELETE /workflows/:id — hard-deletes the workflow + every persisted
-  // version + every cron-driven schedule entry (and its BullMQ
-  // scheduler). Runs and audit rows stay; their `workflow_version_id`
-  // text column has no FK constraint, so orphan references are tolerated
-  // for history. Match excludes special POST-only subpaths so a future
-  // edit can't accidentally route `/workflows/save` here on the wrong
-  // method.
+  // DELETE /workflows/:id — SOFT-deletes the workflow (sets `deletedAt`) so a
+  // deletion is recoverable via POST /workflows/:id/restore. Schedulers are
+  // unregistered immediately (a deleted workflow must stop running), but the
+  // `workflow_versions` + `workflow_metadata` rows are KEPT for restore; the
+  // `system:retention` sweep hard-purges them once `deletedAt` is older than
+  // `retention.deletedWorkflowsDays`. Runs/audit rows stay (orphan-tolerant,
+  // no FK). Match excludes special POST-only subpaths so a future edit can't
+  // accidentally route `/workflows/save` here on the wrong method.
   { method: "DELETE",
     match: (url) => {
       if (!url.startsWith("/workflows/")) return false;
@@ -392,23 +405,78 @@ export const workflowsRoutes: Route[] = [
       const workflowId = url.pathname.slice("/workflows/".length);
       if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
 
-      const existing = await db.select().from(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
-      if (!existing[0]) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      // Only an active (not already soft-deleted) workflow can be deleted;
+      // an absent/already-deleted id returns the same enumeration-safe 404.
+      // The `RETURNING` makes the active→deleted transition a CAS, so two
+      // concurrent DELETEs cannot both audit the same tombstone.
+      const deleted = await db
+        .update(workflows)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
+        .returning({ id: workflows.id });
+      if (deleted.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
       // Schedule teardown fails open — a Redis blip shouldn't block a
-      // workflow delete from completing. The worker's cold-start replay
-      // won't re-register entries whose DB rows are gone, so a stuck
-      // BullMQ scheduler self-clears after the rows go away.
+      // workflow delete from completing. A soft-deleted workflow is excluded
+      // from every read + run path, so a stuck BullMQ scheduler is harmless
+      // and self-clears; restore re-registers from the latest version.
       try {
         await unregisterAllForWorkflow(auth.orgId, workflowId);
       } catch (err) {
         console.error("[workflows-delete] schedule teardown failed", { workflowId, err });
       }
-      await db.delete(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId)));
-      await db.delete(workflowMetadata).where(and(eq(workflowMetadata.workflowId, workflowId), eq(workflowMetadata.orgId, auth.orgId)));
-      await db.delete(workflows).where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)));
 
-      await auditAction(auth, "workflow.deleted", { targetType: "workflow", targetId: workflowId });
+      await auditAction(auth, "workflow.deleted", { targetType: "workflow", targetId: workflowId, metadata: { soft: true } });
+      return sendJson(res, { workflowId, ok: true });
+    } },
+
+  // POST /workflows/:id/restore — reverse a soft delete: clear `deletedAt` and
+  // re-register schedules from the latest version (soft-delete unregistered
+  // them). 404 if the workflow isn't currently soft-deleted.
+  { method: "POST",
+    match: (url) => {
+      const path = url.split("?")[0];
+      return path.startsWith("/workflows/") && path.endsWith("/restore");
+    },
+    role: "editor",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const matched = url.pathname.match(/^\/workflows\/([^/]+)\/restore$/);
+      const workflowId = matched?.[1];
+      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+
+      const restored = await db
+        .update(workflows)
+        .set({ deletedAt: null })
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNotNull(workflows.deletedAt)))
+        .returning({ id: workflows.id });
+      if (restored.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+
+      // Re-sync schedules from the latest version. Fails open like save —
+      // a Redis blip shouldn't undo the restore; the worker's cold-start
+      // replay reconciles via the deterministic scheduler id.
+      try {
+        const latest = await db
+          .select({ id: workflowVersions.id, dagJson: workflowVersions.dagJson })
+          .from(workflowVersions)
+          .where(and(eq(workflowVersions.orgId, auth.orgId), eq(workflowVersions.workflowId, workflowId)))
+          .orderBy(desc(workflowVersions.version))
+          .limit(1);
+        const parsed = latest[0] ? WorkflowSchema.safeParse(latest[0].dagJson) : null;
+        if (latest[0] && parsed?.success) {
+          await syncWorkflowSchedules({
+            orgId: auth.orgId,
+            workflowId,
+            workflowVersionId: latest[0].id,
+            nodes: parsed.data.nodes,
+            createdBy: auth.userId,
+          });
+        }
+      } catch (err) {
+        console.error("[workflows-restore] schedule re-sync failed", { workflowId, err });
+      }
+
+      await auditAction(auth, "workflow.restored", { targetType: "workflow", targetId: workflowId });
       return sendJson(res, { workflowId, ok: true });
     } },
 
@@ -489,7 +557,7 @@ export const workflowsRoutes: Route[] = [
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
@@ -664,7 +732,7 @@ export const workflowsRoutes: Route[] = [
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
 
