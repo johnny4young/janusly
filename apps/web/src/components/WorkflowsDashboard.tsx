@@ -761,6 +761,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       const current = workflows.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
+      setSelectedIds((prev) => {
+        if (!prev.has(workflowId)) return prev
+        const next = new Set(prev)
+        next.delete(workflowId)
+        return next
+      })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' })
         addToast(t('workflowsDashboard.workflowRestored', { name: current.name }) as string, 'success')
@@ -773,12 +779,45 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [workflows, addToast, bumpPlatformVersion, t],
   )
 
+  // Restore every checked trash row in one action. Optimistic: drop the selected
+  // rows immediately, then fire the per-id restore route for each (the trash set
+  // is retention-bounded, so the loop is small — no batch endpoint needed). A
+  // partial failure surfaces an error toast; the bump-driven refetch reconciles,
+  // so a row that failed to restore reappears in the trash list.
+  const bulkRestore = useCallback(
+    async () => {
+      const ids = [...selectedIds].filter((id) => workflows.some((w) => w.id === id))
+      if (ids.length === 0) return
+      const idSet = new Set(ids)
+      setWorkflows((prev) => prev.filter((w) => !idSet.has(w.id)))
+      setSelectedIds(new Set())
+      const results = await Promise.allSettled(
+        ids.map((id) => api(`/workflows/${encodeURIComponent(id)}/restore`, { method: 'POST' })),
+      )
+      const ok = results.filter((r) => r.status === 'fulfilled').length
+      if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }) as string, 'success')
+      if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed') as string, 'error')
+      bumpPlatformVersion()
+    },
+    [selectedIds, workflows, addToast, bumpPlatformVersion, t],
+  )
+
   // A trash-list row: a flat, non-openable card (a tombstoned workflow can't be
   // opened — reads 404) showing the name, when it was deleted, its run count,
-  // and a Restore action. No tags/folder/drag/bulk — those are active-only.
+  // and a Restore action. A leading checkbox feeds the bulk-restore action bar
+  // (always shown in Trash — selection is this view's purpose). No
+  // tags/folder/drag — those are active-only.
   const renderTrashRow = (workflow: SavedWorkflow) => (
     <li key={workflow.id}>
       <div className="we-list-row" data-severity="cobalt" data-testid={`workflows-trash-row-${workflow.id}`}>
+        <input
+          type="checkbox"
+          className="we-list-row__select"
+          checked={selectedIds.has(workflow.id)}
+          onChange={() => toggleSelected(workflow.id)}
+          aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
+          data-testid={`workflows-trash-select-${workflow.id}`}
+        />
         <span className="we-list-row__avatar" aria-hidden="true">
           <Workflow size={14} />
         </span>
@@ -1312,9 +1351,39 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             </div>
           </div>
         ) : workflows.length > 0 ? (
-          <ul className="we-list" data-testid="workflows-trash-list">
-            {workflows.map(renderTrashRow)}
-          </ul>
+          <>
+            {/* Bulk-restore action bar — selection is always available in Trash.
+                Select-all operates on the raw trash `workflows` (the rendered
+                set). Restore-selected is disabled until ≥1 row is ticked. */}
+            <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
+              {selectedIds.size > 0 && (
+                <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
+              )}
+              <button
+                type="button"
+                className="small-command"
+                aria-pressed={workflows.every((w) => selectedIds.has(w.id))}
+                onClick={() => setSelectedIds(workflows.every((w) => selectedIds.has(w.id)) ? new Set() : new Set(workflows.map((w) => w.id)))}
+                data-testid="workflows-trash-select-all"
+              >
+                {workflows.every((w) => selectedIds.has(w.id))
+                  ? t('workflowsDashboard.clearSelection')
+                  : t('workflowsDashboard.trashSelectAll', { count: workflows.length })}
+              </button>
+              <button
+                type="button"
+                className="small-command"
+                disabled={selectedIds.size === 0}
+                onClick={() => void bulkRestore()}
+                data-testid="workflows-trash-restore-selected"
+              >
+                <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
+              </button>
+            </div>
+            <ul className="we-list" data-testid="workflows-trash-list">
+              {workflows.map(renderTrashRow)}
+            </ul>
+          </>
         ) : null
       )}
 
