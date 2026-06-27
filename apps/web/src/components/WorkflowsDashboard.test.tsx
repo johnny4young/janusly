@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { WorkflowsDashboard } from './WorkflowsDashboard'
@@ -18,6 +18,7 @@ type Flow = {
   runCount?: number
   updatedAt?: string
   createdAt?: string
+  deletedAt?: string | null
 }
 
 // A descending-createdAt page of `count` rows starting at index `startIdx` — the
@@ -1103,9 +1104,11 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.getByTestId('workflows-deletefolder-Billing')).toBeInTheDocument()
     expect(screen.getByLabelText('Rename Billing folder')).toBeInTheDocument()
     expect(screen.getByLabelText('Delete Billing folder')).toBeInTheDocument()
-    // The synthetic "Ungrouped" bucket is not a real folder — no manage controls.
-    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTitle(/^Rename/)).not.toBeInTheDocument()
-    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTitle(/^Delete/)).not.toBeInTheDocument()
+    // The synthetic "Ungrouped" bucket is not a real folder — no FOLDER manage
+    // controls (scoped to the folder-management testids so the per-row Delete
+    // affordance inside the section doesn't false-match a broad title regex).
+    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTestId(/^workflows-renamefolder-/)).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('workflows-folder-ungrouped')).queryByTestId(/^workflows-deletefolder-/)).not.toBeInTheDocument()
   })
 
   it('renames a folder via the inline input (POST /workflows/folders/rename)', async () => {
@@ -1173,5 +1176,184 @@ describe('<WorkflowsDashboard />', () => {
     await waitFor(() =>
       expect(within(screen.getByTestId('workflows-folder-Onboarding')).getByTestId('workflows-row-wf3')).toBeInTheDocument(),
     )
+  })
+
+  // --- Soft-delete loop: per-row delete (active) + Trash view + restore ---
+
+  const TRASH: Flow[] = [
+    { id: 'wfd', orgId: 'o', name: 'Deleted flow', runCount: 2, deletedAt: '2026-06-05T00:00:00.000Z' },
+  ]
+
+  // Method-aware mock for the delete/trash/restore loop: GET /workflows → active,
+  // GET /workflows/trash → trash, any non-GET is recorded (and can be forced to
+  // reject for the rollback paths). STATEFUL — a mutation moves the row between
+  // the active + trash sets so the bumpPlatformVersion()-driven refetch is
+  // consistent with the optimistic update (a static trash list would re-add a
+  // just-restored row and race the assertions).
+  function mockSoftDeleteLoop(opts: {
+    active: Flow[]
+    trash: Flow[]
+    calls: Array<{ url: string; method: string }>
+    fail?: boolean
+  }) {
+    let active = [...opts.active]
+    let trash = [...opts.trash]
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      const method = options?.method ?? 'GET'
+      if (method !== 'GET') {
+        opts.calls.push({ url, method })
+        if (opts.fail) throw new Error('mutation failed')
+        const restore = url.match(/^\/workflows\/([^/]+)\/restore$/)
+        const del = method === 'DELETE' ? url.match(/^\/workflows\/([^/]+)$/) : null
+        if (restore) {
+          const id = restore[1]
+          const row = trash.find((w) => w.id === id)
+          trash = trash.filter((w) => w.id !== id)
+          if (row) active = [{ ...row, deletedAt: null }, ...active]
+        } else if (del) {
+          const id = del[1]
+          const row = active.find((w) => w.id === id)
+          active = active.filter((w) => w.id !== id)
+          if (row) trash = [{ ...row, deletedAt: '2026-06-05T00:00:00.000Z' }, ...trash]
+        }
+        return { ok: true }
+      }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url.startsWith('/workflows/trash')) return trash
+      return active
+    })
+  }
+
+  it('soft-deletes a workflow via an inline confirm → DELETE + optimistic row removal', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    // First click reveals the inline confirm (no request yet).
+    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
+    expect(screen.getByTestId('workflows-delete-confirm-wf1')).toBeInTheDocument()
+    expect(calls).toHaveLength(0)
+
+    // Confirm fires the DELETE and the row disappears.
+    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+    await waitFor(() => expect(calls).toEqual([{ url: '/workflows/wf1', method: 'DELETE' }]))
+    await waitFor(() => expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument())
+    // The untouched row stays.
+    expect(screen.getByTestId('workflows-row-wf2')).toBeInTheDocument()
+  })
+
+  it('cancelling the delete confirm makes no request and keeps the row', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
+    const confirm = screen.getByTestId('workflows-delete-confirm-wf1')
+    // The cancel button sits next to the confirm CTA in the same control group.
+    fireEvent.click(within(confirm.parentElement as HTMLElement).getAllByRole('button').at(-1) as HTMLElement)
+
+    await waitFor(() => expect(screen.queryByTestId('workflows-delete-confirm-wf1')).not.toBeInTheDocument())
+    expect(calls).toHaveLength(0)
+    expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument()
+  })
+
+  it('rolls the row back when the DELETE fails', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls, fail: true })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    // Optimistic removal is reverted — the row returns.
+    await waitFor(() => expect(screen.getByTestId('workflows-row-wf1')).toBeInTheDocument())
+  })
+
+  it('toggles to Trash, fetches GET /workflows/trash, and restores a row', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: TRASH, calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    // The trash list renders the soft-deleted row; active rows are gone.
+    await screen.findByTestId('workflows-trash-list')
+    expect(screen.getByTestId('workflows-trash-row-wfd')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument()
+
+    // Restore POSTs to /restore and drops the row from the trash list.
+    fireEvent.click(screen.getByTestId('workflows-restore-wfd'))
+    await waitFor(() => expect(calls).toEqual([{ url: '/workflows/wfd/restore', method: 'POST' }]))
+    await waitFor(() => expect(screen.queryByTestId('workflows-trash-row-wfd')).not.toBeInTheDocument())
+  })
+
+  it('ignores a stale active-list response after switching to Trash', async () => {
+    let resolveActive: (value: Flow[]) => void = () => {}
+    const activePromise = new Promise<Flow[]>((resolve) => { resolveActive = resolve })
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url.startsWith('/workflows/trash')) return TRASH
+      return activePromise
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-row-wfd')
+
+    await act(async () => {
+      resolveActive(FLOWS)
+      await activePromise
+    })
+
+    expect(screen.getByTestId('workflows-trash-row-wfd')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-trash-row-wf1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument()
+  })
+
+  it('clears the prior view rows on toggle so they never render through the wrong row template', async () => {
+    // Trash fetch held pending so we can inspect the swap window.
+    let resolveTrash: (value: Flow[]) => void = () => {}
+    const trashPromise = new Promise<Flow[]>((resolve) => { resolveTrash = resolve })
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url.startsWith('/workflows/trash')) return trashPromise
+      return FLOWS
+    })
+
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+
+    // While the trash fetch is pending, the prior active rows are cleared and
+    // NONE of them paint as trash rows (the stale-view render the toggle guards).
+    await waitFor(() => expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-trash-row-wf1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflows-trash-list')).not.toBeInTheDocument()
+
+    // Resolving paints the real trash rows.
+    await act(async () => {
+      resolveTrash(TRASH)
+      await trashPromise
+    })
+    expect(screen.getByTestId('workflows-trash-row-wfd')).toBeInTheDocument()
+  })
+
+  it('shows the trash empty state when no workflows are soft-deleted', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-empty')
+    expect(screen.queryByTestId('workflows-trash-list')).not.toBeInTheDocument()
   })
 })

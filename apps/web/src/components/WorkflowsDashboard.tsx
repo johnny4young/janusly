@@ -6,8 +6,8 @@
  * Used by `RightPanel.tsx` (the `workflows` tab).
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CircleCheck, FilterX, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, Search, Trash2, Workflow, X } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CircleCheck, FilterX, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, RotateCcw, Search, Trash, Trash2, Workflow, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
@@ -104,6 +104,16 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [bulkFolderDraft, setBulkFolderDraft] = useState('')
   // `bulkTagDraft` is the tag typed/picked for the bulk add/remove buttons.
   const [bulkTagDraft, setBulkTagDraft] = useState('')
+  // Trash view. `showTrashed` swaps the list to the soft-deleted workflows
+  // (`GET /workflows/trash`) — a flat, filter-free, Restore-only list (active-
+  // only affordances like folders/tags/bulk are hidden there). `confirmDeleteId`
+  // is the active-view row awaiting a delete confirm (inline, one at a time).
+  const [showTrashed, setShowTrashed] = useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // Monotonic list request id. Active-list and Trash fetches share the same
+  // `workflows` state; when the operator toggles views while an older request is
+  // still in flight, only the newest response may paint rows.
+  const listRequestSeq = useRef(0)
 
   // Shared query-string for the list fetch — the active tag / folder / search
   // filters. Both the initial load and "Load more" use it, so the cursor always
@@ -122,20 +132,29 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   }, [tagFilters, folderFilter, debouncedQuery])
 
   const load = useCallback(async () => {
+    const requestSeq = listRequestSeq.current + 1
+    listRequestSeq.current = requestSeq
     setLoading(true)
     try {
-      const qs = buildListParams().toString()
-      const data = await api(`/workflows${qs ? `?${qs}` : ''}`)
+      // Trash is a flat, filter-free, capped read (no tag/folder/search params,
+      // no keyset cursor — the retention sweep bounds it). The active list keeps
+      // its filters + pagination.
+      const qs = showTrashed ? '' : buildListParams().toString()
+      const base = showTrashed ? '/workflows/trash' : '/workflows'
+      const data = await api(`${base}${qs ? `?${qs}` : ''}`)
+      if (listRequestSeq.current !== requestSeq) return
       const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
       setWorkflows(page)
-      // A full page means another may exist; a short page ends pagination.
-      setHasMore(page.length === PAGE_SIZE)
+      // A full page means another may exist; a short page ends pagination. Trash
+      // never paginates.
+      setHasMore(!showTrashed && page.length === PAGE_SIZE)
     } catch (error) {
+      if (listRequestSeq.current !== requestSeq) return
       addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
     } finally {
-      setLoading(false)
+      if (listRequestSeq.current === requestSeq) setLoading(false)
     }
-  }, [addToast, t, buildListParams])
+  }, [addToast, t, buildListParams, showTrashed])
 
   // Append the next keyset page after the oldest loaded row. `workflows` is in
   // server order (createdAt DESC), so its last element is the global oldest; its
@@ -144,16 +163,20 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     if (loadingMore) return
     const oldest = workflows[workflows.length - 1]
     if (!oldest?.createdAt) return
+    const requestSeq = listRequestSeq.current
     setLoadingMore(true)
     try {
       const params = buildListParams()
       params.set('before', `${oldest.createdAt}|${oldest.id}`)
       const data = await api(`/workflows?${params.toString()}`)
+      if (listRequestSeq.current !== requestSeq) return
       const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
       setWorkflows(prev => [...prev, ...page])
       setHasMore(page.length === PAGE_SIZE)
     } catch (error) {
-      addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
+      if (listRequestSeq.current === requestSeq) {
+        addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
+      }
     } finally {
       setLoadingMore(false)
     }
@@ -449,7 +472,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed') as string), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -656,6 +679,83 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [selectedIds, bulkTagDraft, workflows, addToast, bumpPlatformVersion, t],
   )
 
+  // Soft-delete a workflow from the active list. Optimistic: drop the row
+  // immediately (it moves to Trash), DELETE the workflow, then bump so other
+  // panels refresh. Roll the row back on failure. The delete is recoverable
+  // (restore from Trash within the retention window), so this is low-risk — and
+  // it's behind an inline confirm.
+  const deleteWorkflow = useCallback(
+    async (workflowId: string) => {
+      setConfirmDeleteId(null)
+      const current = workflows.find((w) => w.id === workflowId)
+      if (!current) return
+      setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
+      try {
+        await api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' })
+        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }) as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // Restore a soft-deleted workflow from the Trash view. Optimistic: drop the
+  // row from the trash list (it returns to the active list), POST restore, then
+  // bump. Roll the row back on failure.
+  const restoreWorkflow = useCallback(
+    async (workflowId: string) => {
+      const current = workflows.find((w) => w.id === workflowId)
+      if (!current) return
+      setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
+      try {
+        await api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' })
+        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }) as string, 'success')
+        bumpPlatformVersion()
+      } catch (err) {
+        setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
+        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed') as string), 'error')
+      }
+    },
+    [workflows, addToast, bumpPlatformVersion, t],
+  )
+
+  // A trash-list row: a flat, non-openable card (a tombstoned workflow can't be
+  // opened — reads 404) showing the name, when it was deleted, its run count,
+  // and a Restore action. No tags/folder/drag/bulk — those are active-only.
+  const renderTrashRow = (workflow: SavedWorkflow) => (
+    <li key={workflow.id}>
+      <div className="we-list-row" data-severity="cobalt" data-testid={`workflows-trash-row-${workflow.id}`}>
+        <span className="we-list-row__avatar" aria-hidden="true">
+          <Workflow size={14} />
+        </span>
+        <div className="we-list-row__body">
+          <strong>{workflow.name}</strong>
+          <small className="mono" title={workflow.id}>
+            {workflow.deletedAt
+              ? (t('workflowsDashboard.deletedAtLabel', { date: new Date(workflow.deletedAt).toLocaleString(getResolvedLocale()) }) as string)
+              : workflow.id}
+          </small>
+        </div>
+        <div className="we-list-row__meta">
+          {typeof workflow.runCount === 'number' && (
+            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
+          )}
+          <button
+            type="button"
+            className="small-command"
+            onClick={() => void restoreWorkflow(workflow.id)}
+            data-testid={`workflows-restore-${workflow.id}`}
+          >
+            <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
+          </button>
+        </div>
+      </div>
+    </li>
+  )
+
   const renderRow = (workflow: SavedWorkflow) => {
     // Folder choices for the per-row "Move to folder" select: the org-wide
     // folder list plus the row's own folder if a stale value isn't already in it
@@ -793,6 +893,40 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             </select>
           )}
           <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
+          {/* Soft-delete affordance: an inline confirm (one row at a time) so a
+              click never deletes immediately. The delete is recoverable from the
+              Trash view. stopPropagation so the controls never open the row. */}
+          {confirmDeleteId === workflow.id ? (
+            <span className="we-list-row__confirm" onClick={(event) => event.stopPropagation()}>
+              <span className="we-list-row__confirm-text">{t('workflowsDashboard.deleteConfirm', { name: workflow.name })}</span>
+              <button
+                type="button"
+                className="small-command danger"
+                onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
+                data-testid={`workflows-delete-confirm-${workflow.id}`}
+              >
+                {t('workflowsDashboard.confirmDeleteCta')}
+              </button>
+              <button
+                type="button"
+                className="small-command"
+                onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
+              >
+                {t('workflowsDashboard.cancelAction')}
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="small-command danger we-list-row__delete"
+              onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
+              title={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
+              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
+              data-testid={`workflows-delete-${workflow.id}`}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          )}
         </div>
       </div>
     </li>
@@ -803,15 +937,48 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     <div className="panel-list">
       <div className="panel-toolbar">
         <div>
-          <strong>{t('workflowsDashboard.savedFlows', { count: workflows.length })}</strong>
-          <p className="helper-text">{t('workflowsDashboard.helper')}</p>
+          <strong>
+            {showTrashed
+              ? t('workflowsDashboard.trashTitle', { count: workflows.length })
+              : t('workflowsDashboard.savedFlows', { count: workflows.length })}
+          </strong>
+          <p className="helper-text">{showTrashed ? t('workflowsDashboard.trashHelper') : t('workflowsDashboard.helper')}</p>
         </div>
-        <button onClick={load} className="small-command" disabled={loading} aria-label={t('workflowsDashboard.refresh')}>
-          <RefreshCw size={14} aria-hidden="true" /> {loading ? t('workflowsDashboard.loading') : t('workflowsDashboard.refresh')}
-        </button>
+        <div className="panel-toolbar__actions">
+          {/* Trash toggle — always reachable (it lives in the always-rendered
+              header, not the filterable toolbar). Entering Trash clears any
+              active-view selection + delete-confirm so the views don't bleed. */}
+          <button
+            type="button"
+            className="small-command"
+            aria-pressed={showTrashed}
+            onClick={() => {
+              setShowTrashed((on) => !on)
+              setSelectionMode(false)
+              setSelectedIds(new Set())
+              setConfirmDeleteId(null)
+              // Clear the prior view's rows + show loading so they never paint
+              // under the new view through the wrong row template (active rows as
+              // trash with a Restore button, or vice versa) during the swap's
+              // fetch. The view-keyed load() below repopulates.
+              setWorkflows([])
+              setLoading(true)
+            }}
+            data-testid="workflows-trash-toggle"
+          >
+            {showTrashed ? (
+              <><Workflow size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToActive')}</>
+            ) : (
+              <><Trash size={14} aria-hidden="true" /> {t('workflowsDashboard.trashToggleToTrash')}</>
+            )}
+          </button>
+          <button onClick={load} className="small-command" disabled={loading} aria-label={t('workflowsDashboard.refresh')}>
+            <RefreshCw size={14} aria-hidden="true" /> {loading ? t('workflowsDashboard.loading') : t('workflowsDashboard.refresh')}
+          </button>
+        </div>
       </div>
 
-      {showToolbar && (
+      {showToolbar && !showTrashed && (
         <div className="we-list-toolbar">
           <span className="we-list-search">
             <Search size={14} aria-hidden="true" />
@@ -990,7 +1157,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </div>
       )}
 
-      {selectionMode && selectedIds.size > 0 && (
+      {!showTrashed && selectionMode && selectedIds.size > 0 && (
         <div className="we-list-bulk-bar" data-testid="workflows-bulk-bar">
           <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
           <input
@@ -1068,12 +1235,31 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         </div>
       )}
 
+      {/* Trash view — a flat, filter-free list of soft-deleted workflows (uses
+          the raw server-ordered `workflows`, NOT `visible`, so a stale active-
+          view search term never filters it). Restore-only; no folders/tags/bulk. */}
+      {showTrashed && (
+        workflows.length === 0 && !loading ? (
+          <div className="we-allclear" data-testid="workflows-trash-empty">
+            <span className="we-allclear__ring" aria-hidden="true"><Trash size={18} /></span>
+            <div className="we-allclear__copy">
+              <strong>{t('workflowsDashboard.trashEmpty')}</strong>
+              <span>{t('workflowsDashboard.trashEmptyHelper')}</span>
+            </div>
+          </div>
+        ) : workflows.length > 0 ? (
+          <ul className="we-list" data-testid="workflows-trash-list">
+            {workflows.map(renderTrashRow)}
+          </ul>
+        ) : null
+      )}
+
       {/* Empty-state precedence — one chain over `visible.length === 0` (covers
           both an empty server result and a client-narrowed page). The active
           search wins the message (it's the most recent narrowing, and the
           server `?q=` can itself yield 0 rows), then folder, then tag, then the
           genuine all-clear (no flows, no filters). */}
-      {visible.length === 0 && !loading && (
+      {!showTrashed && visible.length === 0 && !loading && (
         query.trim() !== '' ? (
           <p className="helper-text" data-testid="workflows-no-matches">{t('workflowsDashboard.noMatches')}</p>
         ) : folderFilter !== '' ? (
@@ -1095,13 +1281,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         )
       )}
 
-      {visible.length > 0 && !hasFolders && (
+      {!showTrashed && visible.length > 0 && !hasFolders && (
         <ul className="we-list">
           {visible.map(renderRow)}
         </ul>
       )}
 
-      {visible.length > 0 && hasFolders && (
+      {!showTrashed && visible.length > 0 && hasFolders && (
         <div className="we-list-folders" data-testid="workflows-folder-groups">
           {groups.map(group => {
             const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder') as string) : group.key
