@@ -502,7 +502,7 @@ describe("validate hook is opt-in (unchanged-behaviour smoke)", () => {
 });
 
 describe("ORG_CONFIG_DEFINITIONS retention.* family", () => {
-  it("catalogues exactly the five retention.* keys", () => {
+  it("catalogues exactly the six retention.* keys", () => {
     const retentionKeys = ORG_CONFIG_DEFINITIONS.filter((d) => d.key.startsWith("retention."))
       .map((d) => d.key)
       .sort();
@@ -513,6 +513,7 @@ describe("ORG_CONFIG_DEFINITIONS retention.* family", () => {
         "retention.usageEventsDays",
         "retention.recoveryFeedbackDays",
         "retention.memoryEntriesDays",
+        "retention.deletedWorkflowsDays",
       ].sort(),
     );
   });

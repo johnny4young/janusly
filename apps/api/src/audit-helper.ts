@@ -175,6 +175,7 @@ export type AuditAction =
   | "workflow.rolled_back"
   | "workflow.slo.set"
   | "workflow.deleted"
+  | "workflow.restored"
   | "workflow.force_run_during_pause"
   // solution packs (installable, ICP-shaped workflow starters)
   | "workflow.pack_imported"

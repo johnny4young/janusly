@@ -119,6 +119,7 @@ Guardrails:
 | `retention.usageEventsDays` | `JANUSLY_RETENTION_USAGE_EVENTS_DAYS` | `90` | retention sweep | Per-org `usage_events` retention window, range 30..365 days. |
 | `retention.recoveryFeedbackDays` | `JANUSLY_RETENTION_RECOVERY_FEEDBACK_DAYS` | `180` | retention sweep | Per-org `recovery_feedback` retention window, range 30..365 days. |
 | `retention.memoryEntriesDays` | `JANUSLY_RETENTION_MEMORY_ENTRIES_DAYS` | `90` | retention sweep | Per-org `memory_entries` retention window, range 7..730 days; applies in addition to per-kind memory expiry. |
+| `retention.deletedWorkflowsDays` | `JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS` | `30` | retention sweep | Recovery window for a soft-deleted workflow (`DELETE /workflows/:id` sets `deletedAt`), range 1..365 days. Within it, `POST /workflows/:id/restore` brings it back; after it, the sweep hard-purges the workflow + its versions + metadata. |
 
 The config table deliberately does not store `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, database URLs, Redis URLs, Supabase keys, service tokens,
@@ -262,6 +263,7 @@ registration failures log and do not block process boot.
 | `JANUSLY_RETENTION_USAGE_EVENTS_DAYS` | `90` | `org_configs.retention.usageEventsDays` | Env fallback for per-org usage-event retention. |
 | `JANUSLY_RETENTION_RECOVERY_FEEDBACK_DAYS` | `180` | `org_configs.retention.recoveryFeedbackDays` | Env fallback for per-org recovery-feedback retention. |
 | `JANUSLY_RETENTION_MEMORY_ENTRIES_DAYS` | `90` | `org_configs.retention.memoryEntriesDays` | Env fallback for per-org memory-entry retention. |
+| `JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS` | `30` | `org_configs.retention.deletedWorkflowsDays` | Env fallback for the soft-deleted-workflow recovery window before the retention sweep hard-purges. |
 | `JANUSLY_AUDIT_LOGS_RETENTION_CRON` | `0 2 * * *` | `packages/engine/src/audit-logs-retention-scheduler.ts` | Global audit-log retention scheduler. |
 | `JANUSLY_AUDIT_LOGS_RETENTION_DAYS` | `730` | `packages/engine/src/audit-logs-retention-scheduler.ts` | Global audit-log retention window. Range 30..3650. |
 | `JANUSLY_SCIM_EVENTS_RETENTION_CRON` | `0 4 * * *` | `packages/engine/src/scim-events-retention-scheduler.ts` | Global SCIM dedup-event retention scheduler. |

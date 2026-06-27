@@ -32,6 +32,7 @@ const DEFAULTS = {
   usageEventsDays: 90,
   recoveryFeedbackDays: 180,
   memoryEntriesDays: 90,
+  deletedWorkflowsDays: 30,
 };
 
 describe("getRetentionPolicyConfig", () => {
@@ -45,12 +46,14 @@ describe("getRetentionPolicyConfig", () => {
       { key: "retention.runEventsDays", valueJson: 7 },
       { key: "retention.auditLogsDays", valueJson: 730 },
       { key: "retention.memoryEntriesDays", valueJson: 30 },
+      { key: "retention.deletedWorkflowsDays", valueJson: 7 },
     ]);
     await expect(getRetentionPolicyConfig("org_a")).resolves.toEqual({
       ...DEFAULTS,
       runEventsDays: 7,
       auditLogsDays: 730,
       memoryEntriesDays: 30,
+      deletedWorkflowsDays: 7,
     });
   });
 

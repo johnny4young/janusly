@@ -32,6 +32,7 @@ vi.mock("@janusly/data", () => ({
   deleteExpiredUsageEventsForOrg: vi.fn(),
   deleteExpiredRecoveryFeedbackForOrg: vi.fn(),
   deleteExpiredMemoryEntriesForOrg: vi.fn(),
+  deleteExpiredSoftDeletedWorkflowsForOrg: vi.fn(),
 }));
 
 import {
@@ -39,6 +40,7 @@ import {
   deleteExpiredMemoryEntriesForOrg,
   deleteExpiredRecoveryFeedbackForOrg,
   deleteExpiredRunEventsForOrg,
+  deleteExpiredSoftDeletedWorkflowsForOrg,
   deleteExpiredUsageEventsForOrg,
   getRetentionPolicyConfig,
   listOrgIdsForRetention,
@@ -64,6 +66,7 @@ const auditLogsPurgeMock = vi.mocked(deleteExpiredAuditLogsForOrg);
 const usageEventsPurgeMock = vi.mocked(deleteExpiredUsageEventsForOrg);
 const recoveryFeedbackPurgeMock = vi.mocked(deleteExpiredRecoveryFeedbackForOrg);
 const memoryEntriesPurgeMock = vi.mocked(deleteExpiredMemoryEntriesForOrg);
+const softDeletedWorkflowsPurgeMock = vi.mocked(deleteExpiredSoftDeletedWorkflowsForOrg);
 
 const DEFAULT_POLICY = {
   runEventsDays: 90,
@@ -71,6 +74,7 @@ const DEFAULT_POLICY = {
   usageEventsDays: 90,
   recoveryFeedbackDays: 180,
   memoryEntriesDays: 90,
+  deletedWorkflowsDays: 30,
 };
 
 function purgeResult(rowsDeleted: number) {
@@ -87,7 +91,7 @@ beforeEach(() => {
   getConfigMock.mockResolvedValue({ ...DEFAULT_POLICY });
   exportMock.mockReset();
   exportMock.mockResolvedValue(false);
-  for (const m of [runEventsPurgeMock, auditLogsPurgeMock, usageEventsPurgeMock, recoveryFeedbackPurgeMock, memoryEntriesPurgeMock]) {
+  for (const m of [runEventsPurgeMock, auditLogsPurgeMock, usageEventsPurgeMock, recoveryFeedbackPurgeMock, memoryEntriesPurgeMock, softDeletedWorkflowsPurgeMock]) {
     m.mockReset();
     m.mockResolvedValue(purgeResult(0));
   }
@@ -148,6 +152,7 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
       usageEventsDays: 30,
       recoveryFeedbackDays: 45,
       memoryEntriesDays: 15,
+      deletedWorkflowsDays: 5,
     });
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     try {
@@ -161,6 +166,7 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
     expect(usageEventsPurgeMock).toHaveBeenCalledWith({ orgId: "org_a", retentionDays: 30 });
     expect(recoveryFeedbackPurgeMock).toHaveBeenCalledWith({ orgId: "org_a", retentionDays: 45 });
     expect(memoryEntriesPurgeMock).toHaveBeenCalledWith({ orgId: "org_a", retentionDays: 15 });
+    expect(softDeletedWorkflowsPurgeMock).toHaveBeenCalledWith({ orgId: "org_a", retentionDays: 5 });
   });
 
   it("runs the export seam BEFORE any table purge (export-before-delete)", async () => {
@@ -178,7 +184,7 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
     expect(order).toContain("purge");
     expect(exportMock).toHaveBeenCalledWith({
       orgId: "org_a",
-      tables: ["run_events", "audit_logs", "usage_events", "recovery_feedback", "memory_entries"],
+      tables: ["run_events", "audit_logs", "usage_events", "recovery_feedback", "memory_entries", "workflows"],
       requestedBy: null,
     });
   });
@@ -194,7 +200,7 @@ describe("purgeRetentionForOrg — per-org bounds + ordering", () => {
     expect(row.action).toBe("retention.purged");
     expect(row.metadata.totalRowsDeleted).toBe(7);
     expect(Array.isArray(row.metadata.tables)).toBe(true);
-    expect(row.metadata.tables).toHaveLength(5);
+    expect(row.metadata.tables).toHaveLength(6);
   });
 
   it("isolates a per-table failure: other tables still purge and the audit still writes", async () => {

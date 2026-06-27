@@ -23,9 +23,11 @@
  *   has no `org_id` column, so its purge scopes through the parent
  *   `runs.org_id` via a correlated subquery — the only join in this
  *   module, and still org-bounded.
- * - Legal-hold bypass: `(hold_until IS NULL OR hold_until <= now())` is
- *   a conjunct on every DELETE. A future-dated `hold_until` survives the
- *   sweep.
+ * - Legal-hold bypass: for append-only tenant tables, `(hold_until IS
+ *   NULL OR hold_until <= now())` is a conjunct on every DELETE. A
+ *   future-dated `hold_until` survives the sweep. Workflow tombstones
+ *   are the exception: they have no `hold_until` column and are purged by
+ *   `deleted_at` after the restore window expires.
  * - The DELETE runs in `batchSize` (default 10k) row batches, each its
  *   own short transaction; the loop exits when a batch returns fewer
  *   than `batchSize` rows OR `maxBatches` (default 1k → 10M-row ceiling)
@@ -46,6 +48,9 @@ import {
   runEvents,
   runs,
   usageEvents,
+  workflows,
+  workflowVersions,
+  workflowMetadata,
 } from "@janusly/db";
 import { sql } from "drizzle-orm";
 
@@ -58,7 +63,8 @@ export type RetentionTable =
   | "audit_logs"
   | "usage_events"
   | "recovery_feedback"
-  | "memory_entries";
+  | "memory_entries"
+  | "workflows";
 
 export type DeleteExpiredForOrgInput = {
   orgId: string;
@@ -236,6 +242,56 @@ export async function deleteExpiredMemoryEntriesForOrg(
 }
 
 /**
+ * Hard-purge workflows soft-deleted (`deletedAt` set) longer than
+ * `retentionDays` for one org, plus their `workflow_versions` +
+ * `workflow_metadata` rows — the original delete cascade, deferred by the
+ * soft-delete tombstone. Runs / audit rows stay (orphan-tolerant, no FK).
+ * Unlike the high-volume `created_at` sweeps this filters on `deleted_at`
+ * and is single-statement (soft-deleted workflows are low-cardinality), so
+ * it doesn't use the batched driver. The child + parent deletes must stay
+ * atomic: if the process dies mid-purge, a workflow must never be restored
+ * without its version history.
+ */
+export async function deleteExpiredSoftDeletedWorkflowsForOrg(
+  input: DeleteExpiredForOrgInput,
+): Promise<DeleteExpiredForOrgResult> {
+  const startedAt = Date.now();
+  const cutoffAt = cutoffIso(input.retentionDays);
+  // One data-modifying CTE keeps the deferred cascade atomic: either the
+  // tombstoned workflows and their child rows all purge, or none do.
+  const deleted = await db.execute<{ rows_deleted: number | string }>(sql`
+    WITH expired_workflows AS (
+      SELECT ${workflows.id}
+      FROM ${workflows}
+      WHERE ${workflows.orgId} = ${input.orgId}
+        AND ${workflows.deletedAt} IS NOT NULL
+        AND ${workflows.deletedAt} <= ${cutoffAt}::timestamptz
+    ),
+    deleted_versions AS (
+      DELETE FROM ${workflowVersions}
+      WHERE ${workflowVersions.orgId} = ${input.orgId}
+        AND ${workflowVersions.workflowId} IN (SELECT id FROM expired_workflows)
+      RETURNING 1
+    ),
+    deleted_metadata AS (
+      DELETE FROM ${workflowMetadata}
+      WHERE ${workflowMetadata.orgId} = ${input.orgId}
+        AND ${workflowMetadata.workflowId} IN (SELECT id FROM expired_workflows)
+      RETURNING 1
+    ),
+    deleted_workflows AS (
+      DELETE FROM ${workflows}
+      WHERE ${workflows.orgId} = ${input.orgId}
+        AND ${workflows.id} IN (SELECT id FROM expired_workflows)
+      RETURNING ${workflows.id}
+    )
+    SELECT count(*)::int AS rows_deleted FROM deleted_workflows
+  `);
+  const rowsDeleted = Number(deleted[0]?.rows_deleted ?? 0);
+  return { rowsDeleted, cutoffAt, runtimeMs: Date.now() - startedAt, cappedByMaxBatches: false };
+}
+
+/**
  * Enumerate every distinct org that has retention-eligible data in any
  * of the swept tables. The daily sweep iterates this list and reads each
  * org's `retention.*` bounds. `run_events` is reached through `runs`
@@ -259,6 +315,8 @@ export async function listOrgIdsForRetention(): Promise<string[]> {
       SELECT ${recoveryFeedback.orgId} AS org_id FROM ${recoveryFeedback}
       UNION
       SELECT ${memoryEntries.orgId} AS org_id FROM ${memoryEntries}
+      UNION
+      SELECT ${workflows.orgId} AS org_id FROM ${workflows} WHERE ${workflows.deletedAt} IS NOT NULL
     ) AS orgs
     WHERE org_id <> 'system'
   `);
