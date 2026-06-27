@@ -1220,6 +1220,7 @@ describe('<WorkflowsDashboard />', () => {
       }
       if (url === '/workflows/tags') return { tags: [] }
       if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/org/config') return { config: [] } // retention key unset → default window
       if (url.startsWith('/workflows/trash')) return trash
       return active
     })
@@ -1355,5 +1356,51 @@ describe('<WorkflowsDashboard />', () => {
     fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
     await screen.findByTestId('workflows-trash-empty')
     expect(screen.queryByTestId('workflows-trash-list')).not.toBeInTheDocument()
+  })
+
+  const DAY_MS = 86_400_000
+
+  // A trash list whose rows' deletedAt are offsets from "now", so the expiry
+  // countdown is stable under daysUntilPurge's ceil regardless of test clock.
+  function trashRowsRelativeToNow(): Flow[] {
+    return [
+      { id: 'wf-fresh', orgId: 'o', name: 'Recently deleted', runCount: 0, deletedAt: new Date(Date.now() - 5 * DAY_MS).toISOString() },
+      { id: 'wf-stale', orgId: 'o', name: 'Long deleted', runCount: 0, deletedAt: new Date(Date.now() - 40 * DAY_MS).toISOString() },
+    ]
+  }
+
+  it('renders the retention countdown per trash row using the org window from /org/config', async () => {
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/org/config') return { config: [{ key: 'retention.deletedWorkflowsDays', value: 30 }] }
+      if (url.startsWith('/workflows/trash')) return trashRowsRelativeToNow()
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    // Window 30, deleted 5 days ago → 25 days left.
+    const fresh = await screen.findByTestId('workflows-trash-expiry-wf-fresh')
+    expect(fresh).toHaveTextContent('Expires in 25 days')
+    // Window 30, deleted 40 days ago → past the window → "Expires soon".
+    expect(screen.getByTestId('workflows-trash-expiry-wf-stale')).toHaveTextContent('Expires soon')
+  })
+
+  it('omits the expiry label when /org/config cannot be read (no guessed number)', async () => {
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/org/config') throw new Error('config unavailable')
+      if (url.startsWith('/workflows/trash')) return trashRowsRelativeToNow()
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-row-wf-fresh')
+    expect(screen.queryByTestId('workflows-trash-expiry-wf-fresh')).not.toBeInTheDocument()
   })
 })
