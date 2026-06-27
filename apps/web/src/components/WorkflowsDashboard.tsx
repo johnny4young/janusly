@@ -15,6 +15,7 @@ import { WorkflowHealthBadge } from './WorkflowHealthBadge'
 import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
+import { daysUntilPurge } from '../trash-expiry'
 
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
  *  the server's terminal-failure set). */
@@ -29,6 +30,13 @@ const PAGE_SIZE = 100
 /** Sentinel key for the "Ungrouped" folder section. A real folder name is
  *  `min(1)` chars, so the empty string can never collide with one. */
 const UNGROUPED = ''
+
+/** Fallback retention window (days) for the Trash "expires in N days" label,
+ *  used only when `GET /org/config` succeeds but the org left
+ *  `retention.deletedWorkflowsDays` unset. Mirrors the backend default — if the
+ *  server default changes, update this one spot. The actual purge always runs
+ *  server-side; this is a display estimate. */
+const DEFAULT_RETENTION_DAYS = 30
 
 /** One Flows-list folder section: the folder key (`UNGROUPED` = no folder) and
  *  its workflows, in the same order the global filter+sort produced. */
@@ -110,6 +118,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // is the active-view row awaiting a delete confirm (inline, one at a time).
   const [showTrashed, setShowTrashed] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // Org retention window (days) for the Trash "expires in N days" label. `null`
+  // = unknown (not yet fetched or the fetch failed) → render no expiry label,
+  // never a guessed number. Loaded from GET /org/config when Trash is opened.
+  const [retentionDays, setRetentionDays] = useState<number | null>(null)
+  // Timestamp captured when the Trash retention window is loaded. Kept in state
+  // so row rendering stays pure (no Date.now() reads during render).
+  const [trashNowMs, setTrashNowMs] = useState<number | null>(null)
   // Monotonic list request id. Active-list and Trash fetches share the same
   // `workflows` state; when the operator toggles views while an older request is
   // still in flight, only the newest response may paint rows.
@@ -243,6 +258,42 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     })()
     return () => { cancelled = true }
   }, [platformVersion])
+
+  // The org's retention window for the Trash "expires in N days" label. Only
+  // fetched when Trash is open (the label is trash-only), via the un-gated
+  // GET /org/config. A finite `retention.deletedWorkflowsDays` is used directly;
+  // an unset key falls back to the backend default; a fetch failure leaves
+  // `retentionDays` null so no (possibly-wrong) number is shown. Non-fatal.
+  useEffect(() => {
+    if (!showTrashed) {
+      setRetentionDays(null)
+      setTrashNowMs(null)
+      return
+    }
+    let cancelled = false
+    const openedAtMs = Date.now()
+    setRetentionDays(null)
+    setTrashNowMs(openedAtMs)
+    void (async () => {
+      try {
+        const payload = await api('/org/config')
+        const envelope = payload as { config?: unknown }
+        const entries = (Array.isArray(payload)
+          ? payload
+          : Array.isArray(envelope.config)
+            ? envelope.config
+            : []) as Array<{ key: string; value: unknown }>
+        const raw = entries.find(entry => entry.key === 'retention.deletedWorkflowsDays')?.value
+        if (cancelled) return
+        const parsed = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_RETENTION_DAYS
+        setRetentionDays(parsed)
+      } catch {
+        // Unknown window → leave null so the row shows no expiry estimate.
+        if (!cancelled) setRetentionDays(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [showTrashed, platformVersion])
 
   // Client-side filter + sort over the already-dense rows. `recent` keys on
   // the ISO updatedAt/createdAt (lexicographic desc == chronological desc);
@@ -743,6 +794,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           {typeof workflow.runCount === 'number' && (
             <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
           )}
+          {/* Retention countdown — only when the window is known (retentionDays
+              non-null) and the row carries a tombstone date. A non-positive
+              remaining count means the window elapsed (the daily sweep is due). */}
+          {retentionDays != null && trashNowMs != null && workflow.deletedAt && (() => {
+            const daysLeft = daysUntilPurge(workflow.deletedAt, retentionDays, trashNowMs)
+            return (
+              <span className="we-pill we-pill--ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
+                {daysLeft > 0
+                  ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }) as string)
+                  : (t('workflowsDashboard.expiresSoon') as string)}
+              </span>
+            )
+          })()}
           <button
             type="button"
             className="small-command"
