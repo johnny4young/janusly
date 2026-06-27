@@ -9294,6 +9294,31 @@ button.we-ops-metric-card--button {
   text-overflow: ellipsis;
 }
 
+/* Header actions cluster (Trash toggle + Refresh) kept together on the right of
+   the always-rendered panel toolbar. */
+.panel-toolbar__actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* Inline per-row soft-delete confirm — mirrors the folder-delete confirm so a
+   click never deletes immediately. */
+.we-list-row__confirm {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.we-list-row__confirm-text {
+  color: var(--we-muted);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Drag-to-folder. The grip column only appears on rows that carry the handle
    (i.e. once folders exist); the flat no-folder list keeps its 3-column grid. */
 .we-list-row:has(.we-list-row__drag) {
