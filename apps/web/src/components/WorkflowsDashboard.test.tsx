@@ -1403,4 +1403,104 @@ describe('<WorkflowsDashboard />', () => {
     await screen.findByTestId('workflows-trash-row-wf-fresh')
     expect(screen.queryByTestId('workflows-trash-expiry-wf-fresh')).not.toBeInTheDocument()
   })
+
+  const TRASH3: Flow[] = [
+    { id: 'wfa', orgId: 'o', name: 'Trash A', runCount: 0, deletedAt: '2026-06-05T00:00:00.000Z' },
+    { id: 'wfb', orgId: 'o', name: 'Trash B', runCount: 0, deletedAt: '2026-06-05T00:00:00.000Z' },
+    { id: 'wfc', orgId: 'o', name: 'Trash C', runCount: 0, deletedAt: '2026-06-05T00:00:00.000Z' },
+  ]
+
+  it('bulk-restores the checked trash rows via the per-id route', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: TRASH3, calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-list')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
+    fireEvent.click(screen.getByTestId('workflows-trash-select-wfb'))
+    fireEvent.click(screen.getByTestId('workflows-trash-restore-selected'))
+
+    // One POST /workflows/<id>/restore per checked row.
+    await waitFor(() => {
+      const restores = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/restore')).map((c) => c.url).sort()
+      expect(restores).toEqual(['/workflows/wfa/restore', '/workflows/wfb/restore'])
+    })
+    // Restored rows leave trash; the unchecked one stays.
+    await waitFor(() => expect(screen.queryByTestId('workflows-trash-row-wfa')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-trash-row-wfb')).not.toBeInTheDocument()
+    expect(screen.getByTestId('workflows-trash-row-wfc')).toBeInTheDocument()
+  })
+
+  it('select-all ticks every trash row; the toggle then clears them', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: TRASH3, calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-list')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-select-all'))
+    expect((screen.getByTestId('workflows-trash-select-wfa') as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByTestId('workflows-trash-select-wfc') as HTMLInputElement).checked).toBe(true)
+
+    fireEvent.click(screen.getByTestId('workflows-trash-select-all')) // now the clear toggle
+    expect((screen.getByTestId('workflows-trash-select-wfa') as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByTestId('workflows-trash-select-wfc') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('clears a row from the trash selection when it is restored individually', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: TRASH3, calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-list')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
+    expect(screen.getByTestId('workflows-trash-restore-selected')).toHaveTextContent('Restore selected (1)')
+
+    fireEvent.click(screen.getByTestId('workflows-restore-wfa'))
+    await waitFor(() => expect(screen.queryByTestId('workflows-trash-row-wfa')).not.toBeInTheDocument())
+
+    const restoreSelected = screen.getByTestId('workflows-trash-restore-selected') as HTMLButtonElement
+    expect(restoreSelected).toBeDisabled()
+    expect(restoreSelected).toHaveTextContent('Restore selected (0)')
+    expect(screen.queryByText('1 selected')).not.toBeInTheDocument()
+  })
+
+  it('reconciles a partial bulk-restore failure — the failed row reappears', async () => {
+    let trash: Flow[] = [...TRASH3]
+    vi.mocked(api).mockImplementation(async (url: string, options?: RequestInit) => {
+      const method = options?.method ?? 'GET'
+      if (method === 'POST' && url.endsWith('/restore')) {
+        const id = url.match(/\/workflows\/([^/]+)\/restore$/)![1]
+        if (id === 'wfb') throw new Error('restore failed') // one of the two fails
+        trash = trash.filter((w) => w.id !== id)
+        return { ok: true }
+      }
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/org/config') return { config: [] }
+      if (url.startsWith('/workflows/trash')) return trash
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-list')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-select-wfa'))
+    fireEvent.click(screen.getByTestId('workflows-trash-select-wfb'))
+    fireEvent.click(screen.getByTestId('workflows-trash-restore-selected'))
+
+    // wfa restored (gone); wfb failed → the bump-driven refetch re-adds it.
+    await waitFor(() => expect(screen.queryByTestId('workflows-trash-row-wfa')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('workflows-trash-row-wfb')).toBeInTheDocument())
+  })
 })
