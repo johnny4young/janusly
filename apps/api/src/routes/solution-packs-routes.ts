@@ -274,6 +274,13 @@ export const solutionPacksRoutes: Route[] = [
       if (result.kind === "conflict") {
         return sendJson(res, { error: "Concurrent save conflict — please retry", attempts: result.attempts }, 409);
       }
+      if (result.kind === "deleted") {
+        // The pack draft's workflow id collides with a soft-deleted workflow.
+        // Installing must not silently resurrect a tombstoned workflow — the
+        // operator restores it explicitly first. (Practically unreachable: pack
+        // installs mint a fresh workflow id, but the save contract requires it.)
+        return sendJson(res, { error: "Workflow not found" }, 404);
+      }
 
       const { missingCredentials, missingOrgConfigs } = await computeMissingDeps(auth.orgId, pack);
 

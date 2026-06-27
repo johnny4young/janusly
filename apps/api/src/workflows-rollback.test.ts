@@ -8,6 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 let sourceRows: { id: string; orgId: string; workflowId: string; version: number; dagJson: unknown }[] = []
 let existingVersions: { version: number }[] = []
+// Soft-delete pre-check rows for the parent workflow. `[]` = no matching row /
+// not soft-deleted (the default, so existing tests are unaffected).
+let gateWorkflowRows: { deletedAt: Date | null }[] = []
 const insertedRows: Record<string, unknown>[] = []
 
 type SourceSelectChain = {
@@ -26,14 +29,22 @@ type ExistingVersionsSelectChain = {
 
 function makeTx() {
   return {
-    // The rollback helper issues two `select()` calls. We disambiguate by
-    // call-count: first → source-version load (terminates after `where()`);
-    // second → existing-versions list (terminates after `orderBy()`).
+    // The rollback helper issues three `select()` calls. We disambiguate by
+    // call-count: first → workflows soft-delete gate (terminates after
+    // `limit()`); second → source-version load (after `where()`); third →
+    // existing-versions list (after `orderBy()`).
     select: (() => {
       let callCount = 0
       return () => {
         callCount += 1
         if (callCount === 1) {
+          const chain = {
+            from: () => chain,
+            where: () => ({ limit: () => Promise.resolve(gateWorkflowRows) }),
+          }
+          return chain as unknown as SourceSelectChain
+        }
+        if (callCount === 2) {
           const chain: SourceSelectChain = {
             from: () => chain,
             where: () => Promise.resolve(sourceRows),
@@ -68,6 +79,11 @@ vi.mock('@janusly/db', () => ({
     workflowId: 'workflow_versions.workflow_id',
     version: 'workflow_versions.version',
   },
+  workflows: {
+    id: 'workflows.id',
+    orgId: 'workflows.org_id',
+    deletedAt: 'workflows.deleted_at',
+  },
 }))
 
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from './workflows-rollback'
@@ -75,6 +91,7 @@ import { rollbackAuditMetadata, rollbackWorkflowToVersion } from './workflows-ro
 afterEach(() => {
   sourceRows = []
   existingVersions = []
+  gateWorkflowRows = []
   insertedRows.length = 0
 })
 
@@ -169,5 +186,22 @@ describe('rollbackWorkflowToVersion', () => {
       sourceVersion: 3,
       newVersion: 6,
     })
+  })
+
+  it('rejects a rollback against a soft-deleted workflow (no version written)', async () => {
+    gateWorkflowRows = [{ deletedAt: new Date('2026-01-01T00:00:00Z') }]
+    // Even with a valid source version present, the soft-delete gate short-circuits.
+    sourceRows = [{ id: 'ver-3', orgId: 'org-1', workflowId: 'wf-1', version: 3, dagJson: {} }]
+    existingVersions = [{ version: 3 }]
+
+    const result = await rollbackWorkflowToVersion({
+      orgId: 'org-1',
+      userId: 'user-a',
+      workflowId: 'wf-1',
+      sourceVersionId: 'ver-3',
+    })
+
+    expect(result).toEqual({ ok: false, code: 'deleted' })
+    expect(insertedRows).toHaveLength(0)
   })
 })

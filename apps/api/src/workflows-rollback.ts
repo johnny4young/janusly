@@ -18,7 +18,7 @@
  */
 
 import { and, desc, eq } from "drizzle-orm";
-import { db, workflowVersions } from "@janusly/db";
+import { db, workflowVersions, workflows } from "@janusly/db";
 
 /** Result of an attempted rollback. `ok: false` cases are non-throwing so
  *  the route layer can map them to HTTP statuses without a try/catch. */
@@ -34,7 +34,7 @@ export type RollbackResult =
       /** Echoes the input so the audit trail is self-contained. */
       sourceVersionId: string;
     }
-  | { ok: false; code: "not_found" };
+  | { ok: false; code: "not_found" | "deleted" };
 
 /** Successful rollback payload narrowed for callers that need audit metadata. */
 export type SuccessfulRollbackResult = Extract<RollbackResult, { ok: true }>;
@@ -60,6 +60,15 @@ export async function rollbackWorkflowToVersion(args: {
   sourceVersionId: string;
 }): Promise<RollbackResult> {
   return await db.transaction(async (tx) => {
+    // A soft-deleted workflow behaves as "not found" for writes — rolling back
+    // must not append a version to a tombstoned workflow. Restore it first.
+    const wfRows = await tx
+      .select({ deletedAt: workflows.deletedAt })
+      .from(workflows)
+      .where(and(eq(workflows.id, args.workflowId), eq(workflows.orgId, args.orgId)))
+      .limit(1);
+    if (wfRows[0]?.deletedAt) return { ok: false, code: "deleted" } as const;
+
     const sourceRows = await tx
       .select()
       .from(workflowVersions)
