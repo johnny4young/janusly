@@ -33,7 +33,7 @@ vi.mock("@janusly/db", () => ({
   workflowMetadata: { tags: "tags", folder: "folder", orgId: "org_id", workflowId: "workflow_id" },
 }));
 
-import { listWorkflowsWithRunSummary } from "./workflowsListRepo";
+import { listDeletedWorkflowsWithRunSummary, listWorkflowsWithRunSummary } from "./workflowsListRepo";
 
 beforeEach(() => {
   baseRows = [];
@@ -58,8 +58,8 @@ describe("listWorkflowsWithRunSummary", () => {
     const rows = await listWorkflowsWithRunSummary("org-1", 100);
 
     expect(rows).toEqual([
-      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3, status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded", tags: [], folder: "Billing" },
-      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null },
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: "u", createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "failed", runCount: 3, status: "paused_upstream_degraded", pausedReason: "Upstream \"stripe\" degraded", tags: [], folder: "Billing", deletedAt: null },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: null },
     ]);
   });
 
@@ -160,5 +160,40 @@ describe("listWorkflowsWithRunSummary", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe("wf-b");
+  });
+
+  it("includes deletedAt (null for active rows) in the folded shape", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null, deletedAt: null },
+    ];
+    aggRows = [];
+
+    const rows = await listWorkflowsWithRunSummary("org-1", 100);
+
+    expect(rows[0]?.deletedAt).toBeNull();
+  });
+});
+
+describe("listDeletedWorkflowsWithRunSummary", () => {
+  it("returns [] and skips the aggregate query when the org has no soft-deleted workflows", async () => {
+    baseRows = [];
+    aggRows = [{ workflowId: "should-not-be-read", runCount: 9, lastRunStatus: "failed" }];
+    const rows = await listDeletedWorkflowsWithRunSummary("org-1", 100);
+    expect(rows).toEqual([]);
+  });
+
+  it("folds the run aggregate + tombstone date onto each soft-deleted workflow", async () => {
+    baseRows = [
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), status: "active", pausedReason: null, tags: ["billing"], folder: "Billing", deletedAt: new Date("2026-03-02T00:00:00Z") },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), status: "active", pausedReason: null, tags: null, folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
+    ];
+    aggRows = [{ workflowId: "wf-a", runCount: 5, lastRunStatus: "succeeded" }];
+
+    const rows = await listDeletedWorkflowsWithRunSummary("org-1", 100);
+
+    expect(rows).toEqual([
+      { id: "wf-a", orgId: "org-1", name: "A", createdBy: null, createdAt: new Date("2026-01-01T00:00:00Z"), lastRunStatus: "succeeded", runCount: 5, status: "active", pausedReason: null, tags: ["billing"], folder: "Billing", deletedAt: new Date("2026-03-02T00:00:00Z") },
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
+    ]);
   });
 });
