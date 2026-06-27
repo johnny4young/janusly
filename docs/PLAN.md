@@ -355,10 +355,11 @@ What is still missing is broader use of the durable substrate:
 
 Implementation status:
 - ENG-114 landed the privacy and retention policy first — see [`docs/memory-policy.md`](memory-policy.md) for the canonical doc covering eligibility, the two-flag opt-in consent model, per-kind retention, deletion/export, embedding provider posture, prompt-injection framing, the `org_configs.memory.*` catalog, audit actions, DPA language, and incident response.
-- ENG-115 shipped the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, scrubbed content, embedding, provider/model/dimension metadata, bounded metadata jsonb, created_at, retain_until`, plus `commitMemory(entry)`, `recallMemory({ orgId, kind?, query })`, `deleteExpiredMemory({ orgId? })`, and purge helpers.
+- ENG-115 shipped the `memory_entries` substrate: `id, org_id, workflow_id?, run_id?, kind, scrubbed content, embedding, provider/model/dimension metadata, bounded metadata jsonb, created_at, retain_until`, plus `commitMemory(entry)`, `recallMemory({ orgId, kind?, query, limit? })`, `deleteExpiredMemory({ orgId? })`, and purge helpers.
 - ENG-116 feeds recalled recovery memory into `/ai/patch-workflow` via `extraContext.memorySnippets`, with the same data-framing / suspicion-framing posture as other AI prompts.
 - ENG-254 shipped the explicit memory tools `vector.search` / `vector.upsert` (`packages/engine/src/vector-tools.ts`) — thin wrappers over `recallMemory` / `commitMemory` that expose the durable substrate to any workflow `tool` node under a dedicated `workflow_vector` kind, honoring the same two-flag consent.
 - ENG-255 shipped durable cross-run episodic recall for the `agent` / `multi_agent` loop (`packages/engine/src/agent-memory.ts`): on completion the loop commits an `agent_episode` (goal + outcome) and the LLM planner recalls semantically-similar prior episodes into its prompt — the same two-flag consent + DATA-framing posture as the recovery/generation recall paths. This closes ENG-025's last open thread.
+- ENG-259 plumbed `vector.search.topK` into `recallMemory({ limit })`, so the requested top-k is applied at SQL `LIMIT` time (still clamped by `memory.recallMaxEntries`) instead of relying on post-query trimming.
 - Still future: export UI/API and provider implementations beyond the v1 Ollama embedding path.
 
 ### 7.2 RL — make it actually decide

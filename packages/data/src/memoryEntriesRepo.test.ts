@@ -489,6 +489,56 @@ describe("recallMemory — query limits", () => {
     await recallMemory({ orgId: "default", query: "test" });
     expect(chain.limit).toHaveBeenCalledWith(2);
   });
+
+  it("uses an explicit per-call limit below the ceiling as the SQL LIMIT", async () => {
+    stubSuccessfulEmbedding();
+    listOrgConfigMock.mockResolvedValueOnce(
+      fakeOrgConfigEntries({ "memory.recallMaxEntries": 8 }) as never,
+    );
+    const chain = buildSelectChain([fakeRecallRow()]);
+    await recallMemory({ orgId: "default", query: "test", limit: 3 });
+    expect(chain.limit).toHaveBeenCalledWith(3);
+  });
+
+  it("clamps a per-call limit above the ceiling down to recallMaxEntries", async () => {
+    stubSuccessfulEmbedding();
+    listOrgConfigMock.mockResolvedValueOnce(
+      fakeOrgConfigEntries({ "memory.recallMaxEntries": 8 }) as never,
+    );
+    const chain = buildSelectChain([fakeRecallRow()]);
+    await recallMemory({ orgId: "default", query: "test", limit: 100 });
+    expect(chain.limit).toHaveBeenCalledWith(8);
+  });
+
+  it("sanitizes a non-positive / non-integer per-call limit to a floor of 1", async () => {
+    stubSuccessfulEmbedding();
+    listOrgConfigMock.mockResolvedValueOnce(
+      fakeOrgConfigEntries({ "memory.recallMaxEntries": 8 }) as never,
+    );
+    const chain = buildSelectChain([fakeRecallRow()]);
+    await recallMemory({ orgId: "default", query: "test", limit: 0 });
+    expect(chain.limit).toHaveBeenCalledWith(1);
+  });
+
+  it("floors a fractional per-call limit to an integer", async () => {
+    stubSuccessfulEmbedding();
+    listOrgConfigMock.mockResolvedValueOnce(
+      fakeOrgConfigEntries({ "memory.recallMaxEntries": 8 }) as never,
+    );
+    const chain = buildSelectChain([fakeRecallRow()]);
+    await recallMemory({ orgId: "default", query: "test", limit: 3.9 });
+    expect(chain.limit).toHaveBeenCalledWith(3);
+  });
+
+  it("falls back to the ceiling for a non-finite per-call limit (NaN/Infinity)", async () => {
+    stubSuccessfulEmbedding();
+    listOrgConfigMock.mockResolvedValueOnce(
+      fakeOrgConfigEntries({ "memory.recallMaxEntries": 8 }) as never,
+    );
+    const chain = buildSelectChain([fakeRecallRow()]);
+    await recallMemory({ orgId: "default", query: "test", limit: Number.NaN });
+    expect(chain.limit).toHaveBeenCalledWith(8);
+  });
 });
 
 describe("recallMemory — similarity score derivation", () => {
