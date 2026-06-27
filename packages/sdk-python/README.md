@@ -38,7 +38,7 @@ The base URL is normalized at construction (trailing slashes stripped). The defa
 ## Resources
 
 ```python
-client.runs        # start / get / list / poll / stream / resume
+client.runs        # start / get / list / poll / stream / resume / cancel
 client.reports     # export_run_explain (markdown / json)
 client.recovery    # get_metrics
 client.webhooks    # verify_signature (stdlib-only)
@@ -81,6 +81,14 @@ client.runs.resume_node(
     resume_token="...",  # signed token from the run's waiting event
 )
 ```
+
+**Cancel an in-flight run.**
+
+```python
+client.runs.cancel(run_id="run-abc", reason="superseded by a newer run")
+```
+
+Cancelling flips the run + its non-running nodes to `cancelled`. A run that already reached a terminal status raises `JanuslyApiError` (409).
 
 **Export a run-explain report.**
 
@@ -222,6 +230,9 @@ final = await client.runs.poll_until_terminal(run["runId"])
 
 async for event in client.runs.stream_events(run["runId"]):
     print(event["type"])
+
+# Stop an in-flight run when it is superseded or no longer safe to continue.
+await client.runs.cancel(run_id="run-abc", reason="superseded by a newer run")
 ```
 
 The async client mirrors the sync surface 1:1 — same four resources

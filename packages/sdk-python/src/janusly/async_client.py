@@ -109,7 +109,7 @@ class JanuslyAsyncClient:
 
 
 class AsyncRunsResource:
-    """``runs`` resource (async) — start / poll / stream / resume runs."""
+    """``runs`` resource (async) — start / poll / stream / resume / cancel runs."""
 
     def __init__(self, config: ClientConfig) -> None:
         self._config = config
@@ -294,6 +294,21 @@ class AsyncRunsResource:
             self._config,
             method="POST",
             path="/resume",
+            json_body=body,
+        )
+        return cast("dict[str, Any]", response.json())
+
+    async def cancel(
+        self, *, run_id: str, reason: Optional[str] = None
+    ) -> dict[str, Any]:
+        """``POST /run/cancel`` — cancel an in-flight run."""
+        body: dict[str, Any] = {"runId": run_id}
+        if reason is not None:
+            body["reason"] = reason
+        response = await async_request(
+            self._config,
+            method="POST",
+            path="/run/cancel",
             json_body=body,
         )
         return cast("dict[str, Any]", response.json())
