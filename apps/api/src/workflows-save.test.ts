@@ -19,6 +19,10 @@ const updatedWorkflowsRows: Record<string, unknown>[] = []
 let workflowInsertBehaviour: Array<'ok' | { throwError: unknown }> = []
 let versionInsertBehaviour: Array<'ok' | { throwError: unknown }> = []
 let attemptCount = 0
+// Drives the top-level soft-delete pre-check (`db.select … limit(1)` before the
+// save tx). `null` = no matching workflow row → not soft-deleted (the default,
+// so existing tests are unaffected).
+let softDeleteGateRow: { deletedAt: Date | null } | null = null
 
 class SyntheticPgError extends Error {
   code: string
@@ -109,6 +113,15 @@ vi.mock('@janusly/engine/src/schedule-scheduler', () => ({
 
 vi.mock('@janusly/db', () => ({
   db: {
+    // Top-level soft-delete pre-check: select({deletedAt}).from(workflows)
+    //   .where(...).limit(1) → [] (not soft-deleted) unless a test sets the row.
+    select: () => {
+      const chain = {
+        from: () => chain,
+        where: () => ({ limit: () => Promise.resolve(softDeleteGateRow ? [softDeleteGateRow] : []) }),
+      }
+      return chain
+    },
     transaction: async <T>(fn: (tx: ReturnType<typeof makeTx>) => Promise<T>) => {
       attemptCount += 1
       return fn(makeTx(attemptCount))
@@ -153,6 +166,7 @@ afterEach(() => {
   workflowInsertBehaviour = []
   versionInsertBehaviour = []
   attemptCount = 0
+  softDeleteGateRow = null
 })
 
 describe('saveWorkflowVersion — happy path', () => {
@@ -449,6 +463,25 @@ describe('saveWorkflowVersion — retry on workflows-pkey violations (first-save
     expect(result.attempts).toBe(2)
     expect(result.version).toBe(2)
     expect(insertedWorkflowsRows).toHaveLength(0)
+    expect(insertedVersionRows).toHaveLength(1)
+  })
+})
+
+describe('saveWorkflowVersion — soft-deleted workflow', () => {
+  it('rejects with kind:"deleted" and writes nothing', async () => {
+    softDeleteGateRow = { deletedAt: new Date('2026-01-01T00:00:00Z') }
+    const result = await saveWorkflowVersion({ orgId: 'org-1', userId: 'u1', parsedWorkflow: baseWorkflow })
+    expect(result).toEqual({ kind: 'deleted' })
+    expect(insertedVersionRows).toHaveLength(0)
+    expect(insertedWorkflowsRows).toHaveLength(0)
+  })
+
+  it('still saves when the gate row is active (deletedAt null)', async () => {
+    softDeleteGateRow = { deletedAt: null }
+    existingVersionsByAttempt = [[{ version: 4 }]]
+    existingWorkflowRows = [{ id: 'wf-test', name: 'Test workflow' }]
+    const result = await saveWorkflowVersion({ orgId: 'org-1', userId: 'u1', parsedWorkflow: baseWorkflow })
+    expect(result.kind).toBe('ok')
     expect(insertedVersionRows).toHaveLength(1)
   })
 })

@@ -62,6 +62,15 @@ export type SaveWorkflowResult =
       kind: "conflict";
       /** Number of transaction attempts that ran before giving up. */
       attempts: number;
+    }
+  | {
+      /**
+       * The target workflow exists but is soft-deleted (`deletedAt` set).
+       * Saving must not silently resurrect it or append a hidden version —
+       * the route maps this to the standard `workflow_not_found` 404, same as
+       * every other soft-delete gate. The operator restores explicitly first.
+       */
+      kind: "deleted";
     };
 
 /**
@@ -170,6 +179,18 @@ export async function saveWorkflowVersion(args: {
   const { orgId, userId, parsedWorkflow, upstreamHealthSources } = args;
   const workflowId = parsedWorkflow.id ?? crypto.randomUUID();
   const workflowName = parsedWorkflow.name ?? workflowId;
+
+  // Reject a save against a soft-deleted workflow: an EXISTING tombstoned row
+  // must behave as "not found" (the operator restores it explicitly first), not
+  // silently gain a hidden version. A brand-new id (no row) falls through to the
+  // insert path below; an active row takes the normal update path. The
+  // delete-races-save TOCTOU is benign — the loser is hidden + retention-swept.
+  const existingForGate = await db
+    .select({ deletedAt: workflows.deletedAt })
+    .from(workflows)
+    .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, orgId)))
+    .limit(1);
+  if (existingForGate[0]?.deletedAt) return { kind: "deleted" };
 
   for (let attempt = 1; attempt <= MAX_SAVE_ATTEMPTS; attempt += 1) {
     // A fresh `versionId` per attempt — the previous attempt's INSERT
