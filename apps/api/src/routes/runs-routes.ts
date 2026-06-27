@@ -12,7 +12,7 @@
  * runs.
  */
 
-import { and, asc, desc, eq, gt, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 
 import {
   getOrgConfigSnapshot,
@@ -339,7 +339,7 @@ export const runsRoutes: Route[] = [
         const owned = await db
           .select({ id: workflows.id })
           .from(workflows)
-          .where(and(eq(workflows.id, parsedWorkflow.id), eq(workflows.orgId, auth.orgId)));
+          .where(and(eq(workflows.id, parsedWorkflow.id), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)));
         isAdhoc = owned.length === 0;
       }
       if (requireSaved && isAdhoc) {

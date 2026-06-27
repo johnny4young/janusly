@@ -86,7 +86,8 @@ export async function listWorkflowsWithRunSummary(
   // 1. Base list — LEFT JOIN workflow_metadata for tags + folder; the optional
   //    filters are applied BEFORE the cap (tags = jsonb-containment, folder =
   //    scalar equality).
-  const conditions = [eq(workflows.orgId, orgId)];
+  // Soft-deleted workflows (deletedAt set) are excluded from every list.
+  const conditions = [eq(workflows.orgId, orgId), isNull(workflows.deletedAt)];
   if (filters.tags && filters.tags.length > 0) {
     // `tags @> '["a","b"]'::jsonb` — true only when the row's array contains ALL
     // listed tags, so multiple tags AND together in one containment. A workflow

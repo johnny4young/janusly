@@ -117,6 +117,15 @@ export const workflows = pgTable(
     pausedReason: text("paused_reason"),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    /**
+     * Soft-delete tombstone. NULL = active. `DELETE /workflows/:id` sets this
+     * (instead of hard-deleting) so a deletion is recoverable via
+     * `POST /workflows/:id/restore`; every list/read filters `deletedAt IS NULL`
+     * so a soft-deleted workflow behaves as "not found". The `system:retention`
+     * sweep hard-deletes rows soft-deleted longer than
+     * `retention.deletedWorkflowsDays` (the original cascade, deferred).
+     */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [index("workflows_org_created_idx").on(table.orgId, table.createdAt.desc())],
 );

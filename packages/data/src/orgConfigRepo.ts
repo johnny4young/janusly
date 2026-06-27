@@ -868,6 +868,17 @@ export const ORG_CONFIG_DEFINITIONS = [
     max: 730,
   },
   {
+    key: "retention.deletedWorkflowsDays",
+    category: "retention",
+    description:
+      "Days a soft-deleted workflow (DELETE /workflows/:id sets `deletedAt`) is kept before the daily retention sweep HARD-purges it + its versions + metadata, by `deleted_at`. This is the recovery window: within it, POST /workflows/:id/restore brings the workflow back. Range 1..365, default 30.",
+    valueType: "number",
+    defaultValue: 30,
+    envKeys: ["JANUSLY_RETENTION_DELETED_WORKFLOWS_DAYS"],
+    min: 1,
+    max: 365,
+  },
+  {
     key: "onboarding.enabled",
     category: "onboarding",
     description:
@@ -1254,6 +1265,7 @@ export type RetentionPolicyConfig = {
   usageEventsDays: number;
   recoveryFeedbackDays: number;
   memoryEntriesDays: number;
+  deletedWorkflowsDays: number;
 };
 
 const RETENTION_POLICY_KEYS = [
@@ -1262,6 +1274,7 @@ const RETENTION_POLICY_KEYS = [
   "retention.usageEventsDays",
   "retention.recoveryFeedbackDays",
   "retention.memoryEntriesDays",
+  "retention.deletedWorkflowsDays",
 ] as const satisfies readonly OrgConfigKey[];
 
 function retentionDefaultFor(key: OrgConfigKey): number {
@@ -1275,6 +1288,7 @@ function retentionPolicyDefault(): RetentionPolicyConfig {
     usageEventsDays: retentionDefaultFor("retention.usageEventsDays"),
     recoveryFeedbackDays: retentionDefaultFor("retention.recoveryFeedbackDays"),
     memoryEntriesDays: retentionDefaultFor("retention.memoryEntriesDays"),
+    deletedWorkflowsDays: retentionDefaultFor("retention.deletedWorkflowsDays"),
   };
 }
 
@@ -1317,6 +1331,7 @@ export async function getRetentionPolicyConfig(orgId: string): Promise<Retention
   policy.usageEventsDays = clampRetention("retention.usageEventsDays", byKey.get("retention.usageEventsDays") ?? policy.usageEventsDays);
   policy.recoveryFeedbackDays = clampRetention("retention.recoveryFeedbackDays", byKey.get("retention.recoveryFeedbackDays") ?? policy.recoveryFeedbackDays);
   policy.memoryEntriesDays = clampRetention("retention.memoryEntriesDays", byKey.get("retention.memoryEntriesDays") ?? policy.memoryEntriesDays);
+  policy.deletedWorkflowsDays = clampRetention("retention.deletedWorkflowsDays", byKey.get("retention.deletedWorkflowsDays") ?? policy.deletedWorkflowsDays);
   return policy;
 }
 

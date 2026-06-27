@@ -37,6 +37,7 @@ vi.mock("drizzle-orm", () => ({
   desc: vi.fn(() => ({})),
   eq: vi.fn(() => ({})),
   gt: vi.fn(() => ({})),
+  isNull: vi.fn(() => ({})),
   lt: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
 }));

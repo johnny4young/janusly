@@ -37,6 +37,7 @@ vi.mock("@janusly/data/src/scheduleHistoryRepo", () => ({
 
 vi.mock("@janusly/engine/src/schedule-scheduler", () => ({
   unregisterAllForWorkflow: vi.fn(),
+  syncWorkflowSchedules: vi.fn(),
 }));
 
 // The schedule-history engine helpers are pure (no I/O) — import the real
@@ -58,6 +59,12 @@ const workflowsOwnedLimitMock = vi.fn();
 const deleteMock = vi.hoisted(() => vi.fn(() => ({
   where: vi.fn(),
 })));
+// Soft-delete + restore both go through db.update(...).set(...).where().returning().
+const updateMock = vi.hoisted(() => vi.fn(() => ({
+  set: vi.fn(() => ({
+    where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: "wf-1" }]) })),
+  })),
+})));
 
 vi.mock("@janusly/db", () => ({
   db: {
@@ -71,11 +78,11 @@ vi.mock("@janusly/db", () => ({
       })),
     })),
     insert: vi.fn(),
-    update: vi.fn(),
+    update: updateMock,
     delete: deleteMock,
     transaction: vi.fn(),
   },
-  workflows: { id: "id_col", orgId: "org_col" },
+  workflows: { id: "id_col", orgId: "org_col", deletedAt: "deleted_col" },
   workflowMetadata: { orgId: "org_col", workflowId: "wf_col" },
   workflowVersions: { id: "id_col", orgId: "org_col", workflowId: "wf_col", version: "ver_col", dagJson: "dag_col" },
   runs: { id: "id_col" },
@@ -97,7 +104,7 @@ import { sendJson, readJson } from "../http";
 import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
 import { findScheduleEntriesForWorkflow, queryScheduleFires } from "@janusly/data/src/scheduleHistoryRepo";
-import { workflowMetadata } from "@janusly/db";
+import { workflowMetadata, workflows } from "@janusly/db";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);
@@ -133,6 +140,7 @@ beforeEach(() => {
   findScheduleEntriesMock.mockReset();
   workflowsOwnedLimitMock.mockReset();
   deleteMock.mockClear();
+  updateMock.mockClear();
   sendJsonMock.mockClear();
   auditMock.mockClear();
 });
@@ -233,12 +241,37 @@ describe("POST /workflows/:id/slo handler", () => {
   });
 });
 
+describe("GET /workflows versions/latest soft-delete gate", () => {
+  it("returns 404 for versions when the active-workflow ownership gate misses", async () => {
+    mockWorkflowOwned(false);
+    await callRoute("GET", "/workflows/versions?workflowId=wf-1", {});
+
+    expect(sendJsonMock.mock.calls[0]?.[2]).toBe(404);
+  });
+
+  it("returns 404 for latest when the active-workflow ownership gate misses", async () => {
+    mockWorkflowOwned(false);
+    await callRoute("GET", "/workflows/latest?workflowId=wf-1", {});
+
+    expect(sendJsonMock.mock.calls[0]?.[2]).toBe(404);
+  });
+});
+
 describe("DELETE /workflows/:id handler", () => {
-  it("cleans per-workflow metadata when hard-deleting a workflow", async () => {
-    mockWorkflowOwned(true);
+  it("soft-deletes a workflow (tombstones via UPDATE; keeps versions + metadata)", async () => {
     await callRoute("DELETE", "/workflows/wf-1", {});
 
-    expect(deleteMock).toHaveBeenCalledWith(workflowMetadata);
+    // Soft delete goes through db.update(workflows) — NOT a hard db.delete.
+    expect(updateMock).toHaveBeenCalledWith(workflows);
+    expect(deleteMock).not.toHaveBeenCalled();
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
+  });
+
+  it("restore reverses a soft delete via UPDATE", async () => {
+    mockWorkflowOwned(true);
+    await callRoute("POST", "/workflows/wf-1/restore", {});
+
+    expect(updateMock).toHaveBeenCalledWith(workflows);
     expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
   });
 });

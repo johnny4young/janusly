@@ -31,10 +31,14 @@ vi.mock("@janusly/db", () => ({
       })),
     })),
     selectDistinct: vi.fn(() => ({
+      // The tag/folder distincts INNER JOIN `workflows` to exclude soft-deleted
+      // ones: selectDistinct().from().innerJoin().where().orderBy().limit().
       from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          orderBy: vi.fn(() => ({
-            limit: distinctLimitMock,
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => ({
+              limit: distinctLimitMock,
+            })),
           })),
         })),
       })),

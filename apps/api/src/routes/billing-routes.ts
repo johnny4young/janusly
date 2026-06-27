@@ -9,7 +9,7 @@
  * stays intact.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import {
   DEFAULT_USAGE_WINDOW_DAYS,
@@ -79,7 +79,7 @@ export const billingRoutes: Route[] = [
       const workflowRow = await db
         .select({ id: workflows.id })
         .from(workflows)
-        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId)))
+        .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (workflowRow.length === 0) {
         return sendJson(res, { error: "Workflow not found" }, 404);

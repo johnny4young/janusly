@@ -35,6 +35,7 @@ import {
   deleteExpiredMemoryEntriesForOrg,
   deleteExpiredRecoveryFeedbackForOrg,
   deleteExpiredRunEventsForOrg,
+  deleteExpiredSoftDeletedWorkflowsForOrg,
   deleteExpiredUsageEventsForOrg,
   listOrgIdsForRetention,
   runRetentionExport,
@@ -161,6 +162,24 @@ describe("listOrgIdsForRetention", () => {
     expect(first.sql.toLowerCase()).toContain("union");
     // The system sentinel is filtered in-query so it never reaches the loop.
     expect(first.sql).toContain("'system'");
+  });
+});
+
+describe("soft-deleted workflow purge", () => {
+  it("hard-purges tombstoned workflows and children in one atomic statement", async () => {
+    executeMock.mockResolvedValueOnce([{ rows_deleted: 2 }]);
+    const result = await deleteExpiredSoftDeletedWorkflowsForOrg({ orgId: "org_a", retentionDays: 30 });
+
+    expect(result.rowsDeleted).toBe(2);
+    expect(executeMock).toHaveBeenCalledTimes(1);
+    const [first] = renderedCalls();
+    expect(first.sql.toLowerCase()).toContain("with expired_workflows as");
+    expect(first.sql.toLowerCase()).toContain("deleted_versions as");
+    expect(first.sql.toLowerCase()).toContain("deleted_metadata as");
+    expect(first.sql.toLowerCase()).toContain("deleted_workflows as");
+    expect(first.sql).toContain("deleted_at");
+    expect(first.sql).toContain("::timestamptz");
+    expect(first.params).toContain("org_a");
   });
 });
 

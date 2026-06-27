@@ -18,7 +18,7 @@
  *   does not clear it (a forced run is a one-off override, not a resume).
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, upstreamHealthSources, workflows, workflowVersions } from "@janusly/db";
 import type {
   UpstreamComponentStatus,
@@ -340,7 +340,7 @@ export async function getWorkflowStatus(
   const rows = await db
     .select({ status: workflows.status, pausedReason: workflows.pausedReason })
     .from(workflows)
-    .where(and(eq(workflows.orgId, orgId), eq(workflows.id, workflowId)));
+    .where(and(eq(workflows.orgId, orgId), eq(workflows.id, workflowId), isNull(workflows.deletedAt)));
   return rows[0] ?? null;
 }
 

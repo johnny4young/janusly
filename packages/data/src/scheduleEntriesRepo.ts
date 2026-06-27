@@ -18,18 +18,23 @@
  *   indirectly via the scheduler module on workflow deletion.
  *
  * Invariants:
- * - Multi-tenant scope: every function takes `orgId` and filters via
+ * - Multi-tenant scope: every request-path function takes `orgId` and filters via
  *   `eq(scheduleEntries.orgId, orgId)` — EXCEPT `listAllEnabled`, which
  *   the worker calls once at boot to rehydrate every org's schedules and
  *   deliberately omits the filter. It's the single documented exception
  *   and must NEVER be called from a request-path handler.
+ * - Soft-delete posture: worker reads (`getScheduleEntryById` and
+ *   `listAllEnabled`) only return entries whose parent workflow is still
+ *   active (`workflows.deleted_at IS NULL`). If workflow delete fails to
+ *   unregister a BullMQ scheduler, the next tick/boot must NOT start a run
+ *   for a tombstoned workflow.
  * - The unique index on `(org_id, workflow_version_id, node_id)` lets
  *   `upsertScheduleEntry` round-trip an "update or insert" without an
  *   external advisory lock — the DB enforces uniqueness atomically.
  */
 
-import { and, eq, ne } from "drizzle-orm";
-import { db, scheduleEntries } from "@janusly/db";
+import { and, eq, ne, sql } from "drizzle-orm";
+import { db, scheduleEntries, workflows } from "@janusly/db";
 
 export type ScheduleEntry = typeof scheduleEntries.$inferSelect;
 
@@ -42,6 +47,15 @@ export type UpsertScheduleEntryInput = {
   enabled: boolean;
   createdBy: string | null;
 };
+
+function activeWorkflowExists() {
+  return sql`exists (
+    select 1 from ${workflows}
+    where ${workflows.orgId} = ${scheduleEntries.orgId}
+      and ${workflows.id} = ${scheduleEntries.workflowId}
+      and ${workflows.deletedAt} is null
+  )`;
+}
 
 /**
  * Atomically insert a new entry, or update `cron_expression` / `enabled`
@@ -119,7 +133,7 @@ export async function getScheduleEntry(orgId: string, id: string): Promise<Sched
   const rows = await db
     .select()
     .from(scheduleEntries)
-    .where(and(eq(scheduleEntries.orgId, orgId), eq(scheduleEntries.id, id)));
+    .where(and(eq(scheduleEntries.orgId, orgId), eq(scheduleEntries.id, id), activeWorkflowExists()));
   return rows[0] ?? null;
 }
 
@@ -134,7 +148,7 @@ export async function getScheduleEntryById(id: string): Promise<ScheduleEntry | 
   const rows = await db
     .select()
     .from(scheduleEntries)
-    .where(eq(scheduleEntries.id, id));
+    .where(and(eq(scheduleEntries.id, id), activeWorkflowExists()));
   return rows[0] ?? null;
 }
 
@@ -145,7 +159,7 @@ export async function getScheduleEntryById(id: string): Promise<ScheduleEntry | 
  * than process boot. Don't expose to any request-path handler.
  */
 export async function listAllEnabled(): Promise<ScheduleEntry[]> {
-  return db.select().from(scheduleEntries).where(eq(scheduleEntries.enabled, true));
+  return db.select().from(scheduleEntries).where(and(eq(scheduleEntries.enabled, true), activeWorkflowExists()));
 }
 
 /** Record a successful trigger fire. Updates `last_run_at` / `last_run_id` for the operator-facing surface. */
