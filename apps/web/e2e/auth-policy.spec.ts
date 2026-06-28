@@ -18,8 +18,8 @@ test('Operations auth policy panel validates and saves org settings', async ({ p
   await expect(ttlInput).toHaveValue('28800')
 
   await ttlInput.fill('60')
-  await page.getByRole('button', { name: /Save policies/i }).click()
   await expect(page.getByRole('alert')).toContainText('between 300 and 86400')
+  await expect(page.getByRole('button', { name: /Save policies/i })).toBeDisabled()
 
   await domainInput.fill('acme.com, partner.com')
   await mfaToggle.check()
