@@ -310,7 +310,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={owner}
                         onChange={(event) => setOwner(event.target.value)}
-                        placeholder="janusly"
+                        placeholder={t('reportDelivery.field.ownerPlaceholder') as string}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-owner"
@@ -322,7 +322,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={repo}
                         onChange={(event) => setRepo(event.target.value)}
-                        placeholder="demo"
+                        placeholder={t('reportDelivery.field.repoPlaceholder') as string}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-repo"
@@ -334,7 +334,7 @@ export function ReportDeliveryDialog({
                         type="text"
                         value={labels}
                         onChange={(event) => setLabels(event.target.value)}
-                        placeholder="incident, run-explain"
+                        placeholder={t('reportDelivery.field.labelsPlaceholder') as string}
                         autoComplete="off"
                         disabled={step.kind === 'submitting'}
                         data-testid="report-delivery-labels"
@@ -350,7 +350,7 @@ export function ReportDeliveryDialog({
                       type="url"
                       value={webhookUrl}
                       onChange={(event) => setWebhookUrl(event.target.value)}
-                      placeholder="https://partner.example.com/hooks/janusly"
+                      placeholder={t('reportDelivery.field.urlPlaceholder') as string}
                       autoComplete="off"
                       disabled={step.kind === 'submitting'}
                       data-testid="report-delivery-url"

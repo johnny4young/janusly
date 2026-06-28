@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { useWorkflowStore } from '../store'
 import {
   Activity,
   Boxes,
@@ -258,6 +259,9 @@ export function BuilderSidebar({
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
+  // Surface unsaved canvas edits in the header so the operator never loses
+  // track of save state before navigating away or running.
+  const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
   const [stored] = useState<StoredState>(() => loadStoredState())
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(stored.openGroups))
   const [openCategories, setOpenCategories] = useState<Set<string>>(() => new Set(stored.openCategories))
@@ -369,6 +373,14 @@ export function BuilderSidebar({
             <>
               <span className="sb-workflow__sep" aria-hidden="true">·</span>
               <span><b>{workflowRunsCount}</b> {t('sidebar.workflow.meta.runs', { count: workflowRunsCount })}</span>
+            </>
+          ) : null}
+          {!currentWorkflowSaved ? (
+            <>
+              <span className="sb-workflow__sep" aria-hidden="true">·</span>
+              <span className="sb-workflow__unsaved" data-testid="sidebar-unsaved">
+                {t('sidebar.workflow.meta.unsaved')}
+              </span>
             </>
           ) : null}
         </div>
