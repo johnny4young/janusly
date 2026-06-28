@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Credential, SolutionPackPublic } from '../types'
@@ -62,5 +62,29 @@ describe('<SolutionPacksPanel />', () => {
     const matchingChip = container.querySelector('.we-param')
     expect(matchingChip).toHaveClass('we-param--optional')
     expect(matchingChip).toHaveAccessibleName('ops_slack configured (slack_webhook)')
+  })
+
+  it('filters out non-matching packs and offers clear-filter', () => {
+    renderPanel([{ id: 'cred-2', name: 'ops_slack', kind: 'slack_webhook' }])
+    expect(screen.getByText('ops_slack')).toBeInTheDocument()
+
+    const input = screen.getByPlaceholderText('Search packs…')
+    fireEvent.change(input, { target: { value: 'zzz-no-match' } })
+    expect(screen.getByText('No packs match')).toBeInTheDocument()
+    expect(screen.queryByText('ops_slack')).not.toBeInTheDocument()
+    expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Clear filter')
+  })
+
+  it('shows an explore-templates CTA when the catalog is empty', () => {
+    render(
+      <SolutionPacksPanel
+        packs={[]}
+        credentials={[]}
+        onInstall={handlers.onInstall}
+        onSampleRun={handlers.onSampleRun}
+        onInjectFailure={handlers.onInjectFailure}
+      />,
+    )
+    expect(screen.getByTestId('empty-state-cta')).toHaveTextContent('Explore templates')
   })
 })

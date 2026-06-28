@@ -16,9 +16,11 @@
  * - All copy goes through `useT()`; no raw string literals.
  */
 
-import { AlertTriangle, Bug, Download, KeyRound, Package, Play } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertTriangle, Bug, Download, KeyRound, Package, Play, Search } from 'lucide-react'
 import type { Credential, SolutionPackPublic } from '../types'
-import { EmptyView, PanelChrome } from './panel-primitives'
+import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
+import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 
 type SolutionPacksPanelProps = {
@@ -31,17 +33,50 @@ type SolutionPacksPanelProps = {
 
 export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure }: SolutionPacksPanelProps) {
   const { t } = useT()
+  const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
+  const [query, setQuery] = useState('')
   const credentialKeys = new Set(credentials.map((c) => `${c.kind}:${c.name}`))
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return packs
+    return packs.filter((pack) => {
+      const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name }) as string
+      const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description }) as string
+      const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category }) as string
+      return `${packName} ${packDescription} ${categoryLabel}`.toLowerCase().includes(q)
+    })
+  }, [packs, query, t])
+
+  if (packs.length === 0) {
+    return (
+      <PanelChrome title={t('packs.title') as string} description={t('packs.description') as string} icon={<Package size={18} />}>
+        <div className="panel-list">
+          <EmptyView
+            icon={<Package size={22} />}
+            title={t('packs.empty.title') as string}
+            body={t('packs.empty.body') as string}
+            cta={{ label: t('packs.empty.cta') as string, onClick: () => setActiveTab('templates') }}
+          />
+        </div>
+      </PanelChrome>
+    )
+  }
 
   return (
     <PanelChrome title={t('packs.title') as string} description={t('packs.description') as string} icon={<Package size={18} />}>
-      {packs.length === 0 && (
+      <PanelSearch value={query} onChange={setQuery} placeholder={t('packs.searchPlaceholder') as string} />
+      {filtered.length === 0 && (
         <div className="panel-list">
-          <EmptyView icon={<Package size={22} />} title={t('packs.empty.title') as string} body={t('packs.empty.body') as string} />
+          <EmptyView
+            icon={<Search size={22} />}
+            title={t('packs.noMatches.title') as string}
+            body={t('packs.noMatches.body') as string}
+            cta={{ label: t('common.clearFilter') as string, onClick: () => setQuery('') }}
+          />
         </div>
       )}
       <div className="we-recipe-grid">
-        {packs.map((pack) => {
+        {filtered.map((pack) => {
           const packName = t(`packs.${pack.id}.name`, { defaultValue: pack.name }) as string
           const packDescription = t(`packs.${pack.id}.description`, { defaultValue: pack.description }) as string
           const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category }) as string
