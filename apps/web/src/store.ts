@@ -163,6 +163,11 @@ type WorkflowStore = {
 const BUMP_COALESCE_MS = 100
 let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 
+// Toast auto-dismiss windows. Errors stay ~2x longer because they typically
+// carry an action the reader must take before the toast disappears.
+const TOAST_TTL_DEFAULT_MS = 3500
+const TOAST_TTL_ERROR_MS = 6000
+
 // `data.label` is intentionally empty — `WorkflowStepNode` resolves
 // the human label via `getNodeLabel(type)` at render time, which
 // re-evaluates through the i18n runtime on locale toggles. Leaving
@@ -395,7 +400,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
-    setTimeout(() => get().removeToast(id), 3500)
+    // Errors need longer on screen than success/info: an error often asks the
+    // reader to act (switch panel, fix a field) before it auto-dismisses.
+    setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
   bumpPlatformVersion: () => {

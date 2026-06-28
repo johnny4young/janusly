@@ -609,6 +609,7 @@ export function RecoveryDialog({
                 className="command-button command-button-primary"
                 onClick={validateAndApply}
                 disabled={!canApplyPatch}
+                title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason') as string) : undefined}
               >
                 <Play size={14} aria-hidden="true" />
                 <span>
