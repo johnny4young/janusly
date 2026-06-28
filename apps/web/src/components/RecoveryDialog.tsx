@@ -457,7 +457,7 @@ export function RecoveryDialog({
           </button>
         </header>
 
-        <div className="run-input-dialog__body">
+        <div className="run-input-dialog__body" aria-live="polite">
           {step.kind === 'idle' && (
             <p className="helper-text">
               {t('recoveryDialog.idle.failingNodeIs')} <code>{dlq.nodeId}</code> {t('recoveryDialog.idle.onRun')} <code>{dlq.runId.slice(0, 8)}…</code>{' '}

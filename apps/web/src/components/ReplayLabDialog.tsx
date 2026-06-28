@@ -212,7 +212,7 @@ export function ReplayLabDialog({
           </button>
         </header>
 
-        <div className="run-input-dialog__body">
+        <div className="run-input-dialog__body" aria-live="polite">
           <section className="we-replay-lab-source">
             <div className="section-kicker">{t('replayLab.sourceRun')}</div>
             <dl className="we-replay-lab-source-grid">
