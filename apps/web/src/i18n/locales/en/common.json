@@ -552,6 +552,8 @@
   "canvas.flowMap": "Flow map",
   "canvas.empty.title": "This workflow is empty",
   "canvas.empty.body": "Add a step from the palette above to start building your flow.",
+  "canvas.deleteConfirm_one": "Delete this step? It will be removed from the canvas.",
+  "canvas.deleteConfirm_other": "Delete these {{count}} steps? They will be removed from the canvas.",
   "canvas.error.title": "The canvas hit a problem",
   "canvas.error.body": "The editor couldn't render this workflow. Reloading usually fixes it.",
   "canvas.error.reload": "Reload",
