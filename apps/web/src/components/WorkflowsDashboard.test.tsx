@@ -1521,4 +1521,45 @@ describe('<WorkflowsDashboard />', () => {
     await waitFor(() => expect(screen.queryByTestId('workflows-trash-row-wfa')).not.toBeInTheDocument())
     await waitFor(() => expect(screen.getByTestId('workflows-trash-row-wfb')).toBeInTheDocument())
   })
+
+  it('paginates the Trash list with a deletedAt keyset cursor (not createdAt)', async () => {
+    const PAGE = 100
+    const calls: string[] = []
+    // A full first page (length === PAGE_SIZE) so the "Load more" button shows.
+    // Rows carry deletedAt only (no createdAt) — so if loadMore wrongly used
+    // createdAt the cursor would be undefined and no second fetch would fire.
+    const page1: Flow[] = Array.from({ length: PAGE }, (_, k) => ({
+      id: `t${k}`, orgId: 'o', name: `Trash ${k}`, runCount: 0,
+      deletedAt: new Date(Date.UTC(2026, 5, 1) - k * 1000).toISOString(),
+    }))
+    const page2: Flow[] = [{ id: 't100', orgId: 'o', name: 'Trash 100', runCount: 0, deletedAt: '2026-05-01T00:00:00.000Z' }]
+    vi.mocked(api).mockImplementation(async (url: string) => {
+      if (url === '/workflows/tags') return { tags: [] }
+      if (url === '/workflows/folders') return { folders: [] }
+      if (url === '/org/config') return { config: [] }
+      if (url.startsWith('/workflows/trash')) {
+        calls.push(url)
+        return url.includes('before=') ? page2 : page1
+      }
+      return FLOWS
+    })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-trash-toggle'))
+    await screen.findByTestId('workflows-trash-list')
+
+    // A full page → the existing keyset "Load more" button renders in Trash.
+    fireEvent.click(await screen.findByTestId('workflows-load-more'))
+
+    // The second fetch's cursor is the oldest row's deletedAt + id.
+    const oldest = page1[page1.length - 1]!
+    await waitFor(() => {
+      const paged = calls.find((u) => u.includes('before='))
+      expect(paged).toBeTruthy()
+      expect(new URLSearchParams(paged!.split('?')[1]).get('before')).toBe(`${oldest.deletedAt}|${oldest.id}`)
+    })
+    // The next page appends.
+    await screen.findByTestId('workflows-trash-row-t100')
+  })
 })

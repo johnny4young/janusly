@@ -234,7 +234,22 @@ async function foldRunSummary(orgId: string, base: WorkflowBaseRow[]): Promise<W
 export async function listDeletedWorkflowsWithRunSummary(
   orgId: string,
   limit: number,
+  before?: { deletedAt: Date; id: string },
 ): Promise<WorkflowListRow[]> {
+  const conditions = [eq(workflows.orgId, orgId), isNotNull(workflows.deletedAt)];
+  if (before) {
+    // Keyset cursor — rows strictly after `(deletedAt, id)` in the
+    // `(deletedAt DESC, id DESC)` order: an older deletedAt, or the same
+    // deletedAt with a smaller id (the unique PK tiebreaker). The `deletedAt`
+    // analogue of the active list's `createdAt` keyset; `deletedAt` is non-null
+    // here (the isNotNull filter above), so the comparison is total.
+    conditions.push(
+      or(
+        lt(workflows.deletedAt, before.deletedAt),
+        and(eq(workflows.deletedAt, before.deletedAt), lt(workflows.id, before.id)),
+      )!,
+    );
+  }
   const base = await db
     .select({
       id: workflows.id,
@@ -253,7 +268,7 @@ export async function listDeletedWorkflowsWithRunSummary(
       workflowMetadata,
       and(eq(workflowMetadata.orgId, orgId), eq(workflowMetadata.workflowId, workflows.id)),
     )
-    .where(and(eq(workflows.orgId, orgId), isNotNull(workflows.deletedAt)))
+    .where(and(...conditions))
     // Most-recently-deleted first; `id` is the total-order tiebreaker.
     .orderBy(desc(workflows.deletedAt), desc(workflows.id))
     .limit(limit);

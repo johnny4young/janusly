@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import { AlertCircle, KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
@@ -44,6 +44,10 @@ type RoleEntry = {
 };
 
 const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
+
+/** Custom role names: lowercase alphanumerics plus `_`/`-`, 1–32 chars. Mirrors
+ *  the server-side validation so the operator sees the rule before submitting. */
+const ROLE_NAME_RE = /^[a-z0-9_-]{1,32}$/;
 
 export function PermissionGrantsPanel() {
   const { t } = useT();
@@ -176,7 +180,7 @@ export function PermissionGrantsPanel() {
   async function createRole(event: React.FormEvent) {
     event.preventDefault();
     const name = newRoleName.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{1,32}$/.test(name)) {
+    if (!ROLE_NAME_RE.test(name)) {
       setError(t("permissions.errorName") as string);
       return;
     }
@@ -219,6 +223,12 @@ export function PermissionGrantsPanel() {
 
   const builtins = ROLE_ORDER.map((r) => roles.find((row) => row.name === r)).filter((r): r is RoleEntry => r !== undefined);
   const customs = roles.filter((r) => !r.isBuiltin);
+
+  // Live validation for the new-role name: flag a non-empty value that breaks
+  // the format so the operator sees it before submitting, and gate the submit.
+  const trimmedNewRoleName = newRoleName.trim().toLowerCase();
+  const newRoleNameInvalid = trimmedNewRoleName.length > 0 && !ROLE_NAME_RE.test(trimmedNewRoleName);
+  const canCreateRole = trimmedNewRoleName.length > 0 && !newRoleNameInvalid && !creating;
 
   return (
     <section className="we-budget-settings" aria-labelledby="permissions-heading">
@@ -317,7 +327,14 @@ export function PermissionGrantsPanel() {
               onChange={(e) => setNewRoleName(e.target.value)}
               placeholder={t("permissions.add.namePlaceholder") as string}
               maxLength={32}
+              aria-invalid={newRoleNameInvalid}
+              aria-describedby={newRoleNameInvalid ? "new-role-name-error" : undefined}
             />
+            {newRoleNameInvalid && (
+              <span id="new-role-name-error" className="helper-text helper-text--error" role="alert">
+                <AlertCircle size={13} aria-hidden="true" /> {t("permissions.errorName")}
+              </span>
+            )}
           </label>
           <label className="we-field">
             <span className="we-field__label">{t("permissions.add.inherits")}</span>
@@ -359,7 +376,7 @@ export function PermissionGrantsPanel() {
               </div>
             ))}
           </div>
-          <button type="submit" className="we-button we-button--primary" disabled={creating}>
+          <button type="submit" className="we-button we-button--primary" disabled={!canCreateRole}>
             <Plus size={14} aria-hidden="true" /> {creating ? t("permissions.add.creating") : t("permissions.add.create")}
           </button>
         </form>

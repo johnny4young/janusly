@@ -19,13 +19,14 @@
 
 import React, { useEffect, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
-import { Plug, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { AlertCircle, Plug, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { McpConnection, McpConnectionStatus, McpToolDescriptor, McpTransport } from '../types'
 import { tApiError, Trans, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
+import { isLikelyHttpUrl } from '../url'
 import { t as runtimeT } from '../i18n/runtime'
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
@@ -265,6 +266,17 @@ export function McpConnectionsPanel() {
     }
   }
 
+  // Live form validation: gate submit on the required fields for the chosen
+  // transport, and flag a malformed URL inline (http/https only) before submit.
+  const trimmedAlias = form.alias.trim()
+  const urlNeeded = form.transport !== 'stdio'
+  const trimmedUrl = form.url.trim()
+  const urlInvalid = urlNeeded && trimmedUrl.length > 0 && !isLikelyHttpUrl(trimmedUrl)
+  const canSubmit =
+    !saving &&
+    trimmedAlias.length > 0 &&
+    (urlNeeded ? trimmedUrl.length > 0 && !urlInvalid : form.command.trim().length > 0)
+
   return (
     <section className="panel-card">
       <div className="split-row">
@@ -334,11 +346,18 @@ export function McpConnectionsPanel() {
             <label className="field-label" htmlFor="mcp-url">{t('mcpConnections.form.url')}</label>
             <input
               id="mcp-url"
-              className="text-field"
+              className={`text-field${urlInvalid ? ' text-field--error' : ''}`}
               value={form.url}
               onChange={(event) => patchForm({ url: event.target.value })}
               placeholder={t('mcpConnections.form.urlPlaceholder') as string}
+              aria-invalid={urlInvalid}
+              aria-describedby={urlInvalid ? 'mcp-url-error' : undefined}
             />
+            {urlInvalid && (
+              <span id="mcp-url-error" className="helper-text helper-text--error" role="alert">
+                <AlertCircle size={13} aria-hidden="true" /> {t('mcpConnections.errors.urlInvalid')}
+              </span>
+            )}
           </>
         )}
         <label className="field-label" htmlFor="mcp-env-refs">{t('mcpConnections.form.envRefs')}</label>
@@ -350,7 +369,7 @@ export function McpConnectionsPanel() {
           onChange={(event) => patchForm({ envRefsText: event.target.value })}
           placeholder={t('mcpConnections.form.envRefsPlaceholder') as string}
         />
-        <button type="submit" className="command-button command-button-primary" disabled={saving}>
+        <button type="submit" className="command-button command-button-primary" disabled={!canSubmit}>
           <Plug size={15} aria-hidden="true" />
           <span>{saving ? t('mcpConnections.form.submitting') : t('mcpConnections.form.submit')}</span>
         </button>

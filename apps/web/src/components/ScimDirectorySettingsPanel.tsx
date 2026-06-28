@@ -346,7 +346,7 @@ export function ScimDirectorySettingsPanel() {
               <button
                 type="submit"
                 className="we-button we-button--primary we-budget-settings__save"
-                disabled={saving}
+                disabled={saving || form.providerDirectoryId.trim().length === 0}
               >
                 {saving ? <>{t("scim.connecting")}</> : <><Link2 size={14} aria-hidden="true" /> {t("scim.connect")}</>}
                 {!saving && <Save size={14} aria-hidden="true" />}
