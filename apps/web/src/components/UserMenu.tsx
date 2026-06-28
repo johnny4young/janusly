@@ -30,8 +30,10 @@ import {
   Users,
 } from 'lucide-react'
 import { AuthProvider, isSupabaseConfigured } from '../auth'
+import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { useT } from '../i18n'
+import { tApiError, useT } from '../i18n'
+import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import { requestOperationsSection } from './operations-section-bus'
 import {
   type DensityPreference,
@@ -94,6 +96,8 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
   const orgId = useWorkflowStore(state => state.orgId)
   const clearAuth = useWorkflowStore(state => state.clearAuth)
   const addToast = useWorkflowStore(state => state.addToast)
+  const onboarding = useWorkflowStore(state => state.onboarding)
+  const setOnboarding = useWorkflowStore(state => state.setOnboarding)
 
   const [open, setOpen] = useState(false)
   const [theme, setThemeState] = useState<ThemePreference>(() => getStoredTheme())
@@ -153,6 +157,21 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
   const comingSoon = () => {
     addToast(t('userMenu.item.comingSoon'), 'info')
     setOpen(false)
+  }
+
+  // Bring back a skipped onboarding checklist — the only way back once the
+  // operator dismissed the banner (the server reopens it via `resume`).
+  const resumeOnboarding = async () => {
+    setOpen(false)
+    try {
+      const next = (await api('/onboarding', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'resume' }),
+      })) as OnboardingState
+      setOnboarding(next)
+    } catch (err) {
+      addToast(tApiError(err) || (t('userMenu.item.resumeOnboardingFailed') as string), 'error')
+    }
   }
 
   const triggerLabel = open ? t('layout.closeMenu') : t('layout.openMenu')
@@ -338,6 +357,13 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
 
           {/* Items list */}
           <div className="user-menu__items">
+            {onboarding?.status === 'skipped' && (
+              <button type="button" className="user-menu__item" onClick={resumeOnboarding}>
+                <span className="user-menu__item-ic" aria-hidden="true"><Sparkles size={12} /></span>
+                <strong>{t('userMenu.item.resumeOnboarding')}</strong>
+                <span></span>
+              </button>
+            )}
             <button type="button" className="user-menu__item" onClick={comingSoon}>
               <span className="user-menu__item-ic" aria-hidden="true"><UserCog size={12} /></span>
               <strong>{t('userMenu.item.account')}</strong>
