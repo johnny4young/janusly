@@ -741,6 +741,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       const current = workflows.find((w) => w.id === workflowId)
       if (!current) return
       setWorkflows((prev) => prev.filter((w) => w.id !== workflowId))
+      // Drop the id from the selection too (mirrors restoreWorkflow) so the bulk
+      // bar can't show a stale count or act on an id no longer in the list.
+      setSelectedIds((prev) => {
+        if (!prev.has(workflowId)) return prev
+        const next = new Set(prev)
+        next.delete(workflowId)
+        return next
+      })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' })
         addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }) as string, 'success')
