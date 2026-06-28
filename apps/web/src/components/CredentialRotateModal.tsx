@@ -16,6 +16,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, KeyRound, X } from 'lucide-react'
 
 import { api } from '../api'
@@ -60,6 +61,8 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   const [step, setStep] = useState<Step>({ kind: 'loading' })
   const [newSecretRef, setNewSecretRef] = useState('')
   const aliveRef = useRef(true)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
 
   useEffect(() => {
     aliveRef.current = true
@@ -130,6 +133,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   return (
     <div className="run-input-backdrop" onClick={onBackdropClick}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-recovery-dialog"
         role="dialog"
         aria-modal="true"

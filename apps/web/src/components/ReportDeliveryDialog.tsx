@@ -23,6 +23,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -100,6 +101,8 @@ export function ReportDeliveryDialog({
   const [webhookUrl, setWebhookUrl] = useState('')
   const aliveRef = useRef(true)
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
 
   useEffect(() => {
     aliveRef.current = true
@@ -188,6 +191,7 @@ export function ReportDeliveryDialog({
   return (
     <div className="run-input-backdrop" onClick={onBackdrop}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-report-delivery-dialog"
         role="dialog"
         aria-modal="true"
