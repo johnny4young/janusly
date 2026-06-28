@@ -32,7 +32,7 @@ type SolutionPacksPanelProps = {
 }
 
 export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun, onInjectFailure }: SolutionPacksPanelProps) {
-  const { t } = useT()
+  const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [query, setQuery] = useState('')
   const credentialKeys = new Set(credentials.map((c) => `${c.kind}:${c.name}`))
@@ -45,7 +45,7 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
       const categoryLabel = t(`packs.category.${pack.category}`, { defaultValue: pack.category }) as string
       return `${packName} ${packDescription} ${categoryLabel}`.toLowerCase().includes(q)
     })
-  }, [packs, query, t])
+  }, [packs, query, t, i18n.language])
 
   if (packs.length === 0) {
     return (
