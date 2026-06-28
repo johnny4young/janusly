@@ -10,11 +10,12 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/react'
-import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
+import type { EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { CanvasErrorBoundary } from './CanvasErrorBoundary'
+import { useConfirm } from './ConfirmDialog'
 import { getNodeHelper, getNodeLabel } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
@@ -45,6 +46,20 @@ type WorkflowCanvasProps = {
  *  actually change, not on every unrelated store tick from the App root. */
 export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId }: WorkflowCanvasProps) {
   const { t } = useT()
+  const confirmDialog = useConfirm()
+  // Confirm before a node is removed (Delete/Backspace or the toolbar) — a
+  // mis-keyed delete can otherwise drop a configured step silently. Edge-only
+  // deletions skip the prompt: re-drawing a connection is cheap and reversible.
+  const onBeforeDelete = useCallback<OnBeforeDelete<WorkflowGraphNode, WorkflowGraphEdge>>(
+    async ({ nodes: nodesToDelete }) => {
+      if (nodesToDelete.length === 0) return true
+      return confirmDialog({
+        body: t('canvas.deleteConfirm', { count: nodesToDelete.length }) as string,
+        tone: 'danger',
+      })
+    },
+    [confirmDialog, t],
+  )
   // Restore the saved viewport on mount (read once per workflow key); when none
   // exists we fall back to `fitView`. React Flow ignores `defaultViewport` while
   // `fitView` is set, so the two are mutually exclusive below.
@@ -125,6 +140,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onEdgeClick={onEdgeClick}
+        onBeforeDelete={onBeforeDelete}
         fitView={!restoredViewport}
         fitViewOptions={{ padding: 0.22 }}
         defaultViewport={restoredViewport ?? undefined}

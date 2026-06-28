@@ -552,6 +552,8 @@
   "canvas.flowMap": "Mapa de flujo",
   "canvas.empty.title": "Este flujo está vacío",
   "canvas.empty.body": "Agrega un paso desde la paleta de arriba para empezar a construir tu flujo.",
+  "canvas.deleteConfirm_one": "¿Borrar este paso? Se quitará del lienzo.",
+  "canvas.deleteConfirm_other": "¿Borrar estos {{count}} pasos? Se quitarán del lienzo.",
   "canvas.error.title": "El lienzo tuvo un problema",
   "canvas.error.body": "El editor no pudo dibujar este flujo. Recargar suele solucionarlo.",
   "canvas.error.reload": "Recargar",
