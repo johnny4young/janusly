@@ -277,7 +277,7 @@ describe("GET /workflows/trash route", () => {
 
     await callRoute("GET", "/workflows/trash", {});
 
-    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 100);
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 100, undefined);
     expect(sendJsonMock.mock.calls.at(-1)?.[1]).toBe(rows);
   });
 
@@ -286,7 +286,26 @@ describe("GET /workflows/trash route", () => {
 
     await callRoute("GET", "/workflows/trash?limit=9999", {});
 
-    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 200);
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 200, undefined);
+  });
+
+  it("threads a ?before=<deletedAt>|<id> keyset cursor into the repo", async () => {
+    listDeletedMock.mockResolvedValueOnce([] as never);
+
+    await callRoute("GET", "/workflows/trash?before=2026-03-01T00:00:00.000Z|wf-x", {});
+
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 100, {
+      deletedAt: new Date("2026-03-01T00:00:00.000Z"),
+      id: "wf-x",
+    });
+  });
+
+  it("ignores a malformed ?before= cursor (unpaged)", async () => {
+    listDeletedMock.mockResolvedValueOnce([] as never);
+
+    await callRoute("GET", "/workflows/trash?before=not-a-cursor", {});
+
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 100, undefined);
   });
 
   it("is registered before the bare /workflows matcher (not shadowed)", () => {

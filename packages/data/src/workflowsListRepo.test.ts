@@ -196,4 +196,24 @@ describe("listDeletedWorkflowsWithRunSummary", () => {
       { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), lastRunStatus: null, runCount: 0, status: "active", pausedReason: null, tags: [], folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
     ]);
   });
+
+  it("exercises the `before` keyset branch (rows older than the deletedAt cursor)", async () => {
+    baseRows = [
+      { id: "wf-b", orgId: "org-1", name: "B", createdBy: null, createdAt: new Date("2026-01-02T00:00:00Z"), status: "active", pausedReason: null, tags: [], folder: null, deletedAt: new Date("2026-03-01T00:00:00Z") },
+    ];
+    aggRows = [];
+
+    // `before` exercises the `or(lt(deletedAt), and(eq(deletedAt), lt(id)))`
+    // keyset predicate (mirror of the active list's createdAt keyset, on
+    // deletedAt) without throwing; the chain mock ignores the WHERE, so this
+    // asserts the branch + row fold — the real keyset paging is smoke-verified
+    // against Postgres.
+    const rows = await listDeletedWorkflowsWithRunSummary("org-1", 100, {
+      deletedAt: new Date("2026-03-02T00:00:00Z"),
+      id: "wf-a",
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe("wf-b");
+  });
 });
