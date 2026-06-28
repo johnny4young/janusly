@@ -193,7 +193,8 @@ export function OperationsPage() {
         })
         .catch(() => {
           if (cancelled) return
-          setRateLimiterHealth(null)
+          // Keep the last successful snapshot visible. The checked-at timestamp
+          // freezing is the staleness signal when a later /health poll fails.
         })
     }
     loadHealth()
