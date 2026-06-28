@@ -100,7 +100,7 @@ describe('<MembersPanel /> dynamic role list', () => {
     await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
-  it('bumps platformVersion after removing a member', async () => {
+  it('requires inline confirmation before removing a member', async () => {
     setupApi({
       members: [{ id: 'm-1', orgId: 'default', userId: 'user-1', email: 'ada@example.com', role: 'viewer' }],
     })
@@ -108,10 +108,38 @@ describe('<MembersPanel /> dynamic role list', () => {
     await waitFor(() => {
       expect(screen.getByLabelText('Remove ada@example.com')).toBeInTheDocument()
     })
+    // First click only arms the confirm — the DELETE must NOT fire yet.
     fireEvent.click(screen.getByLabelText('Remove ada@example.com'))
+    expect(api).not.toHaveBeenCalledWith('/members?userId=user-1', { method: 'DELETE' })
+    // Confirming fires the DELETE and bumps the platform version.
+    fireEvent.click(screen.getByTestId('members-remove-confirm-user-1'))
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/members?userId=user-1', { method: 'DELETE' })
     })
     await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
+  })
+
+  it('resets the invite role to viewer after a successful invite', async () => {
+    setupApi({
+      roles: {
+        roles: [
+          { name: 'viewer', isBuiltin: true, inheritsFrom: 'viewer', description: null },
+          { name: 'admin', isBuiltin: true, inheritsFrom: 'admin', description: null },
+        ],
+      },
+    })
+    render(<MembersPanel />)
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /admin/i })).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ada@example.com' } })
+    fireEvent.click(screen.getByRole('radio', { name: /admin/i }))
+    expect(screen.getByRole('radio', { name: /admin/i })).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: /Invite/i }))
+    // After the invite resolves, the role must fall back to viewer so the next
+    // invite doesn't silently reuse the elevated selection.
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /viewer/i })).toBeChecked()
+    })
   })
 })

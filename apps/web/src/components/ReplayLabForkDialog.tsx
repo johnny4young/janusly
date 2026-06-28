@@ -23,6 +23,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, GitBranch, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -59,6 +60,8 @@ export function ReplayLabForkDialog({
   const [overrideText, setOverrideText] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
   const aliveRef = useRef(true)
 
   useEffect(() => {
@@ -156,6 +159,7 @@ export function ReplayLabForkDialog({
   return (
     <div className="run-input-backdrop" onClick={onBackdrop}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-replay-lab-dialog"
         role="dialog"
         aria-modal="true"
@@ -227,9 +231,10 @@ export function ReplayLabForkDialog({
               spellCheck={false}
               data-testid="replay-lab-fork-override"
               aria-invalid={parseError ? true : undefined}
+              aria-describedby={parseError ? 'replay-lab-fork-override-error' : undefined}
             />
             {parseError && (
-              <div className="run-input-form-error" role="alert">
+              <div id="replay-lab-fork-override-error" className="run-input-form-error" role="alert">
                 <AlertCircle size={14} aria-hidden="true" />
                 <div>{parseError}</div>
               </div>

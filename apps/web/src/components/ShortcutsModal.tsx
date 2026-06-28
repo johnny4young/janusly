@@ -7,8 +7,9 @@
  * the backdrop also closes.
  */
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Keyboard, X } from 'lucide-react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { useT } from '../i18n'
 
 type Group = {
@@ -27,6 +28,11 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
+
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  // Always-mounted (renders null while closed); focus its close button on open
+  // so the Tab trap has something inside to cycle.
+  useDialogFocusTrap(dialogRef, { active: open, initialFocus: true })
 
   if (!open) return null
 
@@ -57,6 +63,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
 
   return (
     <div
+      ref={dialogRef}
       className="we-shortcuts-backdrop"
       role="dialog"
       aria-modal="true"

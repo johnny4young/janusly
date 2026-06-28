@@ -19,6 +19,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, RotateCcw, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -64,6 +65,8 @@ export function RollbackConfirmDialog({
   const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
   // Tracks whether the dialog is still mounted. Set on unmount so an
   // in-flight rollback that resolves after dismount can't push toasts,
   // hydrate the canvas, or bump the platform version against a UI the
@@ -124,6 +127,7 @@ export function RollbackConfirmDialog({
   return (
     <div className="run-input-backdrop" onClick={onBackdropClick}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-recovery-dialog"
         role="dialog"
         aria-modal="true"

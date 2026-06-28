@@ -444,6 +444,13 @@ export type RecallMemoryInput = {
   orgId: string;
   kind?: MemoryKind;
   query: string;
+  /**
+   * Optional per-call cap on the number of rows returned. Clamped to the
+   * tenant's `memory.recallMaxEntries` (the hard ceiling — a larger value can
+   * never over-fetch) and sanitized to an integer ≥ 1. Omit to use the org
+   * ceiling (the default for the recovery/generation/agent recall paths).
+   */
+  limit?: number;
 };
 
 export type MemoryRecallEntry = {
@@ -498,6 +505,14 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     });
     return { entries: [] };
   }
+  // Effective row cap: an explicit per-call `limit` is sanitized to an integer
+  // ≥ 1 and clamped to the tenant ceiling, so a caller can ask for fewer than
+  // the ceiling (smaller SQL LIMIT = less pgvector work) but never more. No
+  // `limit` → the ceiling, matching the recovery/generation/agent recall paths.
+  const effectiveLimit =
+    input.limit != null && Number.isFinite(input.limit)
+      ? Math.min(Math.max(1, Math.floor(input.limit)), config.recallMaxEntries)
+      : config.recallMaxEntries;
   const embedding = await generateEmbedding(input.query, {
     provider: config.embeddingProvider,
     model: config.embeddingModel,
@@ -588,7 +603,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
       .from(memoryEntries)
       .where(and(...filters))
       .orderBy(sql`distance`)
-      .limit(config.recallMaxEntries);
+      .limit(effectiveLimit);
   } catch (error) {
     console.warn("[memory] recall query failed", { orgId: input.orgId, error });
     await writeRecallFailedAudit(input.orgId, "query_failed", {

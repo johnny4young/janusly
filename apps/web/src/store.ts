@@ -163,6 +163,37 @@ type WorkflowStore = {
 const BUMP_COALESCE_MS = 100
 let pendingBumpTimer: ReturnType<typeof setTimeout> | null = null
 
+// Toast auto-dismiss windows. Errors stay ~2x longer because they typically
+// carry an action the reader must take before the toast disappears.
+const TOAST_TTL_DEFAULT_MS = 3500
+const TOAST_TTL_ERROR_MS = 6000
+
+// Persist the operator's last top-level tab so a refresh restores context
+// instead of dropping back to Home. The stored value is validated against the
+// known set; anything unknown/removed falls back to Home. Keep PERSISTED_TABS
+// in sync with the ActiveTab union in ./types (drift just disables restore for
+// the new tab — it never throws).
+const ACTIVE_TAB_KEY = 'janusly:activeTab'
+const PERSISTED_TABS: readonly ActiveTab[] = [
+  'home', 'workflows', 'members', 'copilot', 'marketplace', 'templates',
+  'packs', 'credentials', 'inspector', 'runs', 'reasoning', 'multiAgent', 'operations',
+]
+function readStoredActiveTab(): ActiveTab {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_TAB_KEY)
+    return raw && (PERSISTED_TABS as readonly string[]).includes(raw) ? (raw as ActiveTab) : 'home'
+  } catch {
+    return 'home'
+  }
+}
+function persistActiveTab(tab: ActiveTab): void {
+  try {
+    window.localStorage.setItem(ACTIVE_TAB_KEY, tab)
+  } catch {
+    // localStorage may be unavailable (Safari private mode); ignore.
+  }
+}
+
 // `data.label` is intentionally empty — `WorkflowStepNode` resolves
 // the human label via `getNodeLabel(type)` at render time, which
 // re-evaluates through the i18n runtime on locale toggles. Leaving
@@ -221,11 +252,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   events: [],
   eventsCursor: null,
   eventsHasMore: false,
-  // The Recovery Center is the authenticated landing page. The operator's
-  // most frequent job is triaging failed runs / pending approvals / cluster
-  // recovery — surfacing those tiles first beats opening the canvas blind.
-  // The builder is one click away via the Workspace-views sidebar.
-  activeTab: 'home',
+  // The Recovery Center is the authenticated landing page (the operator's most
+  // frequent job is triaging failed runs / pending approvals / cluster
+  // recovery). When the operator has navigated elsewhere, the last tab is
+  // restored from localStorage so a refresh doesn't drop them back to Home.
+  activeTab: readStoredActiveTab(),
   streamStatus: 'idle',
   streamTransport: 'idle',
   toasts: [],
@@ -388,14 +419,19 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     return { events }
   }),
 
-  setActiveTab: (tab) => set({ activeTab: tab }),
+  setActiveTab: (tab) => {
+    persistActiveTab(tab)
+    set({ activeTab: tab })
+  },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),
   resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle', streamTransport: 'idle' }),
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))
-    setTimeout(() => get().removeToast(id), 3500)
+    // Errors need longer on screen than success/info: an error often asks the
+    // reader to act (switch panel, fix a field) before it auto-dismisses.
+    setTimeout(() => get().removeToast(id), tone === 'error' ? TOAST_TTL_ERROR_MS : TOAST_TTL_DEFAULT_MS)
   },
   removeToast: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
   bumpPlatformVersion: () => {

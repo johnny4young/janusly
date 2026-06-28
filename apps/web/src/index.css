@@ -820,6 +820,22 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 10px 22px -10px var(--we-primary-shadow-strong);
 }
 
+/* Destructive variant — used by the confirm dialog's confirm button. */
+.command-button-danger {
+  border-color: transparent;
+  background: var(--we-danger);
+  color: var(--we-surface);
+  font-weight: 600;
+}
+.command-button-danger:hover {
+  border-color: transparent;
+  color: var(--we-surface);
+  filter: brightness(1.05);
+}
+
+/* Confirm dialog reuses the run-input modal shell but stays narrower. */
+.run-input-dialog--confirm { max-width: 28rem; }
+
 .command-button-quiet { background: var(--we-surface); }
 
 .we-btn {
@@ -1082,6 +1098,36 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
     linear-gradient(135deg, var(--we-surface) 0%, var(--we-surface-muted) 100%);
 }
 
+/* Teaching overlay shown over a blank canvas (no nodes). The backdrop ignores
+   pointer events so the palette + canvas underneath stay fully interactive. */
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  padding: 1.5rem;
+}
+
+.canvas-empty__card {
+  pointer-events: auto;
+  max-width: 22rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.1rem 1.35rem;
+  border-radius: 0.85rem;
+  border: 1px dashed var(--we-line);
+  background: var(--we-surface-glass);
+  color: var(--we-ink-soft);
+}
+
+.canvas-empty__card strong {
+  color: var(--we-ink);
+}
+
 /* Hidden-but-mounted canvas wrapper — used by the App dispatcher when the
    active tab is not one of the canvas tabs (`copilot` / `inspector`). The
    canvas DOM stays in the tree so React Flow's viewport state (zoom + pan)
@@ -1327,6 +1373,18 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* Inline copy-to-clipboard affordance next to the mono node id. */
+.inspector-id-copy {
+  margin-left: 0.4rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--we-muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.inspector-id-copy:hover { color: var(--we-ink); }
 
 /* Recovery Center hero CTA row (action-first mode when failures exist). */
 .we-recovery-center-hero__actions {
@@ -2132,6 +2190,33 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 /* Shared empty-state shape used across operational surfaces (DLQ empty,
    no clusters, no alerts, etc). Caller supplies the icon + copy; the layout
    stays uniform so the operator recognizes "nothing here" at a glance. */
+/* Loading placeholder — shimmer rows shown while a list/panel fetches. */
+.we-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 12px 4px;
+}
+.we-skeleton__row {
+  display: grid;
+  gap: 6px;
+}
+.we-skeleton__line {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--we-faint);
+  animation: we-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.we-skeleton__line--short {
+  width: 60%;
+}
+@keyframes we-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .we-skeleton__line { animation: none; }
+}
+
 .we-empty-state {
   display: grid;
   justify-items: center;
@@ -3741,6 +3826,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-workflow__dot--connecting { background: var(--we-warning); animation: we-pulse 1s ease-in-out infinite; }
 .sb-workflow__dot--error { background: var(--we-danger); }
 .sb-workflow__sep { color: var(--we-line-strong); }
+.sb-workflow__unsaved { color: var(--we-warning); font-weight: 600; }
 
 .sb-workflow__acts {
   display: grid;
@@ -9288,6 +9374,31 @@ button.we-ops-metric-card--button {
 .we-list-folder__confirm-text {
   color: var(--we-muted);
   flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Header actions cluster (Trash toggle + Refresh) kept together on the right of
+   the always-rendered panel toolbar. */
+.panel-toolbar__actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* Inline per-row soft-delete confirm — mirrors the folder-delete confirm so a
+   click never deletes immediately. */
+.we-list-row__confirm {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.we-list-row__confirm-text {
+  color: var(--we-muted);
   font-size: 12px;
   min-width: 0;
   overflow: hidden;

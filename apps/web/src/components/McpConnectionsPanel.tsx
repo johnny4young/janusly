@@ -24,6 +24,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { McpConnection, McpConnectionStatus, McpToolDescriptor, McpTransport } from '../types'
 import { tApiError, Trans, useT } from '../i18n'
+import { useConfirm } from './ConfirmDialog'
 import { t as runtimeT } from '../i18n/runtime'
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
@@ -90,6 +91,7 @@ function statusLabel(status: McpConnectionStatus): string {
 
 export function McpConnectionsPanel() {
   const { t } = useT()
+  const confirmDialog = useConfirm()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
@@ -101,6 +103,13 @@ export function McpConnectionsPanel() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Patch the create form and clear any stale form-level error on edit, so a
+  // validation message doesn't linger after the operator fixes the field.
+  const patchForm = (patch: Partial<CreateForm>) => {
+    setForm((prev) => ({ ...prev, ...patch }))
+    if (error) setError(null)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -231,7 +240,7 @@ export function McpConnectionsPanel() {
   }
 
   const removeConnection = async (connection: ConnectionListEntry) => {
-    if (!confirm(t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }) as string)) return
+    if (!(await confirmDialog({ body: t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }) as string, tone: 'danger' }))) return
     try {
       await api(`/mcp/connections/${encodeURIComponent(connection.alias)}`, { method: 'DELETE' })
       addToast(t('mcpConnections.toasts.deleted') as string, 'success')
@@ -281,7 +290,7 @@ export function McpConnectionsPanel() {
               id="mcp-alias"
               className="text-field"
               value={form.alias}
-              onChange={(event) => setForm((prev) => ({ ...prev, alias: event.target.value }))}
+              onChange={(event) => patchForm({ alias: event.target.value })}
               placeholder={t('mcpConnections.form.aliasPlaceholder') as string}
               autoComplete="off"
             />
@@ -292,7 +301,7 @@ export function McpConnectionsPanel() {
               id="mcp-transport"
               className="text-field"
               value={form.transport}
-              onChange={(event) => setForm((prev) => ({ ...prev, transport: event.target.value as McpTransport }))}
+              onChange={(event) => patchForm({ transport: event.target.value as McpTransport })}
             >
               <option value="stdio">{t('mcpConnections.form.transportStdio')}</option>
               <option value="sse">{t('mcpConnections.form.transportSse')}</option>
@@ -307,7 +316,7 @@ export function McpConnectionsPanel() {
               id="mcp-command"
               className="text-field"
               value={form.command}
-              onChange={(event) => setForm((prev) => ({ ...prev, command: event.target.value }))}
+              onChange={(event) => patchForm({ command: event.target.value })}
               placeholder={t('mcpConnections.form.commandPlaceholder') as string}
             />
             <label className="field-label" htmlFor="mcp-args">{t('mcpConnections.form.args')}</label>
@@ -315,7 +324,7 @@ export function McpConnectionsPanel() {
               id="mcp-args"
               className="text-field"
               value={form.args}
-              onChange={(event) => setForm((prev) => ({ ...prev, args: event.target.value }))}
+              onChange={(event) => patchForm({ args: event.target.value })}
               placeholder={t('mcpConnections.form.argsPlaceholder') as string}
             />
           </>
@@ -326,7 +335,7 @@ export function McpConnectionsPanel() {
               id="mcp-url"
               className="text-field"
               value={form.url}
-              onChange={(event) => setForm((prev) => ({ ...prev, url: event.target.value }))}
+              onChange={(event) => patchForm({ url: event.target.value })}
               placeholder={t('mcpConnections.form.urlPlaceholder') as string}
             />
           </>
@@ -337,7 +346,7 @@ export function McpConnectionsPanel() {
           className="text-field"
           rows={3}
           value={form.envRefsText}
-          onChange={(event) => setForm((prev) => ({ ...prev, envRefsText: event.target.value }))}
+          onChange={(event) => patchForm({ envRefsText: event.target.value })}
           placeholder={t('mcpConnections.form.envRefsPlaceholder') as string}
         />
         <button type="submit" className="command-button command-button-primary" disabled={saving}>
