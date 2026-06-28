@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { Bell, BellOff } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'
@@ -94,7 +95,7 @@ export function RecentAlertsCard(): React.ReactElement {
         </h3>
       </div>
       <div className="we-recent-alerts__list" data-testid="recent-alerts-list">
-        {loading && <div className="we-list-row--empty">{t('common.loading')}</div>}
+        {loading && <LoadingSkeleton rows={3} label={t('common.loading') as string} />}
         {!loading && items.length === 0 && (
           <EmptyState
             icon={<BellOff />}
