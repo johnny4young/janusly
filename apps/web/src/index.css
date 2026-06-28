@@ -10380,7 +10380,7 @@ button.we-ops-metric-card--button {
 
 /* inline-validation states, layered on the existing .text-field / .helper-text */
 .text-field--error,
-.we-field__input[aria-invalid="true"] { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
+.we-field input[aria-invalid="true"] { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
 .helper-text--error { color: var(--we-danger); display: inline-flex; align-items: center; gap: 5px; }
 .helper-text--hint { color: var(--we-primary); display: inline-flex; align-items: center; gap: 5px; }
 
