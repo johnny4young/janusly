@@ -6960,6 +6960,37 @@ button.we-ops-metric-card--button {
   gap: 6px;
 }
 
+/* Two-step progress for cluster recovery (validate 1 sample → replay N). */
+.we-recovery-cluster-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+}
+.we-recovery-cluster-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--we-muted);
+}
+.we-recovery-cluster-steps li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--we-faint);
+}
+.we-recovery-cluster-steps li[data-state="done"] { color: var(--we-ink-soft); }
+.we-recovery-cluster-steps li[data-state="done"]::before { background: var(--we-success); }
+.we-recovery-cluster-steps li[data-state="active"] { color: var(--we-ink); font-weight: 600; }
+.we-recovery-cluster-steps li[data-state="active"]::before {
+  background: var(--we-primary);
+  animation: we-pulse 1.2s ease-in-out infinite;
+}
+
 .we-recovery-warning,
 .we-recovery-error,
 .we-recovery-success {

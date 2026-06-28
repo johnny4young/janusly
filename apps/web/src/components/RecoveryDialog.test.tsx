@@ -604,5 +604,34 @@ describe('<RecoveryDialog />', () => {
       expect(body.clusterSignature).toBe('Missing secret: GITHUB_TOKEN')
       expect(body.deadLetterIds).toHaveLength(10)
     })
+
+    it('shows the two-step cluster progress (validate → replay N) while validating', async () => {
+      vi.mocked(api)
+        .mockResolvedValueOnce(aiSuggestion)
+        // /dlq/validate-fix
+        .mockResolvedValueOnce({ runId: 'val-run-progress' })
+        // GET /run poll keeps returning running → the dialog stays in validating
+        .mockResolvedValue({ run: { id: 'val-run-progress', status: 'running' }, nodes: [] })
+
+      render(
+        <RecoveryDialog
+          dlq={baseDlq}
+          onClose={vi.fn()}
+          clusterMembers={['dlq-1', 'dlq-2', 'dlq-3']}
+          clusterSignature="Network timeout on http node"
+        />,
+      )
+
+      fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+      await waitFor(() => screen.getByRole('button', { name: /Apply.*validate.*3 entr/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate.*3 entr/i }))
+
+      const steps = await screen.findByTestId('recovery-cluster-steps')
+      // Step 1 (validate) is active while validating; the replay step names the count.
+      expect(steps.querySelector('li[data-state="active"]')).toHaveTextContent(/Validate/i)
+      expect(steps).toHaveTextContent(/Replay 3 runs/i)
+      // The cluster-aware copy sets the 1-representative expectation.
+      expect(screen.getByText(/representative failure/i)).toBeInTheDocument()
+    })
   })
 })
