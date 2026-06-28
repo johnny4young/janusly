@@ -120,6 +120,31 @@ describe('<PermissionGrantsPanel />', () => {
     })
   })
 
+  it('flags an invalid new-role name inline and gates the create button', async () => {
+    setupApi(CATALOG, ROLES_DEFAULT)
+    render(<PermissionGrantsPanel />)
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('compliance')).toBeInTheDocument()
+    })
+    const input = screen.getByPlaceholderText('compliance')
+    const createBtn = screen.getByRole('button', { name: /Create role/ })
+
+    // Empty name → button gated.
+    expect(createBtn).toBeDisabled()
+
+    // Invalid name (space + symbol survive the lowercase normalisation).
+    fireEvent.change(input, { target: { value: 'Bad Name!' } })
+    expect(screen.getByText(/Role name must match/)).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(createBtn).toBeDisabled()
+
+    // Valid name → error clears, button enabled.
+    fireEvent.change(input, { target: { value: 'release-manager' } })
+    expect(screen.queryByText(/Role name must match/)).not.toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-invalid', 'false')
+    expect(createBtn).not.toBeDisabled()
+  })
+
   it('confirms before reverting a built-in override', async () => {
     setupApi(CATALOG, {
       roles: [

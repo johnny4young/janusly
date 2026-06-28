@@ -1485,6 +1485,7 @@
   "mcpConnections.form.submit": "Registrar + descubrir",
   "mcpConnections.form.submitting": "Conectando…",
   "mcpConnections.errors.aliasRequired": "el alias es obligatorio",
+  "mcpConnections.errors.urlInvalid": "Ingresa una URL http(s) válida",
   "mcpConnections.errors.badEnvRefLine": "línea de env-ref incorrecta: {{line}}",
   "mcpConnections.errors.duplicateEnvRefKey": "clave de env-ref duplicada: {{key}}",
   "mcpConnections.errors.loadFailed": "no se pudieron cargar las conexiones MCP",
