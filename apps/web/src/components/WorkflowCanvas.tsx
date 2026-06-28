@@ -14,6 +14,7 @@ import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnMo
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
+import { CanvasErrorBoundary } from './CanvasErrorBoundary'
 import { getNodeHelper, getNodeLabel } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
@@ -79,6 +80,16 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       if (viewport) writeCanvasViewport(viewportWorkflowId, viewport)
     })
   }, [viewportWorkflowId])
+  const canvasErrorFallback = (
+    <div className="canvas-error" role="alert">
+      <strong>{t('canvas.error.title')}</strong>
+      <p>{t('canvas.error.body')}</p>
+      <button type="button" className="command-button" onClick={() => window.location.reload()}>
+        {t('canvas.error.reload')}
+      </button>
+    </div>
+  )
+
   return (
     <div className="canvas-frame">
       <div className="canvas-toolbar" aria-label={t('canvas.flowMapSummary')}>
@@ -103,6 +114,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           ))}
         </div>
       )}
+      <CanvasErrorBoundary fallback={canvasErrorFallback}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -124,6 +136,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
         <Controls onZoomIn={persistCurrentViewport} onZoomOut={persistCurrentViewport} onFitView={persistCurrentViewport} />
       </ReactFlow>
+      </CanvasErrorBoundary>
       {nodes.length === 0 && (
         // Teaching overlay for a blank canvas — pointer-events stay off the
         // backdrop so the palette/canvas underneath remain interactive.
