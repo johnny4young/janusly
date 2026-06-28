@@ -152,18 +152,17 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     listRequestSeq.current = requestSeq
     setLoading(true)
     try {
-      // Trash is a flat, filter-free, capped read (no tag/folder/search params,
-      // no keyset cursor — the retention sweep bounds it). The active list keeps
-      // its filters + pagination.
+      // Trash is a flat, filter-free read (no tag/folder/search params); the
+      // active list keeps its filters. Both keyset-paginate (trash on deletedAt,
+      // active on createdAt — see loadMore).
       const qs = showTrashed ? '' : buildListParams().toString()
       const base = showTrashed ? '/workflows/trash' : '/workflows'
       const data = await api(`${base}${qs ? `?${qs}` : ''}`)
       if (listRequestSeq.current !== requestSeq) return
       const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
       setWorkflows(page)
-      // A full page means another may exist; a short page ends pagination. Trash
-      // never paginates.
-      setHasMore(!showTrashed && page.length === PAGE_SIZE)
+      // A full page means another may exist; a short page ends pagination.
+      setHasMore(page.length === PAGE_SIZE)
     } catch (error) {
       if (listRequestSeq.current !== requestSeq) return
       addToast(error instanceof Error ? error.message : t('workflowsDashboard.toastFailed'), 'error')
@@ -173,18 +172,23 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   }, [addToast, t, buildListParams, showTrashed])
 
   // Append the next keyset page after the oldest loaded row. `workflows` is in
-  // server order (createdAt DESC), so its last element is the global oldest; its
-  // `(createdAt, id)` is the `?before=` cursor. URLSearchParams encodes the `|`.
+  // server order, so its last element is the global oldest. The cursor instant is
+  // the row's `deletedAt` in Trash (ordered deletedAt DESC) or `createdAt` in the
+  // active list (createdAt DESC); URLSearchParams encodes the `|`.
   const loadMore = useCallback(async () => {
     if (loadingMore) return
     const oldest = workflows[workflows.length - 1]
-    if (!oldest?.createdAt) return
+    const cursorTs = showTrashed ? oldest?.deletedAt : oldest?.createdAt
+    if (!oldest || !cursorTs) return
     const requestSeq = listRequestSeq.current
     setLoadingMore(true)
     try {
-      const params = buildListParams()
-      params.set('before', `${oldest.createdAt}|${oldest.id}`)
-      const data = await api(`/workflows?${params.toString()}`)
+      // Trash pages the filter-free /workflows/trash; the active list threads its
+      // tag/folder/search filters so paging stays within the filtered set.
+      const params = showTrashed ? new URLSearchParams() : buildListParams()
+      params.set('before', `${cursorTs}|${oldest.id}`)
+      const base = showTrashed ? '/workflows/trash' : '/workflows'
+      const data = await api(`${base}?${params.toString()}`)
       if (listRequestSeq.current !== requestSeq) return
       const page = Array.isArray(data) ? (data as SavedWorkflow[]) : []
       setWorkflows(prev => [...prev, ...page])
@@ -196,7 +200,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     } finally {
       setLoadingMore(false)
     }
-  }, [loadingMore, workflows, buildListParams, addToast, t])
+  }, [loadingMore, workflows, buildListParams, showTrashed, addToast, t])
 
   useEffect(() => {
     void load()
