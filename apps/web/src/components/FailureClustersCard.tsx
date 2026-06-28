@@ -266,6 +266,7 @@ export function FailureClustersCard() {
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
                 aria-label={t('clusters.rowAria', {
+                  category: t(CATEGORY_KEYS[cluster.category] as never) as string,
                   signature: cluster.signature,
                   occurrences: t('clusters.occurrences', { count: cluster.frequency }),
                   workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
