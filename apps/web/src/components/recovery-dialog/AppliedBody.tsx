@@ -67,11 +67,22 @@ export function AppliedBody({
     </div>
   )
 
+  // Tell the operator what to do next once the fix is applied — closes the
+  // loop instead of leaving them on a success ribbon with no direction.
+  const nextSteps = (
+    <p className="helper-text we-recovery-applied-next">{t('recoveryDialog.applied.nextSteps')}</p>
+  )
+
   // Mount the delta card alongside the ribbon when the save response
   // gave us the workflow id + version. Defensive fall-through to
   // ribbon-only when the save route returned an unexpected shape.
   if (!appliedWorkflowId || typeof appliedVersion !== 'number') {
-    return ribbon
+    return (
+      <div className="we-recovery-applied">
+        {ribbon}
+        {nextSteps}
+      </div>
+    )
   }
 
   return (
@@ -83,6 +94,7 @@ export function AppliedBody({
         priorFailureSignature={priorFailureSignature ?? null}
         preSaveBeforeSnapshot={preSaveBeforeSnapshot ?? null}
       />
+      {nextSteps}
     </div>
   )
 }
