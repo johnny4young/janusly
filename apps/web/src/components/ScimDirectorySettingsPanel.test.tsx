@@ -74,6 +74,19 @@ describe('<ScimDirectorySettingsPanel />', () => {
     expect(screen.getByRole('button', { name: /Disconnect/i })).toBeInTheDocument()
   })
 
+  it('gates the connect button until a directory id is entered', async () => {
+    mockApi({ directories: [] })
+    render(<ScimDirectorySettingsPanel />)
+    const idInput = await screen.findByPlaceholderText(/directory_01…/)
+    const connect = screen.getByRole('button', { name: /Connect directory/i })
+    expect(connect).toBeDisabled()
+    fireEvent.change(idInput, { target: { value: 'directory_test' } })
+    expect(connect).toBeEnabled()
+    // Whitespace-only is still treated as empty.
+    fireEvent.change(idInput, { target: { value: '   ' } })
+    expect(connect).toBeDisabled()
+  })
+
   it('submits the attach form with trimmed values', async () => {
     mockApi({ directories: [] })
     render(<ScimDirectorySettingsPanel />)
