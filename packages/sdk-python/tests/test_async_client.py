@@ -217,6 +217,56 @@ async def test_resume_node_posts_payload(
     }
 
 
+async def test_cancel_posts_payload(
+    client: JanuslyAsyncClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        json={"runId": "run-X", "status": "cancelled"},
+        method="POST",
+    )
+    result = await client.runs.cancel(
+        run_id="run-X",
+        reason="superseded by a newer run",
+    )
+    assert result == {"runId": "run-X", "status": "cancelled"}
+
+    body = json.loads(httpx_mock.get_requests()[0].content.decode("utf-8"))
+    assert body == {
+        "runId": "run-X",
+        "reason": "superseded by a newer run",
+    }
+
+
+async def test_cancel_omits_reason_when_not_supplied(
+    client: JanuslyAsyncClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        json={"runId": "run-X", "status": "cancelled"},
+        method="POST",
+    )
+    await client.runs.cancel(run_id="run-X")
+
+    body = json.loads(httpx_mock.get_requests()[0].content.decode("utf-8"))
+    assert body == {"runId": "run-X"}
+
+
+async def test_cancel_raises_on_terminal_run(
+    client: JanuslyAsyncClient, httpx_mock: HTTPXMock
+) -> None:
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        status_code=409,
+        json={"error": "Run is already terminal", "code": "run_not_cancellable"},
+        method="POST",
+    )
+    with pytest.raises(JanuslyApiError) as err:
+        await client.runs.cancel(run_id="run-X")
+    assert err.value.status_code == 409
+    assert err.value.code == "run_not_cancellable"
+
+
 async def test_export_run_explain_parses_filename(
     client: JanuslyAsyncClient, httpx_mock: HTTPXMock
 ) -> None:

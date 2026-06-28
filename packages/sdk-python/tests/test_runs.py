@@ -1,4 +1,4 @@
-"""Tests for the runs resource (start, get, list, poll_until_terminal, resume)."""
+"""Tests for the runs resource (start, get, list, poll_until_terminal, resume, cancel)."""
 
 from __future__ import annotations
 
@@ -144,3 +144,51 @@ def test_resume_node_posts_payload(client: JanuslyClient, httpx_mock: HTTPXMock)
         "input": {"approved": True},
         "resumeToken": "t-1",
     }
+
+
+def test_cancel_posts_payload(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        json={"runId": "run-X", "status": "cancelled"},
+        method="POST",
+    )
+    result = client.runs.cancel(run_id="run-X", reason="stuck on a bad input")
+    assert result == {"runId": "run-X", "status": "cancelled"}
+
+    import json
+
+    body = json.loads(httpx_mock.get_requests()[0].content.decode("utf-8"))
+    assert body == {"runId": "run-X", "reason": "stuck on a bad input"}
+
+
+def test_cancel_omits_reason_when_not_supplied(
+    client: JanuslyClient,
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        json={"runId": "run-X", "status": "cancelled"},
+        method="POST",
+    )
+    client.runs.cancel(run_id="run-X")
+
+    import json
+
+    body = json.loads(httpx_mock.get_requests()[0].content.decode("utf-8"))
+    assert body == {"runId": "run-X"}
+
+
+def test_cancel_raises_on_terminal_run(
+    client: JanuslyClient,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Cancelling an already-terminal run maps the route's 409 to a typed error."""
+    httpx_mock.add_response(
+        url="https://api.test.janus.ly/run/cancel",
+        json={"error": "Run is already succeeded; cannot cancel"},
+        status_code=409,
+        method="POST",
+    )
+    with pytest.raises(JanuslyApiError) as err:
+        client.runs.cancel(run_id="run-done")
+    assert err.value.status_code == 409

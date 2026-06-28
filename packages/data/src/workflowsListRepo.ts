@@ -19,7 +19,7 @@
  *   never aggregated.
  */
 
-import { and, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
 import { db, runs, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
 
@@ -40,6 +40,12 @@ export type WorkflowListRow = {
   tags: string[];
   /** Operator-assigned folder from `workflow_metadata` (null = ungrouped / no metadata row). Drives the Flows-list grouping. */
   folder: string | null;
+  /**
+   * Soft-delete tombstone timestamp. `null` for an active workflow (the active
+   * list always returns null since it filters them out); the deletion time for a
+   * trash-list row, which the web renders as the "Deleted {date}" label.
+   */
+  deletedAt: Date | null;
 };
 
 /**
@@ -130,6 +136,7 @@ export async function listWorkflowsWithRunSummary(
       pausedReason: workflows.pausedReason,
       tags: workflowMetadata.tags,
       folder: workflowMetadata.folder,
+      deletedAt: workflows.deletedAt,
     })
     .from(workflows)
     .leftJoin(
@@ -143,10 +150,39 @@ export async function listWorkflowsWithRunSummary(
     // createdAt ties (rare) sort by id in memory.
     .orderBy(desc(workflows.createdAt), desc(workflows.id))
     .limit(limit);
+
+  return foldRunSummary(orgId, base);
+}
+
+/**
+ * The base-row shape both list paths select before the run aggregate is folded
+ * in. Mirrors the `workflows` columns plus the LEFT-JOINed `workflow_metadata`
+ * tags + folder.
+ */
+type WorkflowBaseRow = {
+  id: string;
+  orgId: string;
+  name: string;
+  createdBy: string | null;
+  createdAt: Date | null;
+  status: string | null;
+  pausedReason: string | null;
+  tags: unknown;
+  folder: string | null;
+  deletedAt: Date | null;
+};
+
+/**
+ * Fold the per-workflow production-run aggregate (run count + most-recent
+ * status) into a page of base rows. Shared by the active + trash list paths so
+ * the aggregate query, org/page/production-run scoping, and the orphan-tolerant
+ * `runCount: 0` default live in exactly one place.
+ */
+async function foldRunSummary(orgId: string, base: WorkflowBaseRow[]): Promise<WorkflowListRow[]> {
   if (base.length === 0) return [];
 
-  // 2. Per-workflow run aggregate (runs → workflow_versions → workflows),
-  //    scoped to the org + this page + production runs only.
+  // Per-workflow run aggregate (runs → workflow_versions → workflows), scoped
+  // to the org + this page + production runs only.
   const ids = base.map((w) => w.id);
   const agg = await db
     .select({
@@ -180,5 +216,47 @@ export async function listWorkflowsWithRunSummary(
     pausedReason: w.pausedReason ?? null,
     tags: Array.isArray(w.tags) ? (w.tags as string[]) : [],
     folder: w.folder ?? null,
+    deletedAt: w.deletedAt ?? null,
   }));
+}
+
+/**
+ * List an org's SOFT-DELETED workflows (most-recently-deleted first, capped)
+ * with the same run summary + tags + folder fold as the active list — the data
+ * behind the Flows "Trash" view.
+ *
+ * Counterpart to `listWorkflowsWithRunSummary`: identical shape but
+ * `isNotNull(deletedAt)` and ordered by `deletedAt DESC`. The trash set is
+ * bounded by the retention sweep (it purges tombstones past
+ * `retention.deletedWorkflowsDays`), so v1 is a single capped read with no
+ * keyset cursor.
+ */
+export async function listDeletedWorkflowsWithRunSummary(
+  orgId: string,
+  limit: number,
+): Promise<WorkflowListRow[]> {
+  const base = await db
+    .select({
+      id: workflows.id,
+      orgId: workflows.orgId,
+      name: workflows.name,
+      createdBy: workflows.createdBy,
+      createdAt: workflows.createdAt,
+      status: workflows.status,
+      pausedReason: workflows.pausedReason,
+      tags: workflowMetadata.tags,
+      folder: workflowMetadata.folder,
+      deletedAt: workflows.deletedAt,
+    })
+    .from(workflows)
+    .leftJoin(
+      workflowMetadata,
+      and(eq(workflowMetadata.orgId, orgId), eq(workflowMetadata.workflowId, workflows.id)),
+    )
+    .where(and(eq(workflows.orgId, orgId), isNotNull(workflows.deletedAt)))
+    // Most-recently-deleted first; `id` is the total-order tiebreaker.
+    .orderBy(desc(workflows.deletedAt), desc(workflows.id))
+    .limit(limit);
+
+  return foldRunSummary(orgId, base);
 }

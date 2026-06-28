@@ -336,9 +336,10 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
             onChange={event => setSecretRef(event.target.value)}
             placeholder={t('rightPanel.credentials.envPlaceholder') as string}
             aria-invalid={refInvalid}
+            aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
           />
           {refInvalid && (
-            <span className="helper-text helper-text--error" role="alert">
+            <span id="credential-secret-error" className="helper-text helper-text--error" role="alert">
               <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
             </span>
           )}

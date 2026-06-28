@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { useWorkflowStore } from '../store'
 import {
   Activity,
   Boxes,
@@ -258,6 +259,9 @@ export function BuilderSidebar({
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
+  // Surface unsaved canvas edits in the header so the operator never loses
+  // track of save state before navigating away or running.
+  const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
   const [stored] = useState<StoredState>(() => loadStoredState())
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(stored.openGroups))
   const [openCategories, setOpenCategories] = useState<Set<string>>(() => new Set(stored.openCategories))
@@ -371,6 +375,14 @@ export function BuilderSidebar({
               <span><b>{workflowRunsCount}</b> {t('sidebar.workflow.meta.runs', { count: workflowRunsCount })}</span>
             </>
           ) : null}
+          {!currentWorkflowSaved ? (
+            <>
+              <span className="sb-workflow__sep" aria-hidden="true">·</span>
+              <span className="sb-workflow__unsaved" data-testid="sidebar-unsaved">
+                {t('sidebar.workflow.meta.unsaved')}
+              </span>
+            </>
+          ) : null}
         </div>
         <div className="sb-workflow__acts">
           <button className="sb-workflow__ghost" type="button" onClick={onNew} title={t('sidebar.action.new')} aria-label={t('sidebar.action.new')}>
@@ -390,7 +402,12 @@ export function BuilderSidebar({
       </div>
 
       {/* AI mode one-line strip */}
-      <button className="sb-ai-strip" type="button" onClick={() => onOpenTab('copilot')}>
+      <button
+        className="sb-ai-strip"
+        type="button"
+        onClick={() => onOpenTab('copilot')}
+        title={(aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')) as string}
+      >
         <span className="sb-ai-strip__ic" aria-hidden="true"><Sparkles size={12} /></span>
         <span className="sb-ai-strip__body">
           <strong>{aiModeLabel}</strong>

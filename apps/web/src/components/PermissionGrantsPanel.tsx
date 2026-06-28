@@ -23,6 +23,7 @@ import { KeyRound, Plus, RotateCcw, Save, Trash2 } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { tApiError, useT } from "../i18n";
+import { useConfirm } from "./ConfirmDialog";
 
 type Role = "viewer" | "editor" | "admin";
 
@@ -46,6 +47,7 @@ const ROLE_ORDER: Role[] = ["viewer", "editor", "admin"];
 
 export function PermissionGrantsPanel() {
   const { t } = useT();
+  const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion);
   const addToast = useWorkflowStore((s) => s.addToast);
   const platformVersion = useWorkflowStore((s) => s.platformVersion);
@@ -141,7 +143,7 @@ export function PermissionGrantsPanel() {
   }
 
   async function revertBuiltin(role: RoleEntry) {
-    if (!window.confirm(t("permissions.confirmRevert", { role: role.name }) as string)) return;
+    if (!(await confirmDialog({ body: t("permissions.confirmRevert", { role: role.name }) as string, tone: "danger" }))) return;
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastReverted", { role: role.name }), "success");
@@ -152,7 +154,7 @@ export function PermissionGrantsPanel() {
   }
 
   async function deleteCustom(role: RoleEntry) {
-    if (!window.confirm(t("permissions.confirmDelete", { role: role.name }) as string)) return;
+    if (!(await confirmDialog({ body: t("permissions.confirmDelete", { role: role.name }) as string, tone: "danger" }))) return;
     try {
       await api(`/org/roles/${encodeURIComponent(role.name)}`, { method: "DELETE" });
       addToast(t("permissions.toastDeleted", { role: role.name }), "success");

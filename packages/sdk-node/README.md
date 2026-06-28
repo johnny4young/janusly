@@ -181,7 +181,17 @@ for await (const event of client.runs.streamEvents(runId)) {
 For `approval` nodes the token is optional — the API authorises by role
 + org scope.
 
-### 5. Export a run-explain report
+### 5. Cancel an in-flight run
+
+```typescript
+await client.runs.cancel({ runId, reason: "superseded by a newer run" });
+```
+
+Cancelling flips the run + its non-running nodes to `cancelled` (the
+worker's currently-running job drains to completion). A run that already
+reached a terminal status throws `JanuslyApiError` (409).
+
+### 6. Export a run-explain report
 
 ```typescript
 import { writeFile } from "node:fs/promises";
@@ -194,7 +204,7 @@ console.log(`Wrote ${report.filename} (${report.contentType})`);
 The filename comes from the server's `Content-Disposition` header. JSON
 format is also available — pass `{ format: "json" }`.
 
-### 6. Verify an inbound Janusly webhook
+### 7. Verify an inbound Janusly webhook
 
 Mounted in an Express-style handler. **Always pass the RAW request body**
 — re-serializing a parsed object produces different bytes and breaks the

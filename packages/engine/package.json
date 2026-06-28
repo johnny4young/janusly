@@ -36,7 +36,7 @@
     "pdfkit": "^0.19.0",
     "postgres": "^3.4.9",
     "re2-wasm": "^1.0.2",
-    "undici": "^8.4.1",
+    "undici": "^8.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

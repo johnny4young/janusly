@@ -9,6 +9,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
+import { ConfirmProvider } from './components/ConfirmDialog'
 import './index.css'
 
 // Resolve the user's preferred locale BEFORE React mounts so the very first
@@ -34,7 +35,9 @@ void import('./App').then(({ default: App }) => {
   // (zoom / pan) still survives `inspector → operations → inspector`.
   createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <App />
+      <ConfirmProvider>
+        <App />
+      </ConfirmProvider>
     </React.StrictMode>
   )
 })

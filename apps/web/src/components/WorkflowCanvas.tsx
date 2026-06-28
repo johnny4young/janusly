@@ -124,6 +124,16 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
         <Controls onZoomIn={persistCurrentViewport} onZoomOut={persistCurrentViewport} onFitView={persistCurrentViewport} />
       </ReactFlow>
+      {nodes.length === 0 && (
+        // Teaching overlay for a blank canvas — pointer-events stay off the
+        // backdrop so the palette/canvas underneath remain interactive.
+        <div className="canvas-empty" data-testid="canvas-empty">
+          <div className="canvas-empty__card">
+            <strong>{t('canvas.empty.title')}</strong>
+            <p>{t('canvas.empty.body')}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 })

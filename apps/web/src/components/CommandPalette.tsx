@@ -12,6 +12,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import {
   Activity,
   Boxes,
@@ -188,6 +189,9 @@ export function CommandPalette({
   const [recent, setRecent] = useState<CommandId[]>(() => readRecent())
   const inputRef = useRef<HTMLInputElement | null>(null)
   const listRef = useRef<HTMLUListElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  // Always-mounted (renders null while closed) → drive the trap off `open`.
+  useDialogFocusTrap(dialogRef, { active: open })
 
   const commands = useMemo<Command[]>(() => {
     const base = buildCommands()
@@ -282,6 +286,7 @@ export function CommandPalette({
 
   return (
     <div
+      ref={dialogRef}
       className="we-cmdk-backdrop"
       role="dialog"
       aria-modal="true"

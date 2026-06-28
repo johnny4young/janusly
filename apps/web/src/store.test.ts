@@ -170,6 +170,37 @@ describe('useWorkflowStore', () => {
     expect(useWorkflowStore.getState().toasts).toHaveLength(0)
   })
 
+  it('keeps error toasts on screen longer than success toasts', () => {
+    vi.useFakeTimers()
+    try {
+      useWorkflowStore.setState({ toasts: [] })
+      useWorkflowStore.getState().addToast('Saved', 'success')
+      useWorkflowStore.getState().addToast('Boom', 'error')
+      expect(useWorkflowStore.getState().toasts).toHaveLength(2)
+      // The success window (3500ms) elapses — only the error survives.
+      vi.advanceTimersByTime(3500)
+      const remaining = useWorkflowStore.getState().toasts
+      expect(remaining).toHaveLength(1)
+      expect(remaining[0].tone).toBe('error')
+      // The error window (6000ms total) elapses — it clears too.
+      vi.advanceTimersByTime(2500)
+      expect(useWorkflowStore.getState().toasts).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('persists the active tab to localStorage so a refresh can restore it', () => {
+    try {
+      window.localStorage.removeItem('janusly:activeTab')
+      useWorkflowStore.getState().setActiveTab('operations')
+      expect(useWorkflowStore.getState().activeTab).toBe('operations')
+      expect(window.localStorage.getItem('janusly:activeTab')).toBe('operations')
+    } finally {
+      window.localStorage.removeItem('janusly:activeTab')
+    }
+  })
+
   // bumpPlatformVersion coalesce behavior is covered in the dedicated
   // `useWorkflowStore.bumpPlatformVersion (coalesce)` describe block
   // below — it uses fake timers to assert the 100ms trailing-edge

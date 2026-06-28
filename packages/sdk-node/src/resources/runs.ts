@@ -3,8 +3,8 @@
  *
  * Exposes typed methods over the existing HTTP API for workflow run
  * lifecycle: start, list (async iterator over the capped run list), get,
- * poll-until-terminal, stream-events (head-polling iterator), and
- * resume-node.
+ * poll-until-terminal, stream-events (head-polling iterator), resume-node,
+ * and cancel.
  *
  * The polling-backed `streamEvents` is intentionally shaped as an async
  * iterator: when the server gains a server-sent events transport, the
@@ -284,6 +284,29 @@ export class RunsResource {
       { method: "POST", path: "/resume", body },
       options,
     )) as { resumed: true } | { errors: string[] };
+  }
+
+  /**
+   * POST /run/cancel — cancel an in-flight run.
+   *
+   * Flips the run and its non-running nodes to `cancelled`; the worker's
+   * currently-running job (if any) drains to completion — the
+   * cancelled-stays-cancelled rollup absorbs those post-cancel writes. An
+   * optional `reason` is recorded on the cancellation audit. A run already in
+   * a terminal state (succeeded / failed / cancelled / timed_out) is rejected
+   * with `409` (surfaced as a `JanuslyApiError`).
+   */
+  async cancel(
+    input: { runId: string; reason?: string },
+    options?: JanuslyRequestOptions,
+  ): Promise<{ runId: string; status: "cancelled" }> {
+    const body: Record<string, unknown> = { runId: input.runId };
+    if (input.reason !== undefined) body.reason = input.reason;
+    return (await sendApiRequest(
+      this.config,
+      { method: "POST", path: "/run/cancel", body },
+      options,
+    )) as { runId: string; status: "cancelled" };
   }
 }
 

@@ -10,6 +10,7 @@
  */
 
 import React, { useEffect, useState } from "react";
+import { LoadingSkeleton } from "./LoadingSkeleton";
 import { ListChecks } from "lucide-react";
 
 import { api } from "../api";
@@ -154,7 +155,7 @@ export function AuditLogPanel() {
       )}
 
       {loading ? (
-        <p className="we-budget-settings__status">{t("audit.loading")}</p>
+        <LoadingSkeleton rows={4} label={t("audit.loading") as string} />
       ) : rows.length === 0 ? (
         <p className="we-budget-settings__status">{t("audit.empty")}</p>
       ) : (
