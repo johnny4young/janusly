@@ -381,6 +381,7 @@
   "sidebar.action.validate": "Validate",
   "sidebar.action.save": "Save",
   "sidebar.action.run": "Run",
+  "sidebar.action.running": "Running…",
   "sidebar.workspaceViews": "Workspace views",
   "sidebar.nav.home.label": "Home",
   "sidebar.nav.home.helper": "Recovery Center",

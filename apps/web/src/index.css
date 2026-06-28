@@ -3828,6 +3828,11 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-workflow__sep { color: var(--we-line-strong); }
 .sb-workflow__unsaved { color: var(--we-warning); font-weight: 600; }
 
+/* Spinner for in-flight header actions (Validate / Save / Run). */
+.we-spin { animation: we-spin-kf 0.8s linear infinite; }
+@keyframes we-spin-kf { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .we-spin { animation: none; } }
+
 .sb-workflow__acts {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr auto;
