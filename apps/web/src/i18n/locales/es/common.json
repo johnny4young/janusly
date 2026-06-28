@@ -309,6 +309,7 @@
   "workflow.defaultName": "Flujo sin título",
 
   "canvas.edge.condition": "condición",
+  "canvas.edge.connection": "De {{from}} a {{to}}",
 
   "nodeDefaults.approval.message": "Aprueba este paso del flujo.",
   "nodeDefaults.humanForm.title": "Recolectar detalles de la solicitud",
