@@ -22,6 +22,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, Workflow, X } from 'lucide-react'
 import type { WorkflowInputSchemaShape } from '../types'
 import { useT } from '../i18n'
@@ -84,6 +85,8 @@ export function RunInputDialog({
   const [state, setState] = useState<FormState>(() => initialFormState(inputs))
   const [localErrors, setLocalErrors] = useState<ErrorMap>({})
   const firstFieldRef = useRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
 
   // Server errors are remapped per render (no caching) so re-fetching a
   // fresh `serverErrors` prop replaces the inline error text without a
@@ -151,6 +154,7 @@ export function RunInputDialog({
   return (
     <div className="run-input-backdrop" onClick={handleCancel}>
       <div
+        ref={dialogRef}
         className="run-input-dialog"
         role="dialog"
         aria-modal="true"

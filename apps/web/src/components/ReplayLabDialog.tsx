@@ -20,6 +20,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -62,6 +63,8 @@ export function ReplayLabDialog({
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
   const aliveRef = useRef(true)
 
   useEffect(() => {
@@ -182,6 +185,7 @@ export function ReplayLabDialog({
   return (
     <div className="run-input-backdrop" onClick={onBackdrop}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-replay-lab-dialog"
         role="dialog"
         aria-modal="true"

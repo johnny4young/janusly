@@ -37,6 +37,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, Play, RefreshCcw, Sparkles, X } from 'lucide-react'
 import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
@@ -154,6 +155,8 @@ export function RecoveryDialog({
     ? clusterMembersTotal
     : clusterMemberCount
   const primaryRef = useRef<HTMLButtonElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocusTrap(dialogRef)
   const reviewSuggestions = step.kind === 'review' ? step.suggestion.suggestions : []
   const safeSelectedIndex = Math.min(selectedSuggestionIndex, Math.max(reviewSuggestions.length - 1, 0))
   const selectedSuggestion: SuggestionTab | null = step.kind === 'review'
@@ -422,6 +425,7 @@ export function RecoveryDialog({
   return (
     <div className="run-input-backdrop" onClick={onBackdropClick}>
       <div
+        ref={dialogRef}
         className="run-input-dialog we-recovery-dialog"
         role="dialog"
         aria-modal="true"
