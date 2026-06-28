@@ -7,6 +7,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { CircleCheck, FilterX, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, RotateCcw, Search, Trash, Trash2, Workflow, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -1344,6 +1345,12 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             {t('workflowsDashboard.clearSelection')}
           </button>
         </div>
+      )}
+
+      {/* Initial load (active or trash) — skeleton rows instead of a blank gap
+          until the first page arrives. */}
+      {loading && workflows.length === 0 && (
+        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading') as string} />
       )}
 
       {/* Trash view — a flat, filter-free list of soft-deleted workflows (uses

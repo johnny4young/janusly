@@ -12,6 +12,7 @@ import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
 import { EmptyState } from './EmptyState'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { FailureClustersCard } from './FailureClustersCard'
 import { AutoHealingPendingCard } from './AutoHealingPendingCard'
 // Modal-only + heavy (~1.2k lines) — load on first open, not in the main chunk.
@@ -443,6 +444,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       )}
 
       <div className="panel-list">
+        {recoveryFilterLoading && filtered.length === 0 && (
+          <LoadingSkeleton rows={4} label={t('common.loading') as string} />
+        )}
         {filtered.length === 0 && !recoveryFilterLoading && (
           <EmptyState
             icon={<CircleCheck />}
