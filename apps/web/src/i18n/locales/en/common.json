@@ -309,6 +309,7 @@
   "workflow.defaultName": "Untitled Workflow",
 
   "canvas.edge.condition": "condition",
+  "canvas.edge.connection": "From {{from}} to {{to}}",
 
   "nodeDefaults.approval.message": "Please approve this workflow step.",
   "nodeDefaults.humanForm.title": "Collect request details",
