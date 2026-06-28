@@ -5,6 +5,8 @@
 
   "common.save": "Save",
   "common.cancel": "Cancel",
+  "confirmDialog.title": "Are you sure?",
+  "confirmDialog.confirm": "Confirm",
   "common.submit": "Submit",
   "common.close": "Close",
   "common.delete": "Delete",

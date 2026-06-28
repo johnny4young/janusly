@@ -24,6 +24,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { McpConnection, McpConnectionStatus, McpToolDescriptor, McpTransport } from '../types'
 import { tApiError, Trans, useT } from '../i18n'
+import { useConfirm } from './ConfirmDialog'
 import { t as runtimeT } from '../i18n/runtime'
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
@@ -90,6 +91,7 @@ function statusLabel(status: McpConnectionStatus): string {
 
 export function McpConnectionsPanel() {
   const { t } = useT()
+  const confirmDialog = useConfirm()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
   const addToast = useWorkflowStore((state) => state.addToast)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
@@ -238,7 +240,7 @@ export function McpConnectionsPanel() {
   }
 
   const removeConnection = async (connection: ConnectionListEntry) => {
-    if (!confirm(t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }) as string)) return
+    if (!(await confirmDialog({ body: t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }) as string, tone: 'danger' }))) return
     try {
       await api(`/mcp/connections/${encodeURIComponent(connection.alias)}`, { method: 'DELETE' })
       addToast(t('mcpConnections.toasts.deleted') as string, 'success')

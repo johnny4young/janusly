@@ -820,6 +820,22 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 10px 22px -10px var(--we-primary-shadow-strong);
 }
 
+/* Destructive variant — used by the confirm dialog's confirm button. */
+.command-button-danger {
+  border-color: transparent;
+  background: var(--we-danger);
+  color: var(--we-surface);
+  font-weight: 600;
+}
+.command-button-danger:hover {
+  border-color: transparent;
+  color: var(--we-surface);
+  filter: brightness(1.05);
+}
+
+/* Confirm dialog reuses the run-input modal shell but stays narrower. */
+.run-input-dialog--confirm { max-width: 28rem; }
+
 .command-button-quiet { background: var(--we-surface); }
 
 .we-btn {
