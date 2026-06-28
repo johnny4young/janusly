@@ -16,7 +16,7 @@
  * page reload. Search filters BOTH views and step types in one keystroke.
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkflowStore } from '../store'
 import {
   Activity,
@@ -267,12 +267,15 @@ export function BuilderSidebar({
   // strip while its async handler runs, so a slow Save/Validate/Run gives clear
   // feedback and can't be double-submitted.
   const [busyAction, setBusyAction] = useState<'validate' | 'save' | 'run' | null>(null)
+  const busyActionRef = useRef<typeof busyAction>(null)
   const runAction = async (kind: 'validate' | 'save' | 'run', fn: () => void | Promise<void>) => {
-    if (busyAction) return
+    if (busyActionRef.current) return
+    busyActionRef.current = kind
     setBusyAction(kind)
     try {
       await fn()
     } finally {
+      busyActionRef.current = null
       setBusyAction(null)
     }
   }
