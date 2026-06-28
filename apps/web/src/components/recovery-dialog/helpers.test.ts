@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  classifyRecoveryError,
   isActionableSuggestion,
   normalisePatchSuggestion,
   pickErrorMessage,
@@ -135,5 +136,28 @@ describe('toWorkflow', () => {
   it('passes object values through and falls back to an empty workflow otherwise', () => {
     expect(toWorkflow(baseWorkflow)).toBe(baseWorkflow)
     expect(toWorkflow(null)).toEqual({ dslVersion: '1.0', nodes: [], edges: [] })
+  })
+})
+
+describe('classifyRecoveryError', () => {
+  it('classifies by error code', () => {
+    expect(classifyRecoveryError({ code: 'ECONNREFUSED' })).toBe('network')
+    expect(classifyRecoveryError({ code: 'ETIMEDOUT' })).toBe('timeout')
+  })
+  it('classifies by HTTP status', () => {
+    expect(classifyRecoveryError({ status: 401 })).toBe('auth')
+    expect(classifyRecoveryError({ statusCode: 429 })).toBe('rateLimit')
+    expect(classifyRecoveryError({ status: 404 })).toBe('notFound')
+    expect(classifyRecoveryError({ status: 503 })).toBe('serverError')
+  })
+  it('classifies by message text', () => {
+    expect(classifyRecoveryError({ message: 'getaddrinfo ENOTFOUND api.example.com' })).toBe('network')
+    expect(classifyRecoveryError({ message: 'Request timed out after 30s' })).toBe('timeout')
+    expect(classifyRecoveryError({ message: 'Invalid API key' })).toBe('auth')
+  })
+  it('returns null for unknown / non-object errors', () => {
+    expect(classifyRecoveryError({ message: 'something odd happened' })).toBeNull()
+    expect(classifyRecoveryError(null)).toBeNull()
+    expect(classifyRecoveryError('boom')).toBeNull()
   })
 })

@@ -18,6 +18,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { Plug, RefreshCw, Save, Trash2 } from 'lucide-react'
 
 import { api } from '../api'
@@ -356,7 +357,7 @@ export function McpConnectionsPanel() {
       </form>
 
       {loading ? (
-        <p className="helper-text">{t('mcpConnections.list.loading')}</p>
+        <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading') as string} />
       ) : connections.length === 0 ? (
         <p className="helper-text">{t('mcpConnections.list.empty')}</p>
       ) : (
