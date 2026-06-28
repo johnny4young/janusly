@@ -1,24 +1,23 @@
 /**
- * Focus management for a mount-per-open modal dialog. Add it to a dialog
- * component that mounts when opened and unmounts when closed (the common
- * Janusly pattern): pass a ref to the dialog's root element.
+ * Focus management for a modal dialog. Handles both common Janusly patterns:
+ *  - Mount-per-open dialogs (rendered only while open): call
+ *    `useDialogFocusTrap(ref)` — `active` defaults to true for the dialog's
+ *    lifetime, and focus is restored when it unmounts.
+ *  - Always-mounted, `open`-prop dialogs (render null while closed): call
+ *    `useDialogFocusTrap(ref, { active: open })` — focus is captured when
+ *    `open` flips true and restored when it flips false.
  *
- * What it does:
- *  - Captures the element that had focus when the dialog opened (read at the
- *    first render, before the dialog moves focus inward) and restores focus to
- *    it when the dialog unmounts.
- *  - Traps Tab / Shift+Tab so keyboard focus wraps within the dialog instead of
- *    escaping to the background. It only acts while focus is already inside the
- *    dialog, so it never yanks focus away from a nested dialog or the page.
+ * What it does while active:
+ *  - Captures the element that had focus when the dialog opened (read before the
+ *    dialog moves focus inward) and restores focus to it on close / unmount.
+ *  - Traps Tab / Shift+Tab so focus wraps within the dialog instead of escaping
+ *    to the background. It only acts while focus is already inside the dialog,
+ *    so it never yanks focus from a nested dialog or the page.
+ *  - With `initialFocus: true`, focuses the first focusable on open (use for
+ *    dialogs that don't focus a control themselves, e.g. ShortcutsModal).
  *
- * What it does NOT do: it does not set the initial focus (pass
- * `initialFocus: true` to opt in) — most dialogs already focus their primary
- * control, and double-focusing would fight that.
- *
- * Used by the app's modal dialogs (RunInput, Recovery, ReplayLab, Rollback,
- * ReportDelivery, CredentialRotate, CommandPalette, Shortcuts, …). The
- * always-mounted ConfirmDialog provider manages focus itself (it can't use a
- * mount-based capture) — see `ConfirmDialog.tsx`.
+ * Used by the app's modal dialogs. The always-mounted ConfirmDialog provider
+ * manages focus itself (it can't use this) — see `ConfirmDialog.tsx`.
  */
 
 import { useEffect, useRef } from 'react'
@@ -35,30 +34,37 @@ const FOCUSABLE_SELECTOR = [
 
 export function useDialogFocusTrap(
   dialogRef: RefObject<HTMLElement | null>,
-  options?: { initialFocus?: boolean },
+  options?: { active?: boolean; initialFocus?: boolean },
 ): void {
-  // Capture the trigger during the first render — before the dialog's own
-  // initial-focus effect moves focus inward — so it can be restored on close.
-  const triggerRef = useRef<HTMLElement | null>(null)
-  if (triggerRef.current === null && typeof document !== 'undefined') {
-    triggerRef.current = document.activeElement as HTMLElement | null
-  }
-
+  const active = options?.active ?? true
   const initialFocus = options?.initialFocus ?? false
 
+  // Capture the trigger at the render where `active` flips on — before the
+  // dialog's own initial-focus moves focus inward — so it can be restored when
+  // the dialog closes. (Guarded ref write during render: idempotent.)
+  const triggerRef = useRef<HTMLElement | null>(null)
+  const prevActive = useRef(false)
+  if (active && !prevActive.current) {
+    prevActive.current = true
+    if (typeof document !== 'undefined') {
+      triggerRef.current = document.activeElement as HTMLElement | null
+    }
+  } else if (!active && prevActive.current) {
+    prevActive.current = false
+  }
+
   useEffect(() => {
+    if (!active) return
     const root = dialogRef.current
 
     if (initialFocus && root) {
-      const focusables = root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-      focusables[0]?.focus()
+      root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]?.focus()
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return
       const node = dialogRef.current
-      // Only trap while focus is already inside this dialog — avoids fighting a
-      // nested dialog or the page for focus.
+      // Only trap while focus is already inside this dialog.
       if (!node || !node.contains(document.activeElement)) return
       const focusables = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
       if (focusables.length === 0) return
@@ -76,12 +82,12 @@ export function useDialogFocusTrap(
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.removeEventListener('keydown', onKeyDown)
-      // Restore focus to the trigger if it's still in the document.
+      // Restore focus to the trigger on close / unmount (if it still exists).
       const trigger = triggerRef.current
+      triggerRef.current = null
       if (trigger && document.contains(trigger)) {
-        // Defer so the dialog has fully unmounted before focus moves.
         requestAnimationFrame(() => trigger.focus())
       }
     }
-  }, [dialogRef, initialFocus])
+  }, [active, initialFocus, dialogRef])
 }
