@@ -55,6 +55,11 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
 
   const confirm = useCallback<ConfirmFn>((next) => {
+    // Only one modal can own the shared provider at a time. A re-entrant call
+    // (for example, a double-triggered destructive action) must not replace the
+    // active resolver/options because that would leave the first caller's
+    // Promise hanging. Treat overlapping requests as "not confirmed".
+    if (resolveRef.current) return Promise.resolve(false)
     // Remember the element that opened the dialog so focus can return to it.
     triggerRef.current = (document.activeElement as HTMLElement | null) ?? null
     return new Promise<boolean>((resolve) => {
@@ -77,6 +82,16 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (options) confirmButtonRef.current?.focus()
   }, [options])
+
+  // If the provider unmounts while a confirm is open (test cleanup, route-level
+  // teardown, or a future conditional mount), resolve the pending caller instead
+  // of leaving an await forever suspended.
+  useEffect(() => {
+    return () => {
+      resolveRef.current?.(false)
+      resolveRef.current = null
+    }
+  }, [])
 
   // Escape closes; Tab is trapped between the dialog's buttons.
   useEffect(() => {
