@@ -51,4 +51,29 @@ describe('<RecoveryItemBadge />', () => {
     rerender(<RecoveryItemBadge item={makeItem({ occurrenceCount: 12 })} />)
     expect(screen.getByTestId('recovery-item-occurrences').textContent).toMatch(/12/)
   })
+
+  it('aria-label announces localized severity/status + overdue SLA urgency', () => {
+    const past = new Date(Date.now() - 30 * 60 * 1_000).toISOString()
+    render(<RecoveryItemBadge item={makeItem({ slaTargetAtIso: past })} />)
+    const label = screen.getByTestId('recovery-item-badge').getAttribute('aria-label') ?? ''
+    expect(label).toMatch(/P2/) // localized severity label
+    expect(label).toMatch(/Acknowledged/) // localized status label
+    expect(label).toMatch(/overdue/i) // the urgency the red color band conveys
+    expect(label).not.toMatch(/\bp2\b/) // raw enum code no longer leaks to AT
+  })
+
+  it('aria-label folds in the SLA time-remaining for an active item', () => {
+    const future = new Date(Date.now() + 6 * 60 * 60 * 1_000).toISOString()
+    render(<RecoveryItemBadge item={makeItem({ slaTargetAtIso: future })} />)
+    const label = screen.getByTestId('recovery-item-badge').getAttribute('aria-label') ?? ''
+    expect(label).toMatch(/SLA/)
+    expect(label).toMatch(/\d/) // a relative-time figure (e.g. "in 6 hr")
+  })
+
+  it('aria-label omits the SLA clause for a resolved item', () => {
+    render(<RecoveryItemBadge item={makeItem({ status: 'resolved' })} />)
+    const label = screen.getByTestId('recovery-item-badge').getAttribute('aria-label') ?? ''
+    expect(label).not.toMatch(/SLA/)
+    expect(label).toMatch(/Resolved/)
+  })
 })

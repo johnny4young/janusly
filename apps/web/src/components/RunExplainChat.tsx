@@ -17,6 +17,8 @@ type Message = {
   content: string
   mode?: AiMode
   model?: string
+  /** True for the transport/error reply so it renders as an alert, not a normal answer. */
+  isError?: boolean
 }
 
 type ExplainRunResponse = {
@@ -80,7 +82,11 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
     } catch (error) {
       setMessages((current) => [
         ...current,
-        { role: 'assistant', content: error instanceof Error ? error.message : (t('runExplain.failed') as string) },
+        {
+          role: 'assistant',
+          content: error instanceof Error ? error.message : (t('runExplain.failed') as string),
+          isError: true,
+        },
       ])
     } finally {
       setLoading(false)
@@ -99,7 +105,10 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       {!runId && <p className="empty-state">{t('runExplain.empty')}</p>}
 
-      <div className="panel-list">
+      {/* Announce new replies to screen readers — without aria-live a streamed
+          answer (or an error reply) appends silently. polite for normal answers;
+          the error reply below carries role="alert" for an assertive read. */}
+      <div className="panel-list" aria-live="polite">
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className={`message-card message-card-${message.role}`}>
             <div className="split-row">
@@ -118,7 +127,16 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
                 <span>{t('runExplain.fallbackBannerBody')}</span>
               </div>
             )}
-            <div className="message-body">{message.content}</div>
+            {message.isError ? (
+              // A transport/server error is not an answer — surface it as an
+              // alert so a screen reader announces it assertively and a sighted
+              // operator can't mistake it for reasoned output.
+              <div className="issue issue-warn message-body" role="alert" data-testid="run-explain-error">
+                {message.content}
+              </div>
+            ) : (
+              <div className="message-body">{message.content}</div>
+            )}
           </div>
         ))}
       </div>
