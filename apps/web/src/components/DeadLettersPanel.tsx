@@ -109,6 +109,9 @@ function isBulkReplayResult(value: unknown): value is BulkReplayResult {
     && Array.isArray(candidate.errors)
 }
 
+/** How many per-row failure reasons to list inline before collapsing to "+N more". */
+const BULK_ERROR_PREVIEW = 6
+
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
   onReplay: (id: string) => void
@@ -159,6 +162,10 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // Bulk replay re-runs every ticked workflow (cost + side effects), so it
   // asks for an inline confirm first instead of firing on the first click.
   const [confirmBulkReplay, setConfirmBulkReplay] = useState(false)
+  // Per-row failure reasons from the last bulk action's partial-success
+  // envelope. The count toast says HOW MANY failed; this surfaces WHY (and which
+  // rows), so the operator can tell a transient blip from "already replayed".
+  const [bulkErrors, setBulkErrors] = useState<Array<{ deadLetterId: string; error: string }>>([])
 
   const handleRefresh = () => {
     refreshQueue()
@@ -189,6 +196,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     setSelectionMode(false)
     setSelectedIds(new Set())
     setConfirmBulkReplay(false)
+    setBulkErrors([])
   }
 
   // Dismiss every ticked dead letter in one request. Mirrors the single
@@ -198,6 +206,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const bulkResolve = async () => {
     const ids = [...selectedIds]
     if (ids.length === 0) return
+    setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
       if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed') as string)
@@ -211,6 +220,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       if (result.failed > 0) {
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
+        setBulkErrors(result.errors)
         addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }) as string, 'error')
         return
       }
@@ -231,6 +241,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     setConfirmBulkReplay(false)
     const ids = [...selectedIds]
     if (ids.length === 0) return
+    setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-replay', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
       if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
@@ -244,6 +255,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       if (result.failed > 0) {
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
+        setBulkErrors(result.errors)
         addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }) as string, 'error')
         return
       }
@@ -383,6 +395,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
           the count + "Resolve selected" once at least one row is ticked. Reuses
           the Flows-list bulk-bar styling. */}
       {selectionMode && (
+        <>
         <div className="we-list-bulk-bar" data-testid="dlq-bulk-bar">
           <button
             type="button"
@@ -441,6 +454,31 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             </>
           )}
         </div>
+        {/* Surface WHY rows failed (and which) from the partial-success
+            envelope — the count toast alone leaves the operator guessing
+            between a transient blip and "already replayed". role="alert" so a
+            screen reader announces the failures. Server error strings are
+            rendered verbatim (exempt from i18n per the error-message rule). */}
+        {bulkErrors.length > 0 && (
+          <div className="we-dlq-bulk-errors" role="alert" data-testid="dlq-bulk-errors">
+            <span className="we-dlq-bulk-errors__label">
+              {t('dlq.bulkErrorsHeading', { count: bulkErrors.length })}
+            </span>
+            <ul>
+              {bulkErrors.slice(0, BULK_ERROR_PREVIEW).map((entry) => (
+                <li key={entry.deadLetterId}>
+                  <code>{entry.deadLetterId}</code> — {entry.error}
+                </li>
+              ))}
+            </ul>
+            {bulkErrors.length > BULK_ERROR_PREVIEW && (
+              <span className="we-dlq-bulk-errors__more">
+                {t('dlq.bulkErrorsMore', { count: bulkErrors.length - BULK_ERROR_PREVIEW })}
+              </span>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       <div className="panel-list">
