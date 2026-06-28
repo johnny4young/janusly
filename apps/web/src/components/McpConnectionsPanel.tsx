@@ -26,6 +26,7 @@ import { useWorkflowStore } from '../store'
 import type { McpConnection, McpConnectionStatus, McpToolDescriptor, McpTransport } from '../types'
 import { tApiError, Trans, useT } from '../i18n'
 import { useConfirm } from './ConfirmDialog'
+import { isLikelyHttpUrl } from '../url'
 import { t as runtimeT } from '../i18n/runtime'
 
 type ConnectionListEntry = McpConnection & { toolCount?: number; enabledToolCount?: number }
@@ -64,18 +65,6 @@ function parseEnvRefs(text: string): { ok: true; envRefs: Record<string, { kind:
     out[key] = { kind: 'env', name: value }
   }
   return { ok: true, envRefs: out }
-}
-
-/** A URL transport target must parse as an absolute http(s) URL. Used to flag a
- *  malformed `url` inline before the operator submits (the engine SSRF policy
- *  does the authoritative check server-side). */
-function isLikelyUrl(value: string): boolean {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
-  }
 }
 
 function formatEnvRefs(envRefs: Record<string, { kind: 'env'; name: string }>): string {
@@ -282,7 +271,7 @@ export function McpConnectionsPanel() {
   const trimmedAlias = form.alias.trim()
   const urlNeeded = form.transport !== 'stdio'
   const trimmedUrl = form.url.trim()
-  const urlInvalid = urlNeeded && trimmedUrl.length > 0 && !isLikelyUrl(trimmedUrl)
+  const urlInvalid = urlNeeded && trimmedUrl.length > 0 && !isLikelyHttpUrl(trimmedUrl)
   const canSubmit =
     !saving &&
     trimmedAlias.length > 0 &&
