@@ -1230,7 +1230,7 @@
   "clusters.recoverUnavailable": "Bulk recovery needs at least {{min}} matching failures with a queued (dead-letter) sample.",
   "clusters.noOpenMembers": "No open DLQ entries match this pattern any more.",
   "clusters.errorMembers": "Failed to load cluster members",
-  "clusters.rowAria": "{{signature}} — {{occurrences}} across {{workflows}}",
+  "clusters.rowAria": "{{category}}: {{signature}} — {{occurrences}} across {{workflows}}",
   "clusters.category.secret_missing": "Secret",
   "clusters.category.http_error": "HTTP",
   "clusters.category.network_timeout": "Network",
