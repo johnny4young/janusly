@@ -28,6 +28,7 @@ import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
+import { isLikelyHttpUrl } from '../url'
 import { formatStatusLabel } from '../constants'
 
 type SourceRun = {
@@ -126,13 +127,18 @@ export function ReportDeliveryDialog({
     onClose()
   }
 
+  // Flag a malformed webhook URL inline (must be an absolute http(s) URL) so the
+  // operator sees the problem before the disabled submit leaves them guessing.
+  const webhookTrimmed = webhookUrl.trim()
+  const webhookInvalid = destination === 'webhook' && webhookTrimmed.length > 0 && !isLikelyHttpUrl(webhookTrimmed)
+
   // Per-kind valid form. The route's superRefine enforces the same set,
   // but the dialog disables submit so the operator gets the feedback
   // before a round-trip.
   const formValid = (() => {
     if (!credentialName.trim()) return false
     if (destination === 'github') return owner.trim().length > 0 && repo.trim().length > 0
-    if (destination === 'webhook') return webhookUrl.trim().length > 0
+    if (destination === 'webhook') return webhookTrimmed.length > 0 && isLikelyHttpUrl(webhookTrimmed)
     return true
   })()
 
@@ -357,8 +363,15 @@ export function ReportDeliveryDialog({
                       placeholder={t('reportDelivery.field.urlPlaceholder') as string}
                       autoComplete="off"
                       disabled={step.kind === 'submitting'}
+                      aria-invalid={webhookInvalid}
+                      aria-describedby={webhookInvalid ? 'report-delivery-url-error' : undefined}
                       data-testid="report-delivery-url"
                     />
+                    {webhookInvalid && (
+                      <span id="report-delivery-url-error" className="helper-text helper-text--error" role="alert">
+                        <AlertCircle size={13} aria-hidden="true" /> {t('reportDelivery.field.urlInvalid')}
+                      </span>
+                    )}
                   </label>
                 )}
               </div>

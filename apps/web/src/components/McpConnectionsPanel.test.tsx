@@ -171,6 +171,41 @@ describe('<McpConnectionsPanel />', () => {
     await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
+  it('flags a malformed URL inline and gates submit until it is valid', async () => {
+    vi.mocked(api).mockResolvedValueOnce(EMPTY)
+    render(<McpConnectionsPanel />)
+    await waitFor(() => expect(screen.getByText(/No MCP connections yet/i)).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('Alias'), { target: { value: 'hosted-http' } })
+    fireEvent.change(screen.getByLabelText('Transport'), { target: { value: 'http' } })
+    const submit = screen.getByRole('button', { name: /Register \+ discover/i })
+    const urlInput = screen.getByLabelText('URL')
+
+    fireEvent.change(urlInput, { target: { value: 'not-a-url' } })
+    expect(screen.getByText(/valid http\(s\) URL/i)).toBeInTheDocument()
+    expect(urlInput).toHaveAttribute('aria-invalid', 'true')
+    expect(submit).toBeDisabled()
+
+    fireEvent.change(urlInput, { target: { value: 'https://hosted-mcp.example.com/' } })
+    expect(screen.queryByText(/valid http\(s\) URL/i)).not.toBeInTheDocument()
+    expect(submit).not.toBeDisabled()
+  })
+
+  it('gates submit until the transport-required fields are filled', async () => {
+    vi.mocked(api).mockResolvedValueOnce(EMPTY)
+    render(<McpConnectionsPanel />)
+    await waitFor(() => expect(screen.getByText(/No MCP connections yet/i)).toBeInTheDocument())
+    const submit = screen.getByRole('button', { name: /Register \+ discover/i })
+
+    // stdio default: empty alias + command → gated.
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Alias'), { target: { value: 'local-mcp' } })
+    // alias present but command empty → still gated.
+    expect(submit).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Command'), { target: { value: 'node' } })
+    expect(submit).not.toBeDisabled()
+  })
+
   it('submits an http create-connection form with the url transport payload', async () => {
     vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/mcp/connections' && (!init || init.method !== 'POST')) return EMPTY

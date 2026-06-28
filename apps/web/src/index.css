@@ -1738,6 +1738,47 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   word-break: break-word;
 }
 
+/* Reasoning payload rendered as labelled key/value rows (legible) instead of a
+   raw JSON dump; the exact JSON stays behind the .we-reasoning-raw toggle. */
+.we-reasoning-fields {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+}
+.we-reasoning-field {
+  display: grid;
+  grid-template-columns: minmax(72px, 32%) 1fr;
+  gap: 8px;
+  font-size: 12px;
+}
+.we-reasoning-field dt {
+  margin: 0;
+  color: var(--we-muted);
+  font-weight: 600;
+  word-break: break-word;
+}
+.we-reasoning-field dd {
+  margin: 0;
+  color: var(--we-ink);
+  overflow-wrap: anywhere;
+}
+.we-reasoning-field__json {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--we-ink);
+}
+.we-reasoning-raw {
+  margin-top: 6px;
+}
+.we-reasoning-raw summary {
+  font-size: 11px;
+  color: var(--we-muted);
+  cursor: pointer;
+}
+.we-reasoning-raw summary:hover {
+  color: var(--we-ink);
+}
+
 .version-button {
   justify-content: space-between;
   width: 100%;
@@ -3672,6 +3713,41 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .timeline-card[data-tone="tool"] { background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
 .timeline-card[data-tone="tool"]::before { background: var(--we-accent); }
 
+/* Tone → meaning legend above the lanes: the chips below encode phase only via
+   colour, so the legend names each hue (planning / tool call / reflection /
+   completed / failed / other). Swatch colours mirror the .timeline-card dots. */
+.we-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+.we-timeline-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--we-muted);
+}
+.we-timeline-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--we-faint);
+  flex: none;
+}
+.we-timeline-legend__swatch[data-tone="success"] { background: var(--we-success); }
+.we-timeline-legend__swatch[data-tone="warning"] { background: var(--we-warning); }
+.we-timeline-legend__swatch[data-tone="error"] { background: var(--we-danger); }
+.we-timeline-legend__swatch[data-tone="info"] { background: var(--we-primary); }
+.we-timeline-legend__swatch[data-tone="config"] { background: var(--we-info); }
+.we-timeline-legend__swatch[data-tone="tool"] { background: var(--we-accent); }
+
 .timeline-card-label {
   font-size: 13px;
   font-weight: 600;
@@ -3961,6 +4037,34 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 
 /* Search */
+/* Inline search box for list panels (Templates / Packs). Same look as the
+   sidebar .sb-search, minus the side gutters + trailing shortcut column. */
+.we-panel-search {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  background: var(--we-surface);
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.we-panel-search:focus-within {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 3px var(--we-primary-ring);
+}
+.we-panel-search svg { color: var(--we-muted); }
+.we-panel-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 12px;
+  color: var(--we-ink);
+}
+.we-panel-search input::placeholder { color: var(--we-muted); }
+
 .sb-search {
   margin: 0 12px 10px;
   padding: 6px 10px;
@@ -10275,7 +10379,8 @@ button.we-ops-metric-card--button {
 .we-fieldset > legend { padding: 0; margin-bottom: 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--we-muted); }
 
 /* inline-validation states, layered on the existing .text-field / .helper-text */
-.text-field--error { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
+.text-field--error,
+.we-field input[aria-invalid="true"] { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
 .helper-text--error { color: var(--we-danger); display: inline-flex; align-items: center; gap: 5px; }
 .helper-text--hint { color: var(--we-primary); display: inline-flex; align-items: center; gap: 5px; }
 

@@ -66,6 +66,22 @@ describe('<ReportDeliveryDialog />', () => {
     expect(screen.getByTestId('report-delivery-submit')).toBeEnabled()
   })
 
+  it('flags a malformed webhook URL inline and keeps submit disabled', () => {
+    render(<ReportDeliveryDialog sourceRun={sourceRun} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByTestId('report-delivery-destination-webhook'))
+    fireEvent.change(screen.getByTestId('report-delivery-credential'), { target: { value: 'partner' } })
+    const url = screen.getByTestId('report-delivery-url')
+
+    fireEvent.change(url, { target: { value: 'not-a-url' } })
+    expect(screen.getByText(/valid http\(s\) URL/i)).toBeInTheDocument()
+    expect(url).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('report-delivery-submit')).toBeDisabled()
+
+    fireEvent.change(url, { target: { value: 'https://partner.example.com/hooks' } })
+    expect(screen.queryByText(/valid http\(s\) URL/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId('report-delivery-submit')).toBeEnabled()
+  })
+
   it('POSTs the slack delivery body and surfaces the success message', async () => {
     vi.mocked(api).mockResolvedValueOnce({ ok: true, destination: 'slack', statusCode: 200, latencyMs: 12 })
 

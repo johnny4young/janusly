@@ -144,7 +144,12 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
-      const rows = await listDeletedWorkflowsWithRunSummary(auth.orgId, limitValue);
+      // Keyset "Load more" cursor — `parseBeforeCursor` decodes a generic
+      // `<iso>|<id>`; here the instant carries the row's `deletedAt` (the trash
+      // list orders by deletedAt DESC, not createdAt). Malformed/absent → unpaged.
+      const cursor = parseBeforeCursor(url.searchParams.get("before"));
+      const before = cursor ? { deletedAt: cursor.createdAt, id: cursor.id } : undefined;
+      const rows = await listDeletedWorkflowsWithRunSummary(auth.orgId, limitValue, before);
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),

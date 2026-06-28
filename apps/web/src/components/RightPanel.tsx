@@ -21,11 +21,11 @@
  */
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, McpConnection, McpToolDescriptor, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
-import { EmptyView, PanelChrome } from './panel-primitives'
+import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
 // default authoring tab), so it loads on demand behind the shared <Suspense> in
@@ -48,7 +48,7 @@ const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m
 const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { getResolvedLocale, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { getResolvedLocale, tRunEvent, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelProps = {
   tab: ActiveTab
@@ -213,28 +213,61 @@ function RightPanelRouter(props: RightPanelProps) {
   )
 }
 
-function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'templates' | 'onUseTemplate'>) {
-  const { t } = useT()
+export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'templates' | 'onUseTemplate'>) {
+  const { t, i18n } = useT()
+  const setActiveTab = useWorkflowStore(state => state.setActiveTab)
+  const [query, setQuery] = useState('')
+  // `tTemplate*` read the active locale via the runtime translator (not the
+  // closure `t`), so include `i18n.language` so the filter re-runs on a locale
+  // switch — mirroring the MultiAgentTimeline memo.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return templates
+    return templates.filter(template =>
+      `${tTemplateName(template)} ${tTemplateDescription(template)} ${tTemplateCategory(template)}`.toLowerCase().includes(q),
+    )
+  }, [templates, query, i18n.language])
+
   return (
     <PanelChrome title={t('rightPanel.templates.title') as string} description={t('rightPanel.templates.description') as string} icon={<Workflow size={18} />}>
-      {templates.length === 0 && (
+      {templates.length === 0 ? (
         <div className="panel-list">
-          <EmptyView icon={<Workflow size={22} />} title={t('rightPanel.templates.empty.title') as string} body={t('rightPanel.templates.empty.body') as string} />
+          <EmptyView
+            icon={<Workflow size={22} />}
+            title={t('rightPanel.templates.empty.title') as string}
+            body={t('rightPanel.templates.empty.body') as string}
+            cta={{ label: t('rightPanel.templates.empty.cta') as string, onClick: () => setActiveTab('copilot') }}
+          />
         </div>
-      )}
-      <div className="we-recipe-grid">
-        {templates.map(template => (
-          <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
-            <div className="split-row" style={{ width: '100%' }}>
-              <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
-              <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
+      ) : (
+        <>
+          <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder') as string} />
+          {filtered.length === 0 ? (
+            <div className="panel-list">
+              <EmptyView
+                icon={<Search size={22} />}
+                title={t('rightPanel.templates.noMatches.title') as string}
+                body={t('rightPanel.templates.noMatches.body') as string}
+                cta={{ label: t('common.clearFilter') as string, onClick: () => setQuery('') }}
+              />
             </div>
-            <strong>{tTemplateName(template)}</strong>
-            <span>{tTemplateDescription(template)}</span>
-            <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
-          </button>
-        ))}
-      </div>
+          ) : (
+            <div className="we-recipe-grid">
+              {filtered.map(template => (
+                <button key={template.id} className="list-card list-card-button" onClick={() => onUseTemplate(template.workflow)}>
+                  <div className="split-row" style={{ width: '100%' }}>
+                    <span className="mode-pill mode-pill-neutral">{tTemplateCategory(template)}</span>
+                    <span className="mode-pill mode-pill-neutral">{t('rightPanel.templates.stepCount', { count: template.workflow.nodes.length })}</span>
+                  </div>
+                  <strong>{tTemplateName(template)}</strong>
+                  <span>{tTemplateDescription(template)}</span>
+                  <span className="list-card-action">{t('rightPanel.templates.useRecipe')}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </PanelChrome>
   )
 }
@@ -405,7 +438,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
   )
 }
 
-function ReasoningPanel({
+export function ReasoningPanel({
   events,
   eventsHasMore,
   onLoadOlderEvents,
@@ -422,14 +455,51 @@ function ReasoningPanel({
       {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.reasoning.empty.title') as string} body={t('rightPanel.reasoning.empty.body') as string} />}
       {visibleEvents.map(event => (
         <div key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`} className="list-card">
-          <strong>{event.type}</strong>
-          <span>{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
-          <pre className="mini-pre">{JSON.stringify(event.payload ?? {}, null, 2)}</pre>
+          <strong>{tRunEvent(event)}</strong>
+          <span className="helper-text">{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
+          <ReasoningPayload payload={event.payload} />
         </div>
       ))}
       {eventsHasMore && onLoadOlderEvents && <LoadOlderEventsButton onClick={onLoadOlderEvents} />}
     </div>
   )
+}
+
+/** Render an event payload as labelled key/value rows instead of a raw JSON
+ *  dump, with the full pretty-printed JSON tucked behind a "show raw" toggle so
+ *  power users can still copy the exact shape. */
+function ReasoningPayload({ payload }: { payload?: RunEvent['payload'] }) {
+  const { t } = useT()
+  const entries =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? Object.entries(payload as Record<string, unknown>)
+      : []
+  if (entries.length === 0) return null
+  return (
+    <>
+      <dl className="we-reasoning-fields">
+        {entries.map(([key, value]) => (
+          <div key={key} className="we-reasoning-field">
+            <dt>{key}</dt>
+            <dd>{formatReasoningValue(value)}</dd>
+          </div>
+        ))}
+      </dl>
+      <details className="we-reasoning-raw">
+        <summary>{t('rightPanel.reasoning.rawJson')}</summary>
+        <pre className="mini-pre">{JSON.stringify(payload, null, 2)}</pre>
+      </details>
+    </>
+  )
+}
+
+/** Primitive payload values render as plain text; nested objects/arrays collapse
+ *  to compact inline JSON (the raw toggle still exposes the full structure). */
+function formatReasoningValue(value: unknown): React.ReactNode {
+  if (value === null || value === undefined) return <span className="helper-text">—</span>
+  if (typeof value === 'string') return value.length ? value : <span className="helper-text">—</span>
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return <code className="we-reasoning-field__json">{JSON.stringify(value)}</code>
 }
 
 function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void> }) {

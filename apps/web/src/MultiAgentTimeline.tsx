@@ -35,6 +35,12 @@ const GHOST_PHASES = [
 
 type Tone = 'info' | 'config' | 'tool' | 'success' | 'warning' | 'error'
 
+/** Tones shown in the legend above the lanes, ordered by the agent lifecycle
+ *  (plan → call a tool → reflect → finish, with failure / other last) so the
+ *  colour-coded chips below read as a sequence rather than an arbitrary palette.
+ *  Each entry maps 1:1 to a `data-tone` value `getTone` can emit. */
+const LEGEND_TONES: readonly Tone[] = ['config', 'tool', 'warning', 'success', 'error', 'info']
+
 type TimelineItem = {
   id: string
   agent: string
@@ -208,6 +214,15 @@ export function MultiAgentTimeline({
         </div>
         <span className="mode-pill mode-pill-neutral">{t('multiAgent.eventCount', { count: items.length })}</span>
       </div>
+
+      <ul className="we-timeline-legend" aria-label={t('multiAgent.legend.label') as string}>
+        {LEGEND_TONES.map(tone => (
+          <li key={tone} className="we-timeline-legend__item">
+            <span className="we-timeline-legend__swatch" data-tone={tone} aria-hidden="true" />
+            {t(`multiAgent.legend.${tone}`)}
+          </li>
+        ))}
+      </ul>
 
       {eventsHasMore && handleLoadOlder && (
         <button
