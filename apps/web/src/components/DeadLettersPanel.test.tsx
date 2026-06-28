@@ -612,7 +612,10 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
     expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('2 selected')
 
+    // Arming the confirm must not fire the request on its own.
     fireEvent.click(screen.getByTestId('dlq-bulk-replay'))
+    expect(vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-replay')).toBeFalsy()
+    fireEvent.click(screen.getByTestId('dlq-bulk-replay-confirm'))
     await waitFor(() => {
       const call = vi.mocked(api).mock.calls.find(([p]) => p === '/dlq/bulk-replay')
       expect(call).toBeTruthy()
@@ -639,6 +642,7 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
     fireEvent.click(await screen.findByTestId('dlq-select-row-a'))
     fireEvent.click(screen.getByTestId('dlq-select-row-b'))
     fireEvent.click(screen.getByTestId('dlq-bulk-replay'))
+    fireEvent.click(screen.getByTestId('dlq-bulk-replay-confirm'))
 
     await waitFor(() => {
       expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')

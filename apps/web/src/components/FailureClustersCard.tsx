@@ -323,7 +323,7 @@ export function FailureClustersCard() {
                     )}
                   </div>
                   {cluster.frequency >= MIN_FREQUENCY_FOR_BULK_RECOVER
-                    && cluster.samples.some((s) => s.source === 'dead_letter') && (
+                    && cluster.samples.some((s) => s.source === 'dead_letter') ? (
                     <div className="we-cluster-row__section">
                       <button
                         type="button"
@@ -343,6 +343,15 @@ export function FailureClustersCard() {
                           {t('clusters.recoveryError', { detail: recovery.message })}
                         </p>
                       )}
+                    </div>
+                  ) : (
+                    // Explain why bulk recovery isn't offered for this cluster instead
+                    // of rendering nothing — the gate needs repeat failures AND a
+                    // replayable dead-letter sample.
+                    <div className="we-cluster-row__section">
+                      <p className="helper-text we-cluster-row__recover-gate">
+                        {t('clusters.recoverUnavailable', { min: MIN_FREQUENCY_FOR_BULK_RECOVER })}
+                      </p>
                     </div>
                   )}
                 </div>

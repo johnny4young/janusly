@@ -227,9 +227,10 @@ export function ReplayLabForkDialog({
               spellCheck={false}
               data-testid="replay-lab-fork-override"
               aria-invalid={parseError ? true : undefined}
+              aria-describedby={parseError ? 'replay-lab-fork-override-error' : undefined}
             />
             {parseError && (
-              <div className="run-input-form-error" role="alert">
+              <div id="replay-lab-fork-override-error" className="run-input-form-error" role="alert">
                 <AlertCircle size={14} aria-hidden="true" />
                 <div>{parseError}</div>
               </div>
