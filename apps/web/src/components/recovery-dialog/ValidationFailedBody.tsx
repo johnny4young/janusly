@@ -12,7 +12,7 @@ import { Trans, useT } from '../../i18n'
 import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
-import { pickErrorMessage } from './helpers'
+import { classifyRecoveryError, pickErrorMessage } from './helpers'
 import type { PatchSuggestion } from './types'
 
 export function ValidationFailedBody({
@@ -30,6 +30,7 @@ export function ValidationFailedBody({
 }) {
   const { t } = useT()
   const message = pickErrorMessage(errorJson)
+  const category = classifyRecoveryError(errorJson)
   const selected = suggestion.suggestions[selectedIndex] ?? suggestion.suggestions[0]!
   return (
     <>
@@ -44,6 +45,11 @@ export function ValidationFailedBody({
           />
         </div>
       </div>
+      {category ? (
+        <p className="helper-text we-recovery-error-summary">
+          {t(`recoveryDialog.errorSummary.${category}` as never) as string}
+        </p>
+      ) : null}
       {message ? (
         <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria') as string}>
           {message}
