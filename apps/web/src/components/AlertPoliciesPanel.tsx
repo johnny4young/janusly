@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { Bell, BellOff, Pencil, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import {
@@ -586,7 +587,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
       )}
 
       <div className="we-alert-policies__list" data-testid="alert-policies-list">
-        {loading && <div className="we-list-row--empty">{t('common.loading')}</div>}
+        {loading && <LoadingSkeleton rows={3} label={t('common.loading') as string} />}
         {!loading && policies.length === 0 && (
           <EmptyState
             icon={<BellOff />}

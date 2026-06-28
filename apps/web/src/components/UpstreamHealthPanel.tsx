@@ -13,6 +13,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import { LoadingSkeleton } from './LoadingSkeleton'
 import { Activity, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import {
@@ -279,7 +280,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
       )}
 
       {loading ? (
-        <p className="we-muted">{t('common.loading')}</p>
+        <LoadingSkeleton rows={3} label={t('common.loading') as string} />
       ) : sources.length === 0 ? (
         <EmptyState
           icon={<Activity size={20} aria-hidden />}

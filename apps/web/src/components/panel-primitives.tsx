@@ -19,6 +19,7 @@
 
 import React from 'react'
 import { useT } from '../i18n'
+import { EmptyState } from './EmptyState'
 
 export function PanelChrome({
   title,
@@ -50,12 +51,12 @@ export function PanelChrome({
   )
 }
 
+/**
+ * Thin adapter kept for the panel call sites (Templates / Tools / Credentials /
+ * Reasoning / Runs / Packs). Delegates to the canonical `EmptyState` so every
+ * empty state shares one implementation + look — `title` maps to EmptyState's
+ * `kicker`.
+ */
 export function EmptyView({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
-  return (
-    <div className="empty-panel">
-      {icon}
-      <strong>{title}</strong>
-      <p>{body}</p>
-    </div>
-  )
+  return <EmptyState icon={icon} kicker={title} body={body} />
 }
