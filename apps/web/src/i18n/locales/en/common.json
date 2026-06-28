@@ -1485,6 +1485,7 @@
   "mcpConnections.form.submit": "Register + discover",
   "mcpConnections.form.submitting": "Connecting…",
   "mcpConnections.errors.aliasRequired": "alias is required",
+  "mcpConnections.errors.urlInvalid": "Enter a valid http(s) URL",
   "mcpConnections.errors.badEnvRefLine": "bad env-ref line: {{line}}",
   "mcpConnections.errors.duplicateEnvRefKey": "duplicate env-ref key: {{key}}",
   "mcpConnections.errors.loadFailed": "failed to load MCP connections",
