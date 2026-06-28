@@ -68,6 +68,15 @@ describe('<McpConnectionsPanel />', () => {
     })
   })
 
+  it('shows a loading skeleton on initial load', async () => {
+    vi.mocked(api).mockResolvedValueOnce(EMPTY)
+    render(<McpConnectionsPanel />)
+    // `loading` starts true → the skeleton renders before the fetch resolves.
+    expect(screen.getByTestId('loading-skeleton')).toBeInTheDocument()
+    // ...and is replaced once the (empty) result lands.
+    await waitFor(() => expect(screen.queryByTestId('loading-skeleton')).not.toBeInTheDocument())
+  })
+
   it('renders an existing connection with its status badge and tool counts', async () => {
     vi.mocked(api).mockResolvedValueOnce(ONE_CONNECTION)
     render(<McpConnectionsPanel />)
