@@ -82,6 +82,13 @@ export function SolutionPacksPanel({ packs, credentials, onInstall, onSampleRun,
                       <span key={`cfg-${cfg.key}`} className="we-param we-param--optional" title={cfg.purpose}>{cfg.key}</span>
                     ))}
                   </div>
+                  {pack.requiredCredentials.length > 0 && (
+                    <small className="helper-text we-pack-cred-legend">
+                      <AlertTriangle size={10} aria-hidden="true" /> {t('packs.credential.legendMissing')}
+                      {' · '}
+                      <KeyRound size={10} aria-hidden="true" /> {t('packs.credential.legendReady')}
+                    </small>
+                  )}
                 </>
               )}
 
