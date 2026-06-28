@@ -32,14 +32,14 @@ export function RunStreamChip() {
   const lastEventAt = useWorkflowStore((state) => state.events.at(-1)?.createdAt)
 
   // Re-render on a slow tick so the relative age advances even when no new
-  // events arrive (a stalled run still visibly ages). Scheduled only while a
-  // run is active, so an idle workspace runs no timer.
+  // events arrive (a stalled run still visibly ages). Scheduled only while the
+  // chip is visible, so an idle/non-streaming run keeps no background timer.
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
-    if (!runId) return
+    if (!runId || streamTransport === 'idle') return
     const id = window.setInterval(() => setNowMs(Date.now()), AS_OF_TICK_MS)
     return () => window.clearInterval(id)
-  }, [runId])
+  }, [runId, streamTransport])
 
   if (!runId || streamTransport === 'idle') return null
 
