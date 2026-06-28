@@ -1230,7 +1230,7 @@
   "clusters.recoverUnavailable": "La recuperación en lote necesita al menos {{min}} fallas iguales con una muestra en cola (dead-letter).",
   "clusters.noOpenMembers": "Ya no hay entradas DLQ abiertas que coincidan con este patrón.",
   "clusters.errorMembers": "No se pudieron cargar los miembros del cluster",
-  "clusters.rowAria": "{{signature}} — {{occurrences}} en {{workflows}}",
+  "clusters.rowAria": "{{category}}: {{signature}} — {{occurrences}} en {{workflows}}",
   "clusters.category.secret_missing": "Secreto",
   "clusters.category.http_error": "HTTP",
   "clusters.category.network_timeout": "Red",
