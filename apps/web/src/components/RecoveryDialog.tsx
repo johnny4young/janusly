@@ -166,6 +166,20 @@ export function RecoveryDialog({
     ? isActionableSuggestion(dlq.workflowJson, step.suggestion, selectedSuggestion)
     : false
 
+  // Two-step progress for cluster recovery so the validate-1-then-replay-N flow
+  // reads as staged work, not a hung dialog. Visual only — the body line below
+  // each step carries the live-region announcement.
+  const renderClusterSteps = (active: 'validate' | 'replay') => (
+    <ol className="we-recovery-cluster-steps" aria-hidden="true" data-testid="recovery-cluster-steps">
+      <li data-state={active === 'validate' ? 'active' : 'done'}>
+        {t('recoveryDialog.clusterProgress.validate')}
+      </li>
+      <li data-state={active === 'replay' ? 'active' : 'pending'}>
+        {t('recoveryDialog.clusterProgress.replay', { total: clusterMemberCount })}
+      </li>
+    </ol>
+  )
+
   // Focus the primary action on mount so keyboard users can hit Enter.
   useEffect(() => { primaryRef.current?.focus() }, [])
 
@@ -498,9 +512,14 @@ export function RecoveryDialog({
           )}
 
           {step.kind === 'validating' && (
-            <p className="helper-text we-recovery-loading" aria-live="polite">
-              {t('recoveryDialog.validating.body')}
-            </p>
+            <>
+              {isClusterMode && renderClusterSteps('validate')}
+              <p className="helper-text we-recovery-loading" aria-live="polite">
+                {isClusterMode
+                  ? t('recoveryDialog.validating.clusterBody', { total: clusterMemberCount })
+                  : t('recoveryDialog.validating.body')}
+              </p>
+            </>
           )}
 
           {step.kind === 'validation-failed' && (
@@ -549,11 +568,14 @@ export function RecoveryDialog({
           )}
 
           {step.kind === 'applying' && (
-            <p className="helper-text we-recovery-loading" aria-live="polite">
-              {step.mode === 'cluster' && step.total
-                ? t('recoveryDialog.applying.clusterBody', { total: step.total })
-                : t('recoveryDialog.applying.singleBody')}
-            </p>
+            <>
+              {step.mode === 'cluster' && step.total ? renderClusterSteps('replay') : null}
+              <p className="helper-text we-recovery-loading" aria-live="polite">
+                {step.mode === 'cluster' && step.total
+                  ? t('recoveryDialog.applying.clusterBody', { total: step.total })
+                  : t('recoveryDialog.applying.singleBody')}
+              </p>
+            </>
           )}
 
           {step.kind === 'applied' && (
