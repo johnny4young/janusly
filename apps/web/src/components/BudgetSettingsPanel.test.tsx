@@ -109,14 +109,34 @@ describe('<BudgetSettingsPanel />', () => {
     await waitFor(() => expect(useWorkflowStore.getState().platformVersion).toBe(1))
   })
 
-  it('rejects fractional warning thresholds before saving', async () => {
+  it('flags a fractional warning threshold inline and gates save', async () => {
     mockBudgetApi()
     render(<BudgetSettingsPanel />)
 
-    fireEvent.change(await screen.findByTestId('budget-org-warn'), { target: { value: '80.5' } })
-    fireEvent.click(screen.getByTestId('budget-org-save'))
+    const warn = await screen.findByTestId('budget-org-warn')
+    fireEvent.change(warn, { target: { value: '80.5' } })
 
-    await screen.findByText(/Warning threshold must be a whole number/i)
+    // Inline error + aria + a disabled save (no round-trip on a bad value).
+    expect(screen.getByText(/Warning threshold must be a whole number/i)).toBeInTheDocument()
+    expect(warn).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('budget-org-save')).toBeDisabled()
     expect(api).not.toHaveBeenCalledWith('/org/config', expect.objectContaining({ method: 'POST' }))
+
+    // A whole number clears it and re-enables save.
+    fireEvent.change(warn, { target: { value: '80' } })
+    expect(screen.queryByText(/Warning threshold must be a whole number/i)).not.toBeInTheDocument()
+    expect(warn).toHaveAttribute('aria-invalid', 'false')
+    expect(screen.getByTestId('budget-org-save')).toBeEnabled()
+  })
+
+  it('flags a negative monthly budget inline and gates save', async () => {
+    mockBudgetApi()
+    render(<BudgetSettingsPanel />)
+
+    const monthly = await screen.findByTestId('budget-org-monthly')
+    fireEvent.change(monthly, { target: { value: '-5' } })
+    expect(screen.getByText(/non-negative/i)).toBeInTheDocument()
+    expect(monthly).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByTestId('budget-org-save')).toBeDisabled()
   })
 })

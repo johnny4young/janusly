@@ -137,6 +137,8 @@
   "userMenu.appearance.density.comfortable": "Comfortable",
   "userMenu.appearance.density.compact": "Compact",
   "userMenu.item.account": "Account settings",
+  "userMenu.item.resumeOnboarding": "Resume setup checklist",
+  "userMenu.item.resumeOnboardingFailed": "Couldn't resume the setup checklist",
   "userMenu.item.team": "Team & access",
   "userMenu.item.tokens": "Personal access tokens",
   "userMenu.item.shortcuts": "Keyboard shortcuts",
@@ -307,6 +309,7 @@
   "workflow.defaultName": "Untitled Workflow",
 
   "canvas.edge.condition": "condition",
+  "canvas.edge.connection": "From {{from}} to {{to}}",
 
   "nodeDefaults.approval.message": "Please approve this workflow step.",
   "nodeDefaults.humanForm.title": "Collect request details",
@@ -549,6 +552,8 @@
   "canvas.flowMap": "Flow map",
   "canvas.empty.title": "This workflow is empty",
   "canvas.empty.body": "Add a step from the palette above to start building your flow.",
+  "canvas.deleteConfirm_one": "Delete this step? It will be removed from the canvas.",
+  "canvas.deleteConfirm_other": "Delete these {{count}} steps? They will be removed from the canvas.",
   "canvas.error.title": "The canvas hit a problem",
   "canvas.error.body": "The editor couldn't render this workflow. Reloading usually fixes it.",
   "canvas.error.reload": "Reload",
@@ -862,6 +867,7 @@
 
   "operations.rateLimiter.label": "Rate limiter",
   "operations.rateLimiter.healthy": "Rate limiter healthy",
+  "operations.rateLimiter.checkedAt": "Checked {{time}}",
   "operations.rateLimiter.degraded_one": "Rate limiter degraded — {{count}} bucket failing open. Traffic still allowed.",
   "operations.rateLimiter.degraded_other": "Rate limiter degraded — {{count}} buckets failing open. Traffic still allowed.",
   "operations.rateLimiter.degradedBucketsTooltip": "Degraded buckets: {{buckets}}",
@@ -2305,6 +2311,9 @@
   "alerts.form.placeholder.githubRepo": "repo",
   "alerts.form.addChannel": "Add channel",
   "alerts.form.cooldownSeconds": "Cooldown seconds",
+  "alerts.error.minFrequency": "Must be between 2 and 1000",
+  "alerts.error.stalledMinutes": "Must be between 5 and 43200 minutes",
+  "alerts.error.cooldownSeconds": "Must be between 60 and 86400 seconds",
   "alerts.form.enabled": "Enabled",
   "alerts.form.save": "Save policy",
   "alerts.form.saveChanges": "Save changes",
