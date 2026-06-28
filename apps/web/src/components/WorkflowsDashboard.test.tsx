@@ -1245,6 +1245,24 @@ describe('<WorkflowsDashboard />', () => {
     expect(screen.getByTestId('workflows-row-wf2')).toBeInTheDocument()
   })
 
+  it('clears a deleted active row from the bulk selection', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
+    render(<WorkflowsDashboard onOpen={() => {}} />)
+    await screen.findByTestId('workflows-row-wf1')
+
+    fireEvent.click(screen.getByTestId('workflows-select-toggle'))
+    fireEvent.click(screen.getByTestId('workflows-select-row-wf1'))
+    expect(screen.getByTestId('workflows-bulk-bar')).toHaveTextContent('1 selected')
+
+    fireEvent.click(screen.getByTestId('workflows-delete-wf1'))
+    fireEvent.click(screen.getByTestId('workflows-delete-confirm-wf1'))
+
+    await waitFor(() => expect(calls).toEqual([{ url: '/workflows/wf1', method: 'DELETE' }]))
+    await waitFor(() => expect(screen.queryByTestId('workflows-row-wf1')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('workflows-bulk-bar')).not.toBeInTheDocument()
+  })
+
   it('cancelling the delete confirm makes no request and keeps the row', async () => {
     const calls: Array<{ url: string; method: string }> = []
     mockSoftDeleteLoop({ active: FLOWS, trash: [], calls })
