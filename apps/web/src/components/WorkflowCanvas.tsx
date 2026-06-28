@@ -114,7 +114,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           ))}
         </div>
       )}
-      <CanvasErrorBoundary fallback={canvasErrorFallback}>
+      <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
