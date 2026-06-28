@@ -193,9 +193,10 @@ export function BudgetSettingsPanel() {
       addToast(t("budget.toastOrgSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
+      // Surface the failure inline only — the persistent form error below is
+      // the single feedback channel here (no duplicate transient toast).
       const message = tApiError(err) || (t("budget.errorSave") as string);
       setError(message);
-      addToast(message, "error");
     } finally {
       setSaving(false);
     }
@@ -220,9 +221,10 @@ export function BudgetSettingsPanel() {
       addToast(t("budget.workflow.toastSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
+      // Inline-only feedback (the per-workflow status line renders the error);
+      // no duplicate transient toast.
       const message = tApiError(err) || (t("budget.errorSave") as string);
       setWfStatus(message);
-      addToast(message, "error");
     } finally {
       setWfSaving(false);
     }

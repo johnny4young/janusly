@@ -190,6 +190,17 @@ describe('useWorkflowStore', () => {
     }
   })
 
+  it('persists the active tab to localStorage so a refresh can restore it', () => {
+    try {
+      window.localStorage.removeItem('janusly:activeTab')
+      useWorkflowStore.getState().setActiveTab('operations')
+      expect(useWorkflowStore.getState().activeTab).toBe('operations')
+      expect(window.localStorage.getItem('janusly:activeTab')).toBe('operations')
+    } finally {
+      window.localStorage.removeItem('janusly:activeTab')
+    }
+  })
+
   // bumpPlatformVersion coalesce behavior is covered in the dedicated
   // `useWorkflowStore.bumpPlatformVersion (coalesce)` describe block
   // below — it uses fake timers to assert the 100ms trailing-edge
