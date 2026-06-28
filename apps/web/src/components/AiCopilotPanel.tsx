@@ -16,12 +16,13 @@
  *   literals; engine-emitted review issue codes go through tAiReviewIssue.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
 import { tAiReviewIssue, useT } from '../i18n'
+import { useWorkflowStore } from '../store'
 import { BrandMark } from './BrandMark'
 
 // Action-specific assumed token budgets used by the predicted-spend label.
@@ -93,6 +94,14 @@ export function AiCopilotPanel({
   const [prompt, setPrompt] = useState(starterPrompts[0])
   const [loading, setLoading] = useState<'generate' | 'explain' | 'review' | null>(null)
   const [result, setResult] = useState<ResultState | null>(null)
+  const currentWorkflowId = useWorkflowStore((state) => state.currentWorkflowId)
+  // Clear a stale explain/review result when the operator switches workflows so
+  // they don't read another flow's analysis. A freshly generated draft (kind
+  // 'workflow') is preserved — generating ALSO changes the active workflow id
+  // (via hydrateWorkflow), and wiping it would drop the draft just asked for.
+  useEffect(() => {
+    setResult((prev) => (prev && prev.kind === 'workflow' ? prev : null))
+  }, [currentWorkflowId])
 
   const healthLabel = health?.enabled ? t('aiCopilot.healthOn') : t('aiCopilot.healthOff')
   const healthDetail = health?.enabled
