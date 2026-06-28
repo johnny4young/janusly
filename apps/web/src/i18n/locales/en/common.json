@@ -1016,6 +1016,8 @@
   "dlq.bulkReplaySuccess_other": "{{count}} entries replayed",
   "dlq.bulkReplayFailed": "Bulk replay failed",
   "dlq.bulkReplayPartial": "{{replayed}} replayed, {{failed}} failed",
+  "dlq.bulkErrorsHeading": "Could not process ({{count}}):",
+  "dlq.bulkErrorsMore": "+{{count}} more",
   "dlq.statTotal": "Total",
   "dlq.statOpen": "Open",
   "dlq.statRetried": "Retried",

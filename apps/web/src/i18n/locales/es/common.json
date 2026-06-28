@@ -1016,6 +1016,8 @@
   "dlq.bulkReplaySuccess_other": "{{count}} entradas reintentadas",
   "dlq.bulkReplayFailed": "Falló el reintento en lote",
   "dlq.bulkReplayPartial": "{{replayed}} reintentadas, {{failed}} fallidas",
+  "dlq.bulkErrorsHeading": "No se pudieron procesar ({{count}}):",
+  "dlq.bulkErrorsMore": "+{{count}} más",
   "dlq.statTotal": "Total",
   "dlq.statOpen": "Abiertos",
   "dlq.statRetried": "Reintentados",

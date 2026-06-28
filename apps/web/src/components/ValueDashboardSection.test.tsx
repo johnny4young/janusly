@@ -70,7 +70,8 @@ describe('<ValueDashboardSection />', () => {
     )
 
     expect(screen.getByText('5 clusters')).toBeInTheDocument()
-    expect(screen.getByText('2.50h')).toBeInTheDocument()
+    // Trailing zeros stripped: 2.5 → "2.5h", not "2.50h".
+    expect(screen.getByText('2.5h')).toBeInTheDocument()
     // Intl-formatted: "$125.00" in en-US, "125,00 US$" in es-ES.
     // We loosen to a sub-match.
     expect(screen.getByText(/125/)).toBeInTheDocument()

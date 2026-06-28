@@ -68,7 +68,10 @@ function formatCurrency(amount: number): string {
 }
 
 function formatHours(hours: number): string {
-  return hours.toFixed(2)
+  // Round to 2 decimals but drop trailing zeros — "0.5h" / "12h", not
+  // "0.50h" / "12.00h". The figure is already an estimate; false precision
+  // hurts readability.
+  return String(Number(hours.toFixed(2)))
 }
 
 function formatSeconds(seconds: number): string {
