@@ -98,6 +98,31 @@ describe('<AlertPoliciesPanel />', () => {
     fireEvent.change(triggerSelect, { target: { value: 'workflow.schedule_anomaly' } })
     expect(screen.getByLabelText(/Workflow ids/i)).toBeInTheDocument()
   })
+
+  it('flags an out-of-range cooldown inline and gates save', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/alerts/policies') return { policies: [] }
+      if (path === '/credentials') return []
+      return null
+    })
+
+    render(<AlertPoliciesPanel />)
+    fireEvent.click(await screen.findByRole('button', { name: /New policy/i }))
+
+    // Name filled so the gate isolates the cooldown range check.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'My alert' } })
+    const cooldown = screen.getByLabelText('Cooldown seconds')
+    const save = within(screen.getByTestId('alert-policy-form')).getByRole('button', { name: /Save policy/i })
+
+    fireEvent.change(cooldown, { target: { value: '10' } }) // below the 60s floor
+    expect(screen.getByText(/between 60 and 86400/i)).toBeInTheDocument()
+    expect(cooldown).toHaveAttribute('aria-invalid', 'true')
+    expect(save).toBeDisabled()
+
+    fireEvent.change(cooldown, { target: { value: '600' } })
+    expect(screen.queryByText(/between 60 and 86400/i)).not.toBeInTheDocument()
+    expect(save).toBeEnabled()
+  })
 })
 
 describe('<RecentAlertsCard />', () => {
