@@ -114,6 +114,49 @@ export function pickErrorMessage(errorJson: unknown): string | null {
   }
 }
 
+/**
+ * Plain-language category for a sandbox-replay error, so the recovery dialog can
+ * show a one-line "what went wrong + what to try" summary above the raw error
+ * JSON. Returns a stable code the UI maps to a localized string (recovery
+ * surfaces follow the repo's code→i18n convention); `null` when nothing matches
+ * (the raw detail still shows). Matches on common `code`, HTTP `status`, and
+ * message text — never throws.
+ */
+export type RecoveryErrorCategory =
+  | 'network'
+  | 'timeout'
+  | 'auth'
+  | 'rateLimit'
+  | 'notFound'
+  | 'serverError'
+
+export function classifyRecoveryError(errorJson: unknown): RecoveryErrorCategory | null {
+  if (!errorJson || typeof errorJson !== 'object') return null
+  const o = errorJson as Record<string, unknown>
+  const code = typeof o.code === 'string' ? o.code.toUpperCase() : ''
+  const status =
+    typeof o.status === 'number'
+      ? o.status
+      : typeof o.statusCode === 'number'
+        ? o.statusCode
+        : undefined
+  const msg = typeof o.message === 'string' ? o.message.toLowerCase() : ''
+
+  if (
+    code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'ECONNRESET' || code === 'EAI_AGAIN'
+    || /econnrefused|enotfound|getaddrinfo|dns|network|socket hang up/.test(msg)
+  ) return 'network'
+  if (
+    code === 'ETIMEDOUT' || code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
+    || status === 408 || status === 504 || /timed?\s?out|timeout/.test(msg)
+  ) return 'timeout'
+  if (status === 401 || status === 403 || /unauthor|forbidden|invalid (api )?key|invalid credential|authentication/.test(msg)) return 'auth'
+  if (status === 429 || /rate.?limit|too many requests/.test(msg)) return 'rateLimit'
+  if (status === 404 || /\bnot found\b/.test(msg)) return 'notFound'
+  if (typeof status === 'number' && status >= 500 && status <= 599) return 'serverError'
+  return null
+}
+
 export function isActionableSuggestion(
   currentWorkflow: unknown,
   suggestion: PatchSuggestion,
