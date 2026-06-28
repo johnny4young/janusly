@@ -319,6 +319,14 @@ export function AiCopilotPanel({
             <strong>{result.title}</strong>
             <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
           </div>
+          {result.mode === 'fallback' && (
+            // Surface degraded mode prominently above the body so the reader
+            // doesn't mistake a heuristic fallback for an AI-generated answer.
+            <div className="issue issue-warn" role="alert">
+              <strong>{t('aiCopilot.fallbackBannerTitle')}</strong>{' '}
+              <span>{t('aiCopilot.fallbackBannerBody')}</span>
+            </div>
+          )}
           <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never) as string}</p>
           <div className="result-body">{result.body}</div>
           {result.aiError && (

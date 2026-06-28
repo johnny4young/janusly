@@ -23,6 +23,7 @@ import { ClipboardList, Link2, Plus, RefreshCw, Save, Trash2 } from "lucide-reac
 import { api } from "../api";
 import { useWorkflowStore } from "../store";
 import { getResolvedLocale, useT } from "../i18n";
+import { useConfirm } from "./ConfirmDialog";
 
 type DefaultRole = "viewer" | "editor" | "admin";
 type DirectoryStatus = "active" | "revoked";
@@ -68,6 +69,7 @@ const ROLES: readonly DefaultRole[] = ["viewer", "editor", "admin"];
 
 export function ScimDirectorySettingsPanel() {
   const { t } = useT();
+  const confirmDialog = useConfirm();
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion);
   const addToast = useWorkflowStore((state) => state.addToast);
   const platformVersion = useWorkflowStore((state) => state.platformVersion);
@@ -159,7 +161,7 @@ export function ScimDirectorySettingsPanel() {
   };
 
   const revoke = async (row: ScimDirectoryRow) => {
-    if (!window.confirm(t("scim.disconnectPrompt", { id: row.providerDirectoryId }) as string)) {
+    if (!(await confirmDialog({ body: t("scim.disconnectPrompt", { id: row.providerDirectoryId }) as string, tone: "danger" }))) {
       return;
     }
     try {
@@ -211,7 +213,7 @@ export function ScimDirectorySettingsPanel() {
   };
 
   const removeMapping = async (row: ScimGroupRoleMappingRow) => {
-    if (!window.confirm(t("scim.mappings.removePrompt", { group: groupName(row.providerGroupId) }) as string)) {
+    if (!(await confirmDialog({ body: t("scim.mappings.removePrompt", { group: groupName(row.providerGroupId) }) as string, tone: "danger" }))) {
       return;
     }
     try {

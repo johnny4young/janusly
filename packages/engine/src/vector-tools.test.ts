@@ -17,7 +17,9 @@ describe('vector tools', () => {
     vi.mocked(recallMemory).mockReset()
   })
 
-  it('vector.search returns shaped, top-k-limited matches scoped to the workflow_vector kind', async () => {
+  it('vector.search threads topK as the recall limit and shapes the matches scoped to the workflow_vector kind', async () => {
+    // recallMemory applies the limit in SQL; the extra mock row proves the
+    // tool also preserves its public max-results contract defensively.
     vi.mocked(recallMemory).mockResolvedValue({
       entries: [
         { id: 'm1', kind: 'workflow_vector', content: 'churned A', similarity: 0.91, workflowId: null, runId: null, metadata: { customerId: 'cus_1' }, createdAt: new Date('2026-01-01T00:00:00Z') },
@@ -40,7 +42,15 @@ describe('vector tools', () => {
       metadata: { customerId: 'cus_1' },
       createdAt: '2026-01-01T00:00:00.000Z',
     })
-    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'workflow_vector', query: 'who churned' })
+    // The requested topK is passed through as the recall limit.
+    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'workflow_vector', query: 'who churned', limit: 2 })
+  })
+
+  it('vector.search passes the default topK as the recall limit when topK is omitted', async () => {
+    vi.mocked(recallMemory).mockResolvedValue({ entries: [] } as never)
+    await vectorSearchTool.execute({ query: 'anything' }, {}, { orgId: 'org-1' })
+    // DEFAULT_TOP_K (8) is the limit when the caller omits topK.
+    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'workflow_vector', query: 'anything', limit: 8 })
   })
 
   it('vector.search returns empty entries when workflow_vector is not allowed (no throw)', async () => {

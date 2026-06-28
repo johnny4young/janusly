@@ -155,6 +155,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // single-row detail box), which is hidden while selecting.
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  // Bulk replay re-runs every ticked workflow (cost + side effects), so it
+  // asks for an inline confirm first instead of firing on the first click.
+  const [confirmBulkReplay, setConfirmBulkReplay] = useState(false)
 
   const handleRefresh = () => {
     refreshQueue()
@@ -184,6 +187,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const exitSelection = () => {
     setSelectionMode(false)
     setSelectedIds(new Set())
+    setConfirmBulkReplay(false)
   }
 
   // Dismiss every ticked dead letter in one request. Mirrors the single
@@ -223,6 +227,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // exit selection. Only `open` rows are replayable server-side, so an
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
+    setConfirmBulkReplay(false)
     const ids = [...selectedIds]
     if (ids.length === 0) return
     try {
@@ -391,15 +396,39 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <span className="we-list-bulk-bar__divider" aria-hidden="true" />
               <span className="we-list-bulk-bar__count">{t('dlq.bulkSelectedCount', { count: selectedIds.size })}</span>
               {/* Replay (recover) is the primary path; Resolve (accept the loss)
-                  is the secondary dismiss. Both act on the same ticked set. */}
-              <button
-                type="button"
-                className="small-command small-command--primary"
-                onClick={() => { void bulkReplay() }}
-                data-testid="dlq-bulk-replay"
-              >
-                {t('dlq.bulkReplayCta')}
-              </button>
+                  is the secondary dismiss. Both act on the same ticked set.
+                  Replay re-runs workflows, so it goes through an inline confirm. */}
+              {confirmBulkReplay ? (
+                <span className="we-list-row__confirm">
+                  <span className="we-list-row__confirm-text">
+                    {t('dlq.bulkReplayConfirm', { count: selectedIds.size })}
+                  </span>
+                  <button
+                    type="button"
+                    className="small-command small-command--primary"
+                    onClick={() => { void bulkReplay() }}
+                    data-testid="dlq-bulk-replay-confirm"
+                  >
+                    {t('dlq.bulkReplayConfirmCta')}
+                  </button>
+                  <button
+                    type="button"
+                    className="small-command"
+                    onClick={() => setConfirmBulkReplay(false)}
+                  >
+                    {t('common.cancel')}
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="small-command small-command--primary"
+                  onClick={() => setConfirmBulkReplay(true)}
+                  data-testid="dlq-bulk-replay"
+                >
+                  {t('dlq.bulkReplayCta')}
+                </button>
+              )}
               <button
                 type="button"
                 className="small-command"

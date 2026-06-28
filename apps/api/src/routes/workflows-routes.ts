@@ -30,6 +30,7 @@ import {
   DEFAULT_HEALTH_WINDOW_DAYS,
   findScheduleEntriesForWorkflow,
   getWorkflowSlo,
+  listDeletedWorkflowsWithRunSummary,
   listDistinctWorkflowFoldersForOrg,
   listDistinctWorkflowTagsForOrg,
   listWorkflowsWithRunSummary,
@@ -133,6 +134,18 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ res, auth }) => {
       const folders = await listDistinctWorkflowFoldersForOrg(auth.orgId);
       return sendJson(res, { folders });
+    } },
+  // The org's soft-deleted workflows (the Flows "Trash" view). Registered BEFORE
+  // the bare `/workflows` list matcher (same first-match reason as the sibling
+  // routes above) so it isn't shadowed. Bounded by the retention sweep, so v1 is
+  // a single capped read with no keyset cursor; org-scoped in the repo.
+  { method: "GET", match: (url) => url.startsWith("/workflows/trash"), permission: "workflows.read",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
+      const rows = await listDeletedWorkflowsWithRunSummary(auth.orgId, limitValue);
+      return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
     handler: async ({ req, res, auth }) => {
@@ -399,14 +412,17 @@ export const workflowsRoutes: Route[] = [
   // `workflow_versions` + `workflow_metadata` rows are KEPT for restore; the
   // `system:retention` sweep hard-purges them once `deletedAt` is older than
   // `retention.deletedWorkflowsDays`. Runs/audit rows stay (orphan-tolerant,
-  // no FK). Match excludes special POST-only subpaths so a future edit can't
-  // accidentally route `/workflows/save` here on the wrong method.
+  // no FK). Match excludes the single-segment sub-route names (GET or POST) so a
+  // `DELETE /workflows/<name>` can't treat a sibling sub-route's name as a
+  // workflow id — keep this in sync when a new `/workflows/<name>` route lands.
   { method: "DELETE",
     match: (url) => {
       if (!url.startsWith("/workflows/")) return false;
       const rest = url.slice("/workflows/".length).split("?")[0];
       if (rest.length === 0 || rest.includes("/")) return false;
-      const reserved = new Set(["save", "rollback", "versions", "latest", "validate", "readiness", "health"]);
+      const reserved = new Set([
+        "save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash",
+      ]);
       return !reserved.has(rest);
     },
     role: "editor",

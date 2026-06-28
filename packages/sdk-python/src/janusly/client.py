@@ -294,6 +294,25 @@ class RunsResource:
         )
         return cast("dict[str, Any]", response.json())
 
+    def cancel(self, *, run_id: str, reason: Optional[str] = None) -> dict[str, Any]:
+        """``POST /run/cancel`` — cancel an in-flight run.
+
+        Flips the run and its non-running nodes to ``cancelled``; the worker's
+        currently-running job drains to completion. An optional ``reason`` is
+        recorded on the cancellation audit. A run already in a terminal state
+        raises :class:`JanuslyApiError` (``409``).
+        """
+        body: dict[str, Any] = {"runId": run_id}
+        if reason is not None:
+            body["reason"] = reason
+        response = request(
+            self._config,
+            method="POST",
+            path="/run/cancel",
+            json_body=body,
+        )
+        return cast("dict[str, Any]", response.json())
+
 
 class ReportsResource:
     """``reports`` resource — exportable run artefacts."""

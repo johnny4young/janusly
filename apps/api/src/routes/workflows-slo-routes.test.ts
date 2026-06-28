@@ -35,6 +35,11 @@ vi.mock("@janusly/data/src/scheduleHistoryRepo", () => ({
   findScheduleEntriesForWorkflow: vi.fn(),
 }));
 
+vi.mock("@janusly/data/src/workflowsListRepo", () => ({
+  listWorkflowsWithRunSummary: vi.fn(),
+  listDeletedWorkflowsWithRunSummary: vi.fn(),
+}));
+
 vi.mock("@janusly/engine/src/schedule-scheduler", () => ({
   unregisterAllForWorkflow: vi.fn(),
   syncWorkflowSchedules: vi.fn(),
@@ -104,6 +109,7 @@ import { sendJson, readJson } from "../http";
 import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
 import { findScheduleEntriesForWorkflow, queryScheduleFires } from "@janusly/data/src/scheduleHistoryRepo";
+import { listDeletedWorkflowsWithRunSummary } from "@janusly/data/src/workflowsListRepo";
 import { workflowMetadata, workflows } from "@janusly/db";
 import type { Route } from "../routes";
 
@@ -112,6 +118,7 @@ const readJsonMock = vi.mocked(readJson);
 const setWorkflowSloMock = vi.mocked(setWorkflowSlo);
 const queryScheduleFiresMock = vi.mocked(queryScheduleFires);
 const findScheduleEntriesMock = vi.mocked(findScheduleEntriesForWorkflow);
+const listDeletedMock = vi.mocked(listDeletedWorkflowsWithRunSummary);
 const auditMock = vi.mocked(audit);
 
 function findRoute(method: string, path: string): Route {
@@ -138,6 +145,7 @@ beforeEach(() => {
   setWorkflowSloMock.mockReset();
   queryScheduleFiresMock.mockReset();
   findScheduleEntriesMock.mockReset();
+  listDeletedMock.mockReset();
   workflowsOwnedLimitMock.mockReset();
   deleteMock.mockClear();
   updateMock.mockClear();
@@ -257,6 +265,39 @@ describe("GET /workflows versions/latest soft-delete gate", () => {
   });
 });
 
+describe("GET /workflows/trash route", () => {
+  it("declares permission: workflows.read (matches the tags/folders siblings)", () => {
+    const route = findRoute("GET", "/workflows/trash");
+    expect(route.permission).toBe("workflows.read");
+  });
+
+  it("lists soft-deleted workflows via listDeletedWorkflowsWithRunSummary and returns the rows", async () => {
+    const rows = [{ id: "wf-1", name: "Old", deletedAt: new Date("2026-03-01T00:00:00Z") }];
+    listDeletedMock.mockResolvedValueOnce(rows as never);
+
+    await callRoute("GET", "/workflows/trash", {});
+
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 100);
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toBe(rows);
+  });
+
+  it("clamps the limit to the 200 cap", async () => {
+    listDeletedMock.mockResolvedValueOnce([] as never);
+
+    await callRoute("GET", "/workflows/trash?limit=9999", {});
+
+    expect(listDeletedMock).toHaveBeenCalledWith("org-1", 200);
+  });
+
+  it("is registered before the bare /workflows matcher (not shadowed)", () => {
+    // The bare list matcher must NOT claim the trash path; first-match-wins in
+    // the registry resolves /workflows/trash to the trash handler.
+    const trash = findRoute("GET", "/workflows/trash");
+    const bare = findRoute("GET", "/workflows");
+    expect(trash).not.toBe(bare);
+  });
+});
+
 describe("DELETE /workflows/:id handler", () => {
   it("soft-deletes a workflow (tombstones via UPDATE; keeps versions + metadata)", async () => {
     await callRoute("DELETE", "/workflows/wf-1", {});
@@ -273,6 +314,17 @@ describe("DELETE /workflows/:id handler", () => {
 
     expect(updateMock).toHaveBeenCalledWith(workflows);
     expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({ workflowId: "wf-1", ok: true });
+  });
+
+  it("does not treat a sibling sub-route name as a workflow id to delete", () => {
+    // The DELETE matcher must exclude every single-segment `/workflows/<name>`
+    // sub-route so `DELETE /workflows/trash` can't tombstone a workflow whose id
+    // happens to equal a route name. Keep this list in sync with the matcher.
+    for (const name of ["save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash"]) {
+      expect(() => findRoute("DELETE", `/workflows/${name}`)).toThrow();
+    }
+    // A real id still resolves to the soft-delete handler.
+    expect(findRoute("DELETE", "/workflows/wf-1").method).toBe("DELETE");
   });
 });
 

@@ -60,6 +60,9 @@ export function MembersPanel() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<string>('viewer')
   const [pending, setPending] = useState(false)
+  // Inline two-step confirm before removing a member (no native confirm()):
+  // holds the userId whose Remove is awaiting confirmation.
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null)
   const trimmedEmail = email.trim()
   const emailInvalid = trimmedEmail.length > 0 && !emailPattern.test(trimmedEmail)
   const canInvite = emailPattern.test(trimmedEmail) && !pending
@@ -106,6 +109,9 @@ export function MembersPanel() {
       })
       addToast(t('members.toastInvited', { email: trimmed }), 'success')
       setEmail('')
+      // Reset the role to the least-privilege default so the next invite
+      // doesn't silently reuse the previous (possibly elevated) selection.
+      setRole('viewer')
       bumpPlatformVersion()
       await load()
     } catch (error) {
@@ -130,6 +136,7 @@ export function MembersPanel() {
   }
 
   const remove = async (userId: string) => {
+    setConfirmRemoveId(null)
     try {
       await api(`/members?userId=${encodeURIComponent(userId)}`, { method: 'DELETE' })
       addToast(t('members.toastRemoved'), 'success')
@@ -161,9 +168,10 @@ export function MembersPanel() {
             type="email"
             autoComplete="off"
             aria-invalid={emailInvalid}
+            aria-describedby={emailInvalid ? 'member-email-error' : undefined}
           />
           {emailInvalid && (
-            <span className="helper-text helper-text--error" role="alert">
+            <span id="member-email-error" className="helper-text helper-text--error" role="alert">
               <AlertCircle size={13} aria-hidden="true" /> {t('members.invalidEmail')}
             </span>
           )}
@@ -237,15 +245,39 @@ export function MembersPanel() {
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      className="small-command danger"
-                      onClick={() => remove(member.userId)}
-                      aria-label={t('members.row.removeAria', { member: label }) as string}
-                      title={t('members.row.removeTitle') as string}
-                    >
-                      <Trash2 size={14} aria-hidden="true" />
-                    </button>
+                    {confirmRemoveId === member.userId ? (
+                      <span className="we-list-row__confirm">
+                        <span className="we-list-row__confirm-text">
+                          {t('members.row.removeConfirm', { member: label })}
+                        </span>
+                        <button
+                          type="button"
+                          className="small-command danger"
+                          onClick={() => remove(member.userId)}
+                          data-testid={`members-remove-confirm-${member.userId}`}
+                        >
+                          {t('members.row.removeConfirmCta')}
+                        </button>
+                        <button
+                          type="button"
+                          className="small-command"
+                          onClick={() => setConfirmRemoveId(null)}
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="small-command danger"
+                        onClick={() => setConfirmRemoveId(member.userId)}
+                        aria-label={t('members.row.removeAria', { member: label }) as string}
+                        title={t('members.row.removeTitle') as string}
+                        data-testid={`members-remove-${member.userId}`}
+                      >
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </li>

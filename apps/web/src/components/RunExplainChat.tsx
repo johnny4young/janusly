@@ -110,6 +110,14 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
                 </span>
               )}
             </div>
+            {message.role === 'assistant' && message.mode === 'fallback' && (
+              // Make degraded answers obvious at the top of the bubble — not
+              // just an inline pill — so heuristics aren't read as AI output.
+              <div className="issue issue-warn" role="alert">
+                <strong>{t('runExplain.fallbackBannerTitle')}</strong>{' '}
+                <span>{t('runExplain.fallbackBannerBody')}</span>
+              </div>
+            )}
             <div className="message-body">{message.content}</div>
           </div>
         ))}
