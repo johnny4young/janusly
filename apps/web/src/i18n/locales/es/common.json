@@ -1453,6 +1453,7 @@
   "reportDelivery.field.labelsPlaceholder": "incidente, run-explain",
   "reportDelivery.field.url": "URL",
   "reportDelivery.field.urlPlaceholder": "https://partner.example.com/hooks/janusly",
+  "reportDelivery.field.urlInvalid": "Ingresa una URL http(s) válida",
   "reportDelivery.toastSent": "Reporte de explicación enviado a {{destination}}",
   "reportDelivery.errorDefault": "Falló el envío",
   "reportDelivery.successMessage": "Reporte entregado a {{destination}}.",
