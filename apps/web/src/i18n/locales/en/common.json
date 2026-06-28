@@ -1728,6 +1728,8 @@
   "packs.requires": "Requires",
   "packs.credential.missing": "{{name}} missing ({{kind}})",
   "packs.credential.ready": "{{name}} configured ({{kind}})",
+  "packs.credential.legendMissing": "Not configured",
+  "packs.credential.legendReady": "Ready",
   "packs.stepCount_one": "{{count}} step",
   "packs.stepCount_other": "{{count}} steps",
   "packs.action.install": "Install",

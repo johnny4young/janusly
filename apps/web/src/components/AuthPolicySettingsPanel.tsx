@@ -153,6 +153,13 @@ export function AuthPolicySettingsPanel() {
     }
   };
 
+  // Live TTL validity drives inline feedback + the save gate (mirrors the
+  // range checked in validateForm) so the operator sees the problem before
+  // submitting, not after.
+  const ttlNumber = Number(form.sessionTtlSeconds);
+  const ttlValid =
+    Number.isInteger(ttlNumber) && ttlNumber >= SESSION_TTL_MIN && ttlNumber <= SESSION_TTL_MAX;
+
   return (
     <section className="we-budget-settings" aria-labelledby="auth-policy-heading">
       <header className="we-budget-settings__header">
@@ -201,10 +208,17 @@ export function AuthPolicySettingsPanel() {
                 step={60}
                 value={form.sessionTtlSeconds}
                 onChange={(e) => setForm({ ...form, sessionTtlSeconds: e.target.value })}
+                aria-invalid={!ttlValid}
+                aria-describedby={!ttlValid ? "auth-ttl-error" : undefined}
               />
               <small className="we-field__hint">
                 {t("authPolicy.sessionTtlHint", { defaultTtl: SESSION_TTL_DEFAULT, min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
               </small>
+              {!ttlValid && (
+                <small id="auth-ttl-error" className="helper-text helper-text--error" role="alert">
+                  {t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX })}
+                </small>
+              )}
             </label>
           </fieldset>
 
@@ -217,7 +231,7 @@ export function AuthPolicySettingsPanel() {
           <button
             type="submit"
             className="we-button we-button--primary we-budget-settings__save"
-            disabled={saving}
+            disabled={saving || !ttlValid}
           >
             {saving ? (
               <>{t("authPolicy.saving")}</>
