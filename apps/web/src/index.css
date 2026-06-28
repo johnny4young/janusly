@@ -1358,6 +1358,18 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   flex-shrink: 0;
 }
 
+/* Inline copy-to-clipboard affordance next to the mono node id. */
+.inspector-id-copy {
+  margin-left: 0.4rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--we-muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.inspector-id-copy:hover { color: var(--we-ink); }
+
 /* Recovery Center hero CTA row (action-first mode when failures exist). */
 .we-recovery-center-hero__actions {
   margin-top: 14px;

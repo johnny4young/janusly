@@ -402,7 +402,12 @@ export function BuilderSidebar({
       </div>
 
       {/* AI mode one-line strip */}
-      <button className="sb-ai-strip" type="button" onClick={() => onOpenTab('copilot')}>
+      <button
+        className="sb-ai-strip"
+        type="button"
+        onClick={() => onOpenTab('copilot')}
+        title={(aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')) as string}
+      >
         <span className="sb-ai-strip__ic" aria-hidden="true"><Sparkles size={12} /></span>
         <span className="sb-ai-strip__body">
           <strong>{aiModeLabel}</strong>

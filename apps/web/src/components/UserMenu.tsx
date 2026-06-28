@@ -276,7 +276,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
             <span className="user-menu__section-label">{t('userMenu.appearance.heading')}</span>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label">{t('userMenu.appearance.themeLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.themeHint') as string}>{t('userMenu.appearance.themeLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.themeLabel')}>
               <button
                 type="button"
@@ -311,7 +311,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
             </div>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label">{t('userMenu.appearance.densityLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.densityHint') as string}>{t('userMenu.appearance.densityLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.densityLabel')}>
               <button
                 type="button"
