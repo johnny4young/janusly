@@ -1728,6 +1728,8 @@
   "packs.requires": "Requiere",
   "packs.credential.missing": "Falta {{name}} ({{kind}})",
   "packs.credential.ready": "{{name}} configurada ({{kind}})",
+  "packs.credential.legendMissing": "Sin configurar",
+  "packs.credential.legendReady": "Lista",
   "packs.stepCount_one": "{{count}} paso",
   "packs.stepCount_other": "{{count}} pasos",
   "packs.action.install": "Instalar",
