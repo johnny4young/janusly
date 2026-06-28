@@ -22,6 +22,7 @@ import {
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { tApiError, useT } from '../i18n'
+import { useConfirm } from './ConfirmDialog'
 
 type Channel = {
   destination: AlertDestination
@@ -151,6 +152,7 @@ function buildParameters(form: typeof EMPTY_FORM): Record<string, unknown> {
 
 export function AlertPoliciesPanel(): React.ReactElement {
   const { t } = useT()
+  const confirmDialog = useConfirm()
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const addToast = useWorkflowStore((s) => s.addToast)
@@ -270,7 +272,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
   }
 
   async function deletePolicy(policy: AlertPolicy): Promise<void> {
-    if (!confirm(t('alerts.confirm.delete', { name: policy.name }))) return
+    if (!(await confirmDialog({ body: t('alerts.confirm.delete', { name: policy.name }) as string, tone: 'danger' }))) return
     try {
       await api(`/alerts/policies/${policy.id}`, { method: 'DELETE' })
       addToast(t('alerts.toast.deleted') as string, 'success')

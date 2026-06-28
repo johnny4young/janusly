@@ -26,6 +26,7 @@ import {
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
+import { useConfirm } from './ConfirmDialog'
 
 type UpstreamHealthSource = {
   id: string
@@ -80,6 +81,7 @@ function statusTint(s: UpstreamHealthSource): 'green' | 'amber' | 'red' | 'gray'
 
 export function UpstreamHealthPanel(): React.ReactElement {
   const { t } = useT()
+  const confirmDialog = useConfirm()
   const platformVersion = useWorkflowStore((s) => s.platformVersion)
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const addToast = useWorkflowStore((s) => s.addToast)
@@ -154,7 +156,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
   }
 
   async function deleteSource(s: UpstreamHealthSource): Promise<void> {
-    if (!confirm(t('upstreamHealth.confirm.delete', { name: s.name }))) return
+    if (!(await confirmDialog({ body: t('upstreamHealth.confirm.delete', { name: s.name }) as string, tone: 'danger' }))) return
     try {
       await api(`/upstream/sources/${s.id}`, { method: 'DELETE' })
       addToast(t('upstreamHealth.toast.deleted') as string, 'success')
