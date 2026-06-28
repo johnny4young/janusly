@@ -39,6 +39,22 @@ const ORG_CONFIG_KEYS = {
   policy: "ai.budgetExceededPolicy",
 } as const;
 
+/** A monthly-budget input is invalid only when it has content that isn't a
+ *  finite, non-negative number (empty = unset, treated as valid). Mirrors the
+ *  guard the save handlers throw on, so the operator sees it before submit. */
+function isMonthlyInvalid(value: string): boolean {
+  if (value.trim() === "") return false;
+  const n = Number(value);
+  return !Number.isFinite(n) || n < 0;
+}
+/** A warn-percent input is invalid when it has content outside the 0–100
+ *  integer range. */
+function isWarnInvalid(value: string): boolean {
+  if (value.trim() === "") return false;
+  const n = Number(value);
+  return !Number.isInteger(n) || n < 0 || n > 100;
+}
+
 type OrgConfigEntry = {
   key: string;
   value: string | number | boolean;
@@ -235,6 +251,12 @@ export function BudgetSettingsPanel() {
   }, [form.monthlyUsd]);
   const aboutSectionLabel = t("common.aboutSection") as string;
   const budgetIntro = t("budget.intro") as string;
+  // Live field validation mirrors the save-handler guards so the operator sees
+  // a bad value (and the disabled save) before the round-trip.
+  const orgMonthlyInvalid = isMonthlyInvalid(form.monthlyUsd);
+  const orgWarnInvalid = isWarnInvalid(form.warnPercent);
+  const wfMonthlyInvalid = isMonthlyInvalid(wfMonthly);
+  const wfWarnInvalid = isWarnInvalid(wfWarnPercent);
 
   return (
     <section className="panel-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
@@ -274,8 +296,15 @@ export function BudgetSettingsPanel() {
             value={form.monthlyUsd}
             onChange={(event) => setForm((prev) => ({ ...prev, monthlyUsd: event.target.value }))}
             data-testid="budget-org-monthly"
+            aria-invalid={orgMonthlyInvalid}
+            aria-describedby={orgMonthlyInvalid ? "budget-org-monthly-error" : undefined}
           />
           <small>{orgBudgetDisabled ? t("budget.field.monthlyHintOff") : t("budget.field.monthlyHintOn")}</small>
+          {orgMonthlyInvalid && (
+            <span id="budget-org-monthly-error" className="helper-text helper-text--error" role="alert">
+              <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorMonthly")}
+            </span>
+          )}
         </label>
         <label className="we-field">
           <span>{t("budget.field.warn")}</span>
@@ -287,8 +316,15 @@ export function BudgetSettingsPanel() {
             value={form.warnPercent}
             onChange={(event) => setForm((prev) => ({ ...prev, warnPercent: event.target.value }))}
             data-testid="budget-org-warn"
+            aria-invalid={orgWarnInvalid}
+            aria-describedby={orgWarnInvalid ? "budget-org-warn-error" : undefined}
           />
           <small>{t("budget.field.warnHint")}</small>
+          {orgWarnInvalid && (
+            <span id="budget-org-warn-error" className="helper-text helper-text--error" role="alert">
+              <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorWarn")}
+            </span>
+          )}
         </label>
         <label className="we-field">
           <span>{t("budget.field.policy")}</span>
@@ -306,7 +342,7 @@ export function BudgetSettingsPanel() {
             type="button"
             className="command-button command-button-primary"
             onClick={saveOrgBudget}
-            disabled={saving || loading}
+            disabled={saving || loading || orgMonthlyInvalid || orgWarnInvalid}
             data-testid="budget-org-save"
           >
             <Save size={14} aria-hidden="true" />
@@ -347,7 +383,14 @@ export function BudgetSettingsPanel() {
                 onChange={(event) => setWfMonthly(event.target.value)}
                 disabled={!selectedWorkflowId}
                 data-testid="budget-workflow-monthly"
+                aria-invalid={wfMonthlyInvalid}
+                aria-describedby={wfMonthlyInvalid ? "budget-workflow-monthly-error" : undefined}
               />
+              {wfMonthlyInvalid && (
+                <span id="budget-workflow-monthly-error" className="helper-text helper-text--error" role="alert">
+                  <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorMonthly")}
+                </span>
+              )}
             </label>
             <label className="we-field">
               <span>{t("budget.field.warn")}</span>
@@ -360,7 +403,14 @@ export function BudgetSettingsPanel() {
                 onChange={(event) => setWfWarnPercent(event.target.value)}
                 disabled={!selectedWorkflowId}
                 data-testid="budget-workflow-warn"
+                aria-invalid={wfWarnInvalid}
+                aria-describedby={wfWarnInvalid ? "budget-workflow-warn-error" : undefined}
               />
+              {wfWarnInvalid && (
+                <span id="budget-workflow-warn-error" className="helper-text helper-text--error" role="alert">
+                  <AlertTriangle size={13} aria-hidden="true" /> {t("budget.errorWarn")}
+                </span>
+              )}
             </label>
             <label className="we-field">
               <span>{t("budget.field.policy")}</span>
@@ -391,7 +441,7 @@ export function BudgetSettingsPanel() {
                 type="button"
                 className="command-button command-button-primary"
                 onClick={saveWorkflowBudget}
-                disabled={!selectedWorkflowId || wfSaving}
+                disabled={!selectedWorkflowId || wfSaving || wfMonthlyInvalid || wfWarnInvalid}
                 data-testid="budget-workflow-save"
               >
                 <Save size={14} aria-hidden="true" />

@@ -6888,6 +6888,12 @@ button.we-ops-metric-card--button {
   flex: 0 0 auto;
 }
 
+/* "Checked HH:MM" freshness, muted so it sits behind the health state. */
+.we-ops-rate-limiter-chip__age {
+  color: var(--we-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .we-ops-rate-limiter-chip--healthy .we-ops-rate-limiter-chip__dot {
   background: var(--we-success);
 }
@@ -6929,6 +6935,13 @@ button.we-ops-metric-card--button {
   height: 7px;
   border-radius: 50%;
   flex: 0 0 auto;
+}
+
+/* The "as of" age sits muted after the transport label so the pill reads
+   "Live · 2m ago" without the age competing with the live/polling state. */
+.we-run-stream-chip__age {
+  color: var(--we-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .we-run-stream-chip--live .we-run-stream-chip__dot {

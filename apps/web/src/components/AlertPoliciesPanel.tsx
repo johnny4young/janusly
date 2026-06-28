@@ -12,7 +12,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
-import { Bell, BellOff, Pencil, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { AlertCircle, Bell, BellOff, Pencil, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import { EmptyState } from './EmptyState'
 import {
   ALERT_COOLDOWN_SECONDS_DEFAULT,
@@ -283,6 +283,15 @@ export function AlertPoliciesPanel(): React.ReactElement {
     }
   }
 
+  // Range validation for the per-trigger numeric fields. Each flag only fires
+  // for the field its trigger actually shows, so an out-of-range value left over
+  // from another trigger can't block the submit. cooldown is always shown.
+  const minFrequencyInvalid =
+    form.trigger === 'failure_cluster.threshold' && (form.minFrequency < 2 || form.minFrequency > 1000)
+  const stalledMinutesInvalid =
+    form.trigger === 'approval.stalled' && (form.stalledMinutes < 5 || form.stalledMinutes > 43200)
+  const cooldownInvalid = form.cooldownSeconds < 60 || form.cooldownSeconds > 86400
+
   return (
     <section className="we-card we-alert-policies" aria-label={t('alerts.panel.title')}>
       <div className="we-card__header">
@@ -358,7 +367,14 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 min={2}
                 max={1000}
                 onChange={(e) => setForm({ ...form, minFrequency: Number(e.target.value) || 2 })}
+                aria-invalid={minFrequencyInvalid}
+                aria-describedby={minFrequencyInvalid ? 'alert-min-frequency-error' : undefined}
               />
+              {minFrequencyInvalid && (
+                <span id="alert-min-frequency-error" className="helper-text helper-text--error" role="alert">
+                  <AlertCircle size={13} aria-hidden="true" /> {t('alerts.error.minFrequency')}
+                </span>
+              )}
             </label>
           )}
           {form.trigger === 'approval.stalled' && (
@@ -370,7 +386,14 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 min={5}
                 max={43200}
                 onChange={(e) => setForm({ ...form, stalledMinutes: Number(e.target.value) || 60 })}
+                aria-invalid={stalledMinutesInvalid}
+                aria-describedby={stalledMinutesInvalid ? 'alert-stalled-minutes-error' : undefined}
               />
+              {stalledMinutesInvalid && (
+                <span id="alert-stalled-minutes-error" className="helper-text helper-text--error" role="alert">
+                  <AlertCircle size={13} aria-hidden="true" /> {t('alerts.error.stalledMinutes')}
+                </span>
+              )}
             </label>
           )}
           {form.trigger === 'budget.blocked' && (
@@ -551,7 +574,14 @@ export function AlertPoliciesPanel(): React.ReactElement {
               min={60}
               max={86400}
               onChange={(e) => setForm({ ...form, cooldownSeconds: Number(e.target.value) || 900 })}
+              aria-invalid={cooldownInvalid}
+              aria-describedby={cooldownInvalid ? 'alert-cooldown-error' : undefined}
             />
+            {cooldownInvalid && (
+              <span id="alert-cooldown-error" className="helper-text helper-text--error" role="alert">
+                <AlertCircle size={13} aria-hidden="true" /> {t('alerts.error.cooldownSeconds')}
+              </span>
+            )}
           </label>
           <label>
             <input
@@ -567,7 +597,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
               type="button"
               className="we-btn we-btn--primary we-btn--sm"
               onClick={submitPolicy}
-              disabled={submitting || form.name.trim().length === 0}
+              disabled={submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || cooldownInvalid}
             >
               {submitting
                 ? t('alerts.form.submitting')

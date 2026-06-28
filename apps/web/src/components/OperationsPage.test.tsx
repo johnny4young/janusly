@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { act } from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { OperationsPage, requestOperationsSection } from './OperationsPage'
@@ -82,6 +82,10 @@ describe('<OperationsPage />', () => {
     } catch {
       // ignore
     }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('defaults to the Overview sub-tab when localStorage is empty', async () => {
@@ -207,6 +211,37 @@ describe('<OperationsPage />', () => {
     expect(screen.queryByTestId('operations-rail-dot-overview')).toBeNull()
     expect(screen.queryByTestId('operations-rail-dot-access')).toBeNull()
     expect(screen.queryByTestId('operations-rail-dot-integrations')).toBeNull()
+  })
+
+  it('keeps the last rate-limiter snapshot visible when a later health poll fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const healthResponses: Array<unknown> = [
+      { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+      new Error('health offline'),
+    ]
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return healthyMetrics
+      if (path === '/health') {
+        const next = healthResponses.shift()
+        if (next instanceof Error) throw next
+        return next
+      }
+      return null
+    })
+
+    render(<OperationsPage />)
+
+    await screen.findByTestId('stub-FailureClustersCard')
+    await screen.findByText(/Rate limiter healthy/i)
+    expect(screen.getByText(/Checked/i)).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(20_000)
+      await Promise.resolve()
+    })
+
+    expect(screen.getByText(/Rate limiter healthy/i)).toBeInTheDocument()
+    expect(screen.getByText(/Checked/i)).toBeInTheDocument()
   })
 
   it('escalates the Reliability dot to danger when a budget block is in store', async () => {
