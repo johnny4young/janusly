@@ -43,6 +43,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Loader2,
   Play,
   Plug,
   Plus,
@@ -74,10 +75,10 @@ type BuilderSidebarProps = {
   workflowRunsCount?: number | null
   onWorkflowNameChange: (name: string) => void
   onAdd: (type: string) => void
-  onValidate: () => void
-  onSave: () => void
+  onValidate: () => void | Promise<void>
+  onSave: () => void | Promise<void>
   onNew: () => void
-  onStart: () => void
+  onStart: () => void | Promise<void>
   onOpenTab: (tab: ActiveTab) => void
 }
 
@@ -262,6 +263,19 @@ export function BuilderSidebar({
   // Surface unsaved canvas edits in the header so the operator never loses
   // track of save state before navigating away or running.
   const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
+  // In-flight state for the header actions: each shows a spinner + disables the
+  // strip while its async handler runs, so a slow Save/Validate/Run gives clear
+  // feedback and can't be double-submitted.
+  const [busyAction, setBusyAction] = useState<'validate' | 'save' | 'run' | null>(null)
+  const runAction = async (kind: 'validate' | 'save' | 'run', fn: () => void | Promise<void>) => {
+    if (busyAction) return
+    setBusyAction(kind)
+    try {
+      await fn()
+    } finally {
+      setBusyAction(null)
+    }
+  }
   const [stored] = useState<StoredState>(() => loadStoredState())
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(stored.openGroups))
   const [openCategories, setOpenCategories] = useState<Set<string>>(() => new Set(stored.openCategories))
@@ -385,18 +399,18 @@ export function BuilderSidebar({
           ) : null}
         </div>
         <div className="sb-workflow__acts">
-          <button className="sb-workflow__ghost" type="button" onClick={onNew} title={t('sidebar.action.new')} aria-label={t('sidebar.action.new')}>
+          <button className="sb-workflow__ghost" type="button" onClick={onNew} disabled={busyAction !== null} title={t('sidebar.action.new')} aria-label={t('sidebar.action.new')}>
             <SquarePlus size={13} aria-hidden="true" />
           </button>
-          <button className="sb-workflow__ghost" type="button" onClick={onValidate} title={t('sidebar.action.validate')} aria-label={t('sidebar.action.validate')}>
-            <CheckCircle2 size={13} aria-hidden="true" />
+          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('validate', onValidate)} disabled={busyAction !== null} aria-busy={busyAction === 'validate'} title={t('sidebar.action.validate')} aria-label={t('sidebar.action.validate')}>
+            {busyAction === 'validate' ? <Loader2 size={13} className="we-spin" aria-hidden="true" /> : <CheckCircle2 size={13} aria-hidden="true" />}
           </button>
-          <button className="sb-workflow__ghost" type="button" onClick={onSave} title={t('sidebar.action.save')} aria-label={t('sidebar.action.save')}>
-            <Save size={13} aria-hidden="true" />
+          <button className="sb-workflow__ghost" type="button" onClick={() => runAction('save', onSave)} disabled={busyAction !== null} aria-busy={busyAction === 'save'} title={t('sidebar.action.save')} aria-label={t('sidebar.action.save')}>
+            {busyAction === 'save' ? <Loader2 size={13} className="we-spin" aria-hidden="true" /> : <Save size={13} aria-hidden="true" />}
           </button>
-          <button className="sb-workflow__run" type="button" onClick={onStart}>
-            <Play size={12} aria-hidden="true" />
-            <span>{t('sidebar.action.run')}</span>
+          <button className="sb-workflow__run" type="button" onClick={() => runAction('run', onStart)} disabled={busyAction !== null} aria-busy={busyAction === 'run'}>
+            {busyAction === 'run' ? <Loader2 size={12} className="we-spin" aria-hidden="true" /> : <Play size={12} aria-hidden="true" />}
+            <span>{busyAction === 'run' ? t('sidebar.action.running') : t('sidebar.action.run')}</span>
           </button>
         </div>
       </div>
