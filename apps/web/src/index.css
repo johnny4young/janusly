@@ -6931,6 +6931,13 @@ button.we-ops-metric-card--button {
   flex: 0 0 auto;
 }
 
+/* The "as of" age sits muted after the transport label so the pill reads
+   "Live · 2m ago" without the age competing with the live/polling state. */
+.we-run-stream-chip__age {
+  color: var(--we-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .we-run-stream-chip--live .we-run-stream-chip__dot {
   background: var(--we-success);
   animation: we-run-stream-pulse 1.6s ease-in-out infinite;
