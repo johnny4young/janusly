@@ -1128,6 +1128,21 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   color: var(--we-ink);
 }
 
+/* Fallback shown when the React Flow subtree throws (CanvasErrorBoundary). */
+.canvas-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  height: 100%;
+  min-height: 240px;
+  padding: 1.5rem;
+  color: var(--we-ink-soft);
+}
+.canvas-error strong { color: var(--we-ink); }
+
 /* Hidden-but-mounted canvas wrapper — used by the App dispatcher when the
    active tab is not one of the canvas tabs (`copilot` / `inspector`). The
    canvas DOM stays in the tree so React Flow's viewport state (zoom + pan)
@@ -3827,6 +3842,11 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-workflow__dot--error { background: var(--we-danger); }
 .sb-workflow__sep { color: var(--we-line-strong); }
 .sb-workflow__unsaved { color: var(--we-warning); font-weight: 600; }
+
+/* Spinner for in-flight header actions (Validate / Save / Run). */
+.we-spin { animation: we-spin-kf 0.8s linear infinite; }
+@keyframes we-spin-kf { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .we-spin { animation: none; } }
 
 .sb-workflow__acts {
   display: grid;
@@ -6953,6 +6973,37 @@ button.we-ops-metric-card--button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Two-step progress for cluster recovery (validate 1 sample → replay N). */
+.we-recovery-cluster-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+}
+.we-recovery-cluster-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--we-muted);
+}
+.we-recovery-cluster-steps li::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--we-faint);
+}
+.we-recovery-cluster-steps li[data-state="done"] { color: var(--we-ink-soft); }
+.we-recovery-cluster-steps li[data-state="done"]::before { background: var(--we-success); }
+.we-recovery-cluster-steps li[data-state="active"] { color: var(--we-ink); font-weight: 600; }
+.we-recovery-cluster-steps li[data-state="active"]::before {
+  background: var(--we-primary);
+  animation: we-pulse 1.2s ease-in-out infinite;
 }
 
 .we-recovery-warning,
