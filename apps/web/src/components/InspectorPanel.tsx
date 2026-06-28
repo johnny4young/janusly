@@ -85,6 +85,7 @@ export function InspectorPanel({
           <select id="node-type" className="text-field" value={selectedNode.data.type} onChange={event => onUpdateNodeType(event.target.value)}>
             {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
           </select>
+          <span className="helper-text helper-text--hint">{t('rightPanel.inspector.stepKindWarning')}</span>
         </div>
 
         <QuickConfigEditor

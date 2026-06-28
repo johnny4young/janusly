@@ -246,6 +246,11 @@ export function FailureClustersCard() {
           {t('clusters.windowSummary', { samples: t('clusters.samples', { count: totalSamples }), days: windowDays })}
         </span>
       </div>
+      {Number.isFinite(fetchedAtMs) && (
+        <p className="helper-text we-cluster-asof">
+          {t('clusters.asOf', { time: new Date(fetchedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
+        </p>
+      )}
 
       <ul className="we-cluster-list">
         {clusters.map((cluster) => {
