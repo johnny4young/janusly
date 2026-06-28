@@ -29,4 +29,24 @@ describe('<CanvasErrorBoundary />', () => {
     )
     expect(screen.getByText('fallback shown')).toBeInTheDocument()
   })
+
+  it('clears a tripped fallback when resetKey changes', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { rerender } = render(
+      <CanvasErrorBoundary fallback={<div>fallback shown</div>} resetKey="wf-1">
+        <Boom />
+      </CanvasErrorBoundary>,
+    )
+    expect(screen.getByText('fallback shown')).toBeInTheDocument()
+
+    // Switching workflows (resetKey changes) recovers the boundary without a
+    // remount, so the new healthy children render instead of the stale fallback.
+    rerender(
+      <CanvasErrorBoundary fallback={<div>fallback shown</div>} resetKey="wf-2">
+        <div>recovered canvas</div>
+      </CanvasErrorBoundary>,
+    )
+    expect(screen.getByText('recovered canvas')).toBeInTheDocument()
+    expect(screen.queryByText('fallback shown')).not.toBeInTheDocument()
+  })
 })
