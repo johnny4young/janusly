@@ -2355,6 +2355,8 @@
   "alerts.triggers.workflow.schedule_anomaly": "Anomalía de horario",
 
   "recoveryItems.badge.open": "Incidente — severidad {{severity}}, estado {{status}}",
+  "recoveryItems.badge.openSla": "Incidente — severidad {{severity}}, estado {{status}}, SLA {{sla}}",
+  "recoveryItems.sla.overdue": "vencido",
   "recoveryItems.severity.p1": "P1 — crítico",
   "recoveryItems.severity.p2": "P2 — alto",
   "recoveryItems.severity.p3": "P3 — normal",

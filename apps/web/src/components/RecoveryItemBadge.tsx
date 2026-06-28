@@ -72,6 +72,32 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
   const slaToneClass = slaTone(item.slaTargetAtIso, item.status)
   const remaining = formatRemaining(item.slaTargetAtIso, item.status)
 
+  // Screen-reader urgency parity. The SLA color band (red/amber/green) is the
+  // whole point of the badge, but color can't be perceived non-visually — and
+  // the aria-label previously announced raw enum codes ("severity p2, status
+  // acknowledged"). Announce the localized severity/status labels AND fold in a
+  // localized SLA descriptor (overdue / time-remaining) so a screen-reader user
+  // hears the same urgency a sighted operator reads from the color band.
+  const slaTargetMs = new Date(item.slaTargetAtIso).getTime()
+  const slaDescriptor =
+    item.status === 'resolved' || Number.isNaN(slaTargetMs)
+      ? null
+      : Date.now() >= slaTargetMs
+        ? (t('recoveryItems.sla.overdue') as string)
+        : remaining
+  const ariaLabel = (
+    slaDescriptor
+      ? t('recoveryItems.badge.openSla', {
+          severity: t(`recoveryItems.severity.${item.severity}`),
+          status: t(`recoveryItems.status.${item.status}`),
+          sla: slaDescriptor,
+        })
+      : t('recoveryItems.badge.open', {
+          severity: t(`recoveryItems.severity.${item.severity}`),
+          status: t(`recoveryItems.status.${item.status}`),
+        })
+  ) as string
+
   return (
     <button
       type="button"
@@ -80,7 +106,7 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       data-severity={item.severity}
       data-status={item.status}
       onClick={onOpen}
-      aria-label={t('recoveryItems.badge.open', { severity: item.severity, status: item.status })}
+      aria-label={ariaLabel}
     >
       <span
         className={`we-pill we-pill--${severityTone}`}
