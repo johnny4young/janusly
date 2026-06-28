@@ -1128,6 +1128,21 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   color: var(--we-ink);
 }
 
+/* Fallback shown when the React Flow subtree throws (CanvasErrorBoundary). */
+.canvas-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-align: center;
+  height: 100%;
+  min-height: 240px;
+  padding: 1.5rem;
+  color: var(--we-ink-soft);
+}
+.canvas-error strong { color: var(--we-ink); }
+
 /* Hidden-but-mounted canvas wrapper — used by the App dispatcher when the
    active tab is not one of the canvas tabs (`copilot` / `inspector`). The
    canvas DOM stays in the tree so React Flow's viewport state (zoom + pan)
