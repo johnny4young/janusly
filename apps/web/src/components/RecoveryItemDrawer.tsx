@@ -460,6 +460,9 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
         </div>
       )}
 
+      {/* Lifecycle legend so the transition buttons below read in context —
+          which states follow which is otherwise opaque to a new operator. */}
+      <p className="we-recovery-item-drawer__legend helper-text">{t('recoveryItems.legend')}</p>
       <div className="we-recovery-item-drawer__actions" data-testid="recovery-item-drawer-actions">
         {canAcknowledge && (
           <button
