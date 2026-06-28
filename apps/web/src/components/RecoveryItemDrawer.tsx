@@ -10,7 +10,7 @@
  * trigger via the store's `bumpPlatformVersion()`.
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Download, ExternalLink, MessageCircle, Send, X } from 'lucide-react'
 import {
   RECOVERY_ITEM_RESOLUTION_REASONS,
@@ -83,6 +83,42 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
   const bumpPlatformVersion = useWorkflowStore((s) => s.bumpPlatformVersion)
   const addToast = useWorkflowStore((s) => s.addToast)
   const userId = useWorkflowStore((s) => s.userId)
+
+  // Non-modal drawer focus management. The drawer mounts at the END of the DOM
+  // (below the whole DLQ list), so a keyboard / screen-reader operator who
+  // clicked a row badge would otherwise be stranded far from the panel they
+  // just opened. On open, move focus into the drawer (its aria-label is then
+  // announced); Escape closes it; on close, focus returns to the badge that
+  // opened it. Deliberately NOT a focus trap — the drawer is inline, not a modal
+  // overlay, so Tab must still reach the rest of the page (a hard Tab-trap on
+  // non-modal content is itself an accessibility failure).
+  const drawerRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  useEffect(() => {
+    const trigger =
+      typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null
+    drawerRef.current?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCloseRef.current()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      // Restore focus to the trigger (the badge) on close, if it still exists.
+      // Synchronous (NOT requestAnimationFrame) so it is StrictMode-safe: dev
+      // double-invokes the effect as mount → cleanup → mount, and a deferred
+      // restore would land AFTER the second mount's focus-in and steal focus
+      // back to the trigger. A synchronous restore self-corrects — the re-mount's
+      // focus-in runs after it, leaving focus on the drawer as intended.
+      if (trigger && document.contains(trigger)) {
+        trigger.focus()
+      }
+    }
+    // Mount-once: the drawer remounts per open (parent gates on the selected id),
+    // so focus-in / restore fire exactly once. onClose is read via a ref so this
+    // effect never re-runs (and never steals focus) on a parent re-render.
+  }, [])
 
   const [busyTransition, setBusyTransition] = useState<string | null>(null)
   const [commentDraft, setCommentDraft] = useState('')
@@ -329,8 +365,11 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
 
   return (
     <aside
+      ref={drawerRef}
+      tabIndex={-1}
       className="we-recovery-item-drawer"
       role="dialog"
+      aria-modal={false}
       aria-label={t('recoveryItems.drawer.title')}
       data-testid="recovery-item-drawer"
     >
@@ -423,13 +462,18 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
               className="we-btn we-btn--ghost we-btn--sm"
               onClick={() => setOccurrencesOpen((v) => !v)}
               aria-expanded={occurrencesOpen}
+              aria-busy={occurrencesOpen && children === null && !childrenError}
               data-testid="recovery-item-occurrences-toggle"
             >
               {t(occurrencesOpen ? 'recoveryItems.occurrences.hide' : 'recoveryItems.occurrences.show')}
             </button>
           </div>
           {occurrencesOpen && (
-            <div className="we-recovery-occurrences__list" data-testid="recovery-item-occurrences-list">
+            <div
+              className="we-recovery-occurrences__list"
+              data-testid="recovery-item-occurrences-list"
+              aria-live="polite"
+            >
               {childrenError ? (
                 <p className="we-recovery-occurrences__empty">{t('recoveryItems.occurrences.loadError')}</p>
               ) : children === null ? (
