@@ -22,6 +22,20 @@ function renderHarness() {
   return results
 }
 
+function ReentrantHarness({ onResult }: { onResult: (ok: boolean) => void }) {
+  const confirm = useConfirm()
+  return (
+    <button
+      onClick={() => {
+        void confirm({ body: 'First?' }).then(onResult)
+        void confirm({ body: 'Second?' }).then(onResult)
+      }}
+    >
+      open twice
+    </button>
+  )
+}
+
 describe('<ConfirmProvider /> / useConfirm', () => {
   it('shows the dialog and resolves true when confirmed', async () => {
     const results = renderHarness()
@@ -47,5 +61,22 @@ describe('<ConfirmProvider /> / useConfirm', () => {
     await screen.findByRole('alertdialog')
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(results).toEqual([false]))
+  })
+
+  it('rejects a re-entrant confirm without replacing the active dialog', async () => {
+    const results: boolean[] = []
+    render(
+      <ConfirmProvider>
+        <ReentrantHarness onResult={(ok) => results.push(ok)} />
+      </ConfirmProvider>,
+    )
+    fireEvent.click(screen.getByText('open twice'))
+    expect(await screen.findByRole('alertdialog')).toBeInTheDocument()
+    expect(screen.getByText('First?')).toBeInTheDocument()
+    expect(screen.queryByText('Second?')).not.toBeInTheDocument()
+    await waitFor(() => expect(results).toEqual([false]))
+
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+    await waitFor(() => expect(results).toEqual([false, true]))
   })
 })
