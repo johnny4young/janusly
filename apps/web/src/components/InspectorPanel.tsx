@@ -10,9 +10,10 @@
  */
 
 import React, { useState } from 'react'
-import { GitBranch, Layers } from 'lucide-react'
+import { Copy, GitBranch, Layers } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
+import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
 import { QuickConfigEditor } from './QuickConfigEditor'
@@ -48,9 +49,24 @@ export function InspectorPanel({
   onInsertSnippet,
 }: InspectorPanelProps) {
   const { t } = useT()
+  const addToast = useWorkflowStore(state => state.addToast)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
+
+  // Operators paste node ids into logs / run filters; a one-click copy beats
+  // hand-selecting the mono text. Degrades to an error toast where the
+  // Clipboard API is unavailable (non-secure context).
+  const copyNodeId = (id: string) => {
+    if (!navigator.clipboard) {
+      addToast(t('rightPanel.inspector.idCopyFailed'), 'error')
+      return
+    }
+    navigator.clipboard.writeText(id).then(
+      () => addToast(t('rightPanel.inspector.idCopied'), 'success'),
+      () => addToast(t('rightPanel.inspector.idCopyFailed'), 'error'),
+    )
+  }
 
   if (selectedNode) {
     const status = nodeStatus?.status ?? 'draft'
@@ -63,6 +79,15 @@ export function InspectorPanel({
             <h3>{getNodeLabel(selectedNode.data.type)}</h3>
             <p className="helper-text mono">
               {currentWorkflowName ? `${currentWorkflowName} › ` : ''}{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}
+              <button
+                type="button"
+                className="inspector-id-copy"
+                onClick={() => copyNodeId(selectedNode.id)}
+                aria-label={t('rightPanel.inspector.copyId') as string}
+                title={t('rightPanel.inspector.copyId') as string}
+              >
+                <Copy size={12} aria-hidden="true" />
+              </button>
             </p>
             <p className="helper-text">{getNodeConfigSummary(selectedNode.data.type, selectedNode.data.config ?? {})}</p>
           </div>
