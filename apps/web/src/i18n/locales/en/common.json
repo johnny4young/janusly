@@ -867,6 +867,7 @@
 
   "operations.rateLimiter.label": "Rate limiter",
   "operations.rateLimiter.healthy": "Rate limiter healthy",
+  "operations.rateLimiter.checkedAt": "Checked {{time}}",
   "operations.rateLimiter.degraded_one": "Rate limiter degraded — {{count}} bucket failing open. Traffic still allowed.",
   "operations.rateLimiter.degraded_other": "Rate limiter degraded — {{count}} buckets failing open. Traffic still allowed.",
   "operations.rateLimiter.degradedBucketsTooltip": "Degraded buckets: {{buckets}}",

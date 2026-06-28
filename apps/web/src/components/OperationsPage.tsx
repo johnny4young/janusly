@@ -144,6 +144,9 @@ export function OperationsPage() {
   // Rate-limiter health is independent of metrics and degrades silently on
   // /health failure — operators still see the rest of the page.
   const [rateLimiterHealth, setRateLimiterHealth] = useState<RateLimiterHealth | null>(null)
+  // When the last /health snapshot landed — shown as an "as of" on the chip so a
+  // stalled poll (the snapshot frozen) reads as stale rather than current.
+  const [rateLimiterCheckedAt, setRateLimiterCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
 
   // Persist on every section change. Tiny write — no debounce needed.
@@ -186,6 +189,7 @@ export function OperationsPage() {
           if (cancelled) return
           const health = (payload as HealthPayload).rateLimiter
           setRateLimiterHealth(health ?? null)
+          setRateLimiterCheckedAt(Date.now())
         })
         .catch(() => {
           if (cancelled) return
@@ -227,6 +231,7 @@ export function OperationsPage() {
         loading={loading}
         error={error}
         rateLimiterHealth={rateLimiterHealth}
+        rateLimiterCheckedAt={rateLimiterCheckedAt}
       />
       <div className="we-operations-page__body">
         <OperationsRail section={section} onChange={setSection} signals={signals} />
@@ -248,11 +253,13 @@ function OperationsHeader({
   loading,
   error,
   rateLimiterHealth,
+  rateLimiterCheckedAt,
 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
   error: string | null
   rateLimiterHealth: RateLimiterHealth | null
+  rateLimiterCheckedAt: number | null
 }) {
   const { t } = useT()
   return (
@@ -267,7 +274,7 @@ function OperationsHeader({
       </div>
 
       <RunStreamChip />
-      {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} />}
+      {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
 
       {error && (
         <section className="panel-card">
@@ -434,17 +441,25 @@ function IntegrationsSection() {
  * Status chip surfacing Redis-backed rate-limiter degradation. Kept in this
  * file so the Operations page stays self-contained.
  */
-function RateLimiterStatusChip({ health }: { health: RateLimiterHealth }) {
+function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealth; checkedAt?: number | null }) {
   const { t } = useT()
+  // Absolute "Checked HH:MM:SS" of the last successful /health poll. No tick is
+  // needed — the 20s poll re-renders with a fresh timestamp; a failed poll
+  // leaves the last one frozen, which is the staleness signal.
+  const checkedLabel = typeof checkedAt === 'number'
+    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }) as string)
+    : null
+  const age = checkedLabel ? <span className="we-ops-rate-limiter-chip__age">· {checkedLabel}</span> : null
   if (health.healthy) {
     return (
       <span
         className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--healthy"
         role="status"
-        aria-label={t('operations.rateLimiter.label') as string}
+        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
       >
         <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
         <span>{t('operations.rateLimiter.healthy')}</span>
+        {age}
       </span>
     )
   }
@@ -455,11 +470,12 @@ function RateLimiterStatusChip({ health }: { health: RateLimiterHealth }) {
     <span
       className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--degraded"
       role="status"
-      aria-label={t('operations.rateLimiter.label') as string}
+      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
       title={tooltip}
     >
       <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
       <span>{t('operations.rateLimiter.degraded', { count: bucketCount })}</span>
+      {age}
     </span>
   )
 }
