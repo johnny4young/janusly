@@ -2190,6 +2190,33 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 /* Shared empty-state shape used across operational surfaces (DLQ empty,
    no clusters, no alerts, etc). Caller supplies the icon + copy; the layout
    stays uniform so the operator recognizes "nothing here" at a glance. */
+/* Loading placeholder — shimmer rows shown while a list/panel fetches. */
+.we-skeleton {
+  display: grid;
+  gap: 10px;
+  padding: 12px 4px;
+}
+.we-skeleton__row {
+  display: grid;
+  gap: 6px;
+}
+.we-skeleton__line {
+  height: 12px;
+  border-radius: 6px;
+  background: var(--we-faint);
+  animation: we-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.we-skeleton__line--short {
+  width: 60%;
+}
+@keyframes we-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .we-skeleton__line { animation: none; }
+}
+
 .we-empty-state {
   display: grid;
   justify-items: center;
