@@ -41,15 +41,23 @@
   --color-we-accent-soft: #ecfeff;
   --color-we-success: #10b981;
   --color-we-success-soft: #ecfdf5;
+  /* Darker shade for success used as TEXT/icon — the saturated #10b981 only
+     reaches ~2.5:1 on light backgrounds (fails WCAG AA). Fills/borders keep the
+     saturated token. Dark theme overrides this back to the bright value. */
+  --color-we-success-text: #0f6b4f;
   --color-we-warning: #f59e0b;
   --color-we-warning-soft: #fffbeb;
+  --color-we-warning-text: #9a5108;
   --color-we-danger: #ef4444;
   --color-we-danger-soft: #fef2f2;
+  --color-we-danger-text: #b42318;
   --color-we-info: #3b82f6;
   --color-we-info-soft: #eff6ff;
   --color-we-ink: #0f172a;
   --color-we-ink-soft: #334155;
-  --color-we-muted: #64748b;
+  /* Darkened from #64748b so muted/secondary text clears WCAG AA (4.5:1) on the
+     muted panel surface too (#f3f4fb), where #64748b only reached ~4.34:1. */
+  --color-we-muted: #5b6b82;
   --color-we-faint: #94a3b8;
   --color-we-line: #e3e6f0;
   --color-we-line-strong: #d2d6e6;
@@ -115,6 +123,9 @@
   --we-warning-border-30: color-mix(in srgb, var(--we-warning) 30%, transparent);
   --we-warning-border-35: color-mix(in srgb, var(--we-warning) 35%, transparent);
   --we-danger: var(--color-we-danger);
+  --we-success-text: var(--color-we-success-text);
+  --we-warning-text: var(--color-we-warning-text);
+  --we-danger-text: var(--color-we-danger-text);
   --we-danger-soft: var(--color-we-danger-soft);
   --we-danger-border-25: color-mix(in srgb, var(--we-danger) 25%, transparent);
   --we-danger-border-30: color-mix(in srgb, var(--we-danger) 30%, transparent);
@@ -158,10 +169,15 @@
   --color-we-accent-soft: #0d2a32;
   --color-we-success: #10b981;
   --color-we-success-soft: #0c2a22;
+  /* On dark surfaces the bright saturated status colors already clear AA as text
+     (success 6:1, warning 7.5:1, danger 4.6:1), so the -text shade stays bright. */
+  --color-we-success-text: #10b981;
   --color-we-warning: #f59e0b;
   --color-we-warning-soft: #2c1f08;
+  --color-we-warning-text: #f59e0b;
   --color-we-danger: #ef4444;
   --color-we-danger-soft: #2c1414;
+  --color-we-danger-text: #ef4444;
   --color-we-info: #3b82f6;
   --color-we-info-soft: #122035;
   --color-we-brand-glyph: #ffffff;
@@ -317,13 +333,13 @@ a { color: var(--we-primary); }
 
 .top-bar-env--sandbox {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
 .top-bar-env--production {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border: 1px solid var(--we-danger-border-30);
 }
 
@@ -363,7 +379,7 @@ a { color: var(--we-primary); }
    without the emotional weight of a permanent red. */
 .top-bar-cta--attention {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border: 1px solid color-mix(in srgb, var(--we-warning) 30%, transparent);
   box-shadow: none;
   padding: 5px 11px;
@@ -384,7 +400,7 @@ a { color: var(--we-primary); }
 
 .top-bar-cta--clear {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
   box-shadow: none;
   padding: 5px 11px;
@@ -494,7 +510,7 @@ a { color: var(--we-primary); }
 
 .bottom-status-bar__item:hover { color: var(--we-primary); }
 
-.bottom-status-bar__item--live { color: var(--we-success); }
+.bottom-status-bar__item--live { color: var(--we-success-text); }
 
 .bottom-status-bar__dot {
   width: 6px;
@@ -687,6 +703,21 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-size: var(--we-density-meta);
   line-height: 1.45;
   margin: 6px 0 0;
+}
+
+/* Visually-hidden but screen-reader-available. For text that conveys meaning a
+   sighted user gets from another channel (e.g. a color-only severity band). */
+.we-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 /* Sidebar-specific AI mode card shown near the primary builder actions. */
@@ -904,13 +935,13 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .small-command.danger {
   border-color: var(--we-line-strong);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .small-command.danger:hover {
   border-color: var(--we-danger);
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 /* ==========================================================================
@@ -1545,9 +1576,9 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   text-transform: uppercase;
 }
 
-.status-pill[data-status="succeeded"] { color: var(--we-success); border-color: var(--we-success-border-30); background: var(--we-success-soft); }
-.status-pill[data-status="failed"] { color: var(--we-danger); border-color: var(--we-danger-border-30); background: var(--we-danger-soft); }
-.status-pill[data-status="waiting"] { color: var(--we-warning); border-color: var(--we-warning-border-30); background: var(--we-warning-soft); }
+.status-pill[data-status="succeeded"] { color: var(--we-success-text); border-color: var(--we-success-border-30); background: var(--we-success-soft); }
+.status-pill[data-status="failed"] { color: var(--we-danger-text); border-color: var(--we-danger-border-30); background: var(--we-danger-soft); }
+.status-pill[data-status="waiting"] { color: var(--we-warning-text); border-color: var(--we-warning-border-30); background: var(--we-warning-soft); }
 .status-pill[data-status="running"] { color: var(--we-info); border-color: var(--we-info-border-30); background: var(--we-info-soft); }
 
 .mode-pill {
@@ -1581,7 +1612,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .mode-pill-error {
   background: var(--we-danger-soft);
   border-color: color-mix(in srgb, var(--we-danger) 30%, transparent);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 /* ==========================================================================
@@ -1685,7 +1716,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .usecase-icon-ready {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .message-card {
@@ -1714,13 +1745,13 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .issue-error {
   border: 1px solid var(--we-danger-border-25);
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .issue-warn {
   border: 1px solid var(--we-warning);
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .mini-pre {
@@ -2033,9 +2064,9 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   border: 1px solid var(--we-line);
 }
 
-.we-list-row__pill--success { background: var(--we-success-soft); color: var(--we-success); border-color: var(--we-success-border-30); }
-.we-list-row__pill--warning { background: var(--we-warning-soft); color: var(--we-warning); border-color: var(--we-warning-border-30); }
-.we-list-row__pill--danger { background: var(--we-danger-soft); color: var(--we-danger); border-color: var(--we-danger-border-30); }
+.we-list-row__pill--success { background: var(--we-success-soft); color: var(--we-success-text); border-color: var(--we-success-border-30); }
+.we-list-row__pill--warning { background: var(--we-warning-soft); color: var(--we-warning-text); border-color: var(--we-warning-border-30); }
+.we-list-row__pill--danger { background: var(--we-danger-soft); color: var(--we-danger-text); border-color: var(--we-danger-border-30); }
 .we-list-row__pill--cobalt { background: var(--we-primary-soft); color: var(--we-primary); border-color: color-mix(in srgb, var(--we-primary) 28%, transparent); }
 .we-list-row__pill--cyan { background: var(--we-accent-soft); color: var(--we-accent); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
 
@@ -2233,14 +2264,14 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   border-radius: 999px;
   background: var(--we-surface);
   border: 1px solid var(--we-success-border-30);
-  color: var(--we-success);
+  color: var(--we-success-text);
   display: grid;
   place-items: center;
   box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--we-success) 45%, transparent);
 }
 
 .we-allclear__copy { display: grid; gap: 2px; }
-.we-allclear__copy strong { font-size: 13px; color: var(--we-success); font-weight: 700; letter-spacing: -0.01em; }
+.we-allclear__copy strong { font-size: 13px; color: var(--we-success-text); font-weight: 700; letter-spacing: -0.01em; }
 .we-allclear__copy span { font-size: 12px; color: var(--we-ink-soft); line-height: 1.45; }
 
 /* Shared empty-state shape used across operational surfaces (DLQ empty,
@@ -2354,8 +2385,8 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 .we-ghost-lane__phase--config { color: var(--we-info); background: var(--we-info-soft); border-color: color-mix(in srgb, var(--we-info) 30%, transparent); }
 .we-ghost-lane__phase--ai { color: var(--we-accent); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 32%, transparent); }
-.we-ghost-lane__phase--http { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
-.we-ghost-lane__phase--success { color: var(--we-success); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+.we-ghost-lane__phase--http { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+.we-ghost-lane__phase--success { color: var(--we-success-text); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
 .we-ghost-lane__bar {
   flex: 1;
   height: 8px;
@@ -2776,10 +2807,10 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 .we-operator-mini__delta[data-severity="success"],
-.we-operator-mini__delta[data-severity="healthy"] { color: var(--we-success); }
-.we-operator-mini__delta[data-severity="warn"] { color: var(--we-warning); }
+.we-operator-mini__delta[data-severity="healthy"] { color: var(--we-success-text); }
+.we-operator-mini__delta[data-severity="warn"] { color: var(--we-warning-text); }
 .we-operator-mini__delta[data-severity="unhealthy"],
-.we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger); }
+.we-operator-mini__delta[data-severity="danger"] { color: var(--we-danger-text); }
 
 @media (max-width: 1100px) {
   .we-operator-grid { grid-template-columns: 1fr; }
@@ -3136,9 +3167,9 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   place-items: center;
 }
 
-.we-flow-demo__step[data-step="failure"] .we-flow-demo__step-ic { color: var(--we-danger); background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
+.we-flow-demo__step[data-step="failure"] .we-flow-demo__step-ic { color: var(--we-danger-text); background: var(--we-danger-soft); border-color: var(--we-danger-border-30); }
 .we-flow-demo__step[data-step="suggest"] .we-flow-demo__step-ic { color: var(--we-accent); background: var(--we-accent-soft); border-color: color-mix(in srgb, var(--we-accent) 30%, transparent); }
-.we-flow-demo__step[data-step="sandbox"] .we-flow-demo__step-ic { color: var(--we-success); background: var(--we-success-soft); border-color: var(--we-success-border-30); }
+.we-flow-demo__step[data-step="sandbox"] .we-flow-demo__step-ic { color: var(--we-success-text); background: var(--we-success-soft); border-color: var(--we-success-border-30); }
 .we-flow-demo__step[data-step="apply"]   .we-flow-demo__step-ic { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 28%, transparent); }
 
 .we-flow-demo__sig {
@@ -3188,7 +3219,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .we-flow-demo__conf--low {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border-color: var(--we-warning-border-30);
 }
 
@@ -3206,7 +3237,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .we-flow-demo__pill--success {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
@@ -3625,8 +3656,8 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   box-shadow: 0 24px 48px -18px var(--we-primary-shadow-strong), 0 1px 2px var(--we-shadow-ink-04);
 }
 
-.toast-success { border-color: var(--we-success-border-40); background: var(--we-success-soft); color: var(--we-success); }
-.toast-error { border-color: var(--we-danger-border-40); background: var(--we-danger-soft); color: var(--we-danger); }
+.toast-success { border-color: var(--we-success-border-40); background: var(--we-success-soft); color: var(--we-success-text); }
+.toast-error { border-color: var(--we-danger-border-40); background: var(--we-danger-soft); color: var(--we-danger-text); }
 .toast-info { border-color: color-mix(in srgb, var(--we-primary) 30%, transparent); background: var(--we-primary-soft); color: var(--we-primary-strong); }
 
 /* ==========================================================================
@@ -3880,13 +3911,13 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .sb-env--sandbox {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
 .sb-env--production {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border: 1px solid var(--we-danger-border-30);
 }
 
@@ -3917,7 +3948,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .sb-workflow__dot--connecting { background: var(--we-warning); animation: we-pulse 1s ease-in-out infinite; }
 .sb-workflow__dot--error { background: var(--we-danger); }
 .sb-workflow__sep { color: var(--we-line-strong); }
-.sb-workflow__unsaved { color: var(--we-warning); font-weight: 600; }
+.sb-workflow__unsaved { color: var(--we-warning-text); font-weight: 600; }
 
 /* Spinner for in-flight header actions (Validate / Save / Run). */
 .we-spin { animation: we-spin-kf 0.8s linear infinite; }
@@ -4026,7 +4057,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .sb-ai-strip__pill--live {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
@@ -4313,7 +4344,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   font-family: var(--font-mono);
 }
 
-.sb-footer__live--connected { color: var(--we-success); }
+.sb-footer__live--connected { color: var(--we-success-text); }
 
 .sb-footer__live--connected .sb-footer__dot { background: var(--we-success); }
 
@@ -4637,13 +4668,13 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .user-menu__env--sandbox {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
 .user-menu__env--production {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border: 1px solid var(--we-danger-border-30);
 }
 
@@ -4890,10 +4921,10 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   color: var(--we-muted);
 }
 
-.user-menu__item--danger { color: var(--we-danger); }
+.user-menu__item--danger { color: var(--we-danger-text); }
 .user-menu__item--danger .user-menu__item-ic {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border-color: var(--we-danger-border-30);
 }
 .user-menu__item--danger:hover { background: var(--we-danger-soft); }
@@ -4915,7 +4946,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .user-menu__footer-dot {
@@ -5099,14 +5130,14 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .recovery-center-composer__answer-pill--fallback {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border: 1px solid var(--we-warning-border-30);
 }
 
 .recovery-center-composer__answer-error {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .recovery-center-composer__answer-acts {
@@ -5156,7 +5187,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   border-radius: 6px;
   background: var(--we-surface);
   border: 1px solid color-mix(in srgb, var(--we-warning) 30%, transparent);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   display: grid;
   place-items: center;
 }
@@ -5273,7 +5304,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 .we-recovery-watch-row__state--cleared {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
   border: 1px solid var(--we-success-border-30);
 }
 
@@ -5295,7 +5326,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   border-radius: 999px;
   background: var(--we-surface);
   border: 1px solid var(--we-success-border-30);
-  color: var(--we-success);
+  color: var(--we-success-text);
   display: grid;
   place-items: center;
   box-shadow: 0 6px 14px -10px color-mix(in srgb, var(--we-success) 45%, transparent);
@@ -5304,7 +5335,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-recovery-allclear__copy { display: grid; gap: 2px; }
 .we-recovery-allclear__copy strong {
   font-size: 13px;
-  color: var(--we-success);
+  color: var(--we-success-text);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -5615,19 +5646,19 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 
 .we-readiness-badge--pass .we-readiness-badge__summary {
-  color: var(--we-success);
+  color: var(--we-success-text);
   border-color: var(--we-success-border-35);
   background: var(--we-success-soft);
 }
 
 .we-readiness-badge--warn .we-readiness-badge__summary {
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border-color: var(--we-warning-border-35);
   background: var(--we-warning-soft);
 }
 
 .we-readiness-badge--fail .we-readiness-badge__summary {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border-color: var(--we-danger-border-40);
   background: var(--we-danger-soft);
 }
@@ -5709,7 +5740,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   font-size: 11px;
   font-weight: 600;
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border: 1px solid var(--we-danger-border-25);
   white-space: nowrap;
 }
@@ -5731,7 +5762,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 
 .we-readiness-badge__slo-row--breach {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-readiness-badge__slo-row--pass {
@@ -6058,7 +6089,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   align-items: flex-start;
   gap: 6px;
   font-size: 12px;
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   margin: 4px 0 0;
 }
 
@@ -6070,7 +6101,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   border-radius: 8px;
   background: var(--we-danger-soft);
   border: 1px solid color-mix(in srgb, var(--we-danger) 25%, transparent);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -6230,13 +6261,13 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
    secret / http / ai / config / other palette (all token-only). */
 .we-cluster-pill--secret_missing {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-cluster-pill--http_error,
 .we-cluster-pill--network_timeout {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-cluster-pill--ai_provider {
@@ -6557,7 +6588,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   margin-top: 12px;
   border: 1px solid var(--we-warning);
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border-radius: 6px;
   padding: 8px 10px;
   display: flex;
@@ -6582,7 +6613,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   right: 4px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border-radius: 4px;
   padding: 2px 4px;
   cursor: pointer;
@@ -6671,7 +6702,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 }
 
 .we-usage-breakdown-fallback {
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-usage-breakdown-more {
@@ -6694,14 +6725,14 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 .we-diff-tag--secret_ref,
 .we-diff-tag--approval {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-diff-tag--retry,
 .we-diff-tag--timeout,
 .we-diff-tag--bounds {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-diff-tag--rationale {
@@ -6872,7 +6903,7 @@ button.we-ops-metric-card--button {
 
 .we-ops-rate-limiter-chip--healthy {
   border-color: var(--we-success);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-ops-rate-limiter-chip--degraded {
@@ -6922,12 +6953,12 @@ button.we-ops-metric-card--button {
 
 .we-run-stream-chip--live {
   border-color: var(--we-success);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-run-stream-chip--fallback {
   border-color: var(--we-warning);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-run-stream-chip__dot {
@@ -7138,19 +7169,19 @@ button.we-ops-metric-card--button {
 .we-recovery-warning {
   background: var(--we-warning-soft);
   border: 1px solid color-mix(in srgb, var(--we-warning) 25%, transparent);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-recovery-error {
   background: var(--we-danger-soft);
   border: 1px solid color-mix(in srgb, var(--we-danger) 25%, transparent);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-success {
   background: var(--we-success-soft);
   border: 1px solid color-mix(in srgb, var(--we-success) 25%, transparent);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 /* "Why this suggestion?" evidence panel — collapsible side-channel listing
@@ -7385,7 +7416,7 @@ button.we-ops-metric-card--button {
 .we-recovery-delta-card--error {
   border-color: color-mix(in srgb, var(--we-danger) 30%, transparent);
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-delta-skeleton {
@@ -7454,7 +7485,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-delta-pill--success-strong .we-recovery-delta-pill__value {
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-recovery-delta-pill--danger,
@@ -7464,7 +7495,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-delta-pill--danger-strong .we-recovery-delta-pill__value {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-delta-pill--neutral {
@@ -7490,14 +7521,14 @@ button.we-ops-metric-card--button {
 .we-recovery-delta-pill--success-strong .we-recovery-delta-arrow--up,
 .we-recovery-delta-pill--success .we-recovery-delta-arrow--down,
 .we-recovery-delta-pill--success-strong .we-recovery-delta-arrow--down {
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-recovery-delta-pill--danger .we-recovery-delta-arrow--up,
 .we-recovery-delta-pill--danger-strong .we-recovery-delta-arrow--up,
 .we-recovery-delta-pill--danger .we-recovery-delta-arrow--down,
 .we-recovery-delta-pill--danger-strong .we-recovery-delta-arrow--down {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-delta-gathering {
@@ -7537,7 +7568,7 @@ button.we-ops-metric-card--button {
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--we-danger) 30%, transparent);
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -7559,7 +7590,7 @@ button.we-ops-metric-card--button {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-delta-link {
@@ -7574,7 +7605,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-delta-failure-link {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   font-weight: 600;
 }
 
@@ -7847,19 +7878,19 @@ button.we-ops-metric-card--button {
 }
 
 .we-comparison-pill--success {
-  color: var(--we-success);
+  color: var(--we-success-text);
   border-color: var(--we-success-border-30);
   background: var(--we-success-soft);
 }
 
 .we-comparison-pill--danger {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   border-color: var(--we-danger-border-30);
   background: var(--we-danger-soft);
 }
 
 .we-comparison-pill--warn {
-  color: var(--we-warning);
+  color: var(--we-warning-text);
   border-color: var(--we-warning-border-30);
   background: var(--we-warning-soft);
 }
@@ -7880,12 +7911,12 @@ button.we-ops-metric-card--button {
 
 .we-comparison-chip--equal {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-comparison-chip--changed {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-comparison-chip--only-base,
@@ -8006,7 +8037,7 @@ button.we-ops-metric-card--button {
   border-radius: 8px;
   background: var(--we-success-soft);
   border: 1px solid color-mix(in srgb, var(--we-success) 25%, transparent);
-  color: var(--we-success);
+  color: var(--we-success-text);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -8170,15 +8201,15 @@ button.we-ops-metric-card--button {
 
 .we-recovery-center-tile[data-severity="success"] .we-recovery-center-tile__icon {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 .we-recovery-center-tile[data-severity="warning"] .we-recovery-center-tile__icon {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 .we-recovery-center-tile[data-severity="danger"] .we-recovery-center-tile__icon {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 .we-recovery-center-tile[data-severity="cyan"] .we-recovery-center-tile__icon {
   background: var(--we-accent-soft);
@@ -8331,11 +8362,11 @@ button.we-ops-metric-card--button {
 }
 .we-recovery-center-row__pill[data-severity="warning"] {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 .we-recovery-center-row__pill[data-severity="danger"] {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 .we-recovery-center-row__pill[data-severity="neutral"] {
   background: color-mix(in srgb, var(--we-muted) 12%, transparent);
@@ -8403,9 +8434,9 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-center-actions li[data-severity="cyan"] .we-recovery-center-actions__icon { background: var(--we-accent-soft); color: var(--we-accent); }
-.we-recovery-center-actions li[data-severity="success"] .we-recovery-center-actions__icon { background: var(--we-success-soft); color: var(--we-success); }
-.we-recovery-center-actions li[data-severity="warning"] .we-recovery-center-actions__icon { background: var(--we-warning-soft); color: var(--we-warning); }
-.we-recovery-center-actions li[data-severity="danger"] .we-recovery-center-actions__icon { background: var(--we-danger-soft); color: var(--we-danger); }
+.we-recovery-center-actions li[data-severity="success"] .we-recovery-center-actions__icon { background: var(--we-success-soft); color: var(--we-success-text); }
+.we-recovery-center-actions li[data-severity="warning"] .we-recovery-center-actions__icon { background: var(--we-warning-soft); color: var(--we-warning-text); }
+.we-recovery-center-actions li[data-severity="danger"] .we-recovery-center-actions__icon { background: var(--we-danger-soft); color: var(--we-danger-text); }
 
 .we-recovery-center-actions__copy {
   display: flex;
@@ -8759,12 +8790,12 @@ button.we-ops-metric-card--button {
 
 .we-recovery-center-budget__pill[data-severity="warning"] {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-recovery-center-budget__pill[data-severity="danger"] {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 /* Budget settings (Operations) ----------------------------------------- */
@@ -8873,7 +8904,7 @@ button.we-ops-metric-card--button {
   border: 1px solid var(--we-danger);
   border-radius: 8px;
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-budget-settings__form {
@@ -8957,7 +8988,7 @@ button.we-ops-metric-card--button {
 
 .we-pill--warn {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-pill--neutral {
@@ -8981,19 +9012,19 @@ button.we-ops-metric-card--button {
 .we-pill--amber {
   background: var(--we-warning-soft);
   border: 1px solid var(--we-warning-border-30);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-pill--red {
   background: var(--we-danger-soft);
   border: 1px solid var(--we-danger-border-30);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-pill--green {
   background: var(--we-success-soft);
   border: 1px solid var(--we-success-border-30);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-recovery-item-badge {
@@ -9054,12 +9085,12 @@ button.we-ops-metric-card--button {
 
 .we-recovery-item-badge__sev--p1 {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-item-badge__sev--p2 {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-recovery-item-badge__sev--p3 {
@@ -9074,17 +9105,17 @@ button.we-ops-metric-card--button {
 
 .we-recovery-item-badge__sla--green {
   background: var(--we-success-soft);
-  color: var(--we-success);
+  color: var(--we-success-text);
 }
 
 .we-recovery-item-badge__sla--amber {
   background: var(--we-warning-soft);
-  color: var(--we-warning);
+  color: var(--we-warning-text);
 }
 
 .we-recovery-item-badge__sla--red {
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-recovery-item-badge__sla--neutral {
@@ -9415,7 +9446,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-list-row__tag-remove:hover {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
 }
 
 .we-list-row__tag-add {
@@ -9705,7 +9736,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-dlq-bulk-errors__label {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   font-weight: 600;
 }
 
@@ -9904,7 +9935,7 @@ button.we-ops-metric-card--button {
 }
 
 .we-helper-text--error {
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   font-weight: 700;
 }
 
@@ -10032,7 +10063,7 @@ button.we-ops-metric-card--button {
   height: 40px;
   border-radius: 10px;
   background: var(--we-danger-soft);
-  color: var(--we-danger);
+  color: var(--we-danger-text);
   flex-shrink: 0;
 }
 
@@ -10391,9 +10422,9 @@ button.we-ops-metric-card--button {
   background: currentColor;
   flex-shrink: 0;
 }
-.we-secret-pill--healthy { color: var(--we-success); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
-.we-secret-pill--warn { color: var(--we-warning); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
-.we-secret-pill--unhealthy { color: var(--we-danger); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
+.we-secret-pill--healthy { color: var(--we-success-text); background: var(--we-success-soft); border-color: color-mix(in srgb, var(--we-success) 28%, transparent); }
+.we-secret-pill--warn { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: color-mix(in srgb, var(--we-warning) 30%, transparent); }
+.we-secret-pill--unhealthy { color: var(--we-danger-text); background: var(--we-danger-soft); border-color: color-mix(in srgb, var(--we-danger) 28%, transparent); }
 .we-secret-pill--neutral { color: var(--we-muted); background: var(--we-surface-2); border-color: var(--we-line-strong); }
 
 /* --- C6 densification: Recipes gallery, Tools params, list toolbar ------ */
@@ -10414,7 +10445,7 @@ button.we-ops-metric-card--button {
   border: 1px solid transparent;
 }
 .we-param--required { color: var(--we-primary); background: var(--we-primary-soft); border-color: color-mix(in srgb, var(--we-primary) 25%, transparent); }
-.we-param--missing { color: var(--we-warning); background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
+.we-param--missing { color: var(--we-warning-text); background: var(--we-warning-soft); border-color: var(--we-warning-border-30); }
 .we-param--optional { color: var(--we-muted); background: var(--we-surface-muted); border-color: var(--we-line); }
 
 /* List toolbar — search + sort segmented over a dense list (Flows). */
@@ -10433,7 +10464,7 @@ button.we-ops-metric-card--button {
 /* inline-validation states, layered on the existing .text-field / .helper-text */
 .text-field--error,
 .we-field input[aria-invalid="true"] { border-color: var(--we-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-danger) 16%, transparent); }
-.helper-text--error { color: var(--we-danger); display: inline-flex; align-items: center; gap: 5px; }
+.helper-text--error { color: var(--we-danger-text); display: inline-flex; align-items: center; gap: 5px; }
 .helper-text--hint { color: var(--we-primary); display: inline-flex; align-items: center; gap: 5px; }
 
 /* described role radio-cards (invite form) */

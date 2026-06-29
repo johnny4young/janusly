@@ -47,7 +47,7 @@ import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { ValueDashboardSection } from './ValueDashboardSection'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
-import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
+import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import {
   buildGreeting,
   computeRecommendedActions,
@@ -244,7 +244,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   })
   const metricStrip = (
     <VitalSignsStrip
-      tiles={homeTiles}
+      tiles={withSeverityLabels(homeTiles, t)}
       ariaLabel={t('recoveryCenter.metricStripAria') as string}
       testId="recovery-center-metric-strip"
     />

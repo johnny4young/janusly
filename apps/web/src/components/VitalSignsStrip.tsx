@@ -51,8 +51,30 @@ export type VitalSignsTile = {
   numericValue?: number | null
   /** Optional aria-label override. Defaults to the tile's `label`. */
   ariaLabel?: string
+  /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") announced
+   *  to screen readers. The severity is otherwise conveyed by color ONLY (the
+   *  card's left border + value tint), so without this a non-sighted operator
+   *  can't tell a healthy metric from an unhealthy one. Use `withSeverityLabels`
+   *  to populate it from the catalog. */
+  severityLabel?: string
   /** Surface-specific test id (e.g. `recovery-center-metric-failures`). */
   testId?: string
+}
+
+/**
+ * Decorate tiles with a localized `severityLabel` (screen-reader text for the
+ * color-only severity band). The caller supplies its own `t`, keeping this
+ * component presentational — it never imports the i18n module. A tile that
+ * already set `severityLabel` is left untouched.
+ */
+export function withSeverityLabels(
+  tiles: VitalSignsTile[],
+  t: (key: string) => unknown,
+): VitalSignsTile[] {
+  return tiles.map((tile) => ({
+    ...tile,
+    severityLabel: tile.severityLabel ?? String(t(`vitals.severity.${tile.severity}`)),
+  }))
 }
 
 export function VitalSignsStrip({
@@ -99,6 +121,12 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
         <span className="section-kicker we-ops-metric-card__label">{tile.label}</span>
       </div>
       <div className="we-ops-metric-card__value">{animatedValue}</div>
+      {/* Screen-reader-only severity word — the visible severity is color-only
+          (border + value tint). Read after the value: "…, 95.0%, Healthy". On
+          the clickable variant the button's aria-label carries it instead (an
+          aria-label overrides inner content), so this span only feeds the static
+          section variant. */}
+      {tile.severityLabel && <span className="we-sr-only">{tile.severityLabel}</span>}
       {typeof tile.progressValue === 'number' && tile.progressValue !== null && (
         <div className="we-ops-progress" role="presentation">
           <span className="we-ops-progress__rail" />
@@ -120,7 +148,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
         type="button"
         className={className}
         onClick={tile.onClick}
-        aria-label={tile.ariaLabel ?? tile.label}
+        aria-label={clickableTileAriaLabel(tile)}
         data-testid={tile.testId}
       >
         {body}
@@ -137,6 +165,11 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
       {body}
     </section>
   )
+}
+
+function clickableTileAriaLabel(tile: VitalSignsTile): string {
+  const base = tile.ariaLabel ?? [tile.label, tile.display].filter(Boolean).join(', ')
+  return [base, tile.severityLabel].filter(Boolean).join(', ')
 }
 
 /**
