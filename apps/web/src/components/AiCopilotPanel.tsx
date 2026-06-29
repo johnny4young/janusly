@@ -322,6 +322,11 @@ export function AiCopilotPanel({
         </div>
       </section>
 
+      {/* Persistent live region so a screen reader announces the explain /
+          generate / review result when it appears — a conditionally-mounted
+          live region doesn't reliably announce. The fallback / error sub-blocks
+          keep their own role="alert" / role="status". */}
+      <div className="ai-copilot__results" aria-live="polite">
       {result && result.kind !== 'review' && (
         <section className="panel-card result-panel">
           <div className="split-row">
@@ -382,6 +387,7 @@ export function AiCopilotPanel({
           )}
         </section>
       )}
+      </div>
 
       <section className="panel-card">
         <div className="section-kicker">{t('aiCopilot.useCases')}</div>
