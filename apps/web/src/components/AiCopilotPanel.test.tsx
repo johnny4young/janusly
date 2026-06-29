@@ -49,4 +49,17 @@ describe('<AiCopilotPanel /> result clearing on workflow switch', () => {
     act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_generated' }) })
     expect(screen.getByText(/ZZGENERATED/)).toBeInTheDocument()
   })
+
+  it('renders results inside a persistent aria-live region so they are announced', async () => {
+    const { container } = renderPanel()
+    // The live region is always mounted (not conditional), so a result appearing
+    // inside it is announced to screen readers.
+    const live = container.querySelector('.ai-copilot__results')
+    expect(live).not.toBeNull()
+    expect(live).toHaveAttribute('aria-live', 'polite')
+
+    fireEvent.click(screen.getByRole('button', { name: /Explain this flow/i }))
+    await waitFor(() => expect(screen.getByText('EXPLAIN_BODY_XYZ')).toBeInTheDocument())
+    expect(live).toContainElement(screen.getByText('EXPLAIN_BODY_XYZ'))
+  })
 })
