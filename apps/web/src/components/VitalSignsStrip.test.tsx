@@ -116,6 +116,26 @@ describe('<VitalSignsStrip />', () => {
     expect(screen.getByTestId('tile-failures')).toHaveAccessibleName('Failures, 5, Needs attention')
   })
 
+  it('keeps a custom clickable aria-label and still appends severity', () => {
+    render(
+      <VitalSignsStrip
+        tiles={[
+          {
+            icon: <Activity />,
+            label: 'Failures',
+            display: '5',
+            severity: 'unhealthy',
+            severityLabel: 'Critical',
+            ariaLabel: 'Open failed runs in Recovery Center',
+            onClick: vi.fn(),
+            testId: 'tile-failures',
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByTestId('tile-failures')).toHaveAccessibleName('Open failed runs in Recovery Center, Critical')
+  })
+
   it('withSeverityLabels populates a localized severityLabel from the caller t', () => {
     const t = (key: string) => key.replace('vitals.severity.', '').toUpperCase()
     const tiles: VitalSignsTile[] = [
