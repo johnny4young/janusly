@@ -7761,6 +7761,10 @@ button.we-ops-metric-card--button {
 .we-run-history-card {
   display: flex;
   flex-direction: column;
+  /* Self-spacing: the virtualized list renders cards in a plain flow container
+     (not the `.panel-list` grid), so the 8px row gap lives on the card. The
+     pitch (card height + this margin) must equal RUN_ROW_HEIGHT in RunsPanel. */
+  margin-bottom: 8px;
 }
 
 .we-run-history-card .list-card-row {
