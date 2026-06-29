@@ -689,6 +689,21 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   margin: 6px 0 0;
 }
 
+/* Visually-hidden but screen-reader-available. For text that conveys meaning a
+   sighted user gets from another channel (e.g. a color-only severity band). */
+.we-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 /* Sidebar-specific AI mode card shown near the primary builder actions. */
 .ai-mode-card {
   background:

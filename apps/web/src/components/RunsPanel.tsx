@@ -33,7 +33,7 @@ import { ReportDeliveryDialog } from './ReportDeliveryDialog'
 import { EmptyView, PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
-import { VitalSignsStrip, type VitalSignsTile } from './VitalSignsStrip'
+import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 
 type HumanFormWaiting = {
   title?: string
@@ -206,7 +206,7 @@ export function RunsPanel({
   return (
     <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
       <VitalSignsStrip
-        tiles={runMetricTiles}
+        tiles={withSeverityLabels(runMetricTiles, t)}
         ariaLabel={t('rightPanel.runs.summaryAria') as string}
         testId="runs-metric-strip"
       />

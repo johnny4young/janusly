@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Activity, AlertTriangle } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
-import { VitalSignsStrip } from './VitalSignsStrip'
+import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 
 describe('<VitalSignsStrip />', () => {
   it('renders one card per tile with severity-keyed classes and rationale copy', () => {
@@ -75,6 +75,56 @@ describe('<VitalSignsStrip />', () => {
 
     fireEvent.click(failures)
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('announces the severity to screen readers (static tile) since it is color-only', () => {
+    render(
+      <VitalSignsStrip
+        tiles={[
+          {
+            icon: <Activity />,
+            label: 'Success rate',
+            display: '95.0%',
+            severity: 'healthy',
+            severityLabel: 'Healthy',
+            testId: 'tile-success',
+          },
+        ]}
+      />,
+    )
+    const srText = screen.getByText('Healthy')
+    expect(srText).toHaveClass('we-sr-only')
+    expect(screen.getByTestId('tile-success')).toHaveTextContent('Healthy')
+  })
+
+  it('folds the severity into the clickable tile aria-label (label + value + severity)', () => {
+    render(
+      <VitalSignsStrip
+        tiles={[
+          {
+            icon: <Activity />,
+            label: 'Failures',
+            display: '5',
+            severity: 'warn',
+            severityLabel: 'Needs attention',
+            onClick: vi.fn(),
+            testId: 'tile-failures',
+          },
+        ]}
+      />,
+    )
+    expect(screen.getByTestId('tile-failures')).toHaveAccessibleName('Failures, 5, Needs attention')
+  })
+
+  it('withSeverityLabels populates a localized severityLabel from the caller t', () => {
+    const t = (key: string) => key.replace('vitals.severity.', '').toUpperCase()
+    const tiles: VitalSignsTile[] = [
+      { icon: <Activity />, label: 'A', display: '1', severity: 'healthy' },
+      { icon: <Activity />, label: 'B', display: '2', severity: 'unhealthy', severityLabel: 'kept' },
+    ]
+    const out = withSeverityLabels(tiles, t)
+    expect(out[0]!.severityLabel).toBe('HEALTHY')
+    expect(out[1]!.severityLabel).toBe('kept') // pre-set label is left untouched
   })
 
   it('renders the progress bar at the clamped width when progressValue is set', () => {
