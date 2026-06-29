@@ -100,7 +100,15 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null
     drawerRef.current?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCloseRef.current()
+      if (event.key !== 'Escape') return
+      // Don't steal Escape from a nested modal layered on top (e.g. the evidence
+      // ReportDeliveryDialog — let it close first), and ignore Escape fired from
+      // background content the user has tabbed to. Only close when focus is
+      // within the drawer and no modal is open.
+      const node = drawerRef.current
+      if (!node || !node.contains(document.activeElement)) return
+      if (document.querySelector('[aria-modal="true"]')) return
+      onCloseRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => {
@@ -110,8 +118,9 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       // double-invokes the effect as mount → cleanup → mount, and a deferred
       // restore would land AFTER the second mount's focus-in and steal focus
       // back to the trigger. A synchronous restore self-corrects — the re-mount's
-      // focus-in runs after it, leaving focus on the drawer as intended.
-      if (trigger && document.contains(trigger)) {
+      // focus-in runs after it, leaving focus on the drawer as intended. Skip the
+      // restore when a modal is layered on top so we don't yank focus out of it.
+      if (trigger && document.contains(trigger) && !document.querySelector('[aria-modal="true"]')) {
         trigger.focus()
       }
     }

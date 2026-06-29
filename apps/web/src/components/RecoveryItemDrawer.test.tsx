@@ -45,6 +45,22 @@ describe('<RecoveryItemDrawer /> focus management', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('lets a nested modal own Escape instead of closing the drawer', async () => {
+    const onClose = vi.fn()
+    render(<RecoveryItemDrawer item={makeItem()} onClose={onClose} />)
+    await waitFor(() => expect(screen.getByTestId('recovery-item-drawer')).toHaveFocus())
+
+    // A nested modal (e.g. the evidence ReportDeliveryDialog) is layered on top.
+    const modal = document.createElement('div')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.appendChild(modal)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled() // the modal closes; the drawer stays
+
+    modal.remove()
+  })
+
   it('restores focus to the trigger (the badge) when the drawer unmounts', async () => {
     const trigger = document.createElement('button')
     document.body.appendChild(trigger)
