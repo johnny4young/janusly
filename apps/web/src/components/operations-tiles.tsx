@@ -10,7 +10,7 @@
 
 import React from 'react'
 import { CheckCircle2, Clock, DollarSign, RefreshCw, Users, Zap } from 'lucide-react'
-import type { VitalSignsTile, VitalSignsTileSeverity } from './VitalSignsStrip'
+import { withSeverityLabels, type VitalSignsTile, type VitalSignsTileSeverity } from './VitalSignsStrip'
 import { tRecoveryMetricRationale } from '../i18n'
 
 /** Closed enum of metric severity values that the API echoes back. Mirrored
@@ -45,7 +45,7 @@ export function buildOperationsTiles(
   metrics: OperationsMetrics,
   t: (key: string, vars?: Record<string, unknown>) => unknown,
 ): VitalSignsTile[] {
-  return [
+  return withSeverityLabels([
     {
       icon: <CheckCircle2 size={14} aria-hidden="true" />,
       label: t('operations.metric.successRate') as string,
@@ -89,5 +89,5 @@ export function buildOperationsTiles(
       severity: metrics.costThisWindow.severity,
       rationale: tRecoveryMetricRationale(metrics.costThisWindow),
     },
-  ]
+  ], t)
 }
