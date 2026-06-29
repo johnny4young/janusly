@@ -105,9 +105,10 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
 
       {!runId && <p className="empty-state">{t('runExplain.empty')}</p>}
 
-      {/* Announce new replies to screen readers — without aria-live a streamed
-          answer (or an error reply) appends silently. polite for normal answers;
-          the error reply below carries role="alert" for an assertive read. */}
+      {/* Announce new replies to screen readers — without aria-live a newly
+          appended answer (or error reply) lands silently. polite for normal
+          answers; the error reply below carries role="alert" for an assertive
+          read. */}
       <div className="panel-list" aria-live="polite">
         {messages.map((message, index) => (
           <div key={`${message.role}-${index}`} className={`message-card message-card-${message.role}`}>
