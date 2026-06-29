@@ -465,8 +465,10 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               {t('dlq.bulkErrorsHeading', { count: bulkErrors.length })}
             </span>
             <ul>
-              {bulkErrors.slice(0, BULK_ERROR_PREVIEW).map((entry) => (
-                <li key={entry.deadLetterId}>
+              {bulkErrors.slice(0, BULK_ERROR_PREVIEW).map((entry, idx) => (
+                // Composite key: the id stays the stable identity, the index
+                // disambiguates if the envelope ever carries a duplicate id.
+                <li key={`${entry.deadLetterId}-${idx}`}>
                   <code>{entry.deadLetterId}</code> — {entry.error}
                 </li>
               ))}
