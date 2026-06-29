@@ -9693,6 +9693,45 @@ button.we-ops-metric-card--button {
   padding: 8px 10px;
 }
 
+/* Inline per-row failure reasons under the DLQ bulk bar (partial-success
+   envelope) — compact, muted, scrollable when the failed set is large. */
+.we-dlq-bulk-errors {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+}
+
+.we-dlq-bulk-errors__label {
+  color: var(--we-danger);
+  font-weight: 600;
+}
+
+.we-dlq-bulk-errors ul {
+  list-style: none;
+  margin: 4px 0 0;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.we-dlq-bulk-errors li {
+  color: var(--we-ink-muted);
+  padding: 2px 0;
+}
+
+.we-dlq-bulk-errors code {
+  color: var(--we-ink);
+}
+
+.we-dlq-bulk-errors__more {
+  color: var(--we-ink-muted);
+  display: inline-block;
+  margin-top: 4px;
+}
+
 .we-list-bulk-bar__count {
   color: var(--we-ink);
   font-size: 12px;

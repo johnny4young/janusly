@@ -30,6 +30,7 @@ import {
 } from '@janusly/shared/src/workflow-snippets'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { getNodeLabel } from '../constants'
 import { useT } from '../i18n'
@@ -66,7 +67,14 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   // Default the stitch target to the currently-selected node when there is one.
   const [targetNodeId, setTargetNodeId] = useState<string | null>(selectedNodeId)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
   const aliveRef = useRef(true)
+
+  // True modal (aria-modal): trap Tab within the dialog and restore focus to the
+  // trigger on close. The component focuses the search input itself on open, so
+  // initialFocus stays off — the hook only adds the trap + restore the other
+  // app modals already have (this was the lone aria-modal dialog without it).
+  useDialogFocusTrap(dialogRef, { active: open })
 
   useEffect(() => {
     aliveRef.current = true
@@ -199,6 +207,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
 
   return (
     <div
+      ref={dialogRef}
       className="we-cmdk-backdrop"
       role="dialog"
       aria-modal="true"

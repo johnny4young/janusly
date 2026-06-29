@@ -31,6 +31,10 @@ describe('<FailureClustersCard />', () => {
     render(<FailureClustersCard />)
 
     const row = await screen.findByRole('button', { name: /HTTP 401 on http node/i })
+    // The row's accessible name leads with the localized category, so a screen
+    // reader hears the classification (the visual category pill is otherwise
+    // hidden by the button's aria-label).
+    expect(row).toHaveAccessibleName(/^HTTP:/)
     expect(screen.getByText('1 pattern')).toBeInTheDocument()
     expect(screen.getByText('Workflow author')).toBeInTheDocument()
 

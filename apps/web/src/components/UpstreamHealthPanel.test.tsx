@@ -59,6 +59,11 @@ describe('<UpstreamHealthPanel />', () => {
     })
     expect(screen.getByText('Statuspage.io')).toBeInTheDocument()
     expect(screen.getByText('Major outage')).toBeInTheDocument()
+    // The per-source icon-only actions carry accessible names (aria-label), so a
+    // screen reader announces them instead of an anonymous "button".
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
   })
 
   it('surfaces the fail-open error reason chip when the last poll could not reach the feed', async () => {

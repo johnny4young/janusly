@@ -559,6 +559,11 @@ describe('<DeadLettersPanel /> — sort', () => {
       expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
       expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 resolved, 1 failed')
     })
+    // The inline detail surfaces WHICH row failed and WHY, announced as an alert.
+    const errors = screen.getByTestId('dlq-bulk-errors')
+    expect(errors).toHaveAttribute('role', 'alert')
+    expect(errors).toHaveTextContent('b')
+    expect(errors).toHaveTextContent('DLQ entry not found')
   })
 
   it('hides the Resolve action until a row is ticked; select-all ticks every loaded row', async () => {
