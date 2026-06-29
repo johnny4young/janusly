@@ -148,7 +148,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
         type="button"
         className={className}
         onClick={tile.onClick}
-        aria-label={tile.ariaLabel ?? [tile.label, tile.display, tile.severityLabel].filter(Boolean).join(', ')}
+        aria-label={clickableTileAriaLabel(tile)}
         data-testid={tile.testId}
       >
         {body}
@@ -165,6 +165,11 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
       {body}
     </section>
   )
+}
+
+function clickableTileAriaLabel(tile: VitalSignsTile): string {
+  const base = tile.ariaLabel ?? [tile.label, tile.display].filter(Boolean).join(', ')
+  return [base, tile.severityLabel].filter(Boolean).join(', ')
 }
 
 /**
