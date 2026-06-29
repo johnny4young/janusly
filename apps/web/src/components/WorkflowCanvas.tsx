@@ -47,6 +47,21 @@ type WorkflowCanvasProps = {
 export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
+  // Give every node a meaningful screen-reader name. React Flow's default node
+  // aria-label is just "Node <id>"; announce the step's localized label instead
+  // ("Step: Call an API"). Derived here, not in the store, so it stays localized
+  // and never pollutes the persisted / serialized graph. React Flow reads
+  // `node.ariaLabel` (NodeBase) for the focusable node wrapper.
+  const a11yNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        ariaLabel: t('canvas.nodeAria', {
+          label: node.data.label?.trim() || getNodeLabel(node.data.type),
+        }) as string,
+      })),
+    [nodes, t],
+  )
   // Confirm before a node is removed (Delete/Backspace or the toolbar) — a
   // mis-keyed delete can otherwise drop a configured step silently. Edge-only
   // deletions skip the prompt: re-drawing a connection is cheap and reversible.
@@ -131,7 +146,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       )}
       <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
       <ReactFlow
-        nodes={nodes}
+        nodes={a11yNodes}
         edges={edges}
         nodeTypes={workflowNodeTypes}
         edgeTypes={workflowEdgeTypes}
