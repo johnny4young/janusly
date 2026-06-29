@@ -34,4 +34,22 @@ describe('<RunExplainChat />', () => {
 
     expect(screen.getByPlaceholderText(/Ask:/)).toHaveValue('What should I check next?')
   })
+
+  it('exposes the reply list as an aria-live region', () => {
+    const { container } = render(<RunExplainChat runId="run_1" />)
+    expect(container.querySelector('.panel-list')).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('surfaces a transport error as an assertive alert, not a normal answer', async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error('network down'))
+    render(<RunExplainChat runId="run_1" />)
+
+    fireEvent.change(screen.getByPlaceholderText(/Ask:/), { target: { value: 'What happened?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Janusly' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('run-explain-error')).toHaveTextContent('network down')
+    })
+    expect(screen.getByTestId('run-explain-error')).toHaveAttribute('role', 'alert')
+  })
 })

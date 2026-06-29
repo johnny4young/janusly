@@ -185,7 +185,7 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
             className={`we-recovery-item-badge__sev ${SEVERITY_TONE[metadata.severityDefault]}`}
             data-testid="workflow-about-card-severity"
           >
-            {metadata.severityDefault.toUpperCase()}
+            {t(`recoveryItems.severity.${metadata.severityDefault}`)}
           </span>
         </div>
       )}

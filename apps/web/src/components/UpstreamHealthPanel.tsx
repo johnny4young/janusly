@@ -324,6 +324,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
                   title={t('upstreamHealth.action.checkNow') as string}
+                  aria-label={t('upstreamHealth.action.checkNow') as string}
                   onClick={() => void checkNow(s)}
                   disabled={checkingId === s.id}
                 >
@@ -333,6 +334,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
                   title={t('common.edit') as string}
+                  aria-label={t('common.edit') as string}
                   onClick={() => startEdit(s)}
                 >
                   <Pencil size={14} aria-hidden />
@@ -341,6 +343,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
                   title={t('common.delete') as string}
+                  aria-label={t('common.delete') as string}
                   onClick={() => void deleteSource(s)}
                 >
                   <Trash2 size={14} aria-hidden />

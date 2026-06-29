@@ -58,7 +58,8 @@ describe('WorkflowAboutCard', () => {
     })
     const { getByTestId, queryByTestId } = render(<WorkflowAboutCard workflowId="wf-1" />)
     await waitFor(() => getByTestId('workflow-about-card-owners'))
-    expect(getByTestId('workflow-about-card-severity').textContent).toBe('P1')
+    // Localized severity label (consistent with RecoveryItemBadge), not the raw code.
+    expect(getByTestId('workflow-about-card-severity').textContent).toBe('P1 — critical')
     expect(getByTestId('workflow-about-card-slack').textContent).toContain('#payouts-alerts')
     expect(getByTestId('workflow-about-card-linear').textContent).toContain('acme/payouts')
     expect(getByTestId('workflow-about-card-runbook')).not.toBeNull()
