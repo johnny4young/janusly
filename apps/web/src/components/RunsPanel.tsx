@@ -34,6 +34,13 @@ import { EmptyView, PanelChrome } from './panel-primitives'
 import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
+import { useVirtualList } from '../hooks/useVirtualList'
+
+/** Fixed row PITCH (CSS px) for the virtualized run-history list. The history
+ *  cards are made uniform-height (the optional "Lab" action reserves its slot),
+ *  so a single pitch windows the list correctly. Tuned to the rendered card +
+ *  its bottom margin; verify in a real browser when the card layout changes. */
+const RUN_ROW_HEIGHT = 226
 
 type HumanFormWaiting = {
   title?: string
@@ -113,6 +120,17 @@ export function RunsPanel({
   onResolveDeadLetter,
 }: RunsPanelProps) {
   const { t } = useT()
+  // Window the run-history list so a large org's history (capped 100/200 by the
+  // API) doesn't mount hundreds of multi-button cards on every platformVersion
+  // bump. No resetScrollKey — the list refetches on each bump (a new `runs`
+  // reference with identical content), and resetting scroll there would jump the
+  // operator to the top on every tick. Mirrors DeadLettersPanel's windowing.
+  const {
+    containerRef: runListRef,
+    visibleItems: visibleRuns,
+    totalHeight: runListTotalHeight,
+    startOffset: runListStartOffset,
+  } = useVirtualList({ items: runs, rowHeight: RUN_ROW_HEIGHT })
   const waitingNodes = runNodes.filter(node => node.status === 'waiting')
   const failedNodes = runNodes.filter(node => node.status === 'failed')
   const completedRuns = runs.filter(run => run.status === 'succeeded').length
@@ -367,58 +385,72 @@ export function RunsPanel({
       <div className="panel-list">
         <div className="section-kicker">{t('rightPanel.runs.historyKicker')}</div>
         {runs.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.runs.historyEmpty.title') as string} body={t('rightPanel.runs.historyEmpty.body') as string} />}
-        {runs.map(run => {
-          const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
-          return (
-            <div key={run.id} className="list-card we-run-history-card" role="group">
-              <button type="button" className="list-card-row" onClick={() => onOpenRun(run.id)}>
-                <div className="split-row" style={{ width: '100%' }}>
-                  <strong>{run.id.slice(0, 8)}…</strong>
-                  <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
-                </div>
-                <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback') as string)}</span>
-                <span className="list-card-action">{t('rightPanel.runs.openTimeline')}</span>
-              </button>
-              {showLabAction && (
-                <button
-                  type="button"
-                  className="small-command we-replay-lab-history-button"
-                  onClick={() => setLabSourceRun(run)}
-                  data-testid={`history-replay-in-lab-${run.id}`}
-                  aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id }) as string}
-                >
-                  <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
-                </button>
-              )}
-              <button
-                type="button"
-                className="small-command we-run-history-export-button"
-                onClick={async () => {
-                  try {
-                    await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
-                    addToast(t('rightPanel.runs.exportSuccess') as string, 'success')
-                  } catch (err) {
-                    const message = err instanceof Error ? err.message : (t('rightPanel.runs.exportFailed') as string)
-                    addToast(message, 'error')
-                  }
-                }}
-                data-testid={`history-export-${run.id}`}
-                aria-label={t('rightPanel.runs.exportAria', { id: run.id }) as string}
-              >
-                <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
-              </button>
-              <button
-                type="button"
-                className="small-command we-run-history-send-button"
-                onClick={() => setDeliveryRun(run)}
-                data-testid={`history-send-${run.id}`}
-                aria-label={t('rightPanel.runs.sendAria', { id: run.id }) as string}
-              >
-                <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
-              </button>
+        {runs.length > 0 && (
+          <div ref={runListRef} className="we-virtual-list" data-testid="runs-history-virtual-list">
+            <div style={{ height: runListTotalHeight, position: 'relative' }}>
+              <div style={{ transform: `translateY(${runListStartOffset}px)` }}>
+                {visibleRuns.map(({ item: run }) => {
+                  const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
+                  return (
+                    <div key={run.id} className="list-card we-run-history-card" role="group">
+                      <button type="button" className="list-card-row" onClick={() => onOpenRun(run.id)}>
+                        <div className="split-row" style={{ width: '100%' }}>
+                          <strong>{run.id.slice(0, 8)}…</strong>
+                          <span className="status-pill" data-status={run.status}>{formatStatusLabel(run.status)}</span>
+                        </div>
+                        <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback') as string)}</span>
+                        <span className="list-card-action">{t('rightPanel.runs.openTimeline')}</span>
+                      </button>
+                      {/* The Lab action reserves its slot even when not applicable so
+                          every card is the same height — the virtual window needs a
+                          fixed row pitch. Hidden + non-interactive when the run isn't
+                          lab-eligible (non-terminal or already a replay). */}
+                      <button
+                        type="button"
+                        className="small-command we-replay-lab-history-button"
+                        onClick={showLabAction ? () => setLabSourceRun(run) : undefined}
+                        disabled={!showLabAction}
+                        aria-hidden={showLabAction ? undefined : true}
+                        tabIndex={showLabAction ? undefined : -1}
+                        style={showLabAction ? undefined : { visibility: 'hidden' }}
+                        data-testid={showLabAction ? `history-replay-in-lab-${run.id}` : undefined}
+                        aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id }) as string}
+                      >
+                        <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
+                      </button>
+                      <button
+                        type="button"
+                        className="small-command we-run-history-export-button"
+                        onClick={async () => {
+                          try {
+                            await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
+                            addToast(t('rightPanel.runs.exportSuccess') as string, 'success')
+                          } catch (err) {
+                            const message = err instanceof Error ? err.message : (t('rightPanel.runs.exportFailed') as string)
+                            addToast(message, 'error')
+                          }
+                        }}
+                        data-testid={`history-export-${run.id}`}
+                        aria-label={t('rightPanel.runs.exportAria', { id: run.id }) as string}
+                      >
+                        <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
+                      </button>
+                      <button
+                        type="button"
+                        className="small-command we-run-history-send-button"
+                        onClick={() => setDeliveryRun(run)}
+                        data-testid={`history-send-${run.id}`}
+                        aria-label={t('rightPanel.runs.sendAria', { id: run.id }) as string}
+                      >
+                        <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          )
-        })}
+          </div>
+        )}
       </div>
 
       {labSourceRun && (
