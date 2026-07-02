@@ -130,6 +130,7 @@ async function close(server: http.Server): Promise<void> {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("GET /dlq route declaration", () => {
@@ -691,6 +692,34 @@ describe("POST /dlq/bulk-replay", () => {
         body: JSON.stringify({ deadLetterIds: tooMany }),
       });
       expect(response.status).toBe(400);
+      expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+// Proves `guardMcpWrite` is WIRED at the top of POST /dlq/replay — an
+// MCP-source caller (that passes RBAC) with the process flag off is refused
+// before the DLQ row is even looked up, so no node is re-enqueued.
+describe("POST /dlq/replay — MCP-source write consent gate", () => {
+  it("refuses MCP-source replay (403 mcp_process_disabled) with the process flag off, and never re-enqueues", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "service-token", source: "mcp", serviceTokenSuffix: "abcd" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1" }),
+      });
+      expect(response.status).toBe(403);
+      expect((await response.json()).code).toBe("mcp_process_disabled");
+      // Gate fired before the DLQ lookup + the replay adapter.
+      expect(getDeadLetterMock).not.toHaveBeenCalled();
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
