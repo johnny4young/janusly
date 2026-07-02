@@ -63,6 +63,24 @@ const STREAM_RETRY_HINT_MS = 3_000;
 // client can't pull an unbounded backlog in one shot.
 const STREAM_CATCHUP_MAX = 500;
 
+// Summary projection for the `/runs` LIST surfaces. Deliberately excludes
+// `inputJson`: it carries the full workflow snapshot captured by `startRun`,
+// so a 100-row page would ship 100 workflow JSONs the list never renders.
+// The `GET /run?runId=` detail read keeps the full row.
+const runListColumns = {
+  id: runs.id,
+  orgId: runs.orgId,
+  workflowVersionId: runs.workflowVersionId,
+  status: runs.status,
+  outputJson: runs.outputJson,
+  parentRunId: runs.parentRunId,
+  parentNodeId: runs.parentNodeId,
+  traceId: runs.traceId,
+  replayMode: runs.replayMode,
+  createdBy: runs.createdBy,
+  createdAt: runs.createdAt,
+};
+
 export const runsRoutes: Route[] = [
   // Live run stream (SSE over Redis pub/sub). MUST precede the `/runs` list
   // matcher below — both are GET and `/runs/<id>/stream` starts with `/runs`,
@@ -199,20 +217,7 @@ export const runsRoutes: Route[] = [
 
       if (workflowIdFilter) {
         const rows = await db
-          .select({
-            id: runs.id,
-            orgId: runs.orgId,
-            workflowVersionId: runs.workflowVersionId,
-            status: runs.status,
-            inputJson: runs.inputJson,
-            outputJson: runs.outputJson,
-            parentRunId: runs.parentRunId,
-            parentNodeId: runs.parentNodeId,
-            traceId: runs.traceId,
-            replayMode: runs.replayMode,
-            createdBy: runs.createdBy,
-            createdAt: runs.createdAt,
-          })
+          .select(runListColumns)
           .from(runs)
           .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
           .where(and(
@@ -230,7 +235,7 @@ export const runsRoutes: Route[] = [
         return sendJson(res, rows);
       }
 
-      const rows = await db.select().from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
+      const rows = await db.select(runListColumns).from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/run?"),

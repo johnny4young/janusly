@@ -31,8 +31,8 @@ import type { ExecutionStore, NodeStatus, RunMetadata, RunStatus, SerializedErro
 
 /** `ExecutionStore` implementation that delegates to `../persistence.ts`. */
 export class PostgresExecutionStore implements ExecutionStore {
-  getRunContext(runId: string) {
-    return getRunContext(runId);
+  getRunContext(runId: string, opts?: { statusesOnly?: boolean }) {
+    return getRunContext(runId, opts);
   }
 
   async getRunStatus(runId: string): Promise<RunStatus | null> {

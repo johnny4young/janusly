@@ -62,6 +62,7 @@ import { WorkflowSchema } from "@janusly/shared";
 import { DeadLetterQueueAdapter } from "./adapters/dead-letter-queue";
 import { appendEvent, failStalledRunningNode, updateRunStatusFromNodes } from "./persistence";
 import { workflowQueue } from "./queue";
+import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 import type { DeadLetterInput, SerializedError } from "./core/types";
 
@@ -329,7 +330,7 @@ async function writeReaperAudit(metadata: Record<string, unknown>): Promise<void
       action: "run.stalled_node.reaped",
       targetType: null,
       targetId: null,
-      metadata,
+      metadata: safePersistPayload(metadata) as Record<string, unknown>,
     });
   } catch (err) {
     console.warn("[stalled-node-reaper] audit write failed", {
