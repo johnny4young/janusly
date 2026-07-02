@@ -43,6 +43,8 @@ import {
   getOrgConfigSnapshot,
 } from "@janusly/data";
 import type { AuthContext } from "./auth";
+import { enforceRateLimit } from "./rate-limit";
+import { RATE_LIMIT_WINDOW_MS } from "./constants";
 
 export type McpWriteAllowedResult =
   | { allowed: true }
@@ -96,4 +98,35 @@ export function mcpAuditMetadata(auth: AuthContext): Record<string, unknown> {
  */
 export function mcpRateLimitBucket(actionKey: string): string {
   return `mcp.${actionKey}`;
+}
+
+/** Result of the MCP write gate — `ok:false` carries a ready-to-send 403 body. */
+export type McpWriteGate =
+  | { ok: true }
+  | { ok: false; status: number; body: { error: string; code: string } };
+
+/**
+ * Single chokepoint every MCP-write route calls at the top of its handler.
+ * For non-MCP traffic (`auth.source !== "mcp"`) it is a no-op — regular
+ * web / service-token callers keep their existing RBAC-only path. For
+ * MCP-source traffic it enforces the two-flag write consent
+ * (`isMcpWriteAllowed`) and then the per-tool Redis rate-limit bucket, so a
+ * misbehaving MCP client can neither bypass tenant consent nor flood a
+ * tenant. On denial it returns a 403 body with a stable `mcp_*` code the MCP
+ * client renders; the route just does `if (!gate.ok) return sendJson(res,
+ * gate.body, gate.status)`. Audit `source:"mcp"` tagging is handled
+ * separately + automatically by `auditAction` (it reads `auth.source`).
+ */
+export async function guardMcpWrite(auth: AuthContext, actionKey: string): Promise<McpWriteGate> {
+  if (auth.source !== "mcp") return { ok: true };
+  const consent = await isMcpWriteAllowed(auth.orgId);
+  if (!consent.allowed) {
+    return { ok: false, status: 403, body: { error: consent.message, code: `mcp_${consent.reason}` } };
+  }
+  await enforceRateLimit(auth.orgId, {
+    name: mcpRateLimitBucket(actionKey),
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max: 60,
+  });
+  return { ok: true };
 }

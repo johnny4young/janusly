@@ -31,6 +31,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, readJson, sendError, sendJson } from "../http";
+import { guardMcpWrite } from "../mcp-consent";
 import {
   createConnection,
   deleteConnection,
@@ -245,6 +246,8 @@ export const mcpRoutes: Route[] = [
     role: "admin",
     permission: "mcp.connections.write",
     handler: async ({ req, res, auth }) => {
+      const createMcpGate = await guardMcpWrite(auth, "mcp.connections.create");
+      if (!createMcpGate.ok) return sendJson(res, createMcpGate.body, createMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const alias = typeof body.alias === "string" ? body.alias.trim().toLowerCase() : "";
       if (!isValidAlias(alias)) {
@@ -416,6 +419,8 @@ export const mcpRoutes: Route[] = [
     role: "admin",
     permission: "mcp.connections.write",
     handler: async ({ req, res, auth }) => {
+      const deleteMcpGate = await guardMcpWrite(auth, "mcp.connections.delete");
+      if (!deleteMcpGate.ok) return sendJson(res, deleteMcpGate.body, deleteMcpGate.status);
       const alias = aliasFromUrl(req.url, "/mcp/connections");
       if (!alias) return sendJson(res, { error: "alias is required" }, 400);
 
@@ -438,6 +443,8 @@ export const mcpRoutes: Route[] = [
     role: "admin",
     permission: "mcp.connections.write",
     handler: async ({ req, res, auth }) => {
+      const rediscoverMcpGate = await guardMcpWrite(auth, "mcp.connections.rediscover");
+      if (!rediscoverMcpGate.ok) return sendJson(res, rediscoverMcpGate.body, rediscoverMcpGate.status);
       const match = (req.url ?? "").match(/^\/mcp\/connections\/([^/]+)\/rediscover$/);
       const alias = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
       if (!alias) return sendJson(res, { error: "alias is required" }, 400);
@@ -496,6 +503,8 @@ export const mcpRoutes: Route[] = [
     role: "admin",
     permission: "mcp.connections.write",
     handler: async ({ req, res, auth }) => {
+      const setToolMcpGate = await guardMcpWrite(auth, "mcp.connections.set_tool");
+      if (!setToolMcpGate.ok) return sendJson(res, setToolMcpGate.body, setToolMcpGate.status);
       const { alias, toolName } = descriptorNameFromUrl(req.url);
       if (!alias || !toolName) return sendJson(res, { error: "alias and tool name are required" }, 400);
 

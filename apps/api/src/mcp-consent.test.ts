@@ -4,11 +4,28 @@ vi.mock("@janusly/data/src/orgConfigRepo", () => ({
   getOrgConfigSnapshot: vi.fn(),
 }));
 
+vi.mock("./rate-limit", () => ({
+  enforceRateLimit: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { getOrgConfigSnapshot } from "@janusly/data/src/orgConfigRepo";
-import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket } from "./mcp-consent";
+import { isMcpWriteAllowed, mcpAuditMetadata, mcpRateLimitBucket, guardMcpWrite } from "./mcp-consent";
+import { enforceRateLimit } from "./rate-limit";
 import type { AuthContext } from "./auth";
 
 const getOrgConfigSnapshotMock = vi.mocked(getOrgConfigSnapshot);
+const enforceRateLimitMock = vi.mocked(enforceRateLimit);
+
+function mcpAuth(overrides: Partial<AuthContext> = {}): AuthContext {
+  return {
+    orgId: "org-a",
+    userId: "mcp-user",
+    mode: "service-token",
+    source: "mcp",
+    serviceTokenSuffix: "abcd",
+    ...overrides,
+  };
+}
 
 function snapshotWithConsent(consent: boolean) {
   return {
@@ -37,6 +54,7 @@ function snapshotWithConsent(consent: boolean) {
 
 beforeEach(() => {
   getOrgConfigSnapshotMock.mockReset();
+  enforceRateLimitMock.mockClear();
 });
 
 afterEach(() => {
@@ -130,5 +148,45 @@ describe("mcpRateLimitBucket", () => {
   it("composes a stable bucket name from the action key", () => {
     expect(mcpRateLimitBucket("workflows.save")).toBe("mcp.workflows.save");
     expect(mcpRateLimitBucket("workflows.run")).toBe("mcp.workflows.run");
+  });
+});
+
+describe("guardMcpWrite", () => {
+  it("is a no-op for non-MCP callers (no consent read, no rate limit)", async () => {
+    const gate = await guardMcpWrite(mcpAuth({ source: "dev" }), "runs.start");
+    expect(gate.ok).toBe(true);
+    expect(getOrgConfigSnapshotMock).not.toHaveBeenCalled();
+    expect(enforceRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("denies an MCP write when the process env is off — 403 with a stable code, no rate limit", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    const gate = await guardMcpWrite(mcpAuth(), "runs.start");
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) {
+      expect(gate.status).toBe(403);
+      expect(gate.body.code).toBe("mcp_process_disabled");
+    }
+    expect(enforceRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("denies an MCP write when the tenant flag is off — 403 mcp_tenant_disabled", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    getOrgConfigSnapshotMock.mockResolvedValueOnce(snapshotWithConsent(false));
+    const gate = await guardMcpWrite(mcpAuth(), "dlq.replay");
+    expect(gate.ok).toBe(false);
+    if (!gate.ok) expect(gate.body.code).toBe("mcp_tenant_disabled");
+    expect(enforceRateLimitMock).not.toHaveBeenCalled();
+  });
+
+  it("allows an MCP write when both flags are on and fires the per-tool rate limit bucket", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    getOrgConfigSnapshotMock.mockResolvedValueOnce(snapshotWithConsent(true));
+    const gate = await guardMcpWrite(mcpAuth(), "runs.start");
+    expect(gate.ok).toBe(true);
+    expect(enforceRateLimitMock).toHaveBeenCalledWith(
+      "org-a",
+      expect.objectContaining({ name: "mcp.runs.start" }),
+    );
   });
 });
