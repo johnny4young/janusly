@@ -37,6 +37,7 @@
 
 import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, autoHealingRuns, auditLogs } from "@janusly/db";
+import { safePersistPayload } from "@janusly/shared/src/safe-persist";
 
 // ─── Closed enums ───────────────────────────────────────────────────────────
 
@@ -544,7 +545,7 @@ async function writeAudit(
       action,
       targetType: "auto_healing_run",
       targetId,
-      metadata,
+      metadata: safePersistPayload(metadata) as Record<string, unknown>,
     });
   } catch (error) {
     console.warn("[auto-healing] audit write failed", { action, error });

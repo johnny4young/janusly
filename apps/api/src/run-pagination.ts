@@ -51,8 +51,14 @@ export function parseEventsLimit(raw: string | null, defaultLimit: number, maxLi
   return Math.min(Math.floor(parsed), maxLimit);
 }
 
-/** Parse `?eventsCursor=<iso>|<id>`. Returns `null` for malformed / missing cursors. */
-export function parseEventsCursor(raw: string | null): EventsCursor | null {
+/**
+ * Parse a generic `<iso>|<id>` keyset cursor into `{ createdAt, id }`, or
+ * `null` for malformed / missing values (callers degrade to the first page).
+ * Splits on the LAST `|` so an id containing a pipe survives; rejects an
+ * unparseable date or empty id. Single implementation for every
+ * `(timestamp, id)` keyset surface — events, Flows list, audit, Trash.
+ */
+export function parseKeysetCursor(raw: string | null): { createdAt: Date; id: string } | null {
   if (!raw) return null;
   const sep = raw.lastIndexOf(CURSOR_SEPARATOR);
   if (sep === -1) return null;
@@ -61,4 +67,9 @@ export function parseEventsCursor(raw: string | null): EventsCursor | null {
   if (!id) return null;
   const createdAt = new Date(isoPart);
   return Number.isNaN(createdAt.getTime()) ? null : { createdAt, id };
+}
+
+/** Parse `?eventsCursor=<iso>|<id>`. Returns `null` for malformed / missing cursors. */
+export function parseEventsCursor(raw: string | null): EventsCursor | null {
+  return parseKeysetCursor(raw);
 }

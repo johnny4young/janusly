@@ -225,7 +225,16 @@ export const runNodes = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     errorJson: jsonb("error_json"),
   },
-  (table) => [uniqueIndex("run_nodes_run_node_idx").on(table.runId, table.nodeId)],
+  (table) => [
+    uniqueIndex("run_nodes_run_node_idx").on(table.runId, table.nodeId),
+    // Partial index for the stalled-node reaper's sweep
+    // (`status = 'running' AND started_at < cutoff ORDER BY started_at`).
+    // Tiny in practice: `running` rows are transient, while the table grows
+    // one row per node per run — without it every sweep is a seq scan.
+    index("run_nodes_running_started_idx")
+      .on(table.startedAt)
+      .where(sql`"status" = 'running'`),
+  ],
 );
 
 export const runEvents = pgTable(
@@ -260,7 +269,14 @@ export const deadLetters = pgTable(
     replayedAt: timestamp("replayed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
-  (table) => [index("dead_letters_org_status_idx").on(table.orgId, table.status, table.createdAt.desc())],
+  (table) => [
+    index("dead_letters_org_status_idx").on(table.orgId, table.status, table.createdAt.desc()),
+    // Backs the recovery queue's default sorts (`newest` / `oldest`) when no
+    // status filter is applied — with `status` in the middle of the index
+    // above, Postgres can't produce keyset-ordered output and re-sorts the
+    // org's entire DLQ per page.
+    index("dead_letters_org_created_idx").on(table.orgId, table.createdAt.desc(), table.id.desc()),
+  ],
 );
 
 export const routingStats = pgTable(

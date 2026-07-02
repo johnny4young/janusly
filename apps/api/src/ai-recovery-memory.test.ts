@@ -242,20 +242,20 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
     isMemoryAllowedMock.mockResolvedValue({ allowed: true });
   });
 
-  it("calls recallMemory twice — once per kind (recovery_rationale + patch_rationale)", async () => {
+  it("calls recallMemory ONCE with both kinds (single embedding round-trip)", async () => {
     recallMemoryMock.mockResolvedValue({ entries: [] });
     await composeRecoveryMemoryHint({
       orgId: "org-a",
       failingNode: { id: "n1", type: "http" },
       errorEnvelope: { message: "boom" },
     });
-    expect(recallMemoryMock).toHaveBeenCalledTimes(2);
-    const kinds = recallMemoryMock.mock.calls.map((c) => (c[0] as { kind: string }).kind);
+    expect(recallMemoryMock).toHaveBeenCalledTimes(1);
+    const kinds = (recallMemoryMock.mock.calls[0]![0] as { kinds: string[] }).kinds;
     expect(kinds).toContain("recovery_rationale");
     expect(kinds).toContain("patch_rationale");
   });
 
-  it("passes auth.orgId verbatim to BOTH recall calls (tenant isolation)", async () => {
+  it("passes auth.orgId verbatim to the recall call (tenant isolation)", async () => {
     recallMemoryMock.mockResolvedValue({ entries: [] });
     await composeRecoveryMemoryHint({
       orgId: "org-tenant-x",
@@ -277,22 +277,7 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
     expect(result).toEqual({ snippets: "", hitCount: 0, recallOk: true, entries: [] });
   });
 
-  it("keeps the patch route resilient when one recall kind throws", async () => {
-    recallMemoryMock
-      .mockRejectedValueOnce(new Error("repo regression"))
-      .mockResolvedValueOnce({ entries: [fakeEntry({ id: "p1", kind: "patch_rationale" })] });
-    const result = await composeRecoveryMemoryHint({
-      orgId: "default",
-      workflowId: "wf-billing",
-      failingNode: { id: "fetch", type: "http" },
-      errorEnvelope: { message: "timeout" },
-    });
-    expect(result.hitCount).toBe(1);
-    expect(result.recallOk).toBe(false);
-    expect(result.snippets).toContain("patch_rationale");
-  });
-
-  it("degrades to empty context when both recall calls throw", async () => {
+  it("degrades to empty context when the recall call throws", async () => {
     recallMemoryMock.mockRejectedValue(new Error("repo regression"));
     const result = await composeRecoveryMemoryHint({
       orgId: "default",
@@ -304,9 +289,12 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
   });
 
   it("renders the snippets block when entries come back", async () => {
-    recallMemoryMock
-      .mockResolvedValueOnce({ entries: [fakeEntry({ id: "r1", kind: "recovery_rationale" })] })
-      .mockResolvedValueOnce({ entries: [fakeEntry({ id: "p1", kind: "patch_rationale", similarity: 0.7 })] });
+    recallMemoryMock.mockResolvedValueOnce({
+      entries: [
+        fakeEntry({ id: "r1", kind: "recovery_rationale" }),
+        fakeEntry({ id: "p1", kind: "patch_rationale", similarity: 0.7 }),
+      ],
+    });
     const result = await composeRecoveryMemoryHint({
       orgId: "default",
       workflowId: "wf-billing",
@@ -330,19 +318,14 @@ describe("composeRecoveryMemoryHint — workflow post-filter", () => {
     // 4 entries split across kinds — 2 for wf-billing, 2 for wf-other.
     // Higher similarity on the other-workflow entries to confirm that
     // workflow scope wins over raw similarity.
-    recallMemoryMock
-      .mockResolvedValueOnce({
-        entries: [
-          fakeEntry({ id: "wf-billing-r", workflowId: "wf-billing", similarity: 0.5, content: "billing-rationale-r" }),
-          fakeEntry({ id: "wf-other-r", workflowId: "wf-other", similarity: 0.95, content: "other-rationale-r" }),
-        ],
-      })
-      .mockResolvedValueOnce({
-        entries: [
-          fakeEntry({ id: "wf-billing-p", workflowId: "wf-billing", similarity: 0.5, content: "billing-patch-p", kind: "patch_rationale" }),
-          fakeEntry({ id: "wf-other-p", workflowId: "wf-other", similarity: 0.95, content: "other-patch-p", kind: "patch_rationale" }),
-        ],
-      });
+    recallMemoryMock.mockResolvedValueOnce({
+      entries: [
+        fakeEntry({ id: "wf-billing-r", workflowId: "wf-billing", similarity: 0.5, content: "billing-rationale-r" }),
+        fakeEntry({ id: "wf-other-r", workflowId: "wf-other", similarity: 0.95, content: "other-rationale-r" }),
+        fakeEntry({ id: "wf-billing-p", workflowId: "wf-billing", similarity: 0.5, content: "billing-patch-p", kind: "patch_rationale" }),
+        fakeEntry({ id: "wf-other-p", workflowId: "wf-other", similarity: 0.95, content: "other-patch-p", kind: "patch_rationale" }),
+      ],
+    });
     const result = await composeRecoveryMemoryHint({
       orgId: "default",
       workflowId: "wf-billing",
@@ -356,14 +339,12 @@ describe("composeRecoveryMemoryHint — workflow post-filter", () => {
   });
 
   it("orders by similarity desc when no workflowId is supplied", async () => {
-    recallMemoryMock
-      .mockResolvedValueOnce({
-        entries: [
-          fakeEntry({ id: "low", similarity: 0.3, content: "low-sim" }),
-          fakeEntry({ id: "high", similarity: 0.95, content: "high-sim" }),
-        ],
-      })
-      .mockResolvedValueOnce({ entries: [] });
+    recallMemoryMock.mockResolvedValueOnce({
+      entries: [
+        fakeEntry({ id: "low", similarity: 0.3, content: "low-sim" }),
+        fakeEntry({ id: "high", similarity: 0.95, content: "high-sim" }),
+      ],
+    });
     const result = await composeRecoveryMemoryHint({
       orgId: "default",
       failingNode: { id: "n1", type: "http" },
@@ -386,13 +367,11 @@ describe("composeRecoveryMemoryHint — secret defense in depth", () => {
     // at read time, but if a new secret pattern was added to the regex
     // after a row was written, the repo's older scrub could miss it.
     // The helper re-scrubs at compose time.
-    recallMemoryMock
-      .mockResolvedValueOnce({
-        entries: [
-          fakeEntry({ content: "approachLabel=add_retry — sk-aaaaaaaaaaaaaaaaaaaa leaked through" }),
-        ],
-      })
-      .mockResolvedValueOnce({ entries: [] });
+    recallMemoryMock.mockResolvedValueOnce({
+      entries: [
+        fakeEntry({ content: "approachLabel=add_retry — sk-aaaaaaaaaaaaaaaaaaaa leaked through" }),
+      ],
+    });
     const result = await composeRecoveryMemoryHint({
       orgId: "default",
       failingNode: { id: "n1", type: "http" },

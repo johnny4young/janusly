@@ -19,6 +19,10 @@
  *   clients such as `rate-limit-redis.ts`.
  * - `removeOnComplete: 1000` keeps the most recent thousand successful jobs
  *   for debugging while bounding memory.
+ * - `removeOnFail` is bounded too (count + age): the durable failure record
+ *   is Postgres `dead_letters`, not Redis — without a bound, BullMQ keeps
+ *   failed jobs (each carrying a full workflow snapshot) forever, so a
+ *   poisoned producer or schema drift would grow Redis unboundedly.
  */
 
 import { Queue } from "bullmq";
@@ -42,11 +46,15 @@ export const workflowQueue = new Queue("workflow-nodes", {
   connection,
 });
 
+/** Redis retention for failed jobs — Postgres `dead_letters` is the durable record. */
+const REMOVE_ON_FAIL = { count: 1000, age: 7 * 24 * 60 * 60 };
+
 export async function enqueueNode(payload: EnqueueNodeInput) {
   return workflowQueue.add("execute-node", payload, {
     attempts: 1,
     delay: payload.delayMs ?? 0,
     removeOnComplete: 1000,
+    removeOnFail: REMOVE_ON_FAIL,
   });
 }
 
@@ -69,6 +77,7 @@ export async function enqueueWaitUntilResume(runId: string, nodeId: string, dela
       attempts: 1,
       delay: Math.max(0, delayMs),
       removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
     },
   );
 }

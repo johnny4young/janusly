@@ -60,6 +60,7 @@ import { errorEnvelope } from "../error-codes";
 import { asRecord, readJson, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
+import { parseKeysetCursor } from "../run-pagination";
 import {
   checkRollbackAvailability,
   getCredentialReadinessIssues,
@@ -73,18 +74,11 @@ import { saveWorkflowVersion } from "../workflows-save";
 /**
  * Parse a `?before=<iso>|<id>` keyset cursor for the Flows-list "Load more" into
  * the `{ createdAt, id }` the repo expects, or `undefined` for a missing /
- * malformed value (so it degrades to the first page). Splits on the LAST `|` so
- * an id containing a pipe survives; rejects an unparseable date or empty id.
- * Mirrors `parseEventsCursor` (run-pagination.ts) without coupling to it.
+ * malformed value (so it degrades to the first page). Thin adapter over the
+ * shared `parseKeysetCursor` (run-pagination.ts) — one parser per wire format.
  */
 function parseBeforeCursor(raw: string | null): { createdAt: Date; id: string } | undefined {
-  if (!raw) return undefined;
-  const sep = raw.lastIndexOf("|");
-  if (sep === -1) return undefined;
-  const id = raw.slice(sep + 1);
-  if (!id) return undefined;
-  const createdAt = new Date(raw.slice(0, sep));
-  return Number.isNaN(createdAt.getTime()) ? undefined : { createdAt, id };
+  return parseKeysetCursor(raw) ?? undefined;
 }
 
 export const workflowsRoutes: Route[] = [

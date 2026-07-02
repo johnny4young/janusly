@@ -14,7 +14,6 @@
     "@ai-sdk/openai": "^3.0.69",
     "@janusly/shared": "workspace:*",
     "ai": "^6.0.199",
-    "openai": "^6.42.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

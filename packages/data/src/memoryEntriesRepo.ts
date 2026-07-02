@@ -41,11 +41,12 @@
  *   wire audit themselves.
  */
 
-import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { db, memoryEntries, auditLogs } from "@janusly/db";
 import { generateEmbedding } from "@janusly/ai";
 import type { EmbeddingResult } from "@janusly/ai";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
+import { safePersistPayload } from "@janusly/shared/src/safe-persist";
 import { SENSITIVE_KEY_PATTERN } from "@janusly/shared/src/sensitive-keys";
 
 import { isMemoryAllowed } from "./memoryConsent";
@@ -443,6 +444,14 @@ export async function commitMemory(input: CommitMemoryInput): Promise<CommitMemo
 export type RecallMemoryInput = {
   orgId: string;
   kind?: MemoryKind;
+  /**
+   * Recall across several kinds in ONE call — one embedding round-trip and
+   * one pgvector query with `kind IN (...)`, instead of a per-kind
+   * `recallMemory` fan-out that re-embeds the same query. Takes precedence
+   * over `kind` when both are set. The row cap applies to the combined
+   * result (ranked purely by similarity, not per-kind quotas).
+   */
+  kinds?: MemoryKind[];
   query: string;
   /**
    * Optional per-call cap on the number of rows returned. Clamped to the
@@ -490,7 +499,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
   } catch (error) {
     console.warn("[memory] config read failed", { orgId: input.orgId, error });
     await writeRecallFailedAudit(input.orgId, "config_unavailable", {
-      kind: input.kind ?? null,
+      kind: input.kind ?? input.kinds?.join("+") ?? null,
     });
     fireUsageRecorder({
       metric: "memory.recall",
@@ -521,7 +530,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
 
   if (!embedding.ok) {
     await writeRecallFailedAudit(input.orgId, "embedding_failed", {
-      kind: input.kind ?? null,
+      kind: input.kind ?? input.kinds?.join("+") ?? null,
       embeddingProvider: config.embeddingProvider,
       embeddingModel: config.embeddingModel,
       embeddingError: embedding.error,
@@ -542,7 +551,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
 
   if (!hasExpectedEmbeddingDimension(embedding)) {
     await writeRecallFailedAudit(input.orgId, "embedding_dimension_mismatch", {
-      kind: input.kind ?? null,
+      kind: input.kind ?? input.kinds?.join("+") ?? null,
       embeddingProvider: embedding.provider,
       embeddingModel: embedding.model,
       embeddingDimension: embedding.dimension,
@@ -569,7 +578,11 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     eq(memoryEntries.orgId, input.orgId),
     gte(memoryEntries.retainUntil, sql`now()`),
   ];
-  if (input.kind) filters.push(eq(memoryEntries.kind, input.kind));
+  if (input.kinds && input.kinds.length > 0) {
+    filters.push(inArray(memoryEntries.kind, input.kinds));
+  } else if (input.kind) {
+    filters.push(eq(memoryEntries.kind, input.kind));
+  }
 
   // Bind the query embedding ONCE and reference the SELECT alias from
   // ORDER BY so Postgres / pgvector compute the cosine distance per row
@@ -607,7 +620,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
   } catch (error) {
     console.warn("[memory] recall query failed", { orgId: input.orgId, error });
     await writeRecallFailedAudit(input.orgId, "query_failed", {
-      kind: input.kind ?? null,
+      kind: input.kind ?? input.kinds?.join("+") ?? null,
       embeddingProvider: embedding.provider,
       embeddingModel: embedding.model,
     });
@@ -769,7 +782,7 @@ async function writeAudit(
       action,
       targetType,
       targetId,
-      metadata,
+      metadata: safePersistPayload(metadata) as Record<string, unknown>,
     });
   } catch (error) {
     console.warn("[memory] audit write failed", { action, error });

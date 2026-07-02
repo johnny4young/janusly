@@ -139,7 +139,8 @@ export type EnqueueReadyNodesInput = {
 
 /** Persistence boundary the runtime needs. `PostgresExecutionStore` is the production implementation. */
 export interface ExecutionStore {
-  getRunContext(runId: string): Promise<RunContext>;
+  /** `statusesOnly` returns the same keyed shape with empty `state`/`output` — the readiness scan's cheap path when no edge carries a `condition`. */
+  getRunContext(runId: string, opts?: { statusesOnly?: boolean }): Promise<RunContext>;
   getRunStatus(runId: string): Promise<RunStatus | null>;
   /** Stable per-run metadata (orgId/workflow/createdBy) — `null` when the run row is absent. */
   getRunMetadata(runId: string): Promise<RunMetadata | null>;
