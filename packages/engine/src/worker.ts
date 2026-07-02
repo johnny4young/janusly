@@ -26,7 +26,7 @@
  */
 
 import { Worker, UnrecoverableError } from "bullmq";
-import { NodeSchema, WorkflowSchema } from "@janusly/shared";
+import { NodeSchema } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setUsageRecorder } from "@janusly/ai";
 import {
@@ -93,6 +93,7 @@ import {
   registerStalledNodeReaperScheduler,
   STALLED_NODE_REAPER_JOB_NAME,
 } from "./stalled-node-reaper";
+import { parseWorkflowCached } from "./workflow-parse-cache";
 
 await assertMigrationsApplied();
 
@@ -305,11 +306,14 @@ function validateJobData(data: unknown): { runId: string; node: unknown; workflo
   if (!node.success) {
     throw new UnrecoverableError(`Invalid job data (node): ${node.error.issues.map((i) => i.message).join(", ")}`);
   }
-  const workflow = WorkflowSchema.safeParse(obj.workflow);
-  if (!workflow.success) {
-    throw new UnrecoverableError(`Invalid job data (workflow): ${workflow.error.issues.map((i) => i.message).join(", ")}`);
+  // Content-addressed cache: byte-identical workflow payloads (every job of
+  // the same run) skip the full-workflow Zod parse; a patched DLQ replay has
+  // different bytes and can never hit a stale entry.
+  const workflow = parseWorkflowCached(obj.workflow);
+  if (!workflow.ok) {
+    throw new UnrecoverableError(`Invalid job data (workflow): ${workflow.error}`);
   }
-  return { runId: obj.runId, node: node.data, workflow: workflow.data };
+  return { runId: obj.runId, node: node.data, workflow: workflow.workflow };
 }
 
 export const worker = new Worker(

@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
@@ -64,16 +64,26 @@ export type DeadLetterRecovery = {
 }
 
 /** Web-side `dead_letters` row shape (matches the API's response). `recovery`
- *  is the inline overlay (null when the row has no paired recovery item). */
+ *  is the inline overlay (null when the row has no paired recovery item).
+ *  LIST rows (`/dlq`, `/dlq/queue`) are summary projections: they carry
+ *  `nodeType` / `workflowName` but NOT `workflowJson` / `nodeJson` — those
+ *  unbounded snapshots only come back from the `/dlq?id=` detail read, which
+ *  the panel fetches on selection / before opening the Recovery dialog. */
 export type DeadLetter = {
   id: string
   runId: string
   nodeId: string
   attempt: number
   status: 'open' | 'replayed' | 'resolved' | string
-  workflowJson: unknown
-  nodeJson: unknown
+  /** Full workflow snapshot — detail reads only; absent on list rows. */
+  workflowJson?: unknown
+  /** Full node JSON — detail reads only; absent on list rows. */
+  nodeJson?: unknown
   errorJson: unknown
+  /** `node_json->>'type'` summary projection (list rows). */
+  nodeType?: string | null
+  /** `workflow_json->>'name'` summary projection (list rows). */
+  workflowName?: string | null
   createdAt?: string
   replayedAt?: string
   recovery?: DeadLetterRecovery | null
@@ -273,6 +283,36 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const cardSeverity: 'warning' | undefined = hasOpenEntry ? 'warning' : undefined
 
   const selected = filtered.find(item => item.id === selectedId) ?? filtered[0] ?? null
+
+  // List rows are summary projections (no workflowJson / nodeJson). Fetch the
+  // full `/dlq?id=` detail for the selected row so the detail blocks and the
+  // Recovery dialog get the real snapshots; the summary row is the graceful
+  // fallback while loading or on fetch failure.
+  const [selectedDetail, setSelectedDetail] = useState<DeadLetter | null>(null)
+  const selectedRowId = selected?.id ?? null
+  useEffect(() => {
+    if (!selectedRowId) {
+      setSelectedDetail(null)
+      return
+    }
+    let cancelled = false
+    setSelectedDetail(null)
+    api(`/dlq?id=${encodeURIComponent(selectedRowId)}`)
+      .then((row) => {
+        if (!cancelled) setSelectedDetail(row as DeadLetter)
+      })
+      .catch(() => {
+        // Summary row keeps rendering — the detail blocks just stay lighter.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedRowId])
+  // Merge keeps the list row's `recovery` overlay (the detail read is the raw
+  // dead_letters row) while the snapshot fields come from the detail.
+  const selectedFull = selected && selectedDetail && selectedDetail.id === selected.id
+    ? { ...selected, ...selectedDetail, recovery: selected.recovery }
+    : selected
 
   // Virtualize the filtered list. With 100-200 rows in the Recovery
   // Center, mounting every row as a real `<li>` costs hundreds of ms
@@ -610,7 +650,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             <button
               className="small-command small-command--primary"
               disabled={selected.status === 'replayed' || selected.status === 'resolved'}
-              onClick={() => setRecoveryDeadLetter(selected)}
+              onClick={() => setRecoveryDeadLetter(selectedFull ?? selected)}
             >
               <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
             </button>
@@ -644,9 +684,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             </button>
           </div>
 
-          <DetailBlock title={t('dlq.detail.error') as string} value={selected.errorJson} />
-          <DetailBlock title={t('dlq.detail.node') as string} value={selected.nodeJson} />
-          <DetailBlock title={t('dlq.detail.workflow') as string} value={selected.workflowJson} />
+          <DetailBlock title={t('dlq.detail.error') as string} value={(selectedFull ?? selected).errorJson} />
+          <DetailBlock title={t('dlq.detail.node') as string} value={(selectedFull ?? selected).nodeJson ?? null} />
+          <DetailBlock title={t('dlq.detail.workflow') as string} value={(selectedFull ?? selected).workflowJson ?? null} />
         </section>
       )}
       </section>

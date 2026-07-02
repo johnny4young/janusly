@@ -142,9 +142,11 @@ export function RecoveryDialog({
     const nodeJson = dlq.nodeJson as { type?: string } | null
     return normalizeErrorSignature(errorJson, {
       nodeId: dlq.nodeId,
-      nodeType: nodeJson?.type,
+      // Detail rows carry the full nodeJson; list rows carry the summary
+      // nodeType projection. Either yields the same signature input.
+      nodeType: nodeJson?.type ?? dlq.nodeType ?? undefined,
     }).signature
-  }, [dlq.errorJson, dlq.nodeId, dlq.nodeJson])
+  }, [dlq.errorJson, dlq.nodeId, dlq.nodeJson, dlq.nodeType])
   // Which suggestion the operator picked from the tab strip. Reset to 0
   // every time a new review step starts so a fresh "Generate suggestion"
   // call doesn't carry over a stale tab from a prior run.

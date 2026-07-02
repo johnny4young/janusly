@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Workflow } from "@janusly/shared";
 
 import {
+  budgetAwareCandidateCount,
   generateWorkflowCandidates,
   MAX_GENERATION_CANDIDATES,
   selectBestCandidate,
@@ -137,5 +138,31 @@ describe("selectBestCandidate", () => {
     const selection = selectBestCandidate([candidate(invalidWorkflow)]);
     expect(selection!.winner.workflow.id).toBe("broken");
     expect(selection!.validCount).toBe(0);
+  });
+});
+
+describe("budgetAwareCandidateCount", () => {
+  const budget = (over: Partial<{ monthlyUsdLimit: number | null; warningThresholdCrossed: boolean }> = {}) => ({
+    monthlyUsdLimit: 100,
+    warningThresholdCrossed: false,
+    ...over,
+  });
+
+  it("keeps the configured N when spend is under the warning threshold", () => {
+    expect(budgetAwareCandidateCount(3, budget())).toBe(3);
+  });
+
+  it("keeps the configured N when no budget is configured", () => {
+    expect(budgetAwareCandidateCount(5, budget({ monthlyUsdLimit: null, warningThresholdCrossed: true }))).toBe(5);
+  });
+
+  it("collapses to single-shot once the warning threshold is crossed", () => {
+    expect(budgetAwareCandidateCount(5, budget({ warningThresholdCrossed: true }))).toBe(1);
+  });
+
+  it("clamps the configured value into the [1,5] bounds first", () => {
+    expect(budgetAwareCandidateCount(99, budget())).toBe(MAX_GENERATION_CANDIDATES);
+    expect(budgetAwareCandidateCount(0, budget({ warningThresholdCrossed: true }))).toBe(1);
+    expect(budgetAwareCandidateCount(Number.NaN, budget())).toBe(1);
   });
 });
