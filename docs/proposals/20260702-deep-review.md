@@ -133,10 +133,12 @@ Ordered by value. Each is scoped to be a single ticket.
    **Partially shipped in this PR:** the independent routing-stats +
    `node.succeeded` event writes now run under `Promise.all`. Remaining:
    combine `markNodeSucceeded` + its event in one transaction.
-5. **Alerts scanner fan-out.** Sequential per-org iteration ×
-   per-scheduled-workflow `queryScheduleFires` (up to ~200/org) can outlast
-   the cron interval at fleet scale. Design: one grouped query
-   (`GROUP BY workflow_id, day, hour`) + bounded concurrency (4–8) over orgs.
+5. **Alerts scanner fan-out.** **Partially shipped in this PR (fourth
+   batch):** org scans now run through a bounded worker pool (concurrency 4)
+   instead of strictly sequentially, so one slow org can't serialize the
+   fleet past the cron interval. Remaining: batch `queryScheduleFires` into
+   one grouped query (`GROUP BY workflow_id, day, hour`) inside
+   `scanScheduleAnomalies`.
 
 ### 2b. Architecture / maintainability
 
