@@ -35,6 +35,7 @@ import {
   createRecoveryItemForDeadLetter,
 } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { asRecord, readJson, sendError, sendJson } from "../http";
+import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
@@ -480,6 +481,8 @@ export const dlqRoutes: Route[] = [
     } },
   { method: "POST", match: "/dlq/replay", role: "editor", permission: "dlq.replay",
     handler: async ({ req, res, auth }) => {
+      const replayMcpGate = await guardMcpWrite(auth, "dlq.replay");
+      if (!replayMcpGate.ok) return sendJson(res, replayMcpGate.body, replayMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       if (typeof body.deadLetterId === "string") {

@@ -38,6 +38,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendEventFrame, sendError, sendJson, sendSseComment } from "../http";
+import { guardMcpWrite } from "../mcp-consent";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
 import { getRunStreamHub } from "../run-stream";
@@ -292,6 +293,8 @@ export const runsRoutes: Route[] = [
   // Run lifecycle (start / resume / cancel)
   { method: "POST", match: "/start", role: "editor",
     handler: async ({ req, res, auth }) => {
+      const startMcpGate = await guardMcpWrite(auth, "runs.start");
+      if (!startMcpGate.ok) return sendJson(res, startMcpGate.body, startMcpGate.status);
       // Body shape: either a flat workflow (legacy) or `{ workflow, input }`
       // for typed workflow inputs. The flat form keeps existing callers
       // working; the wrapped form is required when the workflow declares
@@ -399,6 +402,8 @@ export const runsRoutes: Route[] = [
     } },
   { method: "POST", match: "/resume", role: "editor",
     handler: async ({ req, res, auth }) => {
+      const resumeMcpGate = await guardMcpWrite(auth, "runs.resume");
+      if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
       const { runId, nodeId, input, resumeToken } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
@@ -432,6 +437,8 @@ export const runsRoutes: Route[] = [
   // the cancelled-stays-cancelled rollup absorbs the post-cancel writes.
   { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel",
     handler: async ({ req, res, auth }) => {
+      const cancelMcpGate = await guardMcpWrite(auth, "runs.cancel");
+      if (!cancelMcpGate.ok) return sendJson(res, cancelMcpGate.body, cancelMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const runId = typeof body.runId === "string" ? body.runId : null;
       const reason = body.reason;

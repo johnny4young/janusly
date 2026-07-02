@@ -15,12 +15,15 @@ function makeMockCallApi() {
 }
 
 describe("MCP tool catalog", () => {
-  it("exposes the fifteen read-only tools by default (no write surface)", () => {
+  it("exposes the read-only surface by default (no write surface)", () => {
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "ai.generate_workflow",
       "ai.patch_workflow",
       "dlq.clusters",
       "dlq.list",
+      "mcp.connections.list",
+      "mcp.connections.tools",
       "recipes.list",
       "recovery.metrics",
       "reports.run_explain",
@@ -34,20 +37,35 @@ describe("MCP tool catalog", () => {
       "workflows.validate",
       "workflows.versions",
     ]);
+    // The gated write surface is absent by default.
+    for (const write of ["workflows.save", "runs.start", "dlq.replay", "mcp.connections.create"]) {
+      expect(names).not.toContain(write);
+    }
   });
 
-  it("appends workflows.save to the catalog when JANUSLY_MCP_WRITES_ENABLED=true", () => {
+  it("appends the full write surface only when JANUSLY_MCP_WRITES_ENABLED=true", () => {
     const off = listTools({ JANUSLY_MCP_WRITES_ENABLED: "" });
-    expect(off.find((t) => t.name === "workflows.save")).toBeUndefined();
-
     const on = listTools({ JANUSLY_MCP_WRITES_ENABLED: "true" });
-    const save = on.find((t) => t.name === "workflows.save");
-    expect(save).toBeDefined();
-    expect(save?.inputSchema).toMatchObject({
-      type: "object",
-      required: ["workflow"],
-      properties: { dryRun: { type: "boolean" } },
-    });
+
+    const writeNames = [
+      "workflows.save",
+      "workflows.rollback",
+      "runs.start",
+      "runs.resume",
+      "runs.cancel",
+      "dlq.replay",
+      "mcp.connections.create",
+      "mcp.connections.rediscover",
+      "mcp.connections.set_tool",
+      "mcp.connections.delete",
+    ];
+    for (const name of writeNames) {
+      expect(off.find((t) => t.name === name)).toBeUndefined();
+      expect(on.find((t) => t.name === name)).toBeDefined();
+    }
+    // The read surface stays present in both modes.
+    expect(on.find((t) => t.name === "ai.generate_workflow")).toBeDefined();
+    expect(off.find((t) => t.name === "ai.generate_workflow")).toBeDefined();
   });
 
   it("treats any non-'true' env value as off when computing the catalog", () => {
@@ -354,5 +372,139 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await expect(dispatchTool(mock, "ai.patch_workflow", { deadLetterId: "" })).rejects.toThrow(/deadLetterId/);
     expect(mock).not.toHaveBeenCalled();
+  });
+
+  // -------- ai.generate_workflow (read-only surface) --------
+
+  it("ai.generate_workflow POSTs the prompt to /ai/generate-workflow (no write flag needed)", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "ai.generate_workflow", { prompt: "email a receipt when a payment lands" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/ai/generate-workflow");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ prompt: "email a receipt when a payment lands" });
+  });
+
+  it("ai.generate_workflow throws on an empty prompt", async () => {
+    const { mock } = makeMockCallApi();
+    await expect(dispatchTool(mock, "ai.generate_workflow", { prompt: "  " })).rejects.toThrow(/prompt/);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  // -------- read-only MCP connection surface --------
+
+  it("mcp.connections.list is a no-arg passthrough to /mcp/connections", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "mcp.connections.list", {});
+    expect(mock).toHaveBeenCalledWith("/mcp/connections");
+  });
+
+  it("mcp.connections.tools URL-encodes the alias", async () => {
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "mcp.connections.tools", { alias: "note book" });
+    expect(mock).toHaveBeenCalledWith("/mcp/connections/note%20book/tools");
+  });
+
+  // -------- gated write surface: env-off rejection --------
+
+  it("every write tool is rejected with a clear error when the env flag is off", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    const { mock } = makeMockCallApi();
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["runs.start", { workflow: { dslVersion: "1.0", nodes: [], edges: [] } }],
+      ["runs.resume", { runId: "r1", nodeId: "n1" }],
+      ["runs.cancel", { runId: "r1" }],
+      ["dlq.replay", { deadLetterId: "dlq-1" }],
+      ["workflows.rollback", { workflowId: "wf1", sourceVersionId: "v1" }],
+      ["mcp.connections.create", { alias: "notion", transport: "http" }],
+      ["mcp.connections.rediscover", { alias: "notion" }],
+      ["mcp.connections.set_tool", { alias: "notion", toolName: "pages.update" }],
+      ["mcp.connections.delete", { alias: "notion" }],
+    ];
+    for (const [tool, args] of cases) {
+      await expect(dispatchTool(mock, tool, args)).rejects.toThrow(/JANUSLY_MCP_WRITES_ENABLED/);
+    }
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  // -------- gated write surface: dispatch shape when env-on --------
+
+  it("runs.start POSTs { workflow, input } to /start", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    const workflow = { dslVersion: "1.0", id: "wf1", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
+    await dispatchTool(mock, "runs.start", { workflow, input: { amount: 42 } });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/start");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ workflow, input: { amount: 42 } });
+  });
+
+  it("runs.resume threads runId/nodeId/input/resumeToken to /resume", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "runs.resume", { runId: "r1", nodeId: "n1", input: { ok: true }, resumeToken: "tok" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/resume");
+    expect(JSON.parse(init?.body as string)).toEqual({ runId: "r1", nodeId: "n1", input: { ok: true }, resumeToken: "tok" });
+  });
+
+  it("runs.cancel POSTs { runId, reason } to /run/cancel", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "runs.cancel", { runId: "r1", reason: "superseded" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/run/cancel");
+    expect(JSON.parse(init?.body as string)).toEqual({ runId: "r1", reason: "superseded" });
+  });
+
+  it("dlq.replay accepts deadLetterId OR runId+nodeId, and rejects neither", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "dlq.replay", { deadLetterId: "dlq-1" });
+    expect(JSON.parse(mock.mock.calls[0][1]?.body as string)).toEqual({ deadLetterId: "dlq-1" });
+    await dispatchTool(mock, "dlq.replay", { runId: "r1", nodeId: "n1" });
+    expect(JSON.parse(mock.mock.calls[1][1]?.body as string)).toEqual({ runId: "r1", nodeId: "n1" });
+    await expect(dispatchTool(mock, "dlq.replay", {})).rejects.toThrow(/deadLetterId/);
+  });
+
+  it("workflows.rollback POSTs { workflowId, sourceVersionId } to /workflows/rollback", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "workflows.rollback", { workflowId: "wf1", sourceVersionId: "v2" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/workflows/rollback");
+    expect(JSON.parse(init?.body as string)).toEqual({ workflowId: "wf1", sourceVersionId: "v2" });
+  });
+
+  it("mcp.connections.create POSTs the full body to /mcp/connections", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    const body = { alias: "notion", transport: "http", url: "https://mcp.example/notion" };
+    await dispatchTool(mock, "mcp.connections.create", body);
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/mcp/connections");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual(body);
+  });
+
+  it("mcp.connections.set_tool strips alias/toolName from the body and puts them in the path", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "mcp.connections.set_tool", { alias: "notion", toolName: "pages.update", enabled: true, writeSide: false });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/mcp/connections/notion/tools/pages.update");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ enabled: true, writeSide: false });
+  });
+
+  it("mcp.connections.delete issues a DELETE to the alias path", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
+    const { mock } = makeMockCallApi();
+    await dispatchTool(mock, "mcp.connections.delete", { alias: "notion" });
+    const [path, init] = mock.mock.calls[0];
+    expect(path).toBe("/mcp/connections/notion");
+    expect(init?.method).toBe("DELETE");
   });
 });

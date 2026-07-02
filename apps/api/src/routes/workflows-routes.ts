@@ -55,10 +55,8 @@ import { z } from "zod";
 
 import { auditAction } from "../audit-helper";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
-import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, readJson, sendError, sendJson } from "../http";
-import { isMcpWriteAllowed, mcpRateLimitBucket } from "../mcp-consent";
-import { enforceRateLimit } from "../rate-limit";
+import { guardMcpWrite } from "../mcp-consent";
 import { parseKeysetCursor } from "../run-pagination";
 import {
   checkRollbackAvailability,
@@ -180,22 +178,11 @@ export const workflowsRoutes: Route[] = [
     } },
   { method: "POST", match: "/workflows/save", role: "editor", permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
-      // MCP-source mutations gate on the process-wide env AND the
-      // tenant's `mcp.writeConsent` flag. Both must be true; otherwise
-      // 403 with a stable code the MCP client can render. Per-tool rate
-      // limit fires for MCP-source traffic so a misbehaving client
-      // can't flood a tenant.
-      if (auth.source === "mcp") {
-        const consent = await isMcpWriteAllowed(auth.orgId);
-        if (!consent.allowed) {
-          return sendJson(res, { error: consent.message, code: `mcp_${consent.reason}` }, 403);
-        }
-        await enforceRateLimit(auth.orgId, {
-          name: mcpRateLimitBucket("workflows.save"),
-          windowMs: RATE_LIMIT_WINDOW_MS,
-          max: 60,
-        });
-      }
+      // MCP-source mutations gate on the process-wide env AND the tenant's
+      // `mcp.writeConsent` flag (+ per-tool rate limit). No-op for non-MCP
+      // callers. Audit `source:"mcp"` tagging is automatic via `auditAction`.
+      const saveMcpGate = await guardMcpWrite(auth, "workflows.save");
+      if (!saveMcpGate.ok) return sendJson(res, saveMcpGate.body, saveMcpGate.status);
 
       const workflow = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const validation = validateWorkflow(workflow);
@@ -254,6 +241,8 @@ export const workflowsRoutes: Route[] = [
     } },
   { method: "POST", match: "/workflows/rollback", role: "editor",
     handler: async ({ req, res, auth }) => {
+      const rollbackMcpGate = await guardMcpWrite(auth, "workflows.rollback");
+      if (!rollbackMcpGate.ok) return sendJson(res, rollbackMcpGate.body, rollbackMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
       const sourceVersionId = typeof body.sourceVersionId === "string" ? body.sourceVersionId : "";
