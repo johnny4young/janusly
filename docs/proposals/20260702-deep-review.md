@@ -133,12 +133,12 @@ Ordered by value. Each is scoped to be a single ticket.
    **Partially shipped in this PR:** the independent routing-stats +
    `node.succeeded` event writes now run under `Promise.all`. Remaining:
    combine `markNodeSucceeded` + its event in one transaction.
-5. **Alerts scanner fan-out.** **Partially shipped in this PR (fourth
-   batch):** org scans now run through a bounded worker pool (concurrency 4)
-   instead of strictly sequentially, so one slow org can't serialize the
-   fleet past the cron interval. Remaining: batch `queryScheduleFires` into
-   one grouped query (`GROUP BY workflow_id, day, hour`) inside
-   `scanScheduleAnomalies`.
+5. ~~Alerts scanner fan-out.~~ **Implemented in this PR (batches 5–6):**
+   org scans run through a bounded worker pool (concurrency 4), and
+   `scanScheduleAnomalies` now makes ONE batched query per org
+   (`queryScheduleFiresByWorkflow`, per-workflow newest-first cap preserved
+   via `ROW_NUMBER() OVER (PARTITION BY workflow_id ...)`) instead of up to
+   ~200 sequential per-workflow queries per cron tick.
 
 ### 2b. Architecture / maintainability
 
@@ -175,12 +175,15 @@ Ordered by value. Each is scoped to be a single ticket.
 11. ~~`@types/node` pin.~~ **Implemented in this PR (third batch):** all ten
     packages now declare `^24.10.1`, matching `engines: node >=24` and the
     Node 24 CI lanes.
-12. **i18n key typing.** `apps/web/src/i18n/server-events.ts` has 13×
-    `t(key as any)`; typo'd keys ship silently (mitigated by `defaultValue`).
-    Type the key union.
-13. **Permission catalog nit.** `PermissionCategory` declares 20 categories
-    but `plugins` has zero entries — drop it or land its first key (AGENTS.md
-    says "19 active categories", which is correct only by accident).
+12. ~~i18n key typing.~~ **Implemented in this PR (sixth batch):** the 13
+    scattered `t(key as any)` casts collapsed into one documented
+    `tServerCode(key, options)` seam. Full static typing is impossible here
+    by design — the key's code half originates on the server — so the win is
+    a single, deliberate escape hatch (with the `MISSING`-sentinel fallback
+    built in) instead of 13 unreviewed casts.
+13. ~~Permission catalog nit.~~ **Implemented in this PR (sixth batch):**
+    the empty `plugins` member is gone — `PermissionCategory` now declares
+    exactly the 19 active categories AGENTS.md documents.
 
 ### 2c. Operations / deployment
 

@@ -34,7 +34,7 @@
  *   trigger path reusing the marker.
  */
 
-import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, runs, scheduleEntries, workflowVersions } from "@janusly/db";
 
 /** Hard ceiling on the lookback window — mirrors the engine's `MAX_HISTORY_DAYS`. */
@@ -95,6 +95,63 @@ export async function queryScheduleFires(
     if (row.firedAt instanceof Date && typeof row.status === "string") {
       out.push({ firedAt: row.firedAt, status: row.status });
     }
+  }
+  return out;
+}
+
+/**
+ * Batched variant of {@link queryScheduleFires} for the alerts scanner: ONE
+ * SQL round-trip for up to `SCHEDULE_ANOMALY_MAX_WORKFLOWS` workflows instead
+ * of a per-workflow query fan-out. Same filters and multi-tenant scope; the
+ * per-workflow newest-first `rowCap` is enforced with a
+ * `ROW_NUMBER() OVER (PARTITION BY workflow_id ORDER BY created_at DESC)`
+ * window so the cap semantics match the single-workflow read exactly.
+ * Workflows with no fires in the window are simply absent from the map.
+ */
+export async function queryScheduleFiresByWorkflow(
+  orgId: string,
+  workflowIds: string[],
+  windowDays: number,
+  rowCapPerWorkflow: number = MAX_SCHEDULE_FIRE_ROWS,
+): Promise<Map<string, ScheduleFireRow[]>> {
+  const out = new Map<string, ScheduleFireRow[]>();
+  if (workflowIds.length === 0) return out;
+
+  const clampedDays = Math.min(MAX_SCHEDULE_HISTORY_DAYS, Math.max(1, Math.trunc(windowDays)));
+  const clampedCap = Math.min(MAX_SCHEDULE_FIRE_ROWS, Math.max(1, Math.trunc(rowCapPerWorkflow)));
+  const since = new Date(Date.now() - clampedDays * 24 * 60 * 60 * 1000);
+
+  const ranked = db
+    .select({
+      workflowId: workflowVersions.workflowId,
+      firedAt: runs.createdAt,
+      status: runs.status,
+      rn: sql<number>`row_number() over (partition by ${workflowVersions.workflowId} order by ${runs.createdAt} desc)`.as("rn"),
+    })
+    .from(runs)
+    .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+    .where(
+      and(
+        eq(workflowVersions.orgId, orgId),
+        inArray(workflowVersions.workflowId, workflowIds),
+        sql`${runs.inputJson} -> 'input' ->> 'triggeredBy' = 'schedule'`,
+        isNull(runs.replayMode),
+        gte(runs.createdAt, since),
+      ),
+    )
+    .as("scheduled_fires");
+
+  const rows = await db
+    .select({ workflowId: ranked.workflowId, firedAt: ranked.firedAt, status: ranked.status })
+    .from(ranked)
+    .where(lte(ranked.rn, clampedCap))
+    .orderBy(ranked.workflowId, desc(ranked.firedAt));
+
+  for (const row of rows) {
+    if (!(row.firedAt instanceof Date) || typeof row.status !== "string") continue;
+    const list = out.get(row.workflowId) ?? [];
+    list.push({ firedAt: row.firedAt, status: row.status });
+    out.set(row.workflowId, list);
   }
   return out;
 }
