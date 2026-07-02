@@ -261,6 +261,78 @@ export async function markNodeSucceeded(runId: string, nodeId: string, output?: 
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
 }
 
+/**
+ * Cap on how much of a node's output the `node.succeeded` EVENT payload
+ * repeats. The full output (up to `STATE_JSON_MAX_BYTES`) always lands in the
+ * node row's `state_json` — the event copy exists only so the live SSE stream
+ * can preview it before the poll loop refetches node rows. Below the cap the
+ * event carries the full output (live Inspector is byte-identical to a
+ * refetch); above it the event carries just a byte count + a truncation flag,
+ * so a 1 MB http body isn't written twice on the hottest completion path.
+ */
+const NODE_SUCCEEDED_EVENT_OUTPUT_MAX_BYTES = 8_000;
+
+/** Best-effort JSON byte size; returns `Infinity` when the value can't be measured (treated as "large"). */
+function approximateJsonBytes(value: unknown): number {
+  try {
+    const json = JSON.stringify(value);
+    return typeof json === "string" ? new TextEncoder().encode(json).length : Number.POSITIVE_INFINITY;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Combine the `succeeded` node transition and its `node.succeeded` event in
+ * ONE transaction. The two writes on the hottest completion path — an UPDATE
+ * of `run_nodes` and an INSERT into `run_events` — commit or roll back
+ * together and cost one DB round-trip instead of two. The SSE publish happens
+ * AFTER commit so a rolled-back write never fans out to live subscribers.
+ *
+ * The event payload does NOT repeat a large output (which already lives in the
+ * node row's `state_json`) — see `NODE_SUCCEEDED_EVENT_OUTPUT_MAX_BYTES`.
+ */
+export async function markNodeSucceededWithEvent(
+  runId: string,
+  nodeId: string,
+  output: unknown,
+  attempt: number,
+): Promise<void> {
+  const finishedAt = new Date();
+  const eventId = crypto.randomUUID();
+  const stateJson = safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES });
+
+  const outputBytes = approximateJsonBytes(output ?? {});
+  const rawEventPayload = outputBytes <= NODE_SUCCEEDED_EVENT_OUTPUT_MAX_BYTES
+    ? { output: output ?? {}, attempt }
+    : { outputBytes, outputTruncated: true, attempt };
+  // Still run the chokepoint for key-redaction (and as a size backstop).
+  const eventPayload = safePersistPayload(rawEventPayload);
+
+  await db.transaction(async (tx) => {
+    await tx.update(runNodes)
+      .set({ status: "succeeded", stateJson, finishedAt })
+      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+    await tx.insert(runEvents).values({
+      id: eventId,
+      runId,
+      nodeId,
+      type: "node.succeeded",
+      payload: eventPayload,
+      createdAt: finishedAt,
+    });
+  });
+
+  publishRunEvent(runId, {
+    kind: "event",
+    id: eventId,
+    nodeId,
+    type: "node.succeeded",
+    payload: eventPayload,
+    createdAt: finishedAt.toISOString(),
+  });
+}
+
 /** Conditionally complete a paused node. Returns false when it was already resumed/cancelled/failed. */
 export async function markWaitingNodeSucceeded(runId: string, nodeId: string, output?: any): Promise<boolean> {
   const completed = await db.update(runNodes)

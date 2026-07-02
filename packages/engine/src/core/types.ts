@@ -157,6 +157,8 @@ export interface ExecutionStore {
   /** Conditional `queued → running` transition. Returns `true` on a successful claim, `false` when the row had already advanced past `queued`. */
   markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
   markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
+  /** Combine the `succeeded` transition + its `node.succeeded` event in one transaction (the hot completion path). */
+  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number): Promise<void>;
   markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;
   markNodeWaiting(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
   markNodeSkipped(runId: string, nodeId: string, metadata?: unknown): Promise<void>;

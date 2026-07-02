@@ -40,6 +40,7 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
     tryClaimNodeForQueue: vi.fn().mockResolvedValue(true),
     markNodeRunning: vi.fn().mockResolvedValue(true),
     markNodeSucceeded: vi.fn().mockResolvedValue(undefined),
+    markNodeSucceededWithEvent: vi.fn().mockResolvedValue(undefined),
     markNodeFailed: vi.fn().mockResolvedValue(undefined),
     markNodeWaiting: vi.fn().mockResolvedValue(undefined),
     markNodeSkipped: vi.fn().mockResolvedValue(undefined),
@@ -130,10 +131,11 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1)
     expect(executors.execute).toHaveBeenCalled()
-    expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'n1', { x: 1 })
-    // appendEvent fires for node.running, node.succeeded, plus enqueueReadyNodes events.
+    // The succeeded transition + its node.succeeded event commit together via
+    // markNodeSucceededWithEvent (not markNodeSucceeded + a separate appendEvent).
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1)
+    // appendEvent still fires for node.running (and enqueueReadyNodes events).
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.succeeded' }))
   })
 
   it('skips downstream scheduling when the run is cancelled while a node was running', async () => {
@@ -151,7 +153,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     await runtime.executeQueuedNode(input)
 
     expect(executors.execute).toHaveBeenCalled()
-    expect(store.markNodeSucceeded).toHaveBeenCalled()
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalled()
     // enqueueReadyNodes never gets a chance to call queue.enqueueNode
     expect(enqueueNode).not.toHaveBeenCalled()
   })
@@ -412,7 +414,7 @@ describe('executeQueuedNode — runtime learning metadata', () => {
 
     expect(recordWorkflowImprovement).not.toHaveBeenCalled()
     // Run still succeeds — node is marked succeeded; no crash.
-    expect(store.markNodeSucceeded).toHaveBeenCalled()
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalled()
   })
 
   it('runs the executor when getRunMetadata returns null (run row deleted mid-flight)', async () => {
@@ -430,7 +432,7 @@ describe('executeQueuedNode — runtime learning metadata', () => {
 
     // Executor still ran.
     expect(executors.execute).toHaveBeenCalled()
-    expect(store.markNodeSucceeded).toHaveBeenCalled()
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalled()
     // Routing-stats write was made (the repo's own guard short-circuits on
     // undefined orgId).
     expect(updateRoutingStats).toHaveBeenCalledWith(expect.objectContaining({
