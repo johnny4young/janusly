@@ -118,8 +118,7 @@ describe('startSandboxRun', () => {
     expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'notify')
     expect(enqueueNodeMock).toHaveBeenCalledWith({
       runId: result.runId,
-      workflow: linearWorkflow,
-      node: linearWorkflow.nodes[1],
+      nodeId: linearWorkflow.nodes[1].id,
       attempt: 1,
     })
     expect(updateRunStatusFromNodesMock).not.toHaveBeenCalled()
@@ -166,7 +165,7 @@ describe('startSandboxRun', () => {
     expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'join')
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
-      node: fanInWorkflow.nodes[2],
+      nodeId: fanInWorkflow.nodes[2].id,
       attempt: 1,
     })
     expect(updateRunStatusFromNodesMock).not.toHaveBeenCalled()

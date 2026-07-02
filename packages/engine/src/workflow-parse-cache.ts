@@ -2,13 +2,14 @@
  * Content-addressed cache for `WorkflowSchema.safeParse` in the worker's
  * job-validation path.
  *
- * Every `execute-node` BullMQ job carries the FULL workflow JSON, so a
- * 100-node workflow pays a full-workflow Zod parse 100+ times per run
- * (more with retries/fan-out) for byte-identical payloads. The cache key
- * is a SHA-1 of the raw payload's JSON — NOT the runId — so a DLQ replay
- * that re-enqueues a PATCHED workflow under the same run can never hit a
- * stale entry: different bytes, different key. `JSON.stringify` + SHA-1
- * is far cheaper than a full schema parse for large workflows.
+ * `execute-node` jobs are slim (`{ runId, nodeId }`); the worker reloads the
+ * workflow from `runs.inputJson.workflow` once per job, so a 100-node
+ * workflow would otherwise pay a full-workflow Zod parse 100+ times per run
+ * (more with retries/fan-out) for byte-identical snapshots. The cache key is
+ * a SHA-1 of the raw JSON — NOT the runId — so a DLQ replay that rewrites the
+ * run's snapshot to a PATCHED workflow can never hit a stale entry: different
+ * bytes, different key. `JSON.stringify` + SHA-1 is far cheaper than a full
+ * schema parse for large workflows.
  *
  * Used by: `packages/engine/src/worker.ts` `validateJobData`.
  *
