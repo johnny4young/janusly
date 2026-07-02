@@ -22,6 +22,7 @@ import {
   markNodeRunning,
   markNodeSkipped,
   markNodeSucceeded,
+  markNodeSucceededWithEvent,
   markNodeWaiting,
   tryClaimNodeForQueue,
   updateRunStatusFromNodes,
@@ -61,6 +62,10 @@ export class PostgresExecutionStore implements ExecutionStore {
 
   markNodeSucceeded(runId: string, nodeId: string, output: unknown) {
     return markNodeSucceeded(runId, nodeId, output);
+  }
+
+  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number) {
+    return markNodeSucceededWithEvent(runId, nodeId, output, attempt);
   }
 
   markNodeFailed(runId: string, nodeId: string, error: SerializedError) {
