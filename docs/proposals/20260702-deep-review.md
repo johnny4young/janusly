@@ -152,11 +152,15 @@ Ordered by value. Each is scoped to be a single ticket.
    `ToolDefinition[]`), keeping `defineTool`/`validateToolInput`/
    `executeTool`/`listTools` in the registry. `vector-tools.ts` /
    `db-query-tools.ts` are the in-repo precedent.
-8. **Type the agent loop.** `runAgentLoop` (`node-registry.ts`) takes
-   `agentConfig: any` and casts `(plan as any).done/.finalAnswer` — LLM
-   planner output flows untyped into tool execution. Zod plan schema (house
-   style everywhere else) + remove the `worker.ts` `node as any,
-   workflow as any` casts at the queue→execution boundary.
+8. ~~Type the agent loop.~~ **Implemented in this PR (fourth batch):**
+   `LlmPlannerReplySchema` (Zod) gates the LLM planner's JSON reply — a
+   malformed plan shape now degrades to the rules planner with `aiError`
+   attribution instead of flowing untyped into `executeTool`; `runAgentLoop`
+   takes a typed `AgentNodeConfig` (schema gains the `name`/`role`/
+   `persona`/`reflection`/`model` fields it already read via passthrough),
+   steps are `AgentLoopStepRecord[]`, and the `worker.ts`
+   `node as any, workflow as any` casts are gone (`validateJobData` returns
+   real types).
 9. **Standardize on `errorEnvelope`.** The canonical helper has 83 call
    sites, but ~280 inline `sendJson(res, { error: … })` sites bypass it, so
    the `code` field the web localizes against is inconsistently present.
@@ -178,12 +182,13 @@ Ordered by value. Each is scoped to be a single ticket.
 
 ### 2c. Operations / deployment
 
-14. **Production container images.** `Dockerfile.api` runs `pnpm dev` as
-    root with no `HEALTHCHECK` and installs dev deps — fine for local, not a
-    deploy artifact. Design: multi-stage build (install → build → prune to
-    prod deps), non-root `USER`, `HEALTHCHECK CMD wget -qO- localhost:3001/health`,
-    `NODE_ENV=production`, and a worker-mode variant (same image,
-    different command).
+14. ~~Production container images.~~ **Implemented in this PR (fourth
+    batch):** `Dockerfile.prod` with `api` + `worker` targets — frozen
+    lockfile, non-root user, `NODE_ENV=production`, no watch mode, and a
+    `HEALTHCHECK` against `GET /health` on the api target. The workspace is
+    TS-first (tsx runtime), so images keep the full install by design; the
+    dev images stay dev-oriented. Prune-to-prod-deps remains open if the
+    workspace ever moves to emitted JS.
 15. ~~Graceful-shutdown parity for the API.~~ **Verified already done** —
     `apps/api/src/index.ts` drains on SIGTERM/SIGINT with a force-close
     timer (`API_SHUTDOWN_GRACE_MS`) and closes the auto-healing/alerts/

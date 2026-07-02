@@ -36,7 +36,8 @@ import {
 } from "@janusly/data";
 import { evaluateExpression } from "./expression";
 import { executeTool, isToolWriteSide } from "./tool-registry";
-import { planAgentTool, planAgentToolWithLLM } from "./agent-planner";
+import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
+import type { AgentNodeConfig } from "./node-configs";
 import { appendEvent } from "./persistence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
@@ -163,7 +164,23 @@ function dryRunToolSkipPayload(tool: string, input: unknown): Record<string, unk
   };
 }
 
-async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "agent") {
+/** One recorded agent-loop step: the plan, the tool result, and the reflection (when enabled). */
+type AgentLoopStepRecord = {
+  iteration: number;
+  plan: AgentPlanResult;
+  result: unknown;
+  reflection: AgentReflection | null;
+};
+
+/** Reflection verdict emitted after a tool call when `config.reflection` is on. */
+type AgentReflection = {
+  agent: string | undefined;
+  iteration: number;
+  decision: "retry" | "accept";
+  reason: string;
+};
+
+async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, eventPrefix = "agent") {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
   const reflectionEnabled = Boolean(agentConfig.reflection);
@@ -196,15 +213,15 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
     memory: summarizedMemory,
   });
 
-  const steps: any[] = [];
-  let lastResult: any = null;
-  let lastReflection: any = null;
+  const steps: AgentLoopStepRecord[] = [];
+  let lastResult: unknown = null;
+  let lastReflection: AgentReflection | null = null;
 
   for (let i = 0; i < maxSteps; i++) {
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.started`, { agent: agentConfig.name, iteration: i });
 
     const planningContext = { context: ctx.context, memory: summarizedMemory, steps, lastReflection };
-    const plan = planner === "openai"
+    const plan: AgentPlanResult = planner === "openai"
       ? await planAgentToolWithLLM(agentConfig, planningContext, steps, llm, {
           orgId: ctx.orgId,
           runId: ctx.runId,
@@ -215,11 +232,11 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
 
-    if ((plan as any).done) {
+    if (plan.done) {
       await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.completed`, {
         agent: agentConfig.name,
         iteration: i,
-        finalAnswer: (plan as any).finalAnswer,
+        finalAnswer: plan.finalAnswer,
         steps,
         reflection: lastReflection,
       });
@@ -232,13 +249,13 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: any, eventPrefix = "a
           workflowId: ctx.workflowId ?? undefined,
           runId: ctx.runId,
           goal: agentConfig.goal ?? "",
-          outcome: String((plan as any).finalAnswer ?? "Done"),
+          outcome: String(plan.finalAnswer ?? "Done"),
           success: true,
           stepCount: steps.length,
         });
       }
 
-      return { memory: summarizedMemory, steps, finalAnswer: (plan as any).finalAnswer, reflection: lastReflection };
+      return { memory: summarizedMemory, steps, finalAnswer: plan.finalAnswer, reflection: lastReflection };
     }
 
     const toolInput = withHttpToolDefaults(plan.tool, plan.input, orgConfig);

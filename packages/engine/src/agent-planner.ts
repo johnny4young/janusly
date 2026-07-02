@@ -20,6 +20,8 @@
  *   `getLlmClient()` so production callers don't have to thread it through.
  */
 
+import { z } from "zod";
+
 import { loadRootEnv } from "@janusly/db";
 import { getLlmClient, type LlmClient } from "@janusly/ai";
 import { checkBudget } from "./budget";
@@ -33,11 +35,39 @@ export type AgentPlan = {
   reason: string;
 };
 
+/** What the agent loop actually receives from a planner call: a plan, plus
+ *  the LLM planner's optional terminate signal and fallback attribution. */
+export type AgentPlanResult = AgentPlan & {
+  done?: boolean;
+  finalAnswer?: string;
+  aiError?: string;
+};
+
+/** One prior step handed back to the planner as history. Only ever
+ *  JSON-stringified into the prompt, so `result` stays `unknown` (tool
+ *  outputs are arbitrary) and the loop may attach extra fields. */
 export type AgentLoopStep = {
   iteration: number;
   plan: AgentPlan;
-  result: Record<string, unknown>;
+  result: unknown;
+  reflection?: unknown;
 };
+
+/**
+ * Shape gate for the LLM planner's JSON reply. The planner output flows
+ * straight into tool execution, so a malformed shape (tool as an object,
+ * input as an array, …) must degrade to the deterministic rules planner —
+ * with `aiError` attribution — instead of walking untyped into
+ * `executeTool`. Mirrors the house style of validating every LLM output
+ * against a Zod schema before it crosses a boundary.
+ */
+const LlmPlannerReplySchema = z.object({
+  done: z.boolean().optional(),
+  finalAnswer: z.string().optional(),
+  tool: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  reason: z.string().optional(),
+});
 
 const availableTools = [
   {
@@ -128,7 +158,7 @@ export async function planAgentToolWithLLM(
    * Empty / omitted when memory is off — the prompt is then byte-for-byte today's.
    */
   recalledEpisodes?: string,
-): Promise<AgentPlan & { done?: boolean; finalAnswer?: string; aiError?: string }> {
+): Promise<AgentPlanResult> {
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
   if (!llm) {
@@ -220,7 +250,12 @@ export async function planAgentToolWithLLM(
       context: telemetryContext,
     });
 
-    const parsed = JSON.parse(result.text || "{}");
+    const reply = LlmPlannerReplySchema.safeParse(JSON.parse(result.text || "{}"));
+    if (!reply.success) {
+      const fallback = planAgentTool(config, context);
+      return { ...fallback, aiError: "LLM planner returned a malformed plan shape" };
+    }
+    const parsed = reply.data;
 
     if (parsed.done) {
       return {
@@ -232,7 +267,7 @@ export async function planAgentToolWithLLM(
       };
     }
 
-    if (!parsed.tool || typeof parsed.tool !== "string") {
+    if (!parsed.tool) {
       const fallback = planAgentTool(config, context);
       return { ...fallback, aiError: "LLM planner did not return a valid tool" };
     }
