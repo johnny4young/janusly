@@ -70,8 +70,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 /** Match `/workflows/<id>/metadata` (no query string yet). Excludes `/workflows/...` reserved suffixes. */
@@ -407,7 +406,7 @@ export const workflowMetadataRoutes: Route[] = [
       if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
-        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const metadata = await getWorkflowMetadata(auth.orgId, workflowId);
@@ -424,7 +423,7 @@ export const workflowMetadataRoutes: Route[] = [
       if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
-        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -470,7 +469,7 @@ export const workflowMetadataRoutes: Route[] = [
       if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
-        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -516,7 +515,7 @@ export const workflowMetadataRoutes: Route[] = [
       if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
-        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));

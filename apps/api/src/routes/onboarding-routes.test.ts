@@ -14,9 +14,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
+  const sendJson = vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status }));
   return {
     ...actual,
-    sendJson: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
+    sendJson,
+    sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+      sendJson(_res, params === undefined ? { error: message, code } : { error: message, code, params }, status)),
     readJson: vi.fn(),
   };
 });

@@ -94,6 +94,8 @@ vi.mock("../http", () => ({
   readJson: vi.fn(() => Promise.resolve(bodyBox.value)),
   sendEventFrame: vi.fn(),
   sendJson: sendJsonMock,
+  sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+    sendJsonMock(_res, params === undefined ? { error: message, code } : { error: message, code, params }, status)),
   sendSseComment: vi.fn(),
 }));
 vi.mock("../rate-limit", () => ({ enforceRateLimit: enforceRateLimitMock }));
