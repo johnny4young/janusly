@@ -57,6 +57,25 @@ function clampCandidateCount(n: number): number {
 }
 
 /**
+ * Cost-aware candidate count: the configured Best-of-N shrinks to single-shot
+ * once the org's monthly budget has crossed its WARNING threshold, so the
+ * highest-variance spend multiplier backs off exactly when spend is already
+ * hot. Deliberately binary (full N ↔ 1) — a graduated curve would make the
+ * sampled-count telemetry hard to reason about, and the warning threshold is
+ * the tenant's own declared "start being careful" line. No budget configured
+ * (`monthlyUsdLimit: null`) keeps the configured N untouched.
+ */
+export function budgetAwareCandidateCount(
+  configured: number,
+  budget: { monthlyUsdLimit: number | null; warningThresholdCrossed: boolean },
+): number {
+  const n = clampCandidateCount(configured);
+  if (n === MIN_GENERATION_CANDIDATES) return n;
+  if (budget.monthlyUsdLimit === null) return n;
+  return budget.warningThresholdCrossed ? MIN_GENERATION_CANDIDATES : n;
+}
+
+/**
  * Fire `n` (clamped to [1,5]) independent free-JSON generations in parallel and
  * return the ones that parsed into a `Workflow`. One sample per candidate — the
  * diversity across N replaces the single-path retry-on-parse-fail. A rejected

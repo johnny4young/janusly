@@ -102,23 +102,25 @@ Ordered by value. Each is scoped to be a single ticket.
 
 ### 2a. Performance
 
-1. **DLQ list detail-split** (high value, needs a small web change — why it's
-   not in this PR). `/dlq` + `/dlq/queue` spread `...dl` per row, shipping the
-   uncapped `workflow_json`/`node_json` (persisted with `maxBytes: Infinity`
-   for replay fidelity) to render a table. But the web's `RecoveryDialog` and
-   `DeadLettersPanel` consume `workflowJson` straight off the LIST row today.
-   Design: add `GET /dlq/:id` returning the full row; list endpoints project
-   summary columns + a bounded `errorJson` excerpt; the dialog fetches detail
-   on open. Cuts a 200-row queue page from potentially tens of MB to KBs.
+1. ~~DLQ list detail-split.~~ **Implemented in this PR (second batch):**
+   `listRecoveryQueue` projects summary columns (+ `nodeType` /
+   `workflowName` one-field extractions) instead of spreading the full
+   `dead_letters` row; the existing `GET /dlq?id=` detail read returns the
+   full snapshots, and the web (`DeadLettersPanel`) fetches it on row
+   selection / before opening the Recovery dialog, with the summary row as
+   graceful fallback. Cuts a 200-row queue page from potentially tens of MB
+   to KBs.
 2. **BullMQ job payload slimming.** `enqueueNode` serializes
    `{ runId, workflow, node }` per node job — a 100-node workflow writes its
-   full JSON into Redis 100+ times per run, and `worker.ts` re-runs
-   `WorkflowSchema.safeParse` on every job. Design: enqueue
+   full JSON into Redis 100+ times per run. Design: enqueue
    `{ runId, nodeId }`; worker loads + validates the workflow once per run
    behind a small LRU keyed by `runId` (`runs.input_json` already holds the
-   snapshot; DLQ rows keep their own copy so replay is unaffected). Interim
-   step with most of the CPU win and none of the contract change: per-run
-   parsed-workflow cache in the worker.
+   snapshot; DLQ rows keep their own copy so replay is unaffected). **The
+   interim step shipped in this PR:** a content-addressed (SHA-1 of the raw
+   payload JSON) LRU in `packages/engine/src/workflow-parse-cache.ts` removes
+   the per-job full-workflow Zod parse — byte-identical payloads reuse the
+   parsed object, and a patched DLQ replay can never hit a stale entry. The
+   Redis payload weight itself still needs the enqueue-shape change.
 3. **Node-output double-write.** Every success persists the output in
    `run_nodes.state_json` AND repeats it in the `node.succeeded`
    `run_events.payload` — up to 2× write amplification on the hottest write
@@ -128,9 +130,9 @@ Ordered by value. Each is scoped to be a single ticket.
 4. **Node completion round-trips.** The success path is ~7–9 sequential DB
    RTTs (`markNodeRunning` → event → metadata → context → execute →
    `markNodeSucceeded` → routing stats → event → status → enqueue scan).
-   Safe batching without touching the atomic-claim invariants:
-   `Promise.all` the independent writes (routing stats + event), and combine
-   `markNodeSucceeded` + its event in one transaction.
+   **Partially shipped in this PR:** the independent routing-stats +
+   `node.succeeded` event writes now run under `Promise.all`. Remaining:
+   combine `markNodeSucceeded` + its event in one transaction.
 5. **Alerts scanner fan-out.** Sequential per-org iteration ×
    per-scheduled-workflow `queryScheduleFires` (up to ~200/org) can outlast
    the cron interval at fleet scale. Design: one grouped query
@@ -182,9 +184,10 @@ Ordered by value. Each is scoped to be a single ticket.
     prod deps), non-root `USER`, `HEALTHCHECK CMD wget -qO- localhost:3001/health`,
     `NODE_ENV=production`, and a worker-mode variant (same image,
     different command).
-15. **Graceful-shutdown parity for the API.** The worker drains on
-    SIGTERM/SIGINT; give the API the same treatment (`server.close()` +
-    in-flight request grace) so rolling deploys don't drop requests.
+15. ~~Graceful-shutdown parity for the API.~~ **Verified already done** —
+    `apps/api/src/index.ts` drains on SIGTERM/SIGINT with a force-close
+    timer (`API_SHUTDOWN_GRACE_MS`) and closes the auto-healing/alerts/
+    run-stream subsystems. No action needed.
 
 ### 2d. Security posture (verified — no criticals found)
 
@@ -278,9 +281,11 @@ new infrastructure unless noted.
 20. **Eval-set auto-harvest from recovery feedback** — accepted patches +
     operator feedback become labeled eval cases (opt-in, consent-gated) in
     `eval_datasets`.
-21. **Cost-aware Best-of-N** — dynamic N from remaining budget
-    (`checkBudget` already returns headroom): full N when cheap, N=1 near
-    the gate.
+21. ~~Cost-aware Best-of-N.~~ **Implemented in this PR (second batch):**
+    `budgetAwareCandidateCount` collapses the configured N to single-shot
+    once monthly spend crosses the budget's warning threshold; no budget
+    configured keeps N untouched. Wired into `/ai/generate-workflow` using
+    the envelope its budget gate already loads.
 22. **Semantic run search** — embed run-explain summaries into the memory
     substrate (`run_summary` kind exists) and expose "find runs like this
     failure" in the Recovery Center.

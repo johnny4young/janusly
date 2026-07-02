@@ -208,8 +208,13 @@ export class WorkflowRuntime {
       // not the loose context bag. The repo's own `if (!orgId) return`
       // guard remains as defence in depth, but on a healthy run the
       // metadata helper above hands it a structured value every time.
-      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
-      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } }));
+      // Independent writes (different tables, no ordering contract between
+      // them) run concurrently — the completion path is a chain of
+      // sequential DB round-trips and this is the one safely parallel pair.
+      await Promise.all([
+        updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true }),
+        this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } })),
+      ]);
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
       await this.evaluateImprovement(runId, context, metadata);
