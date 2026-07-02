@@ -9,7 +9,7 @@
  * `workflow.force_run_during_pause` audit row is written.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   auditActionMock,
@@ -182,4 +182,36 @@ describe("/start upstream-health pause gate", () => {
     expect(getWorkflowStatusMock).not.toHaveBeenCalled();
     expect(startRunMock).toHaveBeenCalledTimes(1);
   });
+});
+
+// Proves `guardMcpWrite` is WIRED at the TOP of each operate route — an
+// MCP-source caller with the process flag off is refused before the body is
+// even parsed, so no run is started/resumed/cancelled. Tenant isolation for
+// resume/cancel additionally rides on their `run.orgId !== auth.orgId → 403`
+// ownership checks (covered elsewhere); this guards the consent wiring.
+describe("operate routes — MCP-source write consent gate", () => {
+  const mcpAuth = { orgId: "org-1", userId: "user-1", mode: "service-token", source: "mcp", serviceTokenSuffix: "abcd" } as never;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function findRoute(match: string): Route {
+    const route = runsRoutes.find((r) => r.method === "POST" && typeof r.match === "string" && r.match === match);
+    if (!route) throw new Error(`${match} route not found`);
+    return route;
+  }
+
+  for (const match of ["/start", "/resume", "/run/cancel"]) {
+    it(`${match} refuses MCP-source traffic (403 mcp_process_disabled) with the process flag off, and never mutates`, async () => {
+      vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+      bodyBox.value = SAVED_WORKFLOW;
+      await findRoute(match).handler({ req: { url: match } as never, res: {} as never, auth: mcpAuth });
+      const last = sendJsonMock.mock.calls.at(-1);
+      expect(last?.[2]).toBe(403);
+      expect((last?.[1] as { code?: string }).code).toBe("mcp_process_disabled");
+      // The gate short-circuited before any run mutation.
+      expect(startRunMock).not.toHaveBeenCalled();
+    });
+  }
 });
