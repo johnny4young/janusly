@@ -6,17 +6,17 @@
  * Used by `RightPanel.tsx` (the `workflows` tab).
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
-import { CircleCheck, FilterX, Folder, FolderPlus, GripVertical, ListChecks, Pencil, RefreshCw, RotateCcw, Search, Trash, Trash2, Workflow, X } from 'lucide-react'
+import { CircleCheck, FolderPlus, ListChecks, Pencil, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { SavedWorkflow } from '../types'
-import { WorkflowHealthBadge } from './WorkflowHealthBadge'
-import { formatStatusLabel } from '../constants'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { readFlowsFilters, writeFlowsFilters, type SortKey } from '../flows-filters'
-import { daysUntilPurge } from '../trash-expiry'
+import { FlowRow } from './FlowRow'
+import { FlowsFilterBar } from './FlowsFilterBar'
+import { TrashPanel } from './TrashPanel'
 
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
  *  the server's terminal-failure set). */
@@ -815,239 +815,32 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
   )
 
-  // A trash-list row: a flat, non-openable card (a tombstoned workflow can't be
-  // opened — reads 404) showing the name, when it was deleted, its run count,
-  // and a Restore action. A leading checkbox feeds the bulk-restore action bar
-  // (always shown in Trash — selection is this view's purpose). No
-  // tags/folder/drag — those are active-only.
-  const renderTrashRow = (workflow: SavedWorkflow) => (
-    <li key={workflow.id}>
-      <div className="we-list-row" data-severity="cobalt" data-testid={`workflows-trash-row-${workflow.id}`}>
-        <input
-          type="checkbox"
-          className="we-list-row__select"
-          checked={selectedIds.has(workflow.id)}
-          onChange={() => toggleSelected(workflow.id)}
-          aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
-          data-testid={`workflows-trash-select-${workflow.id}`}
-        />
-        <span className="we-list-row__avatar" aria-hidden="true">
-          <Workflow size={14} />
-        </span>
-        <div className="we-list-row__body">
-          <strong>{workflow.name}</strong>
-          <small className="mono" title={workflow.id}>
-            {workflow.deletedAt
-              ? (t('workflowsDashboard.deletedAtLabel', { date: new Date(workflow.deletedAt).toLocaleString(getResolvedLocale()) }) as string)
-              : workflow.id}
-          </small>
-        </div>
-        <div className="we-list-row__meta">
-          {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
-          )}
-          {/* Retention countdown — only when the window is known (retentionDays
-              non-null) and the row carries a tombstone date. A non-positive
-              remaining count means the window elapsed (the daily sweep is due). */}
-          {retentionDays != null && trashNowMs != null && workflow.deletedAt && (() => {
-            const daysLeft = daysUntilPurge(workflow.deletedAt, retentionDays, trashNowMs)
-            return (
-              <span className="we-pill we-pill--ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
-                {daysLeft > 0
-                  ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }) as string)
-                  : (t('workflowsDashboard.expiresSoon') as string)}
-              </span>
-            )
-          })()}
-          <button
-            type="button"
-            className="small-command"
-            onClick={() => void restoreWorkflow(workflow.id)}
-            data-testid={`workflows-restore-${workflow.id}`}
-          >
-            <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.restoreFlow')}
-          </button>
-        </div>
-      </div>
-    </li>
+  // Render one active-list row via the extracted <FlowRow>. Kept as a local
+  // renderer so both call sites (the flat list and each folder section) stay a
+  // bare `.map(renderRow)`; the container owns the state + mutations FlowRow
+  // needs and threads them through here.
+  const renderRow = (workflow: SavedWorkflow) => (
+    <FlowRow
+      key={workflow.id}
+      workflow={workflow}
+      folderOptions={folderOptions}
+      tagOptions={tagOptions}
+      hasFolders={hasFolders}
+      selectionMode={selectionMode}
+      selectedIds={selectedIds}
+      draggingId={draggingId}
+      confirmDeleteId={confirmDeleteId}
+      onOpen={onOpen}
+      toggleSelected={toggleSelected}
+      setDraggingId={setDraggingId}
+      setDropTarget={setDropTarget}
+      setConfirmDeleteId={setConfirmDeleteId}
+      setRowTag={setRowTag}
+      moveToFolder={moveToFolder}
+      deleteWorkflow={deleteWorkflow}
+      t={t}
+    />
   )
-
-  const renderRow = (workflow: SavedWorkflow) => {
-    // Folder choices for the per-row "Move to folder" select: the org-wide
-    // folder list plus the row's own folder if a stale value isn't already in it
-    // (so the native select can always render its current value as a real option).
-    const folderChoices =
-      workflow.folder && !folderOptions.includes(workflow.folder)
-        ? [workflow.folder, ...folderOptions]
-        : folderOptions
-    // Org tags not already on this row — the per-row "+ tag" add options.
-    const rowTags = workflow.tags ?? []
-    const addableTags = tagOptions.filter((tg) => !rowTags.includes(tg))
-    return (
-    <li key={workflow.id}>
-      <div
-        className="we-list-row"
-        data-clickable="true"
-        data-severity="cobalt"
-        data-dragging={draggingId === workflow.id ? 'true' : undefined}
-        data-testid={`workflows-row-${workflow.id}`}
-        onClick={() => onOpen(workflow.id)}
-      >
-        {/* Bulk-select checkbox — only in selection mode. stopPropagation so
-            ticking a row never opens it. */}
-        {selectionMode && (
-          <input
-            type="checkbox"
-            className="we-list-row__select"
-            checked={selectedIds.has(workflow.id)}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
-            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
-            data-testid={`workflows-select-row-${workflow.id}`}
-          />
-        )}
-        {/* Drag handle — only rendered once folders exist (otherwise there's no
-            section to drop onto). Native DnD is mouse-only; the per-row select
-            below and the Inspector folder field stay keyboard-accessible. */}
-        {hasFolders && (
-          <span
-            className="we-list-row__drag"
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.setData('text/plain', workflow.id)
-              event.dataTransfer.effectAllowed = 'move'
-              setDraggingId(workflow.id)
-            }}
-            onDragEnd={() => {
-              setDraggingId(null)
-              setDropTarget(null)
-            }}
-            onClick={(event) => event.stopPropagation()}
-            title={t('workflowsDashboard.dragHandleTitle') as string}
-            aria-label={t('workflowsDashboard.dragHandleTitle') as string}
-            data-testid={`workflows-drag-${workflow.id}`}
-          >
-            <GripVertical size={14} aria-hidden="true" />
-          </span>
-        )}
-        <span className="we-list-row__avatar" aria-hidden="true">
-          <Workflow size={14} />
-        </span>
-        <div className="we-list-row__body">
-          <strong>{workflow.name}</strong>
-          <small className="mono" title={workflow.id}>{workflow.updatedAt ? new Date(workflow.updatedAt).toLocaleString(getResolvedLocale()) : workflow.id}</small>
-          {/* Tag pills are editable inline: each carries a ✕ to remove it, and a
-              "+ tag" picker adds an existing org tag — the per-row equivalent of
-              the bulk tag bar. Controls stopPropagation so they never open the row. */}
-          {(rowTags.length > 0 || addableTags.length > 0) && (
-            <span className="we-list-row__tags">
-              {rowTags.map(tag => (
-                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
-                  {tag}
-                  <button
-                    type="button"
-                    className="we-list-row__tag-remove"
-                    aria-label={t('workflowsDashboard.removeTagAria', { tag }) as string}
-                    title={t('workflowsDashboard.removeTagAria', { tag }) as string}
-                    onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
-                    data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
-                  >
-                    <X size={10} aria-hidden="true" />
-                  </button>
-                </span>
-              ))}
-              {addableTags.length > 0 && (
-                <select
-                  className="we-list-row__tag-add"
-                  value=""
-                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name }) as string}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
-                  data-testid={`workflows-row-tag-add-${workflow.id}`}
-                >
-                  <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
-                  {addableTags.map(tag => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
-              )}
-            </span>
-          )}
-          {workflow.folder && (
-            <span className="we-list-row__folder">
-              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder }) as string}>
-                <Folder size={12} aria-hidden="true" /> {workflow.folder}
-              </span>
-            </span>
-          )}
-        </div>
-        <div className="we-list-row__meta">
-          {workflow.lastRunStatus && (
-            <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
-          )}
-          {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
-          )}
-          <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
-          {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
-              <select> is operable without a mouse. Only rendered once folders
-              exist (same gate as the drag handle), so the flat no-folder list is
-              unchanged. Reuses the same moveToFolder path the drag drop uses. */}
-          {hasFolders && (
-            <select
-              className="we-list-row__folder-select"
-              value={workflow.folder ?? ''}
-              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name }) as string}
-              onClick={(event) => event.stopPropagation()}
-              onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
-              data-testid={`workflows-move-folder-${workflow.id}`}
-            >
-              <option value="">{t('workflowsDashboard.ungroupedFolder')}</option>
-              {folderChoices.map(folder => (
-                <option key={folder} value={folder}>{folder}</option>
-              ))}
-            </select>
-          )}
-          <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>
-          {/* Soft-delete affordance: an inline confirm (one row at a time) so a
-              click never deletes immediately. The delete is recoverable from the
-              Trash view. stopPropagation so the controls never open the row. */}
-          {confirmDeleteId === workflow.id ? (
-            <span className="we-list-row__confirm" onClick={(event) => event.stopPropagation()}>
-              <span className="we-list-row__confirm-text">{t('workflowsDashboard.deleteConfirm', { name: workflow.name })}</span>
-              <button
-                type="button"
-                className="small-command danger"
-                onClick={(event) => { event.stopPropagation(); void deleteWorkflow(workflow.id) }}
-                data-testid={`workflows-delete-confirm-${workflow.id}`}
-              >
-                {t('workflowsDashboard.confirmDeleteCta')}
-              </button>
-              <button
-                type="button"
-                className="small-command"
-                onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(null) }}
-              >
-                {t('workflowsDashboard.cancelAction')}
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className="small-command danger we-list-row__delete"
-              onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
-              title={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
-              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
-              data-testid={`workflows-delete-${workflow.id}`}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-      </div>
-    </li>
-    )
-  }
 
   return (
     <div className="panel-list">
@@ -1095,182 +888,36 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       </div>
 
       {showToolbar && !showTrashed && (
-        <div className="we-list-toolbar">
-          <span className="we-list-search">
-            <Search size={14} aria-hidden="true" />
-            <input
-              type="search"
-              className="text-field"
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              placeholder={t('workflowsDashboard.searchPlaceholder') as string}
-              aria-label={t('workflowsDashboard.searchPlaceholder') as string}
-              data-testid="workflows-search"
-            />
-          </span>
-          {/* Multi-tag filter — selected tags are chips (✕ to drop one), and a
-              "+ tag" picker adds another. Several tags AND together server-side. */}
-          {(tagOptions.length > 0 || tagFilters.length > 0) && (
-            <span className="we-list-filter-tags" data-testid="workflows-tag-filter">
-              {tagFilters.map(tag => (
-                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
-                  {tag}
-                  <button
-                    type="button"
-                    className="we-list-row__tag-remove"
-                    aria-label={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
-                    title={t('workflowsDashboard.removeTagFromFilterAria', { tag }) as string}
-                    onClick={() => setTagFilters(prev => prev.filter(tg => tg !== tag))}
-                    data-testid={`workflows-tag-filter-remove-${tag}`}
-                  >
-                    <X size={10} aria-hidden="true" />
-                  </button>
-                </span>
-              ))}
-              {tagOptions.some(tag => !tagFilters.includes(tag)) && (
-                <select
-                  className="text-field we-list-row__tag-add"
-                  value=""
-                  aria-label={t('workflowsDashboard.tagFilterAria') as string}
-                  onChange={event => { if (event.target.value) setTagFilters(prev => prev.includes(event.target.value) ? prev : [...prev, event.target.value]) }}
-                  data-testid="workflows-tag-filter-add"
-                >
-                  <option value="">{t('workflowsDashboard.addTagPlaceholder')}</option>
-                  {tagOptions.filter(tag => !tagFilters.includes(tag)).map(tag => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
-              )}
-            </span>
-          )}
-          {/* Manage the currently-filtered tag — rename it (re-key across the org)
-              or delete it (strip from every workflow). Only shown when EXACTLY one
-              tag is filtered; mirrors the folder-section rename/delete. */}
-          {soleTagFilter && (
-            renamingTag ? (
-              <span className="we-list-tag-manage">
-                <input
-                  className="text-field we-list-tag-manage__input"
-                  value={tagRenameDraft}
-                  autoFocus
-                  maxLength={40}
-                  aria-label={t('workflowsDashboard.renameTagLabel') as string}
-                  onChange={event => setTagRenameDraft(event.target.value)}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') { event.preventDefault(); void renameTag(soleTagFilter, tagRenameDraft) }
-                    else if (event.key === 'Escape') { event.preventDefault(); setRenamingTag(false) }
-                  }}
-                  data-testid="workflows-tag-rename-input"
-                />
-                <button type="button" className="small-command" onClick={() => void renameTag(soleTagFilter, tagRenameDraft)} data-testid="workflows-tag-rename-save">
-                  {t('workflowsDashboard.saveRename')}
-                </button>
-                <button type="button" className="small-command" onClick={() => setRenamingTag(false)}>
-                  {t('workflowsDashboard.cancelAction')}
-                </button>
-              </span>
-            ) : confirmDeleteTag ? (
-              <span className="we-list-tag-manage">
-                <span className="we-list-tag-manage__confirm">{t('workflowsDashboard.deleteTagConfirm', { tag: soleTagFilter })}</span>
-                <button type="button" className="small-command danger" onClick={() => void deleteTag(soleTagFilter)} data-testid="workflows-tag-delete-confirm">
-                  {t('workflowsDashboard.confirmDeleteCta')}
-                </button>
-                <button type="button" className="small-command" onClick={() => setConfirmDeleteTag(false)}>
-                  {t('workflowsDashboard.cancelAction')}
-                </button>
-              </span>
-            ) : (
-              <span className="we-list-tag-manage">
-                <button
-                  type="button"
-                  className="small-command"
-                  onClick={() => { setConfirmDeleteTag(false); setTagRenameDraft(soleTagFilter); setRenamingTag(true) }}
-                  title={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
-                  aria-label={t('workflowsDashboard.renameTag', { tag: soleTagFilter }) as string}
-                  data-testid="workflows-tag-rename"
-                >
-                  <Pencil size={12} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="small-command danger"
-                  onClick={() => { setRenamingTag(false); setConfirmDeleteTag(true) }}
-                  title={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
-                  aria-label={t('workflowsDashboard.deleteTag', { tag: soleTagFilter }) as string}
-                  data-testid="workflows-tag-delete"
-                >
-                  <Trash2 size={12} aria-hidden="true" />
-                </button>
-              </span>
-            )
-          )}
-          {folderOptions.length > 0 && (
-            <select
-              className="text-field"
-              value={folderFilter}
-              onChange={event => setFolderFilter(event.target.value)}
-              aria-label={t('workflowsDashboard.folderFilterAria') as string}
-              data-testid="workflows-folder-filter"
-            >
-              <option value="">{t('workflowsDashboard.allFolders')}</option>
-              {folderOptions.map(folder => (
-                <option key={folder} value={folder}>{folder}</option>
-              ))}
-            </select>
-          )}
-          {/* One-click reset of the active search / tag / folder filters. Only
-              shown when at least one is active; leaves sort + view state intact. */}
-          {hasActiveFilters && (
-            <button
-              type="button"
-              className="small-command"
-              onClick={clearAllFilters}
-              aria-label={t('workflowsDashboard.clearFilters') as string}
-              data-testid="workflows-clear-filters"
-            >
-              <FilterX size={12} aria-hidden="true" />
-              {t('workflowsDashboard.clearFilters')}
-            </button>
-          )}
-          <div className="we-seg" role="group" aria-label={t('workflowsDashboard.sortAria') as string}>
-            <button type="button" aria-pressed={sort === 'recent'} onClick={() => setSort('recent')}>
-              {t('workflowsDashboard.sortRecent')}
-            </button>
-            <button type="button" aria-pressed={sort === 'name'} onClick={() => setSort('name')}>
-              {t('workflowsDashboard.sortName')}
-            </button>
-            <button type="button" aria-pressed={sort === 'failed'} onClick={() => setSort('failed')}>
-              {t('workflowsDashboard.sortFailed')}
-            </button>
-          </div>
-          {/* Bulk-select toggle — reveals per-row checkboxes + the bulk bar. Off
-              by default so the list is unchanged. */}
-          <button
-            type="button"
-            className="small-command"
-            aria-pressed={selectionMode}
-            onClick={() => { setSelectionMode((on) => !on); setSelectedIds(new Set()) }}
-            data-testid="workflows-select-toggle"
-          >
-            {selectionMode ? t('workflowsDashboard.selectDone') : t('workflowsDashboard.selectFlows')}
-          </button>
-          {/* Select-all toggle — lives in the toolbar (not the bulk bar, which
-              only appears once ≥1 row is ticked) so it's reachable at 0 selected.
-              Operates on `visible`, so it works in flat AND foldered views. */}
-          {selectionMode && (
-            <button
-              type="button"
-              className="small-command"
-              aria-pressed={allVisibleSelected}
-              onClick={toggleSelectAll}
-              data-testid="workflows-select-all"
-            >
-              {allVisibleSelected
-                ? t('workflowsDashboard.deselectAll')
-                : t('workflowsDashboard.selectAllCount', { count: visibleIds.length })}
-            </button>
-          )}
-        </div>
+        <FlowsFilterBar
+          query={query}
+          setQuery={setQuery}
+          tagOptions={tagOptions}
+          tagFilters={tagFilters}
+          setTagFilters={setTagFilters}
+          soleTagFilter={soleTagFilter}
+          renamingTag={renamingTag}
+          setRenamingTag={setRenamingTag}
+          tagRenameDraft={tagRenameDraft}
+          setTagRenameDraft={setTagRenameDraft}
+          renameTag={renameTag}
+          confirmDeleteTag={confirmDeleteTag}
+          setConfirmDeleteTag={setConfirmDeleteTag}
+          deleteTag={deleteTag}
+          folderOptions={folderOptions}
+          folderFilter={folderFilter}
+          setFolderFilter={setFolderFilter}
+          hasActiveFilters={hasActiveFilters}
+          clearAllFilters={clearAllFilters}
+          sort={sort}
+          setSort={setSort}
+          selectionMode={selectionMode}
+          setSelectionMode={setSelectionMode}
+          setSelectedIds={setSelectedIds}
+          allVisibleSelected={allVisibleSelected}
+          toggleSelectAll={toggleSelectAll}
+          visibleIds={visibleIds}
+          t={t}
+        />
       )}
 
       {!showTrashed && selectionMode && selectedIds.size > 0 && (
@@ -1361,49 +1008,18 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           the raw server-ordered `workflows`, NOT `visible`, so a stale active-
           view search term never filters it). Restore-only; no folders/tags/bulk. */}
       {showTrashed && (
-        workflows.length === 0 && !loading ? (
-          <div className="we-allclear" data-testid="workflows-trash-empty">
-            <span className="we-allclear__ring" aria-hidden="true"><Trash size={18} /></span>
-            <div className="we-allclear__copy">
-              <strong>{t('workflowsDashboard.trashEmpty')}</strong>
-              <span>{t('workflowsDashboard.trashEmptyHelper')}</span>
-            </div>
-          </div>
-        ) : workflows.length > 0 ? (
-          <>
-            {/* Bulk-restore action bar — selection is always available in Trash.
-                Select-all operates on the raw trash `workflows` (the rendered
-                set). Restore-selected is disabled until ≥1 row is ticked. */}
-            <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
-              {selectedIds.size > 0 && (
-                <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
-              )}
-              <button
-                type="button"
-                className="small-command"
-                aria-pressed={workflows.every((w) => selectedIds.has(w.id))}
-                onClick={() => setSelectedIds(workflows.every((w) => selectedIds.has(w.id)) ? new Set() : new Set(workflows.map((w) => w.id)))}
-                data-testid="workflows-trash-select-all"
-              >
-                {workflows.every((w) => selectedIds.has(w.id))
-                  ? t('workflowsDashboard.clearSelection')
-                  : t('workflowsDashboard.trashSelectAll', { count: workflows.length })}
-              </button>
-              <button
-                type="button"
-                className="small-command"
-                disabled={selectedIds.size === 0}
-                onClick={() => void bulkRestore()}
-                data-testid="workflows-trash-restore-selected"
-              >
-                <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
-              </button>
-            </div>
-            <ul className="we-list" data-testid="workflows-trash-list">
-              {workflows.map(renderTrashRow)}
-            </ul>
-          </>
-        ) : null
+        <TrashPanel
+          workflows={workflows}
+          loading={loading}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
+          toggleSelected={toggleSelected}
+          restoreWorkflow={restoreWorkflow}
+          bulkRestore={bulkRestore}
+          retentionDays={retentionDays}
+          trashNowMs={trashNowMs}
+          t={t}
+        />
       )}
 
       {/* Empty-state precedence — one chain over `visible.length === 0` (covers
