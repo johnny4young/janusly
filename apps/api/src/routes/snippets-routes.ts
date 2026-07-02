@@ -42,8 +42,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 /** Match `/snippets/<id>` (single segment, no trailing path). */
@@ -110,7 +109,7 @@ export const snippetsRoutes: Route[] = [
         ? BUILTIN_SNIPPETS.some((snippet) => snippet.id === id)
         : Boolean(await getSnippetById(auth.orgId, id));
       if (!exists) {
-        return sendJson(res, errorEnvelope("snippet_not_found", "Snippet not found"), 404);
+        return sendError(res, "snippet_not_found", "Snippet not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -152,13 +151,9 @@ export const snippetsRoutes: Route[] = [
       // Reject a name that already exists up-front for a clean 409 instead of a raw 23505.
       const existing = await findSnippetByName(auth.orgId, parsed.data.name);
       if (existing) {
-        return sendJson(
-          res,
-          errorEnvelope("snippet_name_exists", "A snippet with that name already exists", {
-            name: parsed.data.name,
-          }),
-          409,
-        );
+        return sendError(res, "snippet_name_exists", "A snippet with that name already exists", 409, {
+          name: parsed.data.name,
+        });
       }
 
       const snippet = await createSnippet(auth.orgId, {
@@ -192,11 +187,7 @@ export const snippetsRoutes: Route[] = [
 
       // Built-ins are code-only and read-only.
       if (isBuiltinSnippetId(id)) {
-        return sendJson(
-          res,
-          errorEnvelope("snippet_builtin_immutable", "Built-in snippets are read-only"),
-          409,
-        );
+        return sendError(res, "snippet_builtin_immutable", "Built-in snippets are read-only", 409);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -207,13 +198,9 @@ export const snippetsRoutes: Route[] = [
       if (parsed.data.name !== undefined) {
         const clash = await findSnippetByName(auth.orgId, parsed.data.name);
         if (clash && clash.id !== id) {
-          return sendJson(
-            res,
-            errorEnvelope("snippet_name_exists", "A snippet with that name already exists", {
-              name: parsed.data.name,
-            }),
-            409,
-          );
+          return sendError(res, "snippet_name_exists", "A snippet with that name already exists", 409, {
+            name: parsed.data.name,
+          });
         }
       }
 
@@ -227,7 +214,7 @@ export const snippetsRoutes: Route[] = [
         entryNodeId: parsed.data.entryNodeId,
       });
       if (!result) {
-        return sendJson(res, errorEnvelope("snippet_not_found", "Snippet not found"), 404);
+        return sendError(res, "snippet_not_found", "Snippet not found", 404);
       }
 
       await auditAction(auth, "snippet.updated", {
@@ -249,16 +236,12 @@ export const snippetsRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "snippet id required" }, 400);
 
       if (isBuiltinSnippetId(id)) {
-        return sendJson(
-          res,
-          errorEnvelope("snippet_builtin_immutable", "Built-in snippets are read-only"),
-          409,
-        );
+        return sendError(res, "snippet_builtin_immutable", "Built-in snippets are read-only", 409);
       }
 
       const deleted = await deleteSnippet(auth.orgId, id);
       if (!deleted) {
-        return sendJson(res, errorEnvelope("snippet_not_found", "Snippet not found"), 404);
+        return sendError(res, "snippet_not_found", "Snippet not found", 404);
       }
 
       await auditAction(auth, "snippet.deleted", {

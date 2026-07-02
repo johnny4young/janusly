@@ -15,6 +15,7 @@
  */
 
 import http from "http";
+import { errorEnvelope, type ApiErrorCode } from "./error-codes";
 
 /** `Error` carrying an HTTP status. `server.ts` reads `statusCode` to map throws to responses. */
 export type HttpError = Error & { statusCode?: number };
@@ -69,6 +70,23 @@ export function sendJson(res: http.ServerResponse, payload: unknown, status = 20
     ...corsHeaders(res),
   });
   res.end(body);
+}
+
+/**
+ * Canonical 4xx/5xx error responder: the single chokepoint that ships the
+ * `{ error, code, params? }` envelope the web localizes against. Thin sugar
+ * over `sendJson(res, errorEnvelope(code, message, params), status)` — use
+ * this for every catalogued error response so the `code` field is uniformly
+ * present. `status` defaults to 400 (the most common client-error case).
+ */
+export function sendError(
+  res: http.ServerResponse,
+  code: ApiErrorCode,
+  message: string,
+  status = 400,
+  params?: Record<string, string | number | boolean>,
+) {
+  return sendJson(res, errorEnvelope(code, message, params), status);
 }
 
 /**

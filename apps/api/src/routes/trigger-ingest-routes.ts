@@ -68,7 +68,7 @@ import type { AuthContext } from "../auth";
 import { auditAction } from "../audit-helper";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
@@ -271,28 +271,28 @@ export const triggerIngestRoutes: Route[] = [
       const raw = asRecord(await readJson(req, EMAIL_INGEST_MAX_JSON_BYTES));
       const parsed = EmailReceivedPayloadSchema.safeParse(raw);
       if (!parsed.success) {
-        return sendJson(res, errorEnvelope("trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid email payload"), 400);
+        return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid email payload", 400);
       }
       const payload = parsed.data;
 
       // Body byte cap (1 MiB). The schema allows 2x chars as a guard; this is
       // the authoritative byte-length gate.
       if (utf8ByteLength(payload.body) > EMAIL_BODY_MAX_BYTES) {
-        return sendJson(res, errorEnvelope("trigger_payload_too_large", "Email body exceeds 1 MiB cap"), 413);
+        return sendError(res, "trigger_payload_too_large", "Email body exceeds 1 MiB cap", 413);
       }
 
       const resolved = await resolveTriggerNode(auth.orgId, "email_received", (config) => {
         return typeof config.aliasKey === "string" && config.aliasKey.trim().toLowerCase() === payload.aliasKey.trim().toLowerCase();
       });
       if (!resolved) {
-        return sendJson(res, errorEnvelope("trigger_no_matching_node", "No email_received trigger matches this alias"), 404);
+        return sendError(res, "trigger_no_matching_node", "No email_received trigger matches this alias", 404);
       }
 
       // DKIM gate — the node opts INTO requiring DKIM (default true). An
       // unverified sender is rejected unless the operator opted out.
       const dkimRequired = resolved.nodeConfig.dkimRequired !== false;
       if (dkimRequired && !payload.dkimPass) {
-        return sendJson(res, errorEnvelope("trigger_dkim_required", "Inbound email failed the DKIM check"), 403);
+        return sendError(res, "trigger_dkim_required", "Inbound email failed the DKIM check", 403);
       }
 
       // Optional sender-domain allow-list.
@@ -302,7 +302,7 @@ export const triggerIngestRoutes: Route[] = [
       if (fromDomains.length > 0) {
         const senderDomain = payload.from.split("@").pop()?.toLowerCase() ?? "";
         if (!fromDomains.some((d) => d.toLowerCase() === senderDomain)) {
-          return sendJson(res, errorEnvelope("trigger_dkim_required", "Sender domain is not in the allow-list"), 403);
+          return sendError(res, "trigger_dkim_required", "Sender domain is not in the allow-list", 403);
         }
       }
 
@@ -373,12 +373,12 @@ export const triggerIngestRoutes: Route[] = [
       const raw = asRecord(await readJson(req, TRIGGER_INGEST_MAX_JSON_BYTES));
       const parsed = FileDroppedPayloadSchema.safeParse(raw);
       if (!parsed.success) {
-        return sendJson(res, errorEnvelope("trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid file-dropped payload"), 400);
+        return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid file-dropped payload", 400);
       }
       const payload = parsed.data;
 
       if (utf8ByteLength(JSON.stringify(payload)) > FILE_METADATA_MAX_BYTES) {
-        return sendJson(res, errorEnvelope("trigger_payload_too_large", "File event metadata exceeds the cap"), 413);
+        return sendError(res, "trigger_payload_too_large", "File event metadata exceeds the cap", 413);
       }
 
       const resolved = await resolveTriggerNode(auth.orgId, "file_dropped", (config) => {
@@ -395,7 +395,7 @@ export const triggerIngestRoutes: Route[] = [
         return true;
       });
       if (!resolved) {
-        return sendJson(res, errorEnvelope("trigger_no_matching_node", "No file_dropped trigger matches this object"), 404);
+        return sendError(res, "trigger_no_matching_node", "No file_dropped trigger matches this object", 404);
       }
 
       const result = await persistEventAndSpawnRun({
@@ -429,12 +429,12 @@ export const triggerIngestRoutes: Route[] = [
       const raw = asRecord(await readJson(req, TRIGGER_INGEST_MAX_JSON_BYTES));
       const parsed = McpServerEventPayloadSchema.safeParse(raw);
       if (!parsed.success) {
-        return sendJson(res, errorEnvelope("trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid MCP server-event payload"), 400);
+        return sendError(res, "trigger_invalid_payload", parsed.error.issues[0]?.message ?? "Invalid MCP server-event payload", 400);
       }
       const payload = parsed.data;
 
       if (payload.payload && utf8ByteLength(JSON.stringify(payload.payload)) > MCP_EVENT_PAYLOAD_MAX_BYTES) {
-        return sendJson(res, errorEnvelope("trigger_payload_too_large", "MCP resource payload exceeds the cap"), 413);
+        return sendError(res, "trigger_payload_too_large", "MCP resource payload exceeds the cap", 413);
       }
 
       const resolved = await resolveTriggerNode(auth.orgId, "mcp_server_event", (config) => {
@@ -447,7 +447,7 @@ export const triggerIngestRoutes: Route[] = [
         return true;
       });
       if (!resolved) {
-        return sendJson(res, errorEnvelope("trigger_no_matching_node", "No mcp_server_event trigger matches this notification"), 404);
+        return sendError(res, "trigger_no_matching_node", "No mcp_server_event trigger matches this notification", 404);
       }
 
       const result = await persistEventAndSpawnRun({
@@ -479,7 +479,7 @@ export const triggerIngestRoutes: Route[] = [
       const eventId = (req.url ?? "").split("?")[0]!.split("/")[3]!;
       const event = await getTriggerEvent(auth.orgId, eventId);
       if (!event) {
-        return sendJson(res, errorEnvelope("trigger_event_not_found", "Trigger event not found"), 404);
+        return sendError(res, "trigger_event_not_found", "Trigger event not found", 404);
       }
 
       // Re-resolve the trigger node so a replay runs against the CURRENT
@@ -497,7 +497,7 @@ export const triggerIngestRoutes: Route[] = [
       // original node id; an org should keep trigger keys unique per type.)
       const resolved = await resolveTriggerNode(auth.orgId, triggerType, () => true);
       if (!resolved) {
-        return sendJson(res, errorEnvelope("trigger_no_matching_node", "No trigger node of this type exists to replay against"), 404);
+        return sendError(res, "trigger_no_matching_node", "No trigger node of this type exists to replay against", 404);
       }
 
       const result = await persistEventAndSpawnRun({

@@ -43,8 +43,7 @@ import { WorkflowSchema } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { saveWorkflowVersion } from "../workflows-save";
 import type { Route } from "../routes";
 
@@ -126,7 +125,7 @@ export const solutionPacksRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const id = packIdFromUrl(req.url);
       const pack = id ? getSolutionPack(id) : null;
-      if (!pack) return sendJson(res, errorEnvelope("pack_not_found", "Solution pack not found"), 404);
+      if (!pack) return sendError(res, "pack_not_found", "Solution pack not found", 404);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = SampleRunBodySchema.safeParse(body);
@@ -138,11 +137,7 @@ export const solutionPacksRoutes: Route[] = [
         ? pack.samplePayloads.find((s) => s.id === parsed.data.samplePayloadId)
         : pack.samplePayloads[0];
       if (!sample) {
-        return sendJson(
-          res,
-          errorEnvelope("pack_missing_sample_payload", "No matching sample payload for this pack"),
-          400,
-        );
+        return sendError(res, "pack_missing_sample_payload", "No matching sample payload for this pack", 400);
       }
 
       const { runId } = await startSandboxRun({
@@ -170,7 +165,7 @@ export const solutionPacksRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const id = packIdFromUrl(req.url);
       const pack = id ? getSolutionPack(id) : null;
-      if (!pack) return sendJson(res, errorEnvelope("pack_not_found", "Solution pack not found"), 404);
+      if (!pack) return sendError(res, "pack_not_found", "Solution pack not found", 404);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = InjectFailureBodySchema.safeParse(body);
@@ -182,11 +177,7 @@ export const solutionPacksRoutes: Route[] = [
         ? pack.failureFixtures.find((f) => f.id === parsed.data.fixtureId)
         : pack.failureFixtures[0];
       if (!fixture) {
-        return sendJson(
-          res,
-          errorEnvelope("pack_no_failure_fixture", "No matching failure fixture for this pack"),
-          400,
-        );
+        return sendError(res, "pack_no_failure_fixture", "No matching failure fixture for this pack", 400);
       }
 
       const { runId, deadLetterId } = await injectSampleFailure({
@@ -220,7 +211,7 @@ export const solutionPacksRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const id = packIdFromUrl(req.url);
       const pack = id ? getSolutionPack(id) : null;
-      if (!pack) return sendJson(res, errorEnvelope("pack_not_found", "Solution pack not found"), 404);
+      if (!pack) return sendError(res, "pack_not_found", "Solution pack not found", 404);
 
       const { missingCredentials, missingOrgConfigs } = await computeMissingDeps(auth.orgId, pack);
       return sendJson(res, { pack: toPublicPack(pack), missingCredentials, missingOrgConfigs });
@@ -248,7 +239,7 @@ export const solutionPacksRoutes: Route[] = [
       }
 
       const pack = getSolutionPack(parsed.data.packId);
-      if (!pack) return sendJson(res, errorEnvelope("pack_not_found", "Solution pack not found"), 404);
+      if (!pack) return sendError(res, "pack_not_found", "Solution pack not found", 404);
 
       // Copy-on-use: mint a FRESH workflow each install (id stripped so the
       // save chokepoint generates a new id), exactly like template use. Name

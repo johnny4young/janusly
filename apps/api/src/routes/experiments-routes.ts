@@ -61,8 +61,7 @@ import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import { gateBudget, budgetBlockedResponse } from "../budget-gate";
 import type { Route } from "../routes";
@@ -146,25 +145,25 @@ export const experimentsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = RunExperimentBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(res, errorEnvelope("experiment_invalid_body", "Invalid experiment body"), 400);
+        return sendError(res, "experiment_invalid_body", "Invalid experiment body", 400);
       }
       const { name, kind, controlRef, candidateRef, evalDatasetId, scorerKind, judgeModelHint } = parsed.data;
 
       // Defensive narrowing (the Zod enums already constrain, but keep the
       // repo/scorer guards as the single source of truth for the closed sets).
       if (!isExperimentKind(kind) || !isScorerKind(scorerKind)) {
-        return sendJson(res, errorEnvelope("experiment_invalid_body", "Invalid experiment kind/scorer"), 400);
+        return sendError(res, "experiment_invalid_body", "Invalid experiment kind/scorer", 400);
       }
 
       // Resolve the dataset (org-scoped) + pull its examples up-front so an
       // empty or cross-org dataset fails BEFORE any LLM cost is incurred.
       const dataset = await getEvalDataset(auth.orgId, evalDatasetId);
       if (!dataset) {
-        return sendJson(res, errorEnvelope("experiment_dataset_not_found", "Eval dataset not found"), 404);
+        return sendError(res, "experiment_dataset_not_found", "Eval dataset not found", 404);
       }
       const examples = await listEvalExamples(auth.orgId, evalDatasetId);
       if (examples.length === 0) {
-        return sendJson(res, errorEnvelope("experiment_dataset_empty", "Eval dataset has no examples"), 422);
+        return sendError(res, "experiment_dataset_empty", "Eval dataset has no examples", 422);
       }
 
       // Resolve both arms. A bad prompt ref is the only pre-flight rejection;
@@ -180,13 +179,9 @@ export const experimentsRoutes: Route[] = [
           error instanceof MissingPromptVersionError ||
           error instanceof NoPromptVersionsError
         ) {
-          return sendJson(
-            res,
-            errorEnvelope("experiment_prompt_ref_invalid", "A prompt reference could not be resolved", {
-              reason: (error as { code?: string }).code ?? "prompt_ref_invalid",
-            }),
-            422,
-          );
+          return sendError(res, "experiment_prompt_ref_invalid", "A prompt reference could not be resolved", 422, {
+            reason: (error as { code?: string }).code ?? "prompt_ref_invalid",
+          });
         }
         throw error;
       }
@@ -278,7 +273,7 @@ export const experimentsRoutes: Route[] = [
           error: error instanceof Error ? error.message : String(error),
         }) as Record<string, unknown>;
         await recordExperimentResult(auth.orgId, experiment.id, "failed", failSummary);
-        return sendJson(res, errorEnvelope("experiment_invalid_body", "Experiment run failed"), 500);
+        return sendError(res, "experiment_invalid_body", "Experiment run failed", 500);
       }
     },
   },
@@ -294,7 +289,7 @@ export const experimentsRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "id required" }, 400);
       const experiment = await getExperiment(auth.orgId, id);
       if (!experiment) {
-        return sendJson(res, errorEnvelope("experiment_not_found", "Experiment not found"), 404);
+        return sendError(res, "experiment_not_found", "Experiment not found", 404);
       }
       return sendJson(res, { experiment });
     },

@@ -56,8 +56,7 @@ import { z } from "zod";
 import { auditAction } from "../audit-helper";
 import { FAILED_RUN_STATUS_SET, MAX_JSON_BODY_BYTES, OPEN_RUN_STATUS_SET } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { isMcpWriteAllowed, mcpRateLimitBucket } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
 import { parseKeysetCursor } from "../run-pagination";
@@ -95,7 +94,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions);
     } },
@@ -109,7 +108,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
       const versions = await db.select().from(workflowVersions).where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, auth.orgId))).orderBy(desc(workflowVersions.version));
       return sendJson(res, versions[0] ?? null);
     } },
@@ -239,7 +238,7 @@ export const workflowsRoutes: Route[] = [
       // A soft-deleted workflow behaves as "not found" for writes too —
       // saving never silently resurrects it; restore it first.
       if (result.kind === "deleted") {
-        return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const auditMetadata: Record<string, unknown> = {
@@ -270,7 +269,7 @@ export const workflowsRoutes: Route[] = [
       if (!result.ok) {
         // A soft-deleted workflow behaves as "not found" for writes too.
         if (result.code === "deleted") {
-          return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+          return sendError(res, "workflow_not_found", "Workflow not found", 404);
         }
         return sendJson(res, { error: "Source version not found" }, 404);
       }
@@ -307,7 +306,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = z.object({ slo: WorkflowSloSchema.nullable() }).safeParse(body);
@@ -319,7 +318,7 @@ export const workflowsRoutes: Route[] = [
       }
 
       const result = await setWorkflowSlo(auth.orgId, workflowId, parsed.data.slo);
-      if (!result) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (!result) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       await auditAction(auth, "workflow.slo.set", { targetType: "workflow", targetId: workflowId, metadata: {
         slo: parsed.data.slo,
@@ -358,7 +357,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // windowDays clamps to [1, 90]; default to the full 90-day lookback so
       // the heatmap is populated even for sparse weekly crons.
@@ -439,7 +438,7 @@ export const workflowsRoutes: Route[] = [
         .set({ deletedAt: new Date() })
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .returning({ id: workflows.id });
-      if (deleted.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (deleted.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Schedule teardown fails open — a Redis blip shouldn't block a
       // workflow delete from completing. A soft-deleted workflow is excluded
@@ -475,7 +474,7 @@ export const workflowsRoutes: Route[] = [
         .set({ deletedAt: null })
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNotNull(workflows.deletedAt)))
         .returning({ id: workflows.id });
-      if (restored.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (restored.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Re-sync schedules from the latest version. Fails open like save —
       // a Redis blip shouldn't undo the restore; the worker's cold-start
@@ -584,7 +583,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Latest version drives readiness (the workflow JSON the operator
       // currently saved is the post-Apply state). The before-side health
@@ -759,7 +758,7 @@ export const workflowsRoutes: Route[] = [
         .from(workflows)
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
-      if (owned.length === 0) return sendJson(res, errorEnvelope("workflow_not_found", "Workflow not found"), 404);
+      if (owned.length === 0) return sendError(res, "workflow_not_found", "Workflow not found", 404);
 
       // Latest version drives the readiness check (the workflow JSON the
       // operator currently saved). Falling back to readiness on the

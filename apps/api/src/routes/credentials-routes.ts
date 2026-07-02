@@ -22,8 +22,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { productionSecretRefResolver } from "../readiness-helpers";
 import type { Route } from "../routes";
 
@@ -153,7 +152,7 @@ export const credentialsRoutes: Route[] = [
       const outcome = txOutcome.result;
       if (outcome.kind === "not_found") return sendJson(res, { error: "credential not found" }, 404);
       if (outcome.kind === "conflict") {
-        return sendJson(res, errorEnvelope("credential_rotation_conflict", "Credential changed since preview; re-preview before rotating"), 409);
+        return sendError(res, "credential_rotation_conflict", "Credential changed since preview; re-preview before rotating", 409);
       }
       // Never echo secretRef (old or new) — the operator supplied the new one
       // and the env-var name is not for the wire (see file header).

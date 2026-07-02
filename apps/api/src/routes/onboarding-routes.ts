@@ -52,8 +52,7 @@ import {
 import { aiStatus } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { AuthContext } from "../auth";
 import type { Route } from "../routes";
 
@@ -207,11 +206,7 @@ export const onboardingRoutes: Route[] = [
       const parsed = OnboardingActionBodySchema.safeParse(body);
       const action = parsed.success ? parsed.data.action : null;
       if (!isOnboardingAction(action)) {
-        return sendJson(
-          res,
-          errorEnvelope("onboarding_invalid_action", "Unknown onboarding action"),
-          400,
-        );
+        return sendError(res, "onboarding_invalid_action", "Unknown onboarding action", 400);
       }
 
       await ensureOnboardingRow(auth.orgId, auth.userId);

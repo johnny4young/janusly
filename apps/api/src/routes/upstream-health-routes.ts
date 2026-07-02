@@ -34,8 +34,7 @@ import { pollOneSource } from "@janusly/engine/src/upstream-health-poller";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 /** Match `/upstream/sources/<id>` (no trailing segment). */
@@ -90,7 +89,7 @@ export const upstreamHealthRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "source id required" }, 400);
       const source = await getUpstreamHealthSourceById(auth.orgId, id);
       if (!source) {
-        return sendJson(res, errorEnvelope("upstream_source_not_found", "Upstream source not found"), 404);
+        return sendError(res, "upstream_source_not_found", "Upstream source not found", 404);
       }
       // Immediate poll. `pollOneSource` never throws — fetch errors fail open.
       const result = await pollOneSource(source);
@@ -127,11 +126,7 @@ export const upstreamHealthRoutes: Route[] = [
       // Reject duplicate name up-front for a clean 409 instead of a raw 23505.
       const existing = await findUpstreamHealthSourceByName(auth.orgId, parsed.data.source.name);
       if (existing) {
-        return sendJson(
-          res,
-          errorEnvelope("upstream_source_duplicate", "An upstream source with that name already exists", { name: parsed.data.source.name }),
-          409,
-        );
+        return sendError(res, "upstream_source_duplicate", "An upstream source with that name already exists", 409, { name: parsed.data.source.name });
       }
 
       const source = await createUpstreamHealthSource(auth.orgId, {
@@ -162,16 +157,12 @@ export const upstreamHealthRoutes: Route[] = [
       // If the name is changing, guard the unique index for a clean 409.
       const renaming = await findUpstreamHealthSourceByName(auth.orgId, parsed.data.source.name);
       if (renaming && renaming.id !== id) {
-        return sendJson(
-          res,
-          errorEnvelope("upstream_source_duplicate", "An upstream source with that name already exists", { name: parsed.data.source.name }),
-          409,
-        );
+        return sendError(res, "upstream_source_duplicate", "An upstream source with that name already exists", 409, { name: parsed.data.source.name });
       }
 
       const updated = await updateUpstreamHealthSource(auth.orgId, id, parsed.data.source);
       if (!updated) {
-        return sendJson(res, errorEnvelope("upstream_source_not_found", "Upstream source not found"), 404);
+        return sendError(res, "upstream_source_not_found", "Upstream source not found", 404);
       }
       await auditAction(auth, "upstream_health.source.updated", {
         targetType: "upstream_health_source",
@@ -191,7 +182,7 @@ export const upstreamHealthRoutes: Route[] = [
       if (!id) return sendJson(res, { error: "source id required" }, 400);
       const deleted = await deleteUpstreamHealthSource(auth.orgId, id);
       if (!deleted) {
-        return sendJson(res, errorEnvelope("upstream_source_not_found", "Upstream source not found"), 404);
+        return sendError(res, "upstream_source_not_found", "Upstream source not found", 404);
       }
       await auditAction(auth, "upstream_health.source.deleted", {
         targetType: "upstream_health_source",
