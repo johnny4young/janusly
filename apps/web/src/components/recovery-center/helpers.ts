@@ -297,6 +297,9 @@ export function readErrorSignature(errorJson: unknown): string {
 }
 
 export function readWorkflowName(dlq: DeadLetter, runs: RunSummary[]): string {
+  // List rows carry the cheap `workflowName` projection; detail rows carry
+  // the full snapshot. Prefer whichever is present.
+  if (typeof dlq.workflowName === 'string' && dlq.workflowName.length > 0) return dlq.workflowName
   const fromWorkflow = (dlq.workflowJson as { name?: unknown } | null | undefined)?.name
   if (typeof fromWorkflow === 'string' && fromWorkflow.length > 0) return fromWorkflow
   const run = runs.find((entry) => entry.id === dlq.runId)

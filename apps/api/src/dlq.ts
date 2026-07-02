@@ -132,9 +132,18 @@ export type RecoveryQueueOverlay = {
   lastOccurredAt: Date;
 };
 
-/** A recovery-queue row: the `dead_letters` row plus its inline recovery
- *  overlay. The web renders the queue from this single cap-correct shape. */
-export type RecoveryQueueRow = typeof deadLetters.$inferSelect & {
+/** A recovery-queue LIST row: a summary projection of the `dead_letters` row
+ *  plus its inline recovery overlay. Deliberately excludes `workflowJson` /
+ *  `nodeJson` — those are persisted with `maxBytes: Infinity` for replay
+ *  fidelity, so a 200-row page would ship 200 unbounded workflow snapshots to
+ *  render a table. The list carries cheap `nodeType` / `workflowName`
+ *  projections instead; `GET /dlq?id=` (`getDeadLetter`) returns the full row
+ *  and is what the web fetches before opening the Recovery dialog. */
+export type RecoveryQueueRow = Omit<typeof deadLetters.$inferSelect, "workflowJson" | "nodeJson"> & {
+  /** `node_json->>'type'` — enough for list rendering without the full node. */
+  nodeType: string | null;
+  /** `workflow_json->>'name'` — enough for list titles without the snapshot. */
+  workflowName: string | null;
   recovery: RecoveryQueueOverlay | null;
 };
 
@@ -259,7 +268,26 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
       : DLQ_LIST_DEFAULT_LIMIT;
 
   const rows = await db
-    .select({ dl: deadLetters, ri: recoveryItems, wf: workflows })
+    .select({
+      // Summary projection — see the RecoveryQueueRow doc: workflow_json /
+      // node_json are unbounded (replay-fidelity) columns the list never
+      // renders; ship one-field `->>` extractions instead.
+      dl: {
+        id: deadLetters.id,
+        orgId: deadLetters.orgId,
+        runId: deadLetters.runId,
+        nodeId: deadLetters.nodeId,
+        attempt: deadLetters.attempt,
+        errorJson: deadLetters.errorJson,
+        status: deadLetters.status,
+        replayedAt: deadLetters.replayedAt,
+        createdAt: deadLetters.createdAt,
+        nodeType: sql<string | null>`${deadLetters.nodeJson}->>'type'`,
+        workflowName: sql<string | null>`${deadLetters.workflowJson}->>'name'`,
+      },
+      ri: recoveryItems,
+      wf: workflows,
+    })
     .from(deadLetters)
     .leftJoin(
       recoveryItems,

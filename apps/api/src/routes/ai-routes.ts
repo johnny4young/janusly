@@ -33,7 +33,7 @@ import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@ja
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleExplainRunEvidence, assembleRecoveryEvidence, assembleSuggestImprovementEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
-import { generateWorkflowCandidates, selectBestCandidate } from "../ai-generate-bestofn";
+import { budgetAwareCandidateCount, generateWorkflowCandidates, selectBestCandidate } from "../ai-generate-bestofn";
 import { composeGenerationExemplars, recordGenerationExemplar, type GenerationExemplarsResult } from "../ai-generation-memory";
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
@@ -156,7 +156,14 @@ export const aiRoutes: Route[] = [
           // JSON text validated server-side against the SAME
           // `AiGenerationWorkflowSchema` shapes.
           const ctx = { orgId: auth.orgId, userId: auth.userId };
-          const candidateTarget = orgConfig.ai.generationCandidates;
+          // Cost-aware Best-of-N: the configured candidate count collapses to
+          // single-shot once monthly spend crosses the budget's warning
+          // threshold (the gate above already loaded the envelope — no extra
+          // read). No budget configured → configured N applies untouched.
+          const candidateTarget = budgetAwareCandidateCount(
+            orgConfig.ai.generationCandidates,
+            budgetGate.envelope,
+          );
           if (candidateTarget > 1) {
             // Best-of-N: sample N independent drafts and keep the best by a
             // deterministic readiness score. The winner flows through the same
