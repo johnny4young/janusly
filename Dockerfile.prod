@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+# Production images for the Janusly API and worker.
+#
+#   docker build -f Dockerfile.prod --target api    -t janusly-api .
+#   docker build -f Dockerfile.prod --target worker -t janusly-worker .
+#
+# Differences from the dev images (Dockerfile.api / Dockerfile.web, which stay
+# dev-oriented on purpose):
+#   - frozen lockfile install (reproducible; CI-equivalent)
+#   - runs as a non-root user
+#   - NODE_ENV=production, no watch mode
+#   - the api target carries a HEALTHCHECK against GET /health
+#
+# The workspace is TS-first (packages ship src/*.ts; `build` is tsc --noEmit),
+# so the runtime executes TypeScript via tsx — a full install is required
+# (tsx is a workspace devDependency). Remember to run the two-file index
+# rollout (production-rollout.sql) and `pnpm migrate` before pointing a new
+# image at the database — both api and worker fail fast on unapplied
+# migrations via assertMigrationsApplied().
+
+FROM node:24-alpine AS base
+
+WORKDIR /app
+
+RUN corepack enable
+
+# Manifests first so the install layer caches across source-only changes.
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages ./packages
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN addgroup -S janusly && adduser -S janusly -G janusly \
+  && chown -R janusly:janusly /app
+
+USER janusly
+
+ENV NODE_ENV=production
+
+# ── API ──────────────────────────────────────────────────────────────────────
+FROM base AS api
+
+EXPOSE 3001
+
+# GET /health is the unauthenticated liveness probe (see docs/api.md).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3001/health || exit 1
+
+CMD ["pnpm", "--filter", "@janusly/api", "exec", "tsx", "src/index.ts"]
+
+# ── Worker ───────────────────────────────────────────────────────────────────
+FROM base AS worker
+
+# No HTTP surface — BullMQ liveness is observable via queue metrics; the
+# container's process liveness is the restart signal.
+CMD ["pnpm", "--filter", "@janusly/engine", "exec", "tsx", "src/worker.ts"]

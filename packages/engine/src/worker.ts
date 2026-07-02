@@ -26,7 +26,9 @@
  */
 
 import { Worker, UnrecoverableError } from "bullmq";
-import { NodeSchema } from "@janusly/shared";
+import { z } from "zod";
+
+import { NodeSchema, type Workflow } from "@janusly/shared";
 import { assertMigrationsApplied } from "@janusly/db/src/migrations";
 import { setUsageRecorder } from "@janusly/ai";
 import {
@@ -294,7 +296,11 @@ const runtime = new WorkflowRuntime(
   }
 );
 
-function validateJobData(data: unknown): { runId: string; node: unknown; workflow: unknown } {
+function validateJobData(data: unknown): {
+  runId: string;
+  node: z.infer<typeof NodeSchema>;
+  workflow: Workflow;
+} {
   if (!data || typeof data !== "object") {
     throw new UnrecoverableError("Invalid job data: not an object");
   }
@@ -367,7 +373,7 @@ export const worker = new Worker(
       return;
     }
     const { runId, node, workflow } = validateJobData(job.data);
-    await runtime.executeQueuedNode({ runId, node: node as any, workflow: workflow as any });
+    await runtime.executeQueuedNode({ runId, node, workflow });
   },
   {
     connection,
