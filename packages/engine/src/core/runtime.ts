@@ -332,7 +332,12 @@ export class WorkflowRuntime {
     // guard catches any future caller that forgets to.
     const status = await this.store.getRunStatus(runId);
     if (status === "cancelled" || status === "failed") return 0;
-    const context = await this.store.getRunContext(runId);
+    // Cheap path: the readiness scan only reads node STATUSES unless some
+    // edge carries a `condition` (whose expression can reach into outputs).
+    // Skipping state_json here matters — this runs after EVERY completion,
+    // and full rows would move O(nodes × state size) per scan.
+    const hasConditionalEdges = workflow.edges.some((edge) => edge.condition);
+    const context = await this.store.getRunContext(runId, { statusesOnly: !hasConditionalEdges });
 
     // Readiness reads come from the context snapshot loaded above — ONE query
     // for the whole scan — instead of a per-dep + per-node `getNodeStatus`

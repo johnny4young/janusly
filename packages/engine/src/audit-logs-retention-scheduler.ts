@@ -36,6 +36,7 @@ import { auditLogs, db } from "@janusly/db";
 import { deleteExpiredAuditLogs } from "@janusly/data";
 
 import { workflowQueue } from "./queue";
+import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global id for the BullMQ scheduler. */
@@ -147,7 +148,7 @@ async function writeSystemAudit(action: string, metadata: Record<string, unknown
       action,
       targetType: null,
       targetId: null,
-      metadata,
+      metadata: safePersistPayload(metadata) as Record<string, unknown>,
     });
   } catch (err) {
     console.warn("[audit-logs-retention] audit write failed", { action, err: err instanceof Error ? err.message : String(err) });

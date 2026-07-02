@@ -33,6 +33,7 @@ import { auditLogs, db } from "@janusly/db";
 import { pruneOldProcessedEvents } from "@janusly/data";
 
 import { workflowQueue } from "./queue";
+import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 
 export const SCIM_EVENTS_RETENTION_JOB_ID = "system:scim-events-retention";
@@ -136,7 +137,7 @@ async function writeSystemAudit(action: string, metadata: Record<string, unknown
       action,
       targetType: null,
       targetId: null,
-      metadata,
+      metadata: safePersistPayload(metadata) as Record<string, unknown>,
     });
   } catch (err) {
     console.warn("[scim-events-retention] audit write failed", { action, err: err instanceof Error ? err.message : String(err) });

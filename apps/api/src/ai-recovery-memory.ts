@@ -224,9 +224,10 @@ function oneLine(value: string): string {
  *
  * Step 2: build the query string from the failing node + error excerpt.
  *
- * Step 3: parallel recall for `recovery_rationale` + `patch_rationale`.
- * The two kinds cover the operator-feedback half + the post-acceptance
- * patch rationale half of the recovery loop.
+ * Step 3: one multi-kind recall for `recovery_rationale` +
+ * `patch_rationale` (single embedding + single pgvector query). The two
+ * kinds cover the operator-feedback half + the post-acceptance patch
+ * rationale half of the recovery loop.
  *
  * Step 4: post-filter by `workflowId` (workflow matches lead, then
  * cross-workflow matches fill remaining budget — the AC's "preferably
@@ -256,28 +257,30 @@ export async function composeRecoveryMemoryHint(
     return { snippets: "", hitCount: 0, recallOk: true, entries: [] };
   }
 
-  // Two kinds in parallel. `recallMemory` normally handles consent,
+  // Both kinds in ONE `recallMemory` call (`kinds: [...]`) — one embedding
+  // round-trip and one pgvector query instead of a per-kind fan-out that
+  // re-embeds the identical query string. `recallMemory` handles consent,
   // embedding generation, pgvector ranking, and read-time scrubbing.
   // Keep this route resilient if a future repo regression throws: the
-  // recovery prompt proceeds without the failed kind and the audit row
-  // carries `memoryRecallOk: false`.
-  const [rationaleSettled, patchSettled] = await Promise.allSettled([
-    recallMemory({ orgId: input.orgId, kind: "recovery_rationale", query }),
-    recallMemory({ orgId: input.orgId, kind: "patch_rationale", query }),
+  // recovery prompt proceeds without memory and the audit row carries
+  // `memoryRecallOk: false`.
+  const [recallSettled] = await Promise.allSettled([
+    recallMemory({
+      orgId: input.orgId,
+      kinds: ["recovery_rationale", "patch_rationale"],
+      query,
+    }),
   ]);
 
-  const allEntries: MemoryRecallEntry[] = [
-    ...(rationaleSettled.status === "fulfilled" ? rationaleSettled.value.entries : []),
-    ...(patchSettled.status === "fulfilled" ? patchSettled.value.entries : []),
-  ];
-  // We cannot directly observe "did each fulfilled call fail or just
+  const allEntries: MemoryRecallEntry[] =
+    recallSettled.status === "fulfilled" ? recallSettled.value.entries : [];
+  // We cannot directly observe "did the fulfilled call fail or just
   // return empty?" from the result envelope (the repo deliberately
   // gives a uniform `{ entries: [] }` for both). Treat the recall as OK
-  // only when both calls returned; the repo's `memory.recall.failed`
+  // only when the call returned; the repo's `memory.recall.failed`
   // audit row remains the rich diagnostic signal for fulfilled-but-empty
   // runtime failures.
-  const recallOk =
-    rationaleSettled.status === "fulfilled" && patchSettled.status === "fulfilled";
+  const recallOk = recallSettled.status === "fulfilled";
 
   if (allEntries.length === 0) {
     return { snippets: "", hitCount: 0, recallOk, entries: [] };

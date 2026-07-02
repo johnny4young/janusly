@@ -285,7 +285,13 @@ export async function updateRunStatusFromNodes(runId: string) {
     return status;
   }
 
-  const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId));
+  // Status-only projection: this rollup runs after every node completion,
+  // and the full rows would drag each node's state_json (up to 1MB) over
+  // the wire just to inspect the status column.
+  const nodes = await db
+    .select({ status: runNodes.status })
+    .from(runNodes)
+    .where(eq(runNodes.runId, runId));
 
   if (nodes.some(node => node.status === "failed")) {
     await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
@@ -361,8 +367,35 @@ export async function appendEvent(runId: string, nodeId: string | null, type: st
   });
 }
 
-/** Build the per-run context dict (`{ [nodeId]: { status, output, ... } }`) every executor receives. */
-export async function getRunContext(runId: string) {
+/**
+ * Build the per-run context dict (`{ [nodeId]: { status, output, ... } }`)
+ * every executor receives.
+ *
+ * `statusesOnly: true` skips the `state_json` / `error_json` columns — the
+ * readiness scan in `enqueueReadyNodes` only needs statuses unless an edge
+ * carries a `condition`, and full rows drag each node's state (up to 1MB)
+ * over the wire on every completion. The reduced shape keeps the same keys
+ * (empty `state`/`output`, `null` error) so consumers stay structurally
+ * compatible; don't hand it to executors that template over outputs.
+ */
+export async function getRunContext(runId: string, opts: { statusesOnly?: boolean } = {}) {
+  if (opts.statusesOnly) {
+    const rows = await db
+      .select({ nodeId: runNodes.nodeId, status: runNodes.status, attempts: runNodes.attempts })
+      .from(runNodes)
+      .where(eq(runNodes.runId, runId));
+    return rows.reduce<Record<string, any>>((acc, row) => {
+      acc[row.nodeId] = {
+        status: row.status,
+        attempts: row.attempts ?? 0,
+        state: {},
+        output: {},
+        error: null,
+      };
+      return acc;
+    }, {});
+  }
+
   const rows = await db.select().from(runNodes).where(eq(runNodes.runId, runId));
 
   return rows.reduce<Record<string, any>>((acc, row) => {

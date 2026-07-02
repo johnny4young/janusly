@@ -368,7 +368,9 @@ returns `422` when fail-level readiness issues remain.
 
 List the org's runs, newest first. Supports `?limit=` capped at 200 and
 `?workflowId=` to filter through `workflow_versions` while preserving org
-scope.
+scope. Rows are summary projections — `inputJson` (the per-run workflow
+snapshot) is intentionally omitted from list responses; use `GET /run`
+for the full row.
 
 ### `GET /run?runId=<uuid>`
 

@@ -40,6 +40,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 
 import { db, auditLogs } from "@janusly/db";
 import { scrubSecretShapes } from "@janusly/shared/src/error-signature";
+import { safePersistPayload } from "@janusly/shared/src/safe-persist";
 import { recordAlertEvent } from "./alert-dispatch";
 
 /** Per-bucket state held in-memory while the bucket is degraded. */
@@ -303,12 +304,12 @@ async function writeDegradedAudit(input: {
       action: "rate_limit.degraded",
       targetType: "rate_limit_bucket",
       targetId: input.bucket,
-      metadata: {
+      metadata: safePersistPayload({
         bucket: input.bucket,
         firstObservedAt: input.firstObservedAt,
         lastObservedKey: input.key,
         lastError: input.message,
-      },
+      }) as Record<string, unknown>,
     });
 
     // Fire the recovery-alerting hook so subscribed system-org policies can
@@ -343,12 +344,12 @@ async function writeRecoveredAudit(input: {
       action: "rate_limit.recovered",
       targetType: "rate_limit_bucket",
       targetId: input.bucket,
-      metadata: {
+      metadata: safePersistPayload({
         bucket: input.bucket,
         firstObservedAt: input.firstObservedAt,
         lastObservedAt: input.lastObservedAt,
         errorCount: input.errorCount,
-      },
+      }) as Record<string, unknown>,
     });
   } catch (err) {
     console.warn("[rate-limit] recovered audit write failed", { bucket: input.bucket, err });

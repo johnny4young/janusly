@@ -21,6 +21,8 @@
  *   user-friendly templating.
  */
 
+import { redactValues } from "@janusly/shared/src/safe-persist";
+
 import { getSecret } from "./secrets";
 
 export type TemplateScope = Record<string, unknown>;
@@ -186,25 +188,12 @@ export function renderTemplateWithRedactions(
  * Recursively replace any string occurrences of `redactedValues` (e.g.
  * resolved secret/env values) with the literal `"[redacted]"`. Applied to
  * executor outputs and `waiting` metadata before persistence.
+ *
+ * Implementation lives in `@janusly/shared/src/safe-persist` (single
+ * source shared with `safePersistPayload` and the data layer); re-exported
+ * here so existing engine imports keep working.
  */
-export function redactValues<T>(value: T, redactedValues: string[]): T {
-  if (redactedValues.length === 0) return value;
-  if (typeof value === 'string') {
-    let next: string = value;
-    for (const secret of redactedValues) {
-      if (!secret) continue;
-      next = next.split(secret).join('[redacted]');
-    }
-    return next as T;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactValues(item, redactedValues)) as T;
-  }
-  if (isTemplateRecord(value)) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactValues(item, redactedValues)])) as T;
-  }
-  return value;
-}
+export { redactValues };
 
 /**
  * Redact resolved secret/env values from thrown errors before the runtime
