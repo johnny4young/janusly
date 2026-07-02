@@ -15,25 +15,30 @@
  * Used by `packages/mcp-server/src/index.ts`'s `setRequestHandler` arms.
  *
  * Invariants:
- * - Tool surface split: read-only (`workflows.list`, `workflows.get`,
- *   `workflows.versions`, `workflows.health`, `recipes.list`, `tools.list`,
- *   `runs.get`, `runs.list`, `dlq.list`, `dlq.clusters`,
- *   `recovery.metrics`, `reports.run_explain`, `ai.patch_workflow`),
- *   pre-flight checks (`workflows.validate` and `workflows.readiness` —
- *   POST but no side effects), and a gated write surface (`workflows.save`).
- *   Write tools are advertised ONLY when `JANUSLY_MCP_WRITES_ENABLED=true`.
- *   When the env is off the tool is absent from `tools()` and a direct call is
- *   rejected with a clear error. The API enforces a second gate
- *   (per-tenant `mcp.writeConsent`) so flipping the env without tenant
- *   opt-in still rejects at the wire. `ai.patch_workflow` is read-only
- *   from system-state POV (writes an audit row + incurs LLM cost, but
- *   never saves a workflow version); applying a suggested patch requires
- *   a follow-up `workflows.save` and therefore the same two-flag consent.
+ * - Tool surface split. READ-ONLY (always advertised): describe / inspect
+ *   (`workflows.list/get/versions/health`, `recipes.list`, `tools.list`,
+ *   `runs.get/list`, `dlq.list/clusters`, `recovery.metrics`,
+ *   `reports.run_explain`, `mcp.connections.list/tools`), pre-flight POSTs
+ *   with no side effects (`workflows.validate`, `workflows.readiness`), and
+ *   the two AI surfaces `ai.generate_workflow` + `ai.patch_workflow` (both
+ *   read-only from system-state POV — they write an audit row + incur LLM
+ *   cost but NEVER save a workflow version; persisting a suggestion needs a
+ *   follow-up `workflows.save`, so the two-flag consent still gates the
+ *   actual mutation). GATED WRITE surface (advertised ONLY when
+ *   `JANUSLY_MCP_WRITES_ENABLED=true`): author (`workflows.save`,
+ *   `workflows.rollback`), operate (`runs.start`, `runs.resume`,
+ *   `runs.cancel`, `dlq.replay`), and outbound-connection management
+ *   (`mcp.connections.create/rediscover/set_tool/delete`). When the env is
+ *   off a write tool is absent from `listTools()` and a direct call is
+ *   rejected by `requireWrites`. The API enforces the SECOND gate
+ *   (per-tenant `mcp.writeConsent`, via `guardMcpWrite`) so flipping the env
+ *   without tenant opt-in still 403s at the wire; the connection-management
+ *   writes additionally require admin RBAC upstream.
  * - Don't add more write tools without an explicit product/security review
- *   matching the required posture: explicit consent (both env + tenant),
- *   RBAC enforced upstream, audit row written by the API with
- *   `metadata.source: "mcp"`, per-tool rate limit, and safe exposure to a
- *   remote MCP client.
+ *   matching the required posture: explicit consent (both env + tenant via
+ *   `guardMcpWrite`), RBAC enforced upstream, audit row auto-tagged
+ *   `metadata.source: "mcp"` by `auditAction`, per-tool rate limit, and safe
+ *   exposure to a remote MCP client.
  * - The MCP server itself still has zero DB access and writes no audit
  *   rows of its own. All audit + scope enforcement lives on the API side.
  * - Errors thrown here are caught by the SDK's request-handler machinery
@@ -71,6 +76,136 @@ const WRITE_TOOLS: Tool[] = [
             "When true, route to /validate instead of /workflows/save. Returns `{ mode: 'dry-run', valid, issues }` without writing a new version.",
         },
       },
+    },
+  },
+  {
+    name: "runs.start",
+    description:
+      "Start a run of a workflow. Pass the FULL workflow DAG in `workflow` (fetch a saved one with `workflows.get` first) plus optional typed `input`. Returns `{ runId }`; monitor with `runs.get`. Include the saved workflow's `id` in the DAG to run it as saved rather than ad-hoc. Gated by the two-flag write consent + per-org rate limit.",
+    inputSchema: {
+      type: "object",
+      required: ["workflow"],
+      properties: {
+        workflow: { type: "object", description: "Full workflow DAG to run (same shape `POST /start` accepts)." },
+        input: { type: "object", description: "Optional run input payload; validated against the workflow's declared `inputs` when present." },
+      },
+    },
+  },
+  {
+    name: "runs.resume",
+    description:
+      "Resume a run paused at an `approval`, `webhook`, or `human_form` node. `human_form` requires a signed `resumeToken` and validates `input` against the node's schema. Returns `{ resumed: true }`. Two-flag write consent + rate limit apply.",
+    inputSchema: {
+      type: "object",
+      required: ["runId", "nodeId"],
+      properties: {
+        runId: { type: "string" },
+        nodeId: { type: "string", description: "The waiting node's id." },
+        input: { type: "object", description: "Structured input captured as the resumed node's output (webhook / human_form)." },
+        resumeToken: { type: "string", description: "HMAC resume token — required for `human_form` nodes." },
+      },
+    },
+  },
+  {
+    name: "runs.cancel",
+    description:
+      "Cancel an in-flight run. A run already in a terminal state returns 409. Returns `{ runId, status: 'cancelled' }`. Two-flag write consent + rate limit apply.",
+    inputSchema: {
+      type: "object",
+      required: ["runId"],
+      properties: {
+        runId: { type: "string" },
+        reason: { type: "string", description: "Optional cancellation reason recorded on the run timeline + audit." },
+      },
+    },
+  },
+  {
+    name: "dlq.replay",
+    description:
+      "Replay a dead-letter entry — re-enqueue the failed node so the run advances past the failure (after the cause is fixed, e.g. a patched workflow saved). Identify the entry by `deadLetterId` (from `dlq.list`) OR by `runId` + `nodeId`. Two-flag write consent + rate limit apply.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deadLetterId: { type: "string", description: "Stable dead-letter id (from `dlq.list`)." },
+        runId: { type: "string", description: "Alternative to `deadLetterId`: the failed run id (requires `nodeId`)." },
+        nodeId: { type: "string", description: "The failed node id (used with `runId`)." },
+      },
+    },
+  },
+  {
+    name: "workflows.rollback",
+    description:
+      "Roll a workflow back to a prior saved version by appending that version's DAG as a new latest version (non-destructive). Get version ids from `workflows.versions`. Returns the new version metadata. Two-flag write consent + rate limit apply.",
+    inputSchema: {
+      type: "object",
+      required: ["workflowId", "sourceVersionId"],
+      properties: {
+        workflowId: { type: "string" },
+        sourceVersionId: { type: "string", description: "The version id to roll back to (from `workflows.versions`)." },
+      },
+    },
+  },
+  {
+    name: "mcp.connections.create",
+    description:
+      "Register a new outbound MCP connection for the org so its tools become available to `mcp_tool` workflow steps. Discovery runs once at create; every discovered tool lands `enabled:false` / `writeSide:true` until opted in via `mcp.connections.set_tool`. Requires admin RBAC upstream IN ADDITION to the two-flag write consent.",
+    inputSchema: {
+      type: "object",
+      required: ["alias", "transport"],
+      properties: {
+        alias: { type: "string", description: "Unique per-org alias, /^[a-z0-9_-]{1,32}$/." },
+        transport: { type: "string", enum: ["stdio", "sse", "http"], description: "MCP transport." },
+        command: { type: "string", description: "stdio only: the allowlisted command to spawn." },
+        args: { type: "array", items: { type: "string" }, description: "stdio only: command arguments." },
+        url: { type: "string", description: "sse/http only: the server endpoint URL (SSRF-validated)." },
+        envRefs: {
+          type: "object",
+          description:
+            "Credential-name references resolved to secrets at call time — NEVER the secret values. Shape: { HEADER_OR_ENV: { kind: 'env', name: '<credential-name>' } }.",
+        },
+      },
+    },
+  },
+  {
+    name: "mcp.connections.rediscover",
+    description:
+      "Re-run tool discovery for one connection (picks up new/renamed upstream tools). Existing `enabled` / `writeSide` opt-ins survive. Requires admin RBAC + two-flag write consent.",
+    inputSchema: {
+      type: "object",
+      required: ["alias"],
+      properties: { alias: { type: "string", description: "Connection alias." } },
+    },
+  },
+  {
+    name: "mcp.connections.set_tool",
+    description:
+      "Toggle one cached tool descriptor: `enabled` (opt the tool into workflows), `writeSide` (mark it a mutation for the dry-run + write-consent gates), `exposeToAi` (surface its description to the workflow generator), or `rateLimitPerMin`. Requires admin RBAC + two-flag write consent.",
+    inputSchema: {
+      type: "object",
+      required: ["alias", "toolName"],
+      properties: {
+        alias: { type: "string" },
+        toolName: { type: "string" },
+        enabled: { type: "boolean" },
+        writeSide: { type: "boolean" },
+        exposeToAi: { type: "boolean" },
+        rateLimitPerMin: {
+          type: "number",
+          minimum: 1,
+          maximum: 10000,
+          description: "Per-tool override; omit to use the org default.",
+        },
+      },
+    },
+  },
+  {
+    name: "mcp.connections.delete",
+    description:
+      "Delete an outbound MCP connection and its cached tool descriptors. Workflows referencing its tools fail on next run until re-registered. Requires admin RBAC + two-flag write consent.",
+    inputSchema: {
+      type: "object",
+      required: ["alias"],
+      properties: { alias: { type: "string", description: "Connection alias." } },
     },
   },
 ];
@@ -310,6 +445,40 @@ const READ_TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: "ai.generate_workflow",
+    description:
+      "Generate a complete workflow DAG from a natural-language goal. Returns `{ workflow, mode, aiError? }` — `mode: 'ai'` on success, `mode: 'fallback'` (with `aiError`) when the LLM is unavailable so you always get a runnable draft. NO version is saved: validate it (`workflows.validate` / `workflows.readiness`), then persist with `workflows.save` (two-flag write consent). The API enforces per-org AI rate limit + LLM budget on this call.",
+    inputSchema: {
+      type: "object",
+      required: ["prompt"],
+      properties: {
+        prompt: {
+          type: "string",
+          description:
+            "Plain-language description of what the workflow should do (e.g. \"When a Stripe webhook arrives, look up the customer in Postgres and email them a receipt PDF\").",
+        },
+      },
+    },
+  },
+  {
+    name: "mcp.connections.list",
+    description:
+      "List the org's registered outbound MCP connections (the external MCP servers Janusly can call as `mcp_tool` workflow steps): alias, transport, status, exposeToAi flag, and per-tool counts. No side effects.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "mcp.connections.tools",
+    description:
+      "List the cached tool descriptors for one MCP connection: name, description, `enabled`, `writeSide`, `exposeToAi`, and any per-tool rate limit. Use it before `mcp.connections.set_tool` to see what to toggle. No side effects.",
+    inputSchema: {
+      type: "object",
+      required: ["alias"],
+      properties: {
+        alias: { type: "string", description: "Connection alias (from `mcp.connections.list`)." },
+      },
+    },
+  },
 ];
 
 /** Pure variant that lets tests vary the env per-case. */
@@ -461,10 +630,114 @@ async function runOne(
         body: JSON.stringify({ deadLetterId: args.deadLetterId }),
       });
     }
-    case "workflows.save": {
-      if (!mcpWritesEnabled()) {
-        throw new Error("workflows.save is disabled (set JANUSLY_MCP_WRITES_ENABLED=true to advertise)");
+    case "ai.generate_workflow": {
+      if (typeof args.prompt !== "string" || args.prompt.trim().length === 0) {
+        throw new Error("ai.generate_workflow requires `prompt` (non-empty string)");
       }
+      return callApi("/ai/generate-workflow", {
+        method: "POST",
+        body: JSON.stringify({ prompt: args.prompt }),
+      });
+    }
+    case "mcp.connections.list":
+      return callApi("/mcp/connections");
+    case "mcp.connections.tools": {
+      if (typeof args.alias !== "string" || args.alias.length === 0) {
+        throw new Error("mcp.connections.tools requires `alias` (non-empty string)");
+      }
+      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}/tools`);
+    }
+    case "runs.start": {
+      requireWrites(name);
+      if (!isObject(args.workflow)) {
+        throw new Error("runs.start requires `workflow` (object)");
+      }
+      const payload: Record<string, unknown> = { workflow: args.workflow };
+      if (args.input !== undefined) payload.input = args.input;
+      return callApi("/start", { method: "POST", body: JSON.stringify(payload) });
+    }
+    case "runs.resume": {
+      requireWrites(name);
+      if (typeof args.runId !== "string" || typeof args.nodeId !== "string") {
+        throw new Error("runs.resume requires `runId` and `nodeId` (strings)");
+      }
+      const payload: Record<string, unknown> = { runId: args.runId, nodeId: args.nodeId };
+      if (args.input !== undefined) payload.input = args.input;
+      if (typeof args.resumeToken === "string") payload.resumeToken = args.resumeToken;
+      return callApi("/resume", { method: "POST", body: JSON.stringify(payload) });
+    }
+    case "runs.cancel": {
+      requireWrites(name);
+      if (typeof args.runId !== "string" || args.runId.length === 0) {
+        throw new Error("runs.cancel requires `runId` (non-empty string)");
+      }
+      const payload: Record<string, unknown> = { runId: args.runId };
+      if (typeof args.reason === "string") payload.reason = args.reason;
+      return callApi("/run/cancel", { method: "POST", body: JSON.stringify(payload) });
+    }
+    case "dlq.replay": {
+      requireWrites(name);
+      const payload: Record<string, unknown> = {};
+      if (typeof args.deadLetterId === "string" && args.deadLetterId.length > 0) {
+        payload.deadLetterId = args.deadLetterId;
+      } else if (typeof args.runId === "string" && typeof args.nodeId === "string") {
+        payload.runId = args.runId;
+        payload.nodeId = args.nodeId;
+      } else {
+        throw new Error("dlq.replay requires `deadLetterId` OR both `runId` and `nodeId`");
+      }
+      return callApi("/dlq/replay", { method: "POST", body: JSON.stringify(payload) });
+    }
+    case "workflows.rollback": {
+      requireWrites(name);
+      if (typeof args.workflowId !== "string" || typeof args.sourceVersionId !== "string") {
+        throw new Error("workflows.rollback requires `workflowId` and `sourceVersionId` (strings)");
+      }
+      return callApi("/workflows/rollback", {
+        method: "POST",
+        body: JSON.stringify({ workflowId: args.workflowId, sourceVersionId: args.sourceVersionId }),
+      });
+    }
+    case "mcp.connections.create": {
+      requireWrites(name);
+      if (typeof args.alias !== "string" || args.alias.length === 0) {
+        throw new Error("mcp.connections.create requires `alias` (non-empty string)");
+      }
+      if (typeof args.transport !== "string") {
+        throw new Error("mcp.connections.create requires `transport` (string)");
+      }
+      return callApi("/mcp/connections", { method: "POST", body: JSON.stringify(args) });
+    }
+    case "mcp.connections.rediscover": {
+      requireWrites(name);
+      if (typeof args.alias !== "string" || args.alias.length === 0) {
+        throw new Error("mcp.connections.rediscover requires `alias` (non-empty string)");
+      }
+      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}/rediscover`, {
+        method: "POST",
+        body: "{}",
+      });
+    }
+    case "mcp.connections.set_tool": {
+      requireWrites(name);
+      if (typeof args.alias !== "string" || typeof args.toolName !== "string") {
+        throw new Error("mcp.connections.set_tool requires `alias` and `toolName` (strings)");
+      }
+      const { alias, toolName, ...patch } = args;
+      return callApi(
+        `/mcp/connections/${encodeURIComponent(alias)}/tools/${encodeURIComponent(toolName)}`,
+        { method: "POST", body: JSON.stringify(patch) },
+      );
+    }
+    case "mcp.connections.delete": {
+      requireWrites(name);
+      if (typeof args.alias !== "string" || args.alias.length === 0) {
+        throw new Error("mcp.connections.delete requires `alias` (non-empty string)");
+      }
+      return callApi(`/mcp/connections/${encodeURIComponent(args.alias)}`, { method: "DELETE" });
+    }
+    case "workflows.save": {
+      requireWrites(name);
       if (!isObject(args.workflow)) {
         throw new Error("workflows.save requires `workflow` (object)");
       }
@@ -487,4 +760,17 @@ async function runOne(
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Guard every write-tool dispatch: refuse when `JANUSLY_MCP_WRITES_ENABLED`
+ * is off. Write tools are also absent from `listTools()` when the env is off,
+ * so this is defense-in-depth against a client that calls a tool it never saw
+ * advertised. The API enforces the SECOND gate (per-tenant `mcp.writeConsent`)
+ * regardless — flipping the env without tenant opt-in still 403s at the wire.
+ */
+function requireWrites(name: string): void {
+  if (!mcpWritesEnabled()) {
+    throw new Error(`${name} is disabled (set JANUSLY_MCP_WRITES_ENABLED=true to advertise)`);
+  }
 }
