@@ -83,6 +83,13 @@ export const AgentNodeConfigSchema = z
     planner: z.enum(["rules", "openai"]).optional(),
     maxSteps: z.number().int().positive().max(50).optional(),
     timeoutMs: z.number().int().positive().optional(),
+    // Presentation + behavior fields the agent loop reads; previously they
+    // rode the passthrough untyped.
+    name: z.string().optional(),
+    role: z.string().optional(),
+    persona: z.string().optional(),
+    reflection: z.boolean().optional(),
+    model: z.string().optional(),
   })
   .passthrough();
 
