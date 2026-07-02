@@ -4,6 +4,7 @@ const {
   appendEventMock,
   enqueueNodeMock,
   markNodeQueuedMock,
+  setRunWorkflowSnapshotMock,
   originalRunNodeRowsRef,
   runEventsTable,
   runNodesTable,
@@ -15,6 +16,7 @@ const {
   appendEventMock: vi.fn().mockResolvedValue(undefined),
   enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
   markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
+  setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
   originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
   runEventsTable: { name: 'runEvents' },
   runNodesTable: { name: 'runNodes' },
@@ -59,6 +61,7 @@ vi.mock('../queue', () => ({
 vi.mock('../persistence', () => ({
   markNodeQueued: markNodeQueuedMock,
   appendEvent: appendEventMock,
+  setRunWorkflowSnapshot: setRunWorkflowSnapshotMock,
 }))
 
 vi.mock('../safe-persist', () => ({
@@ -87,6 +90,7 @@ beforeEach(() => {
   enqueueNodeMock.mockReset()
   markNodeQueuedMock.mockReset()
   appendEventMock.mockReset()
+  setRunWorkflowSnapshotMock.mockReset()
 })
 
 describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
@@ -100,9 +104,12 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1)
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: 'orig-run',
-      node: failingNode,
+      nodeId: failingNode.id,
       attempt: 1,
     })
+    // The replayed workflow becomes the run's authoritative snapshot so the
+    // slim queue worker (and the downstream cascade) reload the right DAG.
+    expect(setRunWorkflowSnapshotMock).toHaveBeenCalledWith('orig-run', baseWorkflow)
     // Production replay is a single enqueue — no new run row, no new node rows.
     expect(txInsertMock).not.toHaveBeenCalled()
     expect(markNodeQueuedMock).not.toHaveBeenCalled()
@@ -151,7 +158,7 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1)
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
-      node: failingNode,
+      nodeId: 'fetch',
       attempt: 1,
     })
 

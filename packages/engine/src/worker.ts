@@ -96,6 +96,7 @@ import {
   STALLED_NODE_REAPER_JOB_NAME,
 } from "./stalled-node-reaper";
 import { parseWorkflowCached } from "./workflow-parse-cache";
+import { loadRunWorkflowRaw } from "./persistence";
 
 await assertMigrationsApplied();
 
@@ -296,11 +297,26 @@ const runtime = new WorkflowRuntime(
   }
 );
 
-function validateJobData(data: unknown): {
-  runId: string;
-  node: z.infer<typeof NodeSchema>;
-  workflow: Workflow;
-} {
+type ResolvedJob =
+  | { skip: true }
+  | { skip: false; runId: string; node: z.infer<typeof NodeSchema>; workflow: Workflow };
+
+/**
+ * Resolve a slim `execute-node` job (`{ runId, nodeId }`) into the full
+ * execution input. The workflow is NOT carried in the Redis payload — it is
+ * reloaded from `runs.inputJson.workflow` (the authoritative snapshot,
+ * updated on replay) and the node resolved by id. The content-addressed
+ * `parseWorkflowCached` keeps the full-workflow Zod parse off the hot path
+ * for byte-identical loads; a patched replay has different bytes and can
+ * never hit a stale entry.
+ *
+ * Returns `{ skip: true }` when the run row is gone (deleted between enqueue
+ * and execution) — a benign no-op that mirrors the pre-slim "claim fails →
+ * skip" outcome. Genuine data corruption (missing/invalid workflow, unknown
+ * node id) throws `UnrecoverableError` so the poisoned job lands in the DLQ
+ * instead of retrying forever.
+ */
+async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   if (!data || typeof data !== "object") {
     throw new UnrecoverableError("Invalid job data: not an object");
   }
@@ -308,18 +324,24 @@ function validateJobData(data: unknown): {
   if (typeof obj.runId !== "string" || obj.runId.length === 0) {
     throw new UnrecoverableError("Invalid job data: missing runId");
   }
-  const node = NodeSchema.safeParse(obj.node);
-  if (!node.success) {
-    throw new UnrecoverableError(`Invalid job data (node): ${node.error.issues.map((i) => i.message).join(", ")}`);
+  if (typeof obj.nodeId !== "string" || obj.nodeId.length === 0) {
+    throw new UnrecoverableError("Invalid job data: missing nodeId");
   }
-  // Content-addressed cache: byte-identical workflow payloads (every job of
-  // the same run) skip the full-workflow Zod parse; a patched DLQ replay has
-  // different bytes and can never hit a stale entry.
-  const workflow = parseWorkflowCached(obj.workflow);
-  if (!workflow.ok) {
-    throw new UnrecoverableError(`Invalid job data (workflow): ${workflow.error}`);
+
+  const { found, workflow: rawWorkflow } = await loadRunWorkflowRaw(obj.runId);
+  if (!found) {
+    // Run deleted between enqueue and execution — nothing to run.
+    return { skip: true };
   }
-  return { runId: obj.runId, node: node.data, workflow: workflow.workflow };
+  const parsed = parseWorkflowCached(rawWorkflow);
+  if (!parsed.ok) {
+    throw new UnrecoverableError(`Invalid workflow for run ${obj.runId}: ${parsed.error}`);
+  }
+  const node = parsed.workflow.nodes.find((candidate) => candidate.id === obj.nodeId);
+  if (!node) {
+    throw new UnrecoverableError(`Node ${obj.nodeId} not found in workflow for run ${obj.runId}`);
+  }
+  return { skip: false, runId: obj.runId, node, workflow: parsed.workflow };
 }
 
 export const worker = new Worker(
@@ -372,7 +394,9 @@ export const worker = new Worker(
       await handleMemoryBulkPurgeTrigger(job.data);
       return;
     }
-    const { runId, node, workflow } = validateJobData(job.data);
+    const resolved = await resolveJobData(job.data);
+    if (resolved.skip) return;
+    const { runId, node, workflow } = resolved;
     await runtime.executeQueuedNode({ runId, node, workflow });
   },
   {

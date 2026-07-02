@@ -177,7 +177,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     }))
     expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
-      node: retryNode,
+      nodeId: 'n1',
       attempt: 2,
     }))
     expect(store.markNodeFailed).not.toHaveBeenCalled()
@@ -544,7 +544,7 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
     expect(queued).toBe(1)
     expect(store.tryClaimNodeForQueue).toHaveBeenCalledWith('r1', 'merge', 1)
     expect(queue.enqueueNode).toHaveBeenCalledTimes(1)
-    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ runId: 'r1', node: expect.objectContaining({ id: 'merge' }) }))
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ runId: 'r1', nodeId: 'merge' }))
   })
 
   it('does NOT queue merge while one branch is still running (pending fan-in)', async () => {
@@ -563,7 +563,7 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
     await runtime.enqueueReadyNodes({ runId: 'r1', workflow: fanInWorkflow })
 
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalledWith('r1', 'merge', expect.anything())
-    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'merge' }) }))
+    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'merge' }))
   })
 
   it('does NOT queue merge when one branch failed terminally (join never runs)', async () => {
@@ -582,7 +582,7 @@ describe('enqueueReadyNodes — fan-in (parallel_fork / join)', () => {
     await runtime.enqueueReadyNodes({ runId: 'r1', workflow: fanInWorkflow })
 
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalledWith('r1', 'merge', expect.anything())
-    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'merge' }) }))
+    expect(queue.enqueueNode).not.toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'merge' }))
   })
 })
 
@@ -653,6 +653,6 @@ describe('enqueueReadyNodes — snapshot-based readiness', () => {
 
     expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'b', { reason: 'Condition not met' })
     expect(queued).toBe(1)
-    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ node: expect.objectContaining({ id: 'c' }) }))
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
   })
 })

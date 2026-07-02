@@ -97,7 +97,7 @@ export async function startRun(workflow: StartableWorkflow) {
 
   for (const node of startNodes) {
     await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, workflow, node });
+    await enqueueNode({ runId, nodeId: node.id });
     await appendEvent(runId, node.id, "node.queued", {});
   }
 

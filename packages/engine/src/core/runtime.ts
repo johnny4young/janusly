@@ -246,7 +246,7 @@ export class WorkflowRuntime {
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
 
-        await this.queue.enqueueNode({ runId, workflow: input.workflow, node, delayMs, attempt: nextAttempt });
+        await this.queue.enqueueNode({ runId, nodeId: node.id, delayMs, attempt: nextAttempt });
         return;
       }
 
@@ -387,7 +387,7 @@ export class WorkflowRuntime {
       const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
       if (!claimed) continue;
       statuses.set(node.id, "queued");
-      await this.queue.enqueueNode({ runId, workflow, node, attempt: 1 });
+      await this.queue.enqueueNode({ runId, nodeId: node.id, attempt: 1 });
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
       logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });
       queued++;

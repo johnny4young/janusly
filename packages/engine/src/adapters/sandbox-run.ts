@@ -117,7 +117,10 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
       status: "running",
       replayMode: "validation",
       createdBy: createdBy ?? null,
-      inputJson: safePersistPayload({ workflow, input: input ?? {} }),
+      // Workflow stored RAW (like `startRun`) so the slim queue worker can
+      // reload an executable DAG via `loadRunWorkflowRaw` — key-redaction /
+      // size-truncation would corrupt it.
+      inputJson: { workflow, input: input ?? {} },
       parentRunId: null,
       parentNodeId: null,
       traceId: null,
@@ -169,7 +172,7 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
 
   for (const node of readyNodes) {
     await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, workflow, node, attempt: 1 });
+    await enqueueNode({ runId, nodeId: node.id, attempt: 1 });
     await appendEvent(runId, node.id, "node.queued", {});
   }
 

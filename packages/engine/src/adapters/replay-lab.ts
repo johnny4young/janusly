@@ -96,7 +96,9 @@ export async function replayRunAsValidation(
       // Mirror the `startRun` shape: `inputJson` carries the workflow
       // snapshot AND the trigger input so `{{input.*}}` references
       // resolve to the same values the source run saw.
-      inputJson: safePersistPayload({ workflow, input: input ?? {} }),
+      // Workflow stored RAW (like `startRun`) so the slim queue worker can
+      // reload an executable DAG via `loadRunWorkflowRaw`.
+      inputJson: { workflow, input: input ?? {} },
       parentRunId: sourceRunId,
       parentNodeId: null,
       traceId: null,
@@ -140,7 +142,7 @@ export async function replayRunAsValidation(
 
   for (const node of startNodes) {
     await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, workflow, node, attempt: 1 });
+    await enqueueNode({ runId, nodeId: node.id, attempt: 1 });
     await appendEvent(runId, node.id, "node.queued", {});
   }
 
@@ -309,7 +311,9 @@ export async function replayRunAsValidationFork(
       status: "running",
       replayMode: "validation",
       createdBy: createdBy ?? null,
-      inputJson: safePersistPayload({ workflow, input: input ?? {}, fork: { sourceRunId, forkNodeId, hasOverride: inputOverride !== undefined } }),
+      // Workflow stored RAW (like `startRun`) so the slim queue worker can
+      // reload an executable DAG via `loadRunWorkflowRaw`.
+      inputJson: { workflow, input: input ?? {}, fork: { sourceRunId, forkNodeId, hasOverride: inputOverride !== undefined } },
       parentRunId: sourceRunId,
       parentNodeId: forkNodeId,
       traceId: null,
@@ -411,7 +415,7 @@ export async function replayRunAsValidationFork(
   const forkNode = workflow.nodes.find((n) => n.id === forkNodeId);
   if (forkNode) {
     await markNodeQueued(runId, forkNode.id);
-    await enqueueNode({ runId, workflow, node: forkNode, attempt: 1 });
+    await enqueueNode({ runId, nodeId: forkNode.id, attempt: 1 });
     await appendEvent(runId, forkNode.id, "node.queued", {});
   }
 

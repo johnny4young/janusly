@@ -101,11 +101,18 @@ export type ExecuteQueuedNodeInput = {
   attempt?: number;
 };
 
-/** Input the runtime hands to `QueueAdapter.enqueueNode` to schedule a node. */
+/**
+ * Input the runtime hands to `QueueAdapter.enqueueNode` to schedule a node.
+ *
+ * The payload is deliberately SLIM — `{ runId, nodeId }` only. The full
+ * workflow is NOT shipped in every BullMQ job: the worker reloads it once per
+ * job from `runs.inputJson.workflow` (the authoritative snapshot, updated on
+ * replay) and resolves the node by id. This keeps a 100-node run from writing
+ * its full workflow JSON into Redis 100+ times.
+ */
 export type EnqueueNodeInput = {
   runId: string;
-  workflow: Workflow;
-  node: WorkflowNode;
+  nodeId: string;
   delayMs?: number;
   attempt?: number;
 };
