@@ -166,9 +166,9 @@ Ordered by value. Each is scoped to be a single ticket.
     `flows-filters.ts`), `FlowRow`. And **`orgConfigRepo.ts` (1,430)** —
     extract the ~600-line `ORG_CONFIG_DEFINITIONS` catalog + guards from the
     DB read/write layer.
-11. **`@types/node` pin.** Workspace declares `^25.9.2` against
-    `engines: node >=24` / Node 24 CI — typings from a newer major can admit
-    APIs absent at runtime. Pin `^24`.
+11. ~~`@types/node` pin.~~ **Implemented in this PR (third batch):** all ten
+    packages now declare `^24.10.1`, matching `engines: node >=24` and the
+    Node 24 CI lanes.
 12. **i18n key typing.** `apps/web/src/i18n/server-events.ts` has 13×
     `t(key as any)`; typo'd keys ship silently (mitigated by `defaultValue`).
     Type the key union.
