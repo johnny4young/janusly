@@ -17,6 +17,18 @@ import type { RunEvent, ValidationIssue } from '../types'
 /** Sentinel returned by i18next when `defaultValue: '__MISSING__'` and no key matched. */
 const MISSING = '__MISSING__'
 
+/**
+ * Resolve a SERVER-COMPUTED catalog key (`<surface>.<code>`). The key union
+ * cannot be statically typed — the code half originates on the server — so
+ * this helper is the single deliberate escape hatch from i18next's key
+ * typing for this module. It always applies the `MISSING` sentinel default
+ * so callers can fall back to the server's literal message. Don't scatter
+ * `t(key as any)` casts; add the key to the catalog or route through here.
+ */
+function tServerCode(key: string, options: Record<string, unknown> = {}): string {
+  return t(key as never, { defaultValue: MISSING, ...options }) as string
+}
+
 /** Generic free-form wrapper. Returns the message verbatim today; one place to prefix later. */
 export function tServerFallback(message: string | undefined | null): string {
   if (!message) return ''
@@ -26,11 +38,10 @@ export function tServerFallback(message: string | undefined | null): string {
 /** Translate a `ValidationIssue.code` to a localized string, falling back to its `message`. */
 export function tValidationIssue(issue: ValidationIssue): string {
   const key = `validation.${issue.code}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     nodeId: issue.nodeId ?? '',
     edgeId: issue.edgeId ?? '',
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(issue.message) : translated
 }
 
@@ -44,11 +55,10 @@ export type ReadinessIssue = {
 }
 export function tReadinessIssue(issue: ReadinessIssue): string {
   const key = `readiness.${issue.code}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     nodeId: issue.nodeId ?? '',
     edgeId: issue.edgeId ?? '',
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(issue.message) : translated
 }
 
@@ -64,11 +74,10 @@ export type AiReviewIssue = {
 }
 export function tAiReviewIssue(issue: AiReviewIssue): string {
   const key = `aiReview.${issue.code}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     nodeId: issue.nodeId ?? '',
     edgeId: issue.edgeId ?? '',
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(issue.message) : translated
 }
 
@@ -79,7 +88,7 @@ export function tRunEvent(event: RunEvent): string {
     nodeId: event.nodeId ?? '',
     ...(event.payload && typeof event.payload === 'object' ? event.payload : {}),
   }
-  const translated = t(key as any, { defaultValue: MISSING, ...interpolation }) as string
+  const translated = tServerCode(key, interpolation)
   if (translated !== MISSING) return translated
   // No catalog entry — surface a debug-friendly description so operators still
   // get a hint of what happened on the timeline.
@@ -97,10 +106,9 @@ export type FailureClusterSignature = {
 }
 export function tFailureCluster(cluster: FailureClusterSignature): string {
   const key = `failureClusters.${cluster.signatureCode}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     ...(cluster.signatureMeta ?? {}),
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(cluster.signatureLabel) : translated
 }
 
@@ -125,11 +133,10 @@ export function tHealthRationale(entry: HealthBreakdownEntryLike): string {
   }
 
   const key = `healthRationale.${entry.rationaleCode}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     ...(entry.rationaleMeta ?? {}),
     totalTokens: formatNumber(entry.rationaleMeta?.totalTokens),
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(entry.rationale) : translated
 }
 
@@ -142,10 +149,9 @@ export type RecoveryMetricLike = {
 export function tRecoveryMetricRationale(metric: RecoveryMetricLike): string {
   if (!metric.rationaleCode) return tServerFallback(metric.rationale)
   const key = `recoveryMetricRationale.${metric.rationaleCode}`
-  const translated = t(key as any, {
-    defaultValue: MISSING,
+  const translated = tServerCode(key, {
     ...(metric.rationaleMeta ?? {}),
-  }) as string
+  })
   return translated === MISSING ? tServerFallback(metric.rationale) : translated
 }
 
@@ -169,19 +175,19 @@ export type TemplateLike = {
 export function tTemplateName(template: TemplateLike): string {
   if (!template.nameCode) return tServerFallback(template.name)
   const key = `templates.${template.nameCode}`
-  const translated = t(key as any, { defaultValue: MISSING }) as string
+  const translated = tServerCode(key)
   return translated === MISSING ? tServerFallback(template.name) : translated
 }
 export function tTemplateDescription(template: TemplateLike): string {
   if (!template.descriptionCode) return tServerFallback(template.description)
   const key = `templates.${template.descriptionCode}`
-  const translated = t(key as any, { defaultValue: MISSING }) as string
+  const translated = tServerCode(key)
   return translated === MISSING ? tServerFallback(template.description) : translated
 }
 export function tTemplateCategory(template: TemplateLike): string {
   if (!template.categoryCode) return tServerFallback(template.category)
   const key = `templates.category.${template.categoryCode}`
-  const translated = t(key as any, { defaultValue: MISSING }) as string
+  const translated = tServerCode(key)
   return translated === MISSING ? tServerFallback(template.category) : translated
 }
 
@@ -216,10 +222,9 @@ export function tApiError(envelope: ApiErrorLike | Error | unknown): string {
       : undefined;
   if (code) {
     const key = `apiErrors.${code}`;
-    const translated = t(key as any, {
-      defaultValue: MISSING,
+    const translated = tServerCode(key, {
       ...(obj.params ?? {}),
-    }) as string;
+    });
     if (translated !== MISSING) return translated;
   }
   return tServerFallback(fallback ?? '');
@@ -238,7 +243,7 @@ export type ToolLike = {
 export function tToolDescription(tool: ToolLike): string {
   if (!tool.descriptionCode) return tServerFallback(tool.description)
   const key = `tools.${tool.descriptionCode}.description`
-  const translated = t(key as any, { defaultValue: MISSING }) as string
+  const translated = tServerCode(key)
   return translated === MISSING ? tServerFallback(tool.description) : translated
 }
 

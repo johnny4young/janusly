@@ -37,7 +37,7 @@ import {
 import {
   queryFailureSamples,
   queryHealthSignals,
-  queryScheduleFires,
+  queryScheduleFiresByWorkflow,
   listOpenItemsWithBreachedSla,
   getEnabledPoliciesByTrigger,
   listOrgIdsWithEnabledPolicies,
@@ -388,14 +388,19 @@ async function scanScheduleAnomalies(orgId: string): Promise<void> {
   }
   if (workflowIds.length === 0) return;
 
+  // ONE batched query for the whole scheduled set (per-workflow newest-first
+  // cap preserved via the repo's window function) — this scan previously
+  // issued up to ~200 sequential per-workflow queries per org per cron tick.
+  let firesByWorkflow: Awaited<ReturnType<typeof queryScheduleFiresByWorkflow>>;
+  try {
+    firesByWorkflow = await queryScheduleFiresByWorkflow(orgId, workflowIds, MAX_HISTORY_DAYS, MAX_FIRE_ROWS);
+  } catch (err) {
+    console.warn("[alerts] schedule fires query failed", { orgId, err });
+    return;
+  }
+
   for (const workflowId of workflowIds) {
-    let fires: Awaited<ReturnType<typeof queryScheduleFires>>;
-    try {
-      fires = await queryScheduleFires(orgId, workflowId, MAX_HISTORY_DAYS, MAX_FIRE_ROWS);
-    } catch (err) {
-      console.warn("[alerts] schedule fires query failed", { orgId, workflowId, err });
-      continue;
-    }
+    const fires = firesByWorkflow.get(workflowId) ?? [];
 
     // Reuse the SAME aggregator the Inspector heatmap renders, so an alert
     // fires for exactly the slots the operator would see flagged in the panel.

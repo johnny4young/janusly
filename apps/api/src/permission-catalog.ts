@@ -37,7 +37,6 @@ export type PermissionCategory =
   | "ai"
   | "members"
   | "org"
-  | "plugins"
   | "mcp"
   | "prompts"
   | "auto-healing"
