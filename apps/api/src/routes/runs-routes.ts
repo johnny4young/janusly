@@ -37,8 +37,7 @@ import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, corsHeaders, readJson, sendEventFrame, sendJson, sendSseComment } from "../http";
+import { asRecord, corsHeaders, readJson, sendEventFrame, sendError, sendJson, sendSseComment } from "../http";
 import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
 import { getRunStreamHub } from "../run-stream";
@@ -361,14 +360,12 @@ export const runsRoutes: Route[] = [
         const wfStatus = await getWorkflowStatus(auth.orgId, parsedWorkflow.id);
         if (wfStatus && wfStatus.status !== WORKFLOW_STATUS_ACTIVE) {
           if (!forceRunDuringPause) {
-            return sendJson(
+            return sendError(
               res,
-              errorEnvelope(
-                "upstream_degraded",
-                wfStatus.pausedReason ?? "Workflow is paused because an upstream dependency is degraded",
-                { status: wfStatus.status },
-              ),
+              "upstream_degraded",
+              wfStatus.pausedReason ?? "Workflow is paused because an upstream dependency is degraded",
               409,
+              { status: wfStatus.status },
             );
           }
           forcedDuringPause = true;

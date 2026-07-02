@@ -110,29 +110,34 @@ Ordered by value. Each is scoped to be a single ticket.
    selection / before opening the Recovery dialog, with the summary row as
    graceful fallback. Cuts a 200-row queue page from potentially tens of MB
    to KBs.
-2. **BullMQ job payload slimming.** `enqueueNode` serializes
-   `{ runId, workflow, node }` per node job — a 100-node workflow writes its
-   full JSON into Redis 100+ times per run. Design: enqueue
-   `{ runId, nodeId }`; worker loads + validates the workflow once per run
-   behind a small LRU keyed by `runId` (`runs.input_json` already holds the
-   snapshot; DLQ rows keep their own copy so replay is unaffected). **The
-   interim step shipped in this PR:** a content-addressed (SHA-1 of the raw
-   payload JSON) LRU in `packages/engine/src/workflow-parse-cache.ts` removes
-   the per-job full-workflow Zod parse — byte-identical payloads reuse the
-   parsed object, and a patched DLQ replay can never hit a stale entry. The
-   Redis payload weight itself still needs the enqueue-shape change.
-3. **Node-output double-write.** Every success persists the output in
-   `run_nodes.state_json` AND repeats it in the `node.succeeded`
-   `run_events.payload` — up to 2× write amplification on the hottest write
-   path, and `GET /run` ships both copies. Design: event payload carries
-   `{ attempt, outputBytes }` (or a small preview); audit web timeline
-   consumers first (they already fetch node rows).
-4. **Node completion round-trips.** The success path is ~7–9 sequential DB
-   RTTs (`markNodeRunning` → event → metadata → context → execute →
-   `markNodeSucceeded` → routing stats → event → status → enqueue scan).
-   **Partially shipped in this PR:** the independent routing-stats +
-   `node.succeeded` event writes now run under `Promise.all`. Remaining:
-   combine `markNodeSucceeded` + its event in one transaction.
+2. ~~BullMQ job payload slimming.~~ **Implemented (follow-up PR).**
+   `enqueueNode` now writes a SLIM `{ runId, nodeId, attempt }` payload; the
+   worker reloads the workflow once per job from `runs.inputJson.workflow`
+   (the authoritative snapshot) via `loadRunWorkflowRaw` + the existing
+   content-addressed `parseWorkflowCached`, and resolves the node by id. The
+   sandbox / replay-lab / validation run creators now store the workflow RAW
+   in `inputJson` (was `safePersistPayload`, which key-redacts + truncates and
+   would corrupt a reloaded executable DAG). `replayDeadLetter` writes the
+   replayed workflow to the snapshot (`setRunWorkflowSnapshot`) BEFORE
+   enqueueing, so an auto-healing / recovery replay against a PATCHED workflow
+   has its downstream cascade reload the patched DAG — matching the pre-slim
+   behaviour where the replayed workflow flowed in-memory into
+   `enqueueReadyNodes`. A missing run row degrades to a benign skip; genuine
+   corruption throws `UnrecoverableError` → DLQ.
+3. ~~Node-output double-write.~~ **Implemented (follow-up PR).** The
+   `node.succeeded` event no longer repeats a large output that already lives
+   in `run_nodes.state_json`. Below an 8 KB cap the event still carries the
+   full output (the live SSE Inspector stays byte-identical to a refetch);
+   above it the event carries `{ outputBytes, outputTruncated }`, so a 1 MB
+   http body isn't written twice and `GET /run` doesn't ship both copies. The
+   web SSE consumer already degrades a missing output to an empty preview and
+   fills the full value from the node row on refetch.
+4. ~~Node completion round-trips.~~ **Implemented (follow-up PR).** In
+   addition to the `Promise.all` on the independent routing-stats + event
+   writes, `markNodeSucceededWithEvent` now commits the `run_nodes`
+   `succeeded` UPDATE and its `node.succeeded` `run_events` INSERT in ONE
+   transaction (one round-trip instead of two; commit-or-rollback together;
+   the SSE publish fires only after commit).
 5. ~~Alerts scanner fan-out.~~ **Implemented in this PR (batches 5–6):**
    org scans run through a bounded worker pool (concurrency 4), and
    `scanScheduleAnomalies` now makes ONE batched query per org
@@ -142,18 +147,25 @@ Ordered by value. Each is scoped to be a single ticket.
 
 ### 2b. Architecture / maintainability
 
-6. **Split `apps/api/src/routes/ai-routes.ts` (1,141 lines, 7 routes) and add
-   route tests.** The `/ai/patch-workflow` handler alone is ~437 lines and
-   gates spend (budget) + recovery patching; the route files
-   (`ai-routes`, `workflows-routes` 811, `recovery-items-routes` 694) are the
-   largest untested surface in the repo — sibling route files
-   (`audit-routes`, `mcp-routes`) show the established `vi.mock` pattern to
-   copy. One module per route; `index.ts` already composes arrays.
-7. **Split `packages/engine/src/tool-registry.ts` (1,486 lines)** by tool
-   domain (`tools/{http,text,json,csv,time,crypto}.ts`, each exporting
-   `ToolDefinition[]`), keeping `defineTool`/`validateToolInput`/
-   `executeTool`/`listTools` in the registry. `vector-tools.ts` /
-   `db-query-tools.ts` are the in-repo precedent.
+6. ~~Split `apps/api/src/routes/ai-routes.ts` and add route tests.~~
+   **Implemented (follow-up PR).** `ai-routes.ts` (1,148 lines) is now a
+   33-line composition point spreading six per-route arrays
+   (`ai-health-route`, `ai-generate-route`, `ai-explain-route`,
+   `ai-review-route`, `ai-patch-route`, `ai-improve-route`) in the original
+   first-match order; shared `withBudgetWarning` moved to
+   `ai-route-helpers.ts`. Four new test files (explain / review / patch /
+   improve, +23 cases) mirror the `audit-routes` `vi.mock` harness — auth
+   gate, AI-mode happy path, and the AI-fallback path (asserting the audit
+   row still fires). No route behaviour, response shapes, audit actions, or
+   role declarations changed.
+7. ~~Split `packages/engine/src/tool-registry.ts` (1,486 lines).~~
+   **Implemented (follow-up PR).** Tools moved into
+   `tools/{http,text,json,csv,time,crypto,pdf,email}.ts`, each exporting its
+   `ToolDefinition` record; `defineTool` + the `ToolDefinition` /
+   `ToolExecutionContext` types live in `tools/tool-types.ts` (no import
+   cycle); the registry keeps `validateToolInput` / `executeTool` /
+   `listTools` and assembles the `tools` object by spreading the domain
+   records. Registry shrank to ~271 lines.
 8. ~~Type the agent loop.~~ **Implemented in this PR (fourth batch):**
    `LlmPlannerReplySchema` (Zod) gates the LLM planner's JSON reply — a
    malformed plan shape now degrades to the rules planner with `aiError`
@@ -163,15 +175,25 @@ Ordered by value. Each is scoped to be a single ticket.
    steps are `AgentLoopStepRecord[]`, and the `worker.ts`
    `node as any, workflow as any` casts are gone (`validateJobData` returns
    real types).
-9. **Standardize on `errorEnvelope`.** The canonical helper has 83 call
-   sites, but ~280 inline `sendJson(res, { error: … })` sites bypass it, so
-   the `code` field the web localizes against is inconsistently present.
-   Mechanical sweep behind a `sendError(res, code, message, status)` helper.
-10. **Split `WorkflowsDashboard.tsx` (1,649 lines, 62 hooks)** —
-    `TrashPanel`, `FlowsFilterBar` (pure logic already lives in
-    `flows-filters.ts`), `FlowRow`. And **`orgConfigRepo.ts` (1,430)** —
-    extract the ~600-line `ORG_CONFIG_DEFINITIONS` catalog + guards from the
-    DB read/write layer.
+9. **Standardize on `errorEnvelope`.** **Partially implemented (follow-up
+    PR):** the named `sendError(res, code, message, status, params?)`
+    chokepoint now exists in `http.ts` and the already-coded
+    `sendJson(res, errorEnvelope(...))` sites route through it. The remaining
+    free-form `sendJson(res, { error: … })` sites are left as the deliberate
+    staging `error-codes.ts` already documents ("~150 lower-traffic envelopes
+    stay free-form in v1 … picked up in a future pass") — coding them is a
+    product-copy effort (each needs a closed-catalog entry + EN/ES i18n with
+    the parity gate), not a mechanical sweep, and mass-adding untranslated
+    codes would dilute the closed catalog. Tracked as its own ticket.
+10. ~~Split `WorkflowsDashboard.tsx` + `orgConfigRepo.ts`.~~ **Implemented
+    (follow-up PR).** `WorkflowsDashboard.tsx` (1,649 → 1,265 lines) extracted
+    `TrashPanel`, `FlowRow`, and `FlowsFilterBar` (the container keeps all
+    state / data-fetching / mutations and passes them down; no markup /
+    class / aria / i18n changes). `orgConfigRepo.ts` (1,430 → 588 lines)
+    extracted the ~600-line `ORG_CONFIG_DEFINITIONS` catalog + forbidden-name
+    / forbidden-value guards + the pure normalize/validate pipeline into
+    `orgConfigCatalog.ts` (no DB access, no import cycle); every moved symbol
+    is re-exported so `@janusly/data` consumers are unaffected.
 11. ~~`@types/node` pin.~~ **Implemented in this PR (third batch):** all ten
     packages now declare `^24.10.1`, matching `engines: node >=24` and the
     Node 24 CI lanes.

@@ -28,7 +28,7 @@
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { errorEnvelope } from "../error-codes";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import {
   countMembersInRole,
   createOrgRole,
@@ -210,7 +210,7 @@ export const rolesRoutes: Route[] = [
 
       const existing = await getOrgRole({ orgId: auth.orgId, name });
       if (existing) {
-        return sendJson(res, errorEnvelope("role_already_exists", "role with this name already exists", { name }), 409);
+        return sendError(res, "role_already_exists", "role with this name already exists", 409, { name });
       }
 
       const description = typeof body.description === "string" ? body.description.slice(0, 240) : null;
@@ -250,7 +250,7 @@ export const rolesRoutes: Route[] = [
       // Built-ins: row may not exist yet — create one on first override.
       // Custom: row MUST exist.
       if (!isBuiltinTarget && !existing) {
-        return sendJson(res, errorEnvelope("role_not_found", "role not found"), 404);
+        return sendError(res, "role_not_found", "role not found", 404);
       }
 
       // Validate `inheritsFrom` — immutable on built-ins
@@ -370,7 +370,7 @@ export const rolesRoutes: Route[] = [
       }
 
       const existing = await getOrgRole({ orgId: auth.orgId, name });
-      if (!existing) return sendJson(res, errorEnvelope("role_not_found", "role not found"), 404);
+      if (!existing) return sendError(res, "role_not_found", "role not found", 404);
 
       const membersAffected = await countMembersInRole({ orgId: auth.orgId, roleName: name });
       if (membersAffected > 0) {

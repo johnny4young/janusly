@@ -40,8 +40,7 @@ import { serializeEvalExamplesToJsonl } from "@janusly/shared/src/eval-dataset";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { errorEnvelope } from "../error-codes";
-import { asRecord, corsHeaders, readJson, sendJson } from "../http";
+import { asRecord, corsHeaders, readJson, sendError, sendJson } from "../http";
 import {
   buildReportFilename,
   contentDispositionAttachment,
@@ -92,19 +91,15 @@ export const evalDatasetsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = CreateEvalDatasetBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(res, errorEnvelope("eval_dataset_name_required", "Invalid eval dataset body"), 400);
+        return sendError(res, "eval_dataset_name_required", "Invalid eval dataset body", 400);
       }
 
       // Reject a duplicate name up-front for a clean 409 instead of a raw 23505.
       const existing = await findEvalDatasetByName(auth.orgId, parsed.data.name);
       if (existing) {
-        return sendJson(
-          res,
-          errorEnvelope("eval_dataset_name_exists", "An eval dataset with that name already exists", {
-            name: parsed.data.name,
-          }),
-          409,
-        );
+        return sendError(res, "eval_dataset_name_exists", "An eval dataset with that name already exists", 409, {
+          name: parsed.data.name,
+        });
       }
 
       const result = await createEvalDataset({
@@ -152,7 +147,7 @@ export const evalDatasetsRoutes: Route[] = [
 
       const dataset = await getEvalDataset(auth.orgId, id);
       if (!dataset) {
-        return sendJson(res, errorEnvelope("eval_dataset_not_found", "Eval dataset not found"), 404);
+        return sendError(res, "eval_dataset_not_found", "Eval dataset not found", 404);
       }
       const examples = await listEvalExamples(auth.orgId, id);
 
@@ -213,7 +208,7 @@ export const evalDatasetsRoutes: Route[] = [
 
       const dataset = await getEvalDataset(auth.orgId, id);
       if (!dataset) {
-        return sendJson(res, errorEnvelope("eval_dataset_not_found", "Eval dataset not found"), 404);
+        return sendError(res, "eval_dataset_not_found", "Eval dataset not found", 404);
       }
       // Re-scrub at read time: the shared serializer projects each example
       // through `toEvalExampleJsonlRow` (which re-runs `scrubSecretShapes`).
@@ -237,7 +232,7 @@ export const evalDatasetsRoutes: Route[] = [
 
       const deleted = await deleteEvalDataset(auth.orgId, id);
       if (!deleted) {
-        return sendJson(res, errorEnvelope("eval_dataset_not_found", "Eval dataset not found"), 404);
+        return sendError(res, "eval_dataset_not_found", "Eval dataset not found", 404);
       }
 
       await auditAction(auth, "eval.dataset.deleted", {
