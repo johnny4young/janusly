@@ -808,3 +808,51 @@ describe("admin gates on every mutating route", () => {
     }
   });
 });
+
+// Proves `guardMcpWrite` is WIRED on every connection-write route (not just
+// that the helper works — that's `mcp-consent.test.ts`). An MCP-source caller
+// with the process flag off must be refused BEFORE any mutation, so a future
+// edit that drops the gate line fails here. Tenant isolation itself rides on
+// the org-scoped repo calls (`getConnectionByAlias({ orgId: auth.orgId })`)
+// exercised throughout the rest of this file.
+describe("MCP-source write consent gate", () => {
+  const mcpAuth = { ...auth, source: "mcp", serviceTokenSuffix: "abcd" } as AuthContext;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const cases: Array<{ name: string; method: string; url: string; body?: unknown }> = [
+    { name: "create", method: "POST", url: "/mcp/connections", body: { alias: "demo", transport: "stdio", command: "node" } },
+    { name: "delete", method: "DELETE", url: "/mcp/connections/demo" },
+    { name: "rediscover", method: "POST", url: "/mcp/connections/demo/rediscover" },
+    { name: "set_tool", method: "POST", url: "/mcp/connections/demo/tools/pages.update", body: { enabled: true } },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} refuses MCP-source traffic (403 mcp_process_disabled) with the process flag off, and never mutates`, async () => {
+      vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+      const route = findRoute(c.method, c.url);
+      expect(route).not.toBeNull();
+      const { res, captured } = mockRes();
+      await route!.handler({ req: mockReq(c.method, c.url, c.body), res, auth: mcpAuth } as unknown as RouteContext);
+      expect(captured.status).toBe(403);
+      expect((captured.payload as { code?: string }).code).toBe("mcp_process_disabled");
+      // The gate fired before any repo mutation.
+      expect(vi.mocked(createConnection)).not.toHaveBeenCalled();
+      expect(vi.mocked(deleteConnection)).not.toHaveBeenCalled();
+    });
+  }
+
+  it("lets a non-MCP admin caller through the gate unchanged (source=service)", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    const route = findRoute("DELETE", "/mcp/connections/demo");
+    vi.mocked(getConnectionByAlias).mockResolvedValueOnce(connectionRow);
+    vi.mocked(deleteConnection).mockResolvedValueOnce(undefined as never);
+    const { res, captured } = mockRes();
+    await route!.handler({ req: mockReq("DELETE", "/mcp/connections/demo"), res, auth } as unknown as RouteContext);
+    // No 403 from the MCP gate — the service-token path proceeds to the repo.
+    expect(captured.status).not.toBe(403);
+    expect(vi.mocked(deleteConnection)).toHaveBeenCalled();
+  });
+});
