@@ -115,14 +115,34 @@ export async function handleAlertsScanTrigger(): Promise<void> {
     return;
   }
 
-  for (const orgId of orgIds) {
-    try {
-      await runOrgScan(orgId);
-    } catch (err) {
-      console.error("[alerts] runOrgScan threw — should never happen", { orgId, err });
-    }
-  }
+  // Bounded worker pool over orgs. Strictly sequential scanning is a
+  // throughput ceiling at fleet scale (each org scan is itself a series of
+  // queries — worst case hundreds per org), and one slow org would push the
+  // whole sweep past its own cron interval. A small fixed concurrency keeps
+  // DB pressure bounded; the shared cursor increment is safe on the
+  // single-threaded event loop.
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(ALERTS_SCAN_ORG_CONCURRENCY, orgIds.length) },
+    async () => {
+      while (cursor < orgIds.length) {
+        const orgId = orgIds[cursor];
+        cursor += 1;
+        if (!orgId) continue;
+        try {
+          await runOrgScan(orgId);
+        } catch (err) {
+          console.error("[alerts] runOrgScan threw — should never happen", { orgId, err });
+        }
+      }
+    },
+  );
+  await Promise.all(workers);
 }
+
+/** How many org scans run concurrently per sweep. Small and fixed — enough to
+ *  stop one slow org serializing the fleet, low enough to bound DB pressure. */
+const ALERTS_SCAN_ORG_CONCURRENCY = 4;
 
 async function runOrgScan(orgId: string): Promise<void> {
   await scanFailureClusters(orgId);
