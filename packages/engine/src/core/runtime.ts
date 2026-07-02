@@ -203,7 +203,6 @@ export class WorkflowRuntime {
         return;
       }
 
-      await this.store.markNodeSucceeded(runId, node.id, result?.output ?? {});
       // Routing-stats writes are gated on a real `orgId` from the run row,
       // not the loose context bag. The repo's own `if (!orgId) return`
       // guard remains as defence in depth, but on a healthy run the
@@ -211,9 +210,13 @@ export class WorkflowRuntime {
       // Independent writes (different tables, no ordering contract between
       // them) run concurrently — the completion path is a chain of
       // sequential DB round-trips and this is the one safely parallel pair.
+      // The `succeeded` node transition + its `node.succeeded` event commit
+      // together in one transaction (`markNodeSucceededWithEvent`), so the
+      // event never repeats the (potentially 1 MB) output the node row
+      // already stores.
       await Promise.all([
         updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true }),
-        this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.succeeded", payload: { output: result?.output ?? {}, attempt } })),
+        this.store.markNodeSucceededWithEvent(runId, node.id, result?.output ?? {}, attempt),
       ]);
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
