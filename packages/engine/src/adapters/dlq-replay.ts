@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import type { DeadLetterReplayAdapter, DeadLetterReplayInput } from "../core/types";
 import type { Workflow, WorkflowNode } from "@janusly/shared";
 import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent } from "../persistence";
+import { markNodeQueued, appendEvent, setRunWorkflowSnapshot } from "../persistence";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -82,10 +82,18 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       nodeId: node.id,
     });
 
+    // Make the replayed workflow authoritative for the run BEFORE enqueueing.
+    // Slim jobs carry only `{ runId, nodeId }`; the worker reloads the DAG
+    // from `runs.inputJson.workflow`. Writing it here means an auto-healing /
+    // recovery replay against a PATCHED workflow has its downstream cascade
+    // reload the patched DAG — matching the pre-slim behaviour where the
+    // replayed workflow flowed in-memory into `enqueueReadyNodes`. For a
+    // normal replay (workflow identical to the snapshot) this is a no-op.
+    await setRunWorkflowSnapshot(runId, workflow);
+
     await enqueueNode({
       runId,
-      workflow,
-      node,
+      nodeId: node.id,
       attempt: 1,
     });
   }
@@ -119,12 +127,15 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
         replayMode: "validation",
         createdBy: createdBy ?? null,
         // Persist the full suggested workflow + failing node id so the
-        // queue worker can rebuild context without consulting
-        // `workflow_versions` (intentionally absent for sandbox runs).
-        inputJson: safePersistPayload({
+        // queue worker can reload the DAG (`loadRunWorkflowRaw`) without
+        // consulting `workflow_versions` (intentionally absent for sandbox
+        // runs). The workflow is stored RAW (like `startRun`) — NOT through
+        // `safePersistPayload` — because the slim queue reloads it and
+        // key-redaction / size-truncation would corrupt an executable DAG.
+        inputJson: {
           workflow: suggestedWorkflow,
           failingNodeId: failingNode.id,
-        }),
+        },
         parentRunId: originalRunId,
         parentNodeId: null,
         traceId: null,
@@ -185,8 +196,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     await markNodeQueued(runId, failingNode.id);
     await enqueueNode({
       runId,
-      workflow: suggestedWorkflow,
-      node: failingNode,
+      nodeId: failingNode.id,
       attempt: 1,
     });
     await appendEvent(runId, failingNode.id, "node.queued", {});

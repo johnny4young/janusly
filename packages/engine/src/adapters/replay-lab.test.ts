@@ -190,7 +190,7 @@ describe('replayRunAsValidation', () => {
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1)
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
-      node: linearWorkflow.nodes[0],
+      nodeId: linearWorkflow.nodes[0].id,
       attempt: 1,
     })
     expect(appendEventMock).toHaveBeenCalledWith(result.runId, 'fetch', 'node.queued', {})
@@ -208,7 +208,7 @@ describe('replayRunAsValidation', () => {
     expect(queuedNodeIds).toEqual(['root_a', 'root_b'])
     expect(enqueueNodeMock).toHaveBeenCalledTimes(2)
     const enqueuedNodeIds = enqueueNodeMock.mock.calls
-      .map((call) => (call[0] as { node: { id: string } }).node.id)
+      .map((call) => (call[0] as { nodeId: string }).nodeId)
       .sort()
     expect(enqueuedNodeIds).toEqual(['root_a', 'root_b'])
     expect(appendEventMock).toHaveBeenCalledTimes(2)

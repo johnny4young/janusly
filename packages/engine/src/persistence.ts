@@ -18,7 +18,7 @@
 
 import { db, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
 import { eq, and, inArray } from "drizzle-orm";
-import { WorkflowSchema } from "@janusly/shared";
+import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
 import { publishRunEvent } from "./run-event-stream";
@@ -37,6 +37,47 @@ const ERROR_JSON_MAX_BYTES = 64_000;
 export async function getRunStatus(runId: string) {
   const rows = await db.select().from(runs).where(eq(runs.id, runId));
   return rows[0]?.status ?? null;
+}
+
+/**
+ * Load the raw workflow snapshot a run executes against, from
+ * `runs.inputJson.workflow`. This is the AUTHORITATIVE per-run workflow:
+ * `startRun` writes it, the sandbox / replay-lab / validation creators write
+ * it, and `replayDeadLetter` updates it (via `setRunWorkflowSnapshot`) so a
+ * patched replay's downstream cascade runs against the patched DAG. The
+ * worker reloads it per node job instead of shipping the full workflow in
+ * every Redis job payload.
+ *
+ * Returns `found: false` when the run row is absent (deleted between enqueue
+ * and execution — the worker treats it as a benign no-op, mirroring the
+ * pre-slim "claim fails → skip" outcome). `workflow` is the raw JSON value
+ * (parsed by the caller through the content-addressed `parseWorkflowCached`).
+ */
+export async function loadRunWorkflowRaw(runId: string): Promise<{ found: boolean; workflow: unknown }> {
+  const rows = await db.select({ inputJson: runs.inputJson }).from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!rows[0]) return { found: false, workflow: undefined };
+  const inputJson = rows[0].inputJson as { workflow?: unknown } | null;
+  return { found: true, workflow: inputJson && typeof inputJson === "object" ? inputJson.workflow : undefined };
+}
+
+/**
+ * Replace the workflow snapshot in `runs.inputJson.workflow` while preserving
+ * the sibling keys (`input`, `fork`, `failingNodeId`, …). Called by
+ * `replayDeadLetter` so a production DLQ replay — including an auto-healing /
+ * recovery replay against a PATCHED workflow — makes the run's authoritative
+ * workflow the one being replayed. Downstream nodes then reload the patched
+ * DAG through `loadRunWorkflowRaw`, matching the pre-slim behaviour where the
+ * replayed workflow flowed into `enqueueReadyNodes` in-memory. A no-op when
+ * the run row is absent. Read-modify-write is safe here: `inputJson.input` is
+ * immutable after run start and a DLQ row has a single replay actor.
+ */
+export async function setRunWorkflowSnapshot(runId: string, workflow: Workflow): Promise<void> {
+  const rows = await db.select({ inputJson: runs.inputJson }).from(runs).where(eq(runs.id, runId)).limit(1);
+  if (!rows[0]) return;
+  const current = rows[0].inputJson && typeof rows[0].inputJson === "object"
+    ? (rows[0].inputJson as Record<string, unknown>)
+    : {};
+  await db.update(runs).set({ inputJson: { ...current, workflow } }).where(eq(runs.id, runId));
 }
 
 /**
