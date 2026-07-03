@@ -35,7 +35,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 function idFromUrl(url: string | undefined): string | null {
@@ -87,40 +87,14 @@ export const alertsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = AlertPolicyConfigSchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid alert policy body",
-            code: "alert_policy_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_invalid", "invalid alert policy body", 422);
       }
       const refinement = validateAlertPolicyConfig(parsed.data);
       if (!refinement.ok) {
-        return sendJson(
-          res,
-          {
-            error: "alert policy refinement failed",
-            code: "alert_policy_invalid",
-            errors: refinement.errors,
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_refinement_failed", "alert policy refinement failed", 422);
       }
       if (!isSystemOnlyTriggerAllowed(auth.orgId, refinement.policy.trigger)) {
-        return sendJson(
-          res,
-          {
-            error: "alert trigger is only available to the system org",
-            code: "alert_policy_system_trigger_only",
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_system_trigger_only", "alert trigger is only available to the system org", 422);
       }
       const policy = await createAlertPolicy(auth.orgId, {
         ...refinement.policy,
@@ -143,10 +117,10 @@ export const alertsRoutes: Route[] = [
     permission: "alerts.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "policy id required" }, 400);
+      if (!id) return sendError(res, "alerts_policy_id_required", "policy id required", 400);
       const existing = await getAlertPolicyById(auth.orgId, id);
       if (!existing) {
-        return sendJson(res, { error: "policy not found", code: "alert_policy_not_found" }, 404);
+        return sendError(res, "alerts_policy_not_found", "policy not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -161,45 +135,19 @@ export const alertsRoutes: Route[] = [
       };
       const parsed = AlertPolicyConfigSchema.safeParse(merged);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid alert policy body",
-            code: "alert_policy_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_invalid", "invalid alert policy body", 422);
       }
       const refinement = validateAlertPolicyConfig(parsed.data);
       if (!refinement.ok) {
-        return sendJson(
-          res,
-          {
-            error: "alert policy refinement failed",
-            code: "alert_policy_invalid",
-            errors: refinement.errors,
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_refinement_failed", "alert policy refinement failed", 422);
       }
       if (!isSystemOnlyTriggerAllowed(auth.orgId, refinement.policy.trigger)) {
-        return sendJson(
-          res,
-          {
-            error: "alert trigger is only available to the system org",
-            code: "alert_policy_system_trigger_only",
-          },
-          422,
-        );
+        return sendError(res, "alerts_policy_system_trigger_only", "alert trigger is only available to the system org", 422);
       }
 
       const result = await updateAlertPolicy(auth.orgId, id, refinement.policy);
       if (!result) {
-        return sendJson(res, { error: "policy not found", code: "alert_policy_not_found" }, 404);
+        return sendError(res, "alerts_policy_not_found", "policy not found", 404);
       }
 
       await auditAction(auth, "alert.policy.updated", { targetType: "alert-policy", targetId: id, metadata: {
@@ -230,10 +178,10 @@ export const alertsRoutes: Route[] = [
     permission: "alerts.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "policy id required" }, 400);
+      if (!id) return sendError(res, "alerts_policy_id_required", "policy id required", 400);
       const before = await deleteAlertPolicy(auth.orgId, id);
       if (!before) {
-        return sendJson(res, { error: "policy not found", code: "alert_policy_not_found" }, 404);
+        return sendError(res, "alerts_policy_not_found", "policy not found", 404);
       }
       await auditAction(auth, "alert.policy.deleted", { targetType: "alert-policy", targetId: id, metadata: {
         name: before.name,

@@ -27,7 +27,7 @@ import {
 import { db, workflows } from "@janusly/db";
 
 import { auditAction } from "../audit-helper";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import type { Route } from "../routes";
 
@@ -40,7 +40,7 @@ export const billingRoutes: Route[] = [
       const dimensions: UsageBreakdownDimension[] = [];
       for (const token of tokens) {
         if (!isUsageBreakdownDimension(token)) {
-          return sendJson(res, { error: `Unknown breakdown dimension: ${token}` }, 400);
+          return sendError(res, "billing_unknown_breakdown_dimension", `Unknown breakdown dimension: {{dimension}}`, 400, { dimension: token });
         }
         if (!dimensions.includes(token)) dimensions.push(token);
       }
@@ -74,7 +74,7 @@ export const billingRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const match = url.pathname.match(/^\/workflows\/([^/]+)\/budget$/);
       const workflowId = match?.[1];
-      if (!workflowId) return sendJson(res, { error: "workflowId path segment is required" }, 400);
+      if (!workflowId) return sendError(res, "billing_workflow_id_required", "workflowId path segment is required", 400);
 
       const workflowRow = await db
         .select({ id: workflows.id })
@@ -82,27 +82,27 @@ export const billingRoutes: Route[] = [
         .where(and(eq(workflows.id, workflowId), eq(workflows.orgId, auth.orgId), isNull(workflows.deletedAt)))
         .limit(1);
       if (workflowRow.length === 0) {
-        return sendJson(res, { error: "Workflow not found" }, 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const monthlyUsd = typeof body.monthlyUsd === "number" ? body.monthlyUsd : null;
       if (monthlyUsd === null || !Number.isFinite(monthlyUsd) || monthlyUsd < 0) {
-        return sendJson(res, { error: "monthlyUsd must be a finite number >= 0" }, 400);
+        return sendError(res, "billing_monthly_usd_invalid", "monthlyUsd must be a finite number >= 0", 400);
       }
       const warnPercentRaw = body.warnPercent;
       const warnPercent = typeof warnPercentRaw === "number" && Number.isFinite(warnPercentRaw)
         ? warnPercentRaw
         : undefined;
       if (warnPercent !== undefined && (!Number.isInteger(warnPercent) || warnPercent < 0 || warnPercent > 100)) {
-        return sendJson(res, { error: "warnPercent must be an integer between 0 and 100" }, 400);
+        return sendError(res, "billing_warn_percent_invalid", "warnPercent must be an integer between 0 and 100", 400);
       }
       const policyRaw = body.policy;
       const policy: WorkflowBudgetPolicy | undefined = policyRaw === "warn" || policyRaw === "block"
         ? policyRaw
         : undefined;
       if (policyRaw !== undefined && policy === undefined) {
-        return sendJson(res, { error: "policy must be 'warn' or 'block'" }, 400);
+        return sendError(res, "billing_policy_invalid", "policy must be 'warn' or 'block'", 400);
       }
 
       const before = await getWorkflowBudget(auth.orgId, workflowId);

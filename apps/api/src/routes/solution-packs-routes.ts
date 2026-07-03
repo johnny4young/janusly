@@ -270,7 +270,7 @@ export const solutionPacksRoutes: Route[] = [
         // Installing must not silently resurrect a tombstoned workflow — the
         // operator restores it explicitly first. (Practically unreachable: pack
         // installs mint a fresh workflow id, but the save contract requires it.)
-        return sendJson(res, { error: "Workflow not found" }, 404);
+        return sendError(res, "workflow_not_found", "Workflow not found", 404);
       }
 
       const { missingCredentials, missingOrgConfigs } = await computeMissingDeps(auth.orgId, pack);

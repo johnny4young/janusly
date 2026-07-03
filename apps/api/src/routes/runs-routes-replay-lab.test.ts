@@ -112,6 +112,8 @@ vi.mock("../http", () => ({
   readJson: vi.fn(() => Promise.resolve(bodyBox.value)),
   sendEvent: vi.fn(),
   sendJson: sendJsonMock,
+  sendError: (_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+    sendJsonMock(_res, params === undefined ? { error: message, code } : { error: message, code, params }, status),
 }));
 
 vi.mock("../rate-limit", () => ({
@@ -212,6 +214,7 @@ describe("runsRoutes Replay Lab handlers", () => {
     expect(audit).not.toHaveBeenCalled();
     expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), {
       error: "Source run is itself a sandbox run; cannot start a nested lab",
+      code: "nested_replay_lab",
     }, 400);
   });
 
@@ -229,7 +232,7 @@ describe("runsRoutes Replay Lab handlers", () => {
       baseRunId: "base-run",
       replayRunId: "replay-run",
     });
-    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), { error: "Base run not found" }, 404);
+    expect(sendJsonMock).toHaveBeenLastCalledWith(expect.anything(), { error: "Base run not found", code: "runs_compare_run_not_found" }, 404);
   });
 });
 

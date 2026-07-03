@@ -86,7 +86,7 @@ export const upstreamHealthRoutes: Route[] = [
     permission: "upstream.write",
     handler: async ({ req, res, auth }) => {
       const id = sourceIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "source id required" }, 400);
+      if (!id) return sendError(res, "upstream_source_id_required", "source id required", 400);
       const source = await getUpstreamHealthSourceById(auth.orgId, id);
       if (!source) {
         return sendError(res, "upstream_source_not_found", "Upstream source not found", 404);
@@ -148,7 +148,7 @@ export const upstreamHealthRoutes: Route[] = [
     permission: "upstream.write",
     handler: async ({ req, res, auth }) => {
       const id = sourceIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "source id required" }, 400);
+      if (!id) return sendError(res, "upstream_source_id_required", "source id required", 400);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = UpsertUpstreamHealthSourceBodySchema.safeParse(body);
@@ -179,7 +179,7 @@ export const upstreamHealthRoutes: Route[] = [
     permission: "upstream.write",
     handler: async ({ req, res, auth }) => {
       const id = sourceIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "source id required" }, 400);
+      if (!id) return sendError(res, "upstream_source_id_required", "source id required", 400);
       const deleted = await deleteUpstreamHealthSource(auth.orgId, id);
       if (!deleted) {
         return sendError(res, "upstream_source_not_found", "Upstream source not found", 404);

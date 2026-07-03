@@ -49,7 +49,7 @@ import { signSignedToken, verifySignedToken } from "@janusly/engine/src/secrets"
 import { audit } from "../audit";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import {
   SSO_SESSION_PURPOSE,
   SSO_STATE_PURPOSE,
@@ -97,13 +97,13 @@ export const ssoRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const provider = body.provider;
       if (provider !== "workos") {
-        return sendJson(res, { error: "provider must be 'workos'" }, 400);
+        return sendError(res, "sso_provider_invalid", "provider must be 'workos'", 400);
       }
       const providerConnectionId = typeof body.providerConnectionId === "string"
         ? body.providerConnectionId.trim()
         : "";
       if (!providerConnectionId) {
-        return sendJson(res, { error: "providerConnectionId is required (e.g. conn_…)" }, 400);
+        return sendError(res, "sso_provider_connection_id_required", "providerConnectionId is required (e.g. conn_…)", 400);
       }
       const enforcedSso = body.enforcedSso === true;
       // Reject re-attaching a provider that already exists for this org
@@ -111,7 +111,7 @@ export const ssoRoutes: Route[] = [
       // surface a clearer message + correct 409 status).
       const existing = await getSsoConnectionForOrg(auth.orgId);
       if (existing && existing.provider === "workos") {
-        return sendJson(res, { error: "SSO connection already exists for this org and provider" }, 409);
+        return sendError(res, "sso_connection_exists", "SSO connection already exists for this org and provider", 409);
       }
       const row = await createSsoConnection({
         orgId: auth.orgId,
@@ -130,7 +130,7 @@ export const ssoRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/sso\/connections\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "connection id is required" }, 400);
+      if (!id) return sendError(res, "sso_connection_id_required", "connection id is required", 400);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const updates: { status?: "active" | "revoked"; enforcedSso?: boolean; providerConnectionId?: string } = {};
       if (body.status === "active" || body.status === "revoked") updates.status = body.status;
@@ -140,15 +140,15 @@ export const ssoRoutes: Route[] = [
           ? body.providerConnectionId.trim()
           : "";
         if (!providerConnectionId) {
-          return sendJson(res, { error: "providerConnectionId must be a non-empty string" }, 400);
+          return sendError(res, "sso_provider_connection_id_invalid", "providerConnectionId must be a non-empty string", 400);
         }
         updates.providerConnectionId = providerConnectionId;
       }
       if (updates.status === undefined && updates.enforcedSso === undefined && updates.providerConnectionId === undefined) {
-        return sendJson(res, { error: "no updatable fields provided" }, 400);
+        return sendError(res, "sso_no_updatable_fields", "no updatable fields provided", 400);
       }
       const existing = await getSsoConnectionById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "SSO connection not found" }, 404);
+      if (!existing) return sendError(res, "sso_connection_not_found", "SSO connection not found", 404);
       const updated = await updateSsoConnection({ id, orgId: auth.orgId, ...updates });
       await auditAction(auth, "org.sso.connection_updated", { targetType: "sso_connection", targetId: id, metadata: updates });
       return sendJson(res, updated);
@@ -157,9 +157,9 @@ export const ssoRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/sso\/connections\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "connection id is required" }, 400);
+      if (!id) return sendError(res, "sso_connection_id_required", "connection id is required", 400);
       const existing = await getSsoConnectionById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "SSO connection not found" }, 404);
+      if (!existing) return sendError(res, "sso_connection_not_found", "SSO connection not found", 404);
       await revokeSsoConnection({ id, orgId: auth.orgId });
       await auditAction(auth, "org.sso.connection_revoked", { targetType: "sso_connection", targetId: id });
       return sendJson(res, { ok: true });
@@ -171,12 +171,12 @@ export const ssoRoutes: Route[] = [
     handler: async ({ req, res }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const orgId = url.searchParams.get("orgId");
-      if (!orgId) return sendJson(res, { error: "orgId is required" }, 400);
+      if (!orgId) return sendError(res, "sso_org_id_required", "orgId is required", 400);
       const callbackUrl = getCallbackUrl();
-      if (!callbackUrl) return sendJson(res, { error: "SSO is not configured (missing JANUSLY_SSO_CALLBACK_URL)" }, 500);
+      if (!callbackUrl) return sendError(res, "sso_callback_not_configured", "SSO is not configured (missing JANUSLY_SSO_CALLBACK_URL)", 500);
       const sso = await getSsoConnectionForOrg(orgId);
       if (!sso || sso.status !== "active") {
-        return sendJson(res, { error: "no active SSO connection for this org" }, 404);
+        return sendError(res, "sso_no_active_connection", "no active SSO connection for this org", 404);
       }
       const nonce = newNonce();
       const expiresAt = new Date(Date.now() + SSO_STATE_TTL_SECONDS * 1000);
@@ -209,10 +209,10 @@ export const ssoRoutes: Route[] = [
       const callbackUrl = getCallbackUrl();
       const webBaseUrl = getWebBaseUrl();
       if (!callbackUrl || !webBaseUrl) {
-        return sendJson(res, { error: "SSO is not configured" }, 500);
+        return sendError(res, "sso_not_configured", "SSO is not configured", 500);
       }
       if (!code || !stateToken) {
-        return sendJson(res, { error: "code and state are required" }, 400);
+        return sendError(res, "sso_code_and_state_required", "code and state are required", 400);
       }
       let statePayload: SsoStatePayload;
       try {
@@ -225,7 +225,7 @@ export const ssoRoutes: Route[] = [
         await audit("default", "sso", "auth.sso.state_invalid", "sso_state", "", {
           reason: "invalid_signature_or_expiry",
         });
-        return sendJson(res, { error: "invalid state" }, 400);
+        return sendError(res, "sso_invalid_state", "invalid state", 400);
       }
 
       const { orgId, nonce, callbackUrl: stateCallbackUrl } = statePayload;
@@ -233,7 +233,7 @@ export const ssoRoutes: Route[] = [
         await audit(orgId, "sso", "auth.sso.state_invalid", "sso_state", "", {
           reason: "callback_url_mismatch",
         });
-        return sendJson(res, { error: "invalid state" }, 400);
+        return sendError(res, "sso_invalid_state", "invalid state", 400);
       }
 
       const consumed = await consumeSsoNonce({ orgId, nonce });
@@ -241,7 +241,7 @@ export const ssoRoutes: Route[] = [
         await audit(orgId, "sso", "auth.sso.state_invalid", "sso_state", "", {
           reason: "nonce_replayed_or_expired",
         });
-        return sendJson(res, { error: "invalid state" }, 400);
+        return sendError(res, "sso_invalid_state", "invalid state", 400);
       }
 
       const sso = await getSsoConnectionForOrg(orgId);
@@ -249,7 +249,7 @@ export const ssoRoutes: Route[] = [
         await audit(orgId, "sso", "auth.sso.callback_failed", "sso_connection", "", {
           reason: "connection_missing",
         });
-        return sendJson(res, { error: "no active SSO connection for this org" }, 404);
+        return sendError(res, "sso_no_active_connection", "no active SSO connection for this org", 404);
       }
 
       let profile;
@@ -260,7 +260,7 @@ export const ssoRoutes: Route[] = [
         await audit(orgId, "sso", "auth.sso.callback_failed", "sso_connection", sso.id, {
           reason,
         });
-        return sendJson(res, { error: "SSO exchange failed" }, 400);
+        return sendError(res, "sso_exchange_failed", "SSO exchange failed", 400);
       }
 
       if (profile.connectionId !== sso.providerConnectionId) {
@@ -271,7 +271,7 @@ export const ssoRoutes: Route[] = [
           expectedConnectionId: sso.providerConnectionId,
           profileConnectionId: profile.connectionId,
         });
-        return sendJson(res, { error: "SSO connection mismatch" }, 400);
+        return sendError(res, "sso_connection_mismatch", "SSO connection mismatch", 400);
       }
 
       // Policy gate BEFORE JIT-provisioning. An admin's
@@ -294,10 +294,12 @@ export const ssoRoutes: Route[] = [
           reason: "policy_rejected",
           policyKey: policyDecision.policyKey,
         });
-        return sendJson(
+        return sendError(
           res,
-          { error: "policy_violation", policyKey: policyDecision.policyKey },
+          "sso_policy_violation",
+          "policy_violation",
           403,
+          { policyKey: policyDecision.policyKey },
         );
       }
 
@@ -332,7 +334,7 @@ export const ssoRoutes: Route[] = [
           reason: "membership_persist_failed",
           detail: txResult.error,
         });
-        return sendJson(res, { error: "membership_persist_failed" }, 500);
+        return sendError(res, "sso_membership_persist_failed", "membership_persist_failed", 500);
       }
 
       const sessionToken = signSignedToken({

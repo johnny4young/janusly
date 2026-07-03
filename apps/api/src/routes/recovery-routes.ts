@@ -27,7 +27,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
 
@@ -67,10 +67,10 @@ export const recoveryRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = RecoveryFeedbackBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(res, { error: "Invalid feedback body", issues: parsed.error.issues }, 400);
+        return sendError(res, "recovery_invalid_feedback_body", "Invalid feedback body", 400);
       }
       const dlq = await getDeadLetter(auth.orgId, parsed.data.deadLetterId);
-      if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
+      if (!dlq) return sendError(res, "dlq_not_found", "DLQ entry not found", 404);
 
       const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
       const workflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
@@ -78,7 +78,7 @@ export const recoveryRoutes: Route[] = [
         // Anonymous (ad-hoc) workflows have no aggregation key — the
         // dialog only opens on saved workflows in practice, so this is
         // defensive.
-        return sendJson(res, { error: "Feedback is only recorded for saved workflows" }, 422);
+        return sendError(res, "recovery_feedback_saved_only", "Feedback is only recorded for saved workflows", 422);
       }
 
       await recordRecoveryFeedback({

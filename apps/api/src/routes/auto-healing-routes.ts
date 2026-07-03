@@ -37,7 +37,7 @@ import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_DEFAULTS_PER_MIN, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { enforceRateLimit } from "../rate-limit";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { db } from "@janusly/db";
 import { deadLetters } from "@janusly/db";
 import { and, eq } from "drizzle-orm";
@@ -75,9 +75,9 @@ export const autoHealingRoutes: Route[] = [
     permission: "autohealing.read",
     handler: async ({ req, res, auth }) => {
       const id = pathParam(req.url ?? "", 1);
-      if (!id) return sendJson(res, { error: "missing id" }, 400);
+      if (!id) return sendError(res, "autoheal_missing_id", "missing id", 400);
       const row = await getByIdForOrg(auth.orgId, id);
-      if (!row) return sendJson(res, { error: "Not found" }, 404);
+      if (!row) return sendError(res, "autoheal_not_found", "Not found", 404);
       return sendJson(res, { row });
     },
   },
@@ -88,20 +88,21 @@ export const autoHealingRoutes: Route[] = [
     permission: "autohealing.decide",
     handler: async ({ req, res, auth }) => {
       const id = pathParam(req.url ?? "", 1);
-      if (!id) return sendJson(res, { error: "missing id" }, 400);
+      if (!id) return sendError(res, "autoheal_missing_id", "missing id", 400);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parse = DecideBodySchema.safeParse(body);
       if (!parse.success) {
-        return sendJson(res, { error: "invalid body", details: parse.error.flatten() }, 400);
+        return sendError(res, "autoheal_invalid_body", "invalid body", 400);
       }
       const { accepted, comment } = parse.data;
 
       const row = await getByIdForOrg(auth.orgId, id);
-      if (!row) return sendJson(res, { error: "Not found" }, 404);
+      if (!row) return sendError(res, "autoheal_not_found", "Not found", 404);
       if (row.status !== "validated") {
-        return sendJson(
+        return sendError(
           res,
-          { error: "Auto-healing row is not pending a decision", code: "not_pending" },
+          "autoheal_not_pending",
+          "Auto-healing row is not pending a decision",
           409,
         );
       }
@@ -129,14 +130,14 @@ export const autoHealingRoutes: Route[] = [
         // even though production replay never happened.
         const workflowParse = WorkflowSchema.safeParse(row.proposedPatchJson);
         if (!workflowParse.success) {
-          return sendJson(res, { error: "Stored patch failed re-validation" }, 500);
+          return sendError(res, "autoheal_patch_revalidation_failed", "Stored patch failed re-validation", 500);
         }
         patchedWorkflow = workflowParse.data;
         failingNode = (patchedWorkflow.nodes as WorkflowNode[]).find(
           (n) => n.id === dlqRow[0]?.nodeId,
         ) ?? null;
         if (!dlqRow[0] || !failingNode) {
-          return sendJson(res, { error: "DLQ row or failing node missing" }, 404);
+          return sendError(res, "autoheal_dlq_or_node_missing", "DLQ row or failing node missing", 404);
         }
       }
 
@@ -148,9 +149,10 @@ export const autoHealingRoutes: Route[] = [
         declineReason: accepted ? undefined : "manual_review",
       });
       if (!decision.applied) {
-        return sendJson(
+        return sendError(
           res,
-          { error: "Auto-healing row was already resolved", code: "signature_already_resolved" },
+          "autoheal_already_resolved",
+          "Auto-healing row was already resolved",
           409,
         );
       }
@@ -192,7 +194,7 @@ export const autoHealingRoutes: Route[] = [
         await markDeadLetterReplayed(auth.orgId, row.deadLetterId);
       } catch (err) {
         console.error("[auto-healing] manual apply replay failed", { id, err });
-        return sendJson(res, { error: "Apply replay failed" }, 500);
+        return sendError(res, "autoheal_apply_replay_failed", "Apply replay failed", 500);
       }
 
       // Note: the audit row for `auto_healing.applied` is already
@@ -209,7 +211,7 @@ export const autoHealingRoutes: Route[] = [
       try {
         await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.autoHealingDecide });
       } catch (err) {
-        return sendJson(res, { error: (err as Error).message }, 429);
+        return sendError(res, "autoheal_rate_limited", (err as Error).message, 429);
       }
       // Trigger asynchronously so the route returns immediately. The
       // per-org call keeps the on-demand scan scoped to the caller's
