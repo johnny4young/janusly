@@ -793,7 +793,7 @@ describe("/reports/run-explain/deliver — rejection + failure paths", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ error: expect.stringContaining("owner") }),
+      expect.objectContaining({ code: "reports_invalid_request", params: expect.objectContaining({ path: expect.stringContaining("owner") }) }),
       400,
     );
     expect(executeToolMock).not.toHaveBeenCalled();
@@ -812,7 +812,7 @@ describe("/reports/run-explain/deliver — rejection + failure paths", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ error: expect.stringContaining("url") }),
+      expect.objectContaining({ code: "reports_invalid_request", params: expect.objectContaining({ path: expect.stringContaining("url") }) }),
       400,
     );
     expect(executeToolMock).not.toHaveBeenCalled();

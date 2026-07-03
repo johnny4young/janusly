@@ -182,7 +182,7 @@ describe("POST /auto-healing/:id/decide", () => {
       payload: { code?: string };
     };
     expect(result.status).toBe(409);
-    expect(result.payload.code).toBe("signature_already_resolved");
+    expect(result.payload.code).toBe("autoheal_already_resolved");
   });
 
   it("on accept: records decision + writes recovery_feedback mirror row", async () => {

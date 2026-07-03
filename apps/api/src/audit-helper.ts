@@ -62,6 +62,7 @@ export type AuditAction =
   | "auto_healing.decline.manual"
   // billing
   | "billing.budget.configured"
+  | "billing.usage.exported"
   // credentials
   | "credential.created"
   | "credential.bulk_updated"
