@@ -86,7 +86,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
@@ -100,7 +100,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
       const owned = await db
         .select({ id: workflows.id })
         .from(workflows)
@@ -247,7 +247,7 @@ export const workflowsRoutes: Route[] = [
       const workflowId = typeof body.workflowId === "string" ? body.workflowId : "";
       const sourceVersionId = typeof body.sourceVersionId === "string" ? body.sourceVersionId : "";
       if (!workflowId || !sourceVersionId) {
-        return sendJson(res, { error: "workflowId and sourceVersionId are required" }, 400);
+        return sendError(res, "workflows_rollback_ids_required", "workflowId and sourceVersionId are required", 400);
       }
       const result = await rollbackWorkflowToVersion({
         orgId: auth.orgId,
@@ -260,7 +260,7 @@ export const workflowsRoutes: Route[] = [
         if (result.code === "deleted") {
           return sendError(res, "workflow_not_found", "Workflow not found", 404);
         }
-        return sendJson(res, { error: "Source version not found" }, 404);
+        return sendError(res, "workflows_source_version_not_found", "Source version not found", 404);
       }
       await auditAction(auth, "workflow.rolled_back", { targetType: "workflow", targetId: workflowId, metadata: rollbackAuditMetadata(result) });
       return sendJson(res, {
@@ -286,7 +286,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length).split("/")[0];
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
       // Multi-tenant gate first — same enumeration-safe shape the sibling
       // DELETE /workflows/:id and GET /workflows/health routes use.
@@ -337,7 +337,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = decodeURIComponent(url.pathname.slice("/workflows/".length).split("/")[0]);
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
       // Multi-tenant gate first — same enumeration-safe 404 the sibling
       // `/workflows/health` and `/workflows/:id/slo` routes use.
@@ -416,7 +416,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.slice("/workflows/".length);
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
       // Only an active (not already soft-deleted) workflow can be deleted;
       // an absent/already-deleted id returns the same enumeration-safe 404.
@@ -456,7 +456,7 @@ export const workflowsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const matched = url.pathname.match(/^\/workflows\/([^/]+)\/restore$/);
       const workflowId = matched?.[1];
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
       const restored = await db
         .update(workflows)
@@ -550,9 +550,9 @@ export const workflowsRoutes: Route[] = [
       const rawAfter = url.searchParams.get("afterVersion");
       const parsedAfterVersion = rawAfter == null ? NaN : Number(rawAfter);
       const afterVersion = Number.isInteger(parsedAfterVersion) ? parsedAfterVersion : NaN;
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
       if (!Number.isFinite(afterVersion) || afterVersion < 1) {
-        return sendJson(res, { error: "afterVersion must be a positive integer" }, 400);
+        return sendError(res, "workflows_after_version_invalid", "afterVersion must be a positive integer", 400);
       }
       const parsedWindowDays = Number(url.searchParams.get("windowDays") ?? NaN);
       // Default to the same 30-day window the bare /workflows/health route
@@ -584,11 +584,11 @@ export const workflowsRoutes: Route[] = [
         .orderBy(desc(workflowVersions.version))
         .limit(1);
       if (latestVersion.length === 0) {
-        return sendJson(res, { error: "Workflow has no versions" }, 404);
+        return sendError(res, "workflows_no_versions", "Workflow has no versions", 404);
       }
       const parsedWorkflow = WorkflowSchema.safeParse(latestVersion[0].dagJson);
       if (!parsedWorkflow.success) {
-        return sendJson(res, { error: "Workflow version is malformed" }, 422);
+        return sendError(res, "workflows_version_malformed", "Workflow version is malformed", 422);
       }
 
       const baseReadiness = checkWorkflowReadiness(parsedWorkflow.data);
@@ -738,7 +738,7 @@ export const workflowsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
-      if (!workflowId) return sendJson(res, { error: "workflowId is required" }, 400);
+      if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
       // Multi-tenant gate: confirm the workflow belongs to the caller's org
       // before doing any work.
@@ -760,12 +760,12 @@ export const workflowsRoutes: Route[] = [
         .orderBy(desc(workflowVersions.version))
         .limit(1);
       if (latestVersion.length === 0) {
-        return sendJson(res, { error: "Workflow has no versions" }, 404);
+        return sendError(res, "workflows_no_versions", "Workflow has no versions", 404);
       }
 
       const parsedWorkflow = WorkflowSchema.safeParse(latestVersion[0].dagJson);
       if (!parsedWorkflow.success) {
-        return sendJson(res, { error: "Workflow version is malformed" }, 422);
+        return sendError(res, "workflows_version_malformed", "Workflow version is malformed", 422);
       }
       // Layer rollback-availability on top of the static readiness check
       // so the health rollup's safety dimension counts the same issues

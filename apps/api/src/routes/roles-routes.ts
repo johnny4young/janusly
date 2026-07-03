@@ -199,14 +199,14 @@ export const rolesRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const name = typeof body.name === "string" ? body.name.trim().toLowerCase() : "";
       if (!isValidRoleName(name)) {
-        return sendJson(res, { error: "name must match /^[a-z0-9_-]{1,32}$/" }, 400);
+        return sendError(res, "roles_name_invalid", "name must match /^[a-z0-9_-]{1,32}$/", 400);
       }
       if (isRole(name)) {
-        return sendJson(res, { error: "cannot create a custom role with a built-in name; use POST /org/roles/:name to override a built-in" }, 400);
+        return sendError(res, "roles_builtin_name", "cannot create a custom role with a built-in name; use POST /org/roles/:name to override a built-in", 400);
       }
       const inheritsFrom: Role = isInheritsFrom(body.inheritsFrom) ? body.inheritsFrom : "viewer";
       const parsed = parsePermissionsArray(body.grantedPermissions);
-      if (!parsed.ok) return sendJson(res, { error: parsed.bad }, 400);
+      if (!parsed.ok) return sendError(res, "roles_permissions_invalid", parsed.bad, 400);
 
       const existing = await getOrgRole({ orgId: auth.orgId, name });
       if (existing) {
@@ -241,7 +241,7 @@ export const rolesRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/roles\/([^/?]+)/);
       const name = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
-      if (!name) return sendJson(res, { error: "role name is required" }, 400);
+      if (!name) return sendError(res, "roles_name_required", "role name is required", 400);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const isBuiltinTarget = isRole(name);
@@ -257,10 +257,10 @@ export const rolesRoutes: Route[] = [
       let inheritsFrom: Role | undefined;
       if (body.inheritsFrom !== undefined) {
         if (isBuiltinTarget) {
-          return sendJson(res, { error: "inheritsFrom is immutable on built-in roles" }, 400);
+          return sendError(res, "roles_inherits_immutable", "inheritsFrom is immutable on built-in roles", 400);
         }
         if (!isInheritsFrom(body.inheritsFrom)) {
-          return sendJson(res, { error: "inheritsFrom must be one of viewer | editor | admin" }, 400);
+          return sendError(res, "roles_inherits_invalid", "inheritsFrom must be one of viewer | editor | admin", 400);
         }
         inheritsFrom = body.inheritsFrom;
       }
@@ -270,7 +270,7 @@ export const rolesRoutes: Route[] = [
       let coercedFloor: Permission[] = [];
       if (body.grantedPermissions !== undefined) {
         const parsed = parsePermissionsArray(body.grantedPermissions);
-        if (!parsed.ok) return sendJson(res, { error: parsed.bad }, 400);
+        if (!parsed.ok) return sendError(res, "roles_permissions_invalid", parsed.bad, 400);
         const floored = coerceAdminFloor(name, parsed.permissions);
         permissions = floored.permissions;
         coercedFloor = floored.coerced;
@@ -281,7 +281,7 @@ export const rolesRoutes: Route[] = [
         : undefined;
 
       if (permissions === undefined && inheritsFrom === undefined && description === undefined) {
-        return sendJson(res, { error: "no updatable fields provided" }, 400);
+        return sendError(res, "roles_no_updatable_fields", "no updatable fields provided", 400);
       }
 
       let savedRow: OrgRoleRow | null;
@@ -356,13 +356,13 @@ export const rolesRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/roles\/([^/?]+)/);
       const name = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
-      if (!name) return sendJson(res, { error: "role name is required" }, 400);
+      if (!name) return sendError(res, "roles_name_required", "role name is required", 400);
 
       if (isRole(name)) {
         // Built-in name: this DELETE means "revert to defaults", not "delete the role".
         const existing = await getOrgRole({ orgId: auth.orgId, name });
         if (!existing) {
-          return sendJson(res, { error: "no override exists for this built-in role" }, 404);
+          return sendError(res, "roles_override_not_found", "no override exists for this built-in role", 404);
         }
         await deleteOrgRole({ orgId: auth.orgId, name });
         await auditAction(auth, "org.permissions.override_cleared", { targetType: "org_role", targetId: existing.id, metadata: { name } });

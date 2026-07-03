@@ -94,10 +94,10 @@ export const runsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = decodeURIComponent(url.pathname.split("/")[2] ?? "");
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
       const { runs: runConfig } = await getOrgConfigSnapshot(auth.orgId);
 
@@ -137,7 +137,7 @@ export const runsRoutes: Route[] = [
       const hub = getRunStreamHub();
       const added = hub.addSubscriber(runId, auth.orgId, writeFrame, runConfig.streamMaxSubscriptions, () => teardown(true));
       if (!added.ok) {
-        return sendJson(res, { error: "Too many live run streams for this organization", code: "stream_cap_exceeded" }, 429);
+        return sendError(res, "stream_cap_exceeded", "Too many live run streams for this organization", 429);
       }
       removeSubscriber = added.remove;
 
@@ -242,9 +242,9 @@ export const runsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
       const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const cursor = parseEventsCursor(url.searchParams.get("eventsCursor"));
@@ -276,9 +276,9 @@ export const runsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
       const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const rows = await db
@@ -311,7 +311,7 @@ export const runsRoutes: Route[] = [
       const forceRunDuringPause = body.forceRunDuringPause === true;
 
       const validation = validateWorkflow(workflow);
-      if (!validation.valid) return sendJson(res, { error: "Validation failed", issues: validation.issues }, 400);
+      if (!validation.valid) return sendError(res, "runs_validation_failed", "Validation failed", 400);
       const parsedWorkflow = WorkflowSchema.parse(workflow);
 
       // Production-mode opt-in gate: when `JANUSLY_PRODUCTION_MODE=true`, the
@@ -331,7 +331,7 @@ export const runsRoutes: Route[] = [
         ]);
         const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
         if (readiness.status === "fail") {
-          return sendJson(res, { error: "Workflow not production-ready", readiness }, 422);
+          return sendError(res, "runs_not_production_ready", "Workflow not production-ready", 422);
         }
       }
 
@@ -350,7 +350,7 @@ export const runsRoutes: Route[] = [
         isAdhoc = owned.length === 0;
       }
       if (requireSaved && isAdhoc) {
-        return sendJson(res, { error: "Ad-hoc workflows are disabled. Save the workflow first." }, 403);
+        return sendError(res, "runs_adhoc_disabled", "Ad-hoc workflows are disabled. Save the workflow first.", 403);
       }
 
       // Upstream-health pause gate. A saved workflow auto-paused by a degraded
@@ -395,7 +395,7 @@ export const runsRoutes: Route[] = [
         return sendJson(res, result);
       } catch (err) {
         if (err instanceof WorkflowInputValidationError) {
-          return sendJson(res, { error: "Input validation failed", errors: err.errors }, 400);
+          return sendError(res, "runs_input_validation_failed", "Input validation failed", 400);
         }
         throw err;
       }
@@ -405,9 +405,9 @@ export const runsRoutes: Route[] = [
       const resumeMcpGate = await guardMcpWrite(auth, "runs.resume");
       if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
       const { runId, nodeId, input, resumeToken } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
-      if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
+      if (typeof runId !== "string" || typeof nodeId !== "string") return sendError(res, "runs_run_id_and_node_id_required", "runId and nodeId are required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
       try {
         const result = await resumeRun(runId, nodeId, {
           input,
@@ -417,16 +417,16 @@ export const runsRoutes: Route[] = [
         return sendJson(res, result);
       } catch (err) {
         if (err instanceof WorkflowInputValidationError) {
-          return sendJson(res, { error: "Input validation failed", errors: err.errors }, 400);
+          return sendError(res, "runs_input_validation_failed", "Input validation failed", 400);
         }
         if (err instanceof ResumeRunConflictError) {
-          return sendJson(res, { error: err.message }, 409);
+          return sendError(res, "runs_resume_conflict", err.message, 409);
         }
         if (err instanceof Error && err.message === "resumeToken is required") {
-          return sendJson(res, { error: err.message }, 400);
+          return sendError(res, "runs_resume_token_required", "resumeToken is required", 400);
         }
         if (err instanceof Error && err.message === "Invalid resume token") {
-          return sendJson(res, { error: "Invalid resume token" }, 403);
+          return sendError(res, "runs_invalid_resume_token", "Invalid resume token", 403);
         }
         throw err;
       }
@@ -442,14 +442,14 @@ export const runsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const runId = typeof body.runId === "string" ? body.runId : null;
       const reason = body.reason;
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0]) return sendJson(res, { error: "Run not found" }, 404);
-      if (run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0]) return sendError(res, "runs_run_not_found", "Run not found", 404);
+      if (run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
       if (isTerminalRunStatus(run[0].status)) {
-        return sendJson(res, { error: `Run is already ${run[0].status}; cannot cancel` }, 409);
+        return sendError(res, "runs_already_terminal", "Run is already {{status}}; cannot cancel", 409, { status: run[0].status });
       }
 
       await cancelRun(runId, reason);
@@ -476,18 +476,18 @@ export const runsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;
-      if (!sourceRunId) return sendJson(res, { error: "sourceRunId is required" }, 400);
+      if (!sourceRunId) return sendError(res, "runs_source_run_id_required", "sourceRunId is required", 400);
 
       // Org-scope the source run and reject cross-org / unknown ids with
       // an identical 404 envelope — no enumeration leak.
       const sourceRows = await db.select().from(runs).where(and(eq(runs.id, sourceRunId), eq(runs.orgId, auth.orgId)));
       const sourceRun = sourceRows[0];
-      if (!sourceRun) return sendJson(res, { error: "Source run not found" }, 404);
+      if (!sourceRun) return sendError(res, "runs_source_run_not_found", "Source run not found", 404);
 
       // No nested labs — a sandbox run is itself a validation run; replaying
       // it would just create a sibling sandbox with the same snapshot.
       if (sourceRun.replayMode) {
-        return sendJson(res, { error: "Source run is itself a sandbox run; cannot start a nested lab" }, 400);
+        return sendError(res, "nested_replay_lab", "Source run is itself a sandbox run; cannot start a nested lab", 400);
       }
 
       // Resolve the workflow snapshot. Precedence: caller-supplied patch >
@@ -496,19 +496,23 @@ export const runsRoutes: Route[] = [
       const hasPatch = body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null;
       if (hasPatch) {
         if (typeof body.suggestedWorkflow !== "object") {
-          return sendJson(res, { error: "suggestedWorkflow must be an object" }, 400);
+          return sendError(res, "runs_suggested_workflow_not_object", "suggestedWorkflow must be an object", 400);
         }
         const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
         if (!parsed.success) {
-          return sendJson(res, {
-            error: `suggestedWorkflow failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-          }, 400);
+          return sendError(
+            res,
+            "runs_suggested_workflow_invalid",
+            "suggestedWorkflow failed schema validation: {{reason}}",
+            400,
+            { reason: parsed.error.issues[0]?.message ?? "unknown" },
+          );
         }
         try {
           workflow = sanitizeAiWorkflow(parsed.data);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
-          return sendJson(res, { error: `suggestedWorkflow sanitize failed: ${reason}` }, 400);
+          return sendError(res, "runs_suggested_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason });
         }
       } else {
         // No patch — load the source's own workflow snapshot. Try the saved
@@ -524,15 +528,17 @@ export const runsRoutes: Route[] = [
           snapshot = input && typeof input === "object" ? input.workflow : null;
         }
         if (!snapshot) {
-          return sendJson(res, {
-            error: "Source run has no workflow snapshot available; supply suggestedWorkflow",
-          }, 400);
+          return sendError(res, "no_workflow_snapshot", "Source run has no workflow snapshot available; supply suggestedWorkflow", 400);
         }
         const parsed = WorkflowSchema.safeParse(snapshot);
         if (!parsed.success) {
-          return sendJson(res, {
-            error: `Source run snapshot failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-          }, 400);
+          return sendError(
+            res,
+            "invalid_snapshot",
+            "Source run snapshot failed schema validation: {{reason}}",
+            400,
+            { reason: parsed.error.issues[0]?.message ?? "unknown" },
+          );
         }
         workflow = parsed.data;
       }
@@ -579,10 +585,10 @@ export const runsRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const sourceRunId = typeof body.sourceRunId === "string" ? body.sourceRunId : null;
-      if (!sourceRunId) return sendJson(res, { error: "sourceRunId is required", code: "invalid_input" }, 400);
+      if (!sourceRunId) return sendError(res, "invalid_input", "sourceRunId is required", 400);
 
       const forkNodeId = typeof body.forkNodeId === "string" ? body.forkNodeId : null;
-      if (!forkNodeId) return sendJson(res, { error: "forkNodeId is required", code: "invalid_input" }, 400);
+      if (!forkNodeId) return sendError(res, "invalid_input", "forkNodeId is required", 400);
 
       // Defensive cap on inputOverride size — same shape as the audit
       // metadata cap. Over-cap landings would balloon `run_nodes.stateJson`
@@ -590,21 +596,24 @@ export const runsRoutes: Route[] = [
       if (body.inputOverride !== undefined) {
         const overrideBytes = Buffer.byteLength(JSON.stringify(body.inputOverride), "utf8");
         if (overrideBytes > 64_000) {
-          return sendJson(res, {
-            error: `inputOverride exceeds 64 KiB cap (${overrideBytes} bytes)`,
-            code: "override_too_large",
-          }, 422);
+          return sendError(
+            res,
+            "override_too_large",
+            "inputOverride exceeds 64 KiB cap ({{overrideBytes}} bytes)",
+            422,
+            { overrideBytes },
+          );
         }
       }
 
       // Org-scope the source run. Cross-org / unknown id → 404 (no enumeration leak).
       const sourceRows = await db.select().from(runs).where(and(eq(runs.id, sourceRunId), eq(runs.orgId, auth.orgId)));
       const sourceRun = sourceRows[0];
-      if (!sourceRun) return sendJson(res, { error: "Source run not found", code: "not_found" }, 404);
+      if (!sourceRun) return sendError(res, "not_found", "Source run not found", 404);
 
       // No nested forks — source run can't itself be a sandbox run.
       if (sourceRun.replayMode) {
-        return sendJson(res, { error: "Source run is itself a sandbox run; cannot fork from it", code: "nested_replay_lab" }, 400);
+        return sendError(res, "nested_replay_lab", "Source run is itself a sandbox run; cannot fork from it", 400);
       }
 
       // Resolve the workflow snapshot. v1 forks DO NOT accept a patched
@@ -623,17 +632,17 @@ export const runsRoutes: Route[] = [
         snapshot = input && typeof input === "object" ? input.workflow : null;
       }
       if (!snapshot) {
-        return sendJson(res, {
-          error: "Source run has no workflow snapshot available; cannot fork",
-          code: "no_workflow_snapshot",
-        }, 400);
+        return sendError(res, "no_workflow_snapshot", "Source run has no workflow snapshot available; cannot fork", 400);
       }
       const parsed = WorkflowSchema.safeParse(snapshot);
       if (!parsed.success) {
-        return sendJson(res, {
-          error: `Source run snapshot failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-          code: "invalid_snapshot",
-        }, 400);
+        return sendError(
+          res,
+          "invalid_snapshot",
+          "Source run snapshot failed schema validation: {{reason}}",
+          400,
+          { reason: parsed.error.issues[0]?.message ?? "unknown" },
+        );
       }
       const workflow = parsed.data;
 
@@ -659,11 +668,7 @@ export const runsRoutes: Route[] = [
         // is a 422 (caller supplied a value the route accepted shape-wise
         // but the workflow doesn't have that node). `predecessor_not_succeeded`
         // is a 422 (we can't fork past an unreliable upstream).
-        return sendJson(res, {
-          error: result.message,
-          code: result.code,
-          details: "details" in result ? result.details : undefined,
-        }, 422);
+        return sendError(res, result.code, result.message, 422);
       }
 
       await auditAction(auth, "replay_lab.fork_started", { targetType: "run", targetId: sourceRunId, metadata: {
@@ -688,14 +693,14 @@ export const runsRoutes: Route[] = [
       const baseRunId = url.searchParams.get("baseRunId");
       const replayRunId = url.searchParams.get("replayRunId");
       if (!baseRunId || !replayRunId) {
-        return sendJson(res, { error: "baseRunId and replayRunId are required" }, 400);
+        return sendError(res, "runs_base_and_replay_run_id_required", "baseRunId and replayRunId are required", 400);
       }
       const result = await getRunComparison({ orgId: auth.orgId, baseRunId, replayRunId });
       if ("error" in result) {
         const message = result.error === "base_run_not_found"
           ? "Base run not found"
           : "Replay run not found";
-        return sendJson(res, { error: message }, 404);
+        return sendError(res, "runs_compare_run_not_found", message, 404);
       }
       return sendJson(res, result);
     } },
@@ -706,14 +711,14 @@ export const runsRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
       const nodeId = url.searchParams.get("nodeId");
-      if (!runId || !nodeId) return sendJson(res, { error: "runId and nodeId are required" }, 400);
+      if (!runId || !nodeId) return sendError(res, "runs_run_id_and_node_id_required", "runId and nodeId are required", 400);
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
       const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
       const decisionEvent = events.find(event => event.type === "decision.made" && event.nodeId === nodeId);
-      if (!decisionEvent) return sendJson(res, { error: "No decision event" }, 404);
+      if (!decisionEvent) return sendError(res, "runs_no_decision_event", "No decision event", 404);
 
       const payload = asRecord(decisionEvent.payload);
       const result = replayDecision({

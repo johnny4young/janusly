@@ -63,6 +63,8 @@ vi.mock("../http", async (importOriginal) => {
   return {
     ...actual,
     sendJson: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
+    sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+      ({ payload: params === undefined ? { error: message, code } : { error: message, code, params }, status })),
     corsHeaders: vi.fn(() => ({})),
   };
 });

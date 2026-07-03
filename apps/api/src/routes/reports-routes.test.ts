@@ -109,6 +109,8 @@ vi.mock("../http", async (importOriginal) => {
   return {
     ...original,
     sendJson: sendJsonMock,
+    sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+      sendJsonMock(_res, params === undefined ? { error: message, code } : { error: message, code, params }, status)),
     corsHeaders: vi.fn(() => ({})),
   };
 });
@@ -433,7 +435,7 @@ describe("/reports/run-explain — rejection paths", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      { error: "runId is required" },
+      { error: "runId is required", code: "reports_run_id_required" },
       400,
     );
     expect(buildRunExplainReportMock).not.toHaveBeenCalled();
@@ -468,7 +470,7 @@ describe("/reports/run-explain — rejection paths", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      { error: "Run not found" },
+      { error: "Run not found", code: "reports_run_not_found" },
       404,
     );
     expect(buildRunExplainReportMock).not.toHaveBeenCalled();
@@ -832,7 +834,7 @@ describe("/reports/run-explain/deliver — rejection + failure paths", () => {
 
     expect(sendJsonMock).toHaveBeenCalledWith(
       expect.anything(),
-      { error: "Run not found" },
+      { error: "Run not found", code: "reports_run_not_found" },
       404,
     );
     expect(executeToolMock).not.toHaveBeenCalled();

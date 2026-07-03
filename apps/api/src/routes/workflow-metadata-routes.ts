@@ -184,18 +184,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = RenameWorkflowFolderBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid folder rename body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid folder rename body", 422);
       }
 
       const { from, to } = parsed.data;
@@ -219,18 +208,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = DeleteWorkflowFolderBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid folder delete body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid folder delete body", 422);
       }
 
       const { folder } = parsed.data;
@@ -254,18 +232,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = AssignWorkflowsToFolderBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid folder assign body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid folder assign body", 422);
       }
 
       const { workflowIds: requestedIds, folder } = parsed.data;
@@ -294,18 +261,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = AssignTagToWorkflowsBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid tag assign body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid tag assign body", 422);
       }
 
       const { workflowIds: requestedIds, tag, op } = parsed.data;
@@ -335,18 +291,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = RenameWorkflowTagBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid tag rename body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid tag rename body", 422);
       }
 
       const { from, to } = parsed.data;
@@ -370,18 +315,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = DeleteWorkflowTagBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid tag delete body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid tag delete body", 422);
       }
 
       const { tag } = parsed.data;
@@ -403,7 +337,7 @@ export const workflowMetadataRoutes: Route[] = [
     permission: "workflows.read",
     handler: async ({ req, res, auth }) => {
       const workflowId = workflowIdFromUrl(req.url);
-      if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
+      if (!workflowId) return sendError(res, "workflow_metadata_workflow_id_required", "workflowId required", 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
@@ -420,7 +354,7 @@ export const workflowMetadataRoutes: Route[] = [
     permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const workflowId = workflowIdFromUrl(req.url);
-      if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
+      if (!workflowId) return sendError(res, "workflow_metadata_workflow_id_required", "workflowId required", 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
@@ -429,18 +363,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = UpsertWorkflowMetadataBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid workflow metadata body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid workflow metadata body", 422);
       }
 
       const { record, previous } = await upsertWorkflowMetadata({
@@ -466,7 +389,7 @@ export const workflowMetadataRoutes: Route[] = [
     permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const workflowId = workflowIdFromFolderUrl(req.url);
-      if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
+      if (!workflowId) return sendError(res, "workflow_metadata_workflow_id_required", "workflowId required", 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
@@ -475,18 +398,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = SetWorkflowFolderBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid workflow folder body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid workflow folder body", 422);
       }
 
       const { record, previous } = await setWorkflowFolder({
@@ -512,7 +424,7 @@ export const workflowMetadataRoutes: Route[] = [
     permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
       const workflowId = workflowIdFromTagsUrl(req.url);
-      if (!workflowId) return sendJson(res, { error: "workflowId required" }, 400);
+      if (!workflowId) return sendError(res, "workflow_metadata_workflow_id_required", "workflowId required", 400);
 
       if (!(await assertWorkflowBelongsToOrg(auth.orgId, workflowId))) {
         return sendError(res, "workflow_not_found", "Workflow not found", 404);
@@ -521,18 +433,7 @@ export const workflowMetadataRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const parsed = SetWorkflowTagBodySchema.safeParse(body);
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid workflow tag body",
-            code: "workflow_metadata_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "workflow_metadata_invalid", "invalid workflow tag body", 422);
       }
 
       const { tag, op } = parsed.data;

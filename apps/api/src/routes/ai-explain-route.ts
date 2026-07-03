@@ -21,7 +21,7 @@ import { assembleExplainRunEvidence } from "../ai-evidence";
 import { fallbackExplainWorkflow, orgLlmRuntime, resolveSurfaceModel } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import { budgetBlockedResponse, gateBudget } from "../budget-gate";
 import { localeFromRequest } from "../locale";
@@ -82,10 +82,10 @@ export const aiExplainRoutes: Route[] = [
       const { runId, question } = explainRunBody;
       const modelOverride = typeof explainRunBody.model === "string" ? explainRunBody.model : undefined;
       const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "explain-run", modelOverride);
-      if (typeof runId !== "string") return sendJson(res, { error: "runId is required" }, 400);
+      if (typeof runId !== "string") return sendError(res, "ai_run_id_required", "runId is required", 400);
       const questionText = typeof question === "string" ? question : undefined;
       if (questionText && questionText.length > orgConfig.ai.promptMaxChars) {
-        return sendJson(res, { error: `question exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
+        return sendError(res, "ai_question_too_long", `question exceeds {{maxChars}} characters`, 413, { maxChars: orgConfig.ai.promptMaxChars });
       }
       // Org-level budget gate. The workflowId is on the run row we load
       // below, but the run lookup itself is cheap and gating at org-level
@@ -95,7 +95,7 @@ export const aiExplainRoutes: Route[] = [
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Run not found" }, 404);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "ai_run_not_found", "Run not found", 404);
 
       // Resolve the workflow id via the same join `getRunMetadata` uses
       // so the recorder can attribute usage rows to the workflow. The

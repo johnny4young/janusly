@@ -61,7 +61,7 @@ export const credentialsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.secretRef !== "string") {
-        return sendJson(res, { error: "name, kind, and secretRef are required" }, 400);
+        return sendError(res, "credentials_fields_required", "name, kind, and secretRef are required", 400);
       }
       const id = crypto.randomUUID();
       await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, createdBy: auth.userId });
@@ -77,7 +77,7 @@ export const credentialsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const pathname = new URL(req.url ?? "", "http://internal").pathname;
       const name = decodeURIComponent(pathname.split("/")[2] ?? "");
-      if (!name) return sendJson(res, { error: "credential name required" }, 400);
+      if (!name) return sendError(res, "credentials_name_required", "credential name required", 400);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const dryRun = body.dryRun === true;
@@ -91,7 +91,7 @@ export const credentialsRoutes: Route[] = [
         .where(and(eq(credentials.orgId, auth.orgId), eq(credentials.name, name)))
         .limit(1);
       const cred = rows[0];
-      if (!cred) return sendJson(res, { error: "credential not found" }, 404);
+      if (!cred) return sendError(res, "credentials_not_found", "credential not found", 404);
 
       if (dryRun) {
         const affected = await resolveCredentialReferences(auth.orgId, name);
@@ -106,13 +106,13 @@ export const credentialsRoutes: Route[] = [
 
       const newSecretRef = typeof body.newSecretRef === "string" ? body.newSecretRef : "";
       if (!ENV_VAR_NAME.test(newSecretRef) || newSecretRef.length > ENV_VAR_NAME_MAX) {
-        return sendJson(res, { error: "newSecretRef must be a valid environment variable name" }, 400);
+        return sendError(res, "credentials_invalid_secret_ref", "newSecretRef must be a valid environment variable name", 400);
       }
       if (!ifMatch) {
-        return sendJson(res, { error: "ifMatch is required — send the updatedAt token from the dry-run preview response" }, 400);
+        return sendError(res, "credentials_if_match_required", "ifMatch is required — send the updatedAt token from the dry-run preview response", 400);
       }
       if (Number.isNaN(new Date(ifMatch).getTime())) {
-        return sendJson(res, { error: "ifMatch must be a valid ISO updatedAt token from the dry-run preview" }, 400);
+        return sendError(res, "credentials_if_match_invalid", "ifMatch must be a valid ISO updatedAt token from the dry-run preview", 400);
       }
 
       const affected = await resolveCredentialReferences(auth.orgId, name);
@@ -147,10 +147,10 @@ export const credentialsRoutes: Route[] = [
 
       if (!txOutcome.ok) {
         // Real transaction/audit failure — the rollback already reverted the swap.
-        return sendJson(res, { error: "Credential rotation failed" }, 500);
+        return sendError(res, "credentials_rotation_failed", "Credential rotation failed", 500);
       }
       const outcome = txOutcome.result;
-      if (outcome.kind === "not_found") return sendJson(res, { error: "credential not found" }, 404);
+      if (outcome.kind === "not_found") return sendError(res, "credentials_not_found", "credential not found", 404);
       if (outcome.kind === "conflict") {
         return sendError(res, "credential_rotation_conflict", "Credential changed since preview; re-preview before rotating", 409);
       }
