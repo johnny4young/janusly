@@ -96,7 +96,7 @@
   "apiErrors.recovery_item_not_escalation": "la severidad debe aumentar al escalar",
   "apiErrors.recovery_item_comment_cap_reached": "se alcanzó el límite de comentarios",
   "apiErrors.runs_suggested_workflow_invalid": "suggestedWorkflow no superó la validación de esquema: {{reason}}",
-  "apiErrors.sso_policy_violation": "Violación de política",
+  "apiErrors.sso_policy_violation": "Inicio de sesión SSO bloqueado por la política de la organización ({{policyKey}})",
   "apiErrors.not_found": "No encontrado",
   "apiErrors.ai_dead_letter_id_required": "deadLetterId es obligatorio",
   "apiErrors.ai_prompt_too_long": "el prompt supera los {{maxChars}} caracteres",
