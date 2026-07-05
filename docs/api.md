@@ -804,7 +804,7 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — six metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, cost) each with `value` / `display` / `severity` / `rationale`. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. Severity bands are tunable constants in the engine module.
 
 ### `POST /recovery/feedback`
 

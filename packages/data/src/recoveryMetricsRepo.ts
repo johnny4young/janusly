@@ -25,7 +25,7 @@
  */
 
 import { db } from "@janusly/db";
-import { deadLetters, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
+import { deadLetters, recoveryItems, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
@@ -80,6 +80,18 @@ export type ResolvedClustersRepo = {
 };
 
 /**
+ * SLA-attainment counts over recovery items RESOLVED in the window. `metSla`
+ * is the subset whose `resolvedAt <= slaTargetAt` (closed before the SLA
+ * deadline). The rollup renders `metSla / resolvedInWindow` as an attainment
+ * percentage. Open-but-breached items are intentionally excluded — attainment
+ * measures resolved-within-target; live breaches are the alert surface.
+ */
+export type SlaAttainmentRepo = {
+  resolvedInWindow: number;
+  metSla: number;
+};
+
+/**
  * Raw signals consumed by the engine's `composeRecoveryMetrics`. Field
  * names + shape match `RecoveryMetricsSignals` there — both modules
  * declare the type so neither layer has to depend on the other.
@@ -92,6 +104,7 @@ export type RecoveryMetricsSignals = {
   p95LatencyMs: number | null;
   replayOutcomes: ReplayOutcomeCountsRepo;
   resolvedClusters: ResolvedClustersRepo;
+  slaAttainment: SlaAttainmentRepo;
 };
 
 /** Collect raw recovery-metrics signals for one org over a rolling window. */
@@ -109,6 +122,7 @@ export async function queryRecoveryMetricsSignals(
     p95LatencyMs,
     replayOutcomes,
     resolvedClusters,
+    slaAttainment,
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
     queryMttrDurations(orgId, since),
@@ -117,6 +131,7 @@ export async function queryRecoveryMetricsSignals(
     queryP95Latency(orgId, since),
     queryReplayOutcomes(orgId, since),
     queryFailureClustersResolved(orgId, since),
+    queryRecoverySlaAttainment(orgId, since),
   ]);
 
   return {
@@ -127,6 +142,35 @@ export async function queryRecoveryMetricsSignals(
     p95LatencyMs,
     replayOutcomes,
     resolvedClusters,
+    slaAttainment,
+  };
+}
+
+/**
+ * SLA-attainment counts over recovery items resolved in the window. Aggregated
+ * in Postgres (two counts, no row materialization): total resolved-in-window
+ * and the `resolved_at <= sla_target_at` subset. Multi-tenant scope:
+ * `eq(recoveryItems.orgId, orgId)`; the `status='resolved'` predicate rides the
+ * `(orgId, status, slaTargetAt)` index and guarantees `resolvedAt` is non-null.
+ */
+export async function queryRecoverySlaAttainment(
+  orgId: string,
+  since: Date,
+): Promise<SlaAttainmentRepo> {
+  const rows = await db
+    .select({
+      resolvedInWindow: sql<number>`count(*)::int`,
+      metSla: sql<number>`count(*) filter (where ${recoveryItems.resolvedAt} <= ${recoveryItems.slaTargetAt})::int`,
+    })
+    .from(recoveryItems)
+    .where(and(
+      eq(recoveryItems.orgId, orgId),
+      eq(recoveryItems.status, "resolved"),
+      gte(recoveryItems.resolvedAt, since),
+    ));
+  return {
+    resolvedInWindow: rows[0]?.resolvedInWindow ?? 0,
+    metSla: rows[0]?.metSla ?? 0,
   };
 }
 

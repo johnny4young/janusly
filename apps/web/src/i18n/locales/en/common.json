@@ -2285,6 +2285,8 @@
   "recoveryCenter.metric.approvals.rationale": "Operators waiting on a decision",
   "recoveryCenter.metric.replay.label": "Replay success",
   "recoveryCenter.metric.replay.rationaleFallback": "Sandbox + production replays combined",
+  "recoveryCenter.metric.sla.label": "SLA attainment",
+  "recoveryCenter.metric.sla.rationaleFallback": "Share of resolved incidents closed within their SLA",
 
   "recoveryMetricRationale.success_rate.empty": "No terminal runs in the window yet.",
   "recoveryMetricRationale.success_rate.summary": "{{succeeded}} of {{terminal}} terminal runs succeeded.",
@@ -2296,6 +2298,8 @@
   "recoveryMetricRationale.approvals.blocked": "Current state: {{count}} runs paused at an approval node; independent of the window.",
   "recoveryMetricRationale.replay.empty": "No replay attempts in the window yet.",
   "recoveryMetricRationale.replay.summary": "{{replayedSuccess}} replays succeeded · {{replayedAndReopened}} re-failed.",
+  "recoveryMetricRationale.sla_attainment.empty": "No recovery items resolved in this window yet.",
+  "recoveryMetricRationale.sla_attainment.summary": "{{metSla}} of {{resolvedInWindow}} resolved within SLA.",
   "recoveryMetricRationale.cost.summary": "Across {{providerCount}} providers over the last {{windowDays}} days.",
 
   "recoveryCenter.greeting.morning": "Good morning, {{who}}.",

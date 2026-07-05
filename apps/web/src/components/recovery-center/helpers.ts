@@ -57,6 +57,7 @@ export type RecoveryMetrics = {
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
+  slaAttainment?: RecoveryMetric
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number

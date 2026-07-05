@@ -359,6 +359,7 @@ describe("ORG_CONFIG_DEFINITIONS recovery.* family", () => {
     expect(recoveryKeys).toEqual([
       "recovery.autoCreateItems",
       "recovery.debounceWindowSeconds",
+      "recovery.slaPolicies",
     ]);
   });
 
@@ -604,5 +605,54 @@ describe("normalizeOrgConfigValue — ai.surfaceModels JSON validator", () => {
       "explain-run": "claude-haiku-4-5",
     });
     expect(normalizeOrgConfigValue(def, all)).toBe(all);
+  });
+});
+
+describe("normalizeOrgConfigValue — recovery.slaPolicies validator", () => {
+  const def = findDef("recovery.slaPolicies");
+
+  it("is a recovery-category, empty-default JSON string key", () => {
+    expect(def.category).toBe("recovery");
+    expect(def.valueType).toBe("string");
+    expect(def.defaultValue).toBe("");
+    expect(def.allowEmpty).toBe(true);
+  });
+
+  it("accepts empty (falls back to built-in defaults)", () => {
+    expect(normalizeOrgConfigValue(def, "")).toBe("");
+  });
+
+  it("accepts a full per-severity minutes map", () => {
+    const json = '{"p1":30,"p2":120,"p3":720,"p4":4320}';
+    expect(normalizeOrgConfigValue(def, json)).toBe(json);
+  });
+
+  it("accepts a partial map (omitted severities keep defaults)", () => {
+    const json = '{"p1":15}';
+    expect(normalizeOrgConfigValue(def, json)).toBe(json);
+  });
+
+  it("rejects an unknown severity key", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"p5":30}')).toThrow(/is not one of/);
+  });
+
+  it("rejects a non-integer minutes value", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"p1":30.5}')).toThrow(/integer number of minutes/);
+  });
+
+  it("rejects below the 1-minute minimum", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"p1":0}')).toThrow(/between 1 and 43200/);
+  });
+
+  it("rejects above the 43200-minute (30-day) maximum", () => {
+    expect(() => normalizeOrgConfigValue(def, '{"p1":43201}')).toThrow(/between 1 and 43200/);
+  });
+
+  it("rejects malformed JSON", () => {
+    expect(() => normalizeOrgConfigValue(def, "{not json")).toThrow(/valid JSON/);
+  });
+
+  it("rejects a JSON array (must be an object)", () => {
+    expect(() => normalizeOrgConfigValue(def, "[30,120]")).toThrow(/must be a JSON object/);
   });
 });

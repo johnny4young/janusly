@@ -23,6 +23,16 @@ const SAMPLE_METRICS: RecoveryMetrics = {
   p95Latency: { value: 4500, display: "4.5s", severity: "healthy", rationale: "ok", rationaleCode: "latency_healthy" },
   approvalsPending: { value: 3, display: "3", severity: "neutral", rationale: "ok", rationaleCode: "approvals_neutral" },
   replayRate: { value: 0.04, display: "4%", severity: "healthy", rationale: "ok", rationaleCode: "replay_healthy" },
+  slaAttainment: {
+    value: 90,
+    display: "90.0%",
+    severity: "healthy",
+    rationale: "9 of 10 resolved within SLA.",
+    rationaleCode: "sla_attainment.summary",
+    rationaleMeta: { metSla: 9, resolvedInWindow: 10 },
+    resolvedInWindow: 10,
+    metSla: 9,
+  },
   costThisWindow: {
     value: 12.5,
     display: "$12.50",
