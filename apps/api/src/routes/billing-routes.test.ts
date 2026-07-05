@@ -91,4 +91,22 @@ describe("GET /billing/usage/export", () => {
     await findRoute("/billing/usage/export").handler({ req, res, auth });
     expect(captured.body).toContain('"wf,""weird"""');
   });
+
+  it("neutralizes formula-injection in user-controlled cells (=, +, -, @)", async () => {
+    getUsageBreakdownMock.mockResolvedValueOnce([
+      { key: "k1", workflow: '=cmd|" /C calc"!A0', model: "+SUM(1)", day: "@ref", quantity: 1, callCount: 1, fallbackCount: 0, costUsd: 0, latency: { p50Ms: 1, p95Ms: 1, avgMs: 1 } },
+      { key: "k2", workflow: "  =leading-space", model: "-1", day: "safe", quantity: 1, callCount: 1, fallbackCount: 0, costUsd: 0, latency: { p50Ms: 1, p95Ms: 1, avgMs: 1 } },
+    ]);
+    const { res, captured } = mockRes();
+    await findRoute("/billing/usage/export").handler({ req, res, auth });
+    // Each formula-leading cell is prefixed with an apostrophe (then RFC-4180
+    // quoted because the apostrophe'd `=cmd...` still contains a comma/quote).
+    expect(captured.body).toContain('"\'=cmd|"" /C calc""!A0"');
+    expect(captured.body).toContain("'+SUM(1)");
+    expect(captured.body).toContain("'@ref");
+    expect(captured.body).toContain("'  =leading-space");
+    expect(captured.body).toContain("'-1");
+    // A benign value is untouched.
+    expect(captured.body).toContain("safe");
+  });
 });

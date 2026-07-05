@@ -306,18 +306,30 @@ export type ApiErrorEnvelope = {
   params?: Record<string, string | number | boolean>;
 };
 
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
  * Build the canonical envelope. Inline use:
  *
  *   return sendJson(res, errorEnvelope("member_exists", "Member already exists for this org", { email }), 409);
  *
- * The `message` argument is the EN fallback — clients without a
- * catalog entry render it verbatim.
+ * The `message` argument is the EN fallback for clients without a catalog
+ * entry. When `params` are supplied, `{{key}}` placeholders in `message` are
+ * interpolated from `params` — mirroring how the web renders the localized
+ * `apiErrors.<code>` template — so the fallback is a fully-rendered English
+ * string instead of raw `{{key}}` braces, while `params` still travels for
+ * localization. Only keys present in `params` are substituted; any unmatched
+ * placeholder is left untouched.
  */
 export function errorEnvelope(
   code: ApiErrorCode,
   message: string,
   params?: Record<string, string | number | boolean>,
 ): ApiErrorEnvelope {
-  return params === undefined ? { error: message, code } : { error: message, code, params };
+  if (params === undefined) return { error: message, code };
+  let error = message;
+  for (const [key, value] of Object.entries(params)) {
+    error = error.replace(new RegExp(`\\{\\{\\s*${escapeRegExp(key)}\\s*\\}\\}`, "g"), String(value));
+  }
+  return { error, code, params };
 }

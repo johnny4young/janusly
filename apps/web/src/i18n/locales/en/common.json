@@ -96,7 +96,7 @@
   "apiErrors.recovery_item_not_escalation": "severity must increase on escalation",
   "apiErrors.recovery_item_comment_cap_reached": "comment cap reached",
   "apiErrors.runs_suggested_workflow_invalid": "suggestedWorkflow failed schema validation: {{reason}}",
-  "apiErrors.sso_policy_violation": "policy_violation",
+  "apiErrors.sso_policy_violation": "SSO login blocked by org policy ({{policyKey}})",
   "apiErrors.not_found": "Not found",
   "apiErrors.ai_dead_letter_id_required": "deadLetterId is required",
   "apiErrors.ai_prompt_too_long": "prompt exceeds {{maxChars}} characters",

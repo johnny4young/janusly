@@ -297,7 +297,7 @@ export const ssoRoutes: Route[] = [
         return sendError(
           res,
           "sso_policy_violation",
-          "policy_violation",
+          "SSO login blocked by org policy ({{policyKey}})",
           403,
           { policyKey: policyDecision.policyKey },
         );

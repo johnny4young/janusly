@@ -31,9 +31,17 @@ import { asRecord, corsHeaders, readJson, sendError, sendJson } from "../http";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import type { Route } from "../routes";
 
-/** RFC 4180 escaping — quote a cell when it carries a comma / quote / newline. */
+/**
+ * RFC 4180 escaping + CSV formula-injection guard. Some cells carry
+ * user-controlled text (e.g. workflow names) that a spreadsheet would
+ * evaluate as a formula if it begins with `= + - @` (optionally after
+ * whitespace). Prefix those with an apostrophe so Excel/Sheets render them as
+ * literal text, then quote per RFC 4180 when the cell carries a comma / quote
+ * / newline.
+ */
 function csvCell(value: unknown): string {
-  const s = value === null || value === undefined ? "" : String(value);
+  let s = value === null || value === undefined ? "" : String(value);
+  if (/^\s*[=+\-@]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
