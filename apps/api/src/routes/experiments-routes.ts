@@ -286,7 +286,7 @@ export const experimentsRoutes: Route[] = [
     permission: "evals.read",
     handler: async ({ req, res, auth }) => {
       const id = experimentIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "experiments_id_required", "id required", 400);
       const experiment = await getExperiment(auth.orgId, id);
       if (!experiment) {
         return sendError(res, "experiment_not_found", "Experiment not found", 404);

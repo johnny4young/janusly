@@ -60,7 +60,7 @@ import { buildRecoveryEvidenceReport, type RecoveryEvidenceReportJson } from "@j
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
-import { asRecord, corsHeaders, readJson, sendJson } from "../http";
+import { asRecord, corsHeaders, readJson, sendError, sendJson } from "../http";
 import type { CorsAwareResponse } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import {
@@ -94,14 +94,12 @@ function idFromUrl(url: string | undefined, verb?: string): string | null {
  * re-render without a refetch.
  */
 function sendTransitionConflict(res: CorsAwareResponse, currentStatus: string): void {
-  sendJson(
+  sendError(
     res,
-    {
-      error: "transition not allowed from current status",
-      code: "recovery_item_transition_invalid",
-      currentStatus,
-    },
+    "recovery_item_transition_invalid",
+    "transition not allowed from current status",
     409,
+    { currentStatus },
   );
 }
 
@@ -167,7 +165,7 @@ export const recoveryItemsRoutes: Route[] = [
       if (cursor) params.cursorIso = cursor;
       const parsed = ListRecoveryItemsFilterSchema.safeParse(params);
       if (!parsed.success) {
-        return sendJson(res, { error: "invalid filter", code: "invalid_filter" }, 400);
+        return sendError(res, "recovery_invalid_filter", "invalid filter", 400);
       }
       const result = await listRecoveryItems({ orgId: auth.orgId, ...parsed.data });
       return sendJson(res, result);
@@ -180,9 +178,9 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const item = await getRecoveryItemById(auth.orgId, id);
-      if (!item) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!item) return sendError(res, "recovery_item_not_found", "not found", 404);
       const handoffs = await listHandoffsForItem(auth.orgId, id);
       return sendJson(res, { item, handoffs });
     },
@@ -197,9 +195,9 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "children");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const item = await getRecoveryItemById(auth.orgId, id);
-      if (!item) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!item) return sendError(res, "recovery_item_not_found", "not found", 404);
       const [children, total] = await Promise.all([
         listRecoveryItemChildren(auth.orgId, id),
         countRecoveryItemChildren(auth.orgId, id),
@@ -214,11 +212,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "acknowledge");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = AcknowledgeBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       const result = await acknowledgeRecoveryItem(auth.orgId, id, body.data);
       if (!result) {
         return sendTransitionConflict(res, current.status);
@@ -237,11 +235,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "in-progress");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = InProgressBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       const result = await setInProgressRecoveryItem(auth.orgId, id, body.data);
       if (!result) {
         return sendTransitionConflict(res, current.status);
@@ -260,11 +258,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "waiting-external");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = WaitingExternalBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       const result = await setWaitingExternalRecoveryItem(auth.orgId, id, { owner: body.data.owner });
       if (!result) {
         return sendTransitionConflict(res, current.status);
@@ -291,20 +289,18 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "escalate");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = EscalateBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       if (!isSeverityEscalation(current.severity, body.data.severity)) {
-        return sendJson(
+        return sendError(
           res,
-          {
-            error: "severity must increase on escalation",
-            code: "recovery_item_not_escalation",
-            currentSeverity: current.severity,
-          },
+          "recovery_item_not_escalation",
+          "severity must increase on escalation",
           422,
+          { currentSeverity: current.severity },
         );
       }
       const result = await escalateRecoveryItem(auth.orgId, id, {
@@ -338,11 +334,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "assign");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = AssignOwnerBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
 
       // Default-owner integration: when the operator omits `owner` AND
       // the item is linked to a workflow, fall back to the workflow's
@@ -389,11 +385,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "resolve");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = ResolveBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       const result = await resolveRecoveryItem(auth.orgId, id, {
         actor: auth.userId,
         reason: body.data.resolutionReason,
@@ -424,11 +420,11 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "reopen");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = ReopenBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const current = await getRecoveryItemById(auth.orgId, id);
-      if (!current) return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+      if (!current) return sendError(res, "recovery_item_not_found", "not found", 404);
       const result = await reopenRecoveryItem(auth.orgId, id, { actor: auth.userId });
       if (!result) {
         return sendTransitionConflict(res, current.status);
@@ -455,7 +451,7 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "comment");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
       const body = CommentBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!body.success) return sendJson(res, { error: "invalid body", issues: body.error.issues }, 422);
       const result = await appendCommentToRecoveryItem({
@@ -465,12 +461,13 @@ export const recoveryItemsRoutes: Route[] = [
         body: body.data.body,
       });
       if (!result.ok && result.reason === "not_found") {
-        return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+        return sendError(res, "recovery_item_not_found", "not found", 404);
       }
       if (!result.ok && result.reason === "comment_cap_reached") {
-        return sendJson(
+        return sendError(
           res,
-          { error: "comment cap reached", code: "recovery_item_comment_cap_reached" },
+          "recovery_item_comment_cap_reached",
+          "comment cap reached",
           422,
         );
       }
@@ -510,18 +507,18 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "evidence");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
 
       const url = new URL(req.url ?? "", "http://internal");
       const formatRaw = (url.searchParams.get("format") ?? "json").toLowerCase();
       if (formatRaw !== "markdown" && formatRaw !== "json") {
-        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "markdown" or "json".` }, 400);
+        return sendError(res, "recovery_evidence_unknown_format", `Unknown format: {{format}}. Use "markdown" or "json".`, 400, { format: formatRaw });
       }
       const format = formatRaw as ReportFormat;
 
       const bundle = await resolveRecoveryEvidence(auth.orgId, id);
       if (!bundle) {
-        return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+        return sendError(res, "recovery_item_not_found", "not found", 404);
       }
 
       const report = buildRecoveryEvidenceReport({
@@ -596,7 +593,7 @@ export const recoveryItemsRoutes: Route[] = [
     permission: "recovery.read",
     handler: async ({ req, res, auth }) => {
       const id = idFromUrl(req.url, "evidence/deliver");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "recovery_id_required", "id required", 400);
 
       const rawBody = await readJson(req, MAX_JSON_BODY_BYTES);
       const parsed = evidenceDeliverBodySchema.safeParse(rawBody);
@@ -604,7 +601,7 @@ export const recoveryItemsRoutes: Route[] = [
         const firstIssue = parsed.error.issues[0];
         const path = firstIssue?.path.join(".") ?? "body";
         const message = firstIssue?.message ?? "invalid body";
-        return sendJson(res, { error: `Invalid request: ${path}: ${message}` }, 400);
+        return sendError(res, "recovery_evidence_invalid_body", `Invalid request: {{path}}: {{message}}`, 400, { path, message });
       }
       const { destination } = parsed.data;
 
@@ -636,12 +633,12 @@ export const recoveryItemsRoutes: Route[] = [
           latencyMs: 0,
           credentialName: destination.credentialName,
         });
-        return sendJson(res, { error: message }, 429);
+        return sendError(res, "recovery_evidence_rate_limited", message, 429);
       }
 
       const bundle = await resolveRecoveryEvidence(auth.orgId, id);
       if (!bundle) {
-        return sendJson(res, { error: "not found", code: "recovery_item_not_found" }, 404);
+        return sendError(res, "recovery_item_not_found", "not found", 404);
       }
 
       const report = buildRecoveryEvidenceReport({

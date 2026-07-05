@@ -16,10 +16,13 @@ vi.mock("../audit", () => ({
 
 vi.mock("../http", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../http")>();
+  const sendJson = vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status }));
   return {
     ...actual,
     readJson: vi.fn(),
-    sendJson: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
+    sendJson,
+    sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+      sendJson(_res, params === undefined ? { error: message, code } : { error: message, code, params }, status)),
   };
 });
 
@@ -144,7 +147,7 @@ describe("POST /prompts", () => {
     expect(audit).not.toHaveBeenCalled();
     expect(sendJson).toHaveBeenLastCalledWith(
       expect.anything(),
-      { error: "a prompt with this name already exists", code: "duplicate_name" },
+      { error: "a prompt with this name already exists", code: "prompts_name_duplicate" },
       409,
     );
   });

@@ -19,7 +19,7 @@ import {
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 const AI_BUDGET_CONFIG_KEYS = new Set([
@@ -35,8 +35,8 @@ export const orgRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const key = typeof body.key === "string" ? body.key : "";
-      if (!key) return sendJson(res, { error: "key is required" }, 400);
-      if (!Object.hasOwn(body, "value")) return sendJson(res, { error: "value is required" }, 400);
+      if (!key) return sendError(res, "org_key_required", "key is required", 400);
+      if (!Object.hasOwn(body, "value")) return sendError(res, "org_value_required", "value is required", 400);
 
       // Capture the previous value of `memory.enabled` BEFORE the
       // upsert so we can detect a true/false flip and emit the
@@ -116,7 +116,7 @@ export const orgRoutes: Route[] = [
         }
         return sendJson(res, entry);
       } catch (error) {
-        return sendJson(res, { error: error instanceof Error ? error.message : "Invalid org config" }, 400);
+        return sendError(res, "org_config_invalid", error instanceof Error ? error.message : "Invalid org config", 400);
       }
     } },
 ];

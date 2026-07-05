@@ -25,6 +25,42 @@ describe("errorEnvelope", () => {
     });
   });
 
+  it("interpolates {{key}} placeholders in the EN fallback from params", () => {
+    const env = errorEnvelope("reports_unknown_format", 'Unknown format: {{format}}. Use "markdown" or "json".', {
+      format: "xml",
+    });
+    expect(env.error).toBe('Unknown format: xml. Use "markdown" or "json".');
+    // params still travel for the web's localized catalog.
+    expect(env.params).toEqual({ format: "xml" });
+  });
+
+  it("interpolates multiple placeholders and tolerates inner whitespace", () => {
+    const env = errorEnvelope("recovery_evidence_invalid_body", "Invalid request: {{ path }}: {{message}}", {
+      path: "body.email",
+      message: "required",
+    });
+    expect(env.error).toBe("Invalid request: body.email: required");
+  });
+
+  it("stringifies number / boolean params during interpolation", () => {
+    const env = errorEnvelope("dlq_ids_cap_exceeded", "deadLetterIds exceeds the per-request cap of {{cap}}", {
+      cap: 100,
+    });
+    expect(env.error).toBe("deadLetterIds exceeds the per-request cap of 100");
+  });
+
+  it("leaves an unmatched placeholder untouched (no matching param key)", () => {
+    const env = errorEnvelope("reports_unknown_format", "Unknown {{format}} and {{other}}", { format: "xml" });
+    expect(env.error).toBe("Unknown xml and {{other}}");
+  });
+
+  it("leaves a literal message without placeholders unchanged", () => {
+    const env = errorEnvelope("member_exists", "Member already exists for this org", {
+      email: "ada@example.com",
+    });
+    expect(env.error).toBe("Member already exists for this org");
+  });
+
   it("accepts string | number | boolean params via type-system check", () => {
     // Compile-time guard — if the union widens, this test still passes;
     // we just want a runtime example of every primitive shape.

@@ -38,7 +38,7 @@ import { AiPatchStructuralEnvelope, patchEnvelopeForNodeType, type AiPatchStruct
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { getDeadLetter } from "../dlq";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { applyConfigPatchToWorkflow, applyStructuralPatchToWorkflow } from "../patch-workflow-merge";
 import { enforceRateLimit } from "../rate-limit";
 import { budgetBlockedResponse, gateBudget } from "../budget-gate";
@@ -76,7 +76,7 @@ export const aiPatchRoutes: Route[] = [
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
       const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "patch-workflow", modelOverride);
       const deadLetterId = typeof body.deadLetterId === "string" ? body.deadLetterId : null;
-      if (!deadLetterId) return sendJson(res, { error: "deadLetterId is required" }, 400);
+      if (!deadLetterId) return sendError(res, "ai_dead_letter_id_required", "deadLetterId is required", 400);
       // Org-level budget gate on recovery routes. The per-workflow gate
       // would need the workflowId resolved from the DLQ's run, which we
       // load below — gating after that load would let an over-budget org
@@ -87,7 +87,7 @@ export const aiPatchRoutes: Route[] = [
 
       // Multi-tenant gate via the existing repo helper.
       const dlq = await getDeadLetter(auth.orgId, deadLetterId);
-      if (!dlq) return sendJson(res, { error: "DLQ entry not found" }, 404);
+      if (!dlq) return sendError(res, "dlq_not_found", "DLQ entry not found", 404);
 
       // Recent events around the failure for run context. runEvents has no
       // orgId column; the read below is org-safe because the run row is gated
@@ -95,7 +95,7 @@ export const aiPatchRoutes: Route[] = [
       // deleted — a cross-tenant runId cannot reach the runEvents query.
       const run = await db.select().from(runs).where(eq(runs.id, dlq.runId));
       if (!run[0] || run[0].orgId !== auth.orgId) {
-        return sendJson(res, { error: "Run not found" }, 404);
+        return sendError(res, "ai_run_not_found", "Run not found", 404);
       }
       const events = (await db
         .select({

@@ -67,6 +67,8 @@ vi.mock("../http", async (importOriginal) => {
     ...actual,
     readJson: vi.fn(),
     sendJson: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
+    sendError: vi.fn((_res: unknown, code: string, message: string, status = 400, params?: Record<string, unknown>) =>
+      ({ payload: params === undefined ? { error: message, code } : { error: message, code, params }, status })),
   };
 });
 
@@ -180,7 +182,7 @@ describe("POST /auto-healing/:id/decide", () => {
       payload: { code?: string };
     };
     expect(result.status).toBe(409);
-    expect(result.payload.code).toBe("signature_already_resolved");
+    expect(result.payload.code).toBe("autoheal_already_resolved");
   });
 
   it("on accept: records decision + writes recovery_feedback mirror row", async () => {

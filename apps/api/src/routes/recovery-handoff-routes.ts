@@ -37,7 +37,7 @@ import { auditAction, type AuditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { getDeadLetter } from "../dlq";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import { dispatchHandoff, composeAppendMessage } from "../recovery-handoff-dispatcher";
 import type { Route } from "../routes";
@@ -80,22 +80,11 @@ export const recoveryHandoffRoutes: Route[] = [
     permission: "recovery.write",
     handler: async ({ req, res, auth }) => {
       const recoveryItemId = idFromUrl(req.url);
-      if (!recoveryItemId) return sendJson(res, { error: "id required" }, 400);
+      if (!recoveryItemId) return sendError(res, "recovery_id_required", "id required", 400);
 
       const parsed = HandoffRequestBodySchema.safeParse(asRecord(await readJson(req, MAX_JSON_BODY_BYTES)));
       if (!parsed.success) {
-        return sendJson(
-          res,
-          {
-            error: "invalid handoff body",
-            code: "recovery_handoff_invalid",
-            issues: parsed.error.issues.map((iss) => ({
-              path: iss.path.join("."),
-              message: iss.message,
-            })),
-          },
-          422,
-        );
+        return sendError(res, "recovery_handoff_invalid", "invalid handoff body", 422);
       }
       const body = parsed.data;
 
@@ -109,11 +98,11 @@ export const recoveryHandoffRoutes: Route[] = [
       // Lookup recovery item + dead letter for context enrichment.
       const item = await getRecoveryItemById(auth.orgId, recoveryItemId);
       if (!item) {
-        return sendJson(res, { error: "recovery item not found", code: "recovery_item_not_found" }, 404);
+        return sendError(res, "recovery_item_not_found", "recovery item not found", 404);
       }
       const deadLetter = await getDeadLetter(auth.orgId, item.deadLetterId);
       if (!deadLetter) {
-        return sendJson(res, { error: "dead letter not found", code: "recovery_handoff_dl_not_found" }, 404);
+        return sendError(res, "dlq_not_found", "dead letter not found", 404);
       }
       const existing = await getHandoffByKey(auth.orgId, recoveryItemId, body.destination);
       const idempotencyKey = buildHandoffIdempotencyKey(recoveryItemId, body.destination);

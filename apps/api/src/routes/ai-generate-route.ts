@@ -26,7 +26,7 @@ import { fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitize
 import { AiGenerationWorkflowSchema } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import { budgetBlockedResponse, gateBudget } from "../budget-gate";
 import { withBudgetWarning } from "../ai-route-helpers";
@@ -41,7 +41,7 @@ export const aiGenerateRoutes: Route[] = [
       const modelOverride = typeof body.model === "string" ? body.model : undefined;
       const surfaceModel = resolveSurfaceModel(orgConfig.ai.surfaceModels, "generate-workflow", modelOverride);
       if (promptText.length > orgConfig.ai.promptMaxChars) {
-        return sendJson(res, { error: `prompt exceeds ${orgConfig.ai.promptMaxChars} characters` }, 413);
+        return sendError(res, "ai_prompt_too_long", `prompt exceeds {{maxChars}} characters`, 413, { maxChars: orgConfig.ai.promptMaxChars });
       }
       // No workflowId yet — /ai/generate-workflow drafts a brand new flow.
       // Only the org-level budget gate applies on this path.

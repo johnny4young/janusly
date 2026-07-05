@@ -13,7 +13,7 @@ import { listTools } from "@janusly/engine/src/tool-registry";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 export const pluginsRoutes: Route[] = [
@@ -26,7 +26,7 @@ export const pluginsRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const pluginId = typeof body.pluginId === "string" ? body.pluginId : "";
-      if (!pluginId) return sendJson(res, { error: "pluginId is required" }, 400);
+      if (!pluginId) return sendError(res, "plugins_plugin_id_required", "pluginId is required", 400);
       const id = crypto.randomUUID();
       await db.insert(installedPlugins).values({ id, orgId: auth.orgId, pluginId, configJson: body.config ?? {}, installedBy: auth.userId });
       await auditAction(auth, "plugin.installed", { targetType: "plugin", targetId: pluginId, metadata: (body.config ?? {}) as Record<string, unknown> });
