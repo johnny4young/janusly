@@ -38,6 +38,7 @@ export {
   type RecoveryMetric,
   type RecoveryMetricSeverity,
   type RecoveryMetrics,
+  type RecoverySlaAttainmentMetric,
   type RunDetails,
   type RunEvent,
   type RunNode,

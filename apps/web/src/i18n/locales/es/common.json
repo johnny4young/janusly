@@ -2285,6 +2285,8 @@
   "recoveryCenter.metric.approvals.rationale": "Operadores esperando una decisión",
   "recoveryCenter.metric.replay.label": "Repetición exitosa",
   "recoveryCenter.metric.replay.rationaleFallback": "Repeticiones de sandbox y producción combinadas",
+  "recoveryCenter.metric.sla.label": "Cumplimiento de SLA",
+  "recoveryCenter.metric.sla.rationaleFallback": "Proporción de incidentes resueltos dentro de su SLA",
 
   "recoveryMetricRationale.success_rate.empty": "Todavía no hay ejecuciones terminales en la ventana.",
   "recoveryMetricRationale.success_rate.summary": "{{succeeded}} de {{terminal}} ejecuciones terminales terminaron bien.",
@@ -2296,6 +2298,8 @@
   "recoveryMetricRationale.approvals.blocked": "Estado actual: {{count}} ejecuciones pausadas en un nodo de aprobación; independiente de la ventana.",
   "recoveryMetricRationale.replay.empty": "Todavía no hay intentos de repetición en la ventana.",
   "recoveryMetricRationale.replay.summary": "{{replayedSuccess}} repeticiones terminaron bien · {{replayedAndReopened}} volvieron a fallar.",
+  "recoveryMetricRationale.sla_attainment.empty": "Todavía no se han resuelto incidentes en esta ventana.",
+  "recoveryMetricRationale.sla_attainment.summary": "{{metSla}} de {{resolvedInWindow}} resueltos dentro del SLA.",
   "recoveryMetricRationale.cost.summary": "En {{providerCount}} proveedores durante los últimos {{windowDays}} días.",
 
   "recoveryCenter.greeting.morning": "Buenos días, {{who}}.",

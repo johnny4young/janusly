@@ -137,6 +137,12 @@ export type RecoveryCostProviderRow = {
   spendShare: number;
 };
 
+/** SLA-attainment card inside the recovery metrics payload. */
+export type RecoverySlaAttainmentMetric = RecoveryMetric & {
+  resolvedInWindow: number;
+  metSla: number;
+};
+
 /** Response shape of `GET /recovery/metrics?windowDays=…`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
@@ -144,6 +150,7 @@ export type RecoveryMetrics = {
   p95Latency: RecoveryMetric;
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
+  slaAttainment: RecoverySlaAttainmentMetric;
   costThisWindow: RecoveryMetric & { providers: RecoveryCostProviderRow[] };
   windowDays: number;
   /** Total terminal runs in the window — denominator for downstream rollups. */

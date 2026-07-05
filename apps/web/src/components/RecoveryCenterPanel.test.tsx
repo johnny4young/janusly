@@ -38,6 +38,7 @@ const baseMetrics = {
   p95Latency: { value: 240, display: '240ms', severity: 'healthy', rationale: 'p95 latency' },
   approvalsPending: { value: 0, display: '0', severity: 'healthy', rationale: 'No human action waiting' },
   replayRate: { value: 78, display: '78%', severity: 'healthy', rationale: 'Replay success rate' },
+  slaAttainment: { value: 92, display: '92.0%', severity: 'healthy', rationale: 'SLA attainment', rationaleCode: 'sla_attainment.summary', rationaleMeta: { metSla: 46, resolvedInWindow: 50 } },
   windowDays: 30,
   terminalRuns: 87,
 }
@@ -324,6 +325,11 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(screen.getByText('Invoice flow')).toBeInTheDocument()
     expect(screen.getByText('Missing secret: GITHUB_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('Approve invoice')).toBeInTheDocument()
+    // SLA attainment metric tile renders from metrics.slaAttainment. Assert on
+    // the label + stable testId, not the display value — the count-up animation
+    // means the numeric text isn't settled synchronously in jsdom.
+    expect(screen.getByText('SLA attainment')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-metric-sla')).toBeInTheDocument()
   })
 
   it('routes Open queue → runs tab', async () => {

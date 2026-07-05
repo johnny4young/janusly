@@ -210,6 +210,7 @@ const valueMetrics = {
   p95Latency: { value: 12_000, display: "12s", severity: "neutral", rationale: "Within bounds." },
   approvalsPending: { value: 1, display: "1", severity: "neutral", rationale: "One approval pending." },
   replayRate: { value: 100, display: "100%", severity: "healthy", rationale: "Both replays succeeded." },
+  slaAttainment: { value: 90, display: "90.0%", severity: "healthy", rationale: "9 of 10 resolved within SLA.", resolvedInWindow: 10, metSla: 9 },
   costThisWindow: { value: 12.34, display: "$12.34", severity: "neutral", rationale: "AI spend this window.", providers: [] },
   clustersResolved: {
     value: 4,
@@ -503,6 +504,7 @@ describe("/reports/value-dashboard — export", () => {
     expect(headers["Content-Disposition"]).toContain("janusly-value-dashboard-org-1-");
     expect(headers["Content-Disposition"]).toContain("-30d.md");
     const markdown = resEndMock.mock.calls[0]![0] as string;
+    expect(markdown).toContain("**SLA attainment**: 90.0% — 9 of 10 resolved within SLA.");
     expect(markdown).toContain("Estimate based on operator-supplied assumptions");
     expect(markdown).toContain("dollarSaved = hoursSaved");
     expect(markdown).toContain("Engineer hourly cost: $80.00");

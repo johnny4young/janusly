@@ -89,6 +89,7 @@ type RecoveryMetrics = {
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
+  slaAttainment?: RecoveryMetric
   costThisWindow: RecoveryMetric & { providers: CostProviderRow[] }
   windowDays: number
   terminalRuns: number

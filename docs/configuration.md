@@ -99,6 +99,9 @@ Guardrails:
 | `runs.requireSavedWorkflow` | `JANUSLY_REQUIRE_SAVED_WORKFLOW` | `false` | `POST /start` | Require runs to start from saved workflows instead of ad-hoc payloads. |
 | `subworkflow.maxDepth` | `JANUSLY_MAX_SUBWORKFLOW_DEPTH` | `5` | Engine `subworkflow` nodes | Maximum nested subworkflow depth. |
 | `runs.streamMaxSubscriptions` | `JANUSLY_STREAM_MAX_SUBSCRIPTIONS` | `50` | `GET /runs/:runId/stream` | Max live-run SSE subscribers per org per API replica. |
+| `recovery.autoCreateItems` | none | `true` | recovery item hook | Automatically creates a `recovery_items` incident for new DLQ entries. Existing legacy tenants can opt out to avoid audit-row backfill surprises. |
+| `recovery.debounceWindowSeconds` | none | `300` | recovery item hook | Failure-storm grouping window for attaching repeated DLQ occurrences to the same open incident. Range 0..3600 seconds; `0` disables grouping. |
+| `recovery.slaPolicies` | none | `""` | recovery item hook | JSON map of per-severity resolve-by targets in minutes, keyed by `p1`..`p4`, e.g. `{"p1":30,"p2":120}`. Empty uses built-in defaults; partial maps keep omitted severities at their defaults; per-severity range is 1..43200 minutes. |
 | `mcp.writeConsent` | none | `false` | MCP server write tools | Tenant half of the two-flag gate for MCP-source mutations such as `workflows.save`. Process env `JANUSLY_MCP_WRITES_ENABLED=true` is also required. |
 | `mcp.clientWriteConsent` | none | `false` | `mcp_tool` node | Tenant half of the two-flag gate for invoking write-side tools on external MCP servers. Process env `JANUSLY_MCP_CLIENT_WRITES_ENABLED=true` is also required. |
 | `mcp.clientRateLimitPerMin` | `JANUSLY_MCP_CLIENT_RATE_LIMIT_PER_MIN` | `60` | `mcp_tool` node | Per-org external MCP invocation budget per minute; per-descriptor overrides can narrow one tool. |

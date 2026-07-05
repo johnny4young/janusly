@@ -3,7 +3,7 @@
  *
  * Composes recovery signals from existing endpoints into a one-screen
  * summary: a hero strip with the org-wide health ring + greeting, a
- * four-cell metric strip (open failures / MTTR / approvals / replay),
+ * five-cell metric strip (open failures / MTTR / approvals / replay / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
  * the value dashboard, and a teaching empty-state hero for new operators.
@@ -25,7 +25,7 @@
  * - `GET /dlq/clusters` → failure-clusters tile.
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
- * The Recovery Center is pure composition — no API additions, no engine change.
+ * The Recovery Center is composition over the recovery API + engine metrics.
  * Each child tile refetches independently on the cross-panel
  * `platformVersion` tick (same pattern OperationsPage uses today).
  *
@@ -38,7 +38,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, RefreshCw, Users, Zap } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -241,6 +241,22 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ariaLabel: t('recoveryCenter.metric.aria', { label: replayLabel, display: replayDisplay, rationale: replayRationale }) as string,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-replay',
+  })
+  const slaLabel = t('recoveryCenter.metric.sla.label') as string
+  const slaDisplay = metrics?.slaAttainment?.display ?? '—'
+  const slaRationale = metrics?.slaAttainment
+    ? tRecoveryMetricRationale(metrics.slaAttainment)
+    : t('recoveryCenter.metric.sla.rationaleFallback') as string
+  homeTiles.push({
+    icon: <Target size={14} aria-hidden="true" />,
+    label: slaLabel,
+    display: slaDisplay,
+    numericValue: metrics?.slaAttainment?.value ?? null,
+    severity: metrics?.slaAttainment?.severity ?? 'neutral',
+    rationale: slaRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: slaLabel, display: slaDisplay, rationale: slaRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-sla',
   })
   const metricStrip = (
     <VitalSignsStrip

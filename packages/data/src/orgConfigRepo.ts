@@ -20,9 +20,16 @@
 
 import { db, orgConfigs } from "@janusly/db";
 import { and, eq, inArray } from "drizzle-orm";
+import {
+  RECOVERY_ITEM_SEVERITIES,
+  SLA_SECONDS_BY_SEVERITY,
+  type RecoveryItemSeverity,
+} from "@janusly/shared";
 
 import {
   ORG_CONFIG_DEFINITIONS,
+  RECOVERY_SLA_MAX_MINUTES,
+  RECOVERY_SLA_MIN_MINUTES,
   defaultValueFor,
   findDefinition,
   isAiSurface,
@@ -321,6 +328,52 @@ export async function isOnboardingEnabled(orgId: string): Promise<boolean> {
     console.warn(`[onboarding] failed to read org_configs for ${orgId}; defaulting enabled`, err);
     return fallback;
   }
+}
+
+/**
+ * Resolve the org's per-severity recovery SLA targets, in SECONDS, merged over
+ * the built-in `SLA_SECONDS_BY_SEVERITY` defaults. Narrow read — the recovery
+ * item repo calls this once per incident creation / severity change, so it
+ * reads the single `recovery.slaPolicies` row rather than materializing the
+ * full snapshot. The stored value is a JSON object of MINUTES keyed by
+ * severity (validated at write time); this read-side parse is defensive and
+ * fail-open — a hand-edited row, a parse error, or a store blip degrades to
+ * the full default map rather than throwing on the failure path that creates
+ * recovery items. Multi-tenant scope: the read carries `eq(orgConfigs.orgId, orgId)`.
+ */
+export async function getRecoverySlaSeconds(
+  orgId: string,
+): Promise<Record<RecoveryItemSeverity, number>> {
+  const resolved: Record<RecoveryItemSeverity, number> = { ...SLA_SECONDS_BY_SEVERITY };
+  try {
+    const rows = await db
+      .select()
+      .from(orgConfigs)
+      .where(and(eq(orgConfigs.orgId, orgId), eq(orgConfigs.key, "recovery.slaPolicies")));
+    const stored = rows[0]?.valueJson;
+    if (typeof stored !== "string" || stored === "") return resolved;
+    const parsed: unknown = JSON.parse(stored);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return resolved;
+    const overrides: Partial<Record<RecoveryItemSeverity, number>> = {};
+    for (const [key, minutes] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(key)) return resolved;
+      if (
+        typeof minutes !== "number" ||
+        !Number.isInteger(minutes) ||
+        minutes < RECOVERY_SLA_MIN_MINUTES ||
+        minutes > RECOVERY_SLA_MAX_MINUTES
+      ) {
+        return resolved;
+      }
+      overrides[key as RecoveryItemSeverity] = minutes * 60;
+    }
+    for (const severity of RECOVERY_ITEM_SEVERITIES) {
+      resolved[severity] = overrides[severity] ?? resolved[severity];
+    }
+  } catch (err) {
+    console.warn(`[recovery] failed to read recovery.slaPolicies for ${orgId}; using SLA defaults`, err);
+  }
+  return resolved;
 }
 
 /**
