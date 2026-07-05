@@ -137,12 +137,12 @@ export const evalDatasetsRoutes: Route[] = [
     permission: "evals.read",
     handler: async ({ req, res, auth }) => {
       const id = datasetIdFromUrl(req.url, "export");
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "eval_dataset_id_required", "id required", 400);
 
       const url = new URL(req.url ?? "", "http://internal");
       const formatRaw = (url.searchParams.get("format") ?? "jsonl").toLowerCase();
       if (formatRaw !== "jsonl" && formatRaw !== "json") {
-        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "jsonl" or "json".` }, 400);
+        return sendError(res, "eval_dataset_unknown_format", `Unknown format: {{format}}. Use "jsonl" or "json".`, 400, { format: formatRaw });
       }
 
       const dataset = await getEvalDataset(auth.orgId, id);
@@ -204,7 +204,7 @@ export const evalDatasetsRoutes: Route[] = [
     permission: "evals.read",
     handler: async ({ req, res, auth }) => {
       const id = datasetIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "eval_dataset_id_required", "id required", 400);
 
       const dataset = await getEvalDataset(auth.orgId, id);
       if (!dataset) {
@@ -228,7 +228,7 @@ export const evalDatasetsRoutes: Route[] = [
     permission: "evals.write",
     handler: async ({ req, res, auth }) => {
       const id = datasetIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "id required" }, 400);
+      if (!id) return sendError(res, "eval_dataset_id_required", "id required", 400);
 
       const deleted = await deleteEvalDataset(auth.orgId, id);
       if (!deleted) {

@@ -101,7 +101,7 @@ export const snippetsRoutes: Route[] = [
     permission: "snippets.read",
     handler: async ({ req, res, auth }) => {
       const id = snippetIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "snippet id required" }, 400);
+      if (!id) return sendError(res, "snippet_id_required", "snippet id required", 400);
 
       // Confirm the snippet exists (built-in or custom in this org) so the
       // audit beacon can't be spoofed with an arbitrary id.
@@ -183,7 +183,7 @@ export const snippetsRoutes: Route[] = [
     permission: "snippets.write",
     handler: async ({ req, res, auth }) => {
       const id = snippetIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "snippet id required" }, 400);
+      if (!id) return sendError(res, "snippet_id_required", "snippet id required", 400);
 
       // Built-ins are code-only and read-only.
       if (isBuiltinSnippetId(id)) {
@@ -233,7 +233,7 @@ export const snippetsRoutes: Route[] = [
     permission: "snippets.write",
     handler: async ({ req, res, auth }) => {
       const id = snippetIdFromUrl(req.url);
-      if (!id) return sendJson(res, { error: "snippet id required" }, 400);
+      if (!id) return sendError(res, "snippet_id_required", "snippet id required", 400);
 
       if (isBuiltinSnippetId(id)) {
         return sendError(res, "snippet_builtin_immutable", "Built-in snippets are read-only", 409);

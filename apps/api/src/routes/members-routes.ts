@@ -51,7 +51,7 @@ export const membersRoutes: Route[] = [
           ? roleName
           : null;
       if (!role) {
-        return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
+        return sendError(res, "members_role_not_defined", 'role "{{role}}" is not defined for this org', 400, { role: roleName });
       }
       if (!email) return sendError(res, "email_required", "email is required", 400);
       if (!EMAIL_PATTERN.test(email) || email.length > 254) {
@@ -89,9 +89,9 @@ export const membersRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/members\/invitations\/([^/?]+)\/revoke/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "invitation id is required" }, 400);
+      if (!id) return sendError(res, "members_invitation_id_required", "invitation id is required", 400);
       const ok = await revokeInvitation({ id, orgId: auth.orgId });
-      if (!ok) return sendJson(res, { error: "invitation not found or not pending" }, 404);
+      if (!ok) return sendError(res, "members_invitation_not_found", "invitation not found or not pending", 404);
       await auditAction(auth, "invitation.revoked", { targetType: "invitation", targetId: id });
       return sendJson(res, { ok: true });
     } },
@@ -100,7 +100,7 @@ export const membersRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const userId = typeof body.userId === "string" ? body.userId : "";
       const roleName = typeof body.role === "string" ? body.role.trim() : "";
-      if (!userId) return sendJson(res, { error: "userId is required" }, 400);
+      if (!userId) return sendError(res, "members_user_id_required", "userId is required", 400);
       // Block the actor from mutating their own membership row. Without
       // this guard an admin can demote themselves to viewer and lock the
       // org out unrecoverably (no remaining admin to escalate the role
@@ -120,7 +120,7 @@ export const membersRoutes: Route[] = [
           ? roleName
           : null;
       if (!accepted) {
-        return sendJson(res, { error: `role "${roleName}" is not defined for this org` }, 400);
+        return sendError(res, "members_role_not_defined", 'role "{{role}}" is not defined for this org', 400, { role: roleName });
       }
       const updated = await db.update(orgMembers)
         .set({ role: accepted })
@@ -129,7 +129,7 @@ export const membersRoutes: Route[] = [
       // No matching row → the target is not a member of this org. Return 404
       // instead of auditing a phantom role change that never touched a row.
       if (updated.length === 0) {
-        return sendJson(res, { error: "member not found" }, 404);
+        return sendError(res, "member_not_found", "member not found", 404);
       }
       await auditAction(auth, "member.role.updated", { targetType: "member", targetId: userId, metadata: { role: accepted } });
       return sendJson(res, { ok: true });
@@ -138,7 +138,7 @@ export const membersRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const userId = url.searchParams.get("userId");
-      if (!userId) return sendJson(res, { error: "userId is required" }, 400);
+      if (!userId) return sendError(res, "members_user_id_required", "userId is required", 400);
       // Block self-removal — see the matching guard on POST /members/role
       // for the lock-out rationale. The audit row carries `action: "remove"`
       // so the closed-enum `metadata.action` field distinguishes the two

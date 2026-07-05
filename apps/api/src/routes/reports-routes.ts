@@ -22,7 +22,7 @@ import {
 } from "@janusly/data";
 import { auditAction } from "../audit-helper";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
-import { corsHeaders, readJson, sendJson } from "../http";
+import { corsHeaders, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import {
   REPORTS_DELIVER_RATE_LIMIT_BUCKET,
@@ -233,9 +233,9 @@ export const reportsRoutes: Route[] = [
       const runId = url.searchParams.get("runId");
       const formatRaw = (url.searchParams.get("format") ?? "markdown").toLowerCase();
 
-      if (!runId) return sendJson(res, { error: "runId is required" }, 400);
+      if (!runId) return sendError(res, "reports_run_id_required", "runId is required", 400);
       if (formatRaw !== "markdown" && formatRaw !== "json") {
-        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "markdown" or "json".` }, 400);
+        return sendError(res, "reports_unknown_format", `Unknown format: {{format}}. Use "markdown" or "json".`, 400, { format: formatRaw });
       }
 
       // Multi-tenant gate. A run that isn't owned by `auth.orgId`
@@ -245,7 +245,7 @@ export const reportsRoutes: Route[] = [
         .from(runs)
         .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)));
       const run = runRows[0];
-      if (!run) return sendJson(res, { error: "Run not found" }, 404);
+      if (!run) return sendError(res, "reports_run_not_found", "Run not found", 404);
 
       const nodes = await db
         .select()
@@ -396,7 +396,7 @@ export const reportsRoutes: Route[] = [
         const firstIssue = parsed.error.issues[0];
         const path = firstIssue?.path.join(".") ?? "body";
         const message = firstIssue?.message ?? "invalid body";
-        return sendJson(res, { error: `Invalid request: ${path}: ${message}` }, 400);
+        return sendError(res, "reports_invalid_request", `Invalid request: {{path}}: {{message}}`, 400, { path, message });
       }
 
       const { runId, destination } = parsed.data;
@@ -449,14 +449,14 @@ export const reportsRoutes: Route[] = [
           runStatus: null,
           credentialName: destination.credentialName,
         });
-        return sendJson(res, { error: message }, 429);
+        return sendError(res, "reports_rate_limit_exceeded", message, 429);
       }
 
       // Multi-tenant gate. A run that isn't owned by `auth.orgId`
       // returns the same 404 as a missing id — no enumeration distinction.
       const loaded = await loadRunReport({ orgId: auth.orgId, runId });
       if (!loaded) {
-        return sendJson(res, { error: "Run not found" }, 404);
+        return sendError(res, "reports_run_not_found", "Run not found", 404);
       }
 
       const inputJson = loaded.runInputJson as { workflow?: { id?: unknown } } | null;
@@ -509,7 +509,7 @@ export const reportsRoutes: Route[] = [
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
       const formatRaw = (url.searchParams.get("format") ?? "markdown").toLowerCase();
       if (formatRaw !== "markdown" && formatRaw !== "json") {
-        return sendJson(res, { error: `Unknown format: ${formatRaw}. Use "markdown" or "json".` }, 400);
+        return sendError(res, "reports_unknown_format", `Unknown format: {{format}}. Use "markdown" or "json".`, 400, { format: formatRaw });
       }
       const format = formatRaw as "markdown" | "json";
 

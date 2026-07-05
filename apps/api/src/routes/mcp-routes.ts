@@ -251,11 +251,11 @@ export const mcpRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const alias = typeof body.alias === "string" ? body.alias.trim().toLowerCase() : "";
       if (!isValidAlias(alias)) {
-        return sendJson(res, { error: "alias must match /^[a-z0-9_-]{1,32}$/" }, 400);
+        return sendError(res, "mcp_alias_invalid", "alias must match /^[a-z0-9_-]{1,32}$/", 400);
       }
       const transport = typeof body.transport === "string" ? body.transport : "";
       if (!TRANSPORTS.has(transport as McpTransport)) {
-        return sendJson(res, { error: "transport must be stdio, sse, or http" }, 400);
+        return sendError(res, "mcp_transport_invalid", "transport must be stdio, sse, or http", 400);
       }
 
       const envRefs = parseEnvRefsBody(body.envRefs);
@@ -264,20 +264,14 @@ export const mcpRoutes: Route[] = [
       let url: string | undefined;
       if (transport === "stdio") {
         command = typeof body.command === "string" ? body.command.trim() : "";
-        if (!command) return sendJson(res, { error: "stdio transport requires a non-empty command" }, 400);
+        if (!command) return sendError(res, "mcp_command_required", "stdio transport requires a non-empty command", 400);
         args = parseArgsBody(body.args);
         const allowlist = await resolveCommandAllowlist(auth.orgId);
         if (allowlist.length === 0) {
-          return sendJson(res, {
-            error: "stdio command allowlist is empty (fail-closed). Set JANUSLY_MCP_ALLOWED_COMMANDS or org config mcp.clientCommandAllowlist before registering stdio connections.",
-            code: "mcp_command_allowlist_empty",
-          }, 400);
+          return sendError(res, "mcp_command_allowlist_empty", "stdio command allowlist is empty (fail-closed). Set JANUSLY_MCP_ALLOWED_COMMANDS or org config mcp.clientCommandAllowlist before registering stdio connections.", 400);
         }
         if (!allowlist.includes(command)) {
-          return sendJson(res, {
-            error: `command "${command}" is not in the allowlist. Allowed: ${allowlist.join(", ")}`,
-            code: "mcp_command_not_allowed",
-          }, 400);
+          return sendError(res, "mcp_command_not_allowed", `command "${command}" is not in the allowlist. Allowed: ${allowlist.join(", ")}`, 400, { command, allowed: allowlist.join(", ") });
         }
       } else {
         // `sse` and `http` both register a URL endpoint. The `transport`
@@ -286,7 +280,7 @@ export const mcpRoutes: Route[] = [
         // `StreamableHTTPClientTransport`'s POST + optional SSE). The
         // route-layer shape check is the same.
         url = typeof body.url === "string" ? body.url.trim() : "";
-        if (!url) return sendJson(res, { error: `${transport} transport requires a non-empty url` }, 400);
+        if (!url) return sendError(res, "mcp_url_required", `${transport} transport requires a non-empty url`, 400, { transport });
       }
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
@@ -341,7 +335,7 @@ export const mcpRoutes: Route[] = [
     permission: "mcp.connections.write",
     handler: async ({ req, res, auth }) => {
       const alias = aliasFromUrl(req.url, "/mcp/connections");
-      if (!alias) return sendJson(res, { error: "alias is required" }, 400);
+      if (!alias) return sendError(res, "mcp_alias_required", "alias is required", 400);
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
       if (!existing) return sendError(res, "mcp_connection_not_found", "connection not found", 404, { alias });
@@ -353,18 +347,15 @@ export const mcpRoutes: Route[] = [
       if (body.args !== undefined && existing.transport === "stdio") updates.args = parseArgsBody(body.args);
       if (typeof body.url === "string" && (existing.transport === "sse" || existing.transport === "http")) {
         const url = body.url.trim();
-        if (!url) return sendJson(res, { error: "url must be non-empty" }, 400);
+        if (!url) return sendError(res, "mcp_url_invalid", "url must be non-empty", 400);
         updates.url = url;
       }
       if (typeof body.command === "string" && existing.transport === "stdio") {
         const command = body.command.trim();
-        if (!command) return sendJson(res, { error: "command must be non-empty" }, 400);
+        if (!command) return sendError(res, "mcp_command_invalid", "command must be non-empty", 400);
         const allowlist = await resolveCommandAllowlist(auth.orgId);
         if (allowlist.length === 0 || !allowlist.includes(command)) {
-          return sendJson(res, {
-            error: `command "${command}" is not in the allowlist.`,
-            code: "mcp_command_not_allowed",
-          }, 400);
+          return sendError(res, "mcp_command_not_allowed", `command "${command}" is not in the allowlist.`, 400, { command });
         }
         updates.command = command;
       }
@@ -422,7 +413,7 @@ export const mcpRoutes: Route[] = [
       const deleteMcpGate = await guardMcpWrite(auth, "mcp.connections.delete");
       if (!deleteMcpGate.ok) return sendJson(res, deleteMcpGate.body, deleteMcpGate.status);
       const alias = aliasFromUrl(req.url, "/mcp/connections");
-      if (!alias) return sendJson(res, { error: "alias is required" }, 400);
+      if (!alias) return sendError(res, "mcp_alias_required", "alias is required", 400);
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
       if (!existing) return sendError(res, "mcp_connection_not_found", "connection not found", 404, { alias });
@@ -447,7 +438,7 @@ export const mcpRoutes: Route[] = [
       if (!rediscoverMcpGate.ok) return sendJson(res, rediscoverMcpGate.body, rediscoverMcpGate.status);
       const match = (req.url ?? "").match(/^\/mcp\/connections\/([^/]+)\/rediscover$/);
       const alias = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
-      if (!alias) return sendJson(res, { error: "alias is required" }, 400);
+      if (!alias) return sendError(res, "mcp_alias_required", "alias is required", 400);
 
       // Cap rediscover spam — each rediscover drives a real outbound
       // connection (stdio spawn or SSE open). 10/min/org is plenty for
@@ -457,7 +448,7 @@ export const mcpRoutes: Route[] = [
         await enforceRateLimit(auth.orgId, { name: "mcp.rediscover", windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_DEFAULTS_PER_MIN.mcpRediscover });
       } catch (err) {
         const message = err instanceof Error ? err.message : "rate limit exceeded";
-        return sendJson(res, { error: message }, 429);
+        return sendError(res, "mcp_rate_limited", message, 429, { message });
       }
 
       const existing = await getConnectionByAlias({ orgId: auth.orgId, alias });
@@ -488,7 +479,7 @@ export const mcpRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/mcp\/connections\/([^/]+)\/tools$/);
       const alias = match?.[1] ? decodeURIComponent(match[1]).trim().toLowerCase() : "";
-      if (!alias) return sendJson(res, { error: "alias is required" }, 400);
+      if (!alias) return sendError(res, "mcp_alias_required", "alias is required", 400);
       const connection = await getConnectionByAlias({ orgId: auth.orgId, alias });
       if (!connection) return sendError(res, "mcp_connection_not_found", "connection not found", 404, { alias });
       const tools = await listToolDescriptors(connection.id);
@@ -506,7 +497,7 @@ export const mcpRoutes: Route[] = [
       const setToolMcpGate = await guardMcpWrite(auth, "mcp.connections.set_tool");
       if (!setToolMcpGate.ok) return sendJson(res, setToolMcpGate.body, setToolMcpGate.status);
       const { alias, toolName } = descriptorNameFromUrl(req.url);
-      if (!alias || !toolName) return sendJson(res, { error: "alias and tool name are required" }, 400);
+      if (!alias || !toolName) return sendError(res, "mcp_alias_tool_required", "alias and tool name are required", 400);
 
       const connection = await getConnectionByAlias({ orgId: auth.orgId, alias });
       if (!connection) return sendError(res, "mcp_connection_not_found", "connection not found", 404, { alias });
@@ -539,7 +530,7 @@ export const mcpRoutes: Route[] = [
         } else if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 10_000) {
           rateLimitPerMin = raw;
         } else {
-          return sendJson(res, { error: "rateLimitPerMin must be null or an integer in [1, 10000]" }, 400);
+          return sendError(res, "mcp_rate_limit_invalid", "rateLimitPerMin must be null or an integer in [1, 10000]", 400);
         }
       }
 
@@ -549,7 +540,7 @@ export const mcpRoutes: Route[] = [
         && rateLimitPerMin === undefined
         && exposeToAi === undefined
       ) {
-        return sendJson(res, { error: "no updatable fields provided" }, 400);
+        return sendError(res, "mcp_no_updatable_fields", "no updatable fields provided", 400);
       }
       const { before, after } = await setToolFlags({
         connectionId: connection.id,

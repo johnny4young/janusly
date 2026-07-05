@@ -37,7 +37,7 @@ import { PromptVariablesSchema, type PromptVariable } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, sendJson } from "../http";
+import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
 
 /** Max prompt name length — matches the shared `PromptRefSchema` cap. */
@@ -83,16 +83,16 @@ export const promptsRoutes: Route[] = [
       const name = body.name;
       const description = body.description;
       if (!isPromptName(name)) {
-        return sendJson(res, { error: "name is required and must be 1..128 chars", code: "invalid_input" }, 400);
+        return sendError(res, "prompts_name_invalid", "name is required and must be 1..128 chars", 400);
       }
       if (description !== undefined && (typeof description !== "string" || description.length > MAX_DESCRIPTION_LEN)) {
-        return sendJson(res, { error: `description must be a string up to ${MAX_DESCRIPTION_LEN} chars`, code: "invalid_input" }, 400);
+        return sendError(res, "prompts_description_too_long", `description must be a string up to ${MAX_DESCRIPTION_LEN} chars`, 400, { max: MAX_DESCRIPTION_LEN });
       }
       // Reject duplicate names per org with a stable 409 so clients can
       // distinguish from a generic server error.
       const existing = await getPromptByName(auth.orgId, name);
       if (existing) {
-        return sendJson(res, { error: "a prompt with this name already exists", code: "duplicate_name" }, 409);
+        return sendError(res, "prompts_name_duplicate", "a prompt with this name already exists", 409);
       }
       const created = await createPrompt({
         orgId: auth.orgId,
@@ -116,12 +116,12 @@ export const promptsRoutes: Route[] = [
       const url = req.url ?? "";
       const match = url.match(PROMPT_DETAIL_PATTERN);
       if (!match) {
-        return sendJson(res, { error: "invalid url", code: "invalid_url" }, 400);
+        return sendError(res, "prompts_invalid_url", "invalid url", 400);
       }
       const name = decodeURIComponent(match[1]);
       const prompt = await getPromptByName(auth.orgId, name);
       if (!prompt) {
-        return sendJson(res, { error: "prompt not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_not_found", "prompt not found", 404);
       }
       const versions = await listPromptVersions(auth.orgId, prompt.id);
       return sendJson(res, {
@@ -146,20 +146,20 @@ export const promptsRoutes: Route[] = [
       const url = req.url ?? "";
       const match = url.match(READ_VERSION_PATTERN);
       if (!match) {
-        return sendJson(res, { error: "invalid url", code: "invalid_url" }, 400);
+        return sendError(res, "prompts_invalid_url", "invalid url", 400);
       }
       const name = decodeURIComponent(match[1]);
       const versionNum = Number.parseInt(match[2], 10);
       if (!Number.isFinite(versionNum) || versionNum < 1) {
-        return sendJson(res, { error: "version must be a positive integer", code: "invalid_input" }, 400);
+        return sendError(res, "prompts_version_invalid", "version must be a positive integer", 400);
       }
       const prompt = await getPromptByName(auth.orgId, name);
       if (!prompt) {
-        return sendJson(res, { error: "prompt not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_not_found", "prompt not found", 404);
       }
       const version = await getPromptVersion(auth.orgId, prompt.id, versionNum);
       if (!version) {
-        return sendJson(res, { error: "version not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_version_not_found", "version not found", 404);
       }
       return sendJson(res, { prompt, version });
     },
@@ -174,7 +174,7 @@ export const promptsRoutes: Route[] = [
       const url = req.url ?? "";
       const match = url.match(VERSIONS_LIST_PATTERN);
       if (!match) {
-        return sendJson(res, { error: "invalid url", code: "invalid_url" }, 400);
+        return sendError(res, "prompts_invalid_url", "invalid url", 400);
       }
       const name = decodeURIComponent(match[1]);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -182,10 +182,10 @@ export const promptsRoutes: Route[] = [
       const variablesInput = body.variables ?? [];
 
       if (typeof templateText !== "string" || templateText.length === 0) {
-        return sendJson(res, { error: "templateText is required", code: "invalid_input" }, 400);
+        return sendError(res, "prompts_template_required", "templateText is required", 400);
       }
       if (templateText.length > MAX_TEMPLATE_LEN) {
-        return sendJson(res, { error: `templateText too long (max ${MAX_TEMPLATE_LEN} chars)`, code: "invalid_input" }, 400);
+        return sendError(res, "prompts_template_too_long", `templateText too long (max ${MAX_TEMPLATE_LEN} chars)`, 400, { max: MAX_TEMPLATE_LEN });
       }
 
       let variables: PromptVariable[];
@@ -193,12 +193,12 @@ export const promptsRoutes: Route[] = [
         variables = PromptVariablesSchema.parse(variablesInput);
       } catch (error) {
         const message = error instanceof Error ? error.message : "invalid variables";
-        return sendJson(res, { error: `variables: ${message}`, code: "invalid_variables" }, 400);
+        return sendError(res, "prompts_variables_invalid", `variables: ${message}`, 400, { message });
       }
 
       const prompt = await getPromptByName(auth.orgId, name);
       if (!prompt) {
-        return sendJson(res, { error: "prompt not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_not_found", "prompt not found", 404);
       }
       const created = await createPromptVersion({
         orgId: auth.orgId,
@@ -225,16 +225,16 @@ export const promptsRoutes: Route[] = [
       const url = req.url ?? "";
       const match = url.match(PIN_VERSION_PATTERN);
       if (!match) {
-        return sendJson(res, { error: "invalid url", code: "invalid_url" }, 400);
+        return sendError(res, "prompts_invalid_url", "invalid url", 400);
       }
       const name = decodeURIComponent(match[1]);
       const versionNum = Number.parseInt(match[2], 10);
       if (!Number.isFinite(versionNum) || versionNum < 1) {
-        return sendJson(res, { error: "version must be a positive integer", code: "invalid_input" }, 400);
+        return sendError(res, "prompts_version_invalid", "version must be a positive integer", 400);
       }
       const prompt = await getPromptByName(auth.orgId, name);
       if (!prompt) {
-        return sendJson(res, { error: "prompt not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_not_found", "prompt not found", 404);
       }
       const result = await pinPromptVersion({
         orgId: auth.orgId,
@@ -242,7 +242,7 @@ export const promptsRoutes: Route[] = [
         version: versionNum,
       });
       if (!result) {
-        return sendJson(res, { error: "version not found", code: "not_found" }, 404);
+        return sendError(res, "prompts_version_not_found", "version not found", 404);
       }
       await auditAction(auth, "prompt.version_pinned", { targetType: "prompt", targetId: prompt.id, metadata: {
         name: prompt.name,

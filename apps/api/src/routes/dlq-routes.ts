@@ -65,7 +65,7 @@ export const dlqRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const signature = url.searchParams.get("signature");
-      if (!signature) return sendJson(res, { error: "signature is required" }, 400);
+      if (!signature) return sendError(res, "dlq_field_required", "signature is required", 400, { field: "signature" });
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
       const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
@@ -94,13 +94,13 @@ export const dlqRoutes: Route[] = [
       const search = searchParam && searchParam.length > 0 && searchParam.length <= 100 ? searchParam : undefined;
 
       if (status && !isDeadLetterStatus(status)) {
-        return sendJson(res, { error: "Invalid DLQ status" }, 400);
+        return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
       }
       if (severity && !(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(severity)) {
-        return sendJson(res, { error: "Invalid severity" }, 400);
+        return sendError(res, "dlq_invalid_severity", "Invalid severity", 400);
       }
       if (sortParam && !isRecoveryQueueSort(sortParam)) {
-        return sendJson(res, { error: "Invalid sort" }, 400);
+        return sendError(res, "dlq_invalid_sort", "Invalid sort", 400);
       }
       const sort = sortParam && isRecoveryQueueSort(sortParam) ? sortParam : undefined;
       // `owner=me` resolves to the caller's stable user id (mirrors `/dlq`).
@@ -156,17 +156,17 @@ export const dlqRoutes: Route[] = [
 
       if (id) {
         const item = await getDeadLetter(auth.orgId, id);
-        if (!item) return sendJson(res, { error: "Not found" }, 404);
+        if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
         return sendJson(res, item);
       }
       if (status && !isDeadLetterStatus(status)) {
-        return sendJson(res, { error: "Invalid DLQ status" }, 400);
+        return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
       }
       if (severity && !(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(severity)) {
-        return sendJson(res, { error: "Invalid severity" }, 400);
+        return sendError(res, "dlq_invalid_severity", "Invalid severity", 400);
       }
       if (sort && !isRecoveryQueueSort(sort)) {
-        return sendJson(res, { error: "Invalid sort" }, 400);
+        return sendError(res, "dlq_invalid_sort", "Invalid sort", 400);
       }
       // `owner=me` resolves to the caller's stable user id (mirrors
       // `/recovery/items`); any other value is treated as a literal owner id.
@@ -187,7 +187,7 @@ export const dlqRoutes: Route[] = [
   { method: "POST", match: "/dlq/resolve", role: "editor",
     handler: async ({ req, res, auth }) => {
       const { id } = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
-      if (typeof id !== "string") return sendJson(res, { error: "id is required" }, 400);
+      if (typeof id !== "string") return sendError(res, "dlq_field_required", "id is required", 400, { field: "id" });
 
       await markDeadLetterResolved(auth.orgId, id);
       await auditAction(auth, "dlq.resolved", { targetType: "dlq", targetId: id });
@@ -215,15 +215,15 @@ export const dlqRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const idsRaw = body.deadLetterIds;
       if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
-        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+        return sendError(res, "dlq_ids_required", "deadLetterIds is required and must be a non-empty array", 400);
       }
       if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
-        return sendJson(res, { error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}` }, 400);
+        return sendError(res, "dlq_ids_cap_exceeded", "deadLetterIds exceeds the per-request cap of {{cap}}", 400, { cap: CLUSTER_MEMBERS_MAX_LIMIT });
       }
       const deadLetterIds: string[] = [];
       for (const candidate of idsRaw) {
         if (typeof candidate !== "string" || candidate.length === 0) {
-          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+          return sendError(res, "dlq_ids_invalid_entries", "deadLetterIds must contain non-empty strings", 400);
         }
         deadLetterIds.push(candidate);
       }
@@ -275,7 +275,7 @@ export const dlqRoutes: Route[] = [
       if (!deadLetterId) return sendError(res, "dlq_field_required", "deadLetterId is required", 400, { field: "deadLetterId" });
       const suggestedWorkflow = body.suggestedWorkflow;
       if (!suggestedWorkflow || typeof suggestedWorkflow !== "object") {
-        return sendJson(res, { error: "suggestedWorkflow is required" }, 400);
+        return sendError(res, "dlq_field_required", "suggestedWorkflow is required", 400, { field: "suggestedWorkflow" });
       }
 
       const item = await getDeadLetter(auth.orgId, deadLetterId);
@@ -287,23 +287,19 @@ export const dlqRoutes: Route[] = [
       // run can't be seeded with a malformed DAG.
       const parsed = WorkflowSchema.safeParse(suggestedWorkflow);
       if (!parsed.success) {
-        return sendJson(res, {
-          error: `suggestedWorkflow failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-        }, 400);
+        return sendError(res, "dlq_workflow_schema_invalid", "suggestedWorkflow failed schema validation: {{reason}}", 400, { reason: parsed.error.issues[0]?.message ?? "unknown" });
       }
       let sanitized: Workflow;
       try {
         sanitized = sanitizeAiWorkflow(parsed.data);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        return sendJson(res, { error: `suggestedWorkflow sanitize failed: ${reason}` }, 400);
+        return sendError(res, "dlq_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason });
       }
 
       const failingNode = sanitized.nodes.find((n) => n.id === item.nodeId);
       if (!failingNode) {
-        return sendJson(res, {
-          error: `suggestedWorkflow does not contain the failing node id "${item.nodeId}"`,
-        }, 400);
+        return sendError(res, "dlq_failing_node_missing", 'suggestedWorkflow does not contain the failing node id "{{nodeId}}"', 400, { nodeId: item.nodeId });
       }
 
       const { runId } = await dlqReplay.replayDeadLetterAsValidation({
@@ -335,20 +331,18 @@ export const dlqRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
 
       const clusterSignature = typeof body.clusterSignature === "string" ? body.clusterSignature : null;
-      if (!clusterSignature) return sendJson(res, { error: "clusterSignature is required" }, 400);
+      if (!clusterSignature) return sendError(res, "dlq_field_required", "clusterSignature is required", 400, { field: "clusterSignature" });
       const idsRaw = body.deadLetterIds;
       if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
-        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+        return sendError(res, "dlq_ids_required", "deadLetterIds is required and must be a non-empty array", 400);
       }
       if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
-        return sendJson(res, {
-          error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}`,
-        }, 400);
+        return sendError(res, "dlq_ids_cap_exceeded", "deadLetterIds exceeds the per-request cap of {{cap}}", 400, { cap: CLUSTER_MEMBERS_MAX_LIMIT });
       }
       const deadLetterIds: string[] = [];
       for (const candidate of idsRaw) {
         if (typeof candidate !== "string" || candidate.length === 0) {
-          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+          return sendError(res, "dlq_ids_invalid_entries", "deadLetterIds must contain non-empty strings", 400);
         }
         deadLetterIds.push(candidate);
       }
@@ -425,15 +419,15 @@ export const dlqRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const idsRaw = body.deadLetterIds;
       if (!Array.isArray(idsRaw) || idsRaw.length === 0) {
-        return sendJson(res, { error: "deadLetterIds is required and must be a non-empty array" }, 400);
+        return sendError(res, "dlq_ids_required", "deadLetterIds is required and must be a non-empty array", 400);
       }
       if (idsRaw.length > CLUSTER_MEMBERS_MAX_LIMIT) {
-        return sendJson(res, { error: `deadLetterIds exceeds the per-request cap of ${CLUSTER_MEMBERS_MAX_LIMIT}` }, 400);
+        return sendError(res, "dlq_ids_cap_exceeded", "deadLetterIds exceeds the per-request cap of {{cap}}", 400, { cap: CLUSTER_MEMBERS_MAX_LIMIT });
       }
       const deadLetterIds: string[] = [];
       for (const candidate of idsRaw) {
         if (typeof candidate !== "string" || candidate.length === 0) {
-          return sendJson(res, { error: "deadLetterIds must contain non-empty strings" }, 400);
+          return sendError(res, "dlq_ids_invalid_entries", "deadLetterIds must contain non-empty strings", 400);
         }
         deadLetterIds.push(candidate);
       }
@@ -487,7 +481,7 @@ export const dlqRoutes: Route[] = [
 
       if (typeof body.deadLetterId === "string") {
         const item = await getDeadLetter(auth.orgId, body.deadLetterId);
-        if (!item) return sendJson(res, { error: "Not found" }, 404);
+        if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
 
         await dlqReplay.replayDeadLetter({
           runId: item.runId,
@@ -509,17 +503,17 @@ export const dlqRoutes: Route[] = [
       }
 
       const { runId, nodeId } = body;
-      if (typeof runId !== "string" || typeof nodeId !== "string") return sendJson(res, { error: "runId and nodeId are required" }, 400);
+      if (typeof runId !== "string" || typeof nodeId !== "string") return sendError(res, "dlq_fields_required", "runId and nodeId are required", 400);
 
       const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendJson(res, { error: "Forbidden" }, 403);
+      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "dlq_forbidden", "Forbidden", 403);
 
       const version = await db.select().from(workflowVersions).where(eq(workflowVersions.id, run[0].workflowVersionId));
-      if (!version[0] || version[0].orgId !== auth.orgId) return sendJson(res, { error: "Workflow version not found" }, 404);
+      if (!version[0] || version[0].orgId !== auth.orgId) return sendError(res, "dlq_workflow_version_not_found", "Workflow version not found", 404);
 
       const workflow = WorkflowSchema.parse(version[0].dagJson);
       const node = workflow.nodes.find(candidate => candidate.id === nodeId);
-      if (!node) return sendJson(res, { error: "Node not found in workflow" }, 404);
+      if (!node) return sendError(res, "dlq_node_not_found", "Node not found in workflow", 404);
 
       await dlqReplay.replayDeadLetter({ runId, workflow, node });
       await auditAction(auth, "dlq.replayed", { targetType: "run", targetId: runId, metadata: { nodeId } });

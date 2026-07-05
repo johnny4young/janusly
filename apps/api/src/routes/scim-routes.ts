@@ -27,7 +27,7 @@
 import { audit } from "../audit";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
-import { asRecord, readJson, readRawBody, sendJson } from "../http";
+import { asRecord, readJson, readRawBody, sendError, sendJson } from "../http";
 import {
   createScimDirectory,
   getScimDirectoryById,
@@ -110,7 +110,7 @@ export const scimRoutes: Route[] = [
         ? body.providerDirectoryId.trim()
         : "";
       if (!providerDirectoryId) {
-        return sendJson(res, { error: "providerDirectoryId is required (e.g. directory_…)" }, 400);
+        return sendError(res, "scim_provider_directory_id_required", "providerDirectoryId is required (e.g. directory_…)", 400);
       }
       const defaultRole: ScimDefaultRole = isDefaultRole(body.defaultRole) ? body.defaultRole : "viewer";
       const directoryType = typeof body.directoryType === "string" && body.directoryType.length > 0
@@ -119,7 +119,7 @@ export const scimRoutes: Route[] = [
 
       const existing = await getScimDirectoryByOrgId(auth.orgId);
       if (existing) {
-        return sendJson(res, { error: "SCIM directory already attached for this org" }, 409);
+        return sendError(res, "scim_directory_already_attached", "SCIM directory already attached for this org", 409);
       }
       const row = await createScimDirectory({
         orgId: auth.orgId,
@@ -142,23 +142,23 @@ export const scimRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/directories\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "directory id is required" }, 400);
+      if (!id) return sendError(res, "scim_directory_id_required", "directory id is required", 400);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const updates: { defaultRole?: ScimDefaultRole } = {};
       if (body.defaultRole !== undefined) {
         if (!isDefaultRole(body.defaultRole)) {
-          return sendJson(res, { error: "defaultRole must be viewer | editor | admin" }, 400);
+          return sendError(res, "scim_default_role_invalid", "defaultRole must be viewer | editor | admin", 400);
         }
         updates.defaultRole = body.defaultRole;
       }
       if (body.status !== undefined) {
-        return sendJson(res, { error: "use DELETE /org/scim/directories/:id to revoke a directory" }, 400);
+        return sendError(res, "scim_directory_status_immutable", "use DELETE /org/scim/directories/:id to revoke a directory", 400);
       }
       if (updates.defaultRole === undefined) {
-        return sendJson(res, { error: "no updatable fields provided" }, 400);
+        return sendError(res, "scim_no_updatable_fields", "no updatable fields provided", 400);
       }
       const existing = await getScimDirectoryById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "SCIM directory not found" }, 404);
+      if (!existing) return sendError(res, "scim_directory_not_found", "SCIM directory not found", 404);
       const updated = await updateScimDirectory({ id, orgId: auth.orgId, ...updates });
       await auditAction(auth, "org.scim.directory_updated", { targetType: "scim_directory", targetId: id, metadata: updates });
       return sendJson(res, updated);
@@ -171,9 +171,9 @@ export const scimRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/directories\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "directory id is required" }, 400);
+      if (!id) return sendError(res, "scim_directory_id_required", "directory id is required", 400);
       const existing = await getScimDirectoryById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "SCIM directory not found" }, 404);
+      if (!existing) return sendError(res, "scim_directory_not_found", "SCIM directory not found", 404);
       await revokeScimDirectory({ id, orgId: auth.orgId });
       await auditAction(auth, "org.scim.directory_revoked", { targetType: "scim_directory", targetId: id });
       return sendJson(res, { ok: true });
@@ -218,21 +218,21 @@ export const scimRoutes: Route[] = [
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const directory = await getScimDirectoryByOrgId(auth.orgId);
       if (!directory) {
-        return sendJson(res, { error: "attach a SCIM directory before configuring group role mappings" }, 409);
+        return sendError(res, "scim_directory_required_for_mappings", "attach a SCIM directory before configuring group role mappings", 409);
       }
       const providerGroupId = typeof body.providerGroupId === "string" ? body.providerGroupId.trim() : "";
       if (!providerGroupId) {
-        return sendJson(res, { error: "providerGroupId is required (e.g. directory_group_…)" }, 400);
+        return sendError(res, "scim_provider_group_id_required", "providerGroupId is required (e.g. directory_group_…)", 400);
       }
       if (!isDefaultRole(body.role)) {
-        return sendJson(res, { error: "role must be viewer | editor | admin" }, 400);
+        return sendError(res, "scim_role_invalid", "role must be viewer | editor | admin", 400);
       }
       const role = body.role;
       // The group must exist in this directory's synced state — guards against
       // typo'd / cross-directory group ids that would silently never match.
       const group = await getScimGroupState({ scimDirectoryId: directory.id, providerGroupId });
       if (!group) {
-        return sendJson(res, { error: "unknown providerGroupId for this directory" }, 404);
+        return sendError(res, "scim_unknown_provider_group_id", "unknown providerGroupId for this directory", 404);
       }
       const dup = await findScimGroupRoleMappingByGroup({
         orgId: auth.orgId,
@@ -240,7 +240,7 @@ export const scimRoutes: Route[] = [
         providerGroupId,
       });
       if (dup) {
-        return sendJson(res, { error: "a mapping for this group already exists; update it instead" }, 409);
+        return sendError(res, "scim_group_role_mapping_exists", "a mapping for this group already exists; update it instead", 409);
       }
       const row = await createScimGroupRoleMapping({
         orgId: auth.orgId,
@@ -264,16 +264,16 @@ export const scimRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "mapping id is required" }, 400);
+      if (!id) return sendError(res, "scim_mapping_id_required", "mapping id is required", 400);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       if (!isDefaultRole(body.role)) {
-        return sendJson(res, { error: "role must be viewer | editor | admin" }, 400);
+        return sendError(res, "scim_role_invalid", "role must be viewer | editor | admin", 400);
       }
       const role = body.role;
       const existing = await getScimGroupRoleMappingById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "group role mapping not found" }, 404);
+      if (!existing) return sendError(res, "scim_group_role_mapping_not_found", "group role mapping not found", 404);
       const updated = await updateScimGroupRoleMapping({ id, orgId: auth.orgId, role, updatedBy: auth.userId });
-      if (!updated) return sendJson(res, { error: "group role mapping not found" }, 404);
+      if (!updated) return sendError(res, "scim_group_role_mapping_not_found", "group role mapping not found", 404);
       await auditAction(auth, "org.scim.group_role_mapping_updated", {
         targetType: "scim_group_role_mapping",
         targetId: id,
@@ -294,9 +294,9 @@ export const scimRoutes: Route[] = [
     handler: async ({ req, res, auth }) => {
       const match = (req.url ?? "").match(/^\/org\/scim\/group-role-mappings\/([^/?]+)/);
       const id = match?.[1];
-      if (!id) return sendJson(res, { error: "mapping id is required" }, 400);
+      if (!id) return sendError(res, "scim_mapping_id_required", "mapping id is required", 400);
       const existing = await getScimGroupRoleMappingById({ id, orgId: auth.orgId });
-      if (!existing) return sendJson(res, { error: "group role mapping not found" }, 404);
+      if (!existing) return sendError(res, "scim_group_role_mapping_not_found", "group role mapping not found", 404);
       await deleteScimGroupRoleMapping({ id, orgId: auth.orgId });
       await auditAction(auth, "org.scim.group_role_mapping_deleted", {
         targetType: "scim_group_role_mapping",
@@ -319,7 +319,7 @@ export const scimRoutes: Route[] = [
     handler: async ({ res, auth }) => {
       const directory = await getScimDirectoryByOrgId(auth.orgId);
       if (!directory) {
-        return sendJson(res, { error: "attach a SCIM directory before re-syncing roles" }, 409);
+        return sendError(res, "scim_directory_required_for_resync", "attach a SCIM directory before re-syncing roles", 409);
       }
       const result = await resyncScimMemberRoles({
         scimDirectory: directory,
@@ -367,19 +367,19 @@ export const scimRoutes: Route[] = [
         await audit("default", "scim:webhook", "scim.webhook.signature_invalid", "scim_event", "", {
           reason: verification.reason,
         });
-        return sendJson(res, { error: "invalid signature" }, 401);
+        return sendError(res, "scim_invalid_signature", "invalid signature", 401);
       }
 
       let parsed: unknown;
       try {
         parsed = JSON.parse(rawBody);
       } catch {
-        return sendJson(res, { error: "invalid JSON" }, 400);
+        return sendError(res, "scim_invalid_json", "invalid JSON", 400);
       }
 
       const event = asScimEvent(parsed);
       if (!event) {
-        return sendJson(res, { error: "invalid event payload" }, 400);
+        return sendError(res, "scim_invalid_event_payload", "invalid event payload", 400);
       }
 
       const directoryId = extractDirectoryId(event);

@@ -13,7 +13,7 @@
 import http from "http";
 
 import { requireAuth, type AuthContext } from "./auth";
-import { corsHeaders, sendJson, type CorsAwareResponse } from "./http";
+import { corsHeaders, sendError, type CorsAwareResponse } from "./http";
 import { requirePermission, requireRole } from "./permissions";
 import { matchesRoute, type Route } from "./routes";
 
@@ -96,7 +96,7 @@ async function dispatchRequest(
     });
 
     if (!matched) {
-      sendJson(response, { error: "Not found" }, 404);
+      sendError(response, "server_not_found", "Not found", 404);
       return;
     }
 
@@ -127,13 +127,13 @@ async function dispatchRequest(
         url: req.url,
         err,
       });
-      sendJson(response, { error: "Server error" }, 500);
+      sendError(response, "server_internal_error", "Server error", 500);
       return;
     }
     // Deliberate HTTP error (`httpError(message, status)` and friends) — the
     // message is operator-curated and client-facing by design.
     const message = err instanceof Error ? err.message : "Server error";
-    sendJson(response, { error: message }, statusCode);
+    sendError(response, "server_request_failed", message, statusCode);
   }
 }
 

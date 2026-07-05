@@ -117,7 +117,7 @@ describe("createApiServer", () => {
       });
 
       expect(response.status).toBe(500);
-      await expect(response.json()).resolves.toEqual({ error: "Server error" });
+      await expect(response.json()).resolves.toEqual({ error: "Server error", code: "server_internal_error" });
       // The real error is preserved server-side for diagnosis.
       expect(consoleError).toHaveBeenCalledWith(
         "[api] unhandled route error",
@@ -150,7 +150,7 @@ describe("createApiServer", () => {
       });
 
       expect(response.status).toBe(422);
-      await expect(response.json()).resolves.toEqual({ error: "workflowId is required" });
+      await expect(response.json()).resolves.toEqual({ error: "workflowId is required", code: "server_request_failed" });
     } finally {
       await close(server);
     }
