@@ -15,7 +15,7 @@ export default defineConfig({
     include: ['src/**/*.integration.test.ts'],
     fileParallelism: false,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    singleFork: true,
     // A real DB round-trip is slower than a mocked call.
     testTimeout: 20_000,
     hookTimeout: 20_000,
