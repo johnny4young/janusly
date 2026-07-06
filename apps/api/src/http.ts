@@ -15,10 +15,60 @@
  */
 
 import http from "http";
+import { gzipSync } from "node:zlib";
 import { errorEnvelope, type ApiErrorCode } from "./error-codes";
 
 /** `Error` carrying an HTTP status. `server.ts` reads `statusCode` to map throws to responses. */
 export type HttpError = Error & { statusCode?: number };
+
+/**
+ * Responses below this many serialized bytes are sent uncompressed — gzip's
+ * header + CPU overhead is not worth it for tiny payloads (and most of the
+ * catalogued error envelopes are well under a KB).
+ */
+const GZIP_MIN_BYTES = 1024;
+
+/** Compression is on by default; `JANUSLY_HTTP_COMPRESSION=false` is the kill-switch. */
+function compressionEnabled(): boolean {
+  return process.env.JANUSLY_HTTP_COMPRESSION !== "false";
+}
+
+/**
+ * Whether the client's `Accept-Encoding` positively advertises gzip. A token
+ * of `gzip;q=0` is an explicit refusal (RFC 9110 §12.5.3) and must NOT be
+ * treated as acceptance. We only ever compress when the client opts in, so
+ * clients that don't send the header (and can't decode gzip) are unaffected.
+ */
+function clientAcceptsGzip(header: string): boolean {
+  for (const part of header.split(",")) {
+    const [encoding, ...params] = part.trim().split(";");
+    if (encoding.trim().toLowerCase() !== "gzip") continue;
+    const qParam = params.map((p) => p.trim()).find((p) => p.toLowerCase().startsWith("q="));
+    if (qParam) {
+      const q = Number(qParam.slice(2));
+      return Number.isFinite(q) && q > 0;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * gzip `body` when the request opted in and the payload is large enough,
+ * else `null` (send uncompressed). Never throws — a compression failure
+ * degrades to the plain body rather than dropping the response.
+ */
+function maybeGzip(res: http.ServerResponse, body: string): Buffer | null {
+  if (!compressionEnabled()) return null;
+  const acceptEncoding = (res as CorsAwareResponse).requestAcceptEncoding ?? "";
+  if (!clientAcceptsGzip(acceptEncoding)) return null;
+  if (Buffer.byteLength(body, "utf8") < GZIP_MIN_BYTES) return null;
+  try {
+    return gzipSync(body);
+  } catch {
+    return null;
+  }
+}
 
 /** Build an `HttpError` with a fixed status. The route handler's catch maps it to the response. */
 export function httpError(message: string, statusCode: number): HttpError {
@@ -29,8 +79,15 @@ export function httpError(message: string, statusCode: number): HttpError {
 
 const DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174";
 
-/** `ServerResponse` augmented with the request `Origin` so `corsHeaders` can resolve it. */
-export type CorsAwareResponse = http.ServerResponse & { requestOrigin?: string };
+/**
+ * `ServerResponse` augmented with request context the dispatcher stashes on
+ * it: `requestOrigin` (so `corsHeaders` can echo an allowlisted origin) and
+ * `requestAcceptEncoding` (so `sendJson` can decide whether to gzip).
+ */
+export type CorsAwareResponse = http.ServerResponse & {
+  requestOrigin?: string;
+  requestAcceptEncoding?: string;
+};
 
 function getAllowedOrigins() {
   const configured = process.env.API_ALLOWED_ORIGINS ?? DEFAULT_ORIGINS;
@@ -56,7 +113,14 @@ export function corsHeaders(res: http.ServerResponse) {
   };
 }
 
-/** Write a JSON response with CORS headers. Falls back to 500 if `payload` can't serialise. */
+/**
+ * Write a JSON response with CORS headers. Falls back to 500 if `payload`
+ * can't serialise. Transparently gzip-compresses the body when the request
+ * advertised `Accept-Encoding: gzip` and the payload clears `GZIP_MIN_BYTES`
+ * — the single chokepoint every non-SSE route goes through, so compression is
+ * uniform without per-route changes. SSE writers (`sendEventFrame`) bypass
+ * this and stay uncompressed.
+ */
 export function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
   let body: string;
   try {
@@ -65,10 +129,21 @@ export function sendJson(res: http.ServerResponse, payload: unknown, status = 20
     body = JSON.stringify({ error: "Failed to serialize response" });
     status = 500;
   }
-  res.writeHead(status, {
+  const headers: http.OutgoingHttpHeaders = {
     "Content-Type": "application/json",
     ...corsHeaders(res),
-  });
+  };
+  const compressed = maybeGzip(res, body);
+  if (compressed) {
+    headers["Content-Encoding"] = "gzip";
+    // Preserve the `Vary: Origin` corsHeaders already set — caches must key
+    // on BOTH the origin and the accepted encoding.
+    headers["Vary"] = [headers["Vary"], "Accept-Encoding"].filter(Boolean).join(", ");
+    res.writeHead(status, headers);
+    res.end(compressed);
+    return;
+  }
+  res.writeHead(status, headers);
   res.end(body);
 }
 

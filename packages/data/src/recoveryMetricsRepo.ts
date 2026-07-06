@@ -25,7 +25,7 @@
  */
 
 import { db } from "@janusly/db";
-import { deadLetters, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
+import { deadLetters, recoveryItems, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
@@ -80,18 +80,35 @@ export type ResolvedClustersRepo = {
 };
 
 /**
+ * SLA-attainment counts over recovery items RESOLVED in the window. `metSla`
+ * is the subset whose `resolvedAt <= slaTargetAt` (closed before the SLA
+ * deadline). The rollup renders `metSla / resolvedInWindow` as an attainment
+ * percentage. Open-but-breached items are intentionally excluded — attainment
+ * measures resolved-within-target; live breaches are the alert surface.
+ */
+export type SlaAttainmentRepo = {
+  resolvedInWindow: number;
+  metSla: number;
+};
+
+/**
  * Raw signals consumed by the engine's `composeRecoveryMetrics`. Field
  * names + shape match `RecoveryMetricsSignals` there — both modules
  * declare the type so neither layer has to depend on the other.
  */
+/** One per-day point for the MTTR trend sparkline: `day` = `YYYY-MM-DD`, `seconds` = avg recovery time that day. */
+export type MttrTrendPointRepo = { day: string; seconds: number };
+
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCountsRepo;
   mttrDurations: number[];
+  mttrTrend: MttrTrendPointRepo[];
   approvalsPending: number;
   costByProvider: CostProviderRowRepo[];
   p95LatencyMs: number | null;
   replayOutcomes: ReplayOutcomeCountsRepo;
   resolvedClusters: ResolvedClustersRepo;
+  slaAttainment: SlaAttainmentRepo;
 };
 
 /** Collect raw recovery-metrics signals for one org over a rolling window. */
@@ -104,29 +121,137 @@ export async function queryRecoveryMetricsSignals(
   const [
     runStatusCounts,
     mttrDurations,
+    mttrTrend,
     approvalsPending,
     costByProvider,
     p95LatencyMs,
     replayOutcomes,
     resolvedClusters,
+    slaAttainment,
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
     queryMttrDurations(orgId, since),
+    queryMttrTrend(orgId, since),
     queryApprovalsPending(orgId),
     queryCostByProvider(orgId, since),
     queryP95Latency(orgId, since),
     queryReplayOutcomes(orgId, since),
     queryFailureClustersResolved(orgId, since),
+    queryRecoverySlaAttainment(orgId, since),
   ]);
 
   return {
     runStatusCounts,
     mttrDurations,
+    mttrTrend,
     approvalsPending,
     costByProvider,
     p95LatencyMs,
     replayOutcomes,
     resolvedClusters,
+    slaAttainment,
+  };
+}
+
+/**
+ * Per-day average recovery time (`replayedAt − createdAt`) for DLQ rows that
+ * replayed cleanly, bucketed by the day the replay landed. Aggregated entirely
+ * in Postgres (one GROUP BY, no row materialization) and bounded to the most
+ * recent 14 days with data, returned oldest-first for the MTTR trend sparkline.
+ * Multi-tenant scope: `eq(deadLetters.orgId, orgId)`.
+ */
+async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPointRepo[]> {
+  const dayBucket = sql`date_trunc('day', ${deadLetters.replayedAt})`;
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
+      seconds: sql<number>`avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt})))::float8`,
+    })
+    .from(deadLetters)
+    .where(and(
+      eq(deadLetters.orgId, orgId),
+      eq(deadLetters.status, "replayed"),
+      gte(deadLetters.replayedAt, since),
+    ))
+    .groupBy(dayBucket)
+    .orderBy(sql`${dayBucket} desc`)
+    .limit(14);
+
+  // Newest-first from SQL → reverse to ascending for the left-to-right
+  // sparkline; drop any non-positive average (clock skew).
+  return rows
+    .map((row) => ({ day: row.day, seconds: Number(row.seconds) }))
+    .filter((point) => Number.isFinite(point.seconds) && point.seconds > 0)
+    .reverse();
+}
+
+/** One per-day cell for the recovery heatmap calendar. */
+export type RecoveryHeatmapDay = {
+  day: string;
+  failures: number;
+  recovered: number;
+  mttrSeconds: number;
+};
+
+const HEATMAP_MAX_DAYS = 90;
+
+/**
+ * Per-day failure/recovery counts over the last `days` (clamped 1..90),
+ * bucketed by the day the failure landed: `failures` = dead letters created
+ * that day, `recovered` = the subset now replayed, `mttrSeconds` = avg recovery
+ * time for the recovered ones. One Postgres GROUP BY (no row materialization),
+ * oldest-first. Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. The existing
+ * `dead_letters_org_created_idx` covers the window scan.
+ */
+export async function queryRecoveryHeatmap(orgId: string, days: number): Promise<RecoveryHeatmapDay[]> {
+  const windowDays = Math.min(HEATMAP_MAX_DAYS, Math.max(1, Math.floor(days)));
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const dayBucket = sql`date_trunc('day', ${deadLetters.createdAt})`;
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
+      failures: sql<number>`count(*)::int`,
+      recovered: sql<number>`count(*) filter (where ${deadLetters.status} = 'replayed')::int`,
+      mttrSeconds: sql<number>`coalesce(avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt}))) filter (where ${deadLetters.status} = 'replayed' and ${deadLetters.replayedAt} is not null), 0)::float8`,
+    })
+    .from(deadLetters)
+    .where(and(eq(deadLetters.orgId, orgId), gte(deadLetters.createdAt, since)))
+    .groupBy(dayBucket)
+    .orderBy(sql`${dayBucket} asc`)
+    .limit(HEATMAP_MAX_DAYS);
+  return rows.map((row) => ({
+    day: row.day,
+    failures: Number(row.failures),
+    recovered: Number(row.recovered),
+    mttrSeconds: Math.round(Number(row.mttrSeconds)),
+  }));
+}
+
+/**
+ * SLA-attainment counts over recovery items resolved in the window. Aggregated
+ * in Postgres (two counts, no row materialization): total resolved-in-window
+ * and the `resolved_at <= sla_target_at` subset. Multi-tenant scope:
+ * `eq(recoveryItems.orgId, orgId)`; the `status='resolved'` predicate rides the
+ * `(orgId, status, slaTargetAt)` index and guarantees `resolvedAt` is non-null.
+ */
+export async function queryRecoverySlaAttainment(
+  orgId: string,
+  since: Date,
+): Promise<SlaAttainmentRepo> {
+  const rows = await db
+    .select({
+      resolvedInWindow: sql<number>`count(*)::int`,
+      metSla: sql<number>`count(*) filter (where ${recoveryItems.resolvedAt} <= ${recoveryItems.slaTargetAt})::int`,
+    })
+    .from(recoveryItems)
+    .where(and(
+      eq(recoveryItems.orgId, orgId),
+      eq(recoveryItems.status, "resolved"),
+      gte(recoveryItems.resolvedAt, since),
+    ));
+  return {
+    resolvedInWindow: rows[0]?.resolvedInWindow ?? 0,
+    metSla: rows[0]?.metSla ?? 0,
   };
 }
 

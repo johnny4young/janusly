@@ -27,7 +27,7 @@ import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
+import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, pickClusterReplayWorkflow, recheckSignature } from "../cluster-recovery";
 import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
@@ -92,6 +92,9 @@ export const dlqRoutes: Route[] = [
       // guarded (≤100) to bound the ILIKE pattern, mirroring the Flows `?q=`.
       const searchParam = url.searchParams.get("search")?.trim();
       const search = searchParam && searchParam.length > 0 && searchParam.length <= 100 ? searchParam : undefined;
+      // Optional `?day=YYYY-MM-DD` — a heatmap-cell drill-in restricting to one
+      // UTC day. Malformed values are dropped server-side (parseDayRange → null).
+      const day = url.searchParams.get("day") ?? undefined;
 
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
@@ -118,6 +121,7 @@ export const dlqRoutes: Route[] = [
             owner,
             severity: severity ? (severity as RecoveryItemSeverity) : undefined,
             search,
+            day,
             sort,
             cursor,
           },
@@ -347,6 +351,24 @@ export const dlqRoutes: Route[] = [
         deadLetterIds.push(candidate);
       }
 
+      // Optional applied fix (the representative patch the operator accepted).
+      // Validated ONCE through the same gate as `/dlq/validate-fix`; applied
+      // per-member below only to cluster members of the SAME workflow whose
+      // failing node survives the patch (a cluster is by failure signature and
+      // may span workflows — a mismatched member gets a plain re-run).
+      let sanitizedFix: Workflow | null = null;
+      if (body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null) {
+        const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
+        if (!parsed.success) {
+          return sendError(res, "dlq_workflow_schema_invalid", "suggestedWorkflow failed schema validation: {{reason}}", 400, { reason: parsed.error.issues[0]?.message ?? "unknown" });
+        }
+        try {
+          sanitizedFix = sanitizeAiWorkflow(parsed.data);
+        } catch (err) {
+          return sendError(res, "dlq_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       const errors: Array<{ deadLetterId: string; error: string }> = [];
       let replayed = 0;
       const totalInCluster = deadLetterIds.length;
@@ -369,10 +391,13 @@ export const dlqRoutes: Route[] = [
 
         try {
           const workflow = WorkflowSchema.parse(item.workflowJson);
+          // Apply the fix only to same-workflow members whose failing node
+          // survives it; every other member re-runs its own snapshot.
+          const { workflow: replayWorkflow, fixNode } = pickClusterReplayWorkflow(workflow, item.nodeId, sanitizedFix);
           await dlqReplay.replayDeadLetter({
             runId: item.runId,
-            workflow,
-            node: NodeSchema.parse(item.nodeJson),
+            workflow: replayWorkflow,
+            node: fixNode ?? NodeSchema.parse(item.nodeJson),
           });
           await markDeadLetterReplayed(auth.orgId, id);
           // Ensure the recovery_item exists (idempotent) so the cluster
@@ -483,11 +508,35 @@ export const dlqRoutes: Route[] = [
         const item = await getDeadLetter(auth.orgId, body.deadLetterId);
         if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
 
-        await dlqReplay.replayDeadLetter({
-          runId: item.runId,
-          workflow: WorkflowSchema.parse(item.workflowJson),
-          node: NodeSchema.parse(item.nodeJson),
-        });
+        // Default: replay the original failed snapshot (a plain retry). When the
+        // caller supplies a `suggestedWorkflow` (the operator's applied fix),
+        // replay against THAT instead — matching the auto-healing path
+        // (`auto-healing-watcher.ts` passes the patched workflow) — so applying
+        // a fix and replaying actually recovers the run instead of re-running
+        // the broken snapshot. Validated through the same gate as
+        // `/dlq/validate-fix`; the failing node id must survive the patch.
+        let workflow = WorkflowSchema.parse(item.workflowJson);
+        let node = NodeSchema.parse(item.nodeJson);
+        if (body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null) {
+          const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
+          if (!parsed.success) {
+            return sendError(res, "dlq_workflow_schema_invalid", "suggestedWorkflow failed schema validation: {{reason}}", 400, { reason: parsed.error.issues[0]?.message ?? "unknown" });
+          }
+          let sanitized: Workflow;
+          try {
+            sanitized = sanitizeAiWorkflow(parsed.data);
+          } catch (err) {
+            return sendError(res, "dlq_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason: err instanceof Error ? err.message : String(err) });
+          }
+          const failingNode = sanitized.nodes.find((n) => n.id === item.nodeId);
+          if (!failingNode) {
+            return sendError(res, "dlq_failing_node_missing", 'suggestedWorkflow does not contain the failing node id "{{nodeId}}"', 400, { nodeId: item.nodeId });
+          }
+          workflow = sanitized;
+          node = failingNode;
+        }
+
+        await dlqReplay.replayDeadLetter({ runId: item.runId, workflow, node });
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
         await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });

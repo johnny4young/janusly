@@ -51,16 +51,24 @@ export type ValueEstimate = {
   }
 }
 
+/** One per-day point of the MTTR trend sparkline; `day` is `YYYY-MM-DD`. */
+export type MttrTrendPoint = { day: string; seconds: number }
+
 export type RecoveryMetrics = {
   successRate: RecoveryMetric
   mttr: RecoveryMetric
   p95Latency: RecoveryMetric
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
+  slaAttainment?: RecoveryMetric
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
   terminalRuns: number
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional — older API responses omit it. */
+  mttrTrend?: MttrTrendPoint[]
+  /** Total automation downtime closed in the window (ms). Optional — older API responses omit it. */
+  downtimeEndedMs?: number
 }
 
 export type ClusterCategory =
@@ -270,6 +278,90 @@ export function budgetBand(envelope: BudgetEnvelope | null): 'cobalt' | 'cyan' |
 // ─────────────────────────────────────────────────────────────────────────
 // Small readers / labelers.
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether to show the onboarding recovery-loop walkthrough. Only for a truly
+ * fresh workspace — no runs, no open failures, no pending approvals — so an
+ * established org that simply has nothing failing right now doesn't get taught
+ * the loop every visit. A prior dismissal always wins.
+ */
+export function shouldShowOnboarding(input: {
+  runs: number
+  openFailures: number
+  waitingApprovals: number
+  dismissed: boolean
+}): boolean {
+  if (input.dismissed) return false
+  return input.runs === 0 && input.openFailures === 0 && input.waitingApprovals === 0
+}
+
+/** One per-day cell from `GET /recovery/heatmap`. */
+export type HeatmapDay = { day: string; failures: number; recovered: number; mttrSeconds: number }
+export type HeatmapOutcome = 'none' | 'recovered' | 'partial' | 'unrecovered'
+export type HeatmapCell = { day: string; failures: number; recovered: number; outcome: HeatmapOutcome }
+
+/** Classify a day's failure/recovery counts into a heatmap color band. */
+export function heatmapOutcome(failures: number, recovered: number): HeatmapOutcome {
+  if (failures <= 0) return 'none'
+  if (recovered >= failures) return 'recovered'
+  if (recovered > 0) return 'partial'
+  return 'unrecovered'
+}
+
+/**
+ * Densify the sparse API rows (only days with failures) into a contiguous
+ * last-`windowDays` grid, oldest→newest, filling missing days as zero. `nowMs`
+ * is injected for deterministic tests. Day keys are UTC (`YYYY-MM-DD`) to match
+ * the API's `date_trunc('day', …)` bucketing.
+ */
+export function buildHeatmapCells(days: HeatmapDay[], windowDays: number, nowMs: number): HeatmapCell[] {
+  const byDay = new Map(days.map((d) => [d.day, d]))
+  const dayMs = 86_400_000
+  const bounded = Math.min(90, Math.max(1, Math.floor(windowDays)))
+  const cells: HeatmapCell[] = []
+  for (let i = bounded - 1; i >= 0; i--) {
+    const key = new Date(nowMs - i * dayMs).toISOString().slice(0, 10)
+    const row = byDay.get(key)
+    const failures = row?.failures ?? 0
+    const recovered = row?.recovered ?? 0
+    cells.push({ day: key, failures, recovered, outcome: heatmapOutcome(failures, recovered) })
+  }
+  return cells
+}
+
+export type DowntimeSeverity = 'ok' | 'warn' | 'danger'
+
+/** Downtime-clock thresholds in minutes (amber ≥1h, red ≥4h). */
+export const DOWNTIME_WARN_MINUTES = 60
+export const DOWNTIME_DANGER_MINUTES = 240
+
+/**
+ * Severity for how long an open failure has been down. Fixed heuristic
+ * thresholds — the DLQ row carries no per-item SLA — so an operator sees a
+ * failure warm from neutral → amber (≥1h) → red (≥4h) the longer it sits.
+ * Returns 'ok' when the clock isn't ready or the timestamp is unusable.
+ */
+export function downtimeSeverity(iso: string | undefined, nowMs: number | null): DowntimeSeverity {
+  if (nowMs === null || !iso) return 'ok'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'ok'
+  const minutes = (nowMs - then) / 60000
+  if (minutes >= DOWNTIME_DANGER_MINUTES) return 'danger'
+  if (minutes >= DOWNTIME_WARN_MINUTES) return 'warn'
+  return 'ok'
+}
+
+/** Compact downtime duration for the "recovered after" toast: "3h 14m" / "12m" / "45s". Empty for bad input. */
+export function formatDowntime(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+}
 
 export function humanizeAge(iso: string | undefined, nowMs: number | null): string {
   if (nowMs === null) return ''

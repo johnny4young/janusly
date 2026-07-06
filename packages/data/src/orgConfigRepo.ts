@@ -20,9 +20,16 @@
 
 import { db, orgConfigs } from "@janusly/db";
 import { and, eq, inArray } from "drizzle-orm";
+import {
+  RECOVERY_ITEM_SEVERITIES,
+  SLA_SECONDS_BY_SEVERITY,
+  type RecoveryItemSeverity,
+} from "@janusly/shared";
 
 import {
   ORG_CONFIG_DEFINITIONS,
+  RECOVERY_SLA_MAX_MINUTES,
+  RECOVERY_SLA_MIN_MINUTES,
   defaultValueFor,
   findDefinition,
   isAiSurface,
@@ -147,12 +154,72 @@ export type OrgConfigSnapshot = {
   };
 };
 
+/**
+ * Process-local TTL cache for the resolved config entry list, keyed by orgId.
+ * `listOrgConfig` / `getOrgConfigSnapshot` run on most authenticated hot paths
+ * (AI routes, recovery metrics, per-node engine config reads); without this,
+ * each call hit Postgres for a full org-scoped scan.
+ *
+ * Bounds:
+ * - TTL via `JANUSLY_ORG_CONFIG_CACHE_TTL_MS` (default 30_000; `0` disables).
+ *   Cross-replica staleness is bounded by the TTL — a config change made on
+ *   one replica propagates to others within one TTL window. Acceptable: this
+ *   catalog is runtime *tuning* (limits, bounds, delivery posture), never
+ *   authz (auth.* keys have their own narrow, un-cached reads).
+ * - Same-process writes (`upsertOrgConfig`) invalidate the org key synchronously.
+ * - Only the default-env hot path is cached; callers passing a custom `env`
+ *   (tests) always read fresh, so a test env never poisons the cache.
+ * - Capped at `ORG_CONFIG_CACHE_MAX` orgs with FIFO eviction.
+ */
+type OrgConfigCacheEntry = { entries: OrgConfigEntry[]; expiresAt: number };
+const ORG_CONFIG_CACHE = new Map<string, OrgConfigCacheEntry>();
+const ORG_CONFIG_CACHE_MAX = 1000;
+
+function orgConfigCacheTtlMs(): number {
+  const raw = Number(process.env.JANUSLY_ORG_CONFIG_CACHE_TTL_MS ?? 30_000);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 30_000;
+}
+
+function readOrgConfigCache(orgId: string): OrgConfigEntry[] | null {
+  const hit = ORG_CONFIG_CACHE.get(orgId);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    ORG_CONFIG_CACHE.delete(orgId);
+    return null;
+  }
+  return hit.entries;
+}
+
+function writeOrgConfigCache(orgId: string, entries: OrgConfigEntry[], ttlMs: number): void {
+  if (!ORG_CONFIG_CACHE.has(orgId) && ORG_CONFIG_CACHE.size >= ORG_CONFIG_CACHE_MAX) {
+    const oldest = ORG_CONFIG_CACHE.keys().next().value;
+    if (oldest !== undefined) ORG_CONFIG_CACHE.delete(oldest);
+  }
+  ORG_CONFIG_CACHE.set(orgId, { entries, expiresAt: Date.now() + ttlMs });
+}
+
+/** Drop an org's cached config. Called on same-process writes; exported for tests. */
+export function invalidateOrgConfigCache(orgId?: string): void {
+  if (orgId === undefined) ORG_CONFIG_CACHE.clear();
+  else ORG_CONFIG_CACHE.delete(orgId);
+}
+
 /** List tenant-visible configuration values, merging tenant rows over env defaults. */
 export async function listOrgConfig(orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<OrgConfigEntry[]> {
-  const rows = await db.select().from(orgConfigs).where(eq(orgConfigs.orgId, orgId));
+  const ttlMs = orgConfigCacheTtlMs();
+  const cacheable = env === process.env && ttlMs > 0;
+  if (cacheable) {
+    const cached = readOrgConfigCache(orgId);
+    if (cached) return cached;
+  }
+
+  // Bound the scan defensively — the closed catalog is ~50 keys, so a healthy
+  // org never approaches this; the cap just guards against a pathological row
+  // count from a future bug or hand-edited table.
+  const rows = await db.select().from(orgConfigs).where(eq(orgConfigs.orgId, orgId)).limit(200);
   const byKey = new Map(rows.map((row) => [row.key, row]));
 
-  return ORG_CONFIG_DEFINITIONS.map((definition) => {
+  const entries: OrgConfigEntry[] = ORG_CONFIG_DEFINITIONS.map((definition) => {
     const row = byKey.get(definition.key);
     const fallback = defaultValueFor(definition, env);
     return {
@@ -163,6 +230,9 @@ export async function listOrgConfig(orgId: string, env: NodeJS.ProcessEnv = proc
       updatedAt: row?.updatedAt ?? null,
     };
   });
+
+  if (cacheable) writeOrgConfigCache(orgId, entries, ttlMs);
+  return entries;
 }
 
 function valuesByKey(entries: OrgConfigEntry[]): Map<OrgConfigKey, string | number | boolean> {
@@ -321,6 +391,52 @@ export async function isOnboardingEnabled(orgId: string): Promise<boolean> {
     console.warn(`[onboarding] failed to read org_configs for ${orgId}; defaulting enabled`, err);
     return fallback;
   }
+}
+
+/**
+ * Resolve the org's per-severity recovery SLA targets, in SECONDS, merged over
+ * the built-in `SLA_SECONDS_BY_SEVERITY` defaults. Narrow read — the recovery
+ * item repo calls this once per incident creation / severity change, so it
+ * reads the single `recovery.slaPolicies` row rather than materializing the
+ * full snapshot. The stored value is a JSON object of MINUTES keyed by
+ * severity (validated at write time); this read-side parse is defensive and
+ * fail-open — a hand-edited row, a parse error, or a store blip degrades to
+ * the full default map rather than throwing on the failure path that creates
+ * recovery items. Multi-tenant scope: the read carries `eq(orgConfigs.orgId, orgId)`.
+ */
+export async function getRecoverySlaSeconds(
+  orgId: string,
+): Promise<Record<RecoveryItemSeverity, number>> {
+  const resolved: Record<RecoveryItemSeverity, number> = { ...SLA_SECONDS_BY_SEVERITY };
+  try {
+    const rows = await db
+      .select()
+      .from(orgConfigs)
+      .where(and(eq(orgConfigs.orgId, orgId), eq(orgConfigs.key, "recovery.slaPolicies")));
+    const stored = rows[0]?.valueJson;
+    if (typeof stored !== "string" || stored === "") return resolved;
+    const parsed: unknown = JSON.parse(stored);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return resolved;
+    const overrides: Partial<Record<RecoveryItemSeverity, number>> = {};
+    for (const [key, minutes] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!(RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(key)) return resolved;
+      if (
+        typeof minutes !== "number" ||
+        !Number.isInteger(minutes) ||
+        minutes < RECOVERY_SLA_MIN_MINUTES ||
+        minutes > RECOVERY_SLA_MAX_MINUTES
+      ) {
+        return resolved;
+      }
+      overrides[key as RecoveryItemSeverity] = minutes * 60;
+    }
+    for (const severity of RECOVERY_ITEM_SEVERITIES) {
+      resolved[severity] = overrides[severity] ?? resolved[severity];
+    }
+  } catch (err) {
+    console.warn(`[recovery] failed to read recovery.slaPolicies for ${orgId}; using SLA defaults`, err);
+  }
+  return resolved;
 }
 
 /**
@@ -575,6 +691,10 @@ export async function upsertOrgConfig(input: {
       updatedBy: input.userId,
     });
   }
+
+  // Same-process invalidation so a config write is reflected immediately here;
+  // other replicas converge within one cache TTL.
+  invalidateOrgConfigCache(input.orgId);
 
   return {
     ...definition,

@@ -16,9 +16,37 @@ function baseSignals(partial: Partial<RecoveryMetricsSignals> = {}): RecoveryMet
     p95LatencyMs: null,
     replayOutcomes: { totalEntries: 0, replayedSuccess: 0, replayedAndReopened: 0 },
     resolvedClusters: { totalClusters: 0, totalEntries: 0, capped: false },
+    slaAttainment: { resolvedInWindow: 0, metSla: 0 },
     ...partial,
   };
 }
+
+describe("composeRecoveryMetrics — mttrTrend passthrough", () => {
+  it("defaults to an empty trend when signals omit it", () => {
+    const result = composeRecoveryMetrics(baseSignals(), 30);
+    expect(result.mttrTrend).toEqual([]);
+  });
+
+  it("passes the per-day trend through untouched (oldest-first)", () => {
+    const trend = [
+      { day: "2026-07-01", seconds: 300 },
+      { day: "2026-07-02", seconds: 180 },
+    ];
+    const result = composeRecoveryMetrics(baseSignals({ mttrTrend: trend }), 30);
+    expect(result.mttrTrend).toEqual(trend);
+  });
+});
+
+describe("composeRecoveryMetrics — downtimeEndedMs", () => {
+  it("sums the recovery durations closed in the window", () => {
+    const result = composeRecoveryMetrics(baseSignals({ mttrDurations: [1500, 1800, 2200] }), 30);
+    expect(result.downtimeEndedMs).toBe(5500);
+  });
+
+  it("is 0 when nothing recovered", () => {
+    expect(composeRecoveryMetrics(baseSignals(), 30).downtimeEndedMs).toBe(0);
+  });
+});
 
 describe("composeRecoveryMetrics — successRate band", () => {
   it("95/100 succeeded → healthy", () => {
@@ -56,6 +84,48 @@ describe("composeRecoveryMetrics — successRate band", () => {
     expect(result.successRate.value).toBe(null);
     expect(result.successRate.severity).toBe("neutral");
     expect(result.successRate.rationaleCode).toBe("success_rate.empty");
+  });
+});
+
+describe("composeRecoveryMetrics — SLA attainment band", () => {
+  it("9/10 within SLA → healthy 90.0%", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ slaAttainment: { resolvedInWindow: 10, metSla: 9 } }),
+      30,
+    );
+    expect(result.slaAttainment.severity).toBe("healthy");
+    expect(result.slaAttainment.display).toBe("90.0%");
+    expect(result.slaAttainment.rationaleCode).toBe("sla_attainment.summary");
+    expect(result.slaAttainment.rationaleMeta).toMatchObject({ metSla: 9, resolvedInWindow: 10 });
+    expect(result.slaAttainment.resolvedInWindow).toBe(10);
+    expect(result.slaAttainment.metSla).toBe(9);
+  });
+
+  it("8/10 within SLA → warn (>=75, <90)", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ slaAttainment: { resolvedInWindow: 10, metSla: 8 } }),
+      30,
+    );
+    expect(result.slaAttainment.severity).toBe("warn");
+  });
+
+  it("5/10 within SLA → unhealthy (<75)", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ slaAttainment: { resolvedInWindow: 10, metSla: 5 } }),
+      30,
+    );
+    expect(result.slaAttainment.severity).toBe("unhealthy");
+    expect(result.slaAttainment.display).toBe("50.0%");
+  });
+
+  it("nothing resolved in window → null + neutral (not 0%)", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ slaAttainment: { resolvedInWindow: 0, metSla: 0 } }),
+      30,
+    );
+    expect(result.slaAttainment.value).toBe(null);
+    expect(result.slaAttainment.severity).toBe("neutral");
+    expect(result.slaAttainment.rationaleCode).toBe("sla_attainment.empty");
   });
 });
 

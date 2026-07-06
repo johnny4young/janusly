@@ -13,7 +13,22 @@
  * - Importing this module runs the boot-time self-check over every definition.
  */
 
+import { RECOVERY_ITEM_SEVERITIES } from "@janusly/shared";
+
 import { MEMORY_KINDS, isMemoryKind } from "./memory-kinds";
+
+/**
+ * Per-severity recovery SLA target bounds, in minutes. `1` = one minute (a
+ * tight on-call target); `43200` = 30 days, matching the 30-day cap the
+ * per-item `slaTargetAtOverrideIso` already enforces so config and override
+ * share the same ceiling.
+ */
+export const RECOVERY_SLA_MIN_MINUTES = 1;
+export const RECOVERY_SLA_MAX_MINUTES = 30 * 24 * 60; // 43200
+
+function isRecoverySeverity(value: string): boolean {
+  return (RECOVERY_ITEM_SEVERITIES as readonly string[]).includes(value);
+}
 
 export type OrgConfigValueType = "string" | "number" | "boolean";
 export type OrgConfigSource = "default" | "env" | "tenant";
@@ -170,6 +185,42 @@ function validateAiSurfaceModels(value: string | number | boolean): void {
     }
     if (typeof model !== "string" || model.trim() === "") {
       throw new Error(`ai.surfaceModels["${key}"] must be a non-empty string`);
+    }
+  }
+}
+
+/**
+ * Validate the JSON-encoded `recovery.slaPolicies` map: a JSON object whose
+ * keys are recovery severities (`p1`..`p4`) and whose values are positive
+ * integer MINUTES within `[1, 43200]` (30 days). Empty string clears the
+ * override (falls back to the built-in `SLA_SECONDS_BY_SEVERITY` defaults). A
+ * partial map is allowed — omitted severities keep their default.
+ */
+function validateRecoverySlaPolicies(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("recovery.slaPolicies must be a string");
+  if (value === "") return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("recovery.slaPolicies must be valid JSON");
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("recovery.slaPolicies must be a JSON object");
+  }
+  for (const [key, minutes] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isRecoverySeverity(key)) {
+      throw new Error(
+        `recovery.slaPolicies key "${key}" is not one of: ${RECOVERY_ITEM_SEVERITIES.join(", ")}`,
+      );
+    }
+    if (typeof minutes !== "number" || !Number.isInteger(minutes)) {
+      throw new Error(`recovery.slaPolicies["${key}"] must be an integer number of minutes`);
+    }
+    if (minutes < RECOVERY_SLA_MIN_MINUTES || minutes > RECOVERY_SLA_MAX_MINUTES) {
+      throw new Error(
+        `recovery.slaPolicies["${key}"] must be between ${RECOVERY_SLA_MIN_MINUTES} and ${RECOVERY_SLA_MAX_MINUTES} minutes`,
+      );
     }
   }
 }
@@ -677,6 +728,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: 300,
     min: 0,
     max: 3600,
+  },
+  {
+    key: "recovery.slaPolicies",
+    category: "recovery",
+    description:
+      "Per-severity recovery SLA targets, in minutes, as a JSON object keyed by severity (p1..p4) — e.g. {\"p1\":30,\"p2\":120}. Sets each incident's slaTargetAt at creation (createdAt + minutes); the breach scanner fires recovery_item.sla_breached when an item isn't resolved by then. Empty string (default) uses the built-in defaults (p1=60, p2=240, p3=1440, p4=10080 minutes). A partial map is allowed — omitted severities keep their default. Per-severity range 1..43200 minutes (30 days, matching the per-item override cap). A per-item slaTargetAtOverrideIso at acknowledge/escalate still wins over this.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateRecoverySlaPolicies,
   },
   {
     key: "value.hourlyCost",

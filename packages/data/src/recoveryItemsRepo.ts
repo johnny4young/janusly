@@ -29,6 +29,7 @@
 
 import { and, count, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { db, recoveryItems, recoveryItemChildren } from "@janusly/db";
+import { getRecoverySlaSeconds } from "./orgConfigRepo";
 import {
   defaultSlaTargetAt,
   isSeverityEscalation,
@@ -40,6 +41,15 @@ import {
 } from "@janusly/shared";
 
 export type RecoveryItemRow = typeof recoveryItems.$inferSelect;
+
+async function defaultSlaTargetAtForOrg(
+  orgId: string,
+  severity: RecoveryItemSeverity,
+  from?: Date,
+): Promise<Date> {
+  const secondsBySeverity = await getRecoverySlaSeconds(orgId);
+  return defaultSlaTargetAt(severity, from ?? new Date(), secondsBySeverity);
+}
 
 export type RecoveryItem = {
   id: string;
@@ -218,9 +228,11 @@ export async function createRecoveryItem(
   input: CreateRecoveryItemInput,
 ): Promise<{ item: RecoveryItem; wasCreated: boolean }> {
   const severity = input.severity ?? "p3";
-  const slaTargetAt = defaultSlaTargetAt(severity);
-  const id = crypto.randomUUID();
   const now = new Date();
+  // Honor the tenant's configured per-severity SLA targets (recovery.slaPolicies);
+  // an unconfigured org resolves to the built-in SLA_SECONDS_BY_SEVERITY defaults.
+  const slaTargetAt = await defaultSlaTargetAtForOrg(input.orgId, severity, now);
+  const id = crypto.randomUUID();
   const inserted = await db
     .insert(recoveryItems)
     .values({
@@ -434,7 +446,7 @@ export async function acknowledgeRecoveryItem(
     patch.severity = input.severity;
     patch.slaTargetAt = input.slaTargetAtOverrideIso
       ? new Date(input.slaTargetAtOverrideIso)
-      : defaultSlaTargetAt(input.severity);
+      : await defaultSlaTargetAtForOrg(orgId, input.severity);
   } else if (input.slaTargetAtOverrideIso) {
     patch.slaTargetAt = new Date(input.slaTargetAtOverrideIso);
   }
@@ -475,7 +487,7 @@ export async function escalateRecoveryItem(
 
   const slaTargetAt = input.slaTargetAtOverrideIso
     ? new Date(input.slaTargetAtOverrideIso)
-    : defaultSlaTargetAt(input.severity);
+    : await defaultSlaTargetAtForOrg(orgId, input.severity);
 
   const result = await db
     .update(recoveryItems)

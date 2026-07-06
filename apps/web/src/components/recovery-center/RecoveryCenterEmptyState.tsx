@@ -19,18 +19,44 @@ import {
   Check,
   FlaskConical,
   Layers,
+  PlayCircle,
   RotateCcw,
   ShieldCheck,
   Sparkles,
   Wand2,
   Workflow,
+  X,
 } from 'lucide-react'
 import { useT } from '../../i18n'
 
-export function RecoveryFlowDemo({ onOpenStudio, onOpenRecipes }: { onOpenStudio: () => void; onOpenRecipes: () => void }) {
+export function RecoveryFlowDemo({
+  onOpenStudio,
+  onOpenRecipes,
+  onTryDemo,
+  onDismiss,
+}: {
+  onOpenStudio: () => void
+  onOpenRecipes: () => void
+  /** When set, renders a primary "try a demo recovery" CTA that injects a real
+   *  demo failure so the operator can experience the loop, not just read it. */
+  onTryDemo?: () => void | Promise<void>
+  /** When set, renders a dismiss control that hides the walkthrough for good. */
+  onDismiss?: () => void
+}) {
   const { t } = useT()
   return (
     <section className="we-flow-demo" aria-labelledby="we-flow-demo-title" data-testid="recovery-flow-demo">
+      {onDismiss && (
+        <button
+          type="button"
+          className="we-flow-demo__dismiss"
+          onClick={onDismiss}
+          aria-label={t('recoveryCenter.flowDemo.dismiss') as string}
+          data-testid="recovery-flow-demo-dismiss"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      )}
       <header className="we-flow-demo__head">
         <div>
           <div className="section-kicker">{t('recoveryCenter.flowDemo.kicker')}</div>
@@ -38,9 +64,20 @@ export function RecoveryFlowDemo({ onOpenStudio, onOpenRecipes }: { onOpenStudio
           <p>{t('recoveryCenter.flowDemo.body')}</p>
         </div>
         <div className="we-flow-demo__ctas">
+          {onTryDemo && (
+            <button
+              type="button"
+              className="command-button command-button-primary"
+              onClick={() => void onTryDemo()}
+              data-testid="recovery-center-empty-cta-demo"
+            >
+              <PlayCircle size={14} aria-hidden="true" />
+              <span>{t('recoveryCenter.flowDemo.cta.tryDemo')}</span>
+            </button>
+          )}
           <button
             type="button"
-            className="command-button command-button-primary"
+            className={onTryDemo ? 'command-button' : 'command-button command-button-primary'}
             onClick={onOpenStudio}
             data-testid="recovery-center-empty-cta-studio"
           >

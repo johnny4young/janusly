@@ -71,6 +71,13 @@ export function buildDedupeKey(trigger: AlertTrigger, payload: Record<string, un
       const workflowId = asString(payload.workflowId);
       return workflowId ? `schedule:${workflowId}` : NO_KEY;
     }
+    case "credential.expiring": {
+      // Per-credential key: with a long cooldown (operators set ~24h) this
+      // yields one heads-up per expiring credential per day, not one per
+      // scanner tick. The `*/2` scan re-emits; the cooldown de-dupes.
+      const credentialId = asString(payload.credentialId);
+      return credentialId ? `credential:${credentialId}` : NO_KEY;
+    }
     default:
       return NO_KEY;
   }

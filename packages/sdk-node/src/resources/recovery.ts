@@ -1,9 +1,10 @@
 /**
- * Recovery resource — exposes the operations dashboard's 6-metric rollup.
+ * Recovery resource — exposes the operations dashboard's recovery-metrics rollup.
  *
  * Maps 1:1 to `GET /recovery/metrics?windowDays=…`. The response carries
  * `successRate`, `mttr`, `p95Latency`, `approvalsPending`, `replayRate`,
- * `costThisWindow` (with per-provider rows). Severity + rationale are
+ * `slaAttainment`, and `costThisWindow` (with per-provider rows).
+ * Severity + rationale are
  * server-emitted so the SDK doesn't re-derive them.
  */
 
@@ -22,7 +23,7 @@ export class RecoveryResource {
   }
 
   /**
-   * GET /recovery/metrics — fetch the 6-metric operations rollup.
+   * GET /recovery/metrics — fetch the recovery metrics rollup.
    *
    * `windowDays` defaults server-side to 30 (matches the Recovery Center).
    * Range 1..90 enforced server-side; values outside the range fall back

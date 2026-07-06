@@ -22,7 +22,7 @@
  *   require a DB migration.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { credentials, db } from "@janusly/db";
 import type { DbOrTx } from "./audit-tx";
 
@@ -115,6 +115,94 @@ export async function rotateCredentialSecretRef(input: {
     .from(credentials)
     .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
   return { ok: false, reason: existing.length === 0 ? "not_found" : "conflict" };
+}
+
+/** Outcome of a credential-expiry set/clear. Mirrors the rotation result:
+ *  the caller learns only success (with the new concurrency token) or why it
+ *  failed — never the secret value or env-var name. */
+export type SetCredentialExpiryResult =
+  | { ok: true; updatedAt: Date }
+  | { ok: false; reason: "not_found" | "conflict" };
+
+/**
+ * Set (or clear, when `expiresAt` is null) the operator-declared expiry of the
+ * credential named `name` for an org. CAS-guarded on `updated_at` exactly like
+ * `rotateCredentialSecretRef` (see that fn for the ms-precision rationale) so a
+ * concurrent edit can't be silently clobbered. Multi-tenant scope via
+ * `eq(orgId)`. This touches only the `expires_at` metadata column — the secret
+ * value + `secret_ref` are untouched. Accepts an optional `tx` so the write +
+ * its audit row commit-or-rollback together via `withAuditTx`.
+ */
+export async function setCredentialExpiry(input: {
+  orgId: string;
+  name: string;
+  expiresAt: Date | null;
+  ifMatchUpdatedAt?: string | null;
+}, tx: DbOrTx = db): Promise<SetCredentialExpiryResult> {
+  const conds = [eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)];
+  if (input.ifMatchUpdatedAt) {
+    const ifMatchDate = new Date(input.ifMatchUpdatedAt);
+    if (Number.isNaN(ifMatchDate.getTime())) {
+      const existing = await tx
+        .select({ id: credentials.id })
+        .from(credentials)
+        .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
+      return { ok: false, reason: existing.length === 0 ? "not_found" : "conflict" };
+    }
+    conds.push(eq(credentials.updatedAt, ifMatchDate));
+  }
+  const updated = await tx
+    .update(credentials)
+    .set({ expiresAt: input.expiresAt, updatedAt: new Date() })
+    .where(and(...conds))
+    .returning({ updatedAt: credentials.updatedAt });
+  const first = updated[0];
+  if (first?.updatedAt) return { ok: true, updatedAt: first.updatedAt };
+  const existing = await tx
+    .select({ id: credentials.id })
+    .from(credentials)
+    .where(and(eq(credentials.orgId, input.orgId), eq(credentials.name, input.name)));
+  return { ok: false, reason: existing.length === 0 ? "not_found" : "conflict" };
+}
+
+/** A credential due to expire within the scan window. Never carries the
+ *  secret value or env-var name — only the fields the expiry alert needs. */
+export type ExpiringCredential = {
+  id: string;
+  name: string;
+  kind: string;
+  expiresAt: Date;
+};
+
+/**
+ * List an org's credentials whose `expires_at` falls on or before `now + days`
+ * (and is non-null). Backs the `credential.expiring` alert scan. Multi-tenant
+ * scope via `eq(orgId)`; capped at 500 like the SLA-breach scan so a huge org
+ * can't unbounded-scan the alerts cron tick.
+ */
+export async function listCredentialsExpiringWithin(
+  orgId: string,
+  days: number,
+): Promise<ExpiringCredential[]> {
+  const threshold = new Date(Date.now() + Math.max(0, days) * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .select({
+      id: credentials.id,
+      name: credentials.name,
+      kind: credentials.kind,
+      expiresAt: credentials.expiresAt,
+    })
+    .from(credentials)
+    .where(
+      and(
+        eq(credentials.orgId, orgId),
+        isNotNull(credentials.expiresAt),
+        lte(credentials.expiresAt, threshold),
+      ),
+    )
+    .limit(500);
+  // `expiresAt` is non-null here (isNotNull predicate); the map narrows the type.
+  return rows.flatMap((r) => (r.expiresAt ? [{ id: r.id, name: r.name, kind: r.kind, expiresAt: r.expiresAt }] : []));
 }
 
 // Multi-tenant invariant: tenant-scoped reads and writes keep orgId in the predicate; document system/global exceptions - see AGENTS.md "AuthContext is Janusly-resolved".

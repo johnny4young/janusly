@@ -3,7 +3,7 @@
  *
  * Composes recovery signals from existing endpoints into a one-screen
  * summary: a hero strip with the org-wide health ring + greeting, a
- * four-cell metric strip (open failures / MTTR / approvals / replay),
+ * five-cell metric strip (open failures / MTTR / approvals / replay / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
  * the value dashboard, and a teaching empty-state hero for new operators.
@@ -25,7 +25,7 @@
  * - `GET /dlq/clusters` → failure-clusters tile.
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
- * The Recovery Center is pure composition — no API additions, no engine change.
+ * The Recovery Center is composition over the recovery API + engine metrics.
  * Each child tile refetches independently on the cross-panel
  * `platformVersion` tick (same pattern OperationsPage uses today).
  *
@@ -38,7 +38,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, RefreshCw, Users, Zap } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -51,11 +51,16 @@ import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './Vita
 import {
   buildGreeting,
   computeRecommendedActions,
+  formatDowntime,
   readDisplayName,
   readHealthScore,
+  shouldShowOnboarding,
   type ClustersResponse,
+  type HeatmapDay,
   type RecoveryMetrics,
 } from './recovery-center/helpers'
+import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
+import { requestRecoveryDayFocus } from './recovery-day-focus-bus'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import {
@@ -77,6 +82,8 @@ type RecoveryCenterPanelProps = {
   onOpenRun: (runId: string) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
   onSubmitHumanForm: (nodeId: string, input: JsonObject) => void | Promise<void>
+  /** Inject a demo failure so a fresh operator can try the recovery loop for real. */
+  onTryDemoRecovery?: () => void | Promise<void>
 }
 
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
@@ -85,10 +92,18 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const user = useWorkflowStore((state) => state.user)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [clusters, setClusters] = useState<ClustersResponse | null>(null)
+  const [heatmap, setHeatmap] = useState<HeatmapDay[]>([])
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [currentHour, setCurrentHour] = useState(12)
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
+    try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
+  })
+  const dismissIntro = () => {
+    setIntroDismissed(true)
+    try { localStorage.setItem('janusly:recovery:hideIntro', 'true') } catch { /* storage unavailable — session-only dismiss */ }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -122,6 +137,20 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     return () => { cancelled = true }
   }, [platformVersion])
 
+  useEffect(() => {
+    let cancelled = false
+    api('/recovery/heatmap?days=90')
+      .then((payload) => {
+        if (cancelled) return
+        setHeatmap(((payload as { days?: HeatmapDay[] })?.days) ?? [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setHeatmap([])
+      })
+    return () => { cancelled = true }
+  }, [platformVersion])
+
   const openDeadLetters = useMemo(
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
     [props.deadLetters],
@@ -131,8 +160,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setCurrentHour(new Date().getHours())
   }, [])
 
+  // Live "downtime clock": re-anchor the reference time on mount and whenever
+  // the data changes, then tick once a minute so open-failure ages advance in
+  // place — ONE interval for the whole panel, never a timer per row.
   useEffect(() => {
     setNowMs(Date.now())
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => window.clearInterval(id)
   }, [platformVersion, openDeadLetters.length])
 
   const waitingNodes = useMemo(
@@ -171,6 +205,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const isEmpty = openDeadLetters.length === 0
     && waitingNodes.length === 0
     && (clusters?.clusters.length ?? 0) === 0
+  // The onboarding walkthrough is stricter than `isEmpty`: only a truly fresh
+  // workspace (no runs either) sees it, and a dismissal hides it for good.
+  const showOnboarding = shouldShowOnboarding({
+    runs: props.runs.length,
+    openFailures: openDeadLetters.length,
+    waitingApprovals: waitingNodes.length,
+    dismissed: introDismissed,
+  })
     && totalRuns === 0
 
   const failuresLabel = t('recoveryCenter.metric.failures.label') as string
@@ -199,6 +241,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const mttrRationale = metrics?.mttr
     ? tRecoveryMetricRationale(metrics.mttr)
     : t('recoveryCenter.metric.mttr.rationaleFallback') as string
+  // MTTR trend sparkline: needs ≥2 daily points to tell a story. The hover
+  // title lists the exact per-day values the sparkline plots.
+  const mttrTrend = metrics?.mttrTrend ?? []
+  const mttrTrendSeconds = mttrTrend.map((point) => point.seconds)
+  const mttrTrendTitle = mttrTrend.map((point) => `${point.day}: ${formatDowntime(point.seconds * 1000)}`).join('\n')
   homeTiles.push({
     icon: <RefreshCw size={14} aria-hidden="true" />,
     label: mttrLabel,
@@ -207,6 +254,9 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     severity: metrics?.mttr.severity ?? 'neutral',
     rationale: mttrRationale,
     ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }) as string,
+    sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
+    sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }) as string,
+    sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })
@@ -242,6 +292,22 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-replay',
   })
+  const slaLabel = t('recoveryCenter.metric.sla.label') as string
+  const slaDisplay = metrics?.slaAttainment?.display ?? '—'
+  const slaRationale = metrics?.slaAttainment
+    ? tRecoveryMetricRationale(metrics.slaAttainment)
+    : t('recoveryCenter.metric.sla.rationaleFallback') as string
+  homeTiles.push({
+    icon: <Target size={14} aria-hidden="true" />,
+    label: slaLabel,
+    display: slaDisplay,
+    numericValue: metrics?.slaAttainment?.value ?? null,
+    severity: metrics?.slaAttainment?.severity ?? 'neutral',
+    rationale: slaRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: slaLabel, display: slaDisplay, rationale: slaRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-sla',
+  })
   const metricStrip = (
     <VitalSignsStrip
       tiles={withSeverityLabels(homeTiles, t)}
@@ -268,6 +334,16 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
       {metricStrip}
 
+      <RecoveryHeatmap
+        days={heatmap}
+        windowDays={90}
+        nowMs={nowMs}
+        onSelectDay={(day) => {
+          requestRecoveryDayFocus(day)
+          props.onOpenTab('runs')
+        }}
+      />
+
       <div className="we-operator-grid">
         <section className="we-operator-chat">
           <RecoveryCenterComposer
@@ -275,10 +351,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             recentDlqRunId={openDeadLetters[0]?.runId}
             showSeedTranscript={isEmpty}
           />
-          {isEmpty && (
+          {showOnboarding && (
             <RecoveryFlowDemo
               onOpenStudio={() => props.onOpenTab('copilot')}
               onOpenRecipes={() => props.onOpenTab('templates')}
+              onTryDemo={props.onTryDemoRecovery}
+              onDismiss={dismissIntro}
             />
           )}
           <RecommendedActionsTile actions={recommendedActions} onOpenTab={props.onOpenTab} />
@@ -319,6 +397,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         clustersResolved={metrics?.clustersResolved}
         valueEstimate={metrics?.valueEstimate}
         windowDays={metrics?.windowDays ?? 30}
+        downtimeEndedMs={metrics?.downtimeEndedMs}
         terminalRunsZero={(metrics?.terminalRuns ?? 0) === 0}
       />
 

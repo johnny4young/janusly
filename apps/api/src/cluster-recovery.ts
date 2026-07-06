@@ -27,6 +27,7 @@ import {
   queryFailureSamples,
 } from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/engine/src/error-signature";
+import type { Workflow, WorkflowNode } from "@janusly/shared";
 
 /** Default member-list cap; matches the bulk-apply request bound. */
 export const CLUSTER_MEMBERS_DEFAULT_LIMIT = 100;
@@ -107,4 +108,25 @@ export function recheckSignature(item: DeadLetterRowForSignature, claimedSignatu
   const toolName = typeof node?.config?.tool === "string" ? node.config.tool : undefined;
   const result = normalizeErrorSignature(item.errorJson, { nodeType, toolName });
   return result.signature === claimedSignature;
+}
+
+/**
+ * Decide which workflow (+ failing node) a cluster member replays against when
+ * an applied fix is present. A cluster is grouped by failure SIGNATURE and can
+ * span workflows, so the representative fix applies ONLY to members of the SAME
+ * workflow (`sanitizedFix.id === memberWorkflow.id`) whose failing node id
+ * survives the patch — every other member re-runs its own snapshot. Returns
+ * `fixNode` (the patched failing node from the fix) when the fix applies, else
+ * `null` (the caller replays the member's own workflow + snapshot node).
+ */
+export function pickClusterReplayWorkflow(
+  memberWorkflow: Workflow,
+  failingNodeId: string,
+  sanitizedFix: Workflow | null,
+): { workflow: Workflow; fixNode: WorkflowNode | null } {
+  if (sanitizedFix && memberWorkflow.id && sanitizedFix.id === memberWorkflow.id) {
+    const fixNode = sanitizedFix.nodes.find((n) => n.id === failingNodeId);
+    if (fixNode) return { workflow: sanitizedFix, fixNode };
+  }
+  return { workflow: memberWorkflow, fixNode: null };
 }

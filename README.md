@@ -177,6 +177,7 @@ pnpm test            # Vitest across the workspace packages
 pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
 pnpm build           # type-check + Vite production build (Rolldown, manualChunks)
 pnpm test:e2e        # Playwright; boots Compose, runs UI flow, tears Compose down
+pnpm test:integration # data integration lane: Compose Postgres + migrate + real-DB SQL tests, down
 pnpm evals           # scripts/run-evals.mjs against /ai/generate-workflow (assumes pnpm dev is up)
 pnpm evals:local     # one-command local regression gate: boots Compose + API, runs golden evals, tears down (spends AI credits only if a provider key is configured)
 pnpm evals:baseline  # snapshot the current ai-mode / shape-pass rates into evals/baseline.json (the regression floors)

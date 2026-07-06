@@ -615,6 +615,7 @@ function buildValueDashboardMarkdown(args: {
   lines.push(`- **p95 latency**: ${metrics.p95Latency.display} — ${metrics.p95Latency.rationale}`);
   lines.push(`- **Approvals pending**: ${metrics.approvalsPending.display} — ${metrics.approvalsPending.rationale}`);
   lines.push(`- **Replay rate**: ${metrics.replayRate.display} — ${metrics.replayRate.rationale}`);
+  lines.push(`- **SLA attainment**: ${metrics.slaAttainment.display} — ${metrics.slaAttainment.rationale}`);
   lines.push(`- **AI spend**: ${metrics.costThisWindow.display} — ${metrics.costThisWindow.rationale}`);
   lines.push(`- **Clusters resolved**: ${metrics.clustersResolved.display} (${metrics.clustersResolved.totalEntries} ${metrics.clustersResolved.totalEntries === 1 ? "entry" : "entries"}${metrics.clustersResolved.capped ? "; scan was capped" : ""})`);
   lines.push("");

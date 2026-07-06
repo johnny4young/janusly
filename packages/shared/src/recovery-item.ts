@@ -175,9 +175,22 @@ export type ListRecoveryItemsFilter = z.infer<typeof ListRecoveryItemsFilterSche
 
 // ---------- helpers ----------
 
-/** Compute the default SLA target given a severity and a start time. */
-export function defaultSlaTargetAt(severity: RecoveryItemSeverity, from: Date = new Date()): Date {
-  return new Date(from.getTime() + SLA_SECONDS_BY_SEVERITY[severity] * 1_000)
+/**
+ * Compute the default SLA target given a severity and a start time.
+ *
+ * `secondsBySeverity` lets a caller pass org-configured targets (in seconds)
+ * instead of the built-in `SLA_SECONDS_BY_SEVERITY` defaults — the data layer
+ * resolves the tenant's `recovery.slaPolicies` config and passes the merged
+ * map here, keeping this function pure/zero-I/O. A partial map still works:
+ * any severity the map omits falls back to the built-in default via `??`.
+ */
+export function defaultSlaTargetAt(
+  severity: RecoveryItemSeverity,
+  from: Date = new Date(),
+  secondsBySeverity: Partial<Record<RecoveryItemSeverity, number>> = SLA_SECONDS_BY_SEVERITY,
+): Date {
+  const seconds = secondsBySeverity[severity] ?? SLA_SECONDS_BY_SEVERITY[severity]
+  return new Date(from.getTime() + seconds * 1_000)
 }
 
 /** Severity ordering: p1 (highest) -> p4 (lowest). */

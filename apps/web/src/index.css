@@ -3081,6 +3081,29 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
+.we-flow-demo__dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.we-flow-demo__dismiss:hover {
+  background: var(--we-surface-3);
+  color: var(--we-text-1);
+}
+
 .we-flow-demo__head {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -6797,6 +6820,24 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   margin: 0;
 }
 
+/* Inline MTTR trend sparkline under a metric value. Color encodes direction:
+   improving (last <= mean) is green, worsening is red. */
+.we-sparkline {
+  display: block;
+  margin-top: 4px;
+  height: 16px;
+  width: 80px;
+  overflow: visible;
+}
+
+.we-sparkline--down polyline {
+  stroke: var(--we-success);
+}
+
+.we-sparkline--up polyline {
+  stroke: var(--we-danger);
+}
+
 .we-ops-progress {
   position: relative;
   height: 6px;
@@ -8384,6 +8425,148 @@ button.we-ops-metric-card--button {
   grid-row: 1 / span 2;
   align-self: center;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Downtime clock: the longer a failure sits open, the hotter its age chip. */
+.we-recovery-center-row__age[data-severity="warn"] {
+  color: var(--we-warning-text);
+  font-weight: 600;
+}
+
+.we-recovery-center-row__age[data-severity="danger"] {
+  color: var(--we-danger-text);
+  font-weight: 700;
+}
+
+/* Recovery heatmap ----------------------------------------------------- */
+
+.we-recovery-heatmap {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--we-border);
+  border-radius: 12px;
+  background: var(--we-surface-1);
+}
+
+.we-recovery-heatmap__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.we-recovery-heatmap__summary {
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.we-recovery-heatmap__cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--we-surface-3);
+}
+
+.we-recovery-heatmap__cell[data-outcome="recovered"] { background: var(--we-success); }
+.we-recovery-heatmap__cell[data-outcome="partial"] { background: var(--we-warning); }
+.we-recovery-heatmap__cell[data-outcome="unrecovered"] { background: var(--we-danger); }
+
+button.we-recovery-heatmap__cell--clickable {
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+button.we-recovery-heatmap__cell--clickable:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 1px var(--we-surface-1);
+}
+
+button.we-recovery-heatmap__cell--clickable:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
+/* Downtime "so far" indicator on an open recovery-queue row — same warming
+   thresholds as the home wedge tile's downtime clock (amber ≥1h, red ≥4h). */
+.we-list-row__downtime {
+  font-size: 11px;
+  color: var(--we-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.we-list-row__downtime[data-severity="warn"] {
+  color: var(--we-warning-text);
+  font-weight: 600;
+}
+
+.we-list-row__downtime[data-severity="danger"] {
+  color: var(--we-danger-text);
+  font-weight: 700;
+}
+
+/* Recovery-queue day drill-in chip (set by a heatmap click). */
+.we-dlq-day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 4px 0 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-primary);
+  background: color-mix(in srgb, var(--we-primary) 8%, var(--we-surface) 92%);
+  color: var(--we-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.we-dlq-day-chip__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.we-dlq-day-chip__clear:hover {
+  background: color-mix(in srgb, var(--we-primary) 18%, transparent);
+}
+
+.we-recovery-heatmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.we-recovery-heatmap__legend-label {
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__legend .we-recovery-heatmap__cell {
+  display: inline-block;
 }
 
 /* Recommended actions -------------------------------------------------- */
