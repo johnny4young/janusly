@@ -344,7 +344,7 @@ issues per-row calls), replaced by the final success/partial-failure toast.
 **AC.** Dialog appears at ≥3 selections; progress toast counts up; partial
 failures reported ("18 replayed, 2 failed"); tests for both.
 
-#### P-20 — Downtime clock on open failures + "minutes recovered" (M) ★wedge — ✅ shipped ENG-272 (parts a+b; c deferred)
+#### P-20 — Downtime clock on open failures + "minutes recovered" (M) ★wedge — ✅ shipped ENG-272 (a+b) + ENG-275 (c)
 **Problem.** MTTR is the north star, but the operator never *feels* time:
 open failures don't show elapsed downtime, and resolving one gives no sense
 of time saved.
@@ -362,7 +362,7 @@ table).
 thresholds colorize; toast shows the delta; dashboard figure matches a
 hand-computed fixture.
 
-#### P-21 — Recovery heatmap calendar (M) ★wedge — ✅ shipped ENG-273 (click-to-filter deferred)
+#### P-21 — Recovery heatmap calendar (M) ★wedge — ✅ shipped ENG-273 + ENG-276 (click-to-filter)
 **Problem.** No at-a-glance seasonal view of failure/recovery health; the
 story "we used to fail a lot, now we recover fast" is invisible.
 **Design.** New `GET /recovery/heatmap?days=90` → per-day
@@ -445,7 +445,7 @@ endpoint). Click → navigates to the Studio readiness panel.
 **AC.** Three states render from fixture issue lists; click navigates;
 updates on save/validate; i18n EN/ES.
 
-#### P-27 — Empty-state onboarding walkthrough on the Recovery Center (M) — ✅ shipped ENG-274 (walkthrough already existed; added fresh-trigger + dismiss)
+#### P-27 — Empty-state onboarding walkthrough on the Recovery Center (M) — ✅ shipped ENG-274 (fresh-trigger + dismiss) + ENG-277 (try-demo CTA)
 **Problem.** A brand-new org sees an empty Recovery Center — the wedge is
 invisible exactly when the first impression forms.
 **Design.** When failures = approvals = runs = 0, render a 5-step CSS

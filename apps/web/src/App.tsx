@@ -894,6 +894,7 @@ export default function App() {
               onOpenRun={openRun}
               onApproveNode={approveNode}
               onSubmitHumanForm={submitHumanForm}
+              onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery')}
             />
           )
         }

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
+import { consumeRecoveryFocusDay, RECOVERY_DAY_FOCUS_EVENT } from '../components/recovery-day-focus-bus'
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
 import type { RecoveryItemDrawerData } from '../components/RecoveryItemDrawer'
 import type { DeadLetter } from '../components/DeadLettersPanel'
@@ -191,6 +192,7 @@ function buildQueuePath(args: {
   severityFilter: SeverityFilter
   sortKey: SortKey
   search: string
+  day: string | null
   cursor: string | null
 }): string {
   const params = new URLSearchParams()
@@ -198,6 +200,7 @@ function buildQueuePath(args: {
   if (args.ownerScope === 'mine') params.set('owner', 'me')
   if (args.severityFilter !== 'all') params.set('severity', args.severityFilter)
   if (args.search) params.set('search', args.search)
+  if (args.day) params.set('day', args.day)
   params.set('sort', args.sortKey)
   params.set('limit', String(RECOVERY_QUEUE_PAGE_SIZE))
   if (args.cursor) params.set('cursor', args.cursor)
@@ -221,6 +224,11 @@ export type RecoveryQueueFilters = {
    *  id / error message), so typing doesn't issue a request per keystroke. */
   searchInput: string
   setSearchInput: (value: string) => void
+  /** Active heatmap drill-in day (`YYYY-MM-DD`) or null. When set, the queue is
+   *  restricted to failures created that UTC day; the panel shows a clear chip. */
+  dayFilter: string | null
+  /** Clear the day drill-in and refetch the unfiltered queue. */
+  clearDayFilter: () => void
   /** The recovery-queue rows loaded so far — the first keyset page plus any
    *  appended via {@link loadMore}. Server-filtered by status ∩ owner ∩ severity
    *  and ordered by `sortKey` before the page cap, so a matching row surfaces
@@ -273,6 +281,10 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   // Both seed from the persisted term so the first load already carries it.
   const [searchInput, setSearchInput] = useState<string>(initialFilters.search)
   const [search, setSearch] = useState<string>(initialFilters.search)
+  // Heatmap drill-in: a `YYYY-MM-DD` restricting the queue to one UTC day. Not
+  // persisted (a transient, click-scoped focus); seeds from a pending focus-day
+  // handoff on mount and updates live via the focus event.
+  const [dayFilter, setDayFilter] = useState<string | null>(() => consumeRecoveryFocusDay())
   const [rows, setRows] = useState<DeadLetter[]>([])
   const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
@@ -287,6 +299,19 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const refresh = useCallback(() => {
     setRefreshNonce((value) => value + 1)
   }, [])
+  const clearDayFilter = useCallback(() => setDayFilter(null), [])
+
+  // A heatmap cell click on Home dispatches the focus event; adopt the day when
+  // the queue is already mounted (the mount-time `consume` covers the not-yet-
+  // mounted case). `consume` clears the stash so a later remount won't re-apply.
+  useEffect(() => {
+    const onFocus = () => {
+      const day = consumeRecoveryFocusDay()
+      if (day) setDayFilter(day)
+    }
+    window.addEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
+    return () => window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
+  }, [])
 
   // Server-side filter + sort, cap-correct: the query narrows + orders before
   // the page cap. `owner=me` is resolved to `auth.userId` server-side. Re-runs
@@ -295,7 +320,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     let cancelled = false
     requestEpochRef.current += 1
     setLoading(true)
-    api(buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, cursor: null }))
+    api(buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, day: dayFilter, cursor: null }))
       .then((resp) => {
         if (cancelled) return
         const page = resp as RecoveryQueuePageResponse
@@ -314,7 +339,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     return () => {
       cancelled = true
     }
-  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey, search])
+  }, [platformVersion, refreshNonce, status, ownerScope, severityFilter, sortKey, search, dayFilter])
 
   // Org-wide status counts for the mini-grid. Keyed ONLY on platformVersion +
   // refresh — NOT on the filter/sort, because the mini-grid summarizes the WHOLE
@@ -350,7 +375,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     setLoadingMore(true)
     try {
       const page = (await api(
-        buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, cursor }),
+        buildQueuePath({ status, ownerScope, severityFilter, sortKey, search, day: dayFilter, cursor }),
       )) as RecoveryQueuePageResponse
       if (epoch !== requestEpochRef.current) return
       setRows((prev) => [...prev, ...(Array.isArray(page?.items) ? page.items : [])])
@@ -361,7 +386,7 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
     } finally {
       setLoadingMore(false)
     }
-  }, [cursor, loadingMore, status, ownerScope, severityFilter, sortKey, search])
+  }, [cursor, loadingMore, status, ownerScope, severityFilter, sortKey, search, dayFilter])
 
   // Settle `searchInput` into the debounced `search` ~300ms after the last
   // keystroke so typing doesn't fire a request per character (mirrors the
@@ -416,6 +441,8 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   return {
     status,
     setStatus,
+    dayFilter,
+    clearDayFilter,
     ownerScope,
     setOwnerScope,
     severityFilter,

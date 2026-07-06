@@ -19,10 +19,13 @@ export function RecoveryHeatmap({
   days,
   windowDays,
   nowMs,
+  onSelectDay,
 }: {
   days: HeatmapDay[]
   windowDays: number
   nowMs: number | null
+  /** Drill into one day's failures. Only days WITH failures are clickable. */
+  onSelectDay?: (day: string) => void
 }) {
   const { t } = useT()
   const cells = useMemo(
@@ -56,21 +59,37 @@ export function RecoveryHeatmap({
         </span>
       </div>
       <div className="we-recovery-heatmap__grid" role="presentation">
-        {cells.map((cell) => (
-          <div
-            key={cell.day}
-            className="we-recovery-heatmap__cell"
-            data-outcome={cell.outcome}
-            data-testid={`recovery-heatmap-cell-${cell.day}`}
-            title={
-              t('recoveryCenter.heatmap.cell', {
-                day: cell.day,
-                failures: cell.failures,
-                recovered: cell.recovered,
-              }) as string
-            }
-          />
-        ))}
+        {cells.map((cell) => {
+          const cellTitle = t('recoveryCenter.heatmap.cell', {
+            day: cell.day,
+            failures: cell.failures,
+            recovered: cell.recovered,
+          }) as string
+          // Only days with failures are drillable; empty days stay inert.
+          if (onSelectDay && cell.failures > 0) {
+            return (
+              <button
+                key={cell.day}
+                type="button"
+                className="we-recovery-heatmap__cell we-recovery-heatmap__cell--clickable"
+                data-outcome={cell.outcome}
+                data-testid={`recovery-heatmap-cell-${cell.day}`}
+                title={cellTitle}
+                aria-label={cellTitle}
+                onClick={() => onSelectDay(cell.day)}
+              />
+            )
+          }
+          return (
+            <div
+              key={cell.day}
+              className="we-recovery-heatmap__cell"
+              data-outcome={cell.outcome}
+              data-testid={`recovery-heatmap-cell-${cell.day}`}
+              title={cellTitle}
+            />
+          )
+        })}
       </div>
       <div className="we-recovery-heatmap__legend" aria-hidden="true">
         <span className="we-recovery-heatmap__legend-label">{t('recoveryCenter.heatmap.legend.less') as string}</span>
