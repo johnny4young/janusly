@@ -53,6 +53,7 @@ import {
   computeRecommendedActions,
   readDisplayName,
   readHealthScore,
+  shouldShowOnboarding,
   type ClustersResponse,
   type HeatmapDay,
   type RecoveryMetrics,
@@ -92,6 +93,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [currentHour, setCurrentHour] = useState(12)
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
+    try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
+  })
+  const dismissIntro = () => {
+    setIntroDismissed(true)
+    try { localStorage.setItem('janusly:recovery:hideIntro', 'true') } catch { /* storage unavailable — session-only dismiss */ }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -193,6 +201,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const isEmpty = openDeadLetters.length === 0
     && waitingNodes.length === 0
     && (clusters?.clusters.length ?? 0) === 0
+  // The onboarding walkthrough is stricter than `isEmpty`: only a truly fresh
+  // workspace (no runs either) sees it, and a dismissal hides it for good.
+  const showOnboarding = shouldShowOnboarding({
+    runs: props.runs.length,
+    openFailures: openDeadLetters.length,
+    waitingApprovals: waitingNodes.length,
+    dismissed: introDismissed,
+  })
     && totalRuns === 0
 
   const failuresLabel = t('recoveryCenter.metric.failures.label') as string
@@ -319,10 +335,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             recentDlqRunId={openDeadLetters[0]?.runId}
             showSeedTranscript={isEmpty}
           />
-          {isEmpty && (
+          {showOnboarding && (
             <RecoveryFlowDemo
               onOpenStudio={() => props.onOpenTab('copilot')}
               onOpenRecipes={() => props.onOpenTab('templates')}
+              onDismiss={dismissIntro}
             />
           )}
           <RecommendedActionsTile actions={recommendedActions} onOpenTab={props.onOpenTab} />

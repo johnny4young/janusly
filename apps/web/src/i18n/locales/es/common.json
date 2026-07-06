@@ -2377,6 +2377,7 @@
   "recoveryCenter.hero.recoveryTitle_other": "{{count}} ejecuciones necesitan recuperación",
   "recoveryCenter.hero.openQueue": "Abrir cola de recuperación",
   "recoveryCenter.flowDemo.kicker": "Recovery loop · cómo funciona",
+  "recoveryCenter.flowDemo.dismiss": "Ocultar el recorrido de recuperación",
   "recoveryCenter.flowDemo.title": "Del fallo al fix en una sola pantalla.",
   "recoveryCenter.flowDemo.body": "El diferenciador de Janusly es este loop. Cada paso ocurre en este Home — sin saltar a logs, sin tickets, sin diffs manuales.",
   "recoveryCenter.flowDemo.cta.studio": "Diseñar un flujo",

@@ -24,13 +24,34 @@ import {
   Sparkles,
   Wand2,
   Workflow,
+  X,
 } from 'lucide-react'
 import { useT } from '../../i18n'
 
-export function RecoveryFlowDemo({ onOpenStudio, onOpenRecipes }: { onOpenStudio: () => void; onOpenRecipes: () => void }) {
+export function RecoveryFlowDemo({
+  onOpenStudio,
+  onOpenRecipes,
+  onDismiss,
+}: {
+  onOpenStudio: () => void
+  onOpenRecipes: () => void
+  /** When set, renders a dismiss control that hides the walkthrough for good. */
+  onDismiss?: () => void
+}) {
   const { t } = useT()
   return (
     <section className="we-flow-demo" aria-labelledby="we-flow-demo-title" data-testid="recovery-flow-demo">
+      {onDismiss && (
+        <button
+          type="button"
+          className="we-flow-demo__dismiss"
+          onClick={onDismiss}
+          aria-label={t('recoveryCenter.flowDemo.dismiss') as string}
+          data-testid="recovery-flow-demo-dismiss"
+        >
+          <X size={14} aria-hidden="true" />
+        </button>
+      )}
       <header className="we-flow-demo__head">
         <div>
           <div className="section-kicker">{t('recoveryCenter.flowDemo.kicker')}</div>

@@ -445,7 +445,7 @@ endpoint). Click → navigates to the Studio readiness panel.
 **AC.** Three states render from fixture issue lists; click navigates;
 updates on save/validate; i18n EN/ES.
 
-#### P-27 — Empty-state onboarding walkthrough on the Recovery Center (M)
+#### P-27 — Empty-state onboarding walkthrough on the Recovery Center (M) — ✅ shipped ENG-274 (walkthrough already existed; added fresh-trigger + dismiss)
 **Problem.** A brand-new org sees an empty Recovery Center — the wedge is
 invisible exactly when the first impression forms.
 **Design.** When failures = approvals = runs = 0, render a 5-step CSS
