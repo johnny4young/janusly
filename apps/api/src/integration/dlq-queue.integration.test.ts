@@ -1,7 +1,7 @@
 /**
  * Integration tests (real Postgres) for the recovery-queue SQL that lives in
- * `apps/api/src/dlq.ts` (not `@janusly/data`): the `day` drill-in filter added
- * for the heatmap click-through (ENG-276) and the org scoping. The mocked-DB
+ * `apps/api/src/dlq.ts` (not `@janusly/data`): the `day` drill-in filter used
+ * by Recovery Center heatmap click-throughs and the org scoping. The mocked-DB
  * unit tests can't prove the actual `created_at ∈ [day, day+1)` WHERE, so this
  * exercises it against a live DB. Unique org id + cleanup.
  */

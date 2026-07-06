@@ -3,8 +3,8 @@
  *
  * Exercise SQL correctness the mocked-DB unit tests can't prove: audit-log
  * keyset pagination boundaries, the action-PREFIX filter, tenant scoping, the
- * credential-rotation CAS conflict path, and presence of the hot-path indexes
- * (ENG-269 audit prefix + baseline HNSW). Each test uses a unique org id so
+ * credential-rotation CAS conflict path, and presence of the audit-prefix and
+ * baseline HNSW hot-path indexes. Each test uses a unique org id so
  * rows never collide; a final cleanup deletes them.
  */
 
@@ -132,11 +132,11 @@ describe("hot-path indexes present after migration", () => {
     return Array.from(rows as Iterable<{ indexname: string }>).map((r) => r.indexname);
   }
 
-  it("audit_logs carries the ENG-269 action-prefix index", async () => {
+  it("audit_logs carries the action-prefix index", async () => {
     expect(await indexNames("audit_logs")).toContain("audit_logs_org_action_created_idx");
   });
 
-  it("memory_entries carries the baseline HNSW vector index (ENG-P09 guard)", async () => {
+  it("memory_entries carries the baseline HNSW vector index", async () => {
     expect(await indexNames("memory_entries")).toContain("memory_entries_embedding_hnsw_idx");
   });
 });
