@@ -81,6 +81,11 @@ async function dispatchRequest(
   response.requestOrigin = Array.isArray(req.headers.origin)
     ? req.headers.origin[0]
     : req.headers.origin;
+  // Stash the negotiated encoding so `sendJson` can decide whether to gzip.
+  const acceptEncoding = req.headers["accept-encoding"];
+  response.requestAcceptEncoding = Array.isArray(acceptEncoding)
+    ? acceptEncoding.join(", ")
+    : acceptEncoding;
 
   if (req.method === "OPTIONS") {
     const headers = corsHeaders(response);

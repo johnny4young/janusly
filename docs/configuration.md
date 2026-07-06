@@ -26,6 +26,9 @@ secret values stay env-only.
 | `JANUSLY_MAX_SUBWORKFLOW_DEPTH` | `5` | `packages/engine/src/subworkflow.ts` | Maximum nested subworkflow depth. |
 | `JANUSLY_RESUME_TOKEN_SECRET` | unset in dev; required in production | `packages/engine/src/secrets.ts` | HMAC signing secret for `human_form` resume tokens and Janusly SSO state/session tokens, separated by signed `purpose`. Dev mode uses a local fallback; production fails closed without this dedicated secret. Do not reuse `JANUSLY_API_SERVICE_TOKEN` for token signing. |
 | `JANUSLY_PERSIST_MAX_BYTES` | `262144` (256 KiB) | `packages/engine/src/safe-persist.ts` | Default size cap for jsonb writes through the safe-persist chokepoint. Over-cap payloads are replaced with a `{ __truncated: true, ... }` sentinel. |
+| `JANUSLY_HTTP_COMPRESSION` | `true` (on) | `apps/api/src/http.ts` | gzip for JSON responses in the `sendJson` chokepoint. Applied only when the client sent `Accept-Encoding: gzip` and the body clears ~1 KB; SSE streams are never compressed. Set `false` to disable. |
+| `JANUSLY_ORG_CONFIG_CACHE_TTL_MS` | `30000` | `packages/data/src/orgConfigRepo.ts` | Process-local TTL (ms) for the resolved `org_configs` snapshot read on hot paths. Same-process writes invalidate immediately; other replicas converge within one TTL. `0` disables the cache. |
+| `JANUSLY_RECOVERY_METRICS_CACHE_TTL_MS` | `30000` | `apps/api/src/metrics-cache.ts` | Process-local TTL (ms) for the composed `GET /recovery/metrics` envelope. Invalidated on DLQ replay/resolve; `0` disables. |
 
 `docker-compose.yml` also sets Postgres container-internal values
 (`POSTGRES_USER=postgres`, `POSTGRES_PASSWORD=postgres`,
