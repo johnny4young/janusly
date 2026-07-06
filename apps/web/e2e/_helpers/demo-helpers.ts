@@ -194,6 +194,32 @@ export async function fetchReadiness(
   };
 }
 
+/**
+ * Sandbox-validate a proposed fix for a dead letter. Returns the validation
+ * run id (a writes-skipped replay of `suggestedWorkflow` from the failing
+ * node) — poll it with {@link pollUntilTerminal}: `succeeded` = the sandbox
+ * accepts the fix, `failed` = it rejects it.
+ */
+export async function validateFix(
+  request: APIRequestContext,
+  deadLetterId: string,
+  suggestedWorkflow: Json,
+): Promise<string> {
+  const result = (await apiPost(request, "/dlq/validate-fix", { deadLetterId, suggestedWorkflow })) as { runId: string };
+  return result.runId;
+}
+
+/** Replay a dead letter by id (production replay of its snapshot). */
+export async function replayDeadLetter(request: APIRequestContext, deadLetterId: string): Promise<void> {
+  await apiPost(request, "/dlq/replay", { deadLetterId });
+}
+
+/** Read a dead letter's current status (`open` / `replayed` / `resolved`), or null if gone. */
+export async function deadLetterStatus(request: APIRequestContext, deadLetterId: string): Promise<string | null> {
+  const rows = (await apiGet(request, "/dlq?limit=200")) as Array<{ id: string; status?: string }>;
+  return rows.find((r) => r.id === deadLetterId)?.status ?? null;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

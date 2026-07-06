@@ -470,7 +470,7 @@ route's matcher. Unmatchable dynamic paths get an explicit allowlist.
 **AC.** Test fails when a web call targets an unregistered route (proven by
 a fixture); allowlist starts empty or minimal; runs in `pnpm test`.
 
-#### P-29 — Recovery-loop e2e journey (M) ★critical
+#### P-29 — Recovery-loop e2e journey (M) — ✅ shipped ENG-280 (sandbox gate + replay-accepted; replay-to-green pending a finding) ★critical
 **Problem.** The product's core story — DLQ failure → suggest fix → sandbox
 validate → apply → replay-to-green — has no end-to-end test; the F3 spec
 stops at "landed in DLQ".
