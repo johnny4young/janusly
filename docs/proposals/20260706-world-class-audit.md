@@ -458,7 +458,7 @@ starts its sample run; dismiss persists; reduced-motion safe.
 
 ### 2D. Testability & DX
 
-#### P-28 — Web↔route contract check (M)
+#### P-28 — Web↔route contract check (M) — ✅ shipped ENG-278
 **Problem.** Nothing validates that the paths/methods the web calls exist in
 the route registry — drift surfaces only in e2e (13 route files currently
 have no tests at all).

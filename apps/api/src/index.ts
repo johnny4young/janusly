@@ -68,88 +68,17 @@ import {
 } from "./api-config";
 import { enforceRateLimit } from "./rate-limit";
 import type { Route } from "./routes";
-import { aiRoutes } from "./routes/ai-routes";
-import { auditRoutes } from "./routes/audit-routes";
-import { billingRoutes } from "./routes/billing-routes";
-import { credentialsRoutes } from "./routes/credentials-routes";
-import { dlqRoutes } from "./routes/dlq-routes";
-import { healthRoutes } from "./routes/health-routes";
-import { mcpRoutes } from "./routes/mcp-routes";
-import { membersRoutes } from "./routes/members-routes";
-import { orgRoutes } from "./routes/org-routes";
-import { rolesRoutes } from "./routes/roles-routes";
-import { scimRoutes } from "./routes/scim-routes";
-import { ssoRoutes } from "./routes/sso-routes";
-import { pluginsRoutes } from "./routes/plugins-routes";
-import { promptsRoutes } from "./routes/prompts-routes";
-import { autoHealingRoutes } from "./routes/auto-healing-routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
-import { alertsRoutes } from "./routes/alerts-routes";
 import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
-import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
-import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";
-import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
 import { registerWorkflowMetadataSeverityResolver } from "./workflow-metadata-bootstrap";
-import { upstreamHealthRoutes } from "./routes/upstream-health-routes";
-import { snippetsRoutes } from "./routes/snippets-routes";
-import { evalDatasetsRoutes } from "./routes/eval-datasets-routes";
-import { experimentsRoutes } from "./routes/experiments-routes";
-import { recoveryRoutes } from "./routes/recovery-routes";
-import { reportsRoutes } from "./routes/reports-routes";
-import { runsRoutes } from "./routes/runs-routes";
-import { templatesRoutes } from "./routes/templates-routes";
-import { toolsRoutes } from "./routes/tools-routes";
-import { triggerIngestRoutes } from "./routes/trigger-ingest-routes";
-import { onboardingRoutes } from "./routes/onboarding-routes";
-import { solutionPacksRoutes } from "./routes/solution-packs-routes";
-import { workflowsRoutes } from "./routes/workflows-routes";
+import { routes } from "./routes-registry";
 import { createApiServer } from "./server";
 
-/**
- * Composed route registry. Module order matters — the dispatcher is
- * first-match-wins; this order mirrors the original monolithic literal
- * so overlap-sensitive pairs (`/workflows/versions` before
- * `/workflows`, `/workflows/health/delta` before `/workflows/health`,
- * `/runs` prefix before `/run?` exact, `/dlq/clusters` before `/dlq`
- * wildcard) keep their precedence.
- */
-export const routes: Route[] = [
-  ...healthRoutes,
-  ...toolsRoutes,
-  ...templatesRoutes,
-  ...billingRoutes,
-  ...orgRoutes,
-  ...membersRoutes,
-  ...ssoRoutes,
-  ...scimRoutes,
-  ...rolesRoutes,
-  ...mcpRoutes,
-  // Solution packs register before workflows so `POST /workflows/import-pack`
-  // resolves here before any `/workflows/*` matcher can shadow it.
-  ...solutionPacksRoutes,
-  ...onboardingRoutes,
-  ...workflowsRoutes,
-  ...pluginsRoutes,
-  ...credentialsRoutes,
-  ...promptsRoutes,
-  ...auditRoutes,
-  ...recoveryRoutes,
-  ...reportsRoutes,
-  ...aiRoutes,
-  ...autoHealingRoutes,
-  ...alertsRoutes,
-  ...recoveryItemsRoutes,
-  ...recoveryHandoffRoutes,
-  ...workflowMetadataRoutes,
-  ...upstreamHealthRoutes,
-  ...snippetsRoutes,
-  ...evalDatasetsRoutes,
-  ...experimentsRoutes,
-  ...triggerIngestRoutes,
-  ...runsRoutes,
-  ...dlqRoutes,
-];
+// The composed route registry lives in `./routes-registry` so it can be
+// imported without this module's boot side effects (see routes-contract.test).
+// Re-exported here for back-compat with existing importers.
+export { routes };
 
 const server = createApiServer({
   routes,
