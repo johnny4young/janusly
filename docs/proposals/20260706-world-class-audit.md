@@ -362,7 +362,7 @@ table).
 thresholds colorize; toast shows the delta; dashboard figure matches a
 hand-computed fixture.
 
-#### P-21 — Recovery heatmap calendar (M) ★wedge
+#### P-21 — Recovery heatmap calendar (M) ★wedge — ✅ shipped ENG-273 (click-to-filter deferred)
 **Problem.** No at-a-glance seasonal view of failure/recovery health; the
 story "we used to fail a lot, now we recover fast" is invisible.
 **Design.** New `GET /recovery/heatmap?days=90` → per-day

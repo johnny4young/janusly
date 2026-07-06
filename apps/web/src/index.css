@@ -8416,6 +8416,66 @@ button.we-ops-metric-card--button {
   font-weight: 700;
 }
 
+/* Recovery heatmap ----------------------------------------------------- */
+
+.we-recovery-heatmap {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--we-border);
+  border-radius: 12px;
+  background: var(--we-surface-1);
+}
+
+.we-recovery-heatmap__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.we-recovery-heatmap__summary {
+  font-size: 12px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.we-recovery-heatmap__cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--we-surface-3);
+}
+
+.we-recovery-heatmap__cell[data-outcome="recovered"] { background: var(--we-success); }
+.we-recovery-heatmap__cell[data-outcome="partial"] { background: var(--we-warning); }
+.we-recovery-heatmap__cell[data-outcome="unrecovered"] { background: var(--we-danger); }
+
+.we-recovery-heatmap__legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.we-recovery-heatmap__legend-label {
+  font-size: 11px;
+  color: var(--we-text-2);
+}
+
+.we-recovery-heatmap__legend .we-recovery-heatmap__cell {
+  display: inline-block;
+}
+
 /* Recommended actions -------------------------------------------------- */
 
 .we-recovery-center-actions {
