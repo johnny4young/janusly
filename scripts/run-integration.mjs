@@ -76,6 +76,8 @@ async function main() {
     await run("pnpm", ["migrate"]);
     console.log("[integration] running data integration tests");
     await run("pnpm", ["--filter", "@janusly/data", "test:integration"]);
+    console.log("[integration] running api integration tests");
+    await run("pnpm", ["--filter", "@janusly/api", "test:integration"]);
   } catch (error) {
     failed = true;
     console.error("[integration] failed:", error.message);
