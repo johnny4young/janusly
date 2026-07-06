@@ -1810,6 +1810,7 @@
   "recoveryDialog.errors.suggestionRequest": "La solicitud de sugerencia falló",
   "recoveryDialog.errors.validationRequest": "La solicitud de validación falló",
   "recoveryDialog.errors.applyFailed": "La aplicación falló",
+  "recoveryDialog.recoveredAfter": "Recuperado tras {{duration}} de inactividad",
   "recoveryDialog.errors.selectedSuggestionUnavailable": "La sugerencia seleccionada ya no está disponible.",
   "recoveryDialog.approachLabel.add_retry": "Añadir reintento",
   "recoveryDialog.approachLabel.raise_timeout": "Subir timeout",

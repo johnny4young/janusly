@@ -344,7 +344,7 @@ issues per-row calls), replaced by the final success/partial-failure toast.
 **AC.** Dialog appears at ≥3 selections; progress toast counts up; partial
 failures reported ("18 replayed, 2 failed"); tests for both.
 
-#### P-20 — Downtime clock on open failures + "minutes recovered" (M) ★wedge
+#### P-20 — Downtime clock on open failures + "minutes recovered" (M) ★wedge — ✅ shipped ENG-272 (parts a+b; c deferred)
 **Problem.** MTTR is the north star, but the operator never *feels* time:
 open failures don't show elapsed downtime, and resolving one gives no sense
 of time saved.
