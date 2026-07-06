@@ -14,6 +14,7 @@ import {
   CLUSTER_MEMBERS_DEFAULT_LIMIT,
   CLUSTER_MEMBERS_MAX_LIMIT,
   findClusterMembers,
+  pickClusterReplayWorkflow,
   recheckSignature,
 } from './cluster-recovery'
 
@@ -158,5 +159,39 @@ describe('recheckSignature', () => {
     }
     const result = recheckSignature(item, 'something else entirely')
     expect(typeof result).toBe('boolean')
+  })
+})
+
+describe('pickClusterReplayWorkflow', () => {
+  const node = (id: string, type = 'noop') => ({ id, type, config: {} }) as never
+  const wf = (id: string, nodes: unknown[]) => ({ dslVersion: '1.0', id, nodes, edges: [] }) as never
+
+  const memberWf = wf('wf-1', [node('charge', 'http'), node('finish')])
+  const fixSameWf = wf('wf-1', [node('charge', 'noop'), node('finish')])
+  const fixOtherWf = wf('wf-2', [node('charge', 'noop')])
+
+  it('applies the fix to a same-workflow member whose failing node survives it', () => {
+    const { workflow, fixNode } = pickClusterReplayWorkflow(memberWf, 'charge', fixSameWf)
+    expect(workflow).toBe(fixSameWf)
+    expect((fixNode as { id: string; type: string } | null)?.type).toBe('noop')
+  })
+
+  it('does NOT apply a fix from a different workflow (same signature, other DAG)', () => {
+    const { workflow, fixNode } = pickClusterReplayWorkflow(memberWf, 'charge', fixOtherWf)
+    expect(workflow).toBe(memberWf)
+    expect(fixNode).toBeNull()
+  })
+
+  it('falls back to the member snapshot when the fix drops the failing node', () => {
+    const fixMissingNode = wf('wf-1', [node('finish')])
+    const { workflow, fixNode } = pickClusterReplayWorkflow(memberWf, 'charge', fixMissingNode)
+    expect(workflow).toBe(memberWf)
+    expect(fixNode).toBeNull()
+  })
+
+  it('replays the member snapshot when no fix is supplied (plain retry)', () => {
+    const { workflow, fixNode } = pickClusterReplayWorkflow(memberWf, 'charge', null)
+    expect(workflow).toBe(memberWf)
+    expect(fixNode).toBeNull()
   })
 })
