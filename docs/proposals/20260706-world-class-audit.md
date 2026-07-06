@@ -483,7 +483,7 @@ accept-patch and reject-patch.
 count grows by ≥2; failure of any loop stage fails the spec with a
 screenshot artifact.
 
-#### P-30 — Data-layer integration lane against real Postgres (L)
+#### P-30 — Data-layer integration lane against real Postgres (L) — ✅ shipped ENG-279
 **Problem.** Repo unit tests mock the query builder; SQL correctness (keyset
 boundaries, window functions, tenant scoping, CAS conflicts) is "verified in
 live smoke" per the repos' own comments — i.e., not gated.
