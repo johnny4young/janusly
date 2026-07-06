@@ -353,6 +353,11 @@ export const credentials = pgTable(
     kind: text("kind").notNull(),
     secretRef: text("secret_ref").notNull(),
     metadata: jsonb("metadata"),
+    // Optional operator-declared expiry for the underlying secret (token /
+    // webhook / DSN). Null = no expiry tracked. Only metadata — the secret
+    // value itself still lives in env via `secret_ref`. Powers the
+    // credential-expiry warning scan + the panel's expiry badge.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     // Optimistic-concurrency token for secret-ref rotation. Millisecond

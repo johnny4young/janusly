@@ -58,6 +58,7 @@ export type ApiErrorCode =
   | "upstream_source_duplicate"
   // credentials
   | "credential_rotation_conflict"
+  | "credential_expiry_conflict"
   // snippets
   | "snippet_not_found"
   | "snippet_name_exists"
@@ -114,6 +115,8 @@ export type ApiErrorCode =
   | "billing_workflow_id_required"
   // credentials
   | "credentials_fields_required"
+  | "credentials_invalid_expiry"
+  | "credentials_expiry_failed"
   | "credentials_if_match_invalid"
   | "credentials_if_match_required"
   | "credentials_invalid_secret_ref"

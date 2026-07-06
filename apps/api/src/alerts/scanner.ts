@@ -1,5 +1,5 @@
 /**
- * Periodic scanner for the five state-driven alert triggers:
+ * Periodic scanner for the six state-driven alert triggers:
  *   - `failure_cluster.threshold` — re-cluster recent failure samples and
  *     fire when a cluster's frequency crosses the policy's `minFrequency`.
  *   - `workflow.slo_breach` — re-evaluate SLO breaches per workflow with
@@ -11,6 +11,8 @@
  *   - `workflow.schedule_anomaly` — re-bucket each actively-scheduled
  *     workflow's recent fires and fire when a day/hour slot's failure rate
  *     diverges above the schedule baseline.
+ *   - `credential.expiring` — find credentials whose operator-declared
+ *     expiry is inside an enabled policy's warning window.
  *
  * Event-driven triggers (`dlq.entry_created`, `budget.blocked`,
  * `limiter.degraded`, `recovery_item.created`) fire in-process via the DI
@@ -39,6 +41,7 @@ import {
   queryHealthSignals,
   queryScheduleFiresByWorkflow,
   listOpenItemsWithBreachedSla,
+  listCredentialsExpiringWithin,
   getEnabledPoliciesByTrigger,
   listOrgIdsWithEnabledPolicies,
   type AlertPolicy,
@@ -150,6 +153,7 @@ async function runOrgScan(orgId: string): Promise<void> {
   await scanStalledApprovals(orgId);
   await scanRecoveryItemSlaBreaches(orgId);
   await scanScheduleAnomalies(orgId);
+  await scanCredentialExpiry(orgId);
 }
 
 // ─── failure_cluster.threshold ─────────────────────────────────────────────
@@ -367,6 +371,52 @@ async function scanRecoveryItemSlaBreaches(orgId: string): Promise<void> {
         owner: item.owner,
         slaTargetAtIso: item.slaTargetAt.toISOString(),
         breachedBySeconds: Math.max(0, Math.floor((Date.now() - item.slaTargetAt.getTime()) / 1000)),
+      },
+    });
+  }
+}
+
+// ─── credential.expiring ───────────────────────────────────────────────────
+
+async function scanCredentialExpiry(orgId: string): Promise<void> {
+  const policies = await getEnabledPoliciesByTrigger(orgId, "credential.expiring");
+  if (policies.length === 0) return;
+
+  // Query once using the WIDEST window any policy cares about (the largest
+  // warnDays); per-policy narrowing happens in matchesPolicyFilter via the
+  // payload's computed daysUntil. Default 30 when a policy omits warnDays
+  // (schema requires it, but be defensive against a hand-written row).
+  let maxWarnDays = 0;
+  for (const policy of policies) {
+    const wd = (policy.parameters as Partial<AlertParamsByTrigger["credential.expiring"]>).warnDays ?? 30;
+    if (typeof wd === "number" && wd > maxWarnDays) maxWarnDays = wd;
+  }
+  if (maxWarnDays <= 0) return;
+
+  let expiring: Awaited<ReturnType<typeof listCredentialsExpiringWithin>>;
+  try {
+    expiring = await listCredentialsExpiringWithin(orgId, maxWarnDays);
+  } catch (err) {
+    console.warn("[alerts] listCredentialsExpiringWithin failed", { orgId, err });
+    return;
+  }
+
+  for (const cred of expiring) {
+    // Whole days until expiry (>= 0). Already-expired credentials report 0 so a
+    // policy with any warnDays still fires. `ceil` so "1.2 days left" → 2 days,
+    // matching the operator's "warn N days ahead" mental model.
+    const daysUntil = Math.max(0, Math.ceil((cred.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+    await dispatchAlert({
+      orgId,
+      trigger: "credential.expiring",
+      payload: {
+        credentialId: cred.id,
+        name: cred.name,
+        kind: cred.kind,
+        // Days until this credential expires (>= 0). The dispatcher's per-policy
+        // filter fires only when this is <= the policy's `warnDays` threshold.
+        daysUntilExpiry: daysUntil,
+        expiresAtIso: cred.expiresAt.toISOString(),
       },
     });
   }

@@ -47,6 +47,7 @@ const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ 
 const ScheduleHistoryPanel = lazy(() => import('./ScheduleHistoryPanel').then((m) => ({ default: m.ScheduleHistoryPanel })))
 const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then((m) => ({ default: m.WorkflowMetadataPanel })))
 import { api } from '../api'
+import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tRunEvent, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
@@ -78,7 +79,7 @@ export type RightPanelProps = {
   onInstallPack: (packId: string) => void
   onSampleRunPack: (packId: string) => void
   onInjectPackFailure: (packId: string) => void
-  onCreateCredential: (credential: { name: string; kind: string; secretRef: string }) => void
+  onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
   onOpenRun: (id: string) => void
   onRefreshPlatform: () => void
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
@@ -303,7 +304,7 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 
  *  consumes to show linked-vs-missing per reference. Connections is the
  *  sole vault editor; Operations Integrations mirrors the same snapshot
  *  read-only. The env-var NAME never reaches this shape (server posture). */
-type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null }
+type CredentialHealthLite = { name: string; secretRefPresent: boolean; lastUsedAt: string | null; expiresAt: string | null }
 
 /** Env-var NAME shape the server accepts for `secretRef` (mirrors the
  *  rotate modal). The secret VALUE never lives here — only the env-var name. */
@@ -319,8 +320,16 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
   const [name, setName] = useState('')
   const [kind, setKind] = useState('generic')
   const [secretRef, setSecretRef] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
   const [rotating, setRotating] = useState<string | null>(null)
   const [healthByName, setHealthByName] = useState<Map<string, CredentialHealthLite>>(new Map())
+  const [expiryNowMs, setExpiryNowMs] = useState(() => Date.now())
+
+  useEffect(() => {
+    setExpiryNowMs(Date.now())
+    const interval = window.setInterval(() => setExpiryNowMs(Date.now()), 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -376,15 +385,31 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
               <AlertCircle size={13} aria-hidden="true" /> {t('rightPanel.credentials.envInvalid')}
             </span>
           )}
+          <label className="field-label" htmlFor="credential-expiry">{t('rightPanel.credentials.expiryLabel')}</label>
+          <input
+            id="credential-expiry"
+            type="date"
+            className="text-field"
+            value={expiresAt}
+            onChange={event => setExpiresAt(event.target.value)}
+          />
+          <span className="helper-text">{t('rightPanel.credentials.expiryHint')}</span>
         </fieldset>
         <div className="form-actions connection-form-actions">
           <button
             className="command-button command-button-primary"
             disabled={!canAdd}
             onClick={() => {
-              onCreateCredential({ name: name.trim(), kind, secretRef: trimmedRef })
+              onCreateCredential({
+                name: name.trim(),
+                kind,
+                secretRef: trimmedRef,
+                // Date input gives YYYY-MM-DD; send an ISO instant (UTC midnight).
+                ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
+              })
               setName('')
               setSecretRef('')
+              setExpiresAt('')
             }}
           >
             {t('rightPanel.credentials.addButton')}
@@ -419,6 +444,27 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
                     {t('rightPanel.credentials.lastUsed')}: {new Date(health.lastUsedAt).toLocaleString(getResolvedLocale())}
                   </span>
                 )}
+                {(() => {
+                  // Expiry badge from the health snapshot's `expiresAt`. Only the
+                  // actionable states render a pill (expired = red, soon = amber);
+                  // healthy/no-expiry credentials show nothing.
+                  const expiry = expiryStatus(health?.expiresAt, expiryNowMs)
+                  if (expiry.kind === 'expired') {
+                    return (
+                      <span className="we-pill we-pill--red" data-testid="credential-expiry-badge">
+                        {t('rightPanel.credentials.expiry.expired')}
+                      </span>
+                    )
+                  }
+                  if (expiry.kind === 'soon') {
+                    return (
+                      <span className="we-pill we-pill--amber" data-testid="credential-expiry-badge">
+                        {t('rightPanel.credentials.expiry.expiresInDays', { count: expiry.days })}
+                      </span>
+                    )
+                  }
+                  return null
+                })()}
               </div>
               <div className="form-actions">
                 <button type="button" className="command-button" onClick={() => setRotating(credential.name)}>

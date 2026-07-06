@@ -34,7 +34,7 @@ vi.mock("drizzle-orm", () => ({
   eq: (col: unknown, val: unknown) => ({ eq: [col, val] }),
 }));
 
-import { rotateCredentialSecretRef } from "./credentialsRepo";
+import { rotateCredentialSecretRef, setCredentialExpiry } from "./credentialsRepo";
 
 beforeEach(() => {
   updateReturningMock.mockReset();
@@ -100,5 +100,67 @@ describe("rotateCredentialSecretRef", () => {
     });
 
     expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("setCredentialExpiry", () => {
+  it("returns ok with the new updatedAt when a row is updated (set)", async () => {
+    const updatedAt = new Date("2026-07-06T00:00:00.000Z");
+    updateReturningMock.mockResolvedValue([{ updatedAt }]);
+
+    const result = await setCredentialExpiry({
+      orgId: "org-1",
+      name: "gh-prod",
+      expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+    });
+
+    expect(result).toEqual({ ok: true, updatedAt });
+    expect(selectWhereMock).not.toHaveBeenCalled();
+  });
+
+  it("clears the expiry (null) and still returns ok", async () => {
+    const updatedAt = new Date("2026-07-06T00:00:00.000Z");
+    updateReturningMock.mockResolvedValue([{ updatedAt }]);
+
+    const result = await setCredentialExpiry({ orgId: "org-1", name: "gh-prod", expiresAt: null });
+
+    expect(result).toEqual({ ok: true, updatedAt });
+  });
+
+  it("returns conflict when the CAS UPDATE matches nothing but the credential exists", async () => {
+    updateReturningMock.mockResolvedValue([]);
+    selectWhereMock.mockResolvedValue([{ id: "cred-1" }]);
+
+    const result = await setCredentialExpiry({
+      orgId: "org-1",
+      name: "gh-prod",
+      expiresAt: new Date("2026-09-01T00:00:00.000Z"),
+      ifMatchUpdatedAt: "2026-07-05T00:00:00.000Z",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+  });
+
+  it("returns not_found when the UPDATE matches nothing and no such credential exists", async () => {
+    updateReturningMock.mockResolvedValue([]);
+    selectWhereMock.mockResolvedValue([]);
+
+    const result = await setCredentialExpiry({ orgId: "org-1", name: "ghost", expiresAt: null });
+
+    expect(result).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("returns conflict for a malformed If-Match without sending an invalid Date to UPDATE", async () => {
+    selectWhereMock.mockResolvedValue([{ id: "cred-1" }]);
+
+    const result = await setCredentialExpiry({
+      orgId: "org-1",
+      name: "gh-prod",
+      expiresAt: null,
+      ifMatchUpdatedAt: "not-a-date",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "conflict" });
+    expect(updateReturningMock).not.toHaveBeenCalled();
   });
 });

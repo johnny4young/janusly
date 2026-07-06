@@ -17,6 +17,7 @@ import {
   getCredentialHealth,
   resolveCredentialReferences,
   rotateCredentialSecretRef,
+  setCredentialExpiry,
   withAuditTx,
 } from "@janusly/data";
 
@@ -29,6 +30,21 @@ import type { Route } from "../routes";
 /** Env-var NAME (not a value): a credential's `secretRef` points at this. */
 const ENV_VAR_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_VAR_NAME_MAX = 256;
+
+/**
+ * Parse an optional operator-supplied expiry. `undefined` / `null` → no expiry
+ * (`date: null`). A string must parse to a valid Date strictly in the future
+ * (a past/now date is a config mistake, not a warning target). Anything else
+ * (number, object, past date, unparseable) → `{ ok: false }` so the route
+ * returns a coded 400. The value is metadata — never a secret.
+ */
+function parseFutureExpiry(value: unknown): { ok: true; date: Date | null } | { ok: false } {
+  if (value === undefined || value === null) return { ok: true, date: null };
+  if (typeof value !== "string") return { ok: false };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) return { ok: false };
+  return { ok: true, date };
+}
 
 export const credentialsRoutes: Route[] = [
   { method: "GET", match: "/credentials", role: "viewer", permission: "credentials.read",
@@ -47,6 +63,7 @@ export const credentialsRoutes: Route[] = [
           metadata: credentials.metadata,
           createdBy: credentials.createdBy,
           createdAt: credentials.createdAt,
+          expiresAt: credentials.expiresAt,
         })
         .from(credentials)
         .where(eq(credentials.orgId, auth.orgId));
@@ -63,9 +80,15 @@ export const credentialsRoutes: Route[] = [
       if (typeof body.name !== "string" || typeof body.kind !== "string" || typeof body.secretRef !== "string") {
         return sendError(res, "credentials_fields_required", "name, kind, and secretRef are required", 400);
       }
+      // Optional operator-declared expiry. Must be a future ISO date; omit or
+      // null for "no expiry". The value is metadata only — never the secret.
+      const parsedExpiry = parseFutureExpiry(body.expiresAt);
+      if (!parsedExpiry.ok) {
+        return sendError(res, "credentials_invalid_expiry", "expiresAt must be a valid future ISO date or null", 400);
+      }
       const id = crypto.randomUUID();
-      await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, createdBy: auth.userId });
-      await auditAction(auth, "credential.created", { targetType: "credential", targetId: id, metadata: { kind: body.kind } });
+      await db.insert(credentials).values({ id, orgId: auth.orgId, name: body.name, kind: body.kind, secretRef: body.secretRef, metadata: body.metadata ?? {}, expiresAt: parsedExpiry.date, createdBy: auth.userId });
+      await auditAction(auth, "credential.created", { targetType: "credential", targetId: id, metadata: { kind: body.kind, hasExpiry: parsedExpiry.date !== null } });
       return sendJson(res, { id });
     } },
   // Bulk credential rotation: preview the blast radius (dryRun), then commit
@@ -161,6 +184,65 @@ export const credentialsRoutes: Route[] = [
         credentialName: name,
         affected,
         affectedCount: affected.length,
+        updatedAt: outcome.updatedAt,
+      });
+    } },
+  // Set (or clear, with `expiresAt: null`) a credential's operator-declared
+  // expiry. Metadata-only — the secret value + env-var name are untouched, so
+  // no blast-radius preview is needed (unlike rotation). `ifMatch` is OPTIONAL
+  // here (low-risk metadata): when supplied it CAS-guards on the updatedAt
+  // token; when omitted it's last-write-wins.
+  { method: "POST", match: (url) => /^\/credentials\/[^/?]+\/expiry(\?|$)/.test(url), role: "admin", permission: "credentials.write",
+    handler: async ({ req, res, auth }) => {
+      const pathname = new URL(req.url ?? "", "http://internal").pathname;
+      const name = decodeURIComponent(pathname.split("/")[2] ?? "");
+      if (!name) return sendError(res, "credentials_name_required", "credential name required", 400);
+
+      const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      const parsedExpiry = parseFutureExpiry(body.expiresAt);
+      if (!parsedExpiry.ok) {
+        return sendError(res, "credentials_invalid_expiry", "expiresAt must be a valid future ISO date or null to clear", 400);
+      }
+      const ifMatch = typeof body.ifMatch === "string" ? body.ifMatch : undefined;
+      if (ifMatch && Number.isNaN(new Date(ifMatch).getTime())) {
+        return sendError(res, "credentials_if_match_invalid", "ifMatch must be a valid ISO updatedAt token", 400);
+      }
+
+      // Atomic: the expiry write + its audit row commit-or-rollback together.
+      const txOutcome = await withAuditTx(async (tx, audit) => {
+        const result = await setCredentialExpiry(
+          { orgId: auth.orgId, name, expiresAt: parsedExpiry.date, ifMatchUpdatedAt: ifMatch },
+          tx,
+        );
+        if (!result.ok) return { kind: result.reason } as const;
+        await audit({
+          orgId: auth.orgId,
+          userId: auth.userId,
+          action: "credential.expiry_set",
+          targetType: "credential",
+          targetId: name,
+          metadata: {
+            hasExpiry: parsedExpiry.date !== null,
+            expiresAt: parsedExpiry.date?.toISOString() ?? null,
+            source: auth.source,
+            actor: { userId: auth.userId, mode: auth.mode, serviceTokenSuffix: auth.serviceTokenSuffix },
+          },
+        });
+        return { kind: "ok", updatedAt: result.updatedAt } as const;
+      });
+
+      if (!txOutcome.ok) {
+        return sendError(res, "credentials_expiry_failed", "Setting credential expiry failed", 500);
+      }
+      const outcome = txOutcome.result;
+      if (outcome.kind === "not_found") return sendError(res, "credentials_not_found", "credential not found", 404);
+      if (outcome.kind === "conflict") {
+        return sendError(res, "credential_expiry_conflict", "Credential changed since load; reload before setting expiry", 409);
+      }
+      return sendJson(res, {
+        ok: true,
+        credentialName: name,
+        expiresAt: parsedExpiry.date?.toISOString() ?? null,
         updatedAt: outcome.updatedAt,
       });
     } },

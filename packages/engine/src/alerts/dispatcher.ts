@@ -175,6 +175,24 @@ export function matchesPolicyFilter(
       }
       return true;
     }
+    case "credential.expiring": {
+      const p = params as Partial<AlertParamsByTrigger["credential.expiring"]>;
+      // Fire only when the credential is at/inside the policy's warn window.
+      // The scanner pre-filters by the widest warnDays window across policies,
+      // so this per-policy check narrows the shared scan to each threshold.
+      const daysUntil = typeof payload.daysUntilExpiry === "number" ? payload.daysUntilExpiry : Number.POSITIVE_INFINITY;
+      const threshold = typeof p.warnDays === "number" ? p.warnDays : 30;
+      if (daysUntil > threshold) return false;
+      if (Array.isArray(p.credentialKinds) && p.credentialKinds.length > 0) {
+        const kind = typeof payload.kind === "string" ? payload.kind : "";
+        if (!p.credentialKinds.includes(kind)) return false;
+      }
+      if (Array.isArray(p.credentialNames) && p.credentialNames.length > 0) {
+        const name = typeof payload.name === "string" ? payload.name : "";
+        if (!p.credentialNames.includes(name)) return false;
+      }
+      return true;
+    }
     default:
       return true;
   }

@@ -31,6 +31,7 @@ vi.mock("@janusly/data/src/credentialHealthRepo", () => ({
 
 vi.mock("@janusly/data/src/credentialsRepo", () => ({
   rotateCredentialSecretRef: vi.fn(),
+  setCredentialExpiry: vi.fn(),
 }));
 
 // withAuditTx (the atomic entity+audit chokepoint) — run the handler with a
@@ -77,7 +78,7 @@ vi.mock("../audit-helper", () => ({
 import { credentialsRoutes } from "./credentials-routes";
 import { readJson, sendJson } from "../http";
 import { getCredentialHealth, resolveCredentialReferences } from "@janusly/data/src/credentialHealthRepo";
-import { rotateCredentialSecretRef } from "@janusly/data/src/credentialsRepo";
+import { rotateCredentialSecretRef, setCredentialExpiry } from "@janusly/data/src/credentialsRepo";
 import { auditAction } from "../audit-helper";
 import type { Route } from "../routes";
 
@@ -86,6 +87,7 @@ const readJsonMock = vi.mocked(readJson);
 const getCredentialHealthMock = vi.mocked(getCredentialHealth);
 const resolveRefsMock = vi.mocked(resolveCredentialReferences);
 const rotateMock = vi.mocked(rotateCredentialSecretRef);
+const setExpiryMock = vi.mocked(setCredentialExpiry);
 const auditActionMock = vi.mocked(auditAction);
 
 function findRoute(method: string, path: string): Route {
@@ -232,5 +234,82 @@ describe("POST /credentials/:name/bulk-update", () => {
     const { status } = await callRoute("POST", PATH, { dryRun: false, newSecretRef: "not a valid name!" });
     expect(status).toBe(400);
     expect(rotateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /credentials — optional expiry", () => {
+  it("accepts a future expiresAt and audits hasExpiry: true", async () => {
+    const future = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const { status } = await callRoute("POST", "/credentials", {
+      name: "gh", kind: "github_token", secretRef: "GH_TOKEN", expiresAt: future,
+    });
+    expect(status).toBe(200);
+    expect(auditActionMock).toHaveBeenCalledWith(
+      AUTH,
+      "credential.created",
+      expect.objectContaining({ metadata: expect.objectContaining({ hasExpiry: true }) }),
+    );
+  });
+
+  it("rejects a past expiresAt with credentials_invalid_expiry (400)", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const { status, payload } = await callRoute("POST", "/credentials", {
+      name: "gh", kind: "github_token", secretRef: "GH_TOKEN", expiresAt: past,
+    });
+    expect(status).toBe(400);
+    expect(payload.code).toBe("credentials_invalid_expiry");
+    expect(auditActionMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-string expiresAt (400)", async () => {
+    const { status, payload } = await callRoute("POST", "/credentials", {
+      name: "gh", kind: "github_token", secretRef: "GH_TOKEN", expiresAt: 123,
+    });
+    expect(status).toBe(400);
+    expect(payload.code).toBe("credentials_invalid_expiry");
+  });
+});
+
+describe("POST /credentials/:name/expiry", () => {
+  const PATH = "/credentials/gh-prod/expiry";
+
+  it("declares BOTH role: admin AND permission: credentials.write", () => {
+    const route = findRoute("POST", PATH);
+    expect(route.role).toBe("admin");
+    expect(route.permission).toBe("credentials.write");
+  });
+
+  it("sets a future expiry → ok + audits credential.expiry_set", async () => {
+    setExpiryMock.mockResolvedValue({ ok: true, updatedAt: new Date("2026-07-06T00:00:00.000Z") });
+    const future = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const { status } = await callRoute("POST", PATH, { expiresAt: future });
+    expect(status).toBe(200);
+    expect(txHoisted.auditCalls[0]).toMatchObject({ action: "credential.expiry_set", metadata: expect.objectContaining({ hasExpiry: true }) });
+  });
+
+  it("clears the expiry (null) → ok", async () => {
+    setExpiryMock.mockResolvedValue({ ok: true, updatedAt: new Date("2026-07-06T00:00:00.000Z") });
+    const { status } = await callRoute("POST", PATH, { expiresAt: null });
+    expect(status).toBe(200);
+    expect(txHoisted.auditCalls[0]).toMatchObject({ metadata: expect.objectContaining({ hasExpiry: false }) });
+  });
+
+  it("rejects a past expiry with credentials_invalid_expiry (400) without calling the repo", async () => {
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const { status, payload } = await callRoute("POST", PATH, { expiresAt: past });
+    expect(status).toBe(400);
+    expect(payload.code).toBe("credentials_invalid_expiry");
+    expect(setExpiryMock).not.toHaveBeenCalled();
+  });
+
+  it("maps not_found → 404 and conflict → 409", async () => {
+    setExpiryMock.mockResolvedValueOnce({ ok: false, reason: "not_found" });
+    const notFound = await callRoute("POST", PATH, { expiresAt: null });
+    expect(notFound.status).toBe(404);
+
+    setExpiryMock.mockResolvedValueOnce({ ok: false, reason: "conflict" });
+    const conflict = await callRoute("POST", PATH, { expiresAt: null });
+    expect(conflict.status).toBe(409);
+    expect(conflict.payload.code).toBe("credential_expiry_conflict");
   });
 });
