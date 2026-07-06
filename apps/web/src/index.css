@@ -6797,6 +6797,24 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   margin: 0;
 }
 
+/* Inline MTTR trend sparkline under a metric value. Color encodes direction:
+   improving (last <= mean) is green, worsening is red. */
+.we-sparkline {
+  display: block;
+  margin-top: 4px;
+  height: 16px;
+  width: 80px;
+  overflow: visible;
+}
+
+.we-sparkline--down polyline {
+  stroke: var(--we-success);
+}
+
+.we-sparkline--up polyline {
+  stroke: var(--we-danger);
+}
+
 .we-ops-progress {
   position: relative;
   height: 6px;

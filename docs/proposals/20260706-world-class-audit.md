@@ -295,7 +295,12 @@ warranted below ~200.
 
 ### 2C. UX & stickiness (no new deps; hand-written CSS only)
 
-#### P-16 — Animated metric counters (S)
+#### P-16 — Animated metric counters (S) — ✅ already implemented (finding inaccurate)
+> Verification during batch 2 found this ALREADY shipped: every Recovery
+> Center / Runs tile passes `numericValue` into `VitalSignsStrip`, which drives
+> the existing `useAnimatedNumber` count-up (reduced-motion-aware). No work
+> needed — the audit's "hook is unused" note was wrong.
+
 **Problem.** Recovery Center metric tiles jump between values on
 `platformVersion` bumps; the existing `useAnimatedNumber` hook is unused.
 **Design.** Wire `useAnimatedNumber` into the metric strip
@@ -304,7 +309,7 @@ respect `prefers-reduced-motion` (render final value directly).
 **AC.** Value change animates; initial render doesn't; reduced-motion renders
 statically; component test asserts final value.
 
-#### P-17 — MTTR trend sparkline (M)
+#### P-17 — MTTR trend sparkline (M) — ✅ shipped ENG-271
 **Problem.** MTTR is a snapshot number; operators can't see if recovery is
 getting faster or slower — the north-star metric has no trend affordance.
 **Design.** Extend `/recovery/metrics` with `mttrTrend: Array<{ day, seconds }>`

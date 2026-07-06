@@ -199,6 +199,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const mttrRationale = metrics?.mttr
     ? tRecoveryMetricRationale(metrics.mttr)
     : t('recoveryCenter.metric.mttr.rationaleFallback') as string
+  // MTTR trend sparkline: needs ≥2 daily points to tell a story.
+  const mttrTrendSeconds = (metrics?.mttrTrend ?? []).map((point) => point.seconds)
   homeTiles.push({
     icon: <RefreshCw size={14} aria-hidden="true" />,
     label: mttrLabel,
@@ -207,6 +209,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     severity: metrics?.mttr.severity ?? 'neutral',
     rationale: mttrRationale,
     ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }) as string,
+    sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
+    sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }) as string,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })

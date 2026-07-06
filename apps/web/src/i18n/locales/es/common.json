@@ -2285,6 +2285,7 @@
   "recoveryCenter.metric.failures.rationale": "Pendientes de triaje",
   "recoveryCenter.metric.mttr.label": "MTTR (p50)",
   "recoveryCenter.metric.mttr.rationaleFallback": "Tiempo medio de recuperación",
+  "recoveryCenter.metric.mttr.trendAria": "Tendencia del MTTR en los últimos {{count}} días con recuperaciones",
   "recoveryCenter.metric.approvals.label": "Aprobaciones pendientes",
   "recoveryCenter.metric.approvals.rationaleEmpty": "Sin acción humana requerida",
   "recoveryCenter.metric.approvals.rationale": "Operadores esperando una decisión",

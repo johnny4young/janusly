@@ -21,6 +21,22 @@ function baseSignals(partial: Partial<RecoveryMetricsSignals> = {}): RecoveryMet
   };
 }
 
+describe("composeRecoveryMetrics — mttrTrend passthrough", () => {
+  it("defaults to an empty trend when signals omit it", () => {
+    const result = composeRecoveryMetrics(baseSignals(), 30);
+    expect(result.mttrTrend).toEqual([]);
+  });
+
+  it("passes the per-day trend through untouched (oldest-first)", () => {
+    const trend = [
+      { day: "2026-07-01", seconds: 300 },
+      { day: "2026-07-02", seconds: 180 },
+    ];
+    const result = composeRecoveryMetrics(baseSignals({ mttrTrend: trend }), 30);
+    expect(result.mttrTrend).toEqual(trend);
+  });
+});
+
 describe("composeRecoveryMetrics — successRate band", () => {
   it("95/100 succeeded → healthy", () => {
     const result = composeRecoveryMetrics(

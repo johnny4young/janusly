@@ -96,9 +96,13 @@ export type SlaAttainmentRepo = {
  * names + shape match `RecoveryMetricsSignals` there — both modules
  * declare the type so neither layer has to depend on the other.
  */
+/** One per-day point for the MTTR trend sparkline: `day` = `YYYY-MM-DD`, `seconds` = avg recovery time that day. */
+export type MttrTrendPointRepo = { day: string; seconds: number };
+
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCountsRepo;
   mttrDurations: number[];
+  mttrTrend: MttrTrendPointRepo[];
   approvalsPending: number;
   costByProvider: CostProviderRowRepo[];
   p95LatencyMs: number | null;
@@ -117,6 +121,7 @@ export async function queryRecoveryMetricsSignals(
   const [
     runStatusCounts,
     mttrDurations,
+    mttrTrend,
     approvalsPending,
     costByProvider,
     p95LatencyMs,
@@ -126,6 +131,7 @@ export async function queryRecoveryMetricsSignals(
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
     queryMttrDurations(orgId, since),
+    queryMttrTrend(orgId, since),
     queryApprovalsPending(orgId),
     queryCostByProvider(orgId, since),
     queryP95Latency(orgId, since),
@@ -137,6 +143,7 @@ export async function queryRecoveryMetricsSignals(
   return {
     runStatusCounts,
     mttrDurations,
+    mttrTrend,
     approvalsPending,
     costByProvider,
     p95LatencyMs,
@@ -144,6 +151,38 @@ export async function queryRecoveryMetricsSignals(
     resolvedClusters,
     slaAttainment,
   };
+}
+
+/**
+ * Per-day average recovery time (`replayedAt − createdAt`) for DLQ rows that
+ * replayed cleanly, bucketed by the day the replay landed. Aggregated entirely
+ * in Postgres (one GROUP BY, no row materialization) and bounded to the most
+ * recent 14 days with data, returned oldest-first for the MTTR trend sparkline.
+ * Multi-tenant scope: `eq(deadLetters.orgId, orgId)`.
+ */
+async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPointRepo[]> {
+  const dayBucket = sql`date_trunc('day', ${deadLetters.replayedAt})`;
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
+      seconds: sql<number>`avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt})))::float8`,
+    })
+    .from(deadLetters)
+    .where(and(
+      eq(deadLetters.orgId, orgId),
+      eq(deadLetters.status, "replayed"),
+      gte(deadLetters.replayedAt, since),
+    ))
+    .groupBy(dayBucket)
+    .orderBy(sql`${dayBucket} desc`)
+    .limit(14);
+
+  // Newest-first from SQL → reverse to ascending for the left-to-right
+  // sparkline; drop any non-positive average (clock skew).
+  return rows
+    .map((row) => ({ day: row.day, seconds: Number(row.seconds) }))
+    .filter((point) => Number.isFinite(point.seconds) && point.seconds > 0)
+    .reverse();
 }
 
 /**
