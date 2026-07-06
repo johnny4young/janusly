@@ -146,6 +146,25 @@ describe('ALERT_PARAMS_SCHEMAS', () => {
     ).toBe(false)
   })
 
+  it('credential.expiring requires warnDays in 1..365 and accepts optional kind/name filters', () => {
+    expect(ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({ warnDays: 14 }).success).toBe(true)
+    expect(
+      ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({
+        warnDays: 7,
+        credentialKinds: ['github_token'],
+        credentialNames: ['prod-token'],
+      }).success,
+    ).toBe(true)
+    // warnDays is required + bounded; an out-of-range or missing value is rejected.
+    expect(ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({}).success).toBe(false)
+    expect(ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({ warnDays: 0 }).success).toBe(false)
+    expect(ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({ warnDays: 366 }).success).toBe(false)
+    // .strict() rejects an unknown key.
+    expect(
+      ALERT_PARAMS_SCHEMAS['credential.expiring'].safeParse({ warnDays: 14, foo: 1 }).success,
+    ).toBe(false)
+  })
+
   it('recovery_item.sla_breached accepts a severities filter', () => {
     expect(ALERT_PARAMS_SCHEMAS['recovery_item.sla_breached'].safeParse({}).success).toBe(true)
     expect(

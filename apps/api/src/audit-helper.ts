@@ -66,6 +66,7 @@ export type AuditAction =
   // credentials
   | "credential.created"
   | "credential.bulk_updated"
+  | "credential.expiry_set"
   // dlq / recovery replay
   | "dlq.resolved"
   | "dlq.replayed"

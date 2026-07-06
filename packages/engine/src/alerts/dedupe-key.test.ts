@@ -70,4 +70,11 @@ describe("buildDedupeKey", () => {
     ).toBe("schedule:wf_1");
     expect(buildDedupeKey("workflow.schedule_anomaly", {})).toBe("__none__");
   });
+
+  it("credential.expiring keys per credential so the cooldown yields one heads-up per credential", () => {
+    expect(
+      buildDedupeKey("credential.expiring", { credentialId: "cred_1", kind: "github_token", warnDays: 5 }),
+    ).toBe("credential:cred_1");
+    expect(buildDedupeKey("credential.expiring", {})).toBe("__none__");
+  });
 });

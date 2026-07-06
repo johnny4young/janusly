@@ -494,7 +494,7 @@ export default function App() {
     }
   }, [addToast, refreshPlatform, t])
 
-  const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string }) => {
+  const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => {
     try {
       await api('/credentials', { method: 'POST', body: JSON.stringify(credential) })
       addToast(t('toasts.credentialAdded', { name: credential.name }), 'success')
