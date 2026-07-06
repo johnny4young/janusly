@@ -14,6 +14,7 @@ import {
   getOrgConfigSnapshot,
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
+  queryRecoveryHeatmap,
 } from "@janusly/data";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
@@ -58,6 +59,19 @@ export const recoveryRoutes: Route[] = [
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
       setCachedRecoveryMetrics(auth.orgId, windowDays, metrics);
       return sendJson(res, metrics);
+    } },
+
+  // Per-day failure/recovery heatmap for the Recovery Center calendar. Pure
+  // aggregation (one GROUP BY over dead_letters); no cache needed — it's read
+  // less often than the metric strip and the grid tolerates one-tick staleness.
+  { method: "GET", match: (url) => url === "/recovery/heatmap" || url.startsWith("/recovery/heatmap?"),
+    role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawDays = Number.parseInt(url.searchParams.get("days") ?? "", 10);
+      const days = Number.isFinite(rawDays) ? Math.min(90, Math.max(1, rawDays)) : 90;
+      const heatmap = await queryRecoveryHeatmap(auth.orgId, days);
+      return sendJson(res, { days: heatmap, windowDays: days });
     } },
 
   // Operator → system feedback channel for the recovery loop. The

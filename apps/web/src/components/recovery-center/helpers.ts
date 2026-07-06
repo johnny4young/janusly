@@ -277,6 +277,40 @@ export function budgetBand(envelope: BudgetEnvelope | null): 'cobalt' | 'cyan' |
 // Small readers / labelers.
 // ─────────────────────────────────────────────────────────────────────────
 
+/** One per-day cell from `GET /recovery/heatmap`. */
+export type HeatmapDay = { day: string; failures: number; recovered: number; mttrSeconds: number }
+export type HeatmapOutcome = 'none' | 'recovered' | 'partial' | 'unrecovered'
+export type HeatmapCell = { day: string; failures: number; recovered: number; outcome: HeatmapOutcome }
+
+/** Classify a day's failure/recovery counts into a heatmap color band. */
+export function heatmapOutcome(failures: number, recovered: number): HeatmapOutcome {
+  if (failures <= 0) return 'none'
+  if (recovered >= failures) return 'recovered'
+  if (recovered > 0) return 'partial'
+  return 'unrecovered'
+}
+
+/**
+ * Densify the sparse API rows (only days with failures) into a contiguous
+ * last-`windowDays` grid, oldest→newest, filling missing days as zero. `nowMs`
+ * is injected for deterministic tests. Day keys are UTC (`YYYY-MM-DD`) to match
+ * the API's `date_trunc('day', …)` bucketing.
+ */
+export function buildHeatmapCells(days: HeatmapDay[], windowDays: number, nowMs: number): HeatmapCell[] {
+  const byDay = new Map(days.map((d) => [d.day, d]))
+  const dayMs = 86_400_000
+  const bounded = Math.min(90, Math.max(1, Math.floor(windowDays)))
+  const cells: HeatmapCell[] = []
+  for (let i = bounded - 1; i >= 0; i--) {
+    const key = new Date(nowMs - i * dayMs).toISOString().slice(0, 10)
+    const row = byDay.get(key)
+    const failures = row?.failures ?? 0
+    const recovered = row?.recovered ?? 0
+    cells.push({ day: key, failures, recovered, outcome: heatmapOutcome(failures, recovered) })
+  }
+  return cells
+}
+
 export type DowntimeSeverity = 'ok' | 'warn' | 'danger'
 
 /** Downtime-clock thresholds in minutes (amber ≥1h, red ≥4h). */

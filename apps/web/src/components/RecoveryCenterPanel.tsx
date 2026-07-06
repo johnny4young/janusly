@@ -54,8 +54,10 @@ import {
   readDisplayName,
   readHealthScore,
   type ClustersResponse,
+  type HeatmapDay,
   type RecoveryMetrics,
 } from './recovery-center/helpers'
+import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import {
@@ -85,6 +87,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const user = useWorkflowStore((state) => state.user)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [clusters, setClusters] = useState<ClustersResponse | null>(null)
+  const [heatmap, setHeatmap] = useState<HeatmapDay[]>([])
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [currentHour, setCurrentHour] = useState(12)
@@ -118,6 +121,20 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       .catch(() => {
         if (cancelled) return
         setClusters(null)
+      })
+    return () => { cancelled = true }
+  }, [platformVersion])
+
+  useEffect(() => {
+    let cancelled = false
+    api('/recovery/heatmap?days=90')
+      .then((payload) => {
+        if (cancelled) return
+        setHeatmap(((payload as { days?: HeatmapDay[] })?.days) ?? [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setHeatmap([])
       })
     return () => { cancelled = true }
   }, [platformVersion])
@@ -292,6 +309,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       />
 
       {metricStrip}
+
+      <RecoveryHeatmap days={heatmap} windowDays={90} nowMs={nowMs} />
 
       <div className="we-operator-grid">
         <section className="we-operator-chat">

@@ -185,6 +185,48 @@ async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPoin
     .reverse();
 }
 
+/** One per-day cell for the recovery heatmap calendar. */
+export type RecoveryHeatmapDay = {
+  day: string;
+  failures: number;
+  recovered: number;
+  mttrSeconds: number;
+};
+
+const HEATMAP_MAX_DAYS = 90;
+
+/**
+ * Per-day failure/recovery counts over the last `days` (clamped 1..90),
+ * bucketed by the day the failure landed: `failures` = dead letters created
+ * that day, `recovered` = the subset now replayed, `mttrSeconds` = avg recovery
+ * time for the recovered ones. One Postgres GROUP BY (no row materialization),
+ * oldest-first. Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. The existing
+ * `dead_letters_org_created_idx` covers the window scan.
+ */
+export async function queryRecoveryHeatmap(orgId: string, days: number): Promise<RecoveryHeatmapDay[]> {
+  const windowDays = Math.min(HEATMAP_MAX_DAYS, Math.max(1, Math.floor(days)));
+  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+  const dayBucket = sql`date_trunc('day', ${deadLetters.createdAt})`;
+  const rows = await db
+    .select({
+      day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
+      failures: sql<number>`count(*)::int`,
+      recovered: sql<number>`count(*) filter (where ${deadLetters.status} = 'replayed')::int`,
+      mttrSeconds: sql<number>`coalesce(avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt}))) filter (where ${deadLetters.status} = 'replayed' and ${deadLetters.replayedAt} is not null), 0)::float8`,
+    })
+    .from(deadLetters)
+    .where(and(eq(deadLetters.orgId, orgId), gte(deadLetters.createdAt, since)))
+    .groupBy(dayBucket)
+    .orderBy(sql`${dayBucket} asc`)
+    .limit(HEATMAP_MAX_DAYS);
+  return rows.map((row) => ({
+    day: row.day,
+    failures: Number(row.failures),
+    recovered: Number(row.recovered),
+    mttrSeconds: Math.round(Number(row.mttrSeconds)),
+  }));
+}
+
 /**
  * SLA-attainment counts over recovery items resolved in the window. Aggregated
  * in Postgres (two counts, no row materialization): total resolved-in-window
