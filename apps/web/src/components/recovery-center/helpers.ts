@@ -277,6 +277,40 @@ export function budgetBand(envelope: BudgetEnvelope | null): 'cobalt' | 'cyan' |
 // Small readers / labelers.
 // ─────────────────────────────────────────────────────────────────────────
 
+export type DowntimeSeverity = 'ok' | 'warn' | 'danger'
+
+/** Downtime-clock thresholds in minutes (amber ≥1h, red ≥4h). */
+export const DOWNTIME_WARN_MINUTES = 60
+export const DOWNTIME_DANGER_MINUTES = 240
+
+/**
+ * Severity for how long an open failure has been down. Fixed heuristic
+ * thresholds — the DLQ row carries no per-item SLA — so an operator sees a
+ * failure warm from neutral → amber (≥1h) → red (≥4h) the longer it sits.
+ * Returns 'ok' when the clock isn't ready or the timestamp is unusable.
+ */
+export function downtimeSeverity(iso: string | undefined, nowMs: number | null): DowntimeSeverity {
+  if (nowMs === null || !iso) return 'ok'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'ok'
+  const minutes = (nowMs - then) / 60000
+  if (minutes >= DOWNTIME_DANGER_MINUTES) return 'danger'
+  if (minutes >= DOWNTIME_WARN_MINUTES) return 'warn'
+  return 'ok'
+}
+
+/** Compact downtime duration for the "recovered after" toast: "3h 14m" / "12m" / "45s". Empty for bad input. */
+export function formatDowntime(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  if (totalMinutes < 60) return `${totalMinutes}m`
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+}
+
 export function humanizeAge(iso: string | undefined, nowMs: number | null): string {
   if (nowMs === null) return ''
   if (!iso) return ''

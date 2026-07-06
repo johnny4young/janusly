@@ -8402,6 +8402,18 @@ button.we-ops-metric-card--button {
   grid-row: 1 / span 2;
   align-self: center;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Downtime clock: the longer a failure sits open, the hotter its age chip. */
+.we-recovery-center-row__age[data-severity="warn"] {
+  color: var(--we-warning-text);
+  font-weight: 600;
+}
+
+.we-recovery-center-row__age[data-severity="danger"] {
+  color: var(--we-danger-text);
+  font-weight: 700;
 }
 
 /* Recommended actions -------------------------------------------------- */

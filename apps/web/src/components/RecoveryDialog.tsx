@@ -43,6 +43,7 @@ import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
+import { formatDowntime } from './recovery-center/helpers'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
@@ -130,6 +131,7 @@ export function RecoveryDialog({
 }: RecoveryDialogProps) {
   const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
+  const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
 
   // Derive the original failure's signature once when the source DLQ
@@ -405,6 +407,18 @@ export function RecoveryDialog({
         preSaveBeforeSnapshot,
       })
       bumpPlatformVersion()
+      // Wedge moment: name the time we just gave back. The dead letter's
+      // `createdAt` is the failure instant; recovering it now closes that
+      // downtime window, so surface "Recovered after 3h 14m".
+      if (dlq.createdAt) {
+        const downtimeMs = Date.now() - new Date(dlq.createdAt).getTime()
+        if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
+          addToast(
+            t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
+            'success',
+          )
+        }
+      }
       // Operator → system feedback: same as cluster mode above. The
       // `rationale` here seeds the `patch_rationale` memory kind so
       // future similar failures recall the LLM's explanation, not just

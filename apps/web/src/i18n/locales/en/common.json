@@ -1810,6 +1810,7 @@
   "recoveryDialog.errors.suggestionRequest": "Suggestion request failed",
   "recoveryDialog.errors.validationRequest": "Validation request failed",
   "recoveryDialog.errors.applyFailed": "Apply failed",
+  "recoveryDialog.recoveredAfter": "Recovered after {{duration}} of downtime",
   "recoveryDialog.errors.selectedSuggestionUnavailable": "Selected suggestion is no longer available.",
   "recoveryDialog.approachLabel.add_retry": "Add retry",
   "recoveryDialog.approachLabel.raise_timeout": "Raise timeout",

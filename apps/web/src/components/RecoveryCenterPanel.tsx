@@ -131,8 +131,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setCurrentHour(new Date().getHours())
   }, [])
 
+  // Live "downtime clock": re-anchor the reference time on mount and whenever
+  // the data changes, then tick once a minute so open-failure ages advance in
+  // place — ONE interval for the whole panel, never a timer per row.
   useEffect(() => {
     setNowMs(Date.now())
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
+    return () => window.clearInterval(id)
   }, [platformVersion, openDeadLetters.length])
 
   const waitingNodes = useMemo(
