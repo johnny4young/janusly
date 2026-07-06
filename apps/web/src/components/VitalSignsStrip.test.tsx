@@ -243,6 +243,12 @@ describe('<Sparkline />', () => {
     expect(screen.getByTestId('vitals-sparkline').getAttribute('data-trend')).toBe('up')
   })
 
+  it('renders a native <title> hover tooltip when supplied', () => {
+    render(<Sparkline points={[300, 180]} ariaLabel="t" title={'2026-07-05: 5m\n2026-07-06: 3m'} />)
+    const titleEl = screen.getByTestId('vitals-sparkline').querySelector('title')
+    expect(titleEl?.textContent).toContain('2026-07-05: 5m')
+  })
+
   it('renders nothing below two points', () => {
     const { container } = render(<Sparkline points={[42]} ariaLabel="t" />)
     expect(container.querySelector('[data-testid="vitals-sparkline"]')).toBeNull()

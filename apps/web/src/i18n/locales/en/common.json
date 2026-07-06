@@ -1205,6 +1205,7 @@
   "dlq.search.label": "Search",
   "dlq.dayFilter.label": "Day: {{day}}",
   "dlq.dayFilter.clear": "Clear day filter",
+  "dlq.downtimeTitle": "Downtime so far",
   "dlq.search.placeholder": "Search by node, run id, or error…",
   "dlq.show": "Show",
   "dlq.filter.all": "All",

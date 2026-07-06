@@ -8500,6 +8500,25 @@ button.we-recovery-heatmap__cell--clickable:focus-visible {
   outline-offset: 1px;
 }
 
+/* Downtime "so far" indicator on an open recovery-queue row — same warming
+   thresholds as the home wedge tile's downtime clock (amber ≥1h, red ≥4h). */
+.we-list-row__downtime {
+  font-size: 11px;
+  color: var(--we-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.we-list-row__downtime[data-severity="warn"] {
+  color: var(--we-warning-text);
+  font-weight: 600;
+}
+
+.we-list-row__downtime[data-severity="danger"] {
+  color: var(--we-danger-text);
+  font-weight: 700;
+}
+
 /* Recovery-queue day drill-in chip (set by a heatmap click). */
 .we-dlq-day-chip {
   display: inline-flex;

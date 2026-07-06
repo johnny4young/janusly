@@ -8,6 +8,8 @@
 
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, Inbox, Sparkles, X } from 'lucide-react'
+
+import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
@@ -612,6 +614,16 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                           </small>
                         </div>
                         <div className="we-list-row__meta">
+                          {item.status === 'open' && item.createdAt && (
+                            <span
+                              className="we-list-row__downtime"
+                              data-severity={downtimeSeverity(item.createdAt, Date.now())}
+                              title={t('dlq.downtimeTitle') as string}
+                              data-testid={`dlq-downtime-${item.id}`}
+                            >
+                              {humanizeAge(item.createdAt, Date.now())}
+                            </span>
+                          )}
                           <span className={`we-list-row__pill we-list-row__pill--${severity}`}>
                             {formatStatusLabel(item.status)}
                           </span>

@@ -2,9 +2,11 @@
  * Web ↔ route contract test.
  *
  * Statically extracts every `api(...)` / `downloadFromApi(...)` path the web
- * calls (`apps/web/src`) and asserts each resolves to a registered route in the
- * composed registry (method + matcher). Catches drift — a web call to a route
- * that was renamed or never existed — at unit-test time instead of only in e2e.
+ * calls (`apps/web/src`) — plus the SSE `fetch(`${API_URL}…`)` streaming paths
+ * that bypass the api client — and asserts each resolves to a registered route
+ * in the composed registry (method + matcher). Catches drift — a web call to a
+ * route that was renamed or never existed — at unit-test time instead of only
+ * in e2e.
  *
  * Scope: only STRING/TEMPLATE-literal paths are checked (a fully dynamic
  * `api(variable)` can't be resolved statically and is skipped). Template
@@ -49,7 +51,6 @@ function extractCalls(source: string, file: string): ApiCall[] {
   const re = /\b(api|downloadFromApi)\(\s*(['"`])([^'"`]*?)\2/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
-    const fn = m[1];
     const rawPath = m[3];
     if (!rawPath.startsWith("/")) continue; // not an absolute API path
     // Look just past the path for an inline `method: 'X'` before the call ends
@@ -59,6 +60,13 @@ function extractCalls(source: string, file: string): ApiCall[] {
     const mm = window.match(/^\s*,\s*\{[\s\S]*?method:\s*['"]([A-Za-z]+)['"]/);
     if (mm) method = mm[1].toUpperCase();
     out.push({ path: rawPath, method, file });
+  }
+  // SSE / raw streaming fetches bypass api()/downloadFromApi() and go through
+  // `${API_URL}` directly (e.g. the run stream). GET; path is after ${API_URL}.
+  const fetchRe = /fetch\(\s*`\$\{API_URL\}([^`]*)`/g;
+  while ((m = fetchRe.exec(source))) {
+    const rawPath = m[1];
+    if (rawPath.startsWith("/")) out.push({ path: rawPath, method: "GET", file });
   }
   return out;
 }
