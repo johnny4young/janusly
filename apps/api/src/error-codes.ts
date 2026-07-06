@@ -116,6 +116,7 @@ export type ApiErrorCode =
   // credentials
   | "credentials_fields_required"
   | "credentials_invalid_expiry"
+  | "credentials_expiry_required"
   | "credentials_expiry_failed"
   | "credentials_if_match_invalid"
   | "credentials_if_match_required"

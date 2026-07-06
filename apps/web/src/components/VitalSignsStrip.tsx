@@ -204,14 +204,20 @@ export function Sparkline({ points, ariaLabel, title }: { points: number[]; aria
     .join(' ')
   const mean = points.reduce((sum, value) => sum + value, 0) / points.length
   const trend = points[points.length - 1] <= mean ? 'down' : 'up'
+  // Without an explicit label the sparkline is a supplementary decoration next
+  // to a tile that already carries its own text + numeric value, so mark it
+  // decorative (`aria-hidden`, no `role="img"`) rather than leaving an unnamed
+  // image in the accessibility tree. With a label it stays an announced image.
+  const decorative = ariaLabel === undefined || ariaLabel === ''
   return (
     <svg
       className={`we-sparkline we-sparkline--${trend}`}
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
-      role="img"
+      role={decorative ? undefined : 'img'}
       aria-label={ariaLabel}
+      aria-hidden={decorative || undefined}
       preserveAspectRatio="none"
       data-testid="vitals-sparkline"
       data-trend={trend}
