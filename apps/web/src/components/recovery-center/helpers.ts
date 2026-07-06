@@ -51,6 +51,9 @@ export type ValueEstimate = {
   }
 }
 
+/** One per-day point of the MTTR trend sparkline; `day` is `YYYY-MM-DD`. */
+export type MttrTrendPoint = { day: string; seconds: number }
+
 export type RecoveryMetrics = {
   successRate: RecoveryMetric
   mttr: RecoveryMetric
@@ -62,6 +65,8 @@ export type RecoveryMetrics = {
   valueEstimate?: ValueEstimate
   windowDays: number
   terminalRuns: number
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional — older API responses omit it. */
+  mttrTrend?: MttrTrendPoint[]
 }
 
 export type ClusterCategory =

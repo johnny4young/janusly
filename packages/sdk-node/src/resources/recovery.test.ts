@@ -43,6 +43,10 @@ const SAMPLE_METRICS: RecoveryMetrics = {
   },
   windowDays: 30,
   terminalRuns: 87,
+  mttrTrend: [
+    { day: "2026-07-01", seconds: 300 },
+    { day: "2026-07-02", seconds: 180 },
+  ],
 };
 
 describe("RecoveryResource.getMetrics", () => {

@@ -2285,6 +2285,7 @@
   "recoveryCenter.metric.failures.rationale": "Awaiting triage",
   "recoveryCenter.metric.mttr.label": "MTTR (p50)",
   "recoveryCenter.metric.mttr.rationaleFallback": "Mean time to recovery",
+  "recoveryCenter.metric.mttr.trendAria": "MTTR trend over the last {{count}} days with recoveries",
   "recoveryCenter.metric.approvals.label": "Approvals pending",
   "recoveryCenter.metric.approvals.rationaleEmpty": "No human action required",
   "recoveryCenter.metric.approvals.rationale": "Operators waiting on a decision",

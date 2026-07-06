@@ -90,11 +90,16 @@ export type SlaAttainmentCounts = {
   metSla: number;
 };
 
+/** One per-day point for the MTTR trend sparkline. `day` is `YYYY-MM-DD`, `seconds` the day's avg recovery time. */
+export type MttrTrendPoint = { day: string; seconds: number };
+
 /** Raw signals the data repo returns; the rollup converts to `RecoveryMetrics`. */
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCounts;
   /** Recovery durations (ms) for replayed DLQ rows. */
   mttrDurations: number[];
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional so pre-existing test fixtures stay valid. */
+  mttrTrend?: MttrTrendPoint[];
   approvalsPending: number;
   costByProvider: CostProviderRow[];
   p95LatencyMs: number | null;
@@ -161,6 +166,8 @@ export type RecoveryMetrics = {
   windowDays: number;
   /** Total terminal runs (succeeded + failed + cancelled) — useful as the denominator for downstream per-workflow rollups. */
   terminalRuns: number;
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) driving the MTTR tile's trend sparkline. `[]` when nothing replayed. */
+  mttrTrend: MttrTrendPoint[];
 };
 
 /* ----------------------------- Severity bands ----------------------------- */
@@ -268,6 +275,7 @@ export function composeRecoveryMetrics(
     valueEstimate,
     windowDays,
     terminalRuns,
+    mttrTrend: signals.mttrTrend ?? [],
   };
 }
 

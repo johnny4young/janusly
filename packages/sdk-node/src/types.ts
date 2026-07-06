@@ -143,6 +143,9 @@ export type RecoverySlaAttainmentMetric = RecoveryMetric & {
   metSla: number;
 };
 
+/** One per-day point of the MTTR trend sparkline. `day` is `YYYY-MM-DD`. */
+export type RecoveryMttrTrendPoint = { day: string; seconds: number };
+
 /** Response shape of `GET /recovery/metrics?windowDays=…`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
@@ -155,6 +158,8 @@ export type RecoveryMetrics = {
   windowDays: number;
   /** Total terminal runs in the window — denominator for downstream rollups. */
   terminalRuns: number;
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR trend sparkline; `[]` when nothing replayed. */
+  mttrTrend: RecoveryMttrTrendPoint[];
 };
 
 /**
