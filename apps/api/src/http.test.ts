@@ -1,8 +1,9 @@
 import { Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { gunzipSync } from "node:zlib";
+import { afterEach, describe, expect, it } from "vitest";
 import type http from "node:http";
 
-import { readJson } from "./http";
+import { readJson, sendJson, type CorsAwareResponse } from "./http";
 
 /** Build a fake `IncomingMessage` that emits the given Buffer chunks. `readJson` only consumes the stream surface (`data`/`error`/`end` + `destroy`), which `Readable` provides. */
 function fakeRequest(chunks: Buffer[]): http.IncomingMessage {
@@ -57,5 +58,96 @@ describe("readJson", () => {
     readable.push(null);
 
     await expect(readJson(readable as unknown as http.IncomingMessage, 1024)).resolves.toEqual({ ok: true });
+  });
+});
+
+/** Capture what `sendJson` wrote to a response, carrying the request context it reads. */
+function fakeResponse(opts: { acceptEncoding?: string; origin?: string } = {}) {
+  const captured: { status?: number; headers?: http.OutgoingHttpHeaders; body?: unknown } = {};
+  const res = {
+    requestAcceptEncoding: opts.acceptEncoding,
+    requestOrigin: opts.origin,
+    writeHead(status: number, headers: http.OutgoingHttpHeaders) {
+      captured.status = status;
+      captured.headers = headers;
+      return this;
+    },
+    end(body?: unknown) {
+      captured.body = body;
+      return this;
+    },
+  };
+  return { res: res as unknown as CorsAwareResponse, captured };
+}
+
+/** A payload whose serialized form comfortably clears the 1 KB gzip threshold. */
+function largePayload() {
+  return { note: "x".repeat(4096), items: Array.from({ length: 20 }, (_, i) => ({ i, label: `row-${i}` })) };
+}
+
+describe("sendJson gzip", () => {
+  const priorFlag = process.env.JANUSLY_HTTP_COMPRESSION;
+  afterEach(() => {
+    if (priorFlag === undefined) delete process.env.JANUSLY_HTTP_COMPRESSION;
+    else process.env.JANUSLY_HTTP_COMPRESSION = priorFlag;
+  });
+
+  it("gzips a large body when the client accepts gzip and round-trips identically", () => {
+    const payload = largePayload();
+    const { res, captured } = fakeResponse({ acceptEncoding: "gzip, deflate, br" });
+
+    sendJson(res, payload);
+
+    expect(captured.headers?.["Content-Encoding"]).toBe("gzip");
+    expect(Buffer.isBuffer(captured.body)).toBe(true);
+    const decoded = JSON.parse(gunzipSync(captured.body as Buffer).toString("utf8"));
+    expect(decoded).toEqual(payload);
+  });
+
+  it("preserves the CORS Vary: Origin alongside Accept-Encoding when compressing", () => {
+    const { res, captured } = fakeResponse({ acceptEncoding: "gzip", origin: "http://localhost:5173" });
+
+    sendJson(res, largePayload());
+
+    const vary = String(captured.headers?.["Vary"] ?? "");
+    expect(vary).toContain("Origin");
+    expect(vary).toContain("Accept-Encoding");
+  });
+
+  it("leaves a small body uncompressed even when gzip is accepted", () => {
+    const { res, captured } = fakeResponse({ acceptEncoding: "gzip" });
+
+    sendJson(res, { ok: true });
+
+    expect(captured.headers?.["Content-Encoding"]).toBeUndefined();
+    expect(typeof captured.body).toBe("string");
+    expect(JSON.parse(captured.body as string)).toEqual({ ok: true });
+  });
+
+  it("does not compress when the client did not advertise gzip", () => {
+    const { res, captured } = fakeResponse({ acceptEncoding: "br, deflate" });
+
+    sendJson(res, largePayload());
+
+    expect(captured.headers?.["Content-Encoding"]).toBeUndefined();
+    expect(typeof captured.body).toBe("string");
+  });
+
+  it("treats gzip;q=0 as an explicit refusal", () => {
+    const { res, captured } = fakeResponse({ acceptEncoding: "gzip;q=0, identity" });
+
+    sendJson(res, largePayload());
+
+    expect(captured.headers?.["Content-Encoding"]).toBeUndefined();
+  });
+
+  it("honors the JANUSLY_HTTP_COMPRESSION=false kill-switch", () => {
+    process.env.JANUSLY_HTTP_COMPRESSION = "false";
+    const { res, captured } = fakeResponse({ acceptEncoding: "gzip" });
+
+    sendJson(res, largePayload());
+
+    expect(captured.headers?.["Content-Encoding"]).toBeUndefined();
+    expect(typeof captured.body).toBe("string");
   });
 });

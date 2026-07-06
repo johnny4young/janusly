@@ -154,12 +154,72 @@ export type OrgConfigSnapshot = {
   };
 };
 
+/**
+ * Process-local TTL cache for the resolved config entry list, keyed by orgId.
+ * `listOrgConfig` / `getOrgConfigSnapshot` run on most authenticated hot paths
+ * (AI routes, recovery metrics, per-node engine config reads); without this,
+ * each call hit Postgres for a full org-scoped scan.
+ *
+ * Bounds:
+ * - TTL via `JANUSLY_ORG_CONFIG_CACHE_TTL_MS` (default 30_000; `0` disables).
+ *   Cross-replica staleness is bounded by the TTL — a config change made on
+ *   one replica propagates to others within one TTL window. Acceptable: this
+ *   catalog is runtime *tuning* (limits, bounds, delivery posture), never
+ *   authz (auth.* keys have their own narrow, un-cached reads).
+ * - Same-process writes (`upsertOrgConfig`) invalidate the org key synchronously.
+ * - Only the default-env hot path is cached; callers passing a custom `env`
+ *   (tests) always read fresh, so a test env never poisons the cache.
+ * - Capped at `ORG_CONFIG_CACHE_MAX` orgs with FIFO eviction.
+ */
+type OrgConfigCacheEntry = { entries: OrgConfigEntry[]; expiresAt: number };
+const ORG_CONFIG_CACHE = new Map<string, OrgConfigCacheEntry>();
+const ORG_CONFIG_CACHE_MAX = 1000;
+
+function orgConfigCacheTtlMs(): number {
+  const raw = Number(process.env.JANUSLY_ORG_CONFIG_CACHE_TTL_MS ?? 30_000);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 30_000;
+}
+
+function readOrgConfigCache(orgId: string): OrgConfigEntry[] | null {
+  const hit = ORG_CONFIG_CACHE.get(orgId);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    ORG_CONFIG_CACHE.delete(orgId);
+    return null;
+  }
+  return hit.entries;
+}
+
+function writeOrgConfigCache(orgId: string, entries: OrgConfigEntry[], ttlMs: number): void {
+  if (!ORG_CONFIG_CACHE.has(orgId) && ORG_CONFIG_CACHE.size >= ORG_CONFIG_CACHE_MAX) {
+    const oldest = ORG_CONFIG_CACHE.keys().next().value;
+    if (oldest !== undefined) ORG_CONFIG_CACHE.delete(oldest);
+  }
+  ORG_CONFIG_CACHE.set(orgId, { entries, expiresAt: Date.now() + ttlMs });
+}
+
+/** Drop an org's cached config. Called on same-process writes; exported for tests. */
+export function invalidateOrgConfigCache(orgId?: string): void {
+  if (orgId === undefined) ORG_CONFIG_CACHE.clear();
+  else ORG_CONFIG_CACHE.delete(orgId);
+}
+
 /** List tenant-visible configuration values, merging tenant rows over env defaults. */
 export async function listOrgConfig(orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<OrgConfigEntry[]> {
-  const rows = await db.select().from(orgConfigs).where(eq(orgConfigs.orgId, orgId));
+  const ttlMs = orgConfigCacheTtlMs();
+  const cacheable = env === process.env && ttlMs > 0;
+  if (cacheable) {
+    const cached = readOrgConfigCache(orgId);
+    if (cached) return cached;
+  }
+
+  // Bound the scan defensively — the closed catalog is ~50 keys, so a healthy
+  // org never approaches this; the cap just guards against a pathological row
+  // count from a future bug or hand-edited table.
+  const rows = await db.select().from(orgConfigs).where(eq(orgConfigs.orgId, orgId)).limit(200);
   const byKey = new Map(rows.map((row) => [row.key, row]));
 
-  return ORG_CONFIG_DEFINITIONS.map((definition) => {
+  const entries: OrgConfigEntry[] = ORG_CONFIG_DEFINITIONS.map((definition) => {
     const row = byKey.get(definition.key);
     const fallback = defaultValueFor(definition, env);
     return {
@@ -170,6 +230,9 @@ export async function listOrgConfig(orgId: string, env: NodeJS.ProcessEnv = proc
       updatedAt: row?.updatedAt ?? null,
     };
   });
+
+  if (cacheable) writeOrgConfigCache(orgId, entries, ttlMs);
+  return entries;
 }
 
 function valuesByKey(entries: OrgConfigEntry[]): Map<OrgConfigKey, string | number | boolean> {
@@ -628,6 +691,10 @@ export async function upsertOrgConfig(input: {
       updatedBy: input.userId,
     });
   }
+
+  // Same-process invalidation so a config write is reflected immediately here;
+  // other replicas converge within one cache TTL.
+  invalidateOrgConfigCache(input.orgId);
 
   return {
     ...definition,

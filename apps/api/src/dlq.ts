@@ -16,6 +16,8 @@ import { eq, desc, asc, and, or, lt, gt, ilike, isNull, count, sql, type SQL } f
 import { escapeLikePattern } from "@janusly/data";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
+import { invalidateRecoveryMetricsCache } from "./metrics-cache";
+
 /** Closed enum of DLQ row statuses. */
 export const deadLetterStatuses = ["open", "replayed", "resolved"] as const;
 /** Inferred string-literal union for `deadLetterStatuses`. */
@@ -420,6 +422,9 @@ export async function markDeadLetterReplayed(orgId: string, id: string) {
   await db.update(deadLetters)
     .set({ status: "replayed", replayedAt: new Date() })
     .where(and(eq(deadLetters.id, id), eq(deadLetters.orgId, orgId)));
+  // The org's recovery metrics just changed — drop the cached rollup so the
+  // dashboard reflects the replay immediately instead of after the TTL.
+  invalidateRecoveryMetricsCache(orgId);
 }
 
 /** Flip status to `resolved` (closed without replay). */
@@ -427,4 +432,5 @@ export async function markDeadLetterResolved(orgId: string, id: string) {
   await db.update(deadLetters)
     .set({ status: "resolved" })
     .where(and(eq(deadLetters.id, id), eq(deadLetters.orgId, orgId)));
+  invalidateRecoveryMetricsCache(orgId);
 }
