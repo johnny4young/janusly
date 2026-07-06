@@ -56,6 +56,8 @@ export type VitalSignsTile = {
   sparkline?: number[]
   /** aria-label for the sparkline — screen readers can't read the SVG shape. */
   sparklineLabel?: string
+  /** Native hover tooltip for the sparkline (e.g. the exact per-day values). */
+  sparklineTitle?: string
   /** Optional aria-label override. Defaults to the tile's `label`. */
   ariaLabel?: string
   /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") announced
@@ -128,7 +130,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
         <span className="section-kicker we-ops-metric-card__label">{tile.label}</span>
       </div>
       <div className="we-ops-metric-card__value">{animatedValue}</div>
-      {tile.sparkline && <Sparkline points={tile.sparkline} ariaLabel={tile.sparklineLabel} />}
+      {tile.sparkline && <Sparkline points={tile.sparkline} ariaLabel={tile.sparklineLabel} title={tile.sparklineTitle} />}
       {/* Screen-reader-only severity word — the visible severity is color-only
           (border + value tint). Read after the value: "…, 95.0%, Healthy". On
           the clickable variant the button's aria-label carries it instead (an
@@ -184,7 +186,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
  * red otherwise. Returns null below 2 points — a single dot tells no story.
  * Pure SVG, no animation, so reduced-motion is a non-issue.
  */
-export function Sparkline({ points, ariaLabel }: { points: number[]; ariaLabel?: string }) {
+export function Sparkline({ points, ariaLabel, title }: { points: number[]; ariaLabel?: string; title?: string }) {
   if (points.length < 2) return null
   const width = 80
   const height = 16
@@ -214,6 +216,7 @@ export function Sparkline({ points, ariaLabel }: { points: number[]; ariaLabel?:
       data-testid="vitals-sparkline"
       data-trend={trend}
     >
+      {title && <title>{title}</title>}
       <polyline points={coords} fill="none" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     </svg>
   )

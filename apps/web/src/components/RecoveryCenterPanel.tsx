@@ -51,6 +51,7 @@ import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './Vita
 import {
   buildGreeting,
   computeRecommendedActions,
+  formatDowntime,
   readDisplayName,
   readHealthScore,
   shouldShowOnboarding,
@@ -240,8 +241,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const mttrRationale = metrics?.mttr
     ? tRecoveryMetricRationale(metrics.mttr)
     : t('recoveryCenter.metric.mttr.rationaleFallback') as string
-  // MTTR trend sparkline: needs ≥2 daily points to tell a story.
-  const mttrTrendSeconds = (metrics?.mttrTrend ?? []).map((point) => point.seconds)
+  // MTTR trend sparkline: needs ≥2 daily points to tell a story. The hover
+  // title lists the exact per-day values the sparkline plots.
+  const mttrTrend = metrics?.mttrTrend ?? []
+  const mttrTrendSeconds = mttrTrend.map((point) => point.seconds)
+  const mttrTrendTitle = mttrTrend.map((point) => `${point.day}: ${formatDowntime(point.seconds * 1000)}`).join('\n')
   homeTiles.push({
     icon: <RefreshCw size={14} aria-hidden="true" />,
     label: mttrLabel,
@@ -252,6 +256,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }) as string,
     sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
     sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }) as string,
+    sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })

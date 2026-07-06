@@ -1205,6 +1205,7 @@
   "dlq.search.label": "Buscar",
   "dlq.dayFilter.label": "Día: {{day}}",
   "dlq.dayFilter.clear": "Quitar filtro de día",
+  "dlq.downtimeTitle": "Inactividad hasta ahora",
   "dlq.search.placeholder": "Busca por nodo, id de ejecución o error…",
   "dlq.show": "Mostrar",
   "dlq.filter.all": "Todos",
