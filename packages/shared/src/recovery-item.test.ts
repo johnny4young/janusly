@@ -56,6 +56,20 @@ describe('SLA defaults', () => {
     const target = defaultSlaTargetAt('p2', from)
     expect(target.toISOString()).toBe('2026-01-01T04:00:00.000Z')
   })
+
+  it('defaultSlaTargetAt honors an org-configured seconds map', () => {
+    const from = new Date('2026-01-01T00:00:00.000Z')
+    // p1 configured to 30 minutes = 1800s
+    const target = defaultSlaTargetAt('p1', from, { p1: 30 * 60 })
+    expect(target.toISOString()).toBe('2026-01-01T00:30:00.000Z')
+  })
+
+  it('defaultSlaTargetAt falls back to the built-in default for a severity the map omits', () => {
+    const from = new Date('2026-01-01T00:00:00.000Z')
+    // Map only sets p1; p2 must fall back to the 4h built-in default.
+    const target = defaultSlaTargetAt('p2', from, { p1: 5 * 60 })
+    expect(target.toISOString()).toBe('2026-01-01T04:00:00.000Z')
+  })
 })
 
 describe('isSeverityEscalation', () => {

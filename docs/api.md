@@ -53,7 +53,7 @@ that permission is the authorization gate.
 | Workflow CRUD/readiness | `GET /workflows`, `POST /workflows/save`, `GET /workflows/versions`, `GET /workflows/latest`, `DELETE /workflows/:id`, `POST /validate`, `POST /workflows/readiness` | viewer/editor | Structural validation plus production-readiness checks. |
 | Workflow operations | `POST /workflows/rollback`, `POST /workflows/:id/slo`, `GET /workflows/:id/schedule-history`, `GET /workflows/health`, `GET /workflows/health/delta`, `GET /workflows/:id/metadata`, `POST /workflows/:id/metadata`, `GET /billing/budget`, `POST /workflows/:id/budget` | viewer/editor/admin by route | Rollback, SLO, schedule observability, health scoring, metadata, and cost-budget overrides. |
 | Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
-| Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. |
+| Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | authenticated; editor where mutating | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. |
 | DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
 | Recovery items | `GET /recovery/items`, `GET /recovery/items/:id`, `GET /recovery/items/:id/children`, `POST /recovery/items/:id/acknowledge`, `POST /recovery/items/:id/in-progress`, `POST /recovery/items/:id/waiting-external`, `POST /recovery/items/:id/escalate`, `POST /recovery/items/:id/assign`, `POST /recovery/items/:id/resolve`, `POST /recovery/items/:id/reopen`, `POST /recovery/items/:id/comment`, `POST /recovery/items/:id/evidence`, `POST /recovery/items/:id/handoff` | viewer/editor + recovery perms | Incident workflow, evidence export, and cross-team handoff. |
@@ -564,11 +564,17 @@ Returns `409 Conflict` if the user already belongs to the org.
 
 ### `GET /credentials` / `GET /credentials/health` / `POST /credentials`
 
-Credentials are operator-managed name/kind rows that point at an environment variable name (`secretRef`). `GET /credentials` intentionally omits `secretRef`; use `GET /credentials/health` for a safe `secretRefPresent` boolean and referencing workflow ids. Requires `admin` for writes.
+Credentials are operator-managed name/kind rows that point at an environment variable name (`secretRef`). `GET /credentials` intentionally omits `secretRef` (but includes `expiresAt`); use `GET /credentials/health` for a safe `secretRefPresent` boolean, `expiresAt`, and referencing workflow ids. Requires `admin` for writes.
 
 ```json
-{ "name": "incidents-slack", "kind": "slack_webhook", "secretRef": "INCIDENTS_SLACK_WEBHOOK_URL" }
+{ "name": "incidents-slack", "kind": "slack_webhook", "secretRef": "INCIDENTS_SLACK_WEBHOOK_URL", "expiresAt": "2026-09-01T00:00:00.000Z" }
 ```
+
+`expiresAt` is optional operator-declared metadata (a future ISO date, or omit for none) — never the secret value. It powers the `credential.expiring` alert trigger + the Credentials panel expiry badge.
+
+### `POST /credentials/:name/expiry`
+
+Set or clear a credential's expiry without rotating the secret. Body `{ "expiresAt": "<future ISO>" | null }` (`null` clears). `admin` + `credentials.write`; optional `ifMatch` (the `updatedAt` token) CAS-guards a concurrent edit. Audited as `credential.expiry_set`. 400 `credentials_invalid_expiry` (past/invalid date), 404 `credentials_not_found`, 409 `credential_expiry_conflict`.
 
 Integration tools reference credentials by operator-facing name, for example:
 
@@ -804,7 +810,7 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — six metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, cost) each with `value` / `display` / `severity` / `rationale`. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. Severity bands are tunable constants in the engine module.
 
 ### `POST /recovery/feedback`
 

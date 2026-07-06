@@ -49,6 +49,15 @@ export type VitalSignsTile = {
    *  animates. Pass `null` to mean "no value yet — render `display`
    *  verbatim and skip the animation". Omit entirely for static tiles. */
   numericValue?: number | null
+  /** Optional numeric series (e.g. per-day MTTR seconds, oldest-first) rendered
+   *  as a tiny inline trend sparkline under the value. Needs ≥2 points; the
+   *  line is green when the last point is at/below the series mean (improving),
+   *  red otherwise. Omit for tiles without a trend. */
+  sparkline?: number[]
+  /** aria-label for the sparkline — screen readers can't read the SVG shape. */
+  sparklineLabel?: string
+  /** Native hover tooltip for the sparkline (e.g. the exact per-day values). */
+  sparklineTitle?: string
   /** Optional aria-label override. Defaults to the tile's `label`. */
   ariaLabel?: string
   /** Pre-translated severity word (e.g. "Healthy" / "Needs attention") announced
@@ -121,6 +130,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
         <span className="section-kicker we-ops-metric-card__label">{tile.label}</span>
       </div>
       <div className="we-ops-metric-card__value">{animatedValue}</div>
+      {tile.sparkline && <Sparkline points={tile.sparkline} ariaLabel={tile.sparklineLabel} title={tile.sparklineTitle} />}
       {/* Screen-reader-only severity word — the visible severity is color-only
           (border + value tint). Read after the value: "…, 95.0%, Healthy". On
           the clickable variant the button's aria-label carries it instead (an
@@ -164,6 +174,57 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
     >
       {body}
     </section>
+  )
+}
+
+/**
+ * Tiny inline trend sparkline. Renders an 80×16 polyline over `points`
+ * (oldest-first) in standard orientation — a HIGHER value sits higher on the
+ * chart (the `1 - normalized` term flips SVG's top-down Y so the line reads
+ * naturally). Direction is conveyed by COLOR, not slope: green when the last
+ * point is at/below the series mean (improving — for MTTR, lower is better),
+ * red otherwise. Returns null below 2 points — a single dot tells no story.
+ * Pure SVG, no animation, so reduced-motion is a non-issue.
+ */
+export function Sparkline({ points, ariaLabel, title }: { points: number[]; ariaLabel?: string; title?: string }) {
+  if (points.length < 2) return null
+  const width = 80
+  const height = 16
+  const pad = 1.5
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const range = max - min || 1
+  const stepX = (width - pad * 2) / (points.length - 1)
+  const coords = points
+    .map((value, i) => {
+      const x = pad + i * stepX
+      const y = pad + (height - pad * 2) * (1 - (value - min) / range)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+  const mean = points.reduce((sum, value) => sum + value, 0) / points.length
+  const trend = points[points.length - 1] <= mean ? 'down' : 'up'
+  // Without an explicit label the sparkline is a supplementary decoration next
+  // to a tile that already carries its own text + numeric value, so mark it
+  // decorative (`aria-hidden`, no `role="img"`) rather than leaving an unnamed
+  // image in the accessibility tree. With a label it stays an announced image.
+  const decorative = ariaLabel === undefined || ariaLabel === ''
+  return (
+    <svg
+      className={`we-sparkline we-sparkline--${trend}`}
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      role={decorative ? undefined : 'img'}
+      aria-label={ariaLabel}
+      aria-hidden={decorative || undefined}
+      preserveAspectRatio="none"
+      data-testid="vitals-sparkline"
+      data-trend={trend}
+    >
+      {title && <title>{title}</title>}
+      <polyline points={coords} fill="none" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+    </svg>
   )
 }
 

@@ -4,6 +4,7 @@ const {
   appendEventMock,
   enqueueNodeMock,
   markNodeQueuedMock,
+  resetRunForReplayMock,
   setRunWorkflowSnapshotMock,
   originalRunNodeRowsRef,
   runEventsTable,
@@ -16,6 +17,7 @@ const {
   appendEventMock: vi.fn().mockResolvedValue(undefined),
   enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
   markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
+  resetRunForReplayMock: vi.fn().mockResolvedValue(undefined),
   setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
   originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
   runEventsTable: { name: 'runEvents' },
@@ -60,6 +62,7 @@ vi.mock('../queue', () => ({
 
 vi.mock('../persistence', () => ({
   markNodeQueued: markNodeQueuedMock,
+  resetRunForReplay: resetRunForReplayMock,
   appendEvent: appendEventMock,
   setRunWorkflowSnapshot: setRunWorkflowSnapshotMock,
 }))
@@ -89,12 +92,13 @@ beforeEach(() => {
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
   markNodeQueuedMock.mockReset()
+  resetRunForReplayMock.mockReset()
   appendEventMock.mockReset()
   setRunWorkflowSnapshotMock.mockReset()
 })
 
 describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
-  it('re-enqueues the failed node into the original run with attempt=1', async () => {
+  it('un-terminates the run + re-queues the failed node, then enqueues (attempt=1)', async () => {
     await adapter.replayDeadLetter({
       runId: 'orig-run',
       workflow: baseWorkflow,
@@ -110,9 +114,14 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
     // The replayed workflow becomes the run's authoritative snapshot so the
     // slim queue worker (and the downstream cascade) reload the right DAG.
     expect(setRunWorkflowSnapshotMock).toHaveBeenCalledWith('orig-run', baseWorkflow)
+    // Un-terminate the run + re-queue the failed node so the re-enqueued job
+    // actually executes (the runtime skips queued jobs on a failed run, and
+    // `markNodeRunning` only claims a `queued` node). Without both, the replay
+    // silently no-ops and the run stays failed.
+    expect(resetRunForReplayMock).toHaveBeenCalledWith('orig-run')
+    expect(markNodeQueuedMock).toHaveBeenCalledWith('orig-run', failingNode.id)
     // Production replay is a single enqueue — no new run row, no new node rows.
     expect(txInsertMock).not.toHaveBeenCalled()
-    expect(markNodeQueuedMock).not.toHaveBeenCalled()
   })
 })
 

@@ -76,6 +76,10 @@ export type CredentialHealthEntry = {
   /** Workflow ids that reference this credential in their LATEST persisted
    *  version. Older versions that no longer reference it are excluded. */
   referencingWorkflowIds: string[];
+  /** Operator-declared expiry of the underlying secret as an ISO timestamp,
+   *  or ``null`` when no expiry is tracked. The web derives the
+   *  expired / expiring-soon badge from this + the current time. */
+  expiresAt: string | null;
 };
 
 export type McpConnectionHealthEntry = {
@@ -436,6 +440,7 @@ export async function getCredentialHealth(
       lastErrorMessage: aggregate?.lastErrorMessage ?? null,
       usageCount30d: aggregate?.usageCount30d ?? 0,
       referencingWorkflowIds: Array.from(referenceIndex.byCredentialName.get(row.name) ?? []).sort(),
+      expiresAt: row.expiresAt?.toISOString() ?? null,
     };
   });
 

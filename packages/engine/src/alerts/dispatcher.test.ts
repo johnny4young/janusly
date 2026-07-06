@@ -52,6 +52,31 @@ describe("matchesPolicyFilter", () => {
     expect(matchesPolicyFilter(policy, { workflowId: "wf_other" })).toBe(false);
   });
 
+  it("credential.expiring fires only within warnDays and honours kind/name allowlists", () => {
+    const policy = makePolicy({
+      trigger: "credential.expiring",
+      parameters: { warnDays: 7 },
+    });
+    // Inside the window fires; outside does not.
+    expect(matchesPolicyFilter(policy, { daysUntilExpiry: 3 })).toBe(true);
+    expect(matchesPolicyFilter(policy, { daysUntilExpiry: 7 })).toBe(true);
+    expect(matchesPolicyFilter(policy, { daysUntilExpiry: 10 })).toBe(false);
+
+    const kindFiltered = makePolicy({
+      trigger: "credential.expiring",
+      parameters: { warnDays: 30, credentialKinds: ["github_token"] },
+    });
+    expect(matchesPolicyFilter(kindFiltered, { daysUntilExpiry: 5, kind: "github_token" })).toBe(true);
+    expect(matchesPolicyFilter(kindFiltered, { daysUntilExpiry: 5, kind: "slack_webhook" })).toBe(false);
+
+    const nameFiltered = makePolicy({
+      trigger: "credential.expiring",
+      parameters: { warnDays: 30, credentialNames: ["prod-token"] },
+    });
+    expect(matchesPolicyFilter(nameFiltered, { daysUntilExpiry: 5, name: "prod-token" })).toBe(true);
+    expect(matchesPolicyFilter(nameFiltered, { daysUntilExpiry: 5, name: "staging-token" })).toBe(false);
+  });
+
   it("failure_cluster.threshold compares frequency to minFrequency", () => {
     const policy = makePolicy({
       trigger: "failure_cluster.threshold",

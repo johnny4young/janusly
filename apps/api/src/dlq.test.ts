@@ -5,9 +5,26 @@ import {
   decodeRecoveryQueueCursor,
   encodeRecoveryQueueCursor,
   isRecoveryQueueSort,
+  parseDayRange,
   RECOVERY_QUEUE_SORTS,
   type RecoveryQueueRow,
 } from "./dlq";
+
+describe("parseDayRange", () => {
+  it("returns the [start, end) UTC bounds for a valid day", () => {
+    const range = parseDayRange("2026-07-06");
+    expect(range?.start.toISOString()).toBe("2026-07-06T00:00:00.000Z");
+    expect(range?.end.toISOString()).toBe("2026-07-07T00:00:00.000Z");
+  });
+
+  it("returns null for malformed or missing input", () => {
+    expect(parseDayRange(null)).toBeNull();
+    expect(parseDayRange(undefined)).toBeNull();
+    expect(parseDayRange("2026-7-6")).toBeNull();
+    expect(parseDayRange("not-a-day")).toBeNull();
+    expect(parseDayRange("2026-13-40")).toBeNull();
+  });
+});
 
 // Minimal RecoveryQueueRow fixture — the cursor codec + page builder read only
 // id / createdAt / recovery (severity + slaTargetAt), so the rest of the

@@ -353,6 +353,11 @@ export const credentials = pgTable(
     kind: text("kind").notNull(),
     secretRef: text("secret_ref").notNull(),
     metadata: jsonb("metadata"),
+    // Optional operator-declared expiry for the underlying secret (token /
+    // webhook / DSN). Null = no expiry tracked. Only metadata — the secret
+    // value itself still lives in env via `secret_ref`. Powers the
+    // credential-expiry warning scan + the panel's expiry badge.
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     // Optimistic-concurrency token for secret-ref rotation. Millisecond
@@ -396,6 +401,14 @@ export const auditLogs = pgTable(
   },
   (table) => [
     index("audit_logs_org_created_idx").on(table.orgId, table.createdAt.desc()),
+    // Backs the audit viewer's action-PREFIX filter
+    // (`queryAuditLogs`: `action LIKE 'prefix%'`). A plain btree can't serve
+    // `LIKE` under the default collation, so the migration SQL appends the
+    // `text_pattern_ops` opclass to the `action` column by hand (drizzle's
+    // builder can't emit an opclass — same pattern as the GIN index below).
+    // Ordered (org_id, action, created_at DESC) so the org-scoped prefix
+    // range scan feeds the newest-first keyset without a full-table sort.
+    index("audit_logs_org_action_created_idx").on(table.orgId, table.action, table.createdAt.desc()),
     // GIN over the jsonb metadata column for containment lookups
     // such as the rate-limit-degradation dedup gate
     // (`metadata @> '{"bucket":"..."}'`). jsonb_path_ops keeps the

@@ -33,6 +33,7 @@ export const ALERT_TRIGGERS = [
   'recovery_item.created',
   'recovery_item.sla_breached',
   'workflow.schedule_anomaly',
+  'credential.expiring',
 ] as const
 
 export const AlertTriggerSchema = z.enum(ALERT_TRIGGERS)
@@ -104,6 +105,18 @@ export const AlertParamsWorkflowScheduleAnomalySchema = z
   })
   .strict()
 
+export const AlertParamsCredentialExpiringSchema = z
+  .object({
+    // Fire when a credential expires within this many days. 1..365.
+    warnDays: z.number().int().min(1).max(365),
+    // Optional allowlists. `credentialKinds` is a free string array (the
+    // credentials table intentionally keeps `kind` open — a new integration
+    // shouldn't need an alert-schema edit). Empty/absent → all kinds / names.
+    credentialKinds: z.array(z.string().min(1).max(120)).max(10).optional(),
+    credentialNames: z.array(z.string().min(1).max(120)).max(50).optional(),
+  })
+  .strict()
+
 /**
  * Per-trigger parameters dispatch table. Caller picks the schema by the
  * value of `policy.trigger` then runs `.safeParse(policy.parameters)`.
@@ -118,6 +131,7 @@ export const ALERT_PARAMS_SCHEMAS = {
   'recovery_item.created': AlertParamsRecoveryItemCreatedSchema,
   'recovery_item.sla_breached': AlertParamsRecoveryItemSlaBreachedSchema,
   'workflow.schedule_anomaly': AlertParamsWorkflowScheduleAnomalySchema,
+  'credential.expiring': AlertParamsCredentialExpiringSchema,
 } as const satisfies Record<AlertTrigger, z.ZodTypeAny>
 
 export type AlertParamsByTrigger = {
@@ -130,6 +144,7 @@ export type AlertParamsByTrigger = {
   'recovery_item.created': z.infer<typeof AlertParamsRecoveryItemCreatedSchema>
   'recovery_item.sla_breached': z.infer<typeof AlertParamsRecoveryItemSlaBreachedSchema>
   'workflow.schedule_anomaly': z.infer<typeof AlertParamsWorkflowScheduleAnomalySchema>
+  'credential.expiring': z.infer<typeof AlertParamsCredentialExpiringSchema>
 }
 
 // ---------- channels ----------

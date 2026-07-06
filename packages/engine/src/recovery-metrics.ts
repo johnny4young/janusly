@@ -38,7 +38,9 @@ export type RecoveryMetricRationaleCode =
   | "replay.summary"
   | "cost.summary"
   | "clusters_resolved.empty"
-  | "clusters_resolved.summary";
+  | "clusters_resolved.summary"
+  | "sla_attainment.empty"
+  | "sla_attainment.summary";
 
 /** Per-provider/model row inside the cost breakdown. */
 export type CostProviderRow = {
@@ -78,16 +80,32 @@ export type ResolvedClustersCounts = {
   capped: boolean;
 };
 
+/**
+ * SLA-attainment counts over recovery items resolved in the window.
+ * `metSla` = the subset resolved before their `slaTargetAt` deadline;
+ * attainment % = `metSla / resolvedInWindow`.
+ */
+export type SlaAttainmentCounts = {
+  resolvedInWindow: number;
+  metSla: number;
+};
+
+/** One per-day point for the MTTR trend sparkline. `day` is `YYYY-MM-DD`, `seconds` the day's avg recovery time. */
+export type MttrTrendPoint = { day: string; seconds: number };
+
 /** Raw signals the data repo returns; the rollup converts to `RecoveryMetrics`. */
 export type RecoveryMetricsSignals = {
   runStatusCounts: RunStatusCounts;
   /** Recovery durations (ms) for replayed DLQ rows. */
   mttrDurations: number[];
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional so pre-existing test fixtures stay valid. */
+  mttrTrend?: MttrTrendPoint[];
   approvalsPending: number;
   costByProvider: CostProviderRow[];
   p95LatencyMs: number | null;
   replayOutcomes: ReplayOutcomeCounts;
   resolvedClusters: ResolvedClustersCounts;
+  slaAttainment: SlaAttainmentCounts;
 };
 
 /** Single metric card payload surfaced to the UI. */
@@ -143,10 +161,15 @@ export type RecoveryMetrics = {
   replayRate: RecoveryMetric;
   costThisWindow: RecoveryMetric & { providers: CostProviderRow[] };
   clustersResolved: RecoveryMetric & { totalEntries: number; capped: boolean };
+  slaAttainment: RecoveryMetric & { resolvedInWindow: number; metSla: number };
   valueEstimate: ValueEstimate;
   windowDays: number;
   /** Total terminal runs (succeeded + failed + cancelled) — useful as the denominator for downstream per-workflow rollups. */
   terminalRuns: number;
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) driving the MTTR tile's trend sparkline. `[]` when nothing replayed. */
+  mttrTrend: MttrTrendPoint[];
+  /** Total automation downtime CLOSED in the window (ms) — the summed `replayedAt − createdAt` of recovered failures. A MEASURED figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
+  downtimeEndedMs: number;
 };
 
 /* ----------------------------- Severity bands ----------------------------- */
@@ -156,6 +179,7 @@ export const MTTR_BANDS_MS = { healthy: 2 * 60 * 1000, warn: 15 * 60 * 1000 } as
 export const LATENCY_BANDS_MS = { healthy: 5_000, warn: 30_000 } as const;
 export const APPROVALS_BANDS = { neutralMax: 5, warnAbove: 5 } as const;
 export const REPLAY_RATE_BANDS = { healthy: 90, warn: 70 } as const;
+export const SLA_ATTAINMENT_BANDS = { healthy: 90, warn: 75 } as const;
 
 /* ----------------------------- Provider lookup --------------------------- */
 
@@ -230,6 +254,7 @@ export function composeRecoveryMetrics(
   const replayRate = computeReplayRate(signals.replayOutcomes);
   const costThisWindow = computeCost(signals.costByProvider, windowDays);
   const clustersResolved = computeClustersResolved(signals.resolvedClusters);
+  const slaAttainment = computeSlaAttainment(signals.slaAttainment);
   const valueEstimate = estimateValueSavings(
     signals.resolvedClusters.totalClusters,
     mttr.value != null ? Math.round(mttr.value / 1000) : null,
@@ -248,9 +273,48 @@ export function composeRecoveryMetrics(
     replayRate,
     costThisWindow,
     clustersResolved,
+    slaAttainment,
     valueEstimate,
     windowDays,
     terminalRuns,
+    mttrTrend: signals.mttrTrend ?? [],
+    downtimeEndedMs: signals.mttrDurations.reduce((sum, ms) => sum + ms, 0),
+  };
+}
+
+/**
+ * SLA attainment = share of recovery items resolved in the window that closed
+ * before their `slaTargetAt` deadline. `neutral` (no chip colour) when nothing
+ * resolved in the window — attainment of an empty set is not "0%".
+ */
+function computeSlaAttainment(
+  counts: SlaAttainmentCounts,
+): RecoveryMetric & { resolvedInWindow: number; metSla: number } {
+  const { resolvedInWindow, metSla } = counts;
+  if (resolvedInWindow === 0) {
+    return {
+      value: null,
+      display: "—",
+      severity: "neutral",
+      rationale: "No recovery items resolved in this window yet.",
+      rationaleCode: "sla_attainment.empty",
+      resolvedInWindow,
+      metSla,
+    };
+  }
+  const rate = (metSla / resolvedInWindow) * 100;
+  const severity: MetricSeverity = rate >= SLA_ATTAINMENT_BANDS.healthy
+    ? "healthy"
+    : rate >= SLA_ATTAINMENT_BANDS.warn ? "warn" : "unhealthy";
+  return {
+    value: rate,
+    display: `${rate.toFixed(1)}%`,
+    severity,
+    rationale: `${metSla} of ${resolvedInWindow} resolved within SLA.`,
+    rationaleCode: "sla_attainment.summary",
+    rationaleMeta: { metSla, resolvedInWindow },
+    resolvedInWindow,
+    metSla,
   };
 }
 

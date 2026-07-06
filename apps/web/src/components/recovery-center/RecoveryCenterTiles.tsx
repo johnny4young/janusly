@@ -46,6 +46,7 @@ import {
   budgetBand,
   clusterCategoryLabel,
   clusterOwnerLabel,
+  downtimeSeverity,
   humanizeAge,
   readErrorSignature,
   readWorkflowName,
@@ -229,6 +230,7 @@ export function RecoveryQueueTile({
             const workflowName = readWorkflowName(dlq, runs)
             const signature = readErrorSignature(dlq.errorJson)
             const age = humanizeAge(dlq.createdAt, nowMs)
+            const ageSeverity = downtimeSeverity(dlq.createdAt, nowMs)
             return (
               <li key={dlq.id}>
                 <button
@@ -245,7 +247,11 @@ export function RecoveryQueueTile({
                     <code className="we-recovery-center-row__node">{dlq.nodeId}</code>
                     <span className="we-recovery-center-row__pill" data-severity="warning">{signature}</span>
                   </span>
-                  <span className="we-recovery-center-row__age">{age}</span>
+                  <span
+                    className="we-recovery-center-row__age"
+                    data-severity={ageSeverity}
+                    data-testid={`recovery-center-queue-age-${dlq.id}`}
+                  >{age}</span>
                 </button>
               </li>
             )

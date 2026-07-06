@@ -70,6 +70,9 @@ const EMPTY_FORM: {
   workflowIds: string
   minFrequency: number
   stalledMinutes: number
+  warnDays: number
+  credentialKinds: string
+  credentialNames: string
   scope: 'org' | 'workflow' | ''
   channels: FormChannel[]
   cooldownSeconds: number
@@ -81,6 +84,9 @@ const EMPTY_FORM: {
   workflowIds: '',
   minFrequency: 3,
   stalledMinutes: 60,
+  warnDays: 14,
+  credentialKinds: '',
+  credentialNames: '',
   scope: '',
   channels: [{ destination: 'slack', credentialName: '', params: {}, _key: newChannelKey() }],
   cooldownSeconds: ALERT_COOLDOWN_SECONDS_DEFAULT,
@@ -102,6 +108,9 @@ function policyToForm(policy: AlertPolicy): typeof EMPTY_FORM {
     workflowIds: Array.isArray(params.workflowIds) ? params.workflowIds.join(', ') : '',
     minFrequency: typeof params.minFrequency === 'number' ? params.minFrequency : 3,
     stalledMinutes: typeof params.stalledMinutes === 'number' ? params.stalledMinutes : 60,
+    warnDays: typeof params.warnDays === 'number' ? params.warnDays : 14,
+    credentialKinds: Array.isArray(params.credentialKinds) ? params.credentialKinds.join(', ') : '',
+    credentialNames: Array.isArray(params.credentialNames) ? params.credentialNames.join(', ') : '',
     scope:
       params.scope === 'org' || params.scope === 'workflow' ? params.scope : '',
     channels:
@@ -146,6 +155,15 @@ function buildParameters(form: typeof EMPTY_FORM): Record<string, unknown> {
       return {
         ...(workflowIds.length ? { workflowIds } : {}),
       }
+    case 'credential.expiring': {
+      const credentialKinds = form.credentialKinds.split(',').map((s) => s.trim()).filter(Boolean)
+      const credentialNames = form.credentialNames.split(',').map((s) => s.trim()).filter(Boolean)
+      return {
+        warnDays: form.warnDays,
+        ...(credentialKinds.length ? { credentialKinds } : {}),
+        ...(credentialNames.length ? { credentialNames } : {}),
+      }
+    }
     default:
       return {}
   }
@@ -290,6 +308,8 @@ export function AlertPoliciesPanel(): React.ReactElement {
     form.trigger === 'failure_cluster.threshold' && (form.minFrequency < 2 || form.minFrequency > 1000)
   const stalledMinutesInvalid =
     form.trigger === 'approval.stalled' && (form.stalledMinutes < 5 || form.stalledMinutes > 43200)
+  const warnDaysInvalid =
+    form.trigger === 'credential.expiring' && (form.warnDays < 1 || form.warnDays > 365)
   const cooldownInvalid = form.cooldownSeconds < 60 || form.cooldownSeconds > 86400
 
   return (
@@ -419,6 +439,45 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 placeholder={t('alerts.form.placeholder.workflowIds') as string}
               />
             </label>
+          )}
+          {form.trigger === 'credential.expiring' && (
+            <>
+              <label>
+                {t('alerts.form.warnDays')}
+                <input
+                  type="number"
+                  value={form.warnDays}
+                  min={1}
+                  max={365}
+                  onChange={(e) => setForm({ ...form, warnDays: Number(e.target.value) || 14 })}
+                  aria-invalid={warnDaysInvalid}
+                  aria-describedby={warnDaysInvalid ? 'alert-warn-days-error' : undefined}
+                />
+                {warnDaysInvalid && (
+                  <span id="alert-warn-days-error" className="helper-text helper-text--error" role="alert">
+                    <AlertCircle size={13} aria-hidden="true" /> {t('alerts.error.warnDays')}
+                  </span>
+                )}
+              </label>
+              <label>
+                {t('alerts.form.credentialKinds')}
+                <input
+                  type="text"
+                  value={form.credentialKinds}
+                  onChange={(e) => setForm({ ...form, credentialKinds: e.target.value })}
+                  placeholder={t('alerts.form.placeholder.credentialKinds') as string}
+                />
+              </label>
+              <label>
+                {t('alerts.form.credentialNames')}
+                <input
+                  type="text"
+                  value={form.credentialNames}
+                  onChange={(e) => setForm({ ...form, credentialNames: e.target.value })}
+                  placeholder={t('alerts.form.placeholder.credentialNames') as string}
+                />
+              </label>
+            </>
           )}
 
           <fieldset className="we-alert-policies__channels">
@@ -597,7 +656,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
               type="button"
               className="we-btn we-btn--primary we-btn--sm"
               onClick={submitPolicy}
-              disabled={submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || cooldownInvalid}
+              disabled={submitting || form.name.trim().length === 0 || minFrequencyInvalid || stalledMinutesInvalid || warnDaysInvalid || cooldownInvalid}
             >
               {submitting
                 ? t('alerts.form.submitting')

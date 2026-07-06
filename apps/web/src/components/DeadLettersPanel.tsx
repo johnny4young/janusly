@@ -7,7 +7,9 @@
  */
 
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { CircleCheck, Download, FlaskConical, Inbox, Sparkles } from 'lucide-react'
+import { CircleCheck, Download, FlaskConical, Inbox, Sparkles, X } from 'lucide-react'
+
+import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
@@ -137,6 +139,8 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const {
     status,
     setStatus,
+    dayFilter,
+    clearDayFilter,
     ownerScope,
     setOwnerScope,
     severityFilter,
@@ -368,6 +372,21 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         <span><strong>{counts.resolved}</strong>{t('dlq.statResolved')}</span>
       </div>
 
+      {dayFilter && (
+        <div className="we-dlq-day-chip" data-testid="dlq-day-filter-chip">
+          <span>{t('dlq.dayFilter.label', { day: dayFilter }) as string}</span>
+          <button
+            type="button"
+            className="we-dlq-day-chip__clear"
+            onClick={clearDayFilter}
+            aria-label={t('dlq.dayFilter.clear') as string}
+            data-testid="dlq-day-filter-clear"
+          >
+            <X size={12} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <label className="field-label" htmlFor="dlq-search">{t('dlq.search.label')}</label>
       <input
         id="dlq-search"
@@ -595,6 +614,16 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                           </small>
                         </div>
                         <div className="we-list-row__meta">
+                          {item.status === 'open' && item.createdAt && (
+                            <span
+                              className="we-list-row__downtime"
+                              data-severity={downtimeSeverity(item.createdAt, Date.now())}
+                              title={t('dlq.downtimeTitle') as string}
+                              data-testid={`dlq-downtime-${item.id}`}
+                            >
+                              {humanizeAge(item.createdAt, Date.now())}
+                            </span>
+                          )}
                           <span className={`we-list-row__pill we-list-row__pill--${severity}`}>
                             {formatStatusLabel(item.status)}
                           </span>

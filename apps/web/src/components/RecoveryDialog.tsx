@@ -43,6 +43,7 @@ import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
+import { formatDowntime } from './recovery-center/helpers'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
@@ -130,6 +131,7 @@ export function RecoveryDialog({
 }: RecoveryDialogProps) {
   const { t } = useT()
   const bumpPlatformVersion = useWorkflowStore((state) => state.bumpPlatformVersion)
+  const addToast = useWorkflowStore((state) => state.addToast)
   const [step, setStep] = useState<Step>({ kind: 'idle' })
 
   // Derive the original failure's signature once when the source DLQ
@@ -365,6 +367,9 @@ export function RecoveryDialog({
           body: JSON.stringify({
             clusterSignature,
             deadLetterIds: clusterMembers,
+            // Apply the fix to same-workflow members so they recover, not just
+            // re-run the broken snapshot; cross-workflow members re-run plainly.
+            suggestedWorkflow: selected.workflow,
           }),
         }) as ClusterApplyResult
         setStep({
@@ -392,9 +397,12 @@ export function RecoveryDialog({
         })
         return
       }
+      // Replay against the applied fix (not the original failed snapshot) so
+      // the run actually recovers — the API validates it through the same gate
+      // as the sandbox and writes it as the run's authoritative workflow.
       const replay = await api('/dlq/replay', {
         method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id }),
+        body: JSON.stringify({ deadLetterId: dlq.id, suggestedWorkflow: selected.workflow }),
       }) as { runId?: string }
       setStep({
         kind: 'applied',
@@ -405,6 +413,18 @@ export function RecoveryDialog({
         preSaveBeforeSnapshot,
       })
       bumpPlatformVersion()
+      // Wedge moment: name the time we just gave back. The dead letter's
+      // `createdAt` is the failure instant; recovering it now closes that
+      // downtime window, so surface "Recovered after 3h 14m".
+      if (dlq.createdAt) {
+        const downtimeMs = Date.now() - new Date(dlq.createdAt).getTime()
+        if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
+          addToast(
+            t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
+            'success',
+          )
+        }
+      }
       // Operator → system feedback: same as cluster mode above. The
       // `rationale` here seeds the `patch_rationale` memory kind so
       // future similar failures recall the LLM's explanation, not just

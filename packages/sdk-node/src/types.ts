@@ -137,6 +137,15 @@ export type RecoveryCostProviderRow = {
   spendShare: number;
 };
 
+/** SLA-attainment card inside the recovery metrics payload. */
+export type RecoverySlaAttainmentMetric = RecoveryMetric & {
+  resolvedInWindow: number;
+  metSla: number;
+};
+
+/** One per-day point of the MTTR trend sparkline. `day` is `YYYY-MM-DD`. */
+export type RecoveryMttrTrendPoint = { day: string; seconds: number };
+
 /** Response shape of `GET /recovery/metrics?windowDays=…`. */
 export type RecoveryMetrics = {
   successRate: RecoveryMetric;
@@ -144,10 +153,15 @@ export type RecoveryMetrics = {
   p95Latency: RecoveryMetric;
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
+  slaAttainment: RecoverySlaAttainmentMetric;
   costThisWindow: RecoveryMetric & { providers: RecoveryCostProviderRow[] };
   windowDays: number;
   /** Total terminal runs in the window — denominator for downstream rollups. */
   terminalRuns: number;
+  /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR trend sparkline; `[]` when nothing replayed. */
+  mttrTrend: RecoveryMttrTrendPoint[];
+  /** Total automation downtime closed in the window (ms) — summed recovery time of replayed failures; a measured figure. */
+  downtimeEndedMs: number;
 };
 
 /**

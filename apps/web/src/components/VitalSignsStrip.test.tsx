@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Activity, AlertTriangle } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
-import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
+import { Sparkline, VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 
 describe('<VitalSignsStrip />', () => {
   it('renders one card per tile with severity-keyed classes and rationale copy', () => {
@@ -205,6 +205,69 @@ describe('<VitalSignsStrip />', () => {
     } finally {
       restoreMatchMedia()
     }
+  })
+
+  it('renders the MTTR trend sparkline when a tile supplies a series', () => {
+    render(
+      <VitalSignsStrip
+        tiles={[
+          {
+            icon: <Activity />,
+            label: 'MTTR',
+            display: '3m',
+            severity: 'healthy',
+            rationale: 'trend',
+            sparkline: [300, 240, 180],
+            sparklineLabel: 'MTTR trend',
+            testId: 'tile-mttr',
+          },
+        ]}
+      />,
+    )
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.tagName.toLowerCase()).toBe('svg')
+    expect(spark.getAttribute('aria-label')).toBe('MTTR trend')
+  })
+})
+
+describe('<Sparkline />', () => {
+  it('marks an improving series (last <= mean) as a down/green trend', () => {
+    render(<Sparkline points={[300, 240, 120]} ariaLabel="t" />)
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.getAttribute('data-trend')).toBe('down')
+    expect(spark.className.baseVal ?? spark.getAttribute('class')).toContain('we-sparkline--down')
+  })
+
+  it('marks a worsening series (last > mean) as an up/red trend', () => {
+    render(<Sparkline points={[120, 240, 600]} ariaLabel="t" />)
+    expect(screen.getByTestId('vitals-sparkline').getAttribute('data-trend')).toBe('up')
+  })
+
+  it('renders a native <title> hover tooltip when supplied', () => {
+    render(<Sparkline points={[300, 180]} ariaLabel="t" title={'2026-07-05: 5m\n2026-07-06: 3m'} />)
+    const titleEl = screen.getByTestId('vitals-sparkline').querySelector('title')
+    expect(titleEl?.textContent).toContain('2026-07-05: 5m')
+  })
+
+  it('renders nothing below two points', () => {
+    const { container } = render(<Sparkline points={[42]} ariaLabel="t" />)
+    expect(container.querySelector('[data-testid="vitals-sparkline"]')).toBeNull()
+  })
+
+  it('announces as an image when labelled', () => {
+    render(<Sparkline points={[300, 180]} ariaLabel="MTTR trend" />)
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.getAttribute('role')).toBe('img')
+    expect(spark.getAttribute('aria-label')).toBe('MTTR trend')
+    expect(spark.getAttribute('aria-hidden')).toBeNull()
+  })
+
+  it('is decorative (aria-hidden, no role=img) when unlabelled — no unnamed image in the a11y tree', () => {
+    render(<Sparkline points={[300, 180]} />)
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.getAttribute('role')).toBeNull()
+    expect(spark.getAttribute('aria-label')).toBeNull()
+    expect(spark.getAttribute('aria-hidden')).toBe('true')
   })
 })
 
