@@ -27,7 +27,7 @@ import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
-import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, recheckSignature } from "../cluster-recovery";
+import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMembers, pickClusterReplayWorkflow, recheckSignature } from "../cluster-recovery";
 import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
@@ -351,6 +351,24 @@ export const dlqRoutes: Route[] = [
         deadLetterIds.push(candidate);
       }
 
+      // Optional applied fix (the representative patch the operator accepted).
+      // Validated ONCE through the same gate as `/dlq/validate-fix`; applied
+      // per-member below only to cluster members of the SAME workflow whose
+      // failing node survives the patch (a cluster is by failure signature and
+      // may span workflows — a mismatched member gets a plain re-run).
+      let sanitizedFix: Workflow | null = null;
+      if (body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null) {
+        const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
+        if (!parsed.success) {
+          return sendError(res, "dlq_workflow_schema_invalid", "suggestedWorkflow failed schema validation: {{reason}}", 400, { reason: parsed.error.issues[0]?.message ?? "unknown" });
+        }
+        try {
+          sanitizedFix = sanitizeAiWorkflow(parsed.data);
+        } catch (err) {
+          return sendError(res, "dlq_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
       const errors: Array<{ deadLetterId: string; error: string }> = [];
       let replayed = 0;
       const totalInCluster = deadLetterIds.length;
@@ -373,10 +391,13 @@ export const dlqRoutes: Route[] = [
 
         try {
           const workflow = WorkflowSchema.parse(item.workflowJson);
+          // Apply the fix only to same-workflow members whose failing node
+          // survives it; every other member re-runs its own snapshot.
+          const { workflow: replayWorkflow, fixNode } = pickClusterReplayWorkflow(workflow, item.nodeId, sanitizedFix);
           await dlqReplay.replayDeadLetter({
             runId: item.runId,
-            workflow,
-            node: NodeSchema.parse(item.nodeJson),
+            workflow: replayWorkflow,
+            node: fixNode ?? NodeSchema.parse(item.nodeJson),
           });
           await markDeadLetterReplayed(auth.orgId, id);
           // Ensure the recovery_item exists (idempotent) so the cluster

@@ -367,6 +367,9 @@ export function RecoveryDialog({
           body: JSON.stringify({
             clusterSignature,
             deadLetterIds: clusterMembers,
+            // Apply the fix to same-workflow members so they recover, not just
+            // re-run the broken snapshot; cross-workflow members re-run plainly.
+            suggestedWorkflow: selected.workflow,
           }),
         }) as ClusterApplyResult
         setStep({
