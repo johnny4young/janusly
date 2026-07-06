@@ -67,6 +67,8 @@ export type RecoveryMetrics = {
   terminalRuns: number
   /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR sparkline. Optional — older API responses omit it. */
   mttrTrend?: MttrTrendPoint[]
+  /** Total automation downtime closed in the window (ms). Optional — older API responses omit it. */
+  downtimeEndedMs?: number
 }
 
 export type ClusterCategory =

@@ -92,6 +92,9 @@ export const dlqRoutes: Route[] = [
       // guarded (≤100) to bound the ILIKE pattern, mirroring the Flows `?q=`.
       const searchParam = url.searchParams.get("search")?.trim();
       const search = searchParam && searchParam.length > 0 && searchParam.length <= 100 ? searchParam : undefined;
+      // Optional `?day=YYYY-MM-DD` — a heatmap-cell drill-in restricting to one
+      // UTC day. Malformed values are dropped server-side (parseDayRange → null).
+      const day = url.searchParams.get("day") ?? undefined;
 
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
@@ -118,6 +121,7 @@ export const dlqRoutes: Route[] = [
             owner,
             severity: severity ? (severity as RecoveryItemSeverity) : undefined,
             search,
+            day,
             sort,
             cursor,
           },

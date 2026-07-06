@@ -160,6 +160,8 @@ export type RecoveryMetrics = {
   terminalRuns: number;
   /** Per-day avg recovery time (last ≤14 days, oldest-first) for the MTTR trend sparkline; `[]` when nothing replayed. */
   mttrTrend: RecoveryMttrTrendPoint[];
+  /** Total automation downtime closed in the window (ms) — summed recovery time of replayed failures; a measured figure. */
+  downtimeEndedMs: number;
 };
 
 /**

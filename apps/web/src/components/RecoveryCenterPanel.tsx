@@ -59,6 +59,7 @@ import {
   type RecoveryMetrics,
 } from './recovery-center/helpers'
 import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
+import { requestRecoveryDayFocus } from './recovery-day-focus-bus'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import {
@@ -80,6 +81,8 @@ type RecoveryCenterPanelProps = {
   onOpenRun: (runId: string) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
   onSubmitHumanForm: (nodeId: string, input: JsonObject) => void | Promise<void>
+  /** Inject a demo failure so a fresh operator can try the recovery loop for real. */
+  onTryDemoRecovery?: () => void | Promise<void>
 }
 
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
@@ -326,7 +329,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
       {metricStrip}
 
-      <RecoveryHeatmap days={heatmap} windowDays={90} nowMs={nowMs} />
+      <RecoveryHeatmap
+        days={heatmap}
+        windowDays={90}
+        nowMs={nowMs}
+        onSelectDay={(day) => {
+          requestRecoveryDayFocus(day)
+          props.onOpenTab('runs')
+        }}
+      />
 
       <div className="we-operator-grid">
         <section className="we-operator-chat">
@@ -339,6 +350,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             <RecoveryFlowDemo
               onOpenStudio={() => props.onOpenTab('copilot')}
               onOpenRecipes={() => props.onOpenTab('templates')}
+              onTryDemo={props.onTryDemoRecovery}
               onDismiss={dismissIntro}
             />
           )}
@@ -380,6 +392,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         clustersResolved={metrics?.clustersResolved}
         valueEstimate={metrics?.valueEstimate}
         windowDays={metrics?.windowDays ?? 30}
+        downtimeEndedMs={metrics?.downtimeEndedMs}
         terminalRunsZero={(metrics?.terminalRuns ?? 0) === 0}
       />
 

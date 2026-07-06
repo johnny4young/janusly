@@ -8483,6 +8483,57 @@ button.we-ops-metric-card--button {
 .we-recovery-heatmap__cell[data-outcome="partial"] { background: var(--we-warning); }
 .we-recovery-heatmap__cell[data-outcome="unrecovered"] { background: var(--we-danger); }
 
+button.we-recovery-heatmap__cell--clickable {
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 90ms ease;
+}
+
+button.we-recovery-heatmap__cell--clickable:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 1px var(--we-surface-1);
+}
+
+button.we-recovery-heatmap__cell--clickable:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
+/* Recovery-queue day drill-in chip (set by a heatmap click). */
+.we-dlq-day-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 4px 0 8px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--we-primary);
+  background: color-mix(in srgb, var(--we-primary) 8%, var(--we-surface) 92%);
+  color: var(--we-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.we-dlq-day-chip__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.we-dlq-day-chip__clear:hover {
+  background: color-mix(in srgb, var(--we-primary) 18%, transparent);
+}
+
 .we-recovery-heatmap__legend {
   display: flex;
   align-items: center;

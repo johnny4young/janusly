@@ -19,6 +19,7 @@ import {
   Check,
   FlaskConical,
   Layers,
+  PlayCircle,
   RotateCcw,
   ShieldCheck,
   Sparkles,
@@ -31,10 +32,14 @@ import { useT } from '../../i18n'
 export function RecoveryFlowDemo({
   onOpenStudio,
   onOpenRecipes,
+  onTryDemo,
   onDismiss,
 }: {
   onOpenStudio: () => void
   onOpenRecipes: () => void
+  /** When set, renders a primary "try a demo recovery" CTA that injects a real
+   *  demo failure so the operator can experience the loop, not just read it. */
+  onTryDemo?: () => void | Promise<void>
   /** When set, renders a dismiss control that hides the walkthrough for good. */
   onDismiss?: () => void
 }) {
@@ -59,9 +64,20 @@ export function RecoveryFlowDemo({
           <p>{t('recoveryCenter.flowDemo.body')}</p>
         </div>
         <div className="we-flow-demo__ctas">
+          {onTryDemo && (
+            <button
+              type="button"
+              className="command-button command-button-primary"
+              onClick={() => void onTryDemo()}
+              data-testid="recovery-center-empty-cta-demo"
+            >
+              <PlayCircle size={14} aria-hidden="true" />
+              <span>{t('recoveryCenter.flowDemo.cta.tryDemo')}</span>
+            </button>
+          )}
           <button
             type="button"
-            className="command-button command-button-primary"
+            className={onTryDemo ? 'command-button' : 'command-button command-button-primary'}
             onClick={onOpenStudio}
             data-testid="recovery-center-empty-cta-studio"
           >

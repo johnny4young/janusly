@@ -47,6 +47,7 @@ const SAMPLE_METRICS: RecoveryMetrics = {
     { day: "2026-07-01", seconds: 300 },
     { day: "2026-07-02", seconds: 180 },
   ],
+  downtimeEndedMs: 480_000,
 };
 
 describe("RecoveryResource.getMetrics", () => {

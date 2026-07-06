@@ -48,8 +48,20 @@ export type ValueDashboardSectionProps = {
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
+  /** Total automation downtime CLOSED in the window (ms) — a measured figure, no estimate badge. */
+  downtimeEndedMs?: number
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
+}
+
+/** Compact hours/minutes for the "downtime ended" figure: "3h 12m" / "45m" / "0m". */
+function formatDurationHm(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0m'
+  const totalMinutes = Math.round(ms / 60000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours === 0) return `${minutes}m`
+  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
 function formatCurrency(amount: number): string {
@@ -185,6 +197,16 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
           </div>
           <div className="we-recovery-center-value__value">
             {clustersResolved?.display ?? '0'}
+          </div>
+        </div>
+
+        {/* Downtime ended (measured — no estimate badge) */}
+        <div className="we-recovery-center-value__card" data-testid="value-downtime-ended">
+          <div className="we-recovery-center-value__label">
+            {t('recoveryCenter.value.downtimeEnded.label')}
+          </div>
+          <div className="we-recovery-center-value__value">
+            {formatDurationHm(props.downtimeEndedMs ?? 0)}
           </div>
         </div>
 

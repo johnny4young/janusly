@@ -37,6 +37,17 @@ describe("composeRecoveryMetrics — mttrTrend passthrough", () => {
   });
 });
 
+describe("composeRecoveryMetrics — downtimeEndedMs", () => {
+  it("sums the recovery durations closed in the window", () => {
+    const result = composeRecoveryMetrics(baseSignals({ mttrDurations: [1500, 1800, 2200] }), 30);
+    expect(result.downtimeEndedMs).toBe(5500);
+  });
+
+  it("is 0 when nothing recovered", () => {
+    expect(composeRecoveryMetrics(baseSignals(), 30).downtimeEndedMs).toBe(0);
+  });
+});
+
 describe("composeRecoveryMetrics — successRate band", () => {
   it("95/100 succeeded → healthy", () => {
     const result = composeRecoveryMetrics(

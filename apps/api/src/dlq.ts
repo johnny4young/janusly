@@ -12,7 +12,7 @@
 
 import { db } from "@janusly/db";
 import { deadLetters, recoveryItems, workflows } from "@janusly/db";
-import { eq, desc, asc, and, or, lt, gt, ilike, isNull, count, sql, type SQL } from "drizzle-orm";
+import { eq, desc, asc, and, or, lt, gt, gte, ilike, isNull, count, sql, type SQL } from "drizzle-orm";
 import { escapeLikePattern } from "@janusly/data";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
@@ -160,12 +160,24 @@ export type RecoveryQueueQuery = {
    *  id, or error message (`error_json->>'message'`). Applied with the other
    *  filters BEFORE the cap, so a match older than the newest page surfaces. */
   search?: string | null;
+  /** UTC calendar day (`YYYY-MM-DD`) to restrict to — matches the recovery
+   *  heatmap's day bucketing so a cell click drills into exactly that day's
+   *  failures. Rows with `created_at ∈ [day, day+1)`. Ignored when malformed. */
+  day?: string | null;
   sort?: RecoveryQueueSort;
   limit?: number;
   /** Decoded keyset position (from {@link decodeRecoveryQueueCursor}). When set,
    *  the query returns only rows strictly AFTER it in the chosen sort order. */
   cursor?: RecoveryQueueCursor | null;
 };
+
+/** Parse a `YYYY-MM-DD` UTC day into its `[start, end)` bounds, or null if malformed. */
+export function parseDayRange(day: string | null | undefined): { start: Date; end: Date } | null {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const start = new Date(`${day}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return null;
+  return { start, end: new Date(start.getTime() + 86_400_000) };
+}
 
 /** Build the ORDER BY for a recovery-queue sort. Every sort ends with a
  *  `deadLetters.id` tie-break so the ordering is total — keyset paging needs a
@@ -245,6 +257,11 @@ export async function listRecoveryQueue(orgId: string, query: RecoveryQueueQuery
   if (isDeadLetterStatus(query.status)) filters.push(eq(deadLetters.status, query.status));
   if (query.owner) filters.push(eq(recoveryItems.owner, query.owner));
   if (query.severity) filters.push(eq(recoveryItems.severity, query.severity));
+  const dayRange = parseDayRange(query.day);
+  if (dayRange) {
+    filters.push(gte(deadLetters.createdAt, dayRange.start));
+    filters.push(lt(deadLetters.createdAt, dayRange.end));
+  }
   if (query.search) {
     // Case-insensitive substring over the dead letter's node id, run id, or
     // error message. LIKE metacharacters are escaped so the term matches

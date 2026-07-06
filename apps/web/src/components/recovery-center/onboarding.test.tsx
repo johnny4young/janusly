@@ -35,3 +35,17 @@ describe('<RecoveryFlowDemo /> dismiss', () => {
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 })
+
+describe('<RecoveryFlowDemo /> try-demo CTA', () => {
+  it('renders no demo CTA without onTryDemo', () => {
+    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} />)
+    expect(screen.queryByTestId('recovery-center-empty-cta-demo')).toBeNull()
+  })
+
+  it('fires onTryDemo when the demo CTA is clicked', () => {
+    const onTryDemo = vi.fn()
+    render(<RecoveryFlowDemo onOpenStudio={() => {}} onOpenRecipes={() => {}} onTryDemo={onTryDemo} />)
+    fireEvent.click(screen.getByTestId('recovery-center-empty-cta-demo'))
+    expect(onTryDemo).toHaveBeenCalledOnce()
+  })
+})
