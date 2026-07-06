@@ -61,7 +61,7 @@ async function composeDown() {
   try {
     await run("docker", ["compose", "down"]);
   } catch (error) {
-    console.error("[integration] docker compose down failed:", error.message);
+    console.error("[integration] docker compose down failed:", error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -80,7 +80,7 @@ async function main() {
     await run("pnpm", ["--filter", "@janusly/api", "test:integration"]);
   } catch (error) {
     failed = true;
-    console.error("[integration] failed:", error.message);
+    console.error("[integration] failed:", error instanceof Error ? error.message : String(error));
   } finally {
     await composeDown();
   }

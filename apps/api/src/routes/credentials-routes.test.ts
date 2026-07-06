@@ -302,6 +302,13 @@ describe("POST /credentials/:name/expiry", () => {
     expect(setExpiryMock).not.toHaveBeenCalled();
   });
 
+  it("rejects an OMITTED expiresAt (400) — clearing must be explicit null, never accidental", async () => {
+    const { status, payload } = await callRoute("POST", PATH, { ifMatch: "2026-07-06T00:00:00.000Z" });
+    expect(status).toBe(400);
+    expect(payload.code).toBe("credentials_expiry_required");
+    expect(setExpiryMock).not.toHaveBeenCalled();
+  });
+
   it("maps not_found → 404 and conflict → 409", async () => {
     setExpiryMock.mockResolvedValueOnce({ ok: false, reason: "not_found" });
     const notFound = await callRoute("POST", PATH, { expiresAt: null });

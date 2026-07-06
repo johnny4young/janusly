@@ -199,6 +199,15 @@ export const credentialsRoutes: Route[] = [
       if (!name) return sendError(res, "credentials_name_required", "credential name required", 400);
 
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
+      // On the DEDICATED expiry endpoint, clearing must be EXPLICIT: require
+      // `expiresAt` to be present (a future ISO date to set, or `null` to
+      // clear). Omitting the field is rejected so a partial/accidental request
+      // (e.g. `{}` or `{ ifMatch }`) can't silently wipe a live expiry. (The
+      // create route treats an omitted `expiresAt` as "no expiry" — correct
+      // there, since nothing is being overwritten.)
+      if (!("expiresAt" in body)) {
+        return sendError(res, "credentials_expiry_required", "expiresAt is required — a future ISO date to set, or null to clear", 400);
+      }
       const parsedExpiry = parseFutureExpiry(body.expiresAt);
       if (!parsedExpiry.ok) {
         return sendError(res, "credentials_invalid_expiry", "expiresAt must be a valid future ISO date or null to clear", 400);

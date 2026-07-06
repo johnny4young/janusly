@@ -253,6 +253,22 @@ describe('<Sparkline />', () => {
     const { container } = render(<Sparkline points={[42]} ariaLabel="t" />)
     expect(container.querySelector('[data-testid="vitals-sparkline"]')).toBeNull()
   })
+
+  it('announces as an image when labelled', () => {
+    render(<Sparkline points={[300, 180]} ariaLabel="MTTR trend" />)
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.getAttribute('role')).toBe('img')
+    expect(spark.getAttribute('aria-label')).toBe('MTTR trend')
+    expect(spark.getAttribute('aria-hidden')).toBeNull()
+  })
+
+  it('is decorative (aria-hidden, no role=img) when unlabelled — no unnamed image in the a11y tree', () => {
+    render(<Sparkline points={[300, 180]} />)
+    const spark = screen.getByTestId('vitals-sparkline')
+    expect(spark.getAttribute('role')).toBeNull()
+    expect(spark.getAttribute('aria-label')).toBeNull()
+    expect(spark.getAttribute('aria-hidden')).toBe('true')
+  })
 })
 
 function stubReducedMotion(matches: boolean): () => void {
