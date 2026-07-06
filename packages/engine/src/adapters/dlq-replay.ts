@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import type { DeadLetterReplayAdapter, DeadLetterReplayInput } from "../core/types";
 import type { Workflow, WorkflowNode } from "@janusly/shared";
 import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent, setRunWorkflowSnapshot } from "../persistence";
+import { markNodeQueued, appendEvent, resetRunForReplay, setRunWorkflowSnapshot } from "../persistence";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -90,6 +90,15 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // replayed workflow flowed in-memory into `enqueueReadyNodes`. For a
     // normal replay (workflow identical to the snapshot) this is a no-op.
     await setRunWorkflowSnapshot(runId, workflow);
+
+    // Un-terminate the run + reset the failed node so the replay actually
+    // re-executes it. Without BOTH, the re-enqueued job is skipped: the
+    // runtime's guard drops queued jobs on a `failed`/`cancelled` run, and
+    // `markNodeRunning` only claims a `queued` node. `resetRunForReplay` only
+    // touches a `failed` run (never un-cancels); `markNodeQueued` mirrors
+    // start-run / retry / replay-lab.
+    await resetRunForReplay(runId);
+    await markNodeQueued(runId, node.id);
 
     await enqueueNode({
       runId,
