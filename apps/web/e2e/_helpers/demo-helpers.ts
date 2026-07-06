@@ -209,9 +209,19 @@ export async function validateFix(
   return result.runId;
 }
 
-/** Replay a dead letter by id (production replay of its snapshot). */
-export async function replayDeadLetter(request: APIRequestContext, deadLetterId: string): Promise<void> {
-  await apiPost(request, "/dlq/replay", { deadLetterId });
+/**
+ * Replay a dead letter by id. With `suggestedWorkflow` the replay runs against
+ * that applied fix (like the RecoveryDialog) — un-terminating the run and
+ * re-queuing the failed node — so a real fix recovers the run; without it, a
+ * plain retry of the original snapshot.
+ */
+export async function replayDeadLetter(
+  request: APIRequestContext,
+  deadLetterId: string,
+  suggestedWorkflow?: Json,
+): Promise<void> {
+  const body: Json = suggestedWorkflow ? { deadLetterId, suggestedWorkflow } : { deadLetterId };
+  await apiPost(request, "/dlq/replay", body);
 }
 
 /** Read a dead letter's current status (`open` / `replayed` / `resolved`), or null if gone. */

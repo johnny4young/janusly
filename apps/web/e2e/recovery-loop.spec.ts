@@ -7,9 +7,12 @@
  * Deterministic + provider-free: F3's `charge` node fails with
  * "Missing secret: BILLING_API_KEY" (a template-resolution error, NOT skipped
  * by the writes-skipped sandbox), so the sandbox gate can be exercised without
- * an AI key or network. The "real fix" edits the failing node's auth header off
- * the missing secret; the sandbox then resolves the template and skips the
- * write-side http call, so validation succeeds.
+ * an AI key or network. The "real fix" replaces the failing http node with a
+ * `noop` of the same id — it succeeds in BOTH the sandbox and a real production
+ * replay (no network), so the replayed run genuinely recovers. (An auth-only
+ * edit would pass the sandbox — which skips the write — but still fail a real
+ * replay's http call; the noop fix avoids that so the test asserts a true
+ * recovery, not a sandbox-only pass.)
  *
  * Driven via API requests (not the UI) so it stays well under the Playwright
  * per-test timeout.
@@ -31,13 +34,12 @@ import {
 
 type WorkflowJson = { nodes: Array<{ id: string; type: string; config: Record<string, unknown> }> };
 
-/** Deep-clone F3 and edit `charge`'s Authorization header off the missing secret. */
-function fixChargeAuth(workflow: WorkflowJson): WorkflowJson {
+/** Deep-clone F3 and replace the failing `charge` http node with a `noop` of
+ *  the same id — a real fix that succeeds in the sandbox AND a real replay. */
+function fixChargeToNoop(workflow: WorkflowJson): WorkflowJson {
   const fixed = JSON.parse(JSON.stringify(workflow)) as WorkflowJson;
-  const charge = fixed.nodes.find((n) => n.id === "charge");
-  const headers = (charge?.config.headers ?? {}) as Record<string, unknown>;
-  headers.Authorization = "Bearer test-token-literal";
-  if (charge) charge.config.headers = headers;
+  const idx = fixed.nodes.findIndex((n) => n.id === "charge");
+  if (idx >= 0) fixed.nodes[idx] = { id: "charge", type: "noop", config: {} };
   return fixed;
 }
 
@@ -67,17 +69,24 @@ test.describe("Recovery loop", () => {
     expect(rejected.status, "sandbox must REJECT a workflow whose failing node is unchanged").toBe("failed");
     expect(rejected.nodes.find((n) => n.nodeId === "charge")?.status).toBe("failed");
 
-    // 3. Sandbox ACCEPTS a real fix — auth header edited off the missing secret;
-    //    the template now resolves and the write-side http call is skipped.
-    const fixed = fixChargeAuth(workflow);
+    // 3. Sandbox ACCEPTS the real fix (charge → noop) — the failing node now
+    //    resolves, so the writes-skipped sandbox replay reaches succeeded.
+    const fixed = fixChargeToNoop(workflow);
     const acceptRunId = await validateFix(request, dl!.id, fixed);
     const accepted = await pollUntilTerminal(request, acceptRunId);
     expect(accepted.status, "sandbox must ACCEPT a workflow whose failing node now resolves").toBe("succeeded");
     expect(accepted.nodes.find((n) => n.nodeId === "charge")?.status).toBe("succeeded");
 
-    // 4. Replay the entry — it is accepted and the DLQ row resolves to `replayed`.
+    // 4. Replay AGAINST the fix — the DLQ entry resolves AND the run RECOVERS:
+    //    the replay un-terminates the run + re-queues the failed node, then
+    //    re-runs it against the applied fix. (Regression guard for the recovery
+    //    bug where replay re-ran the original broken snapshot and stayed failed.)
     expect(await deadLetterStatus(request, dl!.id)).toBe("open");
-    await replayDeadLetter(request, dl!.id);
+    await replayDeadLetter(request, dl!.id, fixed);
     expect(await deadLetterStatus(request, dl!.id), "replay must flip the DLQ entry to replayed").toBe("replayed");
+
+    const recovered = await pollUntilTerminal(request, runId);
+    expect(recovered.status, "replaying against the applied fix must recover the run").toBe("succeeded");
+    expect(recovered.nodes.find((n) => n.nodeId === "charge")?.status).toBe("succeeded");
   });
 });

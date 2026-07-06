@@ -219,6 +219,20 @@ export async function markNodeQueued(runId: string, nodeId: string, attempt = 1)
 }
 
 /**
+ * Flip a `failed` run back to `running` for a recovery replay. The runtime's
+ * pre-execution guard skips queued jobs on a `cancelled`/`failed` run, so a
+ * replay that re-enqueues the failed node would otherwise never execute it.
+ * Conditional on `status='failed'` — a `cancelled` run is never un-cancelled,
+ * and the guard re-reads the status at execution time so a cancel racing the
+ * replay still wins. No-op when the run isn't failed.
+ */
+export async function resetRunForReplay(runId: string): Promise<void> {
+  await db.update(runs)
+    .set({ status: "running" })
+    .where(and(eq(runs.id, runId), eq(runs.status, "failed")));
+}
+
+/**
  * Atomic claim — flip `pending → queued` only when the row is still
  * `pending`. Returns `true` on success, `false` when another worker
  * already claimed. This invariant must not be replaced with a non-atomic

@@ -542,6 +542,66 @@ describe("POST /dlq/bulk-resolve", () => {
   });
 });
 
+describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
+  const failedItem = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n",
+    status: "open",
+    workflowJson: { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "http", config: { url: "https://x", method: "GET" } }], edges: [] },
+    nodeJson: { id: "n", type: "http", config: { url: "https://x", method: "GET" } },
+  };
+
+  it("replays against the supplied fix (not the original snapshot) when suggestedWorkflow is given", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+    autoResolveMock.mockResolvedValue(undefined as never);
+
+    const fix = { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "noop", config: {} }], edges: [] };
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: fix }),
+      });
+      expect(response.status).toBe(200);
+      // The adapter receives the FIX (node `n` is now a noop), not the original http node.
+      const call = replayDeadLetterMock.mock.calls[0][0] as { workflow: { nodes: Array<{ id: string; type: string }> } };
+      expect(call.workflow.nodes.find((x) => x.id === "n")?.type).toBe("noop");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("400s when the suggestedWorkflow drops the failing node id", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockReset();
+
+    const noFailingNode = { id: "wf-1", name: "WF", nodes: [{ id: "other", type: "noop", config: {} }], edges: [] };
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: noFailingNode }),
+      });
+      expect(response.status).toBe(400);
+      expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
 describe("POST /dlq/bulk-replay", () => {
   // An open DLQ row whose stored JSONs pass the real Workflow/Node schemas, so
   // the route reaches the (mocked) replay adapter instead of erroring at parse.

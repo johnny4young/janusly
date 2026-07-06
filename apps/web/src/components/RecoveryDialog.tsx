@@ -394,9 +394,12 @@ export function RecoveryDialog({
         })
         return
       }
+      // Replay against the applied fix (not the original failed snapshot) so
+      // the run actually recovers — the API validates it through the same gate
+      // as the sandbox and writes it as the run's authoritative workflow.
       const replay = await api('/dlq/replay', {
         method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id }),
+        body: JSON.stringify({ deadLetterId: dlq.id, suggestedWorkflow: selected.workflow }),
       }) as { runId?: string }
       setStep({
         kind: 'applied',

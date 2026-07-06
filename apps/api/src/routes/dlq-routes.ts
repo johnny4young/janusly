@@ -487,11 +487,35 @@ export const dlqRoutes: Route[] = [
         const item = await getDeadLetter(auth.orgId, body.deadLetterId);
         if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
 
-        await dlqReplay.replayDeadLetter({
-          runId: item.runId,
-          workflow: WorkflowSchema.parse(item.workflowJson),
-          node: NodeSchema.parse(item.nodeJson),
-        });
+        // Default: replay the original failed snapshot (a plain retry). When the
+        // caller supplies a `suggestedWorkflow` (the operator's applied fix),
+        // replay against THAT instead — matching the auto-healing path
+        // (`auto-healing-watcher.ts` passes the patched workflow) — so applying
+        // a fix and replaying actually recovers the run instead of re-running
+        // the broken snapshot. Validated through the same gate as
+        // `/dlq/validate-fix`; the failing node id must survive the patch.
+        let workflow = WorkflowSchema.parse(item.workflowJson);
+        let node = NodeSchema.parse(item.nodeJson);
+        if (body.suggestedWorkflow !== undefined && body.suggestedWorkflow !== null) {
+          const parsed = WorkflowSchema.safeParse(body.suggestedWorkflow);
+          if (!parsed.success) {
+            return sendError(res, "dlq_workflow_schema_invalid", "suggestedWorkflow failed schema validation: {{reason}}", 400, { reason: parsed.error.issues[0]?.message ?? "unknown" });
+          }
+          let sanitized: Workflow;
+          try {
+            sanitized = sanitizeAiWorkflow(parsed.data);
+          } catch (err) {
+            return sendError(res, "dlq_workflow_sanitize_failed", "suggestedWorkflow sanitize failed: {{reason}}", 400, { reason: err instanceof Error ? err.message : String(err) });
+          }
+          const failingNode = sanitized.nodes.find((n) => n.id === item.nodeId);
+          if (!failingNode) {
+            return sendError(res, "dlq_failing_node_missing", 'suggestedWorkflow does not contain the failing node id "{{nodeId}}"', 400, { nodeId: item.nodeId });
+          }
+          workflow = sanitized;
+          node = failingNode;
+        }
+
+        await dlqReplay.replayDeadLetter({ runId: item.runId, workflow, node });
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
         await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });
