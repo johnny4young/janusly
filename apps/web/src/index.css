@@ -3081,6 +3081,29 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 1px 2px var(--we-shadow-ink-04);
 }
 
+.we-flow-demo__dismiss {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--we-text-2);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.we-flow-demo__dismiss:hover {
+  background: var(--we-surface-3);
+  color: var(--we-text-1);
+}
+
 .we-flow-demo__head {
   display: grid;
   grid-template-columns: 1fr auto;

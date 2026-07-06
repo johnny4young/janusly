@@ -2377,6 +2377,7 @@
   "recoveryCenter.hero.recoveryTitle_other": "{{count}} runs need recovery",
   "recoveryCenter.hero.openQueue": "Open recovery queue",
   "recoveryCenter.flowDemo.kicker": "Recovery loop · how it works",
+  "recoveryCenter.flowDemo.dismiss": "Dismiss the recovery walkthrough",
   "recoveryCenter.flowDemo.title": "From failure to fix in one screen.",
   "recoveryCenter.flowDemo.body": "Janusly's differentiator is the loop below. Every step happens in this Home — no jumping to logs, no ticket triage, no manual diffing.",
   "recoveryCenter.flowDemo.cta.studio": "Draft a flow",

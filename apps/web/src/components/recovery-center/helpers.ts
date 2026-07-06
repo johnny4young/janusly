@@ -277,6 +277,22 @@ export function budgetBand(envelope: BudgetEnvelope | null): 'cobalt' | 'cyan' |
 // Small readers / labelers.
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Whether to show the onboarding recovery-loop walkthrough. Only for a truly
+ * fresh workspace — no runs, no open failures, no pending approvals — so an
+ * established org that simply has nothing failing right now doesn't get taught
+ * the loop every visit. A prior dismissal always wins.
+ */
+export function shouldShowOnboarding(input: {
+  runs: number
+  openFailures: number
+  waitingApprovals: number
+  dismissed: boolean
+}): boolean {
+  if (input.dismissed) return false
+  return input.runs === 0 && input.openFailures === 0 && input.waitingApprovals === 0
+}
+
 /** One per-day cell from `GET /recovery/heatmap`. */
 export type HeatmapDay = { day: string; failures: number; recovered: number; mttrSeconds: number }
 export type HeatmapOutcome = 'none' | 'recovered' | 'partial' | 'unrecovered'
