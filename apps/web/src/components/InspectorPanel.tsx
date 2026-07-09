@@ -54,6 +54,13 @@ export function InspectorPanel({
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
 
+  // A stale parse error from node A must not linger under node B's card —
+  // the error banner describes the PREVIOUS selection's JSON, not this one's.
+  const selectedNodeId = selectedNode?.id ?? null
+  React.useEffect(() => {
+    setJsonError(null)
+  }, [selectedNodeId])
+
   // Operators paste node ids into logs / run filters; a one-click copy beats
   // hand-selecting the mono text. Degrades to an error toast where the
   // Clipboard API is unavailable (non-secure context).
@@ -164,7 +171,11 @@ export function InspectorPanel({
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
         <label className="field-label" htmlFor="edge-condition">{t('rightPanel.inspector.runOnlyWhen')}</label>
+        {/* Keyed by edge id: the textarea is uncontrolled (defaultValue), so
+            without a key React reuses the DOM node across edge selections —
+            edge B would show (and on blur COMMIT) edge A's stale condition. */}
         <textarea
+          key={selectedEdge.id}
           id="edge-condition"
           className="code-field code-field-short"
           defaultValue={selectedEdge.data?.condition ?? ''}

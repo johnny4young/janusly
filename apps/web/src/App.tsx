@@ -727,7 +727,6 @@ export default function App() {
   const recoverState: 'blocked' | 'attention' | 'clear' =
     blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
   const activeRunCount = runs.filter(run => run.status === 'running' || run.status === 'paused').length
-  const queueCount = 0
   const isConnected = streamStatus === 'connected'
 
   // Extracted once so the same element instance can render in either the
@@ -994,9 +993,11 @@ export default function App() {
               <span>{isConnected ? t('statusBar.operatorOnline') : t('statusBar.operatorOffline')}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            {/* DLQ count only — a queue-depth stat returns here when the
+                Q-06 gauge exists; until then we don't render a fake number. */}
             <span className="bottom-status-bar__item">
               <Activity size={12} aria-hidden="true" />
-              <span>{t('statusBar.queue', { queue: queueCount, dlq: openDlqCount })}</span>
+              <span>{t('statusBar.dlq', { dlq: openDlqCount })}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
             <span className="bottom-status-bar__item">
@@ -1016,7 +1017,7 @@ export default function App() {
             </button>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
             <span className="bottom-status-bar__item">
-              {orgId ?? 'default'} · build <span>2026.05.14-90f3a77</span>
+              {orgId ?? 'default'} · build <span>{__BUILD_ID__}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
             <button

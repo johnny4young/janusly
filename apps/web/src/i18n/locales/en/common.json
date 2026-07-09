@@ -430,7 +430,7 @@
   "shortcuts.sidebarSearch": "Focus the sidebar search",
   "statusBar.operatorOnline": "Live · operator online",
   "statusBar.operatorOffline": "Operator offline",
-  "statusBar.queue": "Queue {{queue}} · DLQ {{dlq}}",
+  "statusBar.dlq": "DLQ {{dlq}}",
   "statusBar.activeRuns_one": "Active runs {{count}}",
   "statusBar.activeRuns_other": "Active runs {{count}}",
   "statusBar.docs": "docs",

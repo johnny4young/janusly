@@ -1,10 +1,29 @@
 /// <reference types="vitest" />
+import { execFileSync } from 'node:child_process'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+/**
+ * Real build stamp, computed once at config load: `<date>-<short-sha>`.
+ * Replaces the hardcoded literal that went stale within weeks (fourth-wave
+ * audit W-08). Falls back to "dev" outside a git checkout (e.g. a tarball
+ * build) — an honest "dev" beats a confident wrong date.
+ */
+function buildId(): string {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
+    return `${new Date().toISOString().slice(0, 10)}-${sha}`
+  } catch {
+    return 'dev'
+  }
+}
+
 export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId()),
+  },
   server: {
     port: 5173,
   },

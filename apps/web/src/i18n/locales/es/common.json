@@ -430,7 +430,7 @@
   "shortcuts.sidebarSearch": "Enfocar el buscador del sidebar",
   "statusBar.operatorOnline": "Vivo · operador en línea",
   "statusBar.operatorOffline": "Operador desconectado",
-  "statusBar.queue": "Cola {{queue}} · DLQ {{dlq}}",
+  "statusBar.dlq": "DLQ {{dlq}}",
   "statusBar.activeRuns_one": "Ejecución activa {{count}}",
   "statusBar.activeRuns_other": "Ejecuciones activas {{count}}",
   "statusBar.docs": "docs",

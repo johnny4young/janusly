@@ -46,7 +46,6 @@ import {
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import type { ActiveTab, AiHealth } from '../types'
 
-const BUILD_PLACEHOLDER = '2026.05.14-90f3a77'
 type UserMenuProps = {
   aiHealth?: AiHealth | null
   budgetGuardOn?: boolean | null
@@ -215,7 +214,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
               <strong>{orgId ?? 'default'}</strong>
               <small>
                 <span className={`user-menu__env user-menu__env--${env}`}>{envLabel}</span>
-                <span className="user-menu__build">build {BUILD_PLACEHOLDER}</span>
+                <span className="user-menu__build">build {__BUILD_ID__}</span>
               </small>
             </div>
             <button
