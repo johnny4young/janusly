@@ -65,9 +65,11 @@ export function resolveTriggerConfig(type: TriggerNodeType, config: unknown):
 /**
  * Read the normalized inbound event the ingestion seam stuffed into the
  * run input. `startRun` persists `input` under `runs.inputJson.input`, and
- * the engine plumbs `input` onto every node's context as `ctx.context.input`
- * (the same path `{{input.*}}` templates resolve). A manual `POST /start`
- * has no such block — the executor falls back to an empty object.
+ * `executeNode` merges it onto every node's context as `ctx.context.input`
+ * (the same path `{{context.input.*}}` templates resolve; see
+ * `getRunMetadata` + the merge in `execute-node.ts`). A manual
+ * `POST /start` has no such block — the executor falls back to an empty
+ * object.
  */
 function readTriggerEvent(ctx: { context: Record<string, unknown> }): Record<string, unknown> {
   const input = ctx.context.input;

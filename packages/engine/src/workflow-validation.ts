@@ -89,6 +89,14 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     if (nodeIds.has(node.id)) issues.push({ code: "duplicate_node_id", message: `Duplicate node id: ${node.id}`, nodeId: node.id });
     nodeIds.add(node.id);
 
+    // `context.input` is where `executeNode` merges the run's start/trigger
+    // input — a node with the literal id "input" would collide with that
+    // slot in the template scope (legacy workflows keep today's behaviour:
+    // the merge in `execute-node.ts` is guarded and never clobbers a node).
+    if (node.id === "input") {
+      issues.push({ code: "node_id_reserved", message: `Node id "input" is reserved for the run input (context.input)`, nodeId: node.id });
+    }
+
     if (!supportedNodeTypes.has(node.type)) issues.push({ code: "unsupported_node_type", message: `Unsupported node type: ${node.type}`, nodeId: node.id });
     if (node.type === "http" && !node.config.url) issues.push({ code: "http_missing_url", message: "HTTP node requires config.url", nodeId: node.id });
     if (node.type === "tool" && !node.config.tool) issues.push({ code: "tool_missing_name", message: "Tool node requires config.tool", nodeId: node.id });
@@ -230,6 +238,19 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
     if (edge.condition) {
       const expression = validateExpression(edge.condition);
       if (!expression.valid) issues.push({ code: "edge_invalid_condition", message: expression.message ?? "Invalid edge condition", edgeId });
+      // The `inputs.` scope means "this node's config" and only exists while
+      // a node executes — edges evaluate with `inputs: {}` (core/runtime),
+      // so an `inputs.*` path on an edge is always undefined→falsy and the
+      // branch silently never fires (fourth-wave audit B-04). Reject it at
+      // save time with a pointer to the run-input path that DOES work.
+      // Quoted string literals are stripped first to avoid false positives.
+      if (/\binputs\./.test(edge.condition.replace(/'[^']*'|"[^"]*"/g, ""))) {
+        issues.push({
+          code: "edge_condition_inputs_scope",
+          message: "Edge conditions cannot reference inputs.* (node config does not exist on an edge) — use context.input.* for the run input or context.<nodeId>.output.* for a step's output",
+          edgeId,
+        });
+      }
     }
   }
 

@@ -460,3 +460,57 @@ describe('validateWorkflow', () => {
     }))
   })
 })
+
+describe('validateWorkflow — reserved ids + edge scopes (fourth-wave B-01/B-04)', () => {
+  it('rejects the reserved node id "input" (collides with the run-input context slot)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'input', type: 'noop', config: {} },
+        { id: 'next', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'input', to: 'next' }],
+    })
+
+    expect(result.valid).toBe(false)
+    const issue = result.issues.find(i => i.code === 'node_id_reserved')
+    expect(issue).toBeDefined()
+    expect(issue?.nodeId).toBe('input')
+  })
+
+  it('rejects inputs.* paths in edge conditions (edges evaluate with an empty inputs scope)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'inputs.priority === "high"' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('edge_condition_inputs_scope')
+  })
+
+  it('does NOT flag a quoted string literal that merely contains "inputs."', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'context.a.output.source === "inputs.file"' }],
+    })
+
+    expect(result.issues.map(i => i.code)).not.toContain('edge_condition_inputs_scope')
+  })
+
+  it('still accepts context.input.* paths on edges (the sanctioned run-input scope)', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'context.input.priority === "high"' }],
+    })
+
+    expect(result.issues.map(i => i.code)).not.toContain('edge_condition_inputs_scope')
+  })
+})

@@ -122,6 +122,15 @@ export type RunMetadata = {
    *  omit it stay valid. `executeNode` reads it to set `NodeContext.dryRun`
    *  without a second per-node `runs` lookup. */
   replayMode?: string | null;
+  /** The run's start/trigger input (`runs.inputJson.input` — the block
+   *  `startRun` persists and the trigger-ingest routes fill with the inbound
+   *  event). `executeNode` merges it into the per-node context as
+   *  `context.input` so trigger executors and `{{context.input.*}}`
+   *  templates can read it (fourth-wave audit B-01: before this, the
+   *  payload was silently dropped in production while sandbox validation
+   *  seeded it — validation showed the event flowing, production lost it).
+   *  Optional so existing mocks that omit it stay valid. */
+  input?: Record<string, unknown>;
 };
 
 /**
@@ -152,6 +161,7 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
       workflowId: workflowVersions.workflowId,
       createdBy: runs.createdBy,
       replayMode: runs.replayMode,
+      inputJson: runs.inputJson,
     })
     .from(runs)
     .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
@@ -159,12 +169,21 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
     .limit(1);
   const row = rows[0];
   if (!row) return null;
+  // `inputJson` is `{ workflow, input }` for production runs (`startRun`) and
+  // `{ workflow, failingNodeId }` for sandbox validation runs — read `input`
+  // defensively and normalise anything non-object to `{}`.
+  const rawInput = (row.inputJson as { input?: unknown } | null)?.input;
+  const input =
+    rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
+      ? (rawInput as Record<string, unknown>)
+      : {};
   return {
     orgId: row.orgId,
     workflowVersionId: row.workflowVersionId,
     workflowId: row.workflowId ?? null,
     createdBy: row.createdBy ?? null,
     replayMode: row.replayMode ?? null,
+    input,
   };
 }
 

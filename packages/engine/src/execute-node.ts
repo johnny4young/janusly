@@ -60,6 +60,17 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
 
   const context = await getRunContext(runId);
 
+  // Merge the run's start/trigger input as `context.input` — the contract the
+  // triggers docstring promises and `{{context.input.*}}` templates resolve.
+  // Done HERE (not inside getRunContext) so the readiness scans'
+  // `statusesOnly` variant stays input-free, and reusing the single
+  // `getRunMetadata` row above costs no extra per-node query. Guarded so a
+  // legacy workflow whose node id is literally "input" keeps its slot
+  // (validation reserves the id for new saves — `node_id_reserved`).
+  if (context.input === undefined) {
+    context.input = meta.input ?? {};
+  }
+
   const scope = {
     context,
     inputs: node.config
