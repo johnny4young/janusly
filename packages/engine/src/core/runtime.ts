@@ -183,6 +183,35 @@ export class WorkflowRuntime {
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
           await this.store.markNodeSucceeded(runId, node.id, { decision });
+
+          // ROUTE the decision: mark every non-chosen candidate that is a
+          // direct successor of this router as skipped BEFORE the readiness
+          // scan. Without this, `enqueueReadyNodes` queues every outgoing
+          // edge and the decision is decorative — both paths execute,
+          // doubling cost and side effects (fourth-wave audit B-02).
+          // Mirrors the condition-edge skip exactly: readiness treats
+          // "skipped" as satisfied, so a join fed by the losing branch
+          // still unblocks. Guards: only candidates still `pending` in the
+          // context snapshot (a mis-wired candidate that already ran keeps
+          // its state — validation rejects that shape on new saves via
+          // `router_candidate_not_successor`).
+          const chosen = decision.chosenNodeId;
+          if (chosen) {
+            const successorIds = new Set(
+              input.workflow.edges.filter((edge) => edge.from === node.id).map((edge) => edge.to),
+            );
+            const statusById = context as Record<string, { status?: string } | undefined>;
+            for (const candidate of candidates) {
+              if (candidate.nodeId === chosen) continue;
+              if (!successorIds.has(candidate.nodeId)) continue;
+              if (statusById[candidate.nodeId]?.status !== "pending") continue;
+              const reason = `Router ${node.id} chose ${chosen}`;
+              await this.store.markNodeSkipped(runId, candidate.nodeId, { reason });
+              await this.store.appendEvent(workflowEvent({ runId, nodeId: candidate.nodeId, type: "node.skipped", payload: { reason } }));
+              logNodeEvent({ runId, nodeId: candidate.nodeId, type: "node.skipped" });
+            }
+          }
+
           // Re-check run status before scheduling downstream work — a
           // cancellation that lands while this node was running shouldn't
           // re-queue work for the operator who just cancelled.

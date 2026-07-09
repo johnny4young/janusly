@@ -409,7 +409,9 @@ describe('validateWorkflow', () => {
         { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'fast' }] } },
         { id: 'fast', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'start', to: 'pick' }],
+      // B-02: candidates must be wired as direct successors — the runtime
+      // routes the decision by skipping the non-chosen wired candidates.
+      edges: [{ from: 'start', to: 'pick' }, { from: 'pick', to: 'fast' }],
     })
 
     expect(result).toEqual({ valid: true, issues: [] })
@@ -422,7 +424,7 @@ describe('validateWorkflow', () => {
         { id: 'pick', type: 'router_llm', config: { candidates: [{ id: 'legacy_path' }] } },
         { id: 'legacy_path', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'start', to: 'pick' }],
+      edges: [{ from: 'start', to: 'pick' }, { from: 'pick', to: 'legacy_path' }],
     })
 
     expect(result).toEqual({ valid: true, issues: [] })
@@ -512,5 +514,52 @@ describe('validateWorkflow — reserved ids + edge scopes (fourth-wave B-01/B-04
     })
 
     expect(result.issues.map(i => i.code)).not.toContain('edge_condition_inputs_scope')
+  })
+})
+
+describe('validateWorkflow — router candidate wiring (fourth-wave B-02)', () => {
+  it('accepts a router whose candidates are wired as direct successors', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'a' }, { nodeId: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [
+        { from: 'pick', to: 'a' },
+        { from: 'pick', to: 'b' },
+      ],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+  })
+
+  it('rejects a candidate that is not a direct successor of the router', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ nodeId: 'a' }, { nodeId: 'b' }] } },
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'pick', to: 'a' }, { from: 'a', to: 'b' }],
+    })
+
+    expect(result.valid).toBe(false)
+    const issue = result.issues.find(i => i.code === 'router_candidate_not_successor')
+    expect(issue?.nodeId).toBe('pick')
+    expect(issue?.message).toContain('"b"')
+  })
+
+  it('rejects a candidate that does not exist, honoring the legacy { id } field', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'pick', type: 'router', config: { candidates: [{ id: 'ghost' }] } },
+        { id: 'a', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'pick', to: 'a' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('router_candidate_unknown')
   })
 })

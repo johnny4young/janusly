@@ -658,3 +658,84 @@ describe('enqueueReadyNodes — snapshot-based readiness', () => {
     expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'c' }))
   })
 })
+
+describe('executeQueuedNode — router routes the decision (fourth-wave B-02)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const routerNode = {
+    id: 'pick',
+    type: 'router' as const,
+    config: {
+      strategy: 'fastest',
+      candidates: [
+        { nodeId: 'slow', avgLatencyMs: 1500 },
+        { nodeId: 'fast', avgLatencyMs: 200 },
+      ],
+    },
+  }
+  const wiredWorkflow = {
+    dslVersion: '1.0' as const,
+    nodes: [
+      routerNode,
+      { id: 'fast', type: 'noop' as const, config: {} },
+      { id: 'slow', type: 'noop' as const, config: {} },
+    ],
+    edges: [
+      { from: 'pick', to: 'fast' },
+      { from: 'pick', to: 'slow' },
+    ],
+  }
+  const pendingContext = {
+    pick: { status: 'running' },
+    fast: { status: 'pending' },
+    slow: { status: 'pending' },
+  }
+
+  it('marks the non-chosen successor candidate skipped so only the winner runs', async () => {
+    const store = makeStore({ getRunContext: vi.fn().mockResolvedValue(pendingContext) })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: wiredWorkflow })
+
+    // strategy=fastest → 'fast' wins; 'slow' must be skipped BEFORE the
+    // readiness scan (which treats skipped as satisfied for joins).
+    expect(store.markNodeSkipped).toHaveBeenCalledWith('r1', 'slow', { reason: 'Router pick chose fast' })
+    expect(store.markNodeSkipped).not.toHaveBeenCalledWith('r1', 'fast', expect.anything())
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      nodeId: 'slow',
+      type: 'node.skipped',
+    }))
+  })
+
+  it('never skips a candidate that is not wired as a direct successor', async () => {
+    const unwiredWorkflow = { ...wiredWorkflow, edges: [{ from: 'pick', to: 'fast' }] }
+    const store = makeStore({ getRunContext: vi.fn().mockResolvedValue(pendingContext) })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: unwiredWorkflow })
+
+    // 'slow' has no pick→slow edge — the ROUTER's skip cannot reach it
+    // (validation rejects this shape on new saves via
+    // router_candidate_not_successor). The readiness scan may still skip the
+    // orphan for its own reason; what matters is the router reason never fires.
+    expect(store.markNodeSkipped).not.toHaveBeenCalledWith(
+      'r1',
+      'slow',
+      expect.objectContaining({ reason: expect.stringContaining('Router') }),
+    )
+  })
+
+  it('never flips a candidate that already advanced past pending', async () => {
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({
+        ...pendingContext,
+        slow: { status: 'succeeded', output: { done: true } },
+      }),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: routerNode, workflow: wiredWorkflow })
+
+    expect(store.markNodeSkipped).not.toHaveBeenCalled()
+  })
+})

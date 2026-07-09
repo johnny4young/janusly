@@ -161,7 +161,35 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
     }
     return node;
   });
-  const sanitized = { ...workflow, nodes: sanitizedNodes, edges: sanitizedEdges };
+  // Draft-generation repair for routers (fourth-wave audit B-02): the
+  // runtime routes a decision by skipping non-chosen candidates that are
+  // DIRECT successors of the router, and `router_candidate_not_successor`
+  // now fails validation otherwise. Models trained on the old prompt
+  // example still emit candidates without the router→candidate edge —
+  // auto-wire the missing edges so the draft survives (same posture as the
+  // transform→noop demotion above) instead of 502-ing the generation.
+  const repairedEdges = [...sanitizedEdges];
+  const nodeIdSet = new Set(sanitizedNodes.map((node) => node.id));
+  for (const node of sanitizedNodes) {
+    if (node.type !== "router" && node.type !== "router_llm") continue;
+    const candidates = (node.config as { candidates?: unknown } | undefined)?.candidates;
+    if (!Array.isArray(candidates)) continue;
+    const outgoing = new Set(repairedEdges.filter((edge) => edge.from === node.id).map((edge) => edge.to));
+    for (const entry of candidates) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const e = entry as Record<string, unknown>;
+      const candidateId =
+        typeof e.nodeId === "string" && e.nodeId.trim()
+          ? e.nodeId.trim()
+          : typeof e.id === "string" && e.id.trim()
+            ? e.id.trim()
+            : "";
+      if (!candidateId || !nodeIdSet.has(candidateId) || outgoing.has(candidateId)) continue;
+      repairedEdges.push({ from: node.id, to: candidateId });
+      outgoing.add(candidateId);
+    }
+  }
+  const sanitized = { ...workflow, nodes: sanitizedNodes, edges: repairedEdges };
 
   // Draft-generation tolerance: AI-emitted `tool` nodes may carry
   // partial `input` because the operator finishes the rest in the

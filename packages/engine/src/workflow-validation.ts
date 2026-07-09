@@ -116,6 +116,34 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         if (!expression.valid) issues.push({ code: "condition_invalid_expression", message: expression.message ?? "Invalid condition expression", nodeId: node.id });
       }
     }
+    if ((node.type === "router" || node.type === "router_llm") && Array.isArray(node.config.candidates)) {
+      // The runtime routes a decision by SKIPPING every non-chosen candidate
+      // that is a direct successor of the router (core/runtime.ts). A
+      // candidate without an incoming edge from the router is unroutable:
+      // if it is a root it runs at t=0 regardless of the decision, and if
+      // it hangs elsewhere the skip can never reach it. Fail at save time.
+      const outgoing = new Set(edges.filter((edge) => edge.from === node.id).map((edge) => edge.to));
+      for (const entry of node.config.candidates) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const e = entry as Record<string, unknown>;
+        const candidateId =
+          typeof e.nodeId === "string" && e.nodeId.trim()
+            ? e.nodeId.trim()
+            : typeof e.id === "string" && e.id.trim()
+              ? e.id.trim()
+              : "";
+        if (!candidateId) continue;
+        if (!allNodeIds.has(candidateId)) {
+          issues.push({ code: "router_candidate_unknown", message: `Router candidate does not exist: ${candidateId}`, nodeId: node.id });
+        } else if (!outgoing.has(candidateId)) {
+          issues.push({
+            code: "router_candidate_not_successor",
+            message: `Router candidate "${candidateId}" must be a direct successor (add an edge ${node.id} → ${candidateId}) or the decision cannot route`,
+            nodeId: node.id,
+          });
+        }
+      }
+    }
     if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
     if (node.type === "wait_until") {
       const duration = typeof node.config.duration === "string" ? node.config.duration : "";

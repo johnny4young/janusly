@@ -306,7 +306,11 @@ export const RECOVERY_MATRIX_FIXTURES: readonly RecoveryMatrixFixture[] = [
         config: { candidates: [{ nodeId: "missing_path" }] },
       },
       { id: "real_path", type: "noop" as const, config: {} },
-    ], [{ from: "start", to: "pick" }]),
+      // `real_path` is wired as a router successor so the matrix's synthetic
+      // config patch (candidates -> real_path) yields a workflow that passes
+      // the B-02 `router_candidate_not_successor` rule — the fixture's
+      // BROKENNESS stays where it belongs: the unknown `missing_path` id.
+    ], [{ from: "start", to: "pick" }, { from: "pick", to: "real_path" }]),
     failedNodeId: "pick",
     errorJson: {
       code: "E_ROUTER_CANDIDATE_UNKNOWN",
