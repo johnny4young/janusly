@@ -262,6 +262,9 @@ export class WorkflowRuntime {
       const durationMs = Date.now() - start;
       const context = await this.store.getRunContext(runId).catch(() => ({}));
       const error: SerializedError = { message: err.message, name: err.name, code: err.code, statusCode: err.statusCode };
+      // Carry the write-side-timeout flag (Q-01) into error_json / the DLQ so a
+      // blind replay of a possibly-committed side effect can be gated.
+      if (err?.writeSide === true) error.writeSide = true;
 
       await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
 

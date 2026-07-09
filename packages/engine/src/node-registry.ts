@@ -35,6 +35,7 @@ import {
   type OrgConfigSnapshot,
 } from "@janusly/data";
 import { evaluateExpression } from "./expression";
+import { withTimeout } from "./core/timeout";
 import { executeTool, isToolWriteSide } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
 import type { AgentNodeConfig } from "./node-configs";
@@ -92,6 +93,25 @@ export type NodeContext = {
 /** HTTP methods that read state without mutating it; safe to execute in dryRun mode. */
 const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+/**
+ * True when a node could commit an external side effect — a non-safe HTTP
+ * method or a `writeSide` tool. Same taxonomy the sandbox uses to dry-run-skip
+ * write-side actions; reused by `execute-node.ts` to flag a `NODE_TIMEOUT`
+ * whose executor may have partially completed its effect (Q-01). Conservative:
+ * node types whose write-side-ness isn't statically known (agent tool calls,
+ * subworkflows) return `false` here — those loops carry their own timeouts.
+ */
+export function isWriteSideNode(node: { type: string; config?: { method?: unknown; tool?: unknown } }): boolean {
+  if (node.type === "http") {
+    return !SAFE_HTTP_METHODS.has(String(node.config?.method ?? "GET").toUpperCase());
+  }
+  if (node.type === "tool") {
+    const tool = node.config?.tool;
+    return typeof tool === "string" && isToolWriteSide(tool);
+  }
+  return false;
+}
+
 export type NodeExecutionResult =
   | { status: "completed"; output?: Record<string, unknown> }
   | { status: "waiting"; reason?: string; metadata?: Record<string, unknown> };
@@ -110,17 +130,6 @@ function fallbackAiResponse(prompt: string, context: Record<string, any>) {
 
 function previewText(value: string, maxLength = 700) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs?: number, label = "operation") {
-  if (!timeoutMs) return promise;
-
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    }),
-  ]);
 }
 
 function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
@@ -301,7 +310,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
         },
       ),
       agentConfig.timeoutMs,
-      `${agentConfig.name ?? "agent"}.${plan.tool}`
+      { label: `${agentConfig.name ?? "agent"}.${plan.tool}` }
     );
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.tool.completed`, {

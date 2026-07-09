@@ -15,8 +15,9 @@
  *   `error_json`.
  */
 
-import { nodeRegistry } from "./node-registry";
+import { nodeRegistry, isWriteSideNode } from "./node-registry";
 import { NODE_CONFIG_SCHEMAS } from "./node-configs";
+import { getNodeTimeoutMs, NodeTimeoutError, withTimeout } from "./core/timeout";
 import { getRunContext, getRunMetadata } from "./persistence";
 import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
@@ -91,17 +92,34 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     // dispatcher errored above if no executor matched).
     const configSchema = NODE_CONFIG_SCHEMAS[node.type as NodeType];
     const parsedConfig = configSchema ? configSchema.parse(resolvedConfig) : resolvedConfig;
-    result = await executor({
-      runId,
-      nodeId: node.id,
-      orgId,
-      workflowId,
-      config: parsedConfig,
-      context,
-      redactedValues,
-      dryRun,
-    });
+    // Enforce the node's declared `config.timeoutMs` at THE single executor
+    // chokepoint (Q-01) — before this, only the http fetch + the agent
+    // tool-loop honored it, so a hung `tool` / `subworkflow` / `ai` /
+    // `transform` executor blocked the worker until the 5-minute stalled-node
+    // reaper. `withTimeout` frees the worker at the deadline (throws
+    // `NodeTimeoutError` → normal failure path → retry / DLQ) and swallows the
+    // abandoned executor's late rejection. No timeout declared → the promise
+    // passes through unchanged (behavior-preserving).
+    result = await withTimeout(
+      executor({
+        runId,
+        nodeId: node.id,
+        orgId,
+        workflowId,
+        config: parsedConfig,
+        context,
+        redactedValues,
+        dryRun,
+      }),
+      getNodeTimeoutMs(node),
+      { label: node.type },
+    );
   } catch (err) {
+    // A write-side node that timed out may have already committed its effect
+    // (the race abandons, but doesn't cancel, the executor). Flag it so a
+    // blind replay can be gated — the flag rides through `redactError` (which
+    // returns the same error object) into `error_json` / the DLQ.
+    if (err instanceof NodeTimeoutError) err.writeSide = isWriteSideNode(node);
     throw redactError(err, redactedValues);
   }
 
