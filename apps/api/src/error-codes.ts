@@ -135,6 +135,8 @@ export type ApiErrorCode =
   | "dlq_invalid_sort"
   | "dlq_invalid_status"
   | "dlq_node_not_found"
+  | "dlq_replay_conflict"
+  | "dlq_node_mid_retry"
   | "dlq_workflow_sanitize_failed"
   | "dlq_workflow_schema_invalid"
   | "dlq_workflow_version_not_found"

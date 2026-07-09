@@ -67,6 +67,11 @@ vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   },
 }));
 
+// The REAL Q-02 error — NOT mocked, so the route's `instanceof` check and this
+// test agree on the same class (the persistence module is loaded transitively
+// by the route import; importing the class adds no DB connection).
+import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
+
 import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
 import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
@@ -596,6 +601,53 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       });
       expect(response.status).toBe(400);
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("maps a Q-02 run_not_replayable rejection to 409 dlq_replay_conflict (not a silent no-op)", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockReset();
+    replayDeadLetterMock.mockRejectedValueOnce(new ReplayNotClaimableError("run_not_replayable"));
+    markDeadLetterReplayedMock.mockReset();
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("dlq_replay_conflict");
+      // A rejected claim must NOT mark the DLQ row replayed.
+      expect(markDeadLetterReplayedMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("maps a Q-02 node_mid_retry rejection to 409 dlq_node_mid_retry", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
+    replayDeadLetterMock.mockReset();
+    replayDeadLetterMock.mockRejectedValueOnce(new ReplayNotClaimableError("node_mid_retry"));
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/replay`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("dlq_node_mid_retry");
     } finally {
       await close(server);
     }

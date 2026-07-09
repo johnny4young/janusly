@@ -20,6 +20,7 @@ import {
 } from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
+import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
 
@@ -43,6 +44,24 @@ import type { Route } from "../routes";
 // the canonical replay route. Module-scoped so the three routes share
 // one adapter instance.
 const dlqReplay = new DLQReplayAdapter();
+
+/**
+ * Map a `ReplayNotClaimableError` (the Q-02 atomic-transition rejection) to a
+ * 409 so a single `/dlq/replay` gives the operator explicit feedback instead
+ * of the pre-Q-02 silent no-op that left them believing a replay started.
+ * Returns `true` when it handled + responded (caller should `return`); `false`
+ * to let the caller rethrow (a real error, not a claim rejection). Bulk paths
+ * don't use this — they already collect thrown errors into their `errors[]`.
+ */
+function sendReplayConflictIfClaimError(res: import("node:http").ServerResponse, err: unknown): boolean {
+  if (!(err instanceof ReplayNotClaimableError)) return false;
+  if (err.reason === "node_mid_retry") {
+    sendError(res, "dlq_node_mid_retry", "This step is already retrying — wait for it to finish before replaying", 409);
+  } else {
+    sendError(res, "dlq_replay_conflict", "This run can no longer be replayed — it was cancelled or already recovered", 409);
+  }
+  return true;
+}
 
 export const dlqRoutes: Route[] = [
   // DLQ — cluster rollup must register BEFORE the generic /dlq dispatcher
@@ -536,7 +555,12 @@ export const dlqRoutes: Route[] = [
           node = failingNode;
         }
 
-        await dlqReplay.replayDeadLetter({ runId: item.runId, workflow, node });
+        try {
+          await dlqReplay.replayDeadLetter({ runId: item.runId, workflow, node });
+        } catch (err) {
+          if (sendReplayConflictIfClaimError(res, err)) return;
+          throw err;
+        }
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
         await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });
@@ -564,7 +588,12 @@ export const dlqRoutes: Route[] = [
       const node = workflow.nodes.find(candidate => candidate.id === nodeId);
       if (!node) return sendError(res, "dlq_node_not_found", "Node not found in workflow", 404);
 
-      await dlqReplay.replayDeadLetter({ runId, workflow, node });
+      try {
+        await dlqReplay.replayDeadLetter({ runId, workflow, node });
+      } catch (err) {
+        if (sendReplayConflictIfClaimError(res, err)) return;
+        throw err;
+      }
       await auditAction(auth, "dlq.replayed", { targetType: "run", targetId: runId, metadata: { nodeId } });
 
       return sendJson(res, { ok: true });

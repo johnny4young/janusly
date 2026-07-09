@@ -60,6 +60,8 @@
   "apiErrors.dlq_field_required": "{{field}} is required",
   "apiErrors.workflow_not_found": "Workflow not found",
   "apiErrors.credential_rotation_conflict": "The credential changed since you previewed it — preview again before rotating",
+  "apiErrors.dlq_replay_conflict": "This run can no longer be replayed — it was cancelled or already recovered",
+  "apiErrors.dlq_node_mid_retry": "This step is already retrying — wait for it to finish before replaying",
   "apiErrors.workflow_name_required": "Workflow name is required",
   "apiErrors.nested_replay_lab": "Cannot fork from a sandbox run",
   "apiErrors.fork_node_not_found": "Fork node not found in this workflow",

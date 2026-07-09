@@ -60,6 +60,8 @@
   "apiErrors.dlq_field_required": "{{field}} es obligatorio",
   "apiErrors.workflow_not_found": "No se encontró el workflow",
   "apiErrors.credential_rotation_conflict": "La credencial cambió desde que la previsualizaste — vuelve a previsualizar antes de rotar",
+  "apiErrors.dlq_replay_conflict": "Esta ejecución ya no puede reproducirse — fue cancelada o ya se recuperó",
+  "apiErrors.dlq_node_mid_retry": "Este paso ya está reintentando — espera a que termine antes de reproducir",
   "apiErrors.workflow_name_required": "El nombre del workflow es obligatorio",
   "apiErrors.nested_replay_lab": "No se puede bifurcar desde una ejecución sandbox",
   "apiErrors.fork_node_not_found": "El nodo objetivo no existe en este workflow",

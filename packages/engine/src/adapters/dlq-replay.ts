@@ -32,7 +32,7 @@ import { eq } from "drizzle-orm";
 import type { DeadLetterReplayAdapter, DeadLetterReplayInput } from "../core/types";
 import type { Workflow, WorkflowNode } from "@janusly/shared";
 import { enqueueNode } from "../queue";
-import { markNodeQueued, appendEvent, resetRunForReplay, setRunWorkflowSnapshot } from "../persistence";
+import { appendEvent, claimReplayTransition, markNodeQueued, setRunWorkflowSnapshot } from "../persistence";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -82,7 +82,17 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       nodeId: node.id,
     });
 
-    // Make the replayed workflow authoritative for the run BEFORE enqueueing.
+    // Atomically un-terminate the run + reset the failed node to `queued`
+    // (Q-02). ONE transaction closes the pre-Q-02 gap where a cancel landing
+    // between the reset and the queue left a queued node on a cancelled run
+    // that the runtime guard skips forever (silent false recovery). Claim
+    // FIRST — before the snapshot write — so a `node_mid_retry` /
+    // `run_not_replayable` rejection mutates nothing: no snapshot is written
+    // under an in-flight retry, no job is enqueued. Throws
+    // `ReplayNotClaimableError`, mapped to 409 by the `/dlq/replay` route.
+    await claimReplayTransition(runId, node.id);
+
+    // Make the replayed workflow authoritative for the run before enqueueing.
     // Slim jobs carry only `{ runId, nodeId }`; the worker reloads the DAG
     // from `runs.inputJson.workflow`. Writing it here means an auto-healing /
     // recovery replay against a PATCHED workflow has its downstream cascade
@@ -90,15 +100,6 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // replayed workflow flowed in-memory into `enqueueReadyNodes`. For a
     // normal replay (workflow identical to the snapshot) this is a no-op.
     await setRunWorkflowSnapshot(runId, workflow);
-
-    // Un-terminate the run + reset the failed node so the replay actually
-    // re-executes it. Without BOTH, the re-enqueued job is skipped: the
-    // runtime's guard drops queued jobs on a `failed`/`cancelled` run, and
-    // `markNodeRunning` only claims a `queued` node. `resetRunForReplay` only
-    // touches a `failed` run (never un-cancels); `markNodeQueued` mirrors
-    // start-run / retry / replay-lab.
-    await resetRunForReplay(runId);
-    await markNodeQueued(runId, node.id);
 
     await enqueueNode({
       runId,

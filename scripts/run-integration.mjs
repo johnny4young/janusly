@@ -78,6 +78,8 @@ async function main() {
     await run("pnpm", ["--filter", "@janusly/data", "test:integration"]);
     console.log("[integration] running api integration tests");
     await run("pnpm", ["--filter", "@janusly/api", "test:integration"]);
+    console.log("[integration] running engine integration tests");
+    await run("pnpm", ["--filter", "@janusly/engine", "test:integration"]);
   } catch (error) {
     failed = true;
     console.error("[integration] failed:", error instanceof Error ? error.message : String(error));

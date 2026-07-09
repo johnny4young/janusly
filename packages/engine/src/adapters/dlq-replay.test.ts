@@ -4,8 +4,9 @@ const {
   appendEventMock,
   enqueueNodeMock,
   markNodeQueuedMock,
-  resetRunForReplayMock,
+  claimReplayTransitionMock,
   setRunWorkflowSnapshotMock,
+  ReplayNotClaimableError,
   originalRunNodeRowsRef,
   runEventsTable,
   runNodesTable,
@@ -13,20 +14,32 @@ const {
   safePersistPayloadMock,
   selectWhereMock,
   txInsertMock,
-} = vi.hoisted(() => ({
-  appendEventMock: vi.fn().mockResolvedValue(undefined),
-  enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
-  markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
-  resetRunForReplayMock: vi.fn().mockResolvedValue(undefined),
-  setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
-  originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
-  runEventsTable: { name: 'runEvents' },
-  runNodesTable: { name: 'runNodes' },
-  runsTable: { name: 'runs' },
-  safePersistPayloadMock: vi.fn((payload: unknown) => payload),
-  selectWhereMock: vi.fn(),
-  txInsertMock: vi.fn(),
-}))
+} = vi.hoisted(() => {
+  // The real error's shape so the adapter's throw + the test's `instanceof`
+  // check agree. Declared in-hoist so the (also-hoisted) persistence mock
+  // factory can reference it without a TDZ error.
+  class ReplayNotClaimableError extends Error {
+    constructor(readonly reason: 'run_not_replayable' | 'node_mid_retry') {
+      super(`Replay not claimable: ${reason}`)
+      this.name = 'ReplayNotClaimableError'
+    }
+  }
+  return {
+    appendEventMock: vi.fn().mockResolvedValue(undefined),
+    enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
+    markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
+    claimReplayTransitionMock: vi.fn().mockResolvedValue(undefined),
+    setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
+    ReplayNotClaimableError,
+    originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
+    runEventsTable: { name: 'runEvents' },
+    runNodesTable: { name: 'runNodes' },
+    runsTable: { name: 'runs' },
+    safePersistPayloadMock: vi.fn((payload: unknown) => payload),
+    selectWhereMock: vi.fn(),
+    txInsertMock: vi.fn(),
+  }
+})
 
 vi.mock('@janusly/db', () => ({
   db: {
@@ -62,9 +75,10 @@ vi.mock('../queue', () => ({
 
 vi.mock('../persistence', () => ({
   markNodeQueued: markNodeQueuedMock,
-  resetRunForReplay: resetRunForReplayMock,
+  claimReplayTransition: claimReplayTransitionMock,
   appendEvent: appendEventMock,
   setRunWorkflowSnapshot: setRunWorkflowSnapshotMock,
+  ReplayNotClaimableError,
 }))
 
 vi.mock('../safe-persist', () => ({
@@ -92,13 +106,13 @@ beforeEach(() => {
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
   markNodeQueuedMock.mockReset()
-  resetRunForReplayMock.mockReset()
+  claimReplayTransitionMock.mockReset().mockResolvedValue(undefined)
   appendEventMock.mockReset()
   setRunWorkflowSnapshotMock.mockReset()
 })
 
 describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
-  it('un-terminates the run + re-queues the failed node, then enqueues (attempt=1)', async () => {
+  it('atomically claims the replay transition, snapshots, then enqueues (attempt=1)', async () => {
     await adapter.replayDeadLetter({
       runId: 'orig-run',
       workflow: baseWorkflow,
@@ -111,17 +125,29 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
       nodeId: failingNode.id,
       attempt: 1,
     })
+    // Q-02: ONE atomic transition un-terminates the run + re-queues the failed
+    // node (replaces the pre-Q-02 non-atomic resetRunForReplay + markNodeQueued
+    // pair whose gap let a cancel land between them).
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id)
     // The replayed workflow becomes the run's authoritative snapshot so the
     // slim queue worker (and the downstream cascade) reload the right DAG.
     expect(setRunWorkflowSnapshotMock).toHaveBeenCalledWith('orig-run', baseWorkflow)
-    // Un-terminate the run + re-queue the failed node so the re-enqueued job
-    // actually executes (the runtime skips queued jobs on a failed run, and
-    // `markNodeRunning` only claims a `queued` node). Without both, the replay
-    // silently no-ops and the run stays failed.
-    expect(resetRunForReplayMock).toHaveBeenCalledWith('orig-run')
-    expect(markNodeQueuedMock).toHaveBeenCalledWith('orig-run', failingNode.id)
     // Production replay is a single enqueue — no new run row, no new node rows.
     expect(txInsertMock).not.toHaveBeenCalled()
+  })
+
+  it('claims BEFORE snapshotting/enqueueing — a rejected claim mutates nothing', async () => {
+    // Q-02 claim-first ordering: a node mid engine-retry (or a cancelled run)
+    // must reject without writing the snapshot (which an in-flight retry reads)
+    // or enqueuing a duplicate job.
+    claimReplayTransitionMock.mockRejectedValueOnce(new ReplayNotClaimableError('node_mid_retry'))
+
+    await expect(adapter.replayDeadLetter({ runId: 'orig-run', workflow: baseWorkflow, node: failingNode }))
+      .rejects.toBeInstanceOf(ReplayNotClaimableError)
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id)
+    expect(setRunWorkflowSnapshotMock).not.toHaveBeenCalled()
+    expect(enqueueNodeMock).not.toHaveBeenCalled()
   })
 })
 

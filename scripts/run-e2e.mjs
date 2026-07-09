@@ -270,6 +270,7 @@ try {
   // org ids so they never collide with the Playwright `default` org.
   await run("pnpm", ["--filter", "@janusly/data", "test:integration"]);
   await run("pnpm", ["--filter", "@janusly/api", "test:integration"]);
+  await run("pnpm", ["--filter", "@janusly/engine", "test:integration"]);
 
   const api = startService("api", "pnpm", ["--filter", "@janusly/api", "exec", "tsx", "src/index.ts"], {
     env: { PORT: String(apiPort) },

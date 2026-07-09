@@ -238,17 +238,63 @@ export async function markNodeQueued(runId: string, nodeId: string, attempt = 1)
 }
 
 /**
- * Flip a `failed` run back to `running` for a recovery replay. The runtime's
- * pre-execution guard skips queued jobs on a `cancelled`/`failed` run, so a
- * replay that re-enqueues the failed node would otherwise never execute it.
- * Conditional on `status='failed'` — a `cancelled` run is never un-cancelled,
- * and the guard re-reads the status at execution time so a cancel racing the
- * replay still wins. No-op when the run isn't failed.
+ * Thrown by `claimReplayTransition` when the run/node is NOT in a replayable
+ * state, so the `/dlq/replay` route can map it to a 409 (explicit operator
+ * feedback) instead of the pre-Q-02 silent no-op that left the operator
+ * believing a replay started when it hadn't.
  */
-export async function resetRunForReplay(runId: string): Promise<void> {
-  await db.update(runs)
-    .set({ status: "running" })
-    .where(and(eq(runs.id, runId), eq(runs.status, "failed")));
+export class ReplayNotClaimableError extends Error {
+  constructor(readonly reason: "run_not_replayable" | "node_mid_retry") {
+    super(`Replay not claimable: ${reason}`);
+    this.name = "ReplayNotClaimableError";
+  }
+}
+
+/**
+ * Atomically un-terminate a failed run AND reset its failed node to `queued`,
+ * in ONE transaction (fourth-wave audit Q-02). Replaces the pre-Q-02 pair of
+ * separate awaits (`resetRunForReplay` + `markNodeQueued`) whose gap let a
+ * cancellation land between them — leaving a `queued` node on a `cancelled`
+ * run that the runtime guard skips forever while the operator believes the
+ * replay started (silent false recovery).
+ *
+ * Semantics (throws `ReplayNotClaimableError`, which rolls the tx back so no
+ * partial state survives):
+ * - Flips `failed → running` (idempotent no-op when the run is already
+ *   `running` — the multi-dead-letter-same-run case: a sibling DLQ replay
+ *   flipped it first, and this one still claims its own node).
+ * - Reads the run status back INSIDE the tx: anything other than `running`
+ *   (cancelled / succeeded / deleted) → `run_not_replayable`. NOTE this is a
+ *   deliberate behaviour change from the pre-Q-02 path, which would silently
+ *   queue a node on a non-`failed` run (and, for a `succeeded` run, actually
+ *   re-run it).
+ * - If the failed node is already `queued` (mid engine-retry, an in-flight
+ *   BullMQ job) → `node_mid_retry`, so a manual replay can't stomp the
+ *   snapshot the in-flight retry reads or double-fire its side effect.
+ *
+ * The caller writes the workflow snapshot + enqueues AFTER a successful claim,
+ * so a rejected claim mutates nothing (no snapshot write, no job).
+ */
+export async function claimReplayTransition(runId: string, nodeId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.update(runs)
+      .set({ status: "running" })
+      .where(and(eq(runs.id, runId), eq(runs.status, "failed")));
+
+    const runRows = await tx.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+    if (runRows[0]?.status !== "running") throw new ReplayNotClaimableError("run_not_replayable");
+
+    const nodeRows = await tx
+      .select({ status: runNodes.status })
+      .from(runNodes)
+      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
+      .limit(1);
+    if (nodeRows[0]?.status === "queued") throw new ReplayNotClaimableError("node_mid_retry");
+
+    await tx.update(runNodes)
+      .set({ status: "queued", attempts: 1 })
+      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+  });
 }
 
 /**
