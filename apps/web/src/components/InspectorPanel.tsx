@@ -12,10 +12,11 @@
 import React, { useState } from 'react'
 import { Copy, GitBranch, Layers } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
-import { formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
+import { formatNodeDuration, formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
+import { pickErrorMessage } from './recovery-dialog/helpers'
 import { QuickConfigEditor } from './QuickConfigEditor'
 
 type InspectorPanelProps = {
@@ -77,6 +78,15 @@ export function InspectorPanel({
 
   if (selectedNode) {
     const status = nodeStatus?.status ?? 'draft'
+    const failureMessage = status === 'failed' ? pickErrorMessage(nodeStatus?.errorJson) : null
+    const failureDuration = status === 'failed' ? formatNodeDuration(nodeStatus?.startedAt, nodeStatus?.finishedAt) : null
+    const failureMeta: string[] = []
+    if (status === 'failed') {
+      if (typeof nodeStatus?.attempts === 'number' && nodeStatus.attempts > 0) {
+        failureMeta.push(t('rightPanel.runs.nodeAttempt', { count: nodeStatus.attempts }) as string)
+      }
+      if (failureDuration) failureMeta.push(failureDuration)
+    }
 
     return (
       <section className="panel-card">
@@ -108,6 +118,17 @@ export function InspectorPanel({
             </span>
           </div>
         </div>
+
+        {status === 'failed' && (failureMessage || failureMeta.length > 0) && (
+          <div className="we-failed-node" data-testid="inspector-failed-node">
+            {failureMeta.length > 0 && (
+              <span className="helper-text we-failed-node__meta">{failureMeta.join(' · ')}</span>
+            )}
+            {failureMessage && (
+              <p className="we-failed-node__error" title={failureMessage}>{failureMessage}</p>
+            )}
+          </div>
+        )}
 
         <AiUsageFooter stateJson={nodeStatus?.stateJson} />
 

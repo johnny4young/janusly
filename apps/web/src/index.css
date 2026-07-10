@@ -1531,6 +1531,37 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   gap: 10px;
 }
 
+.we-failed-node {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--we-danger-border-25);
+  border-radius: 10px;
+  background: var(--we-danger-soft);
+}
+
+.we-failed-node__id {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-failed-node__meta {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.we-failed-node__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--we-danger-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
 .mini-grid {
   display: grid;
   gap: 8px;

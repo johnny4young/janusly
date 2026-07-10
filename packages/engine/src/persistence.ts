@@ -17,7 +17,7 @@
  */
 
 import { db, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, ne, and, inArray } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
@@ -486,20 +486,38 @@ export async function updateRunStatusFromNodes(runId: string) {
     .where(eq(runNodes.runId, runId));
 
   if (nodes.some(node => node.status === "failed")) {
-    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
-    await notifyOnTerminal(runId, "failed");
+    // Conditional flip: only the worker that actually transitions running→failed
+    // appends the persisted `run.failed` timeline row + notifies. Under multiple
+    // workers two node-completions can race into this branch; the `ne(status)`
+    // guard means the loser's UPDATE affects 0 rows and it skips the append.
+    const flipped = await db.update(runs)
+      .set({ status: "failed" })
+      .where(and(eq(runs.id, runId), ne(runs.status, "failed")))
+      .returning({ id: runs.id });
+    if (flipped.length > 0) {
+      await appendEvent(runId, null, "run.failed", {
+        failedNodes: nodes.filter(node => node.status === "failed").length,
+      });
+      await notifyOnTerminal(runId, "failed");
+    }
     publishRunEvent(runId, { kind: "run.status", status: "failed" });
     return "failed";
   }
 
   if (nodes.length > 0 && nodes.every(node => !isOpenNodeStatus(node.status))) {
     // Project the workflow's declared `outputs` (if any) into runs.outputJson
-    // BEFORE flipping status, so a single UPDATE carries both writes.
+    // BEFORE flipping status, so a single UPDATE carries both writes. Same
+    // conditional-flip guard as the failed branch: only the transitioning
+    // worker appends the persisted `run.succeeded` row.
     const outputJson = await computeRunOutputs(runId);
-    await db.update(runs)
+    const flipped = await db.update(runs)
       .set({ status: "succeeded", outputJson })
-      .where(eq(runs.id, runId));
-    await notifyOnTerminal(runId, "succeeded");
+      .where(and(eq(runs.id, runId), ne(runs.status, "succeeded")))
+      .returning({ id: runs.id });
+    if (flipped.length > 0) {
+      await appendEvent(runId, null, "run.succeeded", { nodes: nodes.length });
+      await notifyOnTerminal(runId, "succeeded");
+    }
     publishRunEvent(runId, { kind: "run.status", status: "succeeded" });
     return "succeeded";
   }

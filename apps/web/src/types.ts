@@ -14,7 +14,17 @@
 import type { Edge, Node } from '@xyflow/react'
 
 export type JsonObject = Record<string, unknown>
-export type RunNode = { nodeId: string; status: string; stateJson?: JsonObject | null; errorJson?: JsonObject | null }
+export type RunNode = {
+  nodeId: string
+  status: string
+  stateJson?: JsonObject | null
+  errorJson?: JsonObject | null
+  /** Retry attempt count (defaults to 0 in the DB). Present on `/run` + `/status` rows and SSE. */
+  attempts?: number | null
+  /** ISO timestamps from the run_nodes row — used to render node duration. */
+  startedAt?: string | null
+  finishedAt?: string | null
+}
 export type RunEvent = { id: string; nodeId?: string | null; type: string; payload?: JsonObject | null; createdAt?: string }
 type WorkflowNodeData = {
   label: string

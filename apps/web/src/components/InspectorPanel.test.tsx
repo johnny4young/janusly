@@ -80,3 +80,33 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
     expect(document.querySelector('.issue-error')).toBeNull()
   })
 })
+
+describe('<InspectorPanel /> failed-node header (O-01)', () => {
+  it('surfaces the error message + attempt · duration when the selected node failed', () => {
+    renderPanel({
+      selectedNode: makeNode('http_call'),
+      runNodes: [{
+        nodeId: 'http_call',
+        status: 'failed',
+        errorJson: { message: 'HTTP 500 from upstream' },
+        attempts: 2,
+        startedAt: '2026-07-09T10:00:00.000Z',
+        finishedAt: '2026-07-09T10:00:05.000Z',
+      }],
+    })
+
+    const failure = screen.getByTestId('inspector-failed-node')
+    expect(failure).toHaveTextContent('HTTP 500 from upstream')
+    expect(failure).toHaveTextContent('attempt 2')
+    expect(failure).toHaveTextContent('5s')
+  })
+
+  it('renders no failure block for a succeeded node', () => {
+    renderPanel({
+      selectedNode: makeNode('ok_node'),
+      runNodes: [{ nodeId: 'ok_node', status: 'succeeded' }],
+    })
+
+    expect(screen.queryByTestId('inspector-failed-node')).toBeNull()
+  })
+})

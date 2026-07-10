@@ -5,6 +5,9 @@
  */
 
 import { describe, beforeAll, beforeEach, expect, it } from 'vitest'
+import { WORKFLOW_EVENT_TYPES } from '@janusly/shared/src/run-events'
+import en from './locales/en/common.json'
+import es from './locales/es/common.json'
 import { initI18n } from './init'
 import { tValidationIssue, tReadinessIssue, tAiReviewIssue, tRunEvent, tFailureCluster, tHealthRationale, tRecoveryMetricRationale, tApiError, tServerFallback } from './server-events'
 
@@ -51,6 +54,31 @@ describe('tRunEvent', () => {
   it('falls back to a debug-friendly description for unknown types', () => {
     const result = tRunEvent({ id: 'evt2', type: 'totally.new.event', nodeId: 'foo' })
     expect(result).toContain('totally.new.event')
+  })
+})
+
+describe('runEvents catalog coverage', () => {
+  // Contract: every lifecycle event type the engine can write to run_events
+  // (the closed WORKFLOW_EVENT_TYPES catalogue in @janusly/shared) must have a
+  // `runEvents.<type>` label in EVERY locale — otherwise it renders as a raw
+  // type string on the run timeline. Adding an engine event type without its
+  // label fails here.
+  const catalogs = { en: en as Record<string, string>, es: es as Record<string, string> }
+
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    it(`${locale} has a label for every WORKFLOW_EVENT_TYPES member`, () => {
+      const missing = WORKFLOW_EVENT_TYPES.filter(type => !(`runEvents.${type}` in catalog))
+      expect(missing, `${locale} missing runEvents labels for: ${missing.join(', ')}`).toEqual([])
+    })
+  }
+
+  it('tRunEvent never falls back for a catalogued lifecycle type', () => {
+    for (const type of WORKFLOW_EVENT_TYPES) {
+      const rendered = tRunEvent({ id: `evt-${type}`, type, nodeId: 'demo_node' })
+      // The fallback path echoes the raw type string; a real label won't.
+      expect(rendered, `${type} rendered as raw fallback`).not.toBe(`${type} (demo_node)`)
+      expect(rendered, `${type} rendered as bare type`).not.toBe(type)
+    }
   })
 })
 

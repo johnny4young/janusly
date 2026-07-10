@@ -460,14 +460,23 @@ export default function App() {
     }
   }, [addToast, hydrateWorkflow, setActiveTab, t])
 
-  const openRun = useCallback(async (id: string, targetTab: ActiveTab = 'multiAgent') => {
+  const openRun = useCallback(async (id: string, targetTab?: ActiveTab) => {
+    // Switch tabs BEFORE the fetch resolves so the panel changes immediately.
+    // A caller-pinned `targetTab` is honoured verbatim; otherwise default to the
+    // runs timeline — the default used to be `multiAgent`, which dropped every
+    // ordinary run onto an empty multi-agent panel.
+    setActiveTab(targetTab ?? 'runs')
     try {
       const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
       setRunId(id)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
-      setActiveTab(targetTab)
+      // Only auto-route to the multi-agent timeline when the caller didn't pin a
+      // tab AND the run actually produced `multi_agent.*` events.
+      if (!targetTab && (data.events ?? []).some(event => event.type.startsWith('multi_agent.'))) {
+        setActiveTab('multiAgent')
+      }
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }

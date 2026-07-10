@@ -225,6 +225,19 @@ export function formatAiModeLabel(mode: 'ai' | 'fallback' | 'error'): string {
   return t(`aiMode.${mode}` as never) as string
 }
 
+/** Compact run-node duration (`started_at`→`finished_at`) as `42s` / `1m 20s`.
+ *  Returns null when either timestamp is missing or the span is negative. */
+export function formatNodeDuration(startedAt?: string | null, finishedAt?: string | null): string | null {
+  if (!startedAt || !finishedAt) return null
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`
+}
+
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }

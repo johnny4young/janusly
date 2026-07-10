@@ -389,8 +389,9 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     />)
     await waitFor(() => expect(screen.getByTestId('recovery-center-queue-row-dlq-1')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('recovery-center-queue-row-dlq-1'))
-    expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-1')
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    // openRun now switches to the runs tab itself (before its fetch resolves),
+    // so the row passes the target tab through instead of a separate onOpenTab.
+    expect(baseProps.onOpenRun).toHaveBeenCalledWith('run-1', 'runs')
   })
 
   it('clicking a metric strip cell routes to the expected detail tab', async () => {

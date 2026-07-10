@@ -20,7 +20,7 @@ import { useState } from 'react'
 import { Activity, CheckCircle2, CircleX, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
 import type { RunNode, RunSummary, WorkflowInputSchemaShape } from '../types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
-import { formatStatusLabel } from '../constants'
+import { formatStatusLabel, formatNodeDuration } from '../constants'
 import { downloadFromApi } from '../api'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, useT } from '../i18n'
@@ -35,6 +35,7 @@ import { UsageSummaryCard } from './UsageSummaryCard'
 import { RunStreamChip } from './RunStreamChip'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import { useVirtualList } from '../hooks/useVirtualList'
+import { pickErrorMessage } from './recovery-dialog/helpers'
 
 /** Fixed row PITCH (CSS px) for the virtualized run-history list. The history
  *  cards are made uniform-height (the optional "Lab" action reserves its slot),
@@ -344,11 +345,31 @@ export function RunsPanel({
             <strong>{t('rightPanel.runs.attentionTitle')}</strong>
             <p className="helper-text">{t('rightPanel.runs.attentionDescription')}</p>
           </div>
-          {failedNodes.map(node => (
-            <button key={node.nodeId} className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-              {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
-            </button>
-          ))}
+          {failedNodes.map(node => {
+            const errorMessage = pickErrorMessage(node.errorJson)
+            const duration = formatNodeDuration(node.startedAt, node.finishedAt)
+            const meta: string[] = []
+            if (typeof node.attempts === 'number' && node.attempts > 0) {
+              meta.push(t('rightPanel.runs.nodeAttempt', { count: node.attempts }) as string)
+            }
+            if (duration) meta.push(duration)
+            return (
+              <div key={node.nodeId} className="we-failed-node" data-testid={`failed-node-${node.nodeId}`}>
+                <div className="split-row">
+                  <code className="we-failed-node__id">{node.nodeId}</code>
+                  {meta.length > 0 && (
+                    <span className="helper-text we-failed-node__meta">{meta.join(' · ')}</span>
+                  )}
+                </div>
+                {errorMessage && (
+                  <p className="we-failed-node__error" title={errorMessage}>{errorMessage}</p>
+                )}
+                <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+                  {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
+                </button>
+              </div>
+            )
+          })}
         </section>
       )}
 

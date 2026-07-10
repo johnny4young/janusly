@@ -237,8 +237,8 @@ export function RecoveryQueueTile({
                   type="button"
                   className="we-recovery-center-row"
                   onClick={() => {
-                    void onOpenRun(dlq.runId)
-                    onOpenTab('runs')
+                    // openRun switches to the runs tab itself before its fetch resolves.
+                    void onOpenRun(dlq.runId, 'runs')
                   }}
                   data-testid={`recovery-center-queue-row-${dlq.id}`}
                 >
@@ -402,8 +402,10 @@ export function PendingApprovalsTile({
                       type="button"
                       className="command-button command-button-compact"
                       onClick={() => {
-                        if (runId) void onOpenRun(runId)
-                        onOpenTab('runs')
+                        // With a runId, openRun switches to the runs tab itself;
+                        // without one, fall back to just opening the runs list.
+                        if (runId) void onOpenRun(runId, 'runs')
+                        else onOpenTab('runs')
                       }}
                     >
                       {t('recoveryCenter.tile.approvals.hold')}
