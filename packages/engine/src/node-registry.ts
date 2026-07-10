@@ -22,6 +22,8 @@
  *   `{ mode: "fallback", aiError, ... }` on failure — see AGENTS.md.
  * - `http` and the `http.request` tool both go through `fetchHttpTarget`,
  *   preserving the SSRF + DNS-rebinding pin.
+ * - `tool` and agent tool dispatch both pass the cached org-config snapshot
+ *   through the execution context; do not reintroduce a tool-name allowlist.
  * - Adding a new node type requires updating `nodeTypeValues` in
  *   `@janusly/shared` so the schema and the registry stay in lockstep.
  */
@@ -496,23 +498,12 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
     const mappedInput = mapInput(input, { context: ctx.context, inputs: ctx.config });
-    const tenantAwareTools = new Set([
-      "http.request",
-      "email.send",
-      "slack.post",
-      "github.create_issue",
-      "github.add_issue_comment",
-      "webhook.send",
-      "db.schema.describe",
-      "db.query.read",
-      "db.query.write",
-      "db.query.transaction",
-    ]);
-    const orgConfig = tenantAwareTools.has(tool)
-      ? await getOrgConfigSnapshot(ctx.orgId)
-      : null;
+    // One cached snapshot feeds every tool node. Keeping a name allowlist
+    // here let newly registered tools (for example pdf.generate) silently
+    // fall back to process defaults instead of their tenant configuration.
+    const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const toolInput = tool === "http.request"
-      ? withHttpToolDefaults(tool, mappedInput, orgConfig!)
+      ? withHttpToolDefaults(tool, mappedInput, orgConfig)
       : mappedInput;
 
     // In sandbox/validation mode, skip write-side tool invocations.
