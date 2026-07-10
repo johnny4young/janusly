@@ -11,6 +11,7 @@
 import type { JsonObject, ToolSchema } from '../types'
 import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
+import { ResilienceFieldset } from './ResilienceFieldset'
 import {
   asJsonObject,
   fieldId,
@@ -43,6 +44,7 @@ export function QuickConfigEditor({
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.requestUrl') as string} value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+        <ResilienceFieldset nodeId={nodeId} nodeType="http" config={config} onPatch={patch} />
       </section>
     )
   }
@@ -94,6 +96,7 @@ export function QuickConfigEditor({
           {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">{t('rightPanel.quickConfig.unknownToolWarning')}</p>}
         </div>
         <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <ResilienceFieldset nodeId={nodeId} nodeType="tool" config={config} onPatch={patch} />
       </section>
     )
   }
@@ -129,6 +132,7 @@ export function QuickConfigEditor({
             <span>{t('rightPanel.quickConfig.reflection')}</span>
           </label>
         )}
+        {type === 'agent' && <ResilienceFieldset nodeId={nodeId} nodeType="agent" config={config} onPatch={patch} />}
       </section>
     )
   }
@@ -249,11 +253,14 @@ export function QuickConfigEditor({
 
   if (type === 'mcp_tool') {
     return (
-      <McpToolConfigField
-        scope={nodeId}
-        config={config}
-        onPatch={(next) => patch(next)}
-      />
+      <>
+        <McpToolConfigField
+          scope={nodeId}
+          config={config}
+          onPatch={(next) => patch(next)}
+        />
+        <ResilienceFieldset nodeId={nodeId} nodeType="mcp_tool" config={config} onPatch={patch} />
+      </>
     )
   }
 

@@ -349,7 +349,7 @@ a { color: var(--we-primary); }
   border: 1px solid var(--we-line);
   border-radius: 999px;
   background: var(--we-surface);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .top-bar-pill-group > * + * {
@@ -1478,6 +1478,49 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .quick-config {
   border-top: 1px solid var(--we-line);
   padding-top: 12px;
+}
+
+.we-resilience-fieldset {
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface-muted);
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 12px;
+}
+
+.we-resilience-fieldset:focus {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--we-primary) 16%, transparent);
+  outline: none;
+}
+
+.we-resilience-fieldset > legend {
+  color: var(--we-text-1);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 4px;
+}
+
+.we-resilience-fieldset__grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.we-resilience-fieldset__http {
+  border-top: 1px solid var(--we-line);
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+@media (max-width: 560px) {
+  .we-resilience-fieldset__grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .config-field-row {
@@ -6026,6 +6069,24 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   font-size: 12px;
   line-height: 1.4;
   font-style: italic;
+}
+
+.we-readiness-issue__action {
+  background: transparent;
+  border: 0;
+  color: var(--we-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  margin-top: 8px;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.we-readiness-issue__action:hover {
+  color: var(--we-primary-strong);
 }
 
 /* ----------------- Run input dialog (schema-driven form) ----------------- */

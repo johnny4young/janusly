@@ -96,6 +96,7 @@ export function VersionHistoryPanel() {
   const { t } = useT()
   const confirm = useConfirm()
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
+  const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
   const session = useWorkflowStore(state => state.session)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
@@ -140,7 +141,10 @@ export function VersionHistoryPanel() {
     let cancelled = false
 
     const loadVersions = async () => {
-      if (!currentWorkflowId) return
+      if (!currentWorkflowId || !currentWorkflowSaved) {
+        setVersions([])
+        return
+      }
       try {
         const data = await api(`/workflows/versions?workflowId=${encodeURIComponent(currentWorkflowId)}`)
         if (cancelled) return
@@ -159,7 +163,7 @@ export function VersionHistoryPanel() {
     return () => {
       cancelled = true
     }
-  }, [addToast, currentWorkflowId, platformVersion, t])
+  }, [addToast, currentWorkflowId, currentWorkflowSaved, platformVersion, t])
 
   useEffect(() => {
     let cancelled = false

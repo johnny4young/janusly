@@ -47,6 +47,7 @@ describe('<VersionHistoryPanel />', () => {
         orgId: 'default',
         currentWorkflowId: 'wf_compare',
         currentWorkflowName: 'Compare workflow',
+        currentWorkflowSaved: true,
         toasts: [],
         platformVersion: 0,
       },
@@ -72,6 +73,21 @@ describe('<VersionHistoryPanel />', () => {
     expect(screen.getAllByText(/v1/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/v2/).length).toBeGreaterThan(0)
     expect(screen.getByText(/1 node.*changed/i)).toBeInTheDocument()
+  })
+
+  it('does not request version history for an unsaved workflow draft', async () => {
+    vi.mocked(api).mockResolvedValue([])
+    useWorkflowStore.setState({
+      currentWorkflowId: 'ui-test',
+      currentWorkflowSaved: false,
+    }, false)
+
+    render(<VersionHistoryPanel />)
+
+    await screen.findByTestId('version-history-empty')
+    expect(vi.mocked(api).mock.calls.some(([path]) =>
+      typeof path === 'string' && path.startsWith('/workflows/versions'),
+    )).toBe(false)
   })
 
   it('hides the Rollback button when only one version exists', async () => {

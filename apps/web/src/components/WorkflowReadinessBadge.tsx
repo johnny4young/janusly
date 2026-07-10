@@ -24,9 +24,11 @@
 import { useEffect, useState } from 'react'
 import { ShieldCheck, AlertTriangle, ShieldAlert } from 'lucide-react'
 import { api } from '../api'
+import { useShallow } from 'zustand/react/shallow'
 import { useWorkflowStore } from '../store'
 import { tReadinessIssue, useT } from '../i18n'
 import type { ReadinessIssue as ServerReadinessIssue } from '../i18n/server-events'
+import { requestResilienceFocus } from './resilience-focus-bus'
 
 type ReadinessSeverity = 'warn' | 'fail'
 
@@ -43,6 +45,9 @@ type ReadinessResult = {
   issues: ReadinessIssue[]
 }
 
+const resilienceIssueCodes = new Set(['external_node_missing_retry', 'http_missing_bounds'])
+const resilienceNodeTypes = new Set(['http', 'tool', 'agent', 'mcp_tool'])
+
 export function WorkflowReadinessBadge() {
   const { t } = useT()
   // Select the canvas-to-JSON helper directly off the store rather than
@@ -54,6 +59,17 @@ export function WorkflowReadinessBadge() {
   // refires when `platformVersion` ticks.
   const getWorkflowJson = useWorkflowStore((state) => state.getWorkflowJson)
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  // Same anti-re-render discipline as above: a raw `state.nodes` subscription
+  // would re-render this always-mounted header badge on EVERY canvas drag
+  // frame (each position change is a new array). Project down to the ids of
+  // resilience-capable nodes with a shallow-equal selector — position changes
+  // keep ids/types stable, so the badge only re-renders when membership moves.
+  const resilienceNodeIds = useWorkflowStore(useShallow((state) =>
+    state.nodes
+      .filter((node) => resilienceNodeTypes.has(node.data.type))
+      .map((node) => node.id)))
+  const selectNode = useWorkflowStore((state) => state.selectNode)
+  const setActiveTab = useWorkflowStore((state) => state.setActiveTab)
   const [result, setResult] = useState<ReadinessResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -100,6 +116,20 @@ export function WorkflowReadinessBadge() {
       : t('badges.readiness.blockers', { count: failCount })
   const Icon = status === 'pass' ? ShieldCheck : status === 'warn' ? AlertTriangle : ShieldAlert
 
+  const canOpenResilienceControls = (issue: ReadinessIssue) => Boolean(
+    issue.nodeId
+    && resilienceIssueCodes.has(issue.code)
+    && resilienceNodeIds.includes(issue.nodeId),
+  )
+
+  const openResilienceControls = (issue: ReadinessIssue) => {
+    if (!issue.nodeId || !canOpenResilienceControls(issue)) return
+    requestResilienceFocus(issue.nodeId)
+    selectNode(issue.nodeId)
+    setActiveTab('inspector')
+    setExpanded(false)
+  }
+
   return (
     <div className={`we-readiness-badge we-readiness-badge--${status}`}>
       <button
@@ -124,6 +154,15 @@ export function WorkflowReadinessBadge() {
                 {issue.nodeId && <span className="we-readiness-issue__node"> · {issue.nodeId}</span>}
                 <p className="we-readiness-issue__message">{localised}</p>
                 {issue.suggestion && <p className="we-readiness-issue__suggestion">{issue.suggestion}</p>}
+                {canOpenResilienceControls(issue) && (
+                  <button
+                    type="button"
+                    className="we-readiness-issue__action"
+                    onClick={() => openResilienceControls(issue)}
+                  >
+                    {t('badges.readiness.openResilience')}
+                  </button>
+                )}
               </li>
             )
           })}

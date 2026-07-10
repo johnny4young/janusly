@@ -24,8 +24,6 @@ import {
   asJsonObject,
   fieldId,
   JsonConfigField,
-  NumberConfigField,
-  readConfigNumber,
   readConfigString,
 } from './quick-config-fields'
 
@@ -132,13 +130,6 @@ export function McpToolConfigField({ scope, config, onPatch }: { scope: string; 
         )}
       </div>
       <JsonConfigField scope={scope} label={t('rightPanel.mcpInspector.toolInput') as string} value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
-      <NumberConfigField
-        scope={scope}
-        label={t('rightPanel.mcpInspector.timeoutMs') as string}
-        value={readConfigNumber(config, 'timeoutMs') ?? 30000}
-        onChange={(value) => onPatch({ timeoutMs: value })}
-      />
-      <p className="helper-text">{t('rightPanel.mcpInspector.timeoutHelper')}</p>
     </section>
   )
 }

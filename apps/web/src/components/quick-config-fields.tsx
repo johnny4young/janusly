@@ -51,6 +51,65 @@ export function NumberConfigField({ scope, label, value, onChange }: { scope: st
   )
 }
 
+/** Number field that preserves an absent optional config value until the operator sets one. */
+export function OptionalNumberConfigField({
+  scope,
+  label,
+  value,
+  onChange,
+  min = 1,
+  max,
+  placeholder,
+}: {
+  scope: string
+  label: string
+  value: number | null
+  onChange: (value: number | undefined) => void
+  min?: number
+  max?: number
+  placeholder?: string
+}) {
+  const id = fieldId(scope, label)
+  const [draft, setDraft] = useState(() => value === null ? '' : String(value))
+
+  useEffect(() => {
+    setDraft(value === null ? '' : String(value))
+  }, [scope, value])
+
+  // Clamp on BLUR, not per keystroke: clamping mid-typing mangles multi-digit
+  // entry (with min=2, typing "10" becomes 1 → clamped "2" → "20").
+  return (
+    <div className="config-field-row">
+      <label className="field-label" htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        className="text-field"
+        type="number"
+        min={min}
+        max={max}
+        step={1}
+        value={draft}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          if (draft.trim() === '') {
+            if (value !== null) onChange(undefined)
+            return
+          }
+          const parsed = Number(draft)
+          if (!Number.isFinite(parsed)) {
+            setDraft(value === null ? '' : String(value))
+            return
+          }
+          const bounded = Math.max(min, Math.min(max ?? Number.POSITIVE_INFINITY, Math.round(parsed)))
+          setDraft(String(bounded))
+          if (bounded !== value) onChange(bounded)
+        }}
+      />
+    </div>
+  )
+}
+
 export function TextareaConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: string; onChange: (value: string) => void }) {
   const id = fieldId(scope, label)
   return (
@@ -90,8 +149,8 @@ export function JsonConfigField({ scope, label, value, onChange }: { scope: stri
           try {
             onChange(JSON.parse(event.target.value))
             setError(null)
-          } catch (jsonError) {
-            setError(jsonError instanceof Error ? jsonError.message : (t('rightPanel.jsonField.invalidJson') as string))
+          } catch {
+            setError(t('rightPanel.jsonField.invalidJson') as string)
           }
         }}
       />
