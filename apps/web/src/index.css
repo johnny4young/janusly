@@ -9213,6 +9213,160 @@ button.we-recovery-heatmap__cell--clickable:focus-visible {
   background: transparent;
 }
 
+/* Experiment harness: compact comparison forms plus a scroll-safe metrics
+   table. All status color comes from existing semantic tokens. */
+.we-experiments {
+  display: grid;
+  gap: 12px;
+}
+
+.we-experiments__form,
+.we-experiments__dataset-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.we-experiments__dataset-form {
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+.we-experiments__dataset-form .field-label {
+  grid-row: 1;
+}
+
+.we-experiments__dataset-form .text-field,
+.we-experiments__dataset-form .we-button {
+  grid-row: 2;
+}
+
+.we-experiments__ref-hint { margin-top: -2px; }
+
+.we-experiments__list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-experiments__row {
+  align-items: center;
+  background: var(--we-surface-1);
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  color: var(--we-text-1);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  justify-content: space-between;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.we-experiments__row:hover,
+.we-experiments__row[data-selected="true"] {
+  background: var(--we-primary-soft);
+  border-color: var(--we-primary);
+}
+
+.we-experiments__row strong,
+.we-experiments__row small {
+  display: block;
+}
+
+.we-experiments__row small {
+  color: var(--we-text-2);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.we-experiments__table-wrap { overflow-x: auto; }
+
+.we-experiments__table {
+  border-collapse: collapse;
+  min-width: 620px;
+  width: 100%;
+}
+
+.we-experiments__table th,
+.we-experiments__table td {
+  border-bottom: 1px solid var(--we-line);
+  padding: 8px;
+  text-align: left;
+}
+
+.we-experiments__table th {
+  color: var(--we-text-2);
+  font-size: 11px;
+}
+
+.we-experiments__table td[data-severity="danger"] {
+  color: var(--we-danger);
+  font-weight: 700;
+}
+
+.we-experiments__deltas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 0;
+}
+
+.we-experiments__deltas div {
+  background: var(--we-surface-muted);
+  border-radius: 6px;
+  padding: 7px 9px;
+}
+
+.we-experiments__deltas dt {
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.we-experiments__deltas dd {
+  font-weight: 700;
+  margin: 2px 0 0;
+}
+
+.we-experiments__recommendation {
+  background: var(--we-primary-soft);
+  border: 1px solid var(--we-primary);
+  border-radius: 7px;
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+}
+
+.we-experiments__recommendation[data-recommendation="keep_control"] {
+  background: var(--we-surface-muted);
+  border-color: var(--we-line);
+}
+
+.we-experiments__recommendation[data-recommendation="inconclusive"] {
+  border-color: var(--we-warning);
+}
+
+.we-experiments__recommendation p { margin: 0; }
+
+.we-experiments__recommendation code {
+  background: var(--we-surface-1);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+}
+
+@media (max-width: 700px) {
+  .we-experiments__dataset-form { grid-template-columns: 1fr; }
+  .we-experiments__dataset-form .field-label,
+  .we-experiments__dataset-form .text-field,
+  .we-experiments__dataset-form .we-button { grid-row: auto; }
+}
+
 .we-pill {
   display: inline-flex;
   align-items: center;

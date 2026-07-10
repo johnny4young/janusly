@@ -12,6 +12,7 @@ const ALL_TABS: ActiveTab[] = [
   'workflows',
   'members',
   'copilot',
+  'experiments',
   'marketplace',
   'templates',
   'packs',
@@ -44,6 +45,7 @@ describe('CANVAS_TABS contract', () => {
     // contextual main-slot path.
     expect(nonCanvasTabs).toContain('home')
     expect(nonCanvasTabs).toContain('operations')
+    expect(nonCanvasTabs).toContain('experiments')
     expect(nonCanvasTabs).toContain('credentials')
     expect(nonCanvasTabs).toContain('members')
     expect(nonCanvasTabs).toContain('templates')
@@ -93,6 +95,7 @@ describe('getCanvasVisibility — canvas mount + visibility decision', () => {
     'reasoning',
     'multiAgent',
     'operations',
+    'experiments',
   ]
   it.each(NON_CANVAS_NON_HOME)(
     '%s: canvas mounted but HIDDEN, contextual slot renders',

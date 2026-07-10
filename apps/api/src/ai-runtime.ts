@@ -161,8 +161,8 @@ export function sanitizeAiWorkflow(workflow: Workflow): Workflow {
     }
     return node;
   });
-  // Draft-generation repair for routers (fourth-wave audit B-02): the
-  // runtime routes a decision by skipping non-chosen candidates that are
+  // Router candidates must be direct successors because the runtime routes a
+  // decision by skipping non-chosen candidates that are
   // DIRECT successors of the router, and `router_candidate_not_successor`
   // now fails validation otherwise. Models trained on the old prompt
   // example still emit candidates without the router→candidate edge —

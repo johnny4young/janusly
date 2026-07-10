@@ -1,6 +1,6 @@
 /**
- * Regression tests for the RunsPanel "Needs attention" card (fourth-wave audit
- * O-01, golden triage path): a failed node must surface WHY it failed — the
+ * Regression tests for the RunsPanel "Needs attention" card: a failed node
+ * must surface WHY it failed — the
  * error message plus attempt count + duration read off the run_nodes row —
  * instead of just a bare "Retry <id>" button.
  */

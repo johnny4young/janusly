@@ -269,7 +269,7 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
       // The `inputs.` scope means "this node's config" and only exists while
       // a node executes — edges evaluate with `inputs: {}` (core/runtime),
       // so an `inputs.*` path on an edge is always undefined→falsy and the
-      // branch silently never fires (fourth-wave audit B-04). Reject it at
+      // branch silently never fires. Reject it at
       // save time with a pointer to the run-input path that DOES work.
       // Quoted string literals are stripped first to avoid false positives.
       if (/\binputs\./.test(edge.condition.replace(/'[^']*'|"[^"]*"/g, ""))) {

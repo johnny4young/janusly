@@ -188,7 +188,7 @@ export class WorkflowRuntime {
           // direct successor of this router as skipped BEFORE the readiness
           // scan. Without this, `enqueueReadyNodes` queues every outgoing
           // edge and the decision is decorative — both paths execute,
-          // doubling cost and side effects (fourth-wave audit B-02).
+          // doubling cost and side effects.
           // Mirrors the condition-edge skip exactly: readiness treats
           // "skipped" as satisfied, so a join fed by the losing branch
           // still unblocks. Guards: only candidates still `pending` in the

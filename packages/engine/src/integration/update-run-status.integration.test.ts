@@ -1,6 +1,6 @@
 /**
  * Integration tests (real Postgres) for `updateRunStatusFromNodes` terminal
- * transitions (fourth-wave audit O-01) — the run-level rollup that flips a run
+ * transitions — the run-level rollup that flips a run
  * to `succeeded`/`failed` once its nodes settle, and now appends a PERSISTED
  * `run.succeeded` / `run.failed` timeline row next to the status flip.
  *

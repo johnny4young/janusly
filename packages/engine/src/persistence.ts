@@ -126,9 +126,8 @@ export type RunMetadata = {
    *  `startRun` persists and the trigger-ingest routes fill with the inbound
    *  event). `executeNode` merges it into the per-node context as
    *  `context.input` so trigger executors and `{{context.input.*}}`
-   *  templates can read it (fourth-wave audit B-01: before this, the
-   *  payload was silently dropped in production while sandbox validation
-   *  seeded it — validation showed the event flowing, production lost it).
+   *  templates can read it. This keeps production trigger execution aligned
+   *  with sandbox validation, which also receives the run input.
    *  Optional so existing mocks that omit it stay valid. */
   input?: Record<string, unknown>;
 };
@@ -252,8 +251,8 @@ export class ReplayNotClaimableError extends Error {
 
 /**
  * Atomically un-terminate a failed run AND reset its failed node to `queued`,
- * in ONE transaction (fourth-wave audit Q-02). Replaces the pre-Q-02 pair of
- * separate awaits (`resetRunForReplay` + `markNodeQueued`) whose gap let a
+ * in ONE transaction. Replaces the former pair of separate awaits
+ * (`resetRunForReplay` + `markNodeQueued`) whose gap let a
  * cancellation land between them — leaving a `queued` node on a `cancelled`
  * run that the runtime guard skips forever while the operator believes the
  * replay started (silent false recovery).

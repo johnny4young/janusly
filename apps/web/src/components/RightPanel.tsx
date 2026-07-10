@@ -21,7 +21,7 @@
  */
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Activity, AlertCircle, Boxes, Database, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
+import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
@@ -40,6 +40,7 @@ const WorkflowsDashboard = lazy(() => import('./WorkflowsDashboard').then((m) =>
 const MembersPanel = lazy(() => import('./MembersPanel').then((m) => ({ default: m.MembersPanel })))
 const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) => ({ default: m.SolutionPacksPanel })))
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
+const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
 const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
@@ -146,6 +147,11 @@ function RightPanelRouter(props: RightPanelProps) {
     </PanelChrome>
   )
   if (props.tab === 'operations') return <OperationsPage />
+  if (props.tab === 'experiments') return (
+    <PanelChrome title={t('rightPanel.experiments.title')} description={t('rightPanel.experiments.description')} icon={<FlaskConical size={18} />}>
+      <ExperimentsPanel />
+    </PanelChrome>
+  )
   if (props.tab === 'members') return (
     <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
       <MembersPanel />

@@ -17,6 +17,10 @@ scripts/model-eval-results.*
 .env.*.local
 .DS_Store
 
+# Private operator notes. These files intentionally stay local and must not
+# be cited by public docs, source comments, or release material.
+docs/private/
+
 # Python sibling at packages/sdk-python (first Python package in the monorepo)
 __pycache__/
 *.py[cod]

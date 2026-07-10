@@ -27,6 +27,7 @@ import {
   ClipboardList,
   Database,
   FileInput,
+  FlaskConical,
   Gauge,
   GitBranch,
   GitFork,
@@ -171,6 +172,7 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.group.build',
     items: [
       { tab: 'copilot', labelKey: 'sidebar.nav.copilot.label', helperKey: 'sidebar.nav.copilot.helper', icon: <Sparkles size={13} />, meta: '⌘2' },
+      { tab: 'experiments', labelKey: 'sidebar.nav.experiments.label', helperKey: 'sidebar.nav.experiments.helper', icon: <FlaskConical size={13} /> },
       { tab: 'workflows', labelKey: 'sidebar.nav.workflows.label', helperKey: 'sidebar.nav.workflows.helper', icon: <Database size={13} /> },
       { tab: 'inspector', labelKey: 'sidebar.nav.inspector.label', helperKey: 'sidebar.nav.inspector.helper', icon: <GitBranch size={13} /> },
       { tab: 'templates', labelKey: 'sidebar.nav.templates.label', helperKey: 'sidebar.nav.templates.helper', icon: <Workflow size={13} /> },

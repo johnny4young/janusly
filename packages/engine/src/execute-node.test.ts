@@ -1,6 +1,6 @@
 /**
- * Regression tests for the run-input plumbing (fourth-wave audit B-01):
- * `executeNode` must merge the run's start/trigger input (persisted at
+ * Regression tests for the run-input plumbing: `executeNode` must merge the
+ * run's start/trigger input (persisted at
  * `runs.inputJson.input`, surfaced by `getRunMetadata`) onto the per-node
  * context as `context.input` — the contract the trigger executors and
  * `{{context.input.*}}` templates depend on. Before the fix the key was
