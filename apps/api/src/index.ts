@@ -42,6 +42,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  invalidateOrgConfigCache,
   setMemoryUsageRecorder,
   productionBudgetChecker,
   setRecoveryItemCreator,
@@ -53,7 +54,10 @@ import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
-import { closeRunStreamHub, registerRunEventPublisher } from "./run-stream";
+import { closeRunStreamHub, getRunStreamSubscriber, registerRunEventPublisher } from "./run-stream";
+import { configureCacheInvalidationBus, startCacheInvalidationSubscriber } from "./cache-invalidation-bus";
+import { invalidateRecoveryMetricsCache } from "./metrics-cache";
+import { redis } from "./redis";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -131,6 +135,17 @@ console.log("[budget] checker registered (api)");
 // the API process is also the subscriber that streams to browsers.
 registerRunEventPublisher();
 console.log("[run-stream] publisher registered (api)");
+
+// Keep API and worker process-local caches convergent after tenant mutations.
+// The bus reuses the run-stream subscriber connection, which is closed by
+// `closeRunStreamHub()` during shutdown below.
+configureCacheInvalidationBus({
+  publisher: redis,
+  getSubscriber: getRunStreamSubscriber,
+  invalidateRecoveryMetrics: invalidateRecoveryMetricsCache,
+  invalidateOrgConfig: invalidateOrgConfigCache,
+});
+startCacheInvalidationSubscriber();
 
 let shutdownStarted = false;
 

@@ -49,6 +49,7 @@ import { setEngineRateLimiter } from "./rate-limit";
 import { setBudgetChecker } from "./budget";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
 import { closeWorkerRunEventRedis, registerWorkerRunEventPublisher } from "./run-event-redis";
+import { closeWorkerCacheInvalidationSubscriber, startWorkerCacheInvalidationSubscriber } from "./cache-invalidation-redis";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
@@ -99,6 +100,11 @@ import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 
 await assertMigrationsApplied();
+
+// Subscribe before scheduler registration or job execution can populate an
+// org-config snapshot. Redis faults degrade to the cache TTL rather than
+// blocking the worker's startup path.
+startWorkerCacheInvalidationSubscriber();
 
 // Re-register every enabled schedule entry with BullMQ BEFORE the
 // worker starts pulling jobs. Idempotent via the deterministic
@@ -412,6 +418,7 @@ async function shutdown(signal: NodeJS.Signals) {
   console.log(`[worker] received ${signal}, draining in-flight jobs…`);
   try {
     await worker.close();
+    await closeWorkerCacheInvalidationSubscriber();
     await closeWorkerRateLimitRedis();
     await closeWorkerRunEventRedis();
     console.log("[worker] drained, exiting");

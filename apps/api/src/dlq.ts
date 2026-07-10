@@ -17,6 +17,7 @@ import { escapeLikePattern } from "@janusly/data";
 import type { RecoveryItemSeverity } from "@janusly/shared";
 
 import { invalidateRecoveryMetricsCache } from "./metrics-cache";
+import { publishCacheInvalidation } from "./cache-invalidation-bus";
 
 /** Closed enum of DLQ row statuses. */
 export const deadLetterStatuses = ["open", "replayed", "resolved"] as const;
@@ -442,6 +443,7 @@ export async function markDeadLetterReplayed(orgId: string, id: string) {
   // The org's recovery metrics just changed — drop the cached rollup so the
   // dashboard reflects the replay immediately instead of after the TTL.
   invalidateRecoveryMetricsCache(orgId);
+  publishCacheInvalidation({ kind: "recovery-metrics", orgId });
 }
 
 /** Flip status to `resolved` (closed without replay). */
@@ -450,4 +452,5 @@ export async function markDeadLetterResolved(orgId: string, id: string) {
     .set({ status: "resolved" })
     .where(and(eq(deadLetters.id, id), eq(deadLetters.orgId, orgId)));
   invalidateRecoveryMetricsCache(orgId);
+  publishCacheInvalidation({ kind: "recovery-metrics", orgId });
 }

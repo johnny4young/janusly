@@ -1,10 +1,10 @@
 /**
  * Integration-lane runner — the Compose lifecycle for `pnpm test:integration`.
  *
- * Boots ONLY Postgres (the integration tests need no API / worker / Redis /
- * Playwright), applies migrations, runs `@janusly/data`'s `*.integration.test.ts`
- * against that real DB, then tears Compose down. Mirrors scripts/run-e2e.mjs's
- * lifecycle but far lighter, so local and CI behave identically.
+ * Boots Postgres and Redis, applies migrations, runs each package's
+ * `*.integration.test.ts` suite against the real backing services, then tears
+ * Compose down. Mirrors scripts/run-e2e.mjs's lifecycle but stays far lighter,
+ * so local and CI behave identically.
  *
  * Usage:
  *   pnpm test:integration
@@ -57,6 +57,28 @@ async function waitForPostgres(timeoutMs = 60_000) {
   throw lastError ?? new Error("postgres did not become ready");
 }
 
+async function waitForRedis(timeoutMs = 60_000) {
+  const startedAt = Date.now();
+  let lastError = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await new Promise((resolve, reject) => {
+        const child = spawn("docker", ["compose", "exec", "-T", "redis", "redis-cli", "ping"], {
+          cwd: rootDir,
+          stdio: "ignore",
+        });
+        child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`redis ping exited ${code}`))));
+        child.on("error", reject);
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(1_000);
+    }
+  }
+  throw lastError ?? new Error("redis did not become ready");
+}
+
 async function composeDown() {
   try {
     await run("docker", ["compose", "down"]);
@@ -68,10 +90,10 @@ async function composeDown() {
 async function main() {
   let failed = false;
   try {
-    console.log("[integration] docker compose up -d --renew-anon-volumes postgres");
-    await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "postgres"]);
-    console.log("[integration] waiting for postgres...");
-    await waitForPostgres();
+    console.log("[integration] docker compose up -d --renew-anon-volumes redis postgres");
+    await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "redis", "postgres"]);
+    console.log("[integration] waiting for postgres and redis...");
+    await Promise.all([waitForPostgres(), waitForRedis()]);
     console.log("[integration] pnpm migrate");
     await run("pnpm", ["migrate"]);
     console.log("[integration] running data integration tests");

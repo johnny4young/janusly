@@ -71,6 +71,19 @@ export type SubscriberClient = {
   on(event: "message", listener: (channel: string, message: string) => void): unknown;
 };
 
+/**
+ * Return the API process's dedicated Redis subscriber connection.
+ *
+ * The run-event hub owns the connection lifecycle. Other API-only pub/sub
+ * consumers can attach a channel listener here rather than opening another
+ * subscriber connection per replica.
+ */
+export function getRunStreamSubscriber(): IORedis {
+  getRunStreamHub();
+  if (!subscriberConn) throw new Error("Run stream subscriber was not initialized");
+  return subscriberConn;
+}
+
 export type RunStreamHub = {
   /**
    * Attach a client to a run's stream. Refcounts the Redis SUBSCRIBE and
@@ -200,6 +213,9 @@ export function getRunStreamHub(): RunStreamHub {
     enableReadyCheck: true,
     lazyConnect: false,
   });
+  // Redis pub/sub is best-effort. An outage falls back to each cache's TTL,
+  // so a connection error must not become an unhandled process-level event.
+  subscriberConn.on("error", () => {});
   hubSingleton = createRunStreamHub(subscriberConn);
   return hubSingleton;
 }
@@ -209,7 +225,15 @@ export async function closeRunStreamHub(): Promise<void> {
   const conn = subscriberConn;
   subscriberConn = null;
   hubSingleton = null;
-  if (conn) await conn.quit();
+  if (!conn) return;
+  try {
+    await conn.quit();
+  } catch {
+    // The stream and cache subscribers are both best-effort. A disconnected
+    // Redis server must not turn an otherwise graceful API shutdown into a
+    // failed process exit.
+    conn.disconnect();
+  }
 }
 
 /** Wire the engine's run-event seam to a Redis PUBLISH. Call once at boot. */

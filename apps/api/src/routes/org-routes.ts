@@ -18,6 +18,7 @@ import {
 } from "@janusly/engine/src/memory-purge-scheduler";
 
 import { auditAction } from "../audit-helper";
+import { publishCacheInvalidation } from "../cache-invalidation-bus";
 import { MAX_JSON_BODY_BYTES } from "../api-config";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import type { Route } from "../routes";
@@ -57,6 +58,7 @@ export const orgRoutes: Route[] = [
 
       try {
         const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
+        publishCacheInvalidation({ kind: "org-config", orgId: auth.orgId });
         await auditAction(auth, "org.config.updated", { targetType: "org_config", targetId: key, metadata: { key, value: entry.value } });
         if (AI_BUDGET_CONFIG_KEYS.has(key)) {
           try {
