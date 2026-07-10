@@ -528,6 +528,37 @@ export const recoveryFeedback = pgTable(
 );
 
 /**
+ * Durable freshness projection for the recovery-feedback loop.
+ *
+ * `recovery_feedback` is retention-managed, but the operator needs to know
+ * when a workflow/approach stopped receiving accepted fixes even after the
+ * source rows have expired. This compact one-row-per-approach projection is
+ * updated atomically with every feedback decision and intentionally remains
+ * orphan-tolerant like the rest of Janusly's recovery records.
+ */
+export const recoveryFeedbackHealth = pgTable(
+  "recovery_feedback_health",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    approachLabel: text("approach_label").notNull(),
+    /** Most recent accept OR reject decision for this approach. */
+    feedbackLastSeen: timestamp("feedback_last_seen", { withTimezone: true }).notNull().defaultNow(),
+    /** Most recent accepted fix; null when all recorded decisions were rejected. */
+    acceptedFixLastSeen: timestamp("accepted_fix_last_seen", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("recovery_feedback_health_org_workflow_approach_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.approachLabel,
+    ),
+    index("recovery_feedback_health_org_workflow_idx").on(table.orgId, table.workflowId),
+  ],
+);
+
+/**
  * Per-workflow AI budget overrides.
  *
  * Each row caps monthly USD spend for a single workflow within an org. The

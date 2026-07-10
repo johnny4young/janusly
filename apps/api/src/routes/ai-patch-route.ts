@@ -20,6 +20,8 @@ import { RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowPa
 import {
   summarizePastFeedback,
   listCalibrations,
+  queryRecoveryFeedbackHealth,
+  type RecoveryFeedbackHealthSnapshot,
   type StoredCalibration,
 } from "@janusly/data";
 import { db, runEvents, runs } from "@janusly/db";
@@ -205,6 +207,21 @@ export const aiPatchRoutes: Route[] = [
         : [];
       const pastFeedbackSummary = failingWorkflowId ? composeFeedbackHint(feedbackSummaries) : "";
 
+      // The feedback summary above is prompt-only and intentionally returns
+      // an empty array after its rolling window expires. Surface the separate
+      // lifetime aggregate alongside the patch response so the dialog can
+      // distinguish a cold approach from a formerly-active learning loop
+      // whose accepted fixes have gone stale. This is best-effort: a health
+      // read must never weaken the patch route's fallback contract.
+      let feedbackHealth: RecoveryFeedbackHealthSnapshot | undefined;
+      if (failingWorkflowId) {
+        try {
+          feedbackHealth = await queryRecoveryFeedbackHealth(auth.orgId, failingWorkflowId);
+        } catch {
+          feedbackHealth = undefined;
+        }
+      }
+
       // Memory-assisted recovery: when org memory is enabled, recall a
       // small bounded set of similar prior failures + accepted/rejected
       // fixes scoped to the same org (and preferably workflow) and slip
@@ -321,6 +338,8 @@ export const aiPatchRoutes: Route[] = [
          *  AI and fallback paths — the operator can still see what context
          *  was available even when the LLM degraded). */
         evidence: EvidenceRow[];
+        /** Freshness of the operator feedback loop for the failing workflow. */
+        feedbackHealth?: RecoveryFeedbackHealthSnapshot;
         model?: string;
         provider?: string;
         aiError?: string;
@@ -447,6 +466,7 @@ export const aiPatchRoutes: Route[] = [
         memoryEntries: memoryHint.entries,
         toolContract: toolInputContract ?? null,
       });
+      response.feedbackHealth = feedbackHealth;
 
       await auditAction(auth, "ai.workflow.patch_suggested", { targetType: "dlq", targetId: deadLetterId, metadata: {
         mode: response.mode,

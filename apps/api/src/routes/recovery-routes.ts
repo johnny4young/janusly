@@ -10,12 +10,16 @@
 
 import {
   commitMemory,
+  DEFAULT_CALIBRATION_WINDOW_DAYS,
   isMemoryAllowed,
   getOrgConfigSnapshot,
+  listCalibrations,
+  queryRecoveryFeedbackHealth,
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
 } from "@janusly/data";
+import { MIN_CALIBRATION_SAMPLES } from "@janusly/engine/src/confidence-calibration";
 import { composeRecoveryMetrics } from "@janusly/engine/src/recovery-metrics";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
@@ -32,6 +36,12 @@ import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
+
+/** Extract the saved workflow identifier from a DLQ snapshot without trusting client input. */
+function workflowIdFromSnapshot(workflowJson: unknown): string | null {
+  const id = (workflowJson as { id?: unknown } | null)?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
 
 export const recoveryRoutes: Route[] = [
   // Org-level recovery metrics — composes run status counts, MTTR, p95
@@ -61,6 +71,24 @@ export const recoveryRoutes: Route[] = [
       return sendJson(res, metrics);
     } },
 
+  // Read-only view of the curves that already calibrate patch suggestions.
+  // Keep the server locale-neutral: the web owns labels, percentages, and
+  // timestamp formatting. No feedback comments or source rows leave here.
+  { method: "GET", match: (url) => url === "/recovery/calibration-status" || url.startsWith("/recovery/calibration-status?"),
+    role: "viewer",
+    handler: async ({ res, auth }) => {
+      const [orgConfig, calibrations] = await Promise.all([
+        getOrgConfigSnapshot(auth.orgId),
+        listCalibrations(auth.orgId),
+      ]);
+      return sendJson(res, {
+        enabled: orgConfig.ai.confidenceCalibrationEnabled,
+        windowDays: DEFAULT_CALIBRATION_WINDOW_DAYS,
+        minimumSampleSize: MIN_CALIBRATION_SAMPLES,
+        calibrations,
+      });
+    } },
+
   // Per-day failure/recovery heatmap for the Recovery Center calendar. Pure
   // aggregation (one GROUP BY over dead_letters); no cache needed — it's read
   // less often than the metric strip and the grid tolerates one-tick staleness.
@@ -72,6 +100,26 @@ export const recoveryRoutes: Route[] = [
       const days = Number.isFinite(rawDays) ? Math.min(90, Math.max(1, rawDays)) : 90;
       const heatmap = await queryRecoveryHeatmap(auth.orgId, days);
       return sendJson(res, { days: heatmap, windowDays: days });
+    } },
+
+  // Report whether the per-workflow feedback loop still has a fresh accepted
+  // fix. Resolve the workflow from an org-scoped DLQ row instead of accepting
+  // a caller-supplied workflow id, so this read cannot cross tenant bounds.
+  { method: "GET", match: (url) => url === "/recovery/feedback-health" || url.startsWith("/recovery/feedback-health?"),
+    role: "viewer",
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const deadLetterId = url.searchParams.get("deadLetterId");
+      if (!deadLetterId) {
+        return sendError(res, "dlq_field_required", "deadLetterId is required", 400, { field: "deadLetterId" });
+      }
+      const dlq = await getDeadLetter(auth.orgId, deadLetterId);
+      if (!dlq) return sendError(res, "dlq_not_found", "DLQ entry not found", 404);
+      const workflowId = workflowIdFromSnapshot(dlq.workflowJson);
+      if (!workflowId) {
+        return sendError(res, "recovery_feedback_saved_only", "Feedback is only recorded for saved workflows", 422);
+      }
+      return sendJson(res, await queryRecoveryFeedbackHealth(auth.orgId, workflowId));
     } },
 
   // Operator → system feedback channel for the recovery loop. The
@@ -93,8 +141,7 @@ export const recoveryRoutes: Route[] = [
       const dlq = await getDeadLetter(auth.orgId, parsed.data.deadLetterId);
       if (!dlq) return sendError(res, "dlq_not_found", "DLQ entry not found", 404);
 
-      const failingWorkflowJson = dlq.workflowJson as { id?: unknown } | null;
-      const workflowId = typeof failingWorkflowJson?.id === "string" ? failingWorkflowJson.id : null;
+      const workflowId = workflowIdFromSnapshot(dlq.workflowJson);
       if (!workflowId) {
         // Anonymous (ad-hoc) workflows have no aggregation key — the
         // dialog only opens on saved workflows in practice, so this is

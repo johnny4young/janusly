@@ -65,6 +65,7 @@ import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import {
   BudgetTile,
+  CalibrationHealthTile,
   FailureClustersTile,
   OperatorTodayTile,
   PendingApprovalsTile,
@@ -381,6 +382,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             totalSamples={clusters?.totalSamples ?? 0}
             onOpenTab={props.onOpenTab}
           />
+          <CalibrationHealthTile />
           <OperatorTodayTile
             metrics={metrics}
             openDeadLetters={openDeadLetters.length}

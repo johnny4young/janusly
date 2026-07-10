@@ -5,9 +5,9 @@
  * footer link) and the `AllClearState` empty-state, so co-locating them in
  * one file is cleaner than eight micro-files. Each tile takes its data as
  * props from the composer (`../RecoveryCenterPanel.tsx`) — no tile
- * re-fetches what the panel already holds, except `BudgetTile`, which owns
- * its own `/billing/budget` fetch (a distinct endpoint the panel doesn't
- * read).
+ * re-fetches what the panel already holds, except `BudgetTile` and
+ * `CalibrationHealthTile`, which each own a distinct read-only endpoint
+ * the panel does not fetch.
  *
  * Pure presentational logic lives in `./helpers.ts` (`readWorkflowName`,
  * `readErrorSignature`, `humanizeAge`, `clusterCategoryLabel`,
@@ -39,11 +39,14 @@ import {
 import type { ActiveTab, RunNode, RunSummary } from '../../types'
 import { api } from '../../api'
 import { useWorkflowStore } from '../../store'
-import { useT } from '../../i18n'
+import { getResolvedLocale, useT } from '../../i18n'
 import { requestOperationsSection } from '../operations-section-bus'
+import { approachLabelDisplay } from '../recovery-dialog/helpers'
+import type { PatchApproachLabel } from '../recovery-dialog/types'
 import type { DeadLetter } from '../DeadLettersPanel'
 import {
   budgetBand,
+  type CalibrationStatusEnvelope,
   clusterCategoryLabel,
   clusterOwnerLabel,
   downtimeSeverity,
@@ -472,6 +475,108 @@ export function RecommendedActionsTile({
           </li>
         ))}
       </ol>
+    </RecoveryCenterTile>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CalibrationHealthTile — read-only proof that recovery feedback calibrates
+// future patch suggestions. Owns its `/recovery/calibration-status` fetch,
+// analogous to BudgetTile's distinct endpoint.
+// ─────────────────────────────────────────────────────────────────────────
+
+export function CalibrationHealthTile() {
+  const { t } = useT()
+  const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const [status, setStatus] = useState<CalibrationStatusEnvelope | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const locale = getResolvedLocale()
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api('/recovery/calibration-status')
+      .then((payload) => {
+        if (cancelled) return
+        setStatus(payload as CalibrationStatusEnvelope)
+        setLoading(false)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : t('recoveryCenter.calibration.unavailableFallback'))
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [platformVersion, t])
+
+  const curves = status?.calibrations ?? []
+  const severity = error
+    ? 'warning'
+    : !status
+      ? 'neutral'
+      : !status.enabled
+        ? 'neutral'
+        : curves.length > 0
+          ? 'success'
+          : 'cyan'
+  const kicker = !status
+    ? t('recoveryCenter.calibration.kickerCollecting')
+    : !status.enabled
+      ? t('recoveryCenter.calibration.kickerDisabled')
+      : curves.length > 0
+        ? t('recoveryCenter.calibration.kickerEnabled', { count: curves.length })
+        : t('recoveryCenter.calibration.kickerCollecting')
+  const decimal = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 })
+  const percent = new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 })
+  const formatDate = (value: string | null) => {
+    if (!value) return t('common.unknown')
+    const date = new Date(value)
+    return Number.isNaN(date.getTime())
+      ? t('common.unknown')
+      : date.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
+  }
+
+  return (
+    <RecoveryCenterTile
+      title={t('recoveryCenter.calibration.title')}
+      kicker={kicker}
+      severity={severity}
+      icon={<Gauge size={18} aria-hidden="true" />}
+      testId="recovery-center-tile-calibration"
+    >
+      {loading && <p className="we-recovery-center-tile__empty">{t('recoveryCenter.calibration.loading')}</p>}
+      {error && (
+        <p className="we-recovery-center-tile__empty" role="status">
+          {t('recoveryCenter.calibration.unavailable', { detail: error })}
+        </p>
+      )}
+      {!loading && !error && status && !status.enabled && (
+        <p className="we-recovery-center-tile__empty">{t('recoveryCenter.calibration.disabledBody')}</p>
+      )}
+      {!loading && !error && status?.enabled && curves.length === 0 && (
+        <p className="we-recovery-center-tile__empty">
+          {t('recoveryCenter.calibration.empty', { minimumSamples: status.minimumSampleSize })}
+        </p>
+      )}
+      {!loading && !error && status?.enabled && curves.length > 0 && (
+        <ul className="we-recovery-center-calibration" data-testid="recovery-center-calibration-rows">
+          {curves.map((curve) => (
+            <li key={curve.approachLabel} data-testid={`recovery-center-calibration-row-${curve.approachLabel}`}>
+              <div className="we-recovery-center-calibration__head">
+                <strong>{approachLabelDisplay(curve.approachLabel as PatchApproachLabel)}</strong>
+                <span>{t('recoveryCenter.calibration.acceptRate', { rate: percent.format(curve.acceptRate) })}</span>
+              </div>
+              <div className="we-recovery-center-calibration__meta">
+                <span>{t('recoveryCenter.calibration.samples', { count: curve.sampleSize })}</span>
+                <span>{t('recoveryCenter.calibration.slope', { value: decimal.format(curve.curveSlope) })}</span>
+                <span>{t('recoveryCenter.calibration.updated', { date: formatDate(curve.lastComputedAt) })}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </RecoveryCenterTile>
   )
 }

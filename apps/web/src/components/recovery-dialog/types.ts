@@ -25,6 +25,22 @@ export type PatchApproachLabel =
   | 'fix_url'
   | 'other'
 
+export type FeedbackHealthState = 'active' | 'stale' | 'no_accepted_fix'
+
+/** Read-only freshness signal returned with a patch response. */
+export type FeedbackApproachHealth = {
+  approachLabel: PatchApproachLabel
+  feedbackLastSeen: string
+  acceptedFixLastSeen: string | null
+  acceptedFixAgeDays: number | null
+  state: FeedbackHealthState
+}
+
+export type RecoveryFeedbackHealthSnapshot = {
+  windowDays: number
+  approaches: FeedbackApproachHealth[]
+}
+
 export type SuggestionTab = {
   workflow: WorkflowDefinition
   rationale: string
@@ -58,6 +74,12 @@ export type PatchSuggestion = {
    * the renderer treats `undefined` as `[]` and hides the panel.
    */
   evidence?: EvidenceRow[]
+  /**
+   * Feedback-loop freshness for the failing workflow. Optional so legacy or
+   * cached patch responses remain renderable; the dialog hides the badge when
+   * the read-only side channel is unavailable.
+   */
+  feedbackHealth?: RecoveryFeedbackHealthSnapshot
   model?: string
   provider?: string
   aiError?: string

@@ -40,6 +40,7 @@ function whereHandle(queue: Array<() => Promise<unknown>>) {
   const resolved = next ? next() : Promise.resolve([]);
   return {
     limit: () => resolved,
+    orderBy: () => resolved,
     then: (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
       resolved.then(onFulfilled, onRejected),
   };
@@ -87,6 +88,7 @@ vi.mock("@janusly/db", () => ({
 
 vi.mock("drizzle-orm", () => ({
   and: (...conds: unknown[]) => ({ and: conds }),
+  asc: (col: unknown) => ({ asc: col }),
   eq: (col: unknown, val: unknown) => ({ eq: [col, val] }),
   gte: (col: unknown, val: unknown) => ({ gte: [col, val] }),
   isNotNull: (col: unknown) => ({ isNotNull: col }),

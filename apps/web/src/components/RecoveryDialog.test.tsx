@@ -82,6 +82,36 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Apply.*validate/i })).toBeInTheDocument()
   })
 
+  it('surfaces stale feedback health for the selected recovery approach', async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      ...aiSuggestion,
+      suggestions: [{
+        workflow: aiSuggestion.suggestedWorkflow,
+        rationale: aiSuggestion.rationale,
+        approachLabel: 'add_retry',
+        confidence: 76,
+      }],
+      feedbackHealth: {
+        windowDays: 30,
+        approaches: [{
+          approachLabel: 'add_retry',
+          feedbackLastSeen: '2026-07-09T00:00:00.000Z',
+          acceptedFixLastSeen: '2026-05-29T00:00:00.000Z',
+          acceptedFixAgeDays: 42,
+          state: 'stale',
+        }],
+      },
+    })
+
+    render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+    const health = await screen.findByTestId('recovery-dialog-learning-health')
+    expect(health).toHaveAttribute('data-state', 'stale')
+    expect(health).toHaveTextContent('Learning paused')
+    expect(health).toHaveTextContent('42 days')
+  })
+
   it('renders the "Why this suggestion?" evidence panel with chips and scrubs secrets at read', async () => {
     vi.mocked(api).mockResolvedValueOnce({
       ...aiSuggestion,

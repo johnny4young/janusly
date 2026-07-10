@@ -7457,6 +7457,75 @@ button.we-ops-metric-card--button {
   white-space: nowrap;
 }
 
+/* Feedback-loop health — a compact, stateful read-only badge under the
+ * selected recovery suggestion. It explains whether accepted operator
+ * decisions still refresh the next prompt without competing with the diff. */
+.we-recovery-learning-health {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 9px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-recovery-learning-health__icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+}
+
+.we-recovery-learning-health__copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.we-recovery-learning-health__copy strong {
+  color: var(--we-text-1);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-recovery-learning-health__copy span {
+  color: var(--we-text-2);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.we-recovery-learning-health[data-state="active"] {
+  border-color: var(--we-success-border-30);
+  background: var(--we-success-soft);
+}
+
+.we-recovery-learning-health[data-state="active"] .we-recovery-learning-health__icon {
+  background: var(--we-surface);
+  color: var(--we-success-text);
+}
+
+.we-recovery-learning-health[data-state="stale"] {
+  border-color: color-mix(in srgb, var(--we-warning) 45%, transparent);
+  background: var(--we-warning-soft);
+}
+
+.we-recovery-learning-health[data-state="stale"] .we-recovery-learning-health__icon {
+  background: var(--we-surface);
+  color: var(--we-warning-text);
+}
+
+.we-recovery-learning-health[data-state="no_accepted_fix"] .we-recovery-learning-health__icon,
+.we-recovery-learning-health[data-state="not_started"] .we-recovery-learning-health__icon {
+  background: var(--we-accent-soft);
+  color: var(--we-accent);
+}
+
 .small-command--primary {
   background: var(--we-primary-soft);
   border-color: var(--we-primary);
@@ -9040,6 +9109,58 @@ button.we-recovery-heatmap__cell--clickable:focus-visible {
 .we-recovery-center-budget__pill[data-severity="danger"] {
   background: var(--we-danger-soft);
   color: var(--we-danger-text);
+}
+
+/* Recovery learning health — one compact row per calibrated approach. */
+.we-recovery-center-calibration {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.we-recovery-center-calibration li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-recovery-center-calibration__head,
+.we-recovery-center-calibration__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.we-recovery-center-calibration__head strong {
+  color: var(--we-text-1);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.we-recovery-center-calibration__head span {
+  color: var(--we-success-text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.we-recovery-center-calibration__meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--we-text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 /* Budget settings (Operations) ----------------------------------------- */

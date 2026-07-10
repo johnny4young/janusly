@@ -50,6 +50,7 @@ vi.mock("@janusly/ai", async () => {
 vi.mock("@janusly/data", () => ({
   summarizePastFeedback: vi.fn(async () => []),
   listCalibrations: vi.fn(async () => []),
+  queryRecoveryFeedbackHealth: vi.fn(async () => ({ windowDays: 30, approaches: [] })),
 }));
 
 vi.mock("../dlq", () => ({ getDeadLetter: vi.fn() }));
@@ -90,6 +91,7 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 import { suggestWorkflowPatch } from "@janusly/ai";
+import { queryRecoveryFeedbackHealth } from "@janusly/data";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { getDeadLetter } from "../dlq";
@@ -102,6 +104,7 @@ const auditMock = vi.mocked(auditAction);
 const readJsonMock = vi.mocked(readJson);
 const getDlqMock = vi.mocked(getDeadLetter);
 const patchMock = vi.mocked(suggestWorkflowPatch);
+const feedbackHealthMock = vi.mocked(queryRecoveryFeedbackHealth);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -180,6 +183,8 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     // The merged workflow carries the patched url on the failing node.
     expect(res.payload.suggestedWorkflow.nodes[0].config.url).toBe("https://new.example.com");
     expect(res.payload.evidence).toEqual([]);
+    expect(res.payload.feedbackHealth).toEqual({ windowDays: 30, approaches: [] });
+    expect(feedbackHealthMock).toHaveBeenCalledWith("org-1", "wf-patch");
 
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock.mock.calls[0]?.[1]).toBe("ai.workflow.patch_suggested");
@@ -233,5 +238,25 @@ describe("POST /ai/patch-workflow — fallback contract", () => {
 
     expect(res.status).toBe(404);
     expect(patchMock).not.toHaveBeenCalled();
+  });
+
+  it("degrades only the feedback-health side channel when its read fails", async () => {
+    feedbackHealthMock.mockRejectedValueOnce(new Error("database unavailable"));
+    patchMock.mockResolvedValue({
+      mode: "fallback",
+      suggestions: [{
+        patchedConfig: {},
+        rationale: "LLM unavailable",
+        approachLabel: "other",
+        confidence: 0,
+      }],
+      aiError: "rate_limited",
+    } as never);
+
+    const res = await callPatch();
+
+    expect(res.payload.mode).toBe("fallback");
+    expect(res.payload.feedbackHealth).toBeUndefined();
+    expect(auditMock).toHaveBeenCalledTimes(1);
   });
 });

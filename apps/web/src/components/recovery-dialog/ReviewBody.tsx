@@ -16,6 +16,7 @@ import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { EvidencePanel } from './EvidencePanel'
+import { LearningHealthBadge } from './LearningHealthBadge'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './helpers'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
@@ -114,6 +115,10 @@ export function ReviewBody({
           ))}
         </div>
       )}
+      <LearningHealthBadge
+        feedbackHealth={suggestion.feedbackHealth}
+        approachLabel={selected.approachLabel}
+      />
       <div
         id="we-recovery-tabpanel"
         role={showTabs ? 'tabpanel' : undefined}

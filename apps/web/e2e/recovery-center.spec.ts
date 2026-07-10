@@ -13,6 +13,18 @@ test('Recovery Center is the authenticated desktop home', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(2)
 })
 
+test('Recovery Center exposes calibration health without blocking an empty workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/')
+
+  const calibration = page.getByTestId('recovery-center-tile-calibration')
+  await expect(calibration).toBeVisible()
+  await expect(calibration.getByRole('heading', { name: 'Model calibration' })).toBeVisible()
+  await expect(calibration).toContainText(/No curve is ready yet|raw confidence/i)
+  const box = await calibration.boundingBox()
+  expect(box?.height ?? 0).toBeGreaterThan(0)
+})
+
 test('Recovery Center remains usable on mobile and the builder is one tap away', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')

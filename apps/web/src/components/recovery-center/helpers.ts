@@ -107,6 +107,21 @@ export type BudgetEnvelope = {
   resolvedScope?: 'org' | 'workflow' | null
 }
 
+/** Read-only calibration status returned by `GET /recovery/calibration-status`. */
+export type CalibrationStatusEnvelope = {
+  enabled: boolean
+  windowDays: number
+  minimumSampleSize: number
+  calibrations: Array<{
+    approachLabel: string
+    acceptRate: number
+    sampleSize: number
+    curveSlope: number
+    curveIntercept: number
+    lastComputedAt: string | null
+  }>
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Health band — drives the HealthRing stroke colour: cobalt ≥80, amber
 // 60-79, red <60.
