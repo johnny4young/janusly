@@ -16,7 +16,7 @@
  * the dashboard ships before the private-beta MTTR experiment closes.
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Award, Download, FileText } from 'lucide-react'
 
 import { downloadFromApi } from '../api'

@@ -8,7 +8,6 @@
  * behavior byte-for-byte.
  */
 
-import React from 'react'
 import { CheckCircle2, Clock, DollarSign, RefreshCw, Users, Zap } from 'lucide-react'
 import { withSeverityLabels, type VitalSignsTile, type VitalSignsTileSeverity } from './VitalSignsStrip'
 import { tRecoveryMetricRationale } from '../i18n'

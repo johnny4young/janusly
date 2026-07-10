@@ -25,7 +25,7 @@
  *   is created (sandbox runs never produce reusable versions).
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
 import { enqueueNode } from "../queue";

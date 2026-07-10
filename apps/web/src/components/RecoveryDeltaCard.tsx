@@ -25,7 +25,7 @@
  * sibling save/replay bumps it — so the card animates as runs accumulate.
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Minus, RotateCcw } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'

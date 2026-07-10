@@ -86,7 +86,7 @@ vi.mock("../http", async (importOriginal) => {
 import { explainRun } from "@janusly/ai";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
-import { readJson, sendJson } from "../http";
+import { readJson, } from "../http";
 import type { Route } from "../routes";
 import { aiExplainRoutes } from "./ai-explain-route";
 

@@ -58,7 +58,7 @@ function evaluateBoolean(expression: string, scope: ExpressionScope): unknown {
   if (andParts.length > 1) return andParts.every(part => Boolean(evaluateBoolean(part, scope)));
 
   const trimmed = stripOuterParens(expression.trim());
-  if (trimmed.startsWith("!")) return !Boolean(evaluateBoolean(trimmed.slice(1), scope));
+  if (trimmed.startsWith("!")) return !evaluateBoolean(trimmed.slice(1), scope);
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
 

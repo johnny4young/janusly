@@ -16,7 +16,7 @@
  * - `lastErrorMessage` is server-scrubbed via `scrubSecretShapes`.
  */
 
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Info, KeyRound, ShieldCheck } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'

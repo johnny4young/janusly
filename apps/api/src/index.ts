@@ -67,7 +67,6 @@ import {
   PORT,
 } from "./api-config";
 import { enforceRateLimit } from "./rate-limit";
-import type { Route } from "./routes";
 import { bootstrapAutoHealing, shutdownAutoHealing } from "./auto-healing-bootstrap";
 import { bootstrapAlerts, shutdownAlerts } from "./alerts-bootstrap";
 import { createRecoveryItemForDeadLetter } from "@janusly/engine/src/recovery/recovery-item-hook";

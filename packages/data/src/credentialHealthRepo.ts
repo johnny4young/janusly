@@ -35,8 +35,6 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import {
   credentials,
   db,
-  mcpConnections,
-  mcpToolDescriptors,
   usageEvents,
   workflowVersions,
 } from "@janusly/db";

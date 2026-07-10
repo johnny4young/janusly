@@ -16,7 +16,7 @@
  * Used by `OperationsPage.tsx`.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Coins, Info, Save, ShieldAlert } from "lucide-react";
 import { api } from "../api";
 import { useWorkflowStore } from "../store";

@@ -19,7 +19,7 @@
  * and `DeadLettersPanel.tsx` (selected-entry action bar).
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, Play, RefreshCcw, X } from 'lucide-react'
 import { api } from '../api'

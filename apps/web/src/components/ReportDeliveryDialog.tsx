@@ -22,7 +22,7 @@
  * button) and `RecoveryItemDrawer.tsx` (Deliver button in the evidence section).
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, ExternalLink, Send, X } from 'lucide-react'
 import { api } from '../api'

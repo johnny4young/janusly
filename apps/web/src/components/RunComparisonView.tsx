@@ -8,7 +8,7 @@
  * this component for rendering.
  */
 
-import React, { useMemo } from 'react'
+import { useMemo } from 'react'
 import { ArrowRight, Minus, Check, AlertCircle, Beaker } from 'lucide-react'
 import { useT } from '../i18n'
 import { formatStatusLabel } from '../constants'

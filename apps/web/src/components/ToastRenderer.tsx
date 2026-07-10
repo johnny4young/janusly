@@ -5,7 +5,6 @@
  * `useWorkflowStore.getState().addToast({...})`.
  */
 
-import React from 'react'
 import { useWorkflowStore } from '../store'
 
 const toneClass: Record<string, string> = {

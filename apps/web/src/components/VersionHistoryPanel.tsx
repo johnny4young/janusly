@@ -12,7 +12,7 @@
  * Used by `RightPanel.tsx` (Inspector tab → version history).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { GitCompare, History, RotateCcw, Sparkles, X } from 'lucide-react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'

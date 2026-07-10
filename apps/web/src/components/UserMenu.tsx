@@ -11,7 +11,7 @@
  * Used by `App.tsx` (top-bar header).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Building2,

@@ -8,7 +8,6 @@
  * - `InspectorPanel.tsx` (rendered inside the per-node card).
  */
 
-import React from 'react'
 import type { JsonObject, ToolSchema } from '../types'
 import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'

@@ -16,7 +16,7 @@
  * - `RightPanel.tsx` (mounted in the runs branch of the dispatcher).
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Activity, CheckCircle2, CircleX, Download, FlaskConical, GitBranch, ListChecks, Send } from 'lucide-react'
 import type { RunNode, RunSummary, WorkflowInputSchemaShape } from '../types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'

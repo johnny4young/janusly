@@ -18,7 +18,7 @@
  * this dialog with the selected target version.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, CheckCircle2, RotateCcw, X } from 'lucide-react'
 import { api } from '../api'

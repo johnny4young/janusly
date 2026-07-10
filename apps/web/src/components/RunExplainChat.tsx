@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (Runs tab → AI Run Explainer card).
  */
 
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api'
 import { formatAiModeLabel } from '../constants'
 import type { AiMode } from '../types'

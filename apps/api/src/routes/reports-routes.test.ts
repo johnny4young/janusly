@@ -146,7 +146,7 @@ function valueDashboardRoute() {
 /** Build a Node-`http`-shaped request that yields a JSON body via the
  *  same `data` / `end` events the `readJson` helper subscribes to. */
 function makeJsonRequest(body: unknown) {
-  let handlers: Record<string, ((chunk?: unknown) => void)[]> = { data: [], end: [], error: [] };
+  const handlers: Record<string, ((chunk?: unknown) => void)[]> = { data: [], end: [], error: [] };
   const req = {
     url: "/reports/run-explain/deliver",
     on(event: string, handler: (chunk?: unknown) => void) {
@@ -565,7 +565,7 @@ function stageReportLoad(run: { id: string; status: string; inputJson?: unknown 
   // `Object.hasOwn(run, "inputJson")` distinguishes "caller wanted null"
   // from "caller didn't set it" so a test exercising the ad-hoc-workflow
   // fallback path can pass `inputJson: null` explicitly.
-  const inputJson = Object.prototype.hasOwnProperty.call(run, "inputJson") ? run.inputJson : DEFAULT_INPUT_JSON;
+  const inputJson = Object.hasOwn(run, "inputJson") ? run.inputJson : DEFAULT_INPUT_JSON;
   selectRowsBox.rows = [
     [{
       id: run.id,

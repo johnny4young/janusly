@@ -515,7 +515,6 @@ export async function getAuthPolicyConfig(orgId: string): Promise<AuthPolicyConf
       if (typeof stored === "number" && Number.isFinite(stored)) {
         policy.sessionTtlSeconds = stored;
       }
-      continue;
     }
   }
   return policy;

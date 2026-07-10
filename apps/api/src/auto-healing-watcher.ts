@@ -57,7 +57,7 @@ import {
 } from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
-import { WorkflowSchema, type Workflow, type WorkflowNode } from "@janusly/shared";
+import { WorkflowSchema, type WorkflowNode } from "@janusly/shared";
 
 import { audit } from "./audit";
 import {

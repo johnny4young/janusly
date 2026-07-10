@@ -9,7 +9,7 @@
  * instance to avoid collisions when multiple BrandMarks render on the same
  * page.
  */
-import React, { useId } from 'react'
+import { useId } from 'react'
 import { useT } from '../i18n'
 
 type BrandMarkProps = {

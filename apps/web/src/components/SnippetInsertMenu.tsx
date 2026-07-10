@@ -19,7 +19,7 @@
  * Used by `App.tsx` (Inspector "Insert snippet…" button + Cmd+K palette).
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Layers, Search, X } from 'lucide-react'
 import {
   BUILTIN_SNIPPET_ID_PREFIX,

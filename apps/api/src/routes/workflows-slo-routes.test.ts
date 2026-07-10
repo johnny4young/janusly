@@ -113,7 +113,7 @@ import { audit } from "../audit";
 import { setWorkflowSlo } from "@janusly/data/src/workflowSloRepo";
 import { findScheduleEntriesForWorkflow, queryScheduleFires } from "@janusly/data/src/scheduleHistoryRepo";
 import { listDeletedWorkflowsWithRunSummary } from "@janusly/data/src/workflowsListRepo";
-import { workflowMetadata, workflows } from "@janusly/db";
+import { workflows } from "@janusly/db";
 import type { Route } from "../routes";
 
 const sendJsonMock = vi.mocked(sendJson);

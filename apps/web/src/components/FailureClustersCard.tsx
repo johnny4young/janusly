@@ -15,7 +15,7 @@
  * Used in `DeadLettersPanel.tsx` (Runs tab → Operations card).
  */
 
-import React, { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, RefreshCw, Sparkles, Users } from 'lucide-react'
 import { api } from '../api'
 import { EmptyState } from './EmptyState'

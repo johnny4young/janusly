@@ -18,7 +18,7 @@
  * hide instead of rendering an error).
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'

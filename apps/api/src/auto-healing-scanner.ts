@@ -438,7 +438,6 @@ function mergeFirstValidSuggestion(input: {
         confidence: suggestion.confidence,
       };
     } catch {
-      continue;
     }
   }
   return null;

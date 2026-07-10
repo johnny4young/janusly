@@ -22,7 +22,7 @@
  * Used by `RightPanel.tsx`'s `RunsPanel` per-node fork buttons.
  */
 
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import { AlertCircle, FlaskConical, GitBranch, X } from 'lucide-react'
 import { api } from '../api'
@@ -94,7 +94,7 @@ export function ReplayLabForkDialog({
     // Parse override client-side. Empty textarea = no override field
     // on the POST body (the route accepts that; it falls through to
     // the source run's original input value at the fork node).
-    let inputOverride: unknown = undefined
+    let inputOverride: unknown 
     const trimmed = overrideText.trim()
     if (trimmed.length > 0) {
       // Pre-flight the 64 KiB cap the route enforces so an over-cap

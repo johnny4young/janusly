@@ -13,7 +13,6 @@
  * exercised end-to-end in a real Chromium browser, not just a hook test.
  */
 
-import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Login } from './Login'

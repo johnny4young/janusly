@@ -45,7 +45,6 @@
 import { auditLogs, db } from "@janusly/db";
 import {
   WORKFLOW_STATUS_PAUSED_UPSTREAM,
-  findUpstreamHealthSourceByName,
   listSourcesToPoll,
   listWorkflowIdsTaggedWithSource,
   pauseWorkflowsForUpstream,

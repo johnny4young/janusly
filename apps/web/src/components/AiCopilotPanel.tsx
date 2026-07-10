@@ -16,7 +16,7 @@
  *   literals; engine-emitted review issue codes go through tAiReviewIssue.
  */
 
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
 import type { AiHealth, AiMode, WorkflowDefinition } from '../types'

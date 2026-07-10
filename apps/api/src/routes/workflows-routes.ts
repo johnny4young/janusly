@@ -22,7 +22,6 @@ import {
   deadLetters,
   runs,
   workflows,
-  workflowMetadata,
   workflowVersions,
 } from "@janusly/db";
 import {

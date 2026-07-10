@@ -15,7 +15,7 @@
  * - `QuickConfigEditor.tsx` (mcp_tool branch).
  */
 
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { JsonObject, McpConnection, McpToolDescriptor } from '../types'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'

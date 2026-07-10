@@ -63,7 +63,7 @@ export const WAIT_UNTIL_PROMOTE_SYSTEM_PROMPT = [
  * round-trip through the LLM SDK's structured-output validator.
  */
 export const CRON_EXPRESSION_PATTERN =
-  /^(?:[0-9*,\-\/]+\s+){4}[0-9*,\-\/]+$/;
+  /^(?:[0-9*,\-/]+\s+){4}[0-9*,\-/]+$/;
 
 function isBoundedInteger(value: string, min: number, max: number): boolean {
   if (!/^\d+$/.test(value)) return false;

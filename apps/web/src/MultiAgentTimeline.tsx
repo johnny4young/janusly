@@ -15,7 +15,7 @@
  *   merges the new page into the same `events` array.
  */
 
-import React, { useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Layers3 } from 'lucide-react'
 import type { JsonObject, RunEvent } from './types'
 import { EmptyState } from './components/EmptyState'
