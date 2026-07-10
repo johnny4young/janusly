@@ -10,6 +10,7 @@
 import { CheckCircle2 } from 'lucide-react'
 import { useT } from '../../i18n'
 import { RecoveryDeltaCard } from '../RecoveryDeltaCard'
+import { formatDowntime } from '../recovery-center/helpers'
 import type { ClusterApplyResult, PreSaveBeforeSnapshot } from './types'
 
 export function AppliedBody({
@@ -31,6 +32,13 @@ export function AppliedBody({
   const ribbon = cluster ? (
     (() => {
       const total = cluster.replayed + cluster.failed
+      // Q-13 celebration line: name the downtime this apply just ended.
+      // Absent/0 downtimeEndedMs (legacy rows, zero-clock edge) → no line,
+      // never a NaN string.
+      const showDowntime = cluster.replayed > 0
+        && typeof cluster.downtimeEndedMs === 'number'
+        && Number.isFinite(cluster.downtimeEndedMs)
+        && cluster.downtimeEndedMs > 0
       return (
         <div className="we-recovery-success" role="alert">
           <CheckCircle2 size={14} aria-hidden="true" />
@@ -38,6 +46,14 @@ export function AppliedBody({
             <strong>{t('recoveryDialog.applied.title')}</strong>
             {' '}{t('recoveryDialog.applied.replayedNofM', { replayed: cluster.replayed, total })}
             {cluster.failed > 0 ? `; ${t('recoveryDialog.applied.numFailed', { count: cluster.failed })}` : ''}.
+            {showDowntime && (
+              <p className="we-recovery-cluster-celebration" data-testid="cluster-recovered-line">
+                {t('recoveryDialog.clusterRecovered', {
+                  count: cluster.replayed,
+                  duration: formatDowntime(cluster.downtimeEndedMs as number),
+                })}
+              </p>
+            )}
             {cluster.errors.length > 0 ? (
               <details className="we-recovery-cluster-errors">
                 <summary>{t('recoveryDialog.applied.showRowErrors', { count: cluster.errors.length })}</summary>

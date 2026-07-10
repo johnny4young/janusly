@@ -1828,6 +1828,8 @@
   "recoveryDialog.errors.validationRequest": "La solicitud de validación falló",
   "recoveryDialog.errors.applyFailed": "La aplicación falló",
   "recoveryDialog.recoveredAfter": "Recuperado tras {{duration}} de inactividad",
+  "recoveryDialog.clusterRecovered_one": "Recuperaste {{count}} fallo · terminaron {{duration}} de inactividad",
+  "recoveryDialog.clusterRecovered_other": "Recuperaste {{count}} fallos en cascada · terminaron {{duration}} de inactividad",
   "recoveryDialog.errors.selectedSuggestionUnavailable": "La sugerencia seleccionada ya no está disponible.",
   "recoveryDialog.approachLabel.add_retry": "Añadir reintento",
   "recoveryDialog.approachLabel.raise_timeout": "Subir timeout",

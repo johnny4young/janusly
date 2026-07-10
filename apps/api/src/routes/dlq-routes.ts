@@ -400,6 +400,10 @@ export const dlqRoutes: Route[] = [
 
       const errors: Array<{ deadLetterId: string; error: string }> = [];
       let replayed = 0;
+      // Q-13: sum of (now - failure createdAt) across successfully replayed
+      // members — "how much downtime this apply just ended". Rows without a
+      // createdAt (legacy) contribute 0 rather than poisoning the sum.
+      let downtimeEndedMs = 0;
       const totalInCluster = deadLetterIds.length;
 
       for (let i = 0; i < deadLetterIds.length; i += 1) {
@@ -448,6 +452,9 @@ export const dlqRoutes: Route[] = [
             totalInCluster,
           } });
           replayed += 1;
+          if (item.createdAt) {
+            downtimeEndedMs += Math.max(0, Date.now() - item.createdAt.getTime());
+          }
         } catch (err) {
           errors.push({
             deadLetterId: id,
@@ -456,7 +463,7 @@ export const dlqRoutes: Route[] = [
         }
       }
 
-      return sendJson(res, { replayed, failed: errors.length, errors });
+      return sendJson(res, { replayed, failed: errors.length, errors, downtimeEndedMs });
     } },
   // Bulk replay across an arbitrary multi-select — the multi-select
   // equivalent of POST /dlq/replay, and the retry-many sibling of

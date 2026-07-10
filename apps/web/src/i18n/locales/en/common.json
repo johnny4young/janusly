@@ -1828,6 +1828,8 @@
   "recoveryDialog.errors.validationRequest": "Validation request failed",
   "recoveryDialog.errors.applyFailed": "Apply failed",
   "recoveryDialog.recoveredAfter": "Recovered after {{duration}} of downtime",
+  "recoveryDialog.clusterRecovered_one": "Recovered {{count}} failure · {{duration}} of downtime ended",
+  "recoveryDialog.clusterRecovered_other": "Recovered {{count}} cascading failures · {{duration}} of downtime ended",
   "recoveryDialog.errors.selectedSuggestionUnavailable": "Selected suggestion is no longer available.",
   "recoveryDialog.approachLabel.add_retry": "Add retry",
   "recoveryDialog.approachLabel.raise_timeout": "Raise timeout",

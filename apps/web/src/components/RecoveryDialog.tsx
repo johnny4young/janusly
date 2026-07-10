@@ -381,6 +381,23 @@ export function RecoveryDialog({
           preSaveBeforeSnapshot,
         })
         bumpPlatformVersion()
+        // Q-13 wedge moment, cluster edition: name the SUMMED downtime the
+        // batch just ended (the single-replay path below already celebrates
+        // its own). Gated so legacy rows / a 0 sum never render a NaN string.
+        if (
+          result.replayed > 0
+          && typeof result.downtimeEndedMs === 'number'
+          && Number.isFinite(result.downtimeEndedMs)
+          && result.downtimeEndedMs > 0
+        ) {
+          addToast(
+            t('recoveryDialog.clusterRecovered', {
+              count: result.replayed,
+              duration: formatDowntime(result.downtimeEndedMs),
+            }) as string,
+            'success',
+          )
+        }
         // Operator → system feedback: Apply succeeded, so the operator
         // accepted this approach for THIS workflow. Future patch
         // suggestions for the same workflow will see this as accepted.

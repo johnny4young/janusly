@@ -53,6 +53,22 @@ vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
 // M-08: the detail read attaches the suspect-version correlation; mocked so
 // the route tests control hit/miss without a DB.
 vi.mock("../suspect-version", () => ({ resolveSuspectVersion: vi.fn() }));
+
+// Cluster-apply gates on the org's AI rate limit before the loop; both are
+// infra chokepoints (DB org-config read + Redis) irrelevant to route logic.
+vi.mock("../ai-runtime", () => ({
+  orgLlmRuntime: vi.fn(async () => ({ orgConfig: { ai: { rateLimitPerMin: 60 } } })),
+  sanitizeAiWorkflow: vi.fn((workflow: unknown) => workflow),
+}));
+vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
+
+// The signature recheck guards against stale member lists; route tests pin
+// the downtime accounting, not the signature algebra (covered in
+// cluster-recovery's own tests) — force a match.
+vi.mock("../cluster-recovery", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../cluster-recovery")>();
+  return { ...actual, recheckSignature: vi.fn(() => true) };
+});
 vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
   autoResolveRecoveryItemFromReplay: vi.fn(),
   createRecoveryItemForDeadLetter: vi.fn(),
@@ -902,6 +918,102 @@ describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
       const errorResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(errorResponse.status).toBe(200);
       expect(((await errorResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/cluster-apply downtime accounting (Q-13)", () => {
+  function openMember(id: string, createdAt: Date | null) {
+    return {
+      id,
+      orgId: "org-1",
+      runId: `run-${id}`,
+      nodeId: "n",
+      status: "open",
+      createdAt,
+      workflowJson: { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "http", config: { url: "https://x", method: "GET" } }], edges: [] },
+      nodeJson: { id: "n", type: "http", config: { url: "https://x", method: "GET" } },
+    };
+  }
+
+  function editorAuth() {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+  }
+
+  async function applyCluster(baseUrl: string, deadLetterIds: string[]) {
+    return fetch(`${baseUrl}/dlq/cluster-apply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ clusterSignature: "sig-1", deadLetterIds }),
+    });
+  }
+
+  it("sums (now − createdAt) across successfully replayed members", async () => {
+    editorAuth();
+    const now = Date.now();
+    getDeadLetterMock
+      .mockResolvedValueOnce(openMember("dl-1", new Date(now - 60_000)) as never)
+      .mockResolvedValueOnce(openMember("dl-2", new Date(now - 120_000)) as never);
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1", "dl-2"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(2);
+      expect(payload.failed).toBe(0);
+      // ~60s + ~120s of downtime ended; bounded loosely for wall-clock drift.
+      expect(payload.downtimeEndedMs).toBeGreaterThanOrEqual(180_000);
+      expect(payload.downtimeEndedMs).toBeLessThan(200_000);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("a failed member contributes nothing; legacy rows without createdAt contribute 0", async () => {
+    editorAuth();
+    const now = Date.now();
+    getDeadLetterMock
+      .mockResolvedValueOnce(openMember("dl-1", new Date(now - 60_000)) as never)
+      .mockResolvedValueOnce(null as never) // dl-2 vanished → per-row error
+      .mockResolvedValueOnce(openMember("dl-3", null) as never); // legacy row
+    replayDeadLetterMock.mockResolvedValue(undefined as never);
+    markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1", "dl-2", "dl-3"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(2);
+      expect(payload.failed).toBe(1);
+      // Only dl-1's ~60s counts — dl-2 errored, dl-3 has no failure clock.
+      expect(payload.downtimeEndedMs).toBeGreaterThanOrEqual(60_000);
+      expect(payload.downtimeEndedMs).toBeLessThan(90_000);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("downtimeEndedMs is 0 (not absent/NaN) when every member fails", async () => {
+    editorAuth();
+    getDeadLetterMock.mockResolvedValueOnce(null as never);
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await applyCluster(baseUrl, ["dl-1"]);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { replayed: number; downtimeEndedMs: number };
+      expect(payload.replayed).toBe(0);
+      expect(payload.downtimeEndedMs).toBe(0);
     } finally {
       await close(server);
     }

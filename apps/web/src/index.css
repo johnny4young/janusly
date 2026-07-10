@@ -7274,6 +7274,14 @@ button.we-ops-metric-card--button {
   color: var(--we-success-text);
 }
 
+/* Q-13 cluster-recovery celebration line — the summed downtime the apply
+   just ended, rendered under the "Replayed N of M" ribbon text. */
+.we-recovery-cluster-celebration {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* "Why this suggestion?" evidence panel — collapsible side-channel listing
    the context the prompt composer fed the model. Each row is a kind chip +
    one-line snippet + monospace source-ref deep-link token. */

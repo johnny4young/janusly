@@ -72,6 +72,8 @@ export type ClusterApplyResult = {
   replayed: number
   failed: number
   errors: ClusterApplyError[]
+  /** Q-13: summed (now − failure createdAt) across successfully replayed members. */
+  downtimeEndedMs?: number
 }
 
 export type Step =
