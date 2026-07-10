@@ -1,0 +1,60 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"includes": [
+			"**",
+			"!**/dist",
+			"!**/packages/db/migrations",
+			"!**/playwright-report",
+			"!**/test-results",
+			"!**/.claude",
+			"!**/*.json",
+			"!**/*.md",
+			"!**/*.css"
+		]
+	},
+	"formatter": { "enabled": false },
+	"assist": { "enabled": false },
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"a11y": {
+				"preset": "none"
+			},
+			"style": {
+				"noNonNullAssertion": "off",
+				"useImportType": "off",
+				"useTemplate": "off",
+				"useExponentiationOperator": "off",
+				"useNodejsImportProtocol": "off"
+			},
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noControlCharactersInRegex": "off",
+				"noAssignInExpressions": "off",
+				"noArrayIndexKey": "off",
+				"noTemplateCurlyInString": "off",
+				"noThenProperty": "warn",
+				"useIterableCallbackReturn": "warn",
+				"noShadowRestrictedNames": "warn",
+				"noDoubleEquals": "warn",
+				"noImplicitAnyLet": "warn"
+			},
+			"complexity": {
+				"useOptionalChain": "off",
+				"useLiteralKeys": "off"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "off",
+				"noUnsafeOptionalChaining": "warn",
+				"noUnusedImports": "error"
+			}
+		}
+	}
+}

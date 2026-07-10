@@ -11,6 +11,8 @@
     "stop": "docker compose stop",
     "clean": "docker compose down -v",
     "build": "pnpm -r build",
+    "lint": "biome ci .",
+    "lint:fix": "biome lint --write .",
     "bundle-report": "node scripts/bundle-report.mjs",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",
@@ -25,5 +27,8 @@
     "seed:full": "pnpm --filter @janusly/api exec tsx ../../scripts/seed-full.ts",
     "backfill:usage-workflowid": "pnpm --filter @janusly/api exec tsx ../../scripts/backfill-usage-workflowid.ts",
     "test:integration": "node scripts/run-integration.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.3"
   }
 }
