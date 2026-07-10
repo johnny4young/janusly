@@ -49,6 +49,10 @@ vi.mock("../dlq", async (importOriginal) => {
 
 // Bulk-resolve also audits per entry + auto-closes the linked recovery item.
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
+
+// M-08: the detail read attaches the suspect-version correlation; mocked so
+// the route tests control hit/miss without a DB.
+vi.mock("../suspect-version", () => ({ resolveSuspectVersion: vi.fn() }));
 vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
   autoResolveRecoveryItemFromReplay: vi.fn(),
   createRecoveryItemForDeadLetter: vi.fn(),
@@ -76,6 +80,7 @@ import { requireAuth } from "../auth";
 import { requireRole } from "../permissions";
 import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
+import { resolveSuspectVersion } from "../suspect-version";
 import { autoResolveRecoveryItemFromReplay } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
@@ -91,6 +96,7 @@ const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
 const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
 const autoResolveMock = vi.mocked(autoResolveRecoveryItemFromReplay);
+const resolveSuspectVersionMock = vi.mocked(resolveSuspectVersion);
 
 /** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
 function cursorFor(sort: "newest" | "oldest" | "severity" | "sla", id: string, severity = "p1"): string {
@@ -833,6 +839,69 @@ describe("POST /dlq/replay — MCP-source write consent gate", () => {
       // Gate fired before the DLQ lookup + the replay adapter.
       expect(getDeadLetterMock).not.toHaveBeenCalled();
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
+  const DETAIL_ROW = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n-1",
+    status: "open",
+    createdAt: new Date("2026-07-10T12:00:00.000Z"),
+    errorJson: { message: "boom" },
+  };
+
+  it("attaches the resolver's envelope to the detail response", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    getDeadLetterMock.mockResolvedValueOnce(DETAIL_ROW as never);
+    const envelope = {
+      workflowId: "wf-1",
+      version: 4,
+      versionId: "wfv-4",
+      savedAt: "2026-07-10T11:30:00.000Z",
+      previousVersion: 3,
+      previousVersionId: "wfv-3",
+      dagJson: { id: "wf-1", nodes: [] },
+      previousDagJson: { id: "wf-1", nodes: [] },
+    };
+    resolveSuspectVersionMock.mockResolvedValueOnce(envelope as never);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as { id: string; suspectVersion: unknown };
+      expect(payload.id).toBe("dl-1");
+      expect(payload.suspectVersion).toEqual(envelope);
+      // The resolver gets the row's own runId + failure timestamp.
+      expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("attaches null when no correlation, and a resolver throw never breaks the detail read", async () => {
+    requireAuthMock.mockResolvedValue({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValue("viewer");
+    getDeadLetterMock.mockResolvedValue(DETAIL_ROW as never);
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      resolveSuspectVersionMock.mockResolvedValueOnce(null);
+      const missResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(missResponse.status).toBe(200);
+      expect(((await missResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
+
+      resolveSuspectVersionMock.mockRejectedValueOnce(new Error("db hiccup"));
+      const errorResponse = await fetch(`${baseUrl}/dlq?id=dl-1`);
+      expect(errorResponse.status).toBe(200);
+      expect(((await errorResponse.json()) as { suspectVersion: unknown }).suspectVersion).toBeNull();
     } finally {
       await close(server);
     }

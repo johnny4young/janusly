@@ -1249,6 +1249,10 @@
   "dlq.detail.error": "Detalles del error",
   "dlq.detail.node": "Payload del paso",
   "dlq.detail.workflow": "Payload del flujo",
+  "dlq.suspectVersion.chip": "Empezó después de guardar la v{{version}} ({{time}})",
+  "dlq.suspectVersion.viewDiff": "Ver diff",
+  "dlq.suspectVersion.hideDiff": "Ocultar diff",
+  "dlq.suspectVersion.versionLabel": "v{{version}}",
   "dlq.detail.show": "Mostrar {{title}}",
   "dlq.detail.hide": "Ocultar {{title}}",
 

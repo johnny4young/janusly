@@ -1249,6 +1249,10 @@
   "dlq.detail.error": "Error details",
   "dlq.detail.node": "Step payload",
   "dlq.detail.workflow": "Flow payload",
+  "dlq.suspectVersion.chip": "Started after v{{version}} was saved ({{time}})",
+  "dlq.suspectVersion.viewDiff": "View diff",
+  "dlq.suspectVersion.hideDiff": "Hide diff",
+  "dlq.suspectVersion.versionLabel": "v{{version}}",
   "dlq.detail.show": "Show {{title}}",
   "dlq.detail.hide": "Hide {{title}}",
 

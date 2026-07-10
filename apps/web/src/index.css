@@ -1540,6 +1540,24 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   background: var(--we-danger-soft);
 }
 
+.we-suspect-version {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 10px;
+  background: var(--we-surface-muted);
+}
+
+.we-suspect-version__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--we-muted);
+}
+
 .we-failed-node__id {
   font-size: 12px;
   font-weight: 700;

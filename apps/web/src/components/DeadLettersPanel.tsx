@@ -7,12 +7,14 @@
  */
 
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { CircleCheck, Download, FlaskConical, Inbox, Sparkles, X } from 'lucide-react'
+import { CircleCheck, Download, FlaskConical, GitCompare, Inbox, Sparkles, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
 import { formatStatusLabel } from '../constants'
 import { useWorkflowStore } from '../store'
+import { WorkflowDiffView } from './WorkflowDiffView'
+import type { WorkflowDefinition } from '../types'
 import { EmptyState } from './EmptyState'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { FailureClustersCard } from './FailureClustersCard'
@@ -65,6 +67,21 @@ export type DeadLetterRecovery = {
   lastOccurredAt?: string
 }
 
+/** M-08 change-correlation envelope from the `/dlq?id=` detail read: the
+ *  failing run executed `version`, saved within the suspect window before the
+ *  failure; both DAG snapshots ride along so the diff renders with no extra
+ *  fetch. Copy stays temporal ("started after ... was saved"), never causal. */
+export type SuspectVersionInfo = {
+  workflowId: string
+  version: number
+  versionId: string
+  savedAt: string
+  previousVersion: number
+  previousVersionId: string
+  dagJson: WorkflowDefinition
+  previousDagJson: WorkflowDefinition
+}
+
 /** Web-side `dead_letters` row shape (matches the API's response). `recovery`
  *  is the inline overlay (null when the row has no paired recovery item).
  *  LIST rows (`/dlq`, `/dlq/queue`) are summary projections: they carry
@@ -89,6 +106,8 @@ export type DeadLetter = {
   createdAt?: string
   replayedAt?: string
   recovery?: DeadLetterRecovery | null
+  /** M-08 suspect-version correlation — detail reads only; null when no recent-save correlation. */
+  suspectVersion?: SuspectVersionInfo | null
 }
 
 type BulkResolveResult = {
@@ -293,6 +312,8 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // Recovery dialog get the real snapshots; the summary row is the graceful
   // fallback while loading or on fetch failure.
   const [selectedDetail, setSelectedDetail] = useState<DeadLetter | null>(null)
+  // Suspect-version diff visibility — per selection, collapsed by default.
+  const [showSuspectDiff, setShowSuspectDiff] = useState(false)
   const selectedRowId = selected?.id ?? null
   useEffect(() => {
     if (!selectedRowId) {
@@ -301,6 +322,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     }
     let cancelled = false
     setSelectedDetail(null)
+    setShowSuspectDiff(false)
     api(`/dlq?id=${encodeURIComponent(selectedRowId)}`)
       .then((row) => {
         if (!cancelled) setSelectedDetail(row as DeadLetter)
@@ -712,6 +734,36 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
             </button>
           </div>
+
+          {selectedFull?.suspectVersion && (
+            <div className="we-suspect-version" data-testid="dlq-suspect-version">
+              <div className="split-row">
+                <span className="we-suspect-version__chip">
+                  <GitCompare size={12} aria-hidden="true" />
+                  {t('dlq.suspectVersion.chip', {
+                    version: selectedFull.suspectVersion.version,
+                    time: new Date(selectedFull.suspectVersion.savedAt).toLocaleString(getResolvedLocale()),
+                  })}
+                </span>
+                <button
+                  type="button"
+                  className="small-command"
+                  onClick={() => setShowSuspectDiff(value => !value)}
+                  data-testid="dlq-suspect-version-toggle"
+                >
+                  {showSuspectDiff ? t('dlq.suspectVersion.hideDiff') : t('dlq.suspectVersion.viewDiff')}
+                </button>
+              </div>
+              {showSuspectDiff && (
+                <WorkflowDiffView
+                  before={selectedFull.suspectVersion.previousDagJson}
+                  after={selectedFull.suspectVersion.dagJson}
+                  beforeLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.previousVersion }) as string}
+                  afterLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.version }) as string}
+                />
+              )}
+            </div>
+          )}
 
           <DetailBlock title={t('dlq.detail.error') as string} value={(selectedFull ?? selected).errorJson} />
           <DetailBlock title={t('dlq.detail.node') as string} value={(selectedFull ?? selected).nodeJson ?? null} />

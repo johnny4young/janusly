@@ -38,6 +38,7 @@ import {
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { guardMcpWrite } from "../mcp-consent";
 import { enforceRateLimit } from "../rate-limit";
+import { resolveSuspectVersion } from "../suspect-version";
 import type { Route } from "../routes";
 
 // Shared DLQ replay adapter used by validate-fix, cluster-apply, and
@@ -180,7 +181,16 @@ export const dlqRoutes: Route[] = [
       if (id) {
         const item = await getDeadLetter(auth.orgId, id);
         if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
-        return sendJson(res, item);
+        // M-08 change correlation: when the failing run executed a version
+        // saved shortly before the failure, attach the suspect version + both
+        // DAG snapshots so the panel renders "Started after vN was saved" +
+        // the diff. Null on any miss — the detail read never fails over it.
+        const suspectVersion = await resolveSuspectVersion(
+          auth.orgId,
+          item.runId,
+          item.createdAt ?? null,
+        ).catch(() => null);
+        return sendJson(res, { ...item, suspectVersion });
       }
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
