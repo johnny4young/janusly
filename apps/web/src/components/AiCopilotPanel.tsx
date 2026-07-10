@@ -55,7 +55,8 @@ type ReviewFindings = {
 type AiCopilotPanelProps = {
   health: AiHealth | null
   workflowName: string
-  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string }>
+  /** Resolves `null` when the author declined the unsaved-canvas guard. */
+  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string } | null>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>
   onOpenRuns: () => void
@@ -177,6 +178,8 @@ export function AiCopilotPanel({
     setLoading('generate')
     try {
       const response = await onGenerateWorkflow(trimmed)
+      // Author declined the unsaved-canvas guard — keep the prompt, no result card.
+      if (!response) return
       const draftedByAi = response.mode === 'ai'
       const titleKey = draftedByAi
         ? 'aiCopilot.draftedAi'

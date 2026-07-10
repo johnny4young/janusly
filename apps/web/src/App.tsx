@@ -19,7 +19,7 @@
  *   radix/cva/clsx/tailwind-merge here.
  */
 
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Layout } from './Layout'
 import { BrandMark } from './components/BrandMark'
 import { BuilderSidebar } from './components/BuilderSidebar'
@@ -50,12 +50,14 @@ import { useRunEventStream } from './hooks/useRunEventStream'
 import { useBootstrapData } from './hooks/useBootstrapData'
 import { useRunPolling } from './hooks/useRunPolling'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { useDraftAutosave, readDraft, readLatestDraft, clearDraft } from './hooks/useDraftPersistence'
+import { useConfirm } from './components/ConfirmDialog'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { ActiveTab, AiMode, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
-import { useT } from './i18n'
+import { getResolvedLocale, useT } from './i18n'
 
 type RunResponse = {
   run?: RunSummary
@@ -136,6 +138,7 @@ export default function App() {
     getWorkflowJson,
     newWorkflow,
     markWorkflowSaved,
+    markWorkflowDirty,
     selectNode,
     selectEdge,
     updateSelectedNodeConfig,
@@ -187,6 +190,7 @@ export default function App() {
     getWorkflowJson: s.getWorkflowJson,
     newWorkflow: s.newWorkflow,
     markWorkflowSaved: s.markWorkflowSaved,
+    markWorkflowDirty: s.markWorkflowDirty,
     selectNode: s.selectNode,
     selectEdge: s.selectEdge,
     updateSelectedNodeConfig: s.updateSelectedNodeConfig,
@@ -288,12 +292,75 @@ export default function App() {
     return false
   }, [])
   const fireSignOut = useCallback(() => { void signOut() }, [signOut])
-  useKeyboardShortcuts({
-    onTogglePalette: togglePalette,
-    onToggleShortcuts: toggleShortcuts,
-    onFocusSidebarSearch: focusSidebarSearch,
-    onSignOut: fireSignOut,
-  })
+  // NOTE: `useKeyboardShortcuts` is mounted further down, after `saveWorkflow`
+  // exists (Cmd/Ctrl+S needs it and const hoisting doesn't apply).
+
+  const confirm = useConfirm()
+
+  /**
+   * Unsaved-work guard (S-01): every path that replaces the canvas asks first
+   * when the canvas holds edits not yet saved as a version. Resolves true when
+   * it's safe to proceed (clean canvas, or the author confirmed the discard).
+   * The local draft autosave has already captured the outgoing content, so
+   * "discard" here never actually loses the work.
+   */
+  const confirmReplaceCanvas = useCallback(async (): Promise<boolean> => {
+    if (!useWorkflowStore.getState().workflowDirty) return true
+    return confirm({
+      title: t('unsavedGuard.title') as string,
+      body: t('unsavedGuard.body') as string,
+      confirmLabel: t('unsavedGuard.discard') as string,
+      tone: 'danger',
+    })
+  }, [confirm, t])
+
+  // Warn on tab close / reload while the canvas holds unsaved edits. The
+  // browser shows its own generic dialog; we only flag the condition.
+  useEffect(() => {
+    const handler = (event: BeforeUnloadEvent) => {
+      if (!useWorkflowStore.getState().workflowDirty) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
+
+  // Debounced localStorage autosave of unsaved canvas edits (S-01 drafts).
+  useDraftAutosave()
+
+  /**
+   * Offer to restore a local draft for `workflowId` (newer, unsaved canvas
+   * content captured by the autosave). Declining discards the draft so the
+   * author isn't re-prompted forever.
+   */
+  const maybeRestoreDraft = useCallback(async (workflowId: string): Promise<void> => {
+    const draft = readDraft(workflowId)
+    if (!draft) return
+    const restore = await confirm({
+      title: t('draftRestore.title') as string,
+      body: t('draftRestore.body', { time: new Date(draft.savedAt).toLocaleString(getResolvedLocale()) }) as string,
+      confirmLabel: t('draftRestore.restore') as string,
+      cancelLabel: t('draftRestore.discard') as string,
+    })
+    if (restore) {
+      hydrateWorkflow(draft.workflow)
+      // The restored content is NOT server-side — keep the autosave + guards on.
+      markWorkflowDirty()
+    } else {
+      clearDraft(workflowId)
+    }
+  }, [confirm, hydrateWorkflow, markWorkflowDirty, t])
+
+  // Crash recovery: once per app load, offer the most recent draft in this org
+  // — it may belong to a never-saved workflow whose random id isn't reachable
+  // from the Flows list.
+  const draftRecoveryOffered = useRef(false)
+  useEffect(() => {
+    if (!authReady || draftRecoveryOffered.current) return
+    draftRecoveryOffered.current = true
+    const latest = readLatestDraft()
+    if (latest) void maybeRestoreDraft(latest.workflowId)
+  }, [authReady, maybeRestoreDraft])
 
   useEffect(() => {
     let mounted = true
@@ -393,6 +460,15 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, getWorkflowJson, markWorkflowSaved, refreshPlatform, t, validateWorkflow])
 
+  const fireSave = useCallback(() => { void saveWorkflow() }, [saveWorkflow])
+  useKeyboardShortcuts({
+    onTogglePalette: togglePalette,
+    onToggleShortcuts: toggleShortcuts,
+    onFocusSidebarSearch: focusSidebarSearch,
+    onSave: fireSave,
+    onSignOut: fireSignOut,
+  })
+
   /**
    * Internal helper: send the actual `POST /start` request with an optional
    * typed input. Returns the parsed body so the caller can surface server-
@@ -448,17 +524,21 @@ export default function App() {
   }, [addToast, startRunWith, t])
 
   const openWorkflow = useCallback(async (id: string) => {
+    if (!await confirmReplaceCanvas()) return
     try {
       const data = await api(`/workflows/latest?workflowId=${encodeURIComponent(id)}`) as { dagJson?: WorkflowDefinition }
       if (data?.dagJson) {
         hydrateWorkflow(data.dagJson)
         setValidationIssues([])
         setActiveTab('inspector')
+        // A local draft newer than the saved version may exist for this
+        // workflow (autosaved unsaved edits from a prior session).
+        await maybeRestoreDraft(id)
       }
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.workflowOpenFailed'), 'error')
     }
-  }, [addToast, hydrateWorkflow, setActiveTab, t])
+  }, [addToast, confirmReplaceCanvas, hydrateWorkflow, maybeRestoreDraft, setActiveTab, t])
 
   const openRun = useCallback(async (id: string, targetTab?: ActiveTab) => {
     // Switch tabs BEFORE the fetch resolves so the panel changes immediately.
@@ -642,6 +722,9 @@ export default function App() {
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
 
   const generateWorkflow = useCallback(async (prompt: string) => {
+    // Guard BEFORE the LLM call: generation replaces the canvas, and a
+    // declined confirm shouldn't have burned tokens. `null` = author declined.
+    if (!await confirmReplaceCanvas()) return null
     const result = await api('/ai/generate-workflow', {
       method: 'POST',
       body: JSON.stringify({ prompt }),
@@ -663,7 +746,7 @@ export default function App() {
         : t('toasts.starterLoaded')
     addToast(message, tone)
     return { mode, workflow: result as WorkflowDefinition, aiError: result.aiError }
-  }, [addToast, hydrateWorkflow, t])
+  }, [addToast, confirmReplaceCanvas, hydrateWorkflow, t])
 
   const explainWorkflow = useCallback(async () => {
     const workflow = getWorkflowJson()
@@ -767,9 +850,12 @@ export default function App() {
       currentWorkflowOutputs={currentWorkflowOutputs}
       onOpenWorkflow={openWorkflow}
       onUseTemplate={(workflow) => {
-        hydrateWorkflow(workflow)
-        setValidationIssues([])
-        setActiveTab('inspector')
+        void (async () => {
+          if (!await confirmReplaceCanvas()) return
+          hydrateWorkflow(workflow)
+          setValidationIssues([])
+          setActiveTab('inspector')
+        })()
       }}
       onInstallPlugin={installPlugin}
       onInstallPack={installPack}
@@ -870,9 +956,12 @@ export default function App() {
           onSave={saveWorkflow}
           onOpenTab={setActiveTab}
           onNew={() => {
-            newWorkflow()
-            setValidationIssues([])
-            setCurrentWorkflowVersion(null)
+            void (async () => {
+              if (!await confirmReplaceCanvas()) return
+              newWorkflow()
+              setValidationIssues([])
+              setCurrentWorkflowVersion(null)
+            })()
           }}
           onStart={startWorkflow}
         />
@@ -962,9 +1051,12 @@ export default function App() {
             onSave={saveWorkflow}
             onStart={startWorkflow}
             onNew={() => {
-              newWorkflow()
-              setValidationIssues([])
-              setCurrentWorkflowVersion(null)
+              void (async () => {
+                if (!await confirmReplaceCanvas()) return
+                newWorkflow()
+                setValidationIssues([])
+                setCurrentWorkflowVersion(null)
+              })()
             }}
             onSignOut={async () => {
               try {
@@ -983,9 +1075,12 @@ export default function App() {
             onOpenRecipe={(id) => {
               const tmpl = templates.find(template => template.id === id)
               if (tmpl) {
-                hydrateWorkflow(tmpl.workflow)
-                setValidationIssues([])
-                setActiveTab('inspector')
+                void (async () => {
+                  if (!await confirmReplaceCanvas()) return
+                  hydrateWorkflow(tmpl.workflow)
+                  setValidationIssues([])
+                  setActiveTab('inspector')
+                })()
               }
             }}
           />

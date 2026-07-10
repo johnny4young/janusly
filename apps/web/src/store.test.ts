@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { __resetBumpCoalesceForTests, useWorkflowStore } from './store'
+import { __resetBumpCoalesceForTests, registerFlowOps, useWorkflowStore } from './store'
 
 const initialState = useWorkflowStore.getState()
 
@@ -292,5 +292,69 @@ describe('useWorkflowStore.bumpPlatformVersion (coalesce)', () => {
     // No follow-up tick should fire — the timer is one-shot per bump cluster.
     vi.advanceTimersByTime(1000)
     expect(useWorkflowStore.getState().platformVersion).toBe(1)
+  })
+})
+
+describe('useWorkflowStore.workflowDirty (S-01 unsaved-work signal)', () => {
+  // The change reducers no-op until React Flow's ops register (CanvasWorkspace
+  // does it at import time in production) — stub the two we exercise here.
+  beforeEach(() => {
+    registerFlowOps({
+      applyNodeChanges: (changes, nodes) =>
+        nodes.filter((node) => !changes.some((change) => change.type === 'remove' && 'id' in change && change.id === node.id)),
+      applyEdgeChanges: (_changes, edges) => edges,
+      addEdge: (_connection, edges) => edges,
+    } as never)
+  })
+
+  it('starts clean and turns dirty on semantic mutations', () => {
+    expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+    useWorkflowStore.getState().addNode('http')
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+  })
+
+  it('setWorkflowName / updateSelectedNodeConfig / updateEdgeCondition mark dirty', () => {
+    useWorkflowStore.getState().setWorkflowName('renamed')
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+
+    useWorkflowStore.setState({ workflowDirty: false })
+    useWorkflowStore.getState().addNode('http')
+    useWorkflowStore.setState({ workflowDirty: false, selectedNodeId: useWorkflowStore.getState().nodes[0].id })
+    useWorkflowStore.getState().updateSelectedNodeConfig({ url: 'https://changed.example' })
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+  })
+
+  it('hydrateWorkflow and newWorkflow reset the flag', () => {
+    useWorkflowStore.getState().addNode('http')
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+    useWorkflowStore.getState().hydrateWorkflow({ id: 'wf_x', name: 'X', nodes: [], edges: [] })
+    expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+
+    useWorkflowStore.getState().addNode('http')
+    useWorkflowStore.getState().newWorkflow()
+    expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+  })
+
+  it('markWorkflowSaved clears the flag; markWorkflowDirty forces it on', () => {
+    useWorkflowStore.getState().addNode('http')
+    useWorkflowStore.getState().markWorkflowSaved()
+    expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+
+    useWorkflowStore.getState().markWorkflowDirty()
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+  })
+
+  it('node position changes do NOT mark dirty (layout is never serialized), removals do', () => {
+    useWorkflowStore.getState().addNode('http')
+    const nodeId = useWorkflowStore.getState().nodes[0].id
+    useWorkflowStore.setState({ workflowDirty: false })
+
+    useWorkflowStore.getState().onNodesChange([
+      { id: nodeId, type: 'position', position: { x: 500, y: 500 } },
+    ])
+    expect(useWorkflowStore.getState().workflowDirty).toBe(false)
+
+    useWorkflowStore.getState().onNodesChange([{ id: nodeId, type: 'remove' }])
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 })

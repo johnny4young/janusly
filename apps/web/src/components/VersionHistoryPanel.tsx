@@ -20,6 +20,7 @@ import type { OrgMember, OrgRole, WorkflowDefinition } from '../types'
 import { RollbackConfirmDialog } from './RollbackConfirmDialog'
 import { WorkflowDiffView } from './WorkflowDiffView'
 import { EmptyState } from './EmptyState'
+import { useConfirm } from './ConfirmDialog'
 import { getResolvedLocale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 
@@ -93,6 +94,7 @@ function approachLabelText(label: string): string {
 /** Render the version-history list for the active workflow with click-to-hydrate. */
 export function VersionHistoryPanel() {
   const { t } = useT()
+  const confirm = useConfirm()
   const currentWorkflowId = useWorkflowStore(state => state.currentWorkflowId)
   const session = useWorkflowStore(state => state.session)
   const userId = useWorkflowStore(state => state.userId)
@@ -210,8 +212,21 @@ export function VersionHistoryPanel() {
       toggleSelected(version.id)
       return
     }
-    hydrateWorkflow(version.dagJson)
-    addToast(t('versionHistory.loaded', { version: version.version }), 'success')
+    void (async () => {
+      // Loading an old version replaces the canvas — same unsaved-work guard
+      // as the App-level hydrate paths (S-01).
+      if (useWorkflowStore.getState().workflowDirty) {
+        const proceed = await confirm({
+          title: t('unsavedGuard.title') as string,
+          body: t('unsavedGuard.body') as string,
+          confirmLabel: t('unsavedGuard.discard') as string,
+          tone: 'danger',
+        })
+        if (!proceed) return
+      }
+      hydrateWorkflow(version.dagJson)
+      addToast(t('versionHistory.loaded', { version: version.version }), 'success')
+    })()
   }
 
   const toggleSelected = (id: string) => {

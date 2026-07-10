@@ -93,7 +93,8 @@ export type RightPanelProps = {
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string) => void
   onResolveDeadLetter: (id: string) => void
-  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition }>
+  /** Resolves `null` when the author declined the unsaved-canvas guard. */
+  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string } | null>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
   onReviewWorkflow: () => Promise<{
     mode: AiMode
