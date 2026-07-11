@@ -34,6 +34,7 @@ vi.mock("@janusly/db", () => ({
     signature: "signature_col",
     status: "status_col",
     createdAt: "created_at_col",
+    updatedAt: "updated_at_col",
   } as Record<string, string>,
   auditLogs: { id: "audit_id_col" },
 }));
@@ -45,6 +46,7 @@ import {
   recordImmediateDecline,
   recordValidationOutcome,
   countRecentAttemptsBySignature,
+  findLatestOutcomeBySignature,
   getDeadLetterIdsWithExistingRun,
   sweepStaleValidating,
 } from "./autoHealingRepo";
@@ -198,6 +200,57 @@ describe("countRecentAttemptsBySignature", () => {
     expect(n).toBe(4);
     expect(where).toHaveBeenCalledTimes(1);
     void limit; // intentionally unused (count query does not paginate)
+  });
+});
+
+describe("findLatestOutcomeBySignature", () => {
+  it("returns the latest terminal outcome from a tenant-scoped bounded query", async () => {
+    const limit = vi.fn().mockResolvedValue([{
+      id: "heal-prior",
+      orgId: "org-1",
+      deadLetterId: "dlq-prior",
+      signature: "Network timeout on http node",
+      status: "applied",
+      proposedPatchJson: null,
+      approachLabel: "add_retry",
+      confidence: 82,
+      validationRunId: "validation-prior",
+      validationSignature: null,
+      decisionActor: "user-1",
+      declineReason: null,
+      loopAttemptCount: 1,
+      metadata: null,
+      createdAt: new Date("2026-07-01T00:00:00Z"),
+      updatedAt: new Date("2026-07-01T00:10:00Z"),
+    }]);
+    const orderBy = vi.fn(() => ({ limit }));
+    const where = vi.fn(() => ({ orderBy }));
+    selectFromMock.mockReturnValue({ where });
+
+    const result = await findLatestOutcomeBySignature(
+      "org-1",
+      "Network timeout on http node",
+      "dlq-current",
+    );
+
+    expect(result).toMatchObject({
+      id: "heal-prior",
+      orgId: "org-1",
+      status: "applied",
+      approachLabel: "add_retry",
+    });
+    expect(where).toHaveBeenCalledTimes(1);
+    expect(orderBy).toHaveBeenCalledTimes(1);
+    expect(limit).toHaveBeenCalledWith(1);
+  });
+
+  it("returns null when no completed outcome exists", async () => {
+    const limit = vi.fn().mockResolvedValue([]);
+    const orderBy = vi.fn(() => ({ limit }));
+    const where = vi.fn(() => ({ orderBy }));
+    selectFromMock.mockReturnValue({ where });
+
+    await expect(findLatestOutcomeBySignature("org-1", "sig", "dlq-current")).resolves.toBeNull();
   });
 });
 

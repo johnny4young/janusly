@@ -15,10 +15,12 @@
  *   5. **Validation-failed** — the sandbox run reached `failed` /
  *      `cancelled`; surfaces the failed node's `errorJson` plus an
  *      "Iterate" button that re-opens the suggestion flow.
- *   6. **Applying** — sandbox passed; `POST /workflows/save` followed
+ *   6. **Validated** — sandbox passed; show the updated confidence passport
+ *      and require an explicit operator Apply decision.
+ *   7. **Applying** — `POST /workflows/save` followed
  *      by `POST /dlq/replay` (the production replay) chained together.
- *   7. **Applied** — success ribbon + production replay run id.
- *   8. **Error** — surfaces a transport / unexpected failure with a
+ *   8. **Applied** — success ribbon + production replay run id.
+ *   9. **Error** — surfaces a transport / unexpected failure with a
  *      Retry button that re-enters Idle.
  *
  * Reuses the `run-input-*` modal CSS tokens from the run-input dialog
@@ -27,7 +29,7 @@
  *
  * This parent owns the `Step` state machine, the three effects (focus,
  * ESC, the validation polling loop), and the apply-flow callbacks
- * (`generateSuggestion`, `validateAndApply`, `applyAfterValidation`,
+ * (`generateSuggestion`, `validateSuggestion`, `applyAfterValidation`,
  * `recordFeedback`, `onBackdropClick`). The pure helpers + the per-step
  * render bodies live under `./recovery-dialog/` (each body receives its
  * data via explicit props — no shared closures).
@@ -161,12 +163,15 @@ export function RecoveryDialog({
   const primaryRef = useRef<HTMLButtonElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   useDialogFocusTrap(dialogRef)
-  const reviewSuggestions = step.kind === 'review' ? step.suggestion.suggestions : []
+  const reviewSuggestions = step.kind === 'review' || step.kind === 'validated'
+    ? step.suggestion.suggestions
+    : []
   const safeSelectedIndex = Math.min(selectedSuggestionIndex, Math.max(reviewSuggestions.length - 1, 0))
-  const selectedSuggestion: SuggestionTab | null = step.kind === 'review'
-    ? (reviewSuggestions[safeSelectedIndex] ?? null)
+  const selectedIndex = step.kind === 'validated' ? step.selectedIndex : safeSelectedIndex
+  const selectedSuggestion: SuggestionTab | null = step.kind === 'review' || step.kind === 'validated'
+    ? (reviewSuggestions[selectedIndex] ?? null)
     : null
-  const canApplyPatch = step.kind === 'review' && selectedSuggestion
+  const canApplyPatch = (step.kind === 'review' || step.kind === 'validated') && selectedSuggestion
     ? isActionableSuggestion(dlq.workflowJson, step.suggestion, selectedSuggestion)
     : false
 
@@ -234,7 +239,13 @@ export function RecoveryDialog({
         // double-save and double-replay).
         cancelled = true
         if (status === 'succeeded') {
-          await applyAfterValidation(step.suggestion, step.selectedIndex)
+          setSelectedSuggestionIndex(step.selectedIndex)
+          setStep({
+            kind: 'validated',
+            suggestion: step.suggestion,
+            selectedIndex: step.selectedIndex,
+            runId: step.runId,
+          })
           return
         }
         const errorJson = pickFailedNodeErrorJson(result.nodes ?? [], dlq.nodeId)
@@ -283,7 +294,7 @@ export function RecoveryDialog({
     }
   }
 
-  const validateAndApply = async () => {
+  const validateSuggestion = async () => {
     if (step.kind !== 'review') return
     const suggestion = step.suggestion
     const selected = suggestion.suggestions[safeSelectedIndex]
@@ -319,7 +330,12 @@ export function RecoveryDialog({
     // the delta card can render the "before" pills statically without a
     // loading flash. Non-blocking: when this fails the card falls back
     // to fetching everything via /workflows/health/delta.
-    const targetWorkflowId = selected.workflow.id ?? null
+    // Recovery-list rows distinguish the source template/demo id from a
+    // persisted workflow id. Only the explicit metadata id is eligible for
+    // health reads; workflowJson.id may be a template id even when the row has
+    // no recovery overlay yet. If this projection is unavailable, the delta
+    // card fetches both sides after save instead of risking an expected 404.
+    const targetWorkflowId = dlq.recovery?.metadataWorkflowId ?? null
     let preSaveBeforeSnapshot: PreSaveBeforeSnapshot | null = null
     if (targetWorkflowId) {
       try {
@@ -547,6 +563,21 @@ export function RecoveryDialog({
               onSelectIndex={setSelectedSuggestionIndex}
               dlq={dlq}
               canApplyPatch={canApplyPatch}
+              failureSignature={priorFailureSignature}
+            />
+          )}
+
+          {step.kind === 'validated' && selectedSuggestion && (
+            <ReviewBody
+              suggestion={step.suggestion}
+              selected={selectedSuggestion}
+              selectedIndex={step.selectedIndex}
+              onSelectIndex={() => undefined}
+              dlq={dlq}
+              canApplyPatch={canApplyPatch}
+              sandboxStatus="passed"
+              failureSignature={priorFailureSignature}
+              selectionLocked
             />
           )}
 
@@ -568,6 +599,7 @@ export function RecoveryDialog({
               dlq={dlq}
               runId={step.runId}
               errorJson={step.errorJson}
+              failureSignature={priorFailureSignature}
             />
           )}
 
@@ -593,6 +625,13 @@ export function RecoveryDialog({
               onBack={() => {
                 if (step.sourceStep === 'review') {
                   setStep({ kind: 'review', suggestion: step.suggestion })
+                } else if (step.sourceStep === 'validated') {
+                  setStep({
+                    kind: 'validated',
+                    suggestion: step.suggestion,
+                    selectedIndex: step.selectedIndex,
+                    runId: step.runId ?? '',
+                  })
                 } else {
                   setStep({
                     kind: 'validation-failed',
@@ -672,16 +711,46 @@ export function RecoveryDialog({
                 type="button"
                 ref={primaryRef}
                 className="command-button command-button-primary"
-                onClick={validateAndApply}
+                onClick={validateSuggestion}
                 disabled={!canApplyPatch}
                 title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason') as string) : undefined}
               >
                 <Play size={14} aria-hidden="true" />
                 <span>
                   {isClusterMode
-                    ? t('recoveryDialog.footer.applyValidateCluster', { count: clusterMembers!.length })
-                    : t('recoveryDialog.footer.applyValidate')}
+                    ? t('recoveryDialog.footer.validateCluster', { count: clusterMembers!.length })
+                    : t('recoveryDialog.footer.validate')}
                 </span>
+              </button>
+            </>
+          )}
+
+          {step.kind === 'validated' && (
+            <>
+              <button
+                type="button"
+                className="command-button"
+                onClick={() => setStep({
+                  kind: 'cancelling',
+                  suggestion: step.suggestion,
+                  selectedIndex: step.selectedIndex,
+                  sourceStep: 'validated',
+                  runId: step.runId,
+                })}
+              >
+                {t('recoveryDialog.footer.cancel')}
+              </button>
+              <button
+                type="button"
+                ref={primaryRef}
+                className="command-button command-button-primary"
+                onClick={() => void applyAfterValidation(step.suggestion, step.selectedIndex)}
+                disabled={!canApplyPatch}
+              >
+                <Play size={14} aria-hidden="true" />
+                <span>{isClusterMode
+                  ? t('recoveryDialog.footer.applyCluster', { count: clusterMembers!.length })
+                  : t('recoveryDialog.footer.apply')}</span>
               </button>
             </>
           )}

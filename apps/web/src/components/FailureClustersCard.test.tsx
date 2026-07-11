@@ -240,7 +240,8 @@ describe('<FailureClustersCard />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Recover this pattern/i }))
     await screen.findByRole('heading', { name: /Recover fetch on run run-reco/i })
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /Apply.*validate.*2 entries/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Validate 1 sample.*2 entries/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /Apply to 2 entries/i }))
 
     await waitFor(() => {
       expect(screen.getAllByText(/Patch applied/i).length).toBeGreaterThan(0)

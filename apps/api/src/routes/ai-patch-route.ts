@@ -19,6 +19,7 @@ import { desc, eq } from "drizzle-orm";
 import { RUN_EVENT_PROMPT_CAP, STRUCTURAL_PATCH_SYSTEM_PROMPT, suggestWorkflowPatch, type PatchSuggestion } from "@janusly/ai";
 import {
   summarizePastFeedback,
+  findLatestOutcomeBySignature,
   listCalibrations,
   queryRecoveryFeedbackHealth,
   type RecoveryFeedbackHealthSnapshot,
@@ -30,6 +31,7 @@ import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { listTools } from "@janusly/engine/src/tool-registry";
 import { hasApprovalAncestor, isSensitiveAction } from "@janusly/engine/src/workflow-readiness";
 import { NodeSchema, WorkflowSchema, type EvidenceRow, type Workflow } from "@janusly/shared";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleRecoveryEvidence } from "../ai-evidence";
@@ -68,6 +70,37 @@ function indexCalibrationCurves(rows: StoredCalibration[]): Map<string, Calibrat
     });
   }
   return byApproach;
+}
+
+type RecoverySuggestionSafety = {
+  writeSide: boolean;
+  approvalRequired: boolean;
+  approvalPresent: boolean;
+};
+
+/**
+ * Project the existing production-readiness sensitivity rule onto one
+ * concrete patch candidate. The patch route owns this projection because it
+ * already has the strict workflow snapshot; the web never duplicates the
+ * write-side tool allowlist or graph traversal.
+ */
+function recoverySuggestionSafety(workflow: unknown, nodeId: string): RecoverySuggestionSafety {
+  const parsed = WorkflowSchema.safeParse(workflow);
+  if (!parsed.success) {
+    return { writeSide: true, approvalRequired: true, approvalPresent: false };
+  }
+  const node = parsed.data.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) {
+    return { writeSide: true, approvalRequired: true, approvalPresent: false };
+  }
+  const writeSide = isSensitiveAction(node);
+  const approvalPresent = !writeSide || hasApprovalAncestor(
+    nodeId,
+    parsed.data.edges,
+    parsed.data.nodes,
+    new Map(),
+  );
+  return { writeSide, approvalRequired: writeSide, approvalPresent };
 }
 
 export const aiPatchRoutes: Route[] = [
@@ -135,6 +168,20 @@ export const aiPatchRoutes: Route[] = [
       // `oneOf` keyword (works for OpenAI strict mode too).
       const failingNode = NodeSchema.safeParse(dlq.nodeJson);
       const failingNodeType = failingNode.success ? failingNode.data.type : "unknown";
+      const failureSignature = normalizeErrorSignature(dlq.errorJson, {
+        nodeId: dlq.nodeId,
+        nodeType: failingNode.success ? failingNode.data.type : undefined,
+      }).signature;
+      const priorSameSignatureOutcome = await findLatestOutcomeBySignature(
+        auth.orgId,
+        failureSignature,
+        deadLetterId,
+      ).then((row) => row ? ({
+        status: row.status,
+        approachLabel: row.approachLabel,
+        declineReason: row.declineReason,
+        occurredAt: row.updatedAt.toISOString(),
+      }) : null).catch(() => null);
       const configEnvelope = patchEnvelopeForNodeType(failingNodeType);
 
       // Structural-patch dispatch: when the failing node is a write-side
@@ -319,6 +366,8 @@ export const aiPatchRoutes: Route[] = [
          * only when the two differ by ≥ CALIBRATION_SUBTITLE_DELTA points.
          */
         calibratedConfidence: number;
+        /** Deterministic write-side + approval posture for this candidate. */
+        safety: RecoverySuggestionSafety;
       };
       // Resolve raw + calibrated confidence for one approach. Calibration
       // is monotonic in `raw` (the fit only ever returns positive-slope
@@ -340,6 +389,15 @@ export const aiPatchRoutes: Route[] = [
         evidence: EvidenceRow[];
         /** Freshness of the operator feedback loop for the failing workflow. */
         feedbackHealth?: RecoveryFeedbackHealthSnapshot;
+        recoveryPassport: {
+          failureSignature: string;
+          priorSameSignatureOutcome: {
+            status: string;
+            approachLabel: string | null;
+            declineReason: string | null;
+            occurredAt: string;
+          } | null;
+        };
         model?: string;
         provider?: string;
         aiError?: string;
@@ -375,6 +433,7 @@ export const aiPatchRoutes: Route[] = [
                 approachLabel: rawItem.approachLabel,
                 confidence: rawItem.confidence,
                 calibratedConfidence: calibrate(rawItem.approachLabel, rawItem.confidence),
+                safety: recoverySuggestionSafety(sanitized, dlq.nodeId),
               });
             } catch {
               // Drop this suggestion; keep going. If none survive, the
@@ -395,6 +454,7 @@ export const aiPatchRoutes: Route[] = [
             rationale: top.rationale,
             suggestions: validated,
             evidence: [],
+            recoveryPassport: { failureSignature, priorSameSignatureOutcome },
             model: helperResult.model,
             provider: helperResult.provider,
           };
@@ -413,8 +473,10 @@ export const aiPatchRoutes: Route[] = [
               approachLabel: "other",
               confidence: 0,
               calibratedConfidence: 0,
+              safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
             }],
             evidence: [],
+            recoveryPassport: { failureSignature, priorSameSignatureOutcome },
             model: helperResult.model,
             provider: helperResult.provider,
             aiError: helperResult.aiError ?? "no_valid_suggestions",
@@ -432,8 +494,10 @@ export const aiPatchRoutes: Route[] = [
             approachLabel: fallbackItem.approachLabel,
             confidence: fallbackItem.confidence,
             calibratedConfidence: calibrate(fallbackItem.approachLabel, fallbackItem.confidence),
+            safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
           }],
           evidence: [],
+          recoveryPassport: { failureSignature, priorSameSignatureOutcome },
           model: helperResult.model,
           provider: helperResult.provider,
           aiError: helperResult.aiError,

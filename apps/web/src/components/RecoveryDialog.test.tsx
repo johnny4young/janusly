@@ -72,14 +72,14 @@ describe('<RecoveryDialog />', () => {
     expect(screen.getByRole('button', { name: /Generate suggestion/i })).toBeInTheDocument()
   })
 
-  it('shows the diff after a suggestion arrives, with the Apply & validate primary button', async () => {
+  it('shows the diff after a suggestion arrives, with the Validate in sandbox primary button', async () => {
     vi.mocked(api).mockResolvedValueOnce(aiSuggestion)
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
     await waitFor(() => {
       expect(screen.getByText(/Added retry to handle/i)).toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: /Apply.*validate/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Validate in sandbox/i })).toBeInTheDocument()
   })
 
   it('surfaces stale feedback health for the selected recovery approach', async () => {
@@ -149,6 +149,61 @@ describe('<RecoveryDialog />', () => {
     expect(screen.queryByText(/Why this suggestion\?/i)).not.toBeInTheDocument()
   })
 
+  it('turns an evidenced read-side passport safe only after sandbox success', async () => {
+    vi.mocked(api)
+      .mockResolvedValueOnce({
+        ...aiSuggestion,
+        suggestions: [{
+          workflow: aiSuggestion.suggestedWorkflow,
+          rationale: aiSuggestion.rationale,
+          approachLabel: 'add_retry',
+          confidence: 99,
+          safety: { writeSide: false, approvalRequired: false, approvalPresent: true },
+        }],
+        evidence: [{ kind: 'signature_rule', sourceRef: 'network_timeout', snippet: 'Matched network timeout' }],
+        recoveryPassport: {
+          failureSignature: 'Network timeout on http node',
+          priorSameSignatureOutcome: {
+            status: 'applied',
+            approachLabel: 'add_retry',
+            declineReason: null,
+            occurredAt: '2026-07-01T00:00:00.000Z',
+          },
+        },
+      })
+      .mockResolvedValueOnce({ runId: 'val-passport' })
+      .mockResolvedValueOnce({
+        run: { id: 'val-passport', status: 'succeeded' },
+        nodes: [{ nodeId: 'fetch', status: 'succeeded' }],
+      })
+
+    render(<RecoveryDialog dlq={{
+      ...baseDlq,
+      recovery: {
+        id: 'ri-1', owner: null, severity: 'p2', status: 'open', slaTargetAt: '2026-07-12T00:00:00.000Z',
+        resolutionReason: null, comments: [], workflowId: null, metadataWorkflowId: null,
+        occurrenceCount: 4, lastOccurredAt: '2026-07-11T00:00:00.000Z',
+      },
+      suspectVersion: {
+        workflowId: 'wf', versionId: 'v2', version: 2, previousVersion: 1, previousVersionId: 'v1',
+        savedAt: '2026-07-10T00:00:00.000Z',
+        dagJson: baseDlq.workflowJson as never, previousDagJson: baseDlq.workflowJson as never,
+      },
+    }} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
+
+    const passport = await screen.findByTestId('recovery-confidence-passport')
+    expect(passport).toHaveAttribute('data-verdict', 'needs_review')
+    expect(passport).toHaveTextContent('4 occurrences')
+    expect(passport).toHaveTextContent('Version 2')
+    expect(passport).toHaveTextContent('99% confidence · informational only')
+
+    fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
+    await waitFor(() => expect(screen.getByTestId('recovery-confidence-passport')).toHaveAttribute('data-verdict', 'safe_to_apply'))
+    expect(screen.getByText(/Apply validated fix/i)).toBeInTheDocument()
+    expect(vi.mocked(api).mock.calls.map((call) => call[0])).not.toContain('/workflows/save')
+  })
+
   it('runs validate-fix → poll → save → replay in order on Apply', async () => {
     vi.mocked(api)
       .mockResolvedValueOnce(aiSuggestion)
@@ -181,8 +236,13 @@ describe('<RecoveryDialog />', () => {
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Validate in sandbox/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
+
+    const applyButton = await screen.findByRole('button', { name: /Apply validated fix/i })
+    expect(vi.mocked(api).mock.calls.map((call) => call[0])).not.toContain('/workflows/save')
+    expect(screen.getByTestId('recovery-confidence-passport')).toHaveAttribute('data-verdict', 'needs_review')
+    fireEvent.click(applyButton)
 
     await waitFor(() => {
       expect(screen.getByText(/Patch applied/i)).toBeInTheDocument()
@@ -255,7 +315,7 @@ describe('<RecoveryDialog />', () => {
     const onClose = vi.fn()
     render(<RecoveryDialog dlq={baseDlq} onClose={onClose} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Validate in sandbox/i }))
 
     // Click the review-state Cancel — should NOT close the dialog (no
     // /recovery/feedback call yet); instead enters the `cancelling` step
@@ -296,8 +356,8 @@ describe('<RecoveryDialog />', () => {
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Validate in sandbox/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
 
     await waitFor(() => screen.getByText(/Sandbox replay failed/i), { timeout: 4000 })
     fireEvent.click(screen.getByRole('button', { name: /Iterate/i }))
@@ -328,8 +388,8 @@ describe('<RecoveryDialog />', () => {
 
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-    await waitFor(() => screen.getByRole('button', { name: /Apply.*validate/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+    await waitFor(() => screen.getByRole('button', { name: /Validate in sandbox/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
 
     await waitFor(() => {
       expect(screen.getByText(/Sandbox replay failed/i)).toBeInTheDocument()
@@ -352,8 +412,9 @@ describe('<RecoveryDialog />', () => {
     render(<RecoveryDialog dlq={baseDlq} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
     await waitFor(() => screen.getByText(/AI was unavailable/i))
-    const applyButton = screen.getByRole('button', { name: /Apply.*validate/i })
+    const applyButton = screen.getByRole('button', { name: /Validate in sandbox/i })
     expect(applyButton).toBeDisabled()
+    expect(screen.getByTestId('recovery-confidence-passport')).toHaveAttribute('data-verdict', 'unsafe')
   })
 
   describe('multi-suggestion tabs', () => {
@@ -455,7 +516,7 @@ describe('<RecoveryDialog />', () => {
       await waitFor(() => screen.getByRole('tab', { name: /Add retry.*85/i }))
       // Pick the second tab (raise_timeout) before applying.
       fireEvent.click(screen.getByRole('tab', { name: /Raise timeout.*65/i }))
-      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
 
       await waitFor(() => {
         const validateCall = vi.mocked(api).mock.calls.find((call) => call[0] === '/dlq/validate-fix')
@@ -501,7 +562,7 @@ describe('<RecoveryDialog />', () => {
       // No tabs render for a single suggestion.
       expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
       // Apply is enabled — the synthesized item carries the legacy workflow as its `workflow`.
-      const applyButton = screen.getByRole('button', { name: /Apply.*validate/i })
+      const applyButton = screen.getByRole('button', { name: /Validate in sandbox/i })
       expect(applyButton).not.toBeDisabled()
     })
 
@@ -543,7 +604,7 @@ describe('<RecoveryDialog />', () => {
       expect(screen.getByRole('tab', { name: /Fix URL.*40/i })).toHaveAttribute('aria-selected', 'true')
 
       // Apply → fails → Iterate.
-      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Validate in sandbox/i }))
       await waitFor(() => screen.getByText(/Sandbox replay failed/i), { timeout: 4000 })
       fireEvent.click(screen.getByRole('button', { name: /Iterate/i }))
 
@@ -565,7 +626,7 @@ describe('<RecoveryDialog />', () => {
     fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
 
     await waitFor(() => screen.getByText(/No structural patch/i))
-    const applyButton = screen.getByRole('button', { name: /Apply.*validate/i })
+    const applyButton = screen.getByRole('button', { name: /Validate in sandbox/i })
     expect(applyButton).toBeDisabled()
   })
 
@@ -613,8 +674,9 @@ describe('<RecoveryDialog />', () => {
       expect(screen.getByText(/10 of 24/)).toBeInTheDocument()
 
       fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-      await waitFor(() => screen.getByRole('button', { name: /Apply.*validate.*10 entries/i }))
-      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate.*10 entries/i }))
+      await waitFor(() => screen.getByRole('button', { name: /Validate 1 sample.*10 entries/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Validate 1 sample.*10 entries/i }))
+      fireEvent.click(await screen.findByRole('button', { name: /Apply to 10 entries/i }))
 
       await waitFor(() => {
         expect(screen.getByText(/Patch applied/i)).toBeInTheDocument()
@@ -653,8 +715,8 @@ describe('<RecoveryDialog />', () => {
       )
 
       fireEvent.click(screen.getByRole('button', { name: /Generate suggestion/i }))
-      await waitFor(() => screen.getByRole('button', { name: /Apply.*validate.*3 entr/i }))
-      fireEvent.click(screen.getByRole('button', { name: /Apply.*validate.*3 entr/i }))
+      await waitFor(() => screen.getByRole('button', { name: /Validate 1 sample.*3 entr/i }))
+      fireEvent.click(screen.getByRole('button', { name: /Validate 1 sample.*3 entr/i }))
 
       const steps = await screen.findByTestId('recovery-cluster-steps')
       // Step 1 (validate) is active while validating; the replay step names the count.

@@ -29,12 +29,9 @@ test('mobile node setup can be reached from the canvas', async ({ page }) => {
 
   await openMobileNavigation(page)
   await page.getByRole('button', { name: /^AI Studio\b/ }).click()
-  // The onboarding coach is unrelated to this canvas/panel geometry smoke.
-  // Hide it so the test proves the changed surface rather than fighting a
-  // fixed overlay that has its own dedicated coverage.
-  await page.getByTestId('onboarding-banner').evaluateAll((nodes) => {
-    for (const node of nodes) node.style.display = 'none'
-  })
+  // Onboarding is contextual to Recovery Center, so it cannot obscure this
+  // canvas or its setup panel after navigation.
+  await expect(page.getByTestId('onboarding-banner')).toHaveCount(0)
   await page.locator('.workflow-node').filter({ hasText: 'Call an API' }).click()
 
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()

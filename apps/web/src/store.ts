@@ -119,8 +119,8 @@ type WorkflowStore = {
    *  AI Studio top-of-canvas BudgetBlockedBanner reads this slot; the
    *  api() wrapper sets it on every 402; clearBudgetBlocked() unsets. */
   budgetBlocked: BudgetBlockedEnvelope | null
-  /** Latest "first recovered run" onboarding snapshot. The OnboardingBanner
-   *  overlay self-fetches `/onboarding` on mount + every platformVersion bump
+  /** Latest "first recovered run" onboarding snapshot. The contextual
+   *  OnboardingBanner self-fetches `/onboarding` on mount + every platformVersion bump
    *  and stores the result here; renders only while `status === 'active'`. */
   onboarding: OnboardingState | null
 

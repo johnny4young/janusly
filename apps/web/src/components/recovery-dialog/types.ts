@@ -56,6 +56,19 @@ export type SuggestionTab = {
    * absent.
    */
   calibratedConfidence?: number
+  /** Server-derived from the canonical workflow-readiness sensitivity rule. */
+  safety?: {
+    writeSide: boolean
+    approvalRequired: boolean
+    approvalPresent: boolean
+  }
+}
+
+export type PriorSameSignatureOutcome = {
+  status: string
+  approachLabel: string | null
+  declineReason: string | null
+  occurredAt: string
 }
 
 export type PatchSuggestion = {
@@ -80,6 +93,10 @@ export type PatchSuggestion = {
    * the read-only side channel is unavailable.
    */
   feedbackHealth?: RecoveryFeedbackHealthSnapshot
+  recoveryPassport?: {
+    failureSignature: string
+    priorSameSignatureOutcome: PriorSameSignatureOutcome | null
+  }
   model?: string
   provider?: string
   aiError?: string
@@ -103,6 +120,7 @@ export type Step =
   | { kind: 'loading' }
   | { kind: 'review'; suggestion: PatchSuggestion }
   | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
+  | { kind: 'validated'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
   | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
   | {
       kind: 'cancelling'
@@ -111,7 +129,7 @@ export type Step =
       // Where the operator came from — drives the back button when they
       // change their mind. `validation-failed` returns to the failure
       // body; `review` returns to the diff.
-      sourceStep: 'review' | 'validation-failed'
+      sourceStep: 'review' | 'validated' | 'validation-failed'
       // Validation-failed cancels carry the runId / errorJson so the
       // back button can restore the prior step without losing context.
       runId?: string

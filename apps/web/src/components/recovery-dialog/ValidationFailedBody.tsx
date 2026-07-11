@@ -13,6 +13,7 @@ import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { classifyRecoveryError, pickErrorMessage } from './helpers'
+import { RecoveryPassportCard } from './RecoveryPassportCard'
 import type { PatchSuggestion } from './types'
 
 export function ValidationFailedBody({
@@ -21,12 +22,14 @@ export function ValidationFailedBody({
   dlq,
   runId,
   errorJson,
+  failureSignature,
 }: {
   suggestion: PatchSuggestion
   selectedIndex: number
   dlq: DeadLetter
   runId: string
   errorJson: unknown
+  failureSignature: string
 }) {
   const { t } = useT()
   const message = pickErrorMessage(errorJson)
@@ -55,6 +58,14 @@ export function ValidationFailedBody({
           {message}
         </pre>
       ) : null}
+      <RecoveryPassportCard
+        dlq={dlq}
+        suggestion={suggestion}
+        selected={selected}
+        actionable={true}
+        sandboxStatus="failed"
+        failureSignature={failureSignature}
+      />
       <WorkflowDiffView
         before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
         after={selected.workflow}

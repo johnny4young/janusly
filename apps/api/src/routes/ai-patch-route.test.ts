@@ -49,6 +49,7 @@ vi.mock("@janusly/ai", async () => {
 
 vi.mock("@janusly/data", () => ({
   summarizePastFeedback: vi.fn(async () => []),
+  findLatestOutcomeBySignature: vi.fn(async () => null),
   listCalibrations: vi.fn(async () => []),
   queryRecoveryFeedbackHealth: vi.fn(async () => ({ windowDays: 30, approaches: [] })),
 }));
@@ -91,7 +92,7 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 import { suggestWorkflowPatch } from "@janusly/ai";
-import { queryRecoveryFeedbackHealth } from "@janusly/data";
+import { findLatestOutcomeBySignature, queryRecoveryFeedbackHealth } from "@janusly/data";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { getDeadLetter } from "../dlq";
@@ -105,6 +106,7 @@ const readJsonMock = vi.mocked(readJson);
 const getDlqMock = vi.mocked(getDeadLetter);
 const patchMock = vi.mocked(suggestWorkflowPatch);
 const feedbackHealthMock = vi.mocked(queryRecoveryFeedbackHealth);
+const priorOutcomeMock = vi.mocked(findLatestOutcomeBySignature);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -184,6 +186,16 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     expect(res.payload.suggestedWorkflow.nodes[0].config.url).toBe("https://new.example.com");
     expect(res.payload.evidence).toEqual([]);
     expect(res.payload.feedbackHealth).toEqual({ windowDays: 30, approaches: [] });
+    expect(res.payload.recoveryPassport).toEqual({
+      failureSignature: "HTTP 500 on http node",
+      priorSameSignatureOutcome: null,
+    });
+    expect(res.payload.suggestions[0].safety).toEqual({
+      writeSide: false,
+      approvalRequired: false,
+      approvalPresent: true,
+    });
+    expect(priorOutcomeMock).toHaveBeenCalledWith("org-1", "HTTP 500 on http node", "dlq-1");
     expect(feedbackHealthMock).toHaveBeenCalledWith("org-1", "wf-patch");
 
     expect(auditMock).toHaveBeenCalledTimes(1);
@@ -192,6 +204,67 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     expect(meta.mode).toBe("ai");
     expect(meta.patchStyle).toBe("config_only");
     expect(meta.suggestionsCount).toBe(1);
+  });
+
+  it("surfaces the latest same-signature healing outcome without exposing its patch", async () => {
+    priorOutcomeMock.mockResolvedValueOnce({
+      status: "validation_failed",
+      approachLabel: "add_retry",
+      declineReason: "validation_failed",
+      updatedAt: new Date("2026-07-10T12:00:00.000Z"),
+    } as never);
+    patchMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedConfig: { retry: { maxAttempts: 3 } },
+        rationale: "retry transient failures",
+        approachLabel: "add_retry",
+        confidence: 70,
+      }],
+    } as never);
+
+    const res = await callPatch();
+
+    expect(res.payload.recoveryPassport.priorSameSignatureOutcome).toEqual({
+      status: "validation_failed",
+      approachLabel: "add_retry",
+      declineReason: "validation_failed",
+      occurredAt: "2026-07-10T12:00:00.000Z",
+    });
+  });
+
+  it("projects write-side and upstream approval posture for the selected patch", async () => {
+    const writeNode = { id: "n1", type: "http", config: { url: "https://old.example.com", method: "POST" } };
+    getDlqMock.mockResolvedValue({
+      id: "dlq-1",
+      runId: "r1",
+      nodeId: "n1",
+      nodeJson: writeNode,
+      workflowJson: {
+        id: "wf-patch",
+        name: "Patched",
+        nodes: [{ id: "approve", type: "approval", config: { message: "Approve" } }, writeNode],
+        edges: [{ from: "approve", to: "n1" }],
+      },
+      errorJson: { message: "http 500" },
+    } as never);
+    patchMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedConfig: { retry: { maxAttempts: 3 } },
+        rationale: "retry transient failure",
+        approachLabel: "add_retry",
+        confidence: 75,
+      }],
+    } as never);
+
+    const res = await callPatch();
+
+    expect(res.payload.suggestions[0].safety).toEqual({
+      writeSide: true,
+      approvalRequired: true,
+      approvalPresent: true,
+    });
   });
 });
 
@@ -214,6 +287,8 @@ describe("POST /ai/patch-workflow — fallback contract", () => {
     expect(res.payload.aiError).toBe("rate_limited");
     // Fallback leaves the original workflow unchanged.
     expect(res.payload.suggestedWorkflow.nodes[0].config.url).toBe("https://old.example.com");
+    expect(res.payload.recoveryPassport.failureSignature).toBe("HTTP 500 on http node");
+    expect(res.payload.suggestions[0].safety.writeSide).toBe(false);
 
     expect(auditMock).toHaveBeenCalledTimes(1);
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;

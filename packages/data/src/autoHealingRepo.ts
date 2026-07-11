@@ -35,7 +35,7 @@
  *   scanner at that moment.
  */
 
-import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { db, autoHealingRuns, auditLogs } from "@janusly/db";
 import { safePersistPayload } from "@janusly/shared/src/safe-persist";
 
@@ -415,6 +415,37 @@ export async function getExistingForDeadLetter(
       ),
     )
     .orderBy(desc(autoHealingRuns.createdAt))
+    .limit(1);
+  return rows[0] ? rowToRecord(rows[0]) : null;
+}
+
+/**
+ * Latest completed supervised-healing outcome for the same normalized
+ * failure signature, excluding the incident currently under review.
+ *
+ * This is a bounded, tenant-scoped read for the Recovery Confidence
+ * Passport. In-flight states are intentionally excluded: only a prior
+ * validation failure, applied patch, decline, or terminal scanner failure is
+ * evidence about what happened last time. Returns null when supervised
+ * healing has never seen this signature.
+ */
+export async function findLatestOutcomeBySignature(
+  orgId: string,
+  signature: string,
+  excludeDeadLetterId: string,
+): Promise<AutoHealingRun | null> {
+  const rows = await db
+    .select()
+    .from(autoHealingRuns)
+    .where(
+      and(
+        eq(autoHealingRuns.orgId, orgId),
+        eq(autoHealingRuns.signature, signature),
+        ne(autoHealingRuns.deadLetterId, excludeDeadLetterId),
+        inArray(autoHealingRuns.status, ["validation_failed", "applied", "declined", "failed"]),
+      ),
+    )
+    .orderBy(desc(autoHealingRuns.updatedAt), desc(autoHealingRuns.id))
     .limit(1);
   return rows[0] ? rowToRecord(rows[0]) : null;
 }

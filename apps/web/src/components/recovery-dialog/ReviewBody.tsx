@@ -17,6 +17,8 @@ import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { EvidencePanel } from './EvidencePanel'
 import { LearningHealthBadge } from './LearningHealthBadge'
+import { RecoveryPassportCard } from './RecoveryPassportCard'
+import type { RecoverySandboxStatus } from './recovery-passport'
 import { approachLabelDisplay, resolveConfidenceDisplay, suggestionTabKey } from './helpers'
 import type { PatchSuggestion, SuggestionTab } from './types'
 
@@ -27,6 +29,9 @@ export function ReviewBody({
   onSelectIndex,
   dlq,
   canApplyPatch,
+  sandboxStatus = 'not_run',
+  failureSignature,
+  selectionLocked = false,
 }: {
   suggestion: PatchSuggestion
   selected: SuggestionTab
@@ -34,6 +39,9 @@ export function ReviewBody({
   onSelectIndex: (index: number) => void
   dlq: DeadLetter
   canApplyPatch: boolean
+  sandboxStatus?: RecoverySandboxStatus
+  failureSignature: string
+  selectionLocked?: boolean
 }) {
   const { t } = useT()
   const tabs = suggestion.suggestions
@@ -76,6 +84,14 @@ export function ReviewBody({
           </div>
         </div>
       )}
+      <RecoveryPassportCard
+        dlq={dlq}
+        suggestion={suggestion}
+        selected={selected}
+        actionable={canApplyPatch}
+        sandboxStatus={sandboxStatus}
+        failureSignature={failureSignature}
+      />
       {showTabs && (
         <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel') as string}>
           {tabs.map((tab, index) => (
@@ -88,6 +104,7 @@ export function ReviewBody({
               aria-selected={index === selectedIndex}
               tabIndex={index === selectedIndex ? 0 : -1}
               className={`we-recovery-tab${index === selectedIndex ? ' we-recovery-tab--active' : ''}`}
+              disabled={selectionLocked}
               onClick={() => onSelectIndex(index)}
               onKeyDown={(event) => onTabKeyDown(event, index)}
               title={(() => {

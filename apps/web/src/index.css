@@ -7442,6 +7442,90 @@ button.we-ops-metric-card--button {
   line-height: 1.4;
 }
 
+/* Recovery Confidence Passport — deterministic facts first, verdict second.
+ * AI confidence is a normal fact row and never receives verdict colouring. */
+.we-recovery-passport {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--we-border);
+  border-left: 4px solid var(--we-warning);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--we-surface-2) 72%, transparent);
+}
+
+.we-recovery-passport[data-verdict="safe_to_apply"] { border-left-color: var(--we-success); }
+.we-recovery-passport[data-verdict="unsafe"] { border-left-color: var(--we-danger); }
+
+.we-recovery-passport__header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+
+.we-recovery-passport__icon {
+  display: inline-flex;
+  color: var(--we-warning);
+}
+
+.we-recovery-passport[data-verdict="safe_to_apply"] .we-recovery-passport__icon { color: var(--we-success); }
+.we-recovery-passport[data-verdict="unsafe"] .we-recovery-passport__icon { color: var(--we-danger); }
+
+.we-recovery-passport__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.we-recovery-passport__facts div { min-width: 0; }
+.we-recovery-passport__facts dt {
+  margin-bottom: 2px;
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.we-recovery-passport__facts dd {
+  margin: 0;
+  color: var(--we-text-1);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.we-recovery-passport__reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-recovery-passport__reasons li {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--we-warning) 10%, transparent);
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.we-recovery-passport[data-verdict="safe_to_apply"] .we-recovery-passport__reasons li {
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+.we-recovery-passport[data-verdict="unsafe"] .we-recovery-passport__reasons li {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+}
+
+@media (max-width: 620px) {
+  .we-recovery-passport__facts { grid-template-columns: 1fr; }
+}
+
 .we-recovery-warning {
   background: var(--we-warning-soft);
   border: 1px solid color-mix(in srgb, var(--we-warning) 25%, transparent);
@@ -11020,19 +11104,13 @@ button.we-authoring-problems__row:focus-visible {
   outline-offset: 1px;
 }
 
-/* "First recovered run" onboarding banner — a soft cobalt guidance overlay
- * mirroring .we-budget-banner's geometry. Lower z-index than the budget
- * block (a hard stop outranks a nudge); the two rarely co-occur. */
+/* "First recovered run" onboarding checklist — a soft cobalt guidance card
+ * in Recovery Center's document flow. It must never cover incident controls. */
 .we-onboarding-banner {
-  position: fixed;
-  top: 72px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 59;
   display: flex;
   align-items: center;
   gap: 16px;
-  max-width: min(760px, calc(100vw - 32px));
+  width: 100%;
   padding: 14px 18px;
   border-radius: 14px;
   background: var(--we-surface-1);
@@ -11139,8 +11217,8 @@ button.we-authoring-problems__row:focus-visible {
 }
 
 @keyframes onboarding-banner-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (max-width: 760px) {

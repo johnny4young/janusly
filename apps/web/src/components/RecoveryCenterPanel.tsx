@@ -47,6 +47,7 @@ import { tRecoveryMetricRationale, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { ValueDashboardSection } from './ValueDashboardSection'
 import { OnboardingReplayButton } from './OnboardingReplayButton'
+import { OnboardingBanner } from './OnboardingBanner'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import {
   buildGreeting,
@@ -334,6 +335,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         openFailures={openDeadLetters.length}
         onOpenQueue={props.onOpenRecoveryQueue}
       />
+
+      <OnboardingBanner onOpenTab={props.onOpenTab} />
 
       {metricStrip}
 
