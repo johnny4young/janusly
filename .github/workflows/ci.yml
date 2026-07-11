@@ -43,6 +43,9 @@ jobs:
       - name: Test (jsdom)
         run: pnpm test
 
+      - name: Test script utilities
+        run: pnpm test:scripts
+
   test_browser:
     name: Browser tests
     runs-on: ubuntu-latest
@@ -78,6 +81,26 @@ jobs:
 
       - name: Test (browser mode)
         run: pnpm test:browser
+
+      - name: Build production web bundle
+        run: pnpm --filter @janusly/web build
+
+      - name: Enforce bundle budgets
+        run: pnpm bundle-check
+
+      - name: Test route performance budgets
+        env:
+          JANUSLY_PERF_REPORT: artifacts/web-route-performance.json
+        run: pnpm --filter @janusly/web test:performance
+
+      - name: Upload web performance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-performance
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 30
 
   test_e2e:
     name: E2E (Compose + Playwright)

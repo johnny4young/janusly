@@ -1,8 +1,9 @@
 /**
- * OTel tracer + `withSpan` convenience wrapper. The provider is registered
- * by `./otel.ts` (which this file picks up via the global `trace` API).
+ * OTel tracer + `withSpan` convenience wrapper. The provider is registered by
+ * the explicit `./otel` side-effect import below before this singleton tracer
+ * is requested from the global API.
  *
- * Used by `core/runtime.ts` and the executor harness for per-node spans.
+ * Used by `worker.ts` around each claimed workflow-node execution.
  *
  * Invariants:
  * - The tracer name is `"janusly"` (matches `service.name` from
@@ -10,7 +11,8 @@
  *   rename without coordinating with the dashboard owner.
  */
 
-import { trace, context } from "@opentelemetry/api";
+import "./otel";
+import { trace, context, SpanStatusCode, type Attributes } from "@opentelemetry/api";
 
 /** Singleton tracer for engine spans. */
 export const tracer = trace.getTracer("janusly");
@@ -20,21 +22,24 @@ export const tracer = trace.getTracer("janusly");
  * (when provided), records exceptions via `recordException`, sets OK/ERROR
  * status appropriately, and always calls `span.end()` in `finally`.
  */
-export function withSpan<T>(name: string, fn: () => Promise<T>, attrs?: Record<string, any>): Promise<T> {
+export function withSpan<T>(name: string, fn: () => Promise<T>, attrs?: Attributes): Promise<T> {
   const span = tracer.startSpan(name);
 
   if (attrs) {
-    Object.entries(attrs).forEach(([k, v]) => span.setAttribute(k, v));
+    for (const [key, value] of Object.entries(attrs)) {
+      if (value !== undefined) span.setAttribute(key, value);
+    }
   }
 
   return context.with(trace.setSpan(context.active(), span), async () => {
     try {
       const result = await fn();
-      span.setStatus({ code: 1 }); // OK
+      span.setStatus({ code: SpanStatusCode.OK });
       return result;
-    } catch (err: any) {
-      span.recordException(err);
-      span.setStatus({ code: 2, message: err.message });
+    } catch (err: unknown) {
+      const exception = err instanceof Error ? err : new Error(String(err));
+      span.recordException(exception);
+      span.setStatus({ code: SpanStatusCode.ERROR, message: exception.message });
       throw err;
     } finally {
       span.end();

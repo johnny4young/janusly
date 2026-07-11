@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "totalGzipKiB": 600,
+  "unbudgetedRegressionPercent": 10,
+  "assetGroups": {
+    "reactVendor": {
+      "label": "React vendor",
+      "assets": ["react-vendor.js"],
+      "maxGzipKiB": 135
+    },
+    "entry": {
+      "label": "Entry JavaScript",
+      "assets": ["index.js"],
+      "maxGzipKiB": 105
+    },
+    "canvas": {
+      "label": "Canvas workspace",
+      "assets": ["CanvasWorkspace.js", "CanvasWorkspace.css"],
+      "maxGzipKiB": 65
+    }
+  },
+  "routeBudgets": {
+    "home": {
+      "maxTransferredKiB": 600,
+      "maxLongTaskMs": 500
+    },
+    "aiStudio": {
+      "maxTransferredKiB": 100,
+      "maxLongTaskMs": 300
+    },
+    "selectedRecovery": {
+      "maxTransferredKiB": 100,
+      "maxLongTaskMs": 200
+    }
+  },
+  "baselineGzipKiB": {
+    "api.js": 2.53,
+    "App.js": 49.81,
+    "CommandPalette.js": 2.8,
+    "CredentialRotateModal.js": 2.01,
+    "docs-link.js": 0.25,
+    "EmptyState.js": 0.45,
+    "error-signature.js": 1.92,
+    "ExperimentsPanel.js": 4.18,
+    "helpers.js": 2.87,
+    "icons-vendor.js": 16.31,
+    "index.css": 32.95,
+    "LoadingSkeleton.js": 0.41,
+    "MembersPanel.js": 2.42,
+    "MultiAgentTimeline.js": 2.06,
+    "operations-section-bus.js": 0.27,
+    "OperationsPage.js": 21.58,
+    "panel-primitives.js": 0.67,
+    "recovery-item.js": 0.61,
+    "recovery-queue-focus-bus.js": 0.6,
+    "RecoveryDialog.js": 10.46,
+    "RollbackConfirmDialog.js": 1.58,
+    "rolldown-runtime.js": 0.41,
+    "RunInputDialog.js": 3.29,
+    "RunsPanel.js": 25.63,
+    "RunStreamChip.js": 3.58,
+    "ScheduleHistoryPanel.js": 2.37,
+    "schemas.js": 17.87,
+    "ShortcutsModal.js": 1.1,
+    "SnippetInsertMenu.js": 4.19,
+    "SolutionPacksPanel.js": 1.59,
+    "store.js": 3.93,
+    "supabase-vendor.js": 49.98,
+    "useDialogFocusTrap.js": 0.57,
+    "VersionHistoryPanel.js": 3,
+    "VitalSignsStrip.js": 1.92,
+    "workflow-diff.js": 1.29,
+    "WorkflowDiffView.js": 2.08,
+    "WorkflowHealthBadge.js": 1.51,
+    "WorkflowMetadataPanel.js": 1.91,
+    "WorkflowsDashboard.js": 8.97,
+    "WorkflowSloPanel.js": 1.43
+  }
+}

@@ -98,6 +98,8 @@ import {
 } from "./stalled-node-reaper";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
+import { withSpan } from "./observability/tracer";
+import { shutdownTracing } from "./observability/otel";
 
 await assertMigrationsApplied();
 
@@ -403,7 +405,11 @@ export const worker = new Worker(
     const resolved = await resolveJobData(job.data);
     if (resolved.skip) return;
     const { runId, node, workflow } = resolved;
-    await runtime.executeQueuedNode({ runId, node, workflow });
+    await withSpan(
+      "workflow.node.execute",
+      () => runtime.executeQueuedNode({ runId, node, workflow }),
+      { "run.id": runId, "node.id": node.id, "node.type": node.type },
+    );
   },
   {
     connection,
@@ -421,6 +427,9 @@ async function shutdown(signal: NodeJS.Signals) {
     await closeWorkerCacheInvalidationSubscriber();
     await closeWorkerRateLimitRedis();
     await closeWorkerRunEventRedis();
+    await shutdownTracing().catch((error) => {
+      console.warn("[otel] trace shutdown failed; worker resources still drained", error);
+    });
     console.log("[worker] drained, exiting");
     process.exit(0);
   } catch (error) {

@@ -295,8 +295,14 @@ registration failures log and do not block process boot.
 | `OTEL_METRICS_PORT` | `9464` | `packages/engine/src/observability/prometheus.ts` | Prometheus exporter port. |
 | `OTEL_SERVICE_INSTANCE_ID` | `HOSTNAME`, then `os.hostname()` | `packages/engine/src/observability/resource.ts` | Stable OpenTelemetry `service.instance.id`. |
 | `HOSTNAME` | system-provided | `packages/engine/src/observability/resource.ts` | Fallback instance id in containerized environments. |
-| `OTEL_EXPORTER` | unset | `packages/engine/src/observability/otel.ts` | Set to `jaeger` to enable the Jaeger trace exporter. |
-| `OTEL_EXPORTER_JAEGER_ENDPOINT` | `http://localhost:14268/api/traces` | `packages/engine/src/observability/otel.ts` | Jaeger collector endpoint. |
+| `OTEL_EXPORTER` | `console` when unset | `packages/engine/src/observability/trace-exporter.ts` | Trace delivery mode: `console` for local development or `otlp` for batched OTLP/HTTP export. Any other value fails startup. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://localhost:4318/v1/traces` | `packages/engine/src/observability/trace-exporter.ts` | Exact OTLP/HTTP traces endpoint. Takes precedence over the shared base endpoint. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | `packages/engine/src/observability/trace-exporter.ts` | Shared OTLP base URL; Janusly appends `/v1/traces` when the trace-specific endpoint is absent. |
+
+`OTEL_EXPORTER=jaeger` and `OTEL_EXPORTER_JAEGER_ENDPOINT` are no longer
+supported. Point Jaeger deployments at a Collector or Jaeger's native OTLP
+HTTP receiver and use `OTEL_EXPORTER=otlp`; Janusly deliberately does not
+reinterpret the old `/api/traces` URL as an OTLP endpoint.
 
 ## Local Test And Eval Helpers
 
