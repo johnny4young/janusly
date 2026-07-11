@@ -7,7 +7,7 @@ token (`Authorization: Bearer <jwt>` for Supabase or service-token mode, or
 than one membership. The org header is a scope selector; authorization is
 granted by the server-side `org_members` row, not by a client-side claim.
 
-CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). The `5174` ports are included so dev still works when Vite falls back from `5173` due to a port collision. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
+CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174`). Root `pnpm dev` binds loopback on strict port `5173`; the `5174` origins remain for legacy/manual development setups. Body limit defaults to 1 MiB (`API_MAX_JSON_BODY_BYTES`).
 
 All examples below assume the dev-headers shorthand `-H "x-org-id: default" -H "x-user-id: dev-user"`.
 

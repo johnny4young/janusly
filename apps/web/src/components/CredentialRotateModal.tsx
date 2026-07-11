@@ -62,7 +62,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
   const [newSecretRef, setNewSecretRef] = useState('')
   const aliveRef = useRef(true)
   const dialogRef = useRef<HTMLDivElement | null>(null)
-  useDialogFocusTrap(dialogRef)
+  useDialogFocusTrap(dialogRef, { initialFocus: true })
 
   useEffect(() => {
     aliveRef.current = true

@@ -141,7 +141,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
     expect(() => sanitizeAiWorkflow(draft)).not.toThrow();
     const sanitized = sanitizeAiWorkflow(draft);
     expect(sanitized.nodes[0]?.type).toBe("tool");
-    expect((sanitized.nodes[0]?.config as { tool?: string }).tool).toBe("email.send");
+    expect((sanitized.nodes[0]!.config as { tool?: string }).tool).toBe("email.send");
   });
 
   it("still throws on a tool node with NO `tool` name (structural check stays strict)", () => {
@@ -186,7 +186,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
       };
 
       const sanitized = sanitizeAiWorkflow(draft);
-      expect((sanitized.nodes[0]?.config as { input?: unknown }).input).toEqual(input);
+      expect((sanitized.nodes[0]!.config as { input?: unknown }).input).toEqual(input);
       expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
     }
   });
@@ -234,7 +234,7 @@ describe("sanitizeAiWorkflow — draft-generation tool-input tolerance", () => {
 
     const sanitized = sanitizeAiWorkflow(draft);
     expect(sanitized.nodes[0]?.type).toBe("transform");
-    expect((sanitized.nodes[0]?.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
+    expect((sanitized.nodes[0]!.config as { mapping?: unknown }).mapping).toEqual({ name: "{{input.name}}" });
     expect(validateWorkflow(sanitized)).toEqual({ valid: true, issues: [] });
   });
 

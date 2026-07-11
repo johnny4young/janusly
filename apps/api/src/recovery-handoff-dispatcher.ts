@@ -128,7 +128,6 @@ async function dispatchGithub(ctx: DispatchContext): Promise<HandoffDispatchResu
         },
       );
       const ok = result.ok === true;
-      const commentUrl = typeof result.commentUrl === "string" ? result.commentUrl : null;
       const commentId = typeof result.commentId === "number" ? String(result.commentId) : null;
       return {
         destination: "github",
@@ -136,7 +135,7 @@ async function dispatchGithub(ctx: DispatchContext): Promise<HandoffDispatchResu
         statusCode: typeof result.statusCode === "number" ? Math.trunc(result.statusCode) : null,
         error: typeof result.error === "string" ? result.error.slice(0, 1000) : null,
         latencyMs: Date.now() - started,
-        // Preserve the original issueNumber + issueUrl; commentId/url are
+        // Preserve the original issueNumber + issueUrl; commentId is an
         // additive surface (rendered as "Comment added" in the UI).
         externalId: ctx.existing.externalId,
         externalUrl: ctx.existing.externalUrl,

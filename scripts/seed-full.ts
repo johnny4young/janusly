@@ -678,7 +678,6 @@ async function seed(): Promise<void> {
 
     // failure-storm children for some
     if (chance(0.35)) {
-      const others = sample(dlqTargets);
       childRows.push({ id: uid("recchild"), orgId: ORG, recoveryItemId: itemId, deadLetterId: uid("dlqchild"), occurredAt: hoursAgo(randInt(1, 30)) });
     }
     // handoffs for some
@@ -791,7 +790,7 @@ async function seed(): Promise<void> {
     usageRows.push({
       id: uid("use"), orgId: ORG, userId: someUser(), runId: chance(0.7) ? sample(runRefs).id : null,
       metric: "llm.completion", quantity: inTok + outTok,
-      metadata: { provider: model.startsWith("gpt") ? "openai" : "anthropic", model, inputTokens: inTok, outputTokens: outTok, latencyMs: randInt(300, 6000), costUsd: round2((inTok + outTok) / 1_000_000 * sample([3, 5, 15])), nodeId: "classify_1", workflowId: wf.id, mode: chance(0.95) ? "ai" : "fallback" },
+      metadata: { provider: model.startsWith("gpt") ? "openai" : "anthropic", model, inputTokens: inTok, outputTokens: outTok, latencyMs: randInt(300, 6000), costUsd: cost, nodeId: "classify_1", workflowId: wf.id, mode: chance(0.95) ? "ai" : "fallback" },
       createdAt,
     });
   }

@@ -209,7 +209,7 @@ describe("operate routes — MCP-source write consent gate", () => {
       await findRoute(match).handler({ req: { url: match } as never, res: {} as never, auth: mcpAuth });
       const last = sendJsonMock.mock.calls.at(-1);
       expect(last?.[2]).toBe(403);
-      expect((last?.[1] as { code?: string }).code).toBe("mcp_process_disabled");
+      expect((last![1] as { code?: string }).code).toBe("mcp_process_disabled");
       // The gate short-circuited before any run mutation.
       expect(startRunMock).not.toHaveBeenCalled();
     });

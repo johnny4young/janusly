@@ -3,7 +3,7 @@
  *
  * `pnpm dev` at the workspace root runs this. It brings up the full local
  * stack so a fresh checkout is `pnpm install && pnpm dev` to a working
- * Janusly Studio at http://localhost:5173.
+ * Janusly Studio at http://127.0.0.1:5173.
  *
  * Lifecycle:
  *   1. `docker compose up -d redis postgres ollama`
@@ -15,8 +15,9 @@
  *      `node_modules/.bin`. Skipping the `pnpm <script>` wrapper keeps
  *      Ctrl+C teardown quiet — the wrapper would otherwise emit
  *      `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` for every child it SIGTERMs.
- *   5. wait forever; `Ctrl+C` (or any child exiting unexpectedly) triggers `shutdown`
- *   6. `shutdown` SIGTERMs each child, then `docker compose down` so no
+ *   5. wait for API + web HTTP readiness, then print the browser URL
+ *   6. wait forever; `Ctrl+C` (or any child exiting unexpectedly) triggers `shutdown`
+ *   7. `shutdown` SIGTERMs each child, then `docker compose down` so no
  *      containers leak across sessions
  *
  * Used by:
@@ -33,16 +34,23 @@
  *   caller did not provide one. The embedding code's library default is
  *   `http://ollama:11434` for containerized deployments, but `pnpm dev` runs
  *   Node on the host and reaches the Compose service through port 11434.
+ * - Vite binds loopback by default on strict port 5173. Deliberate LAN or
+ *   container exposure requires an explicit validated `JANUSLY_DEV_HOST`.
+ * - The private `JANUSLY_DEV_BIN_PATH` seam is used by the subprocess test
+ *   harness to replace long-running binaries without touching node_modules.
  */
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { delimiter as pathDelimiter } from "node:path";
+import { devWebUrl, resolveDevHost, viteArgs } from "./run-dev-config.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const children = new Set();
 let shuttingDown = false;
 const hostOllamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+const devHost = resolveDevHost(process.env.JANUSLY_DEV_HOST);
+const webUrl = devWebUrl(devHost);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -99,12 +107,34 @@ function startService(name, command, args, options = {}) {
 // it rewraps the SIGTERM the orchestrator just sent it.
 function workspaceBinPath(workspaceDir) {
   return [
+    process.env.JANUSLY_DEV_BIN_PATH,
     `${rootDir}/${workspaceDir}/node_modules/.bin`,
     `${rootDir}/node_modules/.bin`,
     process.env.PATH,
   ]
     .filter(Boolean)
     .join(pathDelimiter);
+}
+
+async function waitForHttp(url, child, timeoutMs = 60_000) {
+  const startedAt = Date.now();
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`${child.serviceName} exited before ${url} became ready`);
+    }
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1_000) });
+      if (response.ok) return;
+      lastError = new Error(`${url} returned HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(250);
+  }
+
+  throw lastError ?? new Error(`${url} did not become ready`);
 }
 
 async function waitForPostgres(timeoutMs = 60_000) {
@@ -193,7 +223,7 @@ try {
   // don't invoke `pnpm <script>` per child — that wrapper noisily wraps the
   // orchestrator's own SIGTERM as a script failure on Ctrl+C. If a workspace
   // changes its dev command, update the line here too.
-  startService("api", "tsx", ["watch", "src/index.ts"], {
+  const api = startService("api", "tsx", ["watch", "src/index.ts"], {
     cwd: `${rootDir}/apps/api`,
     env: { PATH: workspaceBinPath("apps/api"), OLLAMA_BASE_URL: hostOllamaBaseUrl },
   });
@@ -201,12 +231,16 @@ try {
     cwd: `${rootDir}/packages/engine`,
     env: { PATH: workspaceBinPath("packages/engine"), OLLAMA_BASE_URL: hostOllamaBaseUrl },
   });
-  startService("web", "vite", [], {
+  const web = startService("web", "vite", viteArgs(devHost), {
     cwd: `${rootDir}/apps/web`,
     env: { PATH: workspaceBinPath("apps/web") },
   });
 
-  console.error("[dev] api / worker / web spawned; press Ctrl+C to tear down");
+  await Promise.all([
+    waitForHttp(`http://127.0.0.1:${process.env.PORT || "3001"}/health`, api),
+    waitForHttp(webUrl, web),
+  ]);
+  console.error(`[dev] ready at ${webUrl} (bound ${devHost}); press Ctrl+C to tear down`);
   // Stay alive until a signal handler exits the process or a child crashes.
   await new Promise(() => {});
 } catch (error) {

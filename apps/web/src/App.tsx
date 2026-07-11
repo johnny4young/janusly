@@ -107,7 +107,6 @@ export default function App() {
     connect,
     addNode,
     activeTab,
-    session,
     userId,
     orgId,
     authReady,

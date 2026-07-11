@@ -28,12 +28,14 @@ const DEFAULT_POLL_INTERVAL_MS = 1500;
 const DEFAULT_POLL_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_LIST_PAGE_SIZE = 100;
 
-/** Current response shape from `GET /runs` plus future paginated shape. */
-type RunsListResponse = RunSummary[] | {
+type RunsPage = {
   runs: RunSummary[];
   /** Server-side cursor for the next page. Null when no more pages. */
   nextCursor?: string | null;
 };
+
+/** Current response shape from `GET /runs` plus future paginated shape. */
+type RunsListResponse = RunSummary[] | RunsPage;
 
 /** Internal response shape from `GET /workflows/latest?workflowId=…`. */
 type WorkflowVersionResponse = {
@@ -329,12 +331,13 @@ function extractWorkflowDag(latest: WorkflowVersionResponse, workflowId: string)
   return dag as Record<string, unknown>;
 }
 
-function coerceRunsListResponse(raw: unknown): { runs: RunSummary[]; nextCursor?: string | null } {
-  if (Array.isArray(raw)) {
-    return { runs: raw as RunSummary[], nextCursor: null };
+function coerceRunsListResponse(raw: unknown): RunsPage {
+  const response = raw as RunsListResponse;
+  if (Array.isArray(response)) {
+    return { runs: response, nextCursor: null };
   }
-  if (raw && typeof raw === "object" && Array.isArray((raw as { runs?: unknown }).runs)) {
-    return raw as { runs: RunSummary[]; nextCursor?: string | null };
+  if (response && typeof response === "object" && Array.isArray(response.runs)) {
+    return response;
   }
   return { runs: [], nextCursor: null };
 }

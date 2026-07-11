@@ -1,5 +1,5 @@
-import { fireEvent, render } from '@testing-library/react'
-import { useRef } from 'react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import { StrictMode, useRef } from 'react'
 import { describe, expect, it } from 'vitest'
 import { useDialogFocusTrap } from './useDialogFocusTrap'
 
@@ -12,6 +12,17 @@ function Dialog() {
       <button data-testid="last">last</button>
     </div>
   )
+}
+
+function ToggleDialog({ active }: { active: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useDialogFocusTrap(ref, { active, initialFocus: true })
+  return active ? (
+    <div ref={ref} role="dialog">
+      <button data-testid="initial">initial</button>
+      <button disabled data-testid="disabled">disabled</button>
+    </div>
+  ) : null
 }
 
 describe('useDialogFocusTrap', () => {
@@ -47,5 +58,43 @@ describe('useDialogFocusTrap', () => {
     fireEvent.keyDown(document, { key: 'Tab' })
     // No trap: focus stays on the outside control.
     expect(document.activeElement).toBe(outside)
+  })
+
+  it('keeps initial focus on the first enabled control through the Strict Mode effect replay', async () => {
+    const { getByTestId } = render(
+      <StrictMode>
+        <ToggleDialog active />
+      </StrictMode>,
+    )
+
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId('initial')))
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(document.activeElement).toBe(getByTestId('initial'))
+  })
+
+  it('restores focus to the trigger when an active dialog closes', async () => {
+    const { getByTestId, rerender } = render(
+      <>
+        <button data-testid="trigger">trigger</button>
+        <ToggleDialog active={false} />
+      </>,
+    )
+    getByTestId('trigger').focus()
+
+    rerender(
+      <>
+        <button data-testid="trigger">trigger</button>
+        <ToggleDialog active />
+      </>,
+    )
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId('initial')))
+
+    rerender(
+      <>
+        <button data-testid="trigger">trigger</button>
+        <ToggleDialog active={false} />
+      </>,
+    )
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId('trigger')))
   })
 })

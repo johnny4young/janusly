@@ -16,7 +16,8 @@ secret values stay env-only.
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/workflow` | `packages/db` | Postgres connection string for Drizzle, API, worker, and migrations. |
 | `REDIS_URL` | `redis://localhost:6379` | API rate limiter, engine queue | Redis connection for shared rate-limit state and BullMQ. |
 | `PORT` | `3001` | `apps/api` | API HTTP port. |
-| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. Includes `5174` so dev still works when Vite falls back from `5173` due to a port collision. |
+| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. `pnpm dev` uses strict `5173`; `5174` remains for legacy/manual development setups. |
+| `JANUSLY_DEV_HOST` | `127.0.0.1` | `scripts/run-dev.mjs` | Validated Vite bind hostname/IP for `pnpm dev`. Loopback is the safe default; use `0.0.0.0` only for deliberate LAN/container exposure. |
 | `API_MAX_JSON_BODY_BYTES` | `1048576` | `apps/api` | Maximum request JSON body size. |
 | `API_SERVICE_TOKEN` | unset | `apps/api/src/auth.ts` | Optional Bearer token for service clients, including production MCP mode. |
 | `JANUSLY_REQUIRE_SAVED_WORKFLOW` | `false` | `apps/api` | When `true`, rejects ad-hoc `POST /start` workflow payloads. |

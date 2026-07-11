@@ -789,14 +789,6 @@ async function writeAudit(
   }
 }
 
-async function writeEntryCreatedAudit(
-  orgId: string,
-  entryId: string,
-  metadata: Record<string, unknown>,
-): Promise<void> {
-  await writeAudit(orgId, null, "memory.entry.created", "memory_entry", entryId, metadata);
-}
-
 async function writeCommitFailedAudit(
   orgId: string,
   reason: string,

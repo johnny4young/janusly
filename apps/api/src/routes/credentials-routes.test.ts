@@ -76,15 +76,13 @@ vi.mock("../audit-helper", () => ({
 }));
 
 import { credentialsRoutes } from "./credentials-routes";
-import { readJson, sendJson } from "../http";
-import { getCredentialHealth, resolveCredentialReferences } from "@janusly/data/src/credentialHealthRepo";
+import { readJson } from "../http";
+import { resolveCredentialReferences } from "@janusly/data/src/credentialHealthRepo";
 import { rotateCredentialSecretRef, setCredentialExpiry } from "@janusly/data/src/credentialsRepo";
 import { auditAction } from "../audit-helper";
 import type { Route } from "../routes";
 
-const sendJsonMock = vi.mocked(sendJson);
 const readJsonMock = vi.mocked(readJson);
-const getCredentialHealthMock = vi.mocked(getCredentialHealth);
 const resolveRefsMock = vi.mocked(resolveCredentialReferences);
 const rotateMock = vi.mocked(rotateCredentialSecretRef);
 const setExpiryMock = vi.mocked(setCredentialExpiry);

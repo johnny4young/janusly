@@ -74,7 +74,7 @@ vi.mock("../http", async (importOriginal) => {
 import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
-import { readJson, sendJson } from "../http";
+import { readJson } from "../http";
 import type { Route } from "../routes";
 import { aiRoutes } from "./ai-routes";
 import { promoteNoopPlaceholders } from "@janusly/ai";
@@ -87,7 +87,6 @@ const exemplarsMock = vi.mocked(composeGenerationExemplars);
 const recordExemplarMock = vi.mocked(recordGenerationExemplar);
 const auditMock = vi.mocked(auditAction);
 const readJsonMock = vi.mocked(readJson);
-const sendJsonMock = vi.mocked(sendJson);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 

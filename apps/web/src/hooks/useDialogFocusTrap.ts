@@ -43,6 +43,7 @@ export function useDialogFocusTrap(
   // dialog's own initial-focus moves focus inward — so it can be restored when
   // the dialog closes. (Guarded ref write during render: idempotent.)
   const triggerRef = useRef<HTMLElement | null>(null)
+  const restoreFrameRef = useRef<number | null>(null)
   const prevActive = useRef(false)
   if (active && !prevActive.current) {
     prevActive.current = true
@@ -55,6 +56,13 @@ export function useDialogFocusTrap(
 
   useEffect(() => {
     if (!active) return
+    // React Strict Mode runs setup → cleanup → setup once on mount. Cancel the
+    // first cleanup's pending restoration so it cannot steal focus from the
+    // live dialog after the second setup focuses its initial control.
+    if (restoreFrameRef.current !== null) {
+      cancelAnimationFrame(restoreFrameRef.current)
+      restoreFrameRef.current = null
+    }
     const root = dialogRef.current
 
     if (initialFocus && root) {
@@ -84,9 +92,12 @@ export function useDialogFocusTrap(
       document.removeEventListener('keydown', onKeyDown)
       // Restore focus to the trigger on close / unmount (if it still exists).
       const trigger = triggerRef.current
-      triggerRef.current = null
       if (trigger && document.contains(trigger)) {
-        requestAnimationFrame(() => trigger.focus())
+        restoreFrameRef.current = requestAnimationFrame(() => {
+          restoreFrameRef.current = null
+          trigger.focus()
+          if (triggerRef.current === trigger) triggerRef.current = null
+        })
       }
     }
   }, [active, initialFocus, dialogRef])

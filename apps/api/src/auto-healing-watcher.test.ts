@@ -195,7 +195,7 @@ describe("handleAutoHealingWatchTrigger", () => {
 
     const call = outcomeMock.mock.calls[0];
     expect(call?.[1]).toMatchObject({ outcome: "validation_failed" });
-    expect((call?.[1] as { reason: string }).reason).toBe("signature_changed");
+    expect((call![1] as { reason: string }).reason).toBe("signature_changed");
   });
 
   it("invokes the stale sweep at the start of every tick", async () => {

@@ -129,7 +129,7 @@ describe("workflow-mutating routes — MCP-source write consent gate", () => {
     await findRoute("/workflows/save").handler({ req: { url: "/workflows/save" } as never, res: {} as never, auth: mcpAuth });
     const last = sendJsonMock.mock.calls.at(-1);
     expect(last?.[2]).toBe(403);
-    expect((last?.[1] as { code?: string }).code).toBe("mcp_process_disabled");
+    expect((last![1] as { code?: string }).code).toBe("mcp_process_disabled");
     expect(saveMock).not.toHaveBeenCalled();
     // The gate fires before the tenant consent read + the rate limit.
     expect(getOrgConfigSnapshotMock).not.toHaveBeenCalled();
@@ -141,7 +141,7 @@ describe("workflow-mutating routes — MCP-source write consent gate", () => {
     await findRoute("/workflows/rollback").handler({ req: { url: "/workflows/rollback" } as never, res: {} as never, auth: mcpAuth });
     const last = sendJsonMock.mock.calls.at(-1);
     expect(last?.[2]).toBe(403);
-    expect((last?.[1] as { code?: string }).code).toBe("mcp_process_disabled");
+    expect((last![1] as { code?: string }).code).toBe("mcp_process_disabled");
     expect(rollbackMock).not.toHaveBeenCalled();
   });
 

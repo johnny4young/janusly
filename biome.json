@@ -52,7 +52,8 @@
 			},
 			"correctness": {
 				"useExhaustiveDependencies": "off",
-				"noUnsafeOptionalChaining": "warn",
+				"noUnsafeOptionalChaining": "error",
+				"noUnusedVariables": "error",
 				"noUnusedImports": "error"
 			}
 		}

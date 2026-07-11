@@ -134,10 +134,12 @@ pnpm install
 pnpm dev
 
 # 3. Open the Studio
-# http://localhost:5173
+# http://127.0.0.1:5173
 ```
 
-Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). (If port 5173 is already in use, Vite falls back to 5174; both are in `API_ALLOWED_ORIGINS` by default.)
+Open <http://127.0.0.1:5173> after `pnpm dev` prints its ready line — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). Port `5173` is strict: if another process owns it, startup fails instead of silently moving the Studio. Use `pnpm dev:doctor` to clear an orphan.
+
+The web server binds loopback-only by default. Deliberate LAN or container exposure is explicit: `JANUSLY_DEV_HOST=0.0.0.0 pnpm dev`.
 
 The first `pnpm dev` boot may take several minutes while Ollama pulls the `bge-m3` embedding model into the `ollama_models` volume. That model is only used after memory is enabled with both `JANUSLY_MEMORY_ENABLED=true` and the tenant `memory.enabled` config flag.
 
@@ -168,8 +170,8 @@ See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the arc
 ### Root commands
 
 ```bash
-pnpm dev             # full local stack: Compose redis/postgres/ollama + migrate + api/worker/web
-pnpm dev:doctor      # free orphaned api/web dev ports (:3001, :5173, :5174); add --compose to tear Compose down too
+pnpm dev             # full local stack: Compose + migrate + api/worker/web; waits for HTTP readiness
+pnpm dev:doctor      # free api/web ports (:3001, :5173, legacy :5174); add --compose to tear Compose down too
 pnpm stop            # docker compose stop (keeps volumes)
 pnpm clean           # docker compose down -v (removes local volumes)
 pnpm migrate         # apply Drizzle migrations against DATABASE_URL
@@ -347,7 +349,7 @@ pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
-pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, :5174) after a crashed local run
+pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, legacy :5174) after a crashed local run
 pnpm --filter @janusly/web test:watch   # Vitest watch
 ```
 

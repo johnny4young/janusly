@@ -197,7 +197,7 @@ describe('replayRunAsValidation', () => {
   })
 
   it('enqueues every root when the DAG has multiple entry points (fan-in to join)', async () => {
-    const result = await replayRunAsValidation({
+    await replayRunAsValidation({
       orgId: 'org-1',
       sourceRunId: 'src-run',
       workflow: forkWorkflow,
