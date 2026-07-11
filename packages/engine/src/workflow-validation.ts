@@ -272,7 +272,7 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
       // branch silently never fires. Reject it at
       // save time with a pointer to the run-input path that DOES work.
       // Quoted string literals are stripped first to avoid false positives.
-      if (/\binputs\./.test(edge.condition.replace(/'[^']*'|"[^"]*"/g, ""))) {
+      if (/\binputs(?:\.|\[)/.test(edge.condition.replace(/'[^']*'|"[^"]*"/g, ""))) {
         issues.push({
           code: "edge_condition_inputs_scope",
           message: "Edge conditions cannot reference inputs.* (node config does not exist on an edge) — use context.input.* for the run input or context.<nodeId>.output.* for a step's output",

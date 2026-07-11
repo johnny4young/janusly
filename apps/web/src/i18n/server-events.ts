@@ -59,7 +59,15 @@ export function tReadinessIssue(issue: ReadinessIssue): string {
     nodeId: issue.nodeId ?? '',
     edgeId: issue.edgeId ?? '',
   })
-  return translated === MISSING ? tServerFallback(issue.message) : translated
+  if (translated !== MISSING) return translated
+  const validationPrefix = 'invalid_workflow_'
+  if (issue.code.startsWith(validationPrefix)) {
+    return tValidationIssue({
+      ...issue,
+      code: issue.code.slice(validationPrefix.length),
+    })
+  }
+  return tServerFallback(issue.message)
 }
 
 /** AI review issue (from `/ai/review-workflow`). */

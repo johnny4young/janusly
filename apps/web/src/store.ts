@@ -93,6 +93,9 @@ type WorkflowStore = {
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
   workflowDirty: boolean
+  /** Monotonic serialized-workflow revision. Canvas position/selection changes
+   *  never increment it; authoring checks use it to invalidate stale findings. */
+  workflowRevision: number
   /** Declared input shape — surfaced in the Inspector + validated at run start. */
   currentWorkflowInputs: WorkflowDefinition['inputs']
   /** Declared output projection map — engine renders templates at terminal status. */
@@ -126,7 +129,7 @@ type WorkflowStore = {
   setAuthReady: (ready: boolean) => void
 
   addNode: (type: string) => void
-  hydrateWorkflow: (workflow: WorkflowDefinition) => void
+  hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
   /** Mark the current workflow as persisted server-side (after a successful save). */
@@ -252,6 +255,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   currentWorkflowName: t('workflow.sampleName') as string,
   currentWorkflowSaved: false,
   workflowDirty: false,
+  workflowRevision: 0,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
   nodes: initialNodes,
@@ -283,6 +287,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const id = crypto.randomUUID().slice(0, 8)
     set((state) => ({
       workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.concat({
         id,
         position: { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
@@ -293,12 +298,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     }))
   },
 
-  hydrateWorkflow: (workflow) => {
-    set({
+  hydrateWorkflow: (workflow, options) => {
+    const saved = options?.saved ?? true
+    const dirty = options?.dirty ?? false
+    set((state) => ({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
-      currentWorkflowSaved: true,
-      workflowDirty: false,
+      currentWorkflowSaved: saved,
+      workflowDirty: dirty,
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
       nodes: (workflow.nodes ?? []).map((node, index) => ({
@@ -324,7 +331,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       eventsHasMore: false,
       runNodes: [],
       runId: null,
-    })
+      workflowRevision: state.workflowRevision + 1,
+    }))
   },
 
   markWorkflowSaved: () => set({ currentWorkflowSaved: true, workflowDirty: false }),
@@ -344,7 +352,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   newWorkflow: () => {
     const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
-    set({
+    set((state) => ({
       currentWorkflowId: id,
       currentWorkflowName: t('workflow.defaultName') as string,
       currentWorkflowSaved: false,
@@ -361,21 +369,38 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       runNodes: [],
       runId: null,
       activeTab: 'copilot',
-    })
+      workflowRevision: state.workflowRevision + 1,
+    }))
   },
 
-  setWorkflowName: (currentWorkflowName) => set({ currentWorkflowName, workflowDirty: true }),
-  setNodes: (nodes) => set({ nodes, workflowDirty: true }),
-  setEdges: (edges) => set({ edges, workflowDirty: true }),
+  setWorkflowName: (currentWorkflowName) => set((state) => ({ currentWorkflowName, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
+  setNodes: (nodes) => set((state) => ({ nodes, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
+  setEdges: (edges) => set((state) => ({ edges, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
   // Position/dimension/selection changes are layout-only (never serialized by
   // `graphToWorkflow`) — only a node/edge REMOVAL is a semantic edit here.
   onNodesChange: (changes) => set((state) => (flowOps
-    ? { nodes: flowOps.applyNodeChanges(changes, state.nodes), ...(changes.some((c) => c.type === 'remove') ? { workflowDirty: true } : {}) }
+    ? {
+        nodes: flowOps.applyNodeChanges(changes, state.nodes),
+        ...(changes.some((c) => c.type === 'remove')
+          ? { workflowDirty: true, workflowRevision: state.workflowRevision + 1 }
+          : {}),
+      }
     : state)),
   onEdgesChange: (changes) => set((state) => (flowOps
-    ? { edges: flowOps.applyEdgeChanges(changes, state.edges), ...(changes.some((c) => c.type === 'remove') ? { workflowDirty: true } : {}) }
+    ? {
+        edges: flowOps.applyEdgeChanges(changes, state.edges),
+        ...(changes.some((c) => c.type === 'remove')
+          ? { workflowDirty: true, workflowRevision: state.workflowRevision + 1 }
+          : {}),
+      }
     : state)),
-  connect: (connection) => set((state) => (flowOps ? { edges: flowOps.addEdge({ ...connection, data: {} }, state.edges), workflowDirty: true } : state)),
+  connect: (connection) => set((state) => (flowOps
+    ? {
+        edges: flowOps.addEdge({ ...connection, data: {} }, state.edges),
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+      }
+    : state)),
 
   selectNode: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
@@ -385,6 +410,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     if (!selectedNodeId) return
     set((state) => ({
       workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.map((node) => node.id === selectedNodeId ? { ...node, data: { ...node.data, config } } : node)
     }))
   },
@@ -394,6 +420,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     if (!selectedNodeId) return
     set((state) => ({
       workflowDirty: true,
+      workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.map((node) => node.id === selectedNodeId
         // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
         // empty so the canvas resolves it via `getNodeLabel(type)`.
@@ -404,6 +431,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   updateEdgeCondition: (id, condition) => set((state) => ({
     workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
     edges: state.edges.map((edge) => edge.id === id
       ? {
           ...edge,

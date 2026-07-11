@@ -54,7 +54,7 @@ import { useDraftAutosave, readDraft, readLatestDraft, clearDraft } from './hook
 import { useConfirm } from './components/ConfirmDialog'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
-import type { ActiveTab, AiMode, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, AiMode, AiReviewIssue, ReadinessResult, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
@@ -93,15 +93,7 @@ type ReviewWorkflowResponse = {
   model?: string
   review?: {
     status: 'pass' | 'warn' | 'fail'
-    issues: Array<{
-      code: string
-      severity: 'info' | 'warn' | 'fail'
-      message: string
-      nodeId?: string
-      edgeId?: string
-      rationale: string
-      suggestion: string
-    }>
+    issues: AiReviewIssue[]
   }
   error?: string
   aiError?: string
@@ -130,6 +122,7 @@ export default function App() {
     currentWorkflowSaved,
     currentWorkflowInputs,
     currentWorkflowOutputs,
+    workflowRevision,
     streamStatus,
     setAuth,
     clearAuth,
@@ -140,7 +133,6 @@ export default function App() {
     getWorkflowJson,
     newWorkflow,
     markWorkflowSaved,
-    markWorkflowDirty,
     selectNode,
     selectEdge,
     updateSelectedNodeConfig,
@@ -182,6 +174,7 @@ export default function App() {
     currentWorkflowSaved: s.currentWorkflowSaved,
     currentWorkflowInputs: s.currentWorkflowInputs,
     currentWorkflowOutputs: s.currentWorkflowOutputs,
+    workflowRevision: s.workflowRevision,
     streamStatus: s.streamStatus,
     setAuth: s.setAuth,
     clearAuth: s.clearAuth,
@@ -192,7 +185,6 @@ export default function App() {
     getWorkflowJson: s.getWorkflowJson,
     newWorkflow: s.newWorkflow,
     markWorkflowSaved: s.markWorkflowSaved,
-    markWorkflowDirty: s.markWorkflowDirty,
     selectNode: s.selectNode,
     selectEdge: s.selectEdge,
     updateSelectedNodeConfig: s.updateSelectedNodeConfig,
@@ -213,7 +205,22 @@ export default function App() {
   const { t } = useT()
 
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
+  const [readinessResult, setReadinessResult] = useState<ReadinessResult | null>(null)
+  const [aiReviewIssues, setAiReviewIssues] = useState<AiReviewIssue[]>([])
   const [currentWorkflowVersion, setCurrentWorkflowVersion] = useState<number | null>(null)
+  const handleReadinessResult = useCallback((result: ReadinessResult | null) => {
+    setReadinessResult(result)
+  }, [])
+
+  // Findings describe one exact serialized graph. Any semantic mutation makes
+  // validation/AI review stale immediately; readiness publishes a fresh,
+  // debounced result through the header badge. Canvas drags do not increment
+  // this revision and therefore preserve the diagnostics.
+  useEffect(() => {
+    setValidationIssues([])
+    setAiReviewIssues([])
+    setReadinessResult(null)
+  }, [workflowRevision])
   // Server-data bootstrap (tools / templates / packs / credentials / runs /
   // saved workflows / dead letters / usage / ai-health) + the `refreshPlatform`
   // fan-out, fired once `authReady` flips.
@@ -335,7 +342,7 @@ export default function App() {
    * content captured by the autosave). Declining discards the draft so the
    * author isn't re-prompted forever.
    */
-  const maybeRestoreDraft = useCallback(async (workflowId: string): Promise<void> => {
+  const maybeRestoreDraft = useCallback(async (workflowId: string, savedBase = false): Promise<void> => {
     const draft = readDraft(workflowId)
     if (!draft) return
     const restore = await confirm({
@@ -345,13 +352,14 @@ export default function App() {
       cancelLabel: t('draftRestore.discard') as string,
     })
     if (restore) {
-      hydrateWorkflow(draft.workflow)
-      // The restored content is NOT server-side — keep the autosave + guards on.
-      markWorkflowDirty()
+      // The draft content itself is not server-side. `savedBase` only means a
+      // parent workflow entity exists, so server-backed auxiliary panels may
+      // load while autosave/unsaved guards remain active.
+      hydrateWorkflow(draft.workflow, { saved: savedBase, dirty: true })
     } else {
       clearDraft(workflowId)
     }
-  }, [confirm, hydrateWorkflow, markWorkflowDirty, t])
+  }, [confirm, hydrateWorkflow, t])
 
   // Crash recovery: once per app load, offer the most recent draft in this org
   // — it may belong to a never-saved workflow whose random id isn't reachable
@@ -435,8 +443,13 @@ export default function App() {
 
   const validateWorkflow = useCallback(async () => {
     try {
+      const revisionAtRequest = useWorkflowStore.getState().workflowRevision
       const workflow = getWorkflowJson()
       const result = await api('/validate', { method: 'POST', body: JSON.stringify(workflow) }) as ValidationResponse
+      // A response for an older graph must not repopulate Problems after the
+      // semantic-revision effect has cleared it. Returning false also prevents
+      // saveWorkflow from persisting a graph that changed during validation.
+      if (useWorkflowStore.getState().workflowRevision !== revisionAtRequest) return false
       setValidationIssues(result.issues ?? [])
       addToast(result.valid ? t('toasts.validationOk') : t('toasts.validationNeedsFix'), result.valid ? 'success' : 'error')
       return result.valid
@@ -535,7 +548,7 @@ export default function App() {
         setActiveTab('inspector')
         // A local draft newer than the saved version may exist for this
         // workflow (autosaved unsaved edits from a prior session).
-        await maybeRestoreDraft(id)
+        await maybeRestoreDraft(id, true)
       }
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.workflowOpenFailed'), 'error')
@@ -745,7 +758,7 @@ export default function App() {
       throw new Error(t('toasts.aiResponseInvalid'))
     }
 
-    hydrateWorkflow(result)
+    hydrateWorkflow(result, { saved: false, dirty: true })
     setValidationIssues([])
     const mode = result.mode ?? 'fallback'
     const tone = mode === 'error' ? 'error' : result.aiError ? 'info' : 'success'
@@ -775,6 +788,8 @@ export default function App() {
   }, [getWorkflowJson, t])
 
   const reviewWorkflow = useCallback(async () => {
+    setAiReviewIssues([])
+    const revisionAtRequest = useWorkflowStore.getState().workflowRevision
     const workflow = getWorkflowJson()
     const result = await api('/ai/review-workflow', {
       method: 'POST',
@@ -782,9 +797,13 @@ export default function App() {
     }) as ReviewWorkflowResponse
 
     if (result.error) throw new Error(result.error)
+    const review = result.review ?? { status: 'fail' as const, issues: [] }
+    if (useWorkflowStore.getState().workflowRevision === revisionAtRequest) {
+      setAiReviewIssues(review.issues)
+    }
     return {
       mode: result.mode ?? 'fallback',
-      review: result.review ?? { status: 'fail' as const, issues: [] },
+      review,
       model: result.model,
       aiError: result.aiError,
     }
@@ -846,7 +865,11 @@ export default function App() {
       runNodes={runNodes}
       selectedNode={selectedNode}
       selectedEdge={selectedEdge}
+      workflowNodes={nodes}
+      workflowEdges={edges}
       validationIssues={validationIssues}
+      readinessResult={readinessResult}
+      aiReviewIssues={aiReviewIssues}
       tools={tools}
       templates={templates}
       solutionPacks={solutionPacks}
@@ -862,7 +885,7 @@ export default function App() {
       onUseTemplate={(workflow) => {
         void (async () => {
           if (!await confirmReplaceCanvas()) return
-          hydrateWorkflow(workflow)
+          hydrateWorkflow(workflow, { saved: false, dirty: true })
           setValidationIssues([])
           setActiveTab('inspector')
         })()
@@ -877,6 +900,7 @@ export default function App() {
       onUpdateNodeConfig={updateSelectedNodeConfig}
       onUpdateNodeType={updateSelectedNodeType}
       onUpdateEdgeCondition={updateEdgeCondition}
+      onValidateWorkflow={validateWorkflow}
       onInsertSnippet={() => setSnippetMenuOpen(true)}
       onApproveNode={approveNode}
       onSubmitHumanForm={submitHumanForm}
@@ -906,7 +930,7 @@ export default function App() {
           </div>
           <div className="top-bar-right">
             <div className="top-bar-pill-group">
-              <WorkflowReadinessBadge />
+              <WorkflowReadinessBadge onResult={handleReadinessResult} />
               <WorkflowHealthBadge workflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined} />
             </div>
             <button
@@ -1093,7 +1117,7 @@ export default function App() {
               if (tmpl) {
                 void (async () => {
                   if (!await confirmReplaceCanvas()) return
-                  hydrateWorkflow(tmpl.workflow)
+                  hydrateWorkflow(tmpl.workflow, { saved: false, dirty: true })
                   setValidationIssues([])
                   setActiveTab('inspector')
                 })()

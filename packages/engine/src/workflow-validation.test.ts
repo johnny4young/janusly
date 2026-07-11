@@ -492,6 +492,19 @@ describe('validateWorkflow — reserved ids + edge scopes (fourth-wave B-01/B-04
     expect(result.issues.map(i => i.code)).toContain('edge_condition_inputs_scope')
   })
 
+  it('also rejects bracket-indexed inputs paths in edge conditions', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b', condition: 'inputs[0].priority === "high"' }],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues.map(i => i.code)).toContain('edge_condition_inputs_scope')
+  })
+
   it('does NOT flag a quoted string literal that merely contains "inputs."', () => {
     const result = validateWorkflow({
       nodes: [

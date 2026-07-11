@@ -37,12 +37,13 @@ import { SENSITIVE_KEY_PATTERN } from "./safe-persist";
 /** Per-issue severity. `fail` blocks production-mode runs; `warn` is informational. */
 export type ReadinessSeverity = "warn" | "fail";
 
-/** One readiness finding. `code` is the stable key the web matches on for localisation; `nodeId` set when locatable. */
+/** One readiness finding. `code` is the stable key the web matches on for localisation; entity ids are set when locatable. */
 export type ReadinessIssue = {
   code: string;
   severity: ReadinessSeverity;
   message: string;
   nodeId?: string;
+  edgeId?: string;
   /** Optional human-readable hint surfaced next to the issue in the badge expansion. */
   suggestion?: string;
 };

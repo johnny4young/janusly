@@ -36,6 +36,19 @@ type WorkflowNodeData = {
 }
 type WorkflowEdgeData = { condition?: string }
 export type ValidationIssue = { code: string; message: string; nodeId?: string; edgeId?: string }
+export type ReadinessIssue = ValidationIssue & {
+  severity: 'warn' | 'fail'
+  suggestion?: string
+}
+export type ReadinessResult = {
+  status: 'pass' | 'warn' | 'fail'
+  issues: ReadinessIssue[]
+}
+export type AiReviewIssue = ValidationIssue & {
+  severity: 'info' | 'warn' | 'fail'
+  rationale: string
+  suggestion: string
+}
 export type ToolSchema = {
   name: string
   description: string

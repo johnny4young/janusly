@@ -514,6 +514,7 @@ export const workflowsRoutes: Route[] = [
           severity: "fail" as const,
           message: issue.message,
           nodeId: issue.nodeId,
+          edgeId: issue.edgeId,
         }));
         return sendJson(res, { status: "fail", issues } satisfies ReadinessResult);
       }

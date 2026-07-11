@@ -1,15 +1,14 @@
 /**
- * Regression tests for the Inspector's selection-change hygiene (fourth-wave
- * audit B-03): the uncontrolled edge-condition textarea must be keyed by edge
- * id (or React reuses the DOM node and edge B shows — and on blur COMMITS —
- * edge A's stale condition), and a JSON parse error from node A must not
- * linger under node B's card.
+ * Regression tests for Inspector selection-change hygiene: each selected edge
+ * shows its own controlled condition, and a JSON parse error from node A must
+ * not linger under node B's card.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { InspectorPanel } from './InspectorPanel'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
+import { requestAuthoringFocus } from './authoring-focus-bus'
 
 function makeEdge(id: string, condition: string): WorkflowGraphEdge {
   return { id, source: `${id}-src`, target: `${id}-dst`, data: { condition } }
@@ -30,6 +29,8 @@ function renderPanel(overrides: Partial<Parameters<typeof InspectorPanel>[0]> = 
     runNodes: [],
     validationIssues: [],
     tools: [],
+    workflowNodes: [],
+    workflowEdges: [],
     onUpdateNodeConfig: vi.fn(),
     onUpdateNodeType: vi.fn(),
     onUpdateEdgeCondition: vi.fn(),
@@ -62,8 +63,8 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
     // this still reads edge A's text — which blur would then WRITE onto edge B.
     expect(second.value).toBe('context.b.output.count > 0')
 
-    fireEvent.blur(second)
-    expect(onUpdateEdgeCondition).toHaveBeenCalledWith('edge-b', 'context.b.output.count > 0')
+    fireEvent.change(second, { target: { value: 'context.b.output.count >= 1' } })
+    expect(onUpdateEdgeCondition).toHaveBeenCalledWith('edge-b', 'context.b.output.count >= 1')
     expect(onUpdateEdgeCondition).not.toHaveBeenCalledWith('edge-b', 'context.a.output.ok === true')
   })
 
@@ -79,9 +80,16 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
     // Node B never had a parse error; node A's banner must not follow it.
     expect(document.querySelector('.issue-error')).toBeNull()
   })
+
+  it('moves focus to the exact selected entity requested by Problems', async () => {
+    const node = makeNode('node-a')
+    requestAuthoringFocus({ kind: 'node', id: 'node-a' })
+    renderPanel({ selectedNode: node, workflowNodes: [node] })
+    await waitFor(() => expect(screen.getByTestId('inspector-node-node-a')).toHaveFocus())
+  })
 })
 
-describe('<InspectorPanel /> failed-node header (O-01)', () => {
+describe('<InspectorPanel /> failed-node header', () => {
   it('surfaces the error message + attempt · duration when the selected node failed', () => {
     renderPanel({
       selectedNode: makeNode('http_call'),

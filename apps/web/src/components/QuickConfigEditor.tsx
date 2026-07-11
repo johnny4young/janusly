@@ -8,10 +8,11 @@
  * - `InspectorPanel.tsx` (rendered inside the per-node card).
  */
 
-import type { JsonObject, ToolSchema } from '../types'
+import type { JsonObject, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
 import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
+import { ExpressionAssistant } from './ExpressionAssistant'
 import {
   asJsonObject,
   fieldId,
@@ -28,12 +29,18 @@ export function QuickConfigEditor({
   type,
   config,
   tools,
+  workflowNodes,
+  workflowEdges,
+  workflowInputs,
   onUpdate,
 }: {
   nodeId: string
   type: string
   config: JsonObject
   tools: ToolSchema[]
+  workflowNodes: WorkflowGraphNode[]
+  workflowEdges: WorkflowGraphEdge[]
+  workflowInputs?: WorkflowInputSchemaShape
   onUpdate: (config: Record<string, unknown>) => void
 }) {
   const { t } = useT()
@@ -162,7 +169,17 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.branchExpression') as string} value={readConfigString(config, 'expression')} onChange={value => patch({ expression: value })} />
+        <ExpressionAssistant
+          id={`${nodeId}-branch-expression`}
+          label={t('rightPanel.quickConfig.branchExpression') as string}
+          value={readConfigString(config, 'expression')}
+          onChange={value => patch({ expression: value })}
+          nodes={workflowNodes}
+          edges={workflowEdges}
+          targetNodeId={nodeId}
+          mode="node"
+          workflowInputs={workflowInputs}
+        />
       </section>
     )
   }

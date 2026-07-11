@@ -9,7 +9,7 @@
  * - `RightPanel.tsx` (mounted in the inspector branch of the dispatcher).
  */
 
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Copy, GitBranch, Layers } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { formatNodeDuration, formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
@@ -18,6 +18,13 @@ import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
 import { pickErrorMessage } from './recovery-dialog/helpers'
 import { QuickConfigEditor } from './QuickConfigEditor'
+import { ExpressionAssistant } from './ExpressionAssistant'
+import {
+  AUTHORING_FOCUS_EVENT,
+  consumeAuthoringFocus,
+  parseAuthoringFocusEvent,
+  type AuthoringFocusRequest,
+} from './authoring-focus-bus'
 
 type InspectorPanelProps = {
   selectedNode: WorkflowGraphNode | null
@@ -25,6 +32,8 @@ type InspectorPanelProps = {
   runNodes: RunNode[]
   validationIssues: ValidationIssue[]
   tools: ToolSchema[]
+  workflowNodes: WorkflowGraphNode[]
+  workflowEdges: WorkflowGraphEdge[]
   currentWorkflowName?: string
   currentWorkflowInputs?: WorkflowDefinition['inputs']
   currentWorkflowOutputs?: WorkflowDefinition['outputs']
@@ -41,6 +50,8 @@ export function InspectorPanel({
   runNodes,
   validationIssues,
   tools,
+  workflowNodes,
+  workflowEdges,
   currentWorkflowName,
   currentWorkflowInputs,
   currentWorkflowOutputs,
@@ -52,6 +63,8 @@ export function InspectorPanel({
   const { t } = useT()
   const addToast = useWorkflowStore(state => state.addToast)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const entityRef = useRef<HTMLElement | null>(null)
+  const [focusRequest, setFocusRequest] = useState<AuthoringFocusRequest | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
 
@@ -61,6 +74,26 @@ export function InspectorPanel({
   React.useEffect(() => {
     setJsonError(null)
   }, [selectedNodeId])
+
+  useEffect(() => {
+    const pending = consumeAuthoringFocus()
+    if (pending) setFocusRequest(pending)
+    const onFocusRequest = (event: Event) => {
+      const request = consumeAuthoringFocus() ?? parseAuthoringFocusEvent(event)
+      if (request) setFocusRequest(request)
+    }
+    window.addEventListener(AUTHORING_FOCUS_EVENT, onFocusRequest)
+    return () => window.removeEventListener(AUTHORING_FOCUS_EVENT, onFocusRequest)
+  }, [])
+
+  useEffect(() => {
+    if (!focusRequest) return
+    const matchesNode = focusRequest.kind === 'node' && selectedNode?.id === focusRequest.id
+    const matchesEdge = focusRequest.kind === 'edge' && selectedEdge?.id === focusRequest.id
+    if (!matchesNode && !matchesEdge) return
+    entityRef.current?.focus({ preventScroll: false })
+    setFocusRequest(null)
+  }, [focusRequest, selectedEdge?.id, selectedNode?.id])
 
   // Operators paste node ids into logs / run filters; a one-click copy beats
   // hand-selecting the mono text. Degrades to an error toast where the
@@ -89,7 +122,7 @@ export function InspectorPanel({
     }
 
     return (
-      <section className="panel-card">
+      <section ref={entityRef} className="panel-card" tabIndex={-1} data-testid={`inspector-node-${selectedNode.id}`}>
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
@@ -147,6 +180,9 @@ export function InspectorPanel({
           type={selectedNode.data.type}
           config={selectedNode.data.config ?? {}}
           tools={tools}
+          workflowNodes={workflowNodes}
+          workflowEdges={workflowEdges}
+          workflowInputs={currentWorkflowInputs}
           onUpdate={onUpdateNodeConfig}
         />
 
@@ -188,20 +224,20 @@ export function InspectorPanel({
 
   if (selectedEdge) {
     return (
-      <section className="panel-card">
+      <section ref={entityRef} className="panel-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
-        <label className="field-label" htmlFor="edge-condition">{t('rightPanel.inspector.runOnlyWhen')}</label>
-        {/* Keyed by edge id: the textarea is uncontrolled (defaultValue), so
-            without a key React reuses the DOM node across edge selections —
-            edge B would show (and on blur COMMIT) edge A's stale condition. */}
-        <textarea
+        <ExpressionAssistant
           key={selectedEdge.id}
           id="edge-condition"
-          className="code-field code-field-short"
-          defaultValue={selectedEdge.data?.condition ?? ''}
-          onBlur={(event) => onUpdateEdgeCondition(selectedEdge.id, event.target.value.trim())}
-          placeholder={t('rightPanel.inspector.conditionPlaceholder') as string}
+          label={t('rightPanel.inspector.runOnlyWhen') as string}
+          value={selectedEdge.data?.condition ?? ''}
+          onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
+          nodes={workflowNodes}
+          edges={workflowEdges}
+          targetNodeId={selectedEdge.source}
+          mode="edge"
+          workflowInputs={currentWorkflowInputs}
         />
       </section>
     )

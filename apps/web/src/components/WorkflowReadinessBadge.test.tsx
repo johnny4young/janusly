@@ -16,7 +16,7 @@ describe('<WorkflowReadinessBadge />', () => {
   beforeEach(() => {
     initI18n('en')
     vi.mocked(api).mockReset()
-    useWorkflowStore.setState({ activeTab: 'home', selectedNodeId: null, selectedEdgeId: null, nodes: initialNodes })
+    useWorkflowStore.setState({ activeTab: 'home', selectedNodeId: null, selectedEdgeId: null, nodes: initialNodes, workflowRevision: 0 })
   })
 
   afterEach(() => {
@@ -42,6 +42,19 @@ describe('<WorkflowReadinessBadge />', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Production readiness: Production Ready' })).toBeInTheDocument()
     })
+  })
+
+  it('publishes results and coalesces rapid semantic revisions into one refetch', async () => {
+    const onResult = vi.fn()
+    vi.mocked(api).mockResolvedValue({ status: 'pass', issues: [] })
+    render(<WorkflowReadinessBadge onResult={onResult} />)
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith({ status: 'pass', issues: [] }))
+
+    vi.mocked(api).mockClear()
+    useWorkflowStore.setState({ workflowRevision: 1 })
+    useWorkflowStore.setState({ workflowRevision: 2 })
+    await waitFor(() => expect(api).toHaveBeenCalledOnce())
+    expect(onResult).toHaveBeenCalledWith(null)
   })
 
   it('deep-links a retry blocker to the selected node resilience controls', async () => {

@@ -14,6 +14,7 @@ beforeEach(() => {
       authReady: false,
       currentWorkflowId: 'ui-test',
       currentWorkflowName: 'Sample workflow',
+      workflowRevision: 0,
       nodes: [],
       edges: [],
       selectedNodeId: null,
@@ -73,6 +74,15 @@ describe('useWorkflowStore', () => {
     // label and the e2e tests would fail.
     expect(state.nodes[0].data.label).toBe('')
     expect(state.nodes[1].data.label).toBe('')
+  })
+
+  it('hydrates generated/template content as an unsaved dirty draft when requested', () => {
+    useWorkflowStore.getState().hydrateWorkflow(
+      { id: 'draft', name: 'Draft', nodes: [], edges: [] },
+      { saved: false, dirty: true },
+    )
+    expect(useWorkflowStore.getState().currentWorkflowSaved).toBe(false)
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 
   it('getWorkflowJson serializes the graph back to the DAG contract', () => {
@@ -295,7 +305,7 @@ describe('useWorkflowStore.bumpPlatformVersion (coalesce)', () => {
   })
 })
 
-describe('useWorkflowStore.workflowDirty (S-01 unsaved-work signal)', () => {
+describe('useWorkflowStore semantic workflow signals', () => {
   // The change reducers no-op until React Flow's ops register (CanvasWorkspace
   // does it at import time in production) — stub the two we exercise here.
   beforeEach(() => {
@@ -356,5 +366,20 @@ describe('useWorkflowStore.workflowDirty (S-01 unsaved-work signal)', () => {
 
     useWorkflowStore.getState().onNodesChange([{ id: nodeId, type: 'remove' }])
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+  })
+
+  it('increments workflowRevision only for serialized graph changes', () => {
+    expect(useWorkflowStore.getState().workflowRevision).toBe(0)
+    useWorkflowStore.getState().addNode('http')
+    const nodeId = useWorkflowStore.getState().nodes[0].id
+    expect(useWorkflowStore.getState().workflowRevision).toBe(1)
+
+    useWorkflowStore.getState().onNodesChange([
+      { id: nodeId, type: 'position', position: { x: 300, y: 200 } },
+    ])
+    expect(useWorkflowStore.getState().workflowRevision).toBe(1)
+
+    useWorkflowStore.getState().onNodesChange([{ id: nodeId, type: 'remove' }])
+    expect(useWorkflowStore.getState().workflowRevision).toBe(2)
   })
 })

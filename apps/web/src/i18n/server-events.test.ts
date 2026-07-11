@@ -36,6 +36,17 @@ describe('tReadinessIssue', () => {
     const result = tReadinessIssue({ code: 'sensitive_action_missing_approval', severity: 'fail', message: 'fb' })
     expect(result).toBe('Write-side step has no approval upstream')
   })
+
+  it('localizes structural readiness codes through the validation catalog', () => {
+    initI18n('es')
+    const result = tReadinessIssue({
+      code: 'invalid_workflow_condition_invalid_expression',
+      severity: 'fail',
+      message: 'Unsupported expression token: process.exit()',
+      nodeId: 'gate',
+    })
+    expect(result).toBe('La expresión de la condición no es válida')
+  })
 })
 
 describe('tAiReviewIssue', () => {

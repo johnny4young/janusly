@@ -16,7 +16,12 @@ describe('evaluateExpression', () => {
   })
 
   it('rejects expressions that try to execute arbitrary code', () => {
-    expect(validateExpression('process.exit()').valid).toBe(false)
+    expect(validateExpression('process.exit()')).toEqual({
+      valid: false,
+      message: 'Unsupported expression token: process.exit()',
+      code: 'unsupported_token',
+      token: 'process.exit()',
+    })
     expect(validateExpression('context.http.output.ok; process.exit()').valid).toBe(false)
   })
 

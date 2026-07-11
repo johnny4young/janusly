@@ -22,9 +22,10 @@
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, Credential, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
+import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
 import { EmptyView, PanelChrome, PanelSearch } from './panel-primitives'
 // Tab-specific panels are code-split out of the eager App chunk: each is only
 // rendered when the operator navigates to its own tab (never on Home or the
@@ -60,7 +61,11 @@ export type RightPanelProps = {
   runNodes: RunNode[]
   selectedNode: WorkflowGraphNode | null
   selectedEdge: WorkflowGraphEdge | null
+  workflowNodes: WorkflowGraphNode[]
+  workflowEdges: WorkflowGraphEdge[]
   validationIssues: ValidationIssue[]
+  readinessResult: ReadinessResult | null
+  aiReviewIssues: AiReviewIssue[]
   tools: ToolSchema[]
   templates: Template[]
   solutionPacks: SolutionPackPublic[]
@@ -86,6 +91,7 @@ export type RightPanelProps = {
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
+  onValidateWorkflow(): Promise<boolean>
   /** Opens the "Insert snippet…" dialog (also bound to a Cmd+K palette entry). */
   onInsertSnippet: () => void
   onApproveNode: (nodeId: string) => void
@@ -159,12 +165,21 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   if (props.tab === 'inspector') return (
     <PanelChrome title={t('rightPanel.inspector.title') as string} description={t('rightPanel.inspector.description') as string} icon={<GitBranch size={18} />}>
+      <AuthoringProblemsPanel
+        validationIssues={props.validationIssues}
+        readiness={props.readinessResult}
+        aiReviewIssues={props.aiReviewIssues}
+        workflowEdges={props.workflowEdges}
+        onValidate={props.onValidateWorkflow}
+      />
       <InspectorPanel
         selectedNode={props.selectedNode}
         selectedEdge={props.selectedEdge}
         runNodes={props.runNodes}
         validationIssues={props.validationIssues}
         tools={props.tools}
+        workflowNodes={props.workflowNodes}
+        workflowEdges={props.workflowEdges}
         currentWorkflowName={props.currentWorkflowName}
         currentWorkflowInputs={props.currentWorkflowInputs}
         currentWorkflowOutputs={props.currentWorkflowOutputs}

@@ -10845,6 +10845,181 @@ button.we-recovery-heatmap__cell--clickable:focus-visible {
   }
 }
 
+/* Consolidated authoring diagnostics + graph-aware expression context. */
+.we-authoring-problems {
+  display: grid;
+  gap: 12px;
+}
+
+.we-authoring-problems h3 {
+  margin: 2px 0;
+}
+
+.we-authoring-problems__empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--we-success) 28%, var(--we-line));
+  border-radius: 9px;
+  color: var(--we-success);
+  background: color-mix(in srgb, var(--we-success) 7%, var(--we-surface));
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.we-authoring-problems__list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.we-authoring-problems__list > li {
+  border-left: 3px solid var(--we-line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.we-authoring-problems__list > li[data-severity="fail"] { border-left-color: var(--we-danger); }
+.we-authoring-problems__list > li[data-severity="warn"] { border-left-color: var(--we-warning); }
+.we-authoring-problems__list > li[data-severity="info"] { border-left-color: var(--we-accent); }
+
+.we-authoring-problems__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 9px 11px;
+  border: 1px solid var(--we-line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  text-align: left;
+  color: var(--we-ink);
+  background: var(--we-surface);
+}
+
+button.we-authoring-problems__row:hover {
+  border-color: var(--we-primary);
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface));
+}
+
+button.we-authoring-problems__row:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: -2px;
+}
+
+.we-authoring-problems__severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: start;
+  color: var(--we-ink-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.we-authoring-problems__severity[data-severity="fail"] { color: var(--we-danger); }
+.we-authoring-problems__severity[data-severity="warn"] { color: var(--we-warning); }
+.we-authoring-problems__severity[data-severity="info"] { color: var(--we-accent); }
+
+.we-authoring-problems__message {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.we-authoring-problems__meta {
+  grid-column: 2;
+  color: var(--we-ink-soft);
+  font-size: 10px;
+}
+
+.we-authoring-problems__open {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--we-primary);
+}
+
+.we-expression-assistant {
+  display: grid;
+  gap: 7px;
+}
+
+.we-expression-assistant__header {
+  align-items: center;
+}
+
+.we-expression-assistant__status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--we-success);
+  font-size: 11px;
+}
+
+.we-expression-assistant__status--error {
+  color: var(--we-danger);
+}
+
+.we-expression-assistant__options {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 9px;
+  background: var(--we-surface-muted);
+}
+
+.we-expression-assistant__options > p {
+  margin: 0;
+}
+
+.we-expression-assistant__group {
+  display: grid;
+  gap: 6px;
+}
+
+.we-expression-assistant__group > strong {
+  color: var(--we-ink-soft);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.we-expression-assistant__tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.we-expression-assistant__token {
+  max-width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  background: var(--we-surface);
+  color: var(--we-primary);
+  overflow-wrap: anywhere;
+}
+
+.we-expression-assistant__token:hover {
+  border-color: var(--we-primary);
+  background: color-mix(in srgb, var(--we-primary) 6%, var(--we-surface));
+}
+
+.we-expression-assistant__token:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 1px;
+}
+
 /* "First recovered run" onboarding banner — a soft cobalt guidance overlay
  * mirroring .we-budget-banner's geometry. Lower z-index than the budget
  * block (a hard stop outranks a nudge); the two rarely co-occur. */
