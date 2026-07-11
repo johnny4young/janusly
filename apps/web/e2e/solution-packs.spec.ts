@@ -39,7 +39,17 @@ test('Solution Packs install, sample-run, and failure injection flows work from 
   await incidentPack.getByRole('button', { name: 'Break a node', exact: true }).click()
   await expect(page.getByText('Demo failure injected')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
-  await expect(page.locator('[data-testid^="dlq-row-"]').filter({ hasText: 'page_oncall' }).first()).toBeVisible({ timeout: 30_000 })
+  const focusedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
+  await expect(focusedFailure).toBeVisible({ timeout: 30_000 })
+  await expect(focusedFailure).toBeFocused()
+  const targetInMainViewport = await focusedFailure.evaluate((node) => {
+    const main = node.closest('.workspace-main')
+    if (!main) return false
+    const target = node.getBoundingClientRect()
+    const viewport = main.getBoundingClientRect()
+    return target.top >= viewport.top - 2 && target.bottom <= viewport.bottom + 2
+  })
+  expect(targetInMainViewport).toBe(true)
 
   expect(browserErrors).toEqual([])
 })
@@ -47,7 +57,8 @@ test('Solution Packs install, sample-run, and failure injection flows work from 
 test('Solution Packs remains usable on mobile without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
-  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  await page.getByRole('button', { name: 'Navigation' }).click()
+  await page.locator('#workspace-sidebar').getByRole('button', { name: 'Packs', exact: true }).click()
 
   await expect(page.getByRole('heading', { name: 'Solution Packs', exact: true })).toBeVisible()
   await expect(page.locator('.list-card').filter({ hasText: 'Support escalation' })).toBeVisible()

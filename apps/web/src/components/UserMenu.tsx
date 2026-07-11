@@ -45,10 +45,13 @@ import {
 } from '../theme'
 import { LocaleSwitcher } from '../i18n/LocaleSwitcher'
 import type { ActiveTab, AiHealth } from '../types'
+import { parseDocsUrl } from '../docs-link'
 
 type UserMenuProps = {
   aiHealth?: AiHealth | null
   budgetGuardOn?: boolean | null
+  /** Validated build-time docs capability; absent hides the menu item. */
+  docsUrl?: string | null
   onOpenTab?: (tab: ActiveTab) => void
   onOpenShortcuts?: () => void
 }
@@ -88,8 +91,9 @@ function resolveEnv(): 'sandbox' | 'production' {
   return 'sandbox'
 }
 
-export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onOpenShortcuts }: UserMenuProps) {
+export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null, onOpenTab, onOpenShortcuts }: UserMenuProps) {
   const { t } = useT()
+  const safeDocsUrl = parseDocsUrl(docsUrl)
   const user = useWorkflowStore(state => state.user)
   const userId = useWorkflowStore(state => state.userId)
   const orgId = useWorkflowStore(state => state.orgId)
@@ -387,17 +391,20 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, onOpenTab, onO
               <strong>{t('userMenu.item.shortcuts')}</strong>
               <span className="user-menu__item-kbd">?</span>
             </button>
-            <button
-              type="button"
-              className="user-menu__item"
-              onClick={comingSoon}
-              title={t('userMenu.item.docsUnavailable')}
-              aria-label={t('userMenu.item.docsUnavailable')}
-            >
-              <span className="user-menu__item-ic" aria-hidden="true"><BookOpen size={12} /></span>
-              <strong>{t('userMenu.item.docs')}</strong>
-              <span></span>
-            </button>
+            {safeDocsUrl && (
+              <a
+                className="user-menu__item"
+                href={safeDocsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="user-menu-docs"
+                onClick={() => setOpen(false)}
+              >
+                <span className="user-menu__item-ic" aria-hidden="true"><BookOpen size={12} /></span>
+                <strong>{t('userMenu.item.docs')}</strong>
+                <span></span>
+              </a>
+            )}
             {isSupabaseConfigured && (user || userId) && (
               <button type="button" className="user-menu__item user-menu__item--danger" onClick={handleSignOut}>
                 <span className="user-menu__item-ic" aria-hidden="true"><LogOut size={12} /></span>

@@ -65,6 +65,7 @@ import {
 import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 import { useT } from '../i18n'
+import { MOBILE_WORKSPACE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 
 type BuilderSidebarProps = {
   workflowName: string
@@ -262,6 +263,7 @@ export function BuilderSidebar({
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
+  const isMobile = useMediaQuery(MOBILE_WORKSPACE_QUERY)
   // Surface unsaved canvas edits in the header so the operator never loses
   // track of save state before navigating away or running.
   const currentWorkflowSaved = useWorkflowStore(state => state.currentWorkflowSaved)
@@ -293,10 +295,12 @@ export function BuilderSidebar({
 
   // Reflect collapsed state on the workspace shell so the grid column
   // shrinks from 300px to 56px. The data attribute is read by CSS.
+  const visuallyCollapsed = collapsed && !isMobile
+
   useEffect(() => {
-    document.documentElement.dataset.sidebarCollapsed = collapsed ? 'true' : 'false'
+    document.documentElement.dataset.sidebarCollapsed = visuallyCollapsed ? 'true' : 'false'
     return () => { document.documentElement.dataset.sidebarCollapsed = 'false' }
-  }, [collapsed])
+  }, [visuallyCollapsed])
 
   const toggleGroup = (key: string) => {
     setOpenGroups(prev => {
@@ -362,7 +366,7 @@ export function BuilderSidebar({
   const connectionLabel = streamStatus === 'connected' ? t('sidebar.footer.connected') : streamStatus
 
   return (
-    <aside className="builder-sidebar" data-collapsed={collapsed ? 'true' : 'false'}>
+    <aside className="builder-sidebar" data-collapsed={visuallyCollapsed ? 'true' : 'false'}>
       {/* Workflow header card */}
       <div className={`sb-workflow ${isProduction ? 'sb-workflow--prod' : 'sb-workflow--sandbox'}`}>
         <div className="sb-workflow__top">
@@ -425,6 +429,7 @@ export function BuilderSidebar({
         className="sb-ai-strip"
         type="button"
         onClick={() => onOpenTab('copilot')}
+        data-mobile-nav-close="true"
         title={(aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')) as string}
       >
         <span className="sb-ai-strip__ic" aria-hidden="true"><Sparkles size={12} /></span>
@@ -477,6 +482,7 @@ export function BuilderSidebar({
                           type="button"
                           aria-current={active ? 'page' : undefined}
                           onClick={() => onOpenTab(item.tab)}
+                          data-mobile-nav-close="true"
                           title={`${label} — ${helper}`}
                         >
                           <span className="sb-view__ic" aria-hidden="true">{item.icon}</span>

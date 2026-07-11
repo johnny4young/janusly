@@ -30,6 +30,7 @@ const baseProps = {
   onOpenRun: vi.fn(),
   onApproveNode: vi.fn(),
   onSubmitHumanForm: vi.fn(),
+  onOpenRecoveryQueue: vi.fn(),
 }
 
 const baseMetrics = {
@@ -53,6 +54,7 @@ beforeEach(() => {
   baseProps.onOpenRun = vi.fn()
   baseProps.onApproveNode = vi.fn()
   baseProps.onSubmitHumanForm = vi.fn()
+  baseProps.onOpenRecoveryQueue = vi.fn()
 })
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -332,7 +334,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     expect(screen.getByTestId('recovery-center-metric-sla')).toBeInTheDocument()
   })
 
-  it('routes Open queue → runs tab', async () => {
+  it('hands Open queue to the focused recovery navigation callback', async () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
@@ -349,7 +351,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     />)
     await waitFor(() => expect(screen.getByTestId('recovery-center-queue-open-all')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('recovery-center-queue-open-all'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
   })
 
   it('routes Open clusters → operations tab', async () => {
@@ -411,7 +413,7 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     />)
     await waitFor(() => expect(screen.getByTestId('recovery-center-metric-failures')).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('recovery-center-metric-failures'))
-    expect(baseProps.onOpenTab).toHaveBeenCalledWith('runs')
+    expect(baseProps.onOpenRecoveryQueue).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByTestId('recovery-center-metric-mttr'))
     expect(baseProps.onOpenTab).toHaveBeenLastCalledWith('operations')
     fireEvent.click(screen.getByTestId('recovery-center-metric-approvals'))

@@ -143,6 +143,7 @@ only to select the safe provider/model/limit behavior.
 | `VITE_SUPABASE_URL` | unset | `apps/web/src/auth.ts` | Browser Supabase URL for the login UI. |
 | `VITE_SUPABASE_ANON_KEY` | unset | `apps/web/src/auth.ts` | Browser Supabase anon key for the login UI. |
 | `VITE_API_URL` | `http://localhost:3001` | `apps/web/src/api.ts` | API base URL compiled into the Vite web app. |
+| `VITE_DOCS_URL` | unset | `apps/web/src/docs-link.ts` | Optional credential-free HTTPS documentation URL compiled into the web app. When unset or invalid, Docs controls are hidden. |
 | `JANUSLY_PUBLIC_APP_URL` | unset | reports, recovery handoff, alerts | Public web base URL used in generated links. Falls back to `JANUSLY_WEB_BASE_URL` in handoff routes. |
 | `WORKOS_CLIENT_ID` | unset | `apps/api/src/workos.ts` | WorkOS client id for SSO code exchange. |
 | `WORKOS_API_KEY` | unset | `apps/api/src/workos.ts` | WorkOS API key for SSO profile exchange. Secret; keep in `.env` or vault only. |

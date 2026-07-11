@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { CircleCheck, Download, FlaskConical, GitCompare, Inbox, Sparkles, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
@@ -37,6 +37,12 @@ import {
   toStatusFilter,
   useRecoveryQueueFilters,
 } from '../hooks/useRecoveryQueueFilters'
+import {
+  consumeRecoveryQueueFocus,
+  parseRecoveryQueueFocusEvent,
+  RECOVERY_QUEUE_FOCUS_EVENT,
+  type RecoveryQueueFocusRequest,
+} from './recovery-queue-focus-bus'
 
 /** Row PITCH in CSS pixels for the virtualized DLQ list — the full
  *  distance from one row's top to the next row's top in the flex
@@ -178,6 +184,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     loadingMore,
     counts,
   } = useRecoveryQueueFilters()
+  const queueSectionRef = useRef<HTMLElement | null>(null)
+  const queueRowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const [queueFocusRequest, setQueueFocusRequest] = useState<RecoveryQueueFocusRequest | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const openRecoveryItem = openRecoveryItemId
@@ -361,15 +370,64 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}`,
   })
 
+  // A queue CTA may fire before this panel mounts or while it is already open.
+  // Adopt both paths, then wait for the server-filtered first page before
+  // scrolling/focusing. No extra fetch is introduced: the handoff consumes the
+  // same bounded page the panel already owns.
+  useEffect(() => {
+    const pendingRequest = consumeRecoveryQueueFocus()
+    if (pendingRequest) setQueueFocusRequest(pendingRequest)
+
+    const onQueueFocus = (event: Event) => {
+      const request = consumeRecoveryQueueFocus() ?? parseRecoveryQueueFocusEvent(event)
+      if (request) setQueueFocusRequest(request)
+    }
+    window.addEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
+    return () => window.removeEventListener(RECOVERY_QUEUE_FOCUS_EVENT, onQueueFocus)
+  }, [])
+
+  useEffect(() => {
+    if (!queueFocusRequest || recoveryFilterLoading) return
+    const targetId = queueFocusRequest.deadLetterId
+    if (targetId) {
+      const targetIndex = filtered.findIndex((item) => item.id === targetId)
+      const targetRow = queueRowRefs.current.get(targetId)
+      if (!targetRow && targetIndex >= 0 && virtualContainerRef.current) {
+        virtualContainerRef.current.scrollTop = targetIndex * DLQ_ROW_HEIGHT
+        virtualContainerRef.current.dispatchEvent(new Event('scroll'))
+        return
+      }
+      if (targetRow) {
+        setSelectedId(targetId)
+        targetRow.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+        targetRow.focus({ preventScroll: true })
+        setQueueFocusRequest(null)
+        return
+      }
+    }
+
+    const queue = queueSectionRef.current
+    queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
+    queue?.focus({ preventScroll: true })
+    setQueueFocusRequest(null)
+  }, [filtered, queueFocusRequest, recoveryFilterLoading, virtualContainerRef, visibleDeadLetters])
+
   return (
     <>
       <FailureClustersCard />
       <AutoHealingPendingCard />
-      <section className="panel-card" data-severity={cardSeverity}>
+      <section
+        ref={queueSectionRef}
+        className="panel-card"
+        data-severity={cardSeverity}
+        data-testid="recovery-queue"
+        tabIndex={-1}
+        aria-labelledby="recovery-queue-heading"
+      >
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('dlq.kicker')}</div>
-          <strong>{t('dlq.queue')}</strong>
+          <strong id="recovery-queue-heading">{t('dlq.queue')}</strong>
         </div>
         <div className="split-row">
           <button
@@ -610,10 +668,18 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   return (
                     <li key={item.id}>
                       <div
+                        ref={(node) => {
+                          if (node) queueRowRefs.current.set(item.id, node)
+                          else queueRowRefs.current.delete(item.id)
+                        }}
                         className="we-list-row"
                         data-clickable="true"
                         data-severity={severity}
                         data-testid={`dlq-row-${item.id}`}
+                        data-dead-letter-id={item.id}
+                        data-selected={selected?.id === item.id ? 'true' : undefined}
+                        tabIndex={-1}
+                        aria-label={`${item.nodeId} — ${formatStatusLabel(item.status)}`}
                         onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
                       >
                         {selectionMode && (

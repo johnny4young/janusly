@@ -194,13 +194,13 @@ export function RecoveryQueueTile({
   runs,
   nowMs,
   onOpenRun,
-  onOpenTab,
+  onOpenQueue,
 }: {
   deadLetters: DeadLetter[]
   runs: RunSummary[]
   nowMs: number | null
   onOpenRun: (runId: string) => void | Promise<void>
-  onOpenTab: (tab: ActiveTab) => void
+  onOpenQueue: () => void
 }) {
   const { t } = useT()
   const top = deadLetters.slice(0, 3)
@@ -215,7 +215,7 @@ export function RecoveryQueueTile({
         <button
           type="button"
           className="we-recovery-center-tile__link"
-          onClick={() => onOpenTab('runs')}
+          onClick={onOpenQueue}
           data-testid="recovery-center-queue-open-all"
         >
           {t('recoveryCenter.tile.queue.openAll')} <ChevronRight size={14} aria-hidden="true" />

@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { __resetBumpCoalesceForTests, useWorkflowStore } from '../store'
 import { DeadLettersPanel, type DeadLetter, type DeadLetterRecovery } from './DeadLettersPanel'
+import { requestRecoveryQueueFocus } from './recovery-queue-focus-bus'
 
 // `DeadLettersPanel`'s hook fetches `/dlq/queue?…` itself now — the server
 // filters + sorts before the page cap, folds the recovery overlay inline, and
@@ -130,6 +132,7 @@ describe('<DeadLettersPanel />', () => {
   beforeEach(() => {
     __resetBumpCoalesceForTests()
     localStorage.clear()
+    sessionStorage.clear()
     vi.mocked(api).mockClear()
     vi.mocked(api).mockImplementation(defaultApiMock)
     useWorkflowStore.setState({ ...initialState, platformVersion: 0, toasts: [] }, true)
@@ -265,6 +268,44 @@ describe('<DeadLettersPanel />', () => {
     const rowB = screen.getByTestId('dlq-row-b')
     fireEvent.click(rowB)
     expect(rowB).toBeInTheDocument()
+  })
+
+  it('focuses the queue heading after a queue-level navigation handoff', async () => {
+    requestRecoveryQueueFocus()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+
+    const queue = await screen.findByTestId('recovery-queue')
+    await waitFor(() => expect(queue).toHaveFocus())
+    expect(queue).toHaveAccessibleName('Recovery queue')
+  })
+
+  it('selects and focuses a requested dead-letter row after data loads', async () => {
+    requestRecoveryQueueFocus('target')
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('other'), mockDeadLetter('target')]))
+    render(
+      <StrictMode>
+        <DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />
+      </StrictMode>,
+    )
+
+    const target = await screen.findByTestId('dlq-row-target')
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(target).toHaveAttribute('data-selected', 'true')
+  })
+
+  it('uses the live handoff when session storage is unavailable', async () => {
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('target')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={vi.fn()} onResolve={vi.fn()} />)
+    const target = await screen.findByTestId('dlq-row-target')
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('storage blocked')
+    })
+
+    requestRecoveryQueueFocus('target')
+
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(target).toHaveAttribute('data-selected', 'true')
   })
 
   it('renders the owner filter with All selected by default', async () => {

@@ -269,6 +269,12 @@ a { color: var(--we-primary); }
   grid-template-rows: 56px 1fr 32px;
 }
 
+.mobile-nav-bar,
+.mobile-nav-drawer-header,
+.mobile-nav-backdrop {
+  display: none;
+}
+
 .top-bar {
   display: grid;
   grid-template-columns: minmax(0, auto) 1fr auto;
@@ -5009,6 +5015,7 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   cursor: pointer;
   font-size: 12px;
   width: 100%;
+  text-decoration: none;
 }
 
 .user-menu__item:hover { background: var(--we-surface-muted); }
@@ -5496,7 +5503,87 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
 @media (max-width: 760px) {
   .app-shell {
-    grid-template-rows: auto 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
+  }
+
+  .app-shell--with-status {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+  }
+
+  .mobile-nav-bar {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--we-line);
+    background: var(--we-surface);
+    z-index: 4;
+  }
+
+  .mobile-nav-trigger,
+  .mobile-nav-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    border: 1px solid var(--we-line);
+    border-radius: 8px;
+    background: var(--we-surface);
+    color: var(--we-ink);
+    cursor: pointer;
+  }
+
+  .mobile-nav-trigger {
+    gap: 7px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 750;
+  }
+
+  .mobile-nav-close {
+    width: 32px;
+    padding: 0;
+  }
+
+  .mobile-nav-trigger:hover,
+  .mobile-nav-close:hover {
+    border-color: var(--we-primary);
+    color: var(--we-primary);
+  }
+
+  .mobile-nav-trigger:focus-visible,
+  .mobile-nav-close:focus-visible {
+    outline: 2px solid var(--we-primary);
+    outline-offset: 2px;
+  }
+
+  .mobile-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: color-mix(in srgb, var(--we-ink) 40%, transparent);
+    backdrop-filter: blur(2px);
+  }
+
+  .mobile-nav-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: 8px 10px 8px 14px;
+    border-bottom: 1px solid var(--we-line);
+    background: var(--we-surface);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .mobile-nav-drawer-header strong {
+    font-size: 13px;
   }
 
   .top-bar {
@@ -5590,20 +5677,38 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
 
   .workspace-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(430px, 64svh) auto;
+    grid-template-rows: minmax(430px, 64svh) auto;
+    min-height: 0;
+    overflow-y: auto;
   }
 
-  /* When there's no right panel (Recovery Center home), the sidebar still stacks
-     above the main but the main grows to fill the rest of the viewport
-     instead of leaving room for a third row. */
+  /* The mobile sidebar is an off-canvas dialog, so the Recovery Center owns
+     the initial viewport instead of starting below the navigation tree. */
   .workspace-grid--no-panel {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
   }
 
   .workspace-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--we-line);
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(320px, 88vw);
+    z-index: 40;
+    border-right: 1px solid var(--we-line);
+    border-bottom: 0;
+    box-shadow: 16px 0 38px var(--we-shadow-ink-18);
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 180ms ease, visibility 0s linear 180ms;
+  }
+
+  .workspace-sidebar--mobile-open {
+    transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+    transition: transform 180ms ease;
   }
 
   .workspace-panel {
@@ -5614,6 +5719,26 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   .builder-sidebar,
   .panel-stack {
     padding: 12px;
+  }
+
+  .workspace-sidebar .builder-sidebar {
+    padding: 0;
+  }
+
+  .workspace-sidebar .sb-footer__collapse {
+    display: none;
+  }
+
+  .detail-box > .split-row,
+  .detail-box > .split-row > .split-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .detail-box .small-command {
+    max-width: 100%;
+    white-space: normal;
   }
 
   .sidebar-actions,

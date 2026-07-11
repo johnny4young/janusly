@@ -58,6 +58,8 @@ import type { ActiveTab, AiMode, RunEvent, RunNode, RunSummary, ValidationIssue,
 import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
+import { requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
+import { DOCS_URL } from './docs-link'
 
 type RunResponse = {
   run?: RunSummary
@@ -621,17 +623,25 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, openRun, refreshPlatform, t])
 
+  const openRecoveryQueue = useCallback((deadLetterId?: string) => {
+    requestRecoveryQueueFocus(deadLetterId)
+    setActiveTab('runs')
+  }, [setActiveTab])
+
   const injectPackFailure = useCallback(async (packId: string) => {
     try {
-      await api(`/solution-packs/${encodeURIComponent(packId)}/inject-failure`, { method: 'POST', body: JSON.stringify({}) })
+      const result = await api(
+        `/solution-packs/${encodeURIComponent(packId)}/inject-failure`,
+        { method: 'POST', body: JSON.stringify({}) },
+      ) as { deadLetterId?: string }
       addToast(t('packs.toast.failureInjected'), 'success')
       bumpPlatformVersion()
       await refreshPlatform()
-      setActiveTab('runs')
+      openRecoveryQueue(result.deadLetterId)
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('packs.toast.injectFailed'), 'error')
     }
-  }, [addToast, bumpPlatformVersion, refreshPlatform, setActiveTab, t])
+  }, [addToast, bumpPlatformVersion, openRecoveryQueue, refreshPlatform, t])
 
   const approveNode = useCallback(async (nodeId: string) => {
     if (!runId) return
@@ -902,7 +912,7 @@ export default function App() {
             <button
               type="button"
               className={`top-bar-cta top-bar-cta--${recoverState}`}
-              onClick={() => setActiveTab('home')}
+              onClick={() => (recoverState === 'clear' ? setActiveTab('home') : openRecoveryQueue())}
               aria-label={
                 recoverState === 'blocked'
                   ? t('topbar.blockerAria', { count: blockerCount }) as string
@@ -937,7 +947,12 @@ export default function App() {
               <span>{t('topbar.cmdkLabel')}</span>
               <kbd>⌘K</kbd>
             </button>
-            <UserMenu aiHealth={aiHealth} onOpenTab={setActiveTab} onOpenShortcuts={() => setShortcutsOpen(true)} />
+            <UserMenu
+              aiHealth={aiHealth}
+              docsUrl={DOCS_URL}
+              onOpenTab={setActiveTab}
+              onOpenShortcuts={() => setShortcutsOpen(true)}
+            />
           </div>
         </>
       }
@@ -991,6 +1006,7 @@ export default function App() {
               onOpenRun={openRun}
               onApproveNode={approveNode}
               onSubmitHumanForm={submitHumanForm}
+              onOpenRecoveryQueue={() => openRecoveryQueue()}
               onTryDemoRecovery={() => injectPackFailure('failed-payment-recovery')}
             />
           )
@@ -1067,7 +1083,7 @@ export default function App() {
                 addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
               }
             }}
-            onDocsUnavailable={() => addToast(t('statusBar.docsUnavailable'), 'info')}
+            docsUrl={DOCS_URL}
             onInsertSnippet={() => setSnippetMenuOpen(true)}
             workflows={savedWorkflows.map(wf => ({ id: wf.id, name: wf.name }))}
             recipes={templates.map(template => ({ id: template.id, name: template.name }))}
@@ -1110,16 +1126,20 @@ export default function App() {
             </span>
           </div>
           <div className="bottom-status-bar__group bottom-status-bar__group--right">
-            <button
-              type="button"
-              className="bottom-status-bar__item"
-              onClick={() => addToast(t('statusBar.docsUnavailable'), 'info')}
-              title={t('statusBar.docsUnavailable')}
-              aria-label={t('statusBar.docsUnavailable')}
-            >
-              {t('statusBar.docs')}
-            </button>
-            <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+            {DOCS_URL && (
+              <>
+                <a
+                  className="bottom-status-bar__item"
+                  href={DOCS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="status-bar-docs"
+                >
+                  {t('statusBar.docs')}
+                </a>
+                <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
+              </>
+            )}
             <span className="bottom-status-bar__item">
               {orgId ?? 'default'} · build <span>{__BUILD_ID__}</span>
             </span>

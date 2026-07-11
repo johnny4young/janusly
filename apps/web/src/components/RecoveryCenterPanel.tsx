@@ -83,6 +83,8 @@ type RecoveryCenterPanelProps = {
   onOpenRun: (runId: string) => void | Promise<void>
   onApproveNode: (nodeId: string) => void | Promise<void>
   onSubmitHumanForm: (nodeId: string, input: JsonObject) => void | Promise<void>
+  /** Navigate to Runs and land keyboard focus on the Recovery Queue. */
+  onOpenRecoveryQueue: () => void
   /** Inject a demo failure so a fresh operator can try the recovery loop for real. */
   onTryDemoRecovery?: () => void | Promise<void>
 }
@@ -230,7 +232,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       severity: openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn',
       rationale: failuresRationale,
       ariaLabel: t('recoveryCenter.metric.aria', { label: failuresLabel, display: failuresDisplay, rationale: failuresRationale }) as string,
-      onClick: () => props.onOpenTab('runs'),
+      onClick: props.onOpenRecoveryQueue,
       testId: 'recovery-center-metric-failures',
     },
   ]
@@ -330,7 +332,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         subline={greeting.subline}
         healthScore={healthScore}
         openFailures={openDeadLetters.length}
-        onOpenQueue={() => props.onOpenTab('runs')}
+        onOpenQueue={props.onOpenRecoveryQueue}
       />
 
       {metricStrip}
@@ -366,7 +368,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
             runs={props.runs}
             nowMs={nowMs}
             onOpenRun={props.onOpenRun}
-            onOpenTab={props.onOpenTab}
+            onOpenQueue={props.onOpenRecoveryQueue}
           />
         </section>
         <aside className="we-operator-rail" aria-label={t('recoveryCenter.railAria')}>
