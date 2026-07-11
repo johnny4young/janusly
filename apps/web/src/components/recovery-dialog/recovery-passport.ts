@@ -27,7 +27,7 @@ export type RecoveryPassportEvaluation = {
 }
 
 export function evaluateRecoveryPassport(input: {
-  suggestionMode: 'ai' | 'fallback'
+  suggestionMode: 'ai' | 'fallback' | 'playbook'
   actionable: boolean
   safety: SuggestionTab['safety']
   evidenceCount: number

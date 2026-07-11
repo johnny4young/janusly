@@ -22,6 +22,17 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const { findMatchingPlaybookMock, replayDeadLetterMock, replayValidationMock } = vi.hoisted(() => ({
+  findMatchingPlaybookMock: vi.fn(),
+  replayDeadLetterMock: vi.fn(),
+  replayValidationMock: vi.fn(),
+}));
+
+vi.mock("@janusly/data", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@janusly/data")>();
+  return { ...actual, findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock };
+});
+
 vi.mock("../auth", () => ({
   requireAuth: vi.fn(),
 }));
@@ -79,15 +90,14 @@ vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
 // cleanly (vitest `Reflect.construct`s a `new`-ed mock — an arrow factory
 // would throw "not a constructor"). Each instance's replayDeadLetter is the
 // shared hoisted mock we assert on / make reject.
-const { replayDeadLetterMock } = vi.hoisted(() => ({ replayDeadLetterMock: vi.fn() }));
 vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   DLQReplayAdapter: class {
     replayDeadLetter = replayDeadLetterMock;
-    replayDeadLetterAsValidation = vi.fn();
+    replayDeadLetterAsValidation = replayValidationMock;
   },
 }));
 
-// The REAL Q-02 error — NOT mocked, so the route's `instanceof` check and this
+// The real claim error is not mocked, so the route's `instanceof` check and this
 // test agree on the same class (the persistence module is loaded transitively
 // by the route import; importing the class adds no DB connection).
 import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
@@ -628,7 +638,7 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     }
   });
 
-  it("maps a Q-02 run_not_replayable rejection to 409 dlq_replay_conflict (not a silent no-op)", async () => {
+  it("maps a run_not_replayable rejection to 409 dlq_replay_conflict (not a silent no-op)", async () => {
     requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValueOnce("editor");
     getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
@@ -653,7 +663,7 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     }
   });
 
-  it("maps a Q-02 node_mid_retry rejection to 409 dlq_node_mid_retry", async () => {
+  it("maps a node_mid_retry rejection to 409 dlq_node_mid_retry", async () => {
     requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
     requireRoleMock.mockResolvedValueOnce("editor");
     getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
@@ -670,6 +680,84 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       });
       expect(response.status).toBe(409);
       expect(((await response.json()) as { code: string }).code).toBe("dlq_node_mid_retry");
+    } finally {
+      await close(server);
+    }
+  });
+});
+
+describe("POST /dlq/validate-fix with a Recovery Playbook", () => {
+  const sourceWorkflow = {
+    id: "wf-1",
+    name: "WF",
+    dslVersion: "1.0",
+    nodes: [{ id: "n", type: "http", config: { url: "https://example.com", method: "GET", timeoutMs: 5000 } }],
+    edges: [],
+  };
+  const item = {
+    id: "dl-1",
+    orgId: "org-1",
+    runId: "run-1",
+    nodeId: "n",
+    status: "open",
+    workflowJson: sourceWorkflow,
+    nodeJson: sourceWorkflow.nodes[0],
+    errorJson: { message: "request timed out" },
+  };
+
+  it("attests only an active exact-match playbook on the validation run", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    findMatchingPlaybookMock.mockResolvedValueOnce({ id: "pb-1", sourceWorkflow });
+    replayValidationMock.mockResolvedValueOnce({ runId: "validation-1" });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: sourceWorkflow, recoveryPlaybookId: "pb-1" }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ runId: "validation-1" });
+      expect(findMatchingPlaybookMock).toHaveBeenCalledWith("org-1", "wf-1", expect.any(String));
+      expect(replayValidationMock).toHaveBeenCalledWith(expect.objectContaining({
+        orgId: "org-1",
+        originalRunId: "run-1",
+        recoveryPlaybookId: "pb-1",
+      }));
+      expect(auditActionMock).toHaveBeenCalledWith(expect.anything(), "recovery.validation_started", expect.objectContaining({
+        metadata: { validationRunId: "validation-1", recoveryPlaybookId: "pb-1" },
+      }));
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("rejects a stale or modified playbook source before starting sandbox", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("editor");
+    getDeadLetterMock.mockResolvedValueOnce(item as never);
+    findMatchingPlaybookMock.mockResolvedValueOnce({ id: "pb-1", sourceWorkflow });
+    replayValidationMock.mockReset();
+    const modified = {
+      ...sourceWorkflow,
+      nodes: [{ ...sourceWorkflow.nodes[0], config: { ...sourceWorkflow.nodes[0].config, timeoutMs: 9000 } }],
+    };
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/validate-fix`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deadLetterId: "dl-1", suggestedWorkflow: modified, recoveryPlaybookId: "pb-1" }),
+      });
+      expect(response.status).toBe(409);
+      expect(((await response.json()) as { code: string }).code).toBe("recovery_playbook_match_changed");
+      expect(replayValidationMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -924,7 +1012,7 @@ describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
   });
 });
 
-describe("POST /dlq/cluster-apply downtime accounting (Q-13)", () => {
+describe("POST /dlq/cluster-apply downtime accounting", () => {
   function openMember(id: string, createdAt: Date | null) {
     return {
       id,

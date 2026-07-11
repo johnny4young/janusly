@@ -7442,6 +7442,108 @@ button.we-ops-metric-card--button {
   line-height: 1.4;
 }
 
+/* Evidence-gated Recovery Playbooks: an exact-match offer, a manual
+   draft/activation surface, and a source banner that makes revalidation
+   impossible to mistake for an automatic apply. */
+.we-recovery-playbook,
+.we-recovery-playbook-promotion,
+.we-recovery-playbook-source {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--we-primary) 28%, var(--we-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--we-primary) 5%, var(--we-surface));
+}
+
+.we-recovery-playbook__header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.we-recovery-playbook__header > div { flex: 1; min-width: 0; }
+.we-recovery-playbook__icon { color: var(--we-primary); display: inline-flex; }
+.we-recovery-playbook__version {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--we-primary-soft);
+  color: var(--we-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.we-recovery-playbook__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 0;
+}
+.we-recovery-playbook__facts div { display: flex; gap: 6px; }
+.we-recovery-playbook__facts dt { color: var(--we-muted); font-size: 11px; }
+.we-recovery-playbook__facts dd { margin: 0; color: var(--we-ink); font-size: 11px; font-weight: 700; }
+.we-recovery-playbook__gate {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--we-warning);
+  background: var(--we-warning-soft);
+  color: var(--we-warning-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.we-recovery-playbook__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.we-recovery-playbook__retire-confirm {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--we-danger-border-30);
+  border-radius: 8px;
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+  font-size: 11px;
+}
+
+.we-recovery-playbook-promotion .field-group { display: grid; gap: 5px; }
+.we-recovery-playbook-promotion label { color: var(--we-ink-soft); font-size: 11px; font-weight: 700; }
+.we-recovery-playbook-promotion input,
+.we-recovery-playbook-promotion textarea {
+  width: 100%;
+  border: 1px solid var(--we-line-strong);
+  border-radius: 8px;
+  background: var(--we-surface);
+  color: var(--we-ink);
+  padding: 9px 11px;
+  resize: vertical;
+}
+.we-recovery-playbook-promotion--active {
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  border-color: var(--we-success-border-30);
+  background: var(--we-success-soft);
+  color: var(--we-success-text);
+}
+.we-recovery-playbook-promotion p { margin: 4px 0 0; }
+
+.we-recovery-playbook-source {
+  border-left: 4px solid var(--we-primary);
+  font-size: 12px;
+}
+.we-recovery-playbook-source span { color: var(--we-ink-soft); }
+.we-recovery-playbook-regression {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--we-danger-border-30);
+  border-left: 4px solid var(--we-danger);
+  border-radius: 8px;
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+  font-size: 11px;
+}
+
 /* Recovery Confidence Passport — deterministic facts first, verdict second.
  * AI confidence is a normal fact row and never receives verdict colouring. */
 .we-recovery-passport {

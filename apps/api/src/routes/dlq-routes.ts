@@ -16,6 +16,7 @@
 import { eq } from "drizzle-orm";
 
 import {
+  findMatchingActiveRecoveryPlaybook,
   queryFailureSamples,
 } from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
@@ -23,6 +24,8 @@ import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
 import { ReplayNotClaimableError } from "@janusly/engine/src/persistence";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
 import { NodeSchema, WorkflowSchema, type Workflow } from "@janusly/shared";
+import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
+import { computeWorkflowDiff } from "@janusly/shared/src/workflow-diff";
 
 import { orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
@@ -47,9 +50,9 @@ import type { Route } from "../routes";
 const dlqReplay = new DLQReplayAdapter();
 
 /**
- * Map a `ReplayNotClaimableError` (the Q-02 atomic-transition rejection) to a
+ * Map a `ReplayNotClaimableError` (the atomic-transition rejection) to a
  * 409 so a single `/dlq/replay` gives the operator explicit feedback instead
- * of the pre-Q-02 silent no-op that left them believing a replay started.
+ * of the previous silent no-op that left them believing a replay started.
  * Returns `true` when it handled + responded (caller should `return`); `false`
  * to let the caller rethrow (a real error, not a claim rejection). Bulk paths
  * don't use this — they already collect thrown errors into their `errors[]`.
@@ -313,6 +316,7 @@ export const dlqRoutes: Route[] = [
 
       const item = await getDeadLetter(auth.orgId, deadLetterId);
       if (!item) return sendError(res, "dlq_not_found", "DLQ entry not found", 404);
+      const recoveryPlaybookId = typeof body.recoveryPlaybookId === "string" ? body.recoveryPlaybookId : null;
 
       // Validate the proposed workflow through the same grammar gate
       // `/ai/patch-workflow` runs on its output: strict schema parse +
@@ -335,16 +339,41 @@ export const dlqRoutes: Route[] = [
         return sendError(res, "dlq_failing_node_missing", 'suggestedWorkflow does not contain the failing node id "{{nodeId}}"', 400, { nodeId: item.nodeId });
       }
 
+      if (recoveryPlaybookId) {
+        const workflowId = (item.workflowJson as { id?: unknown } | null)?.id;
+        if (typeof workflowId !== "string" || workflowId.length === 0) {
+          return sendError(res, "recovery_playbook_match_changed", "This playbook no longer matches the failure", 409);
+        }
+        const sourceNode = item.nodeJson as { type?: unknown; config?: { tool?: unknown } } | null;
+        const signature = normalizeErrorSignature(item.errorJson, {
+          nodeId: item.nodeId,
+          nodeType: typeof sourceNode?.type === "string" ? sourceNode.type : undefined,
+          toolName: typeof sourceNode?.config?.tool === "string" ? sourceNode.config.tool : undefined,
+        }).signature;
+        const playbook = await findMatchingActiveRecoveryPlaybook(auth.orgId, workflowId, signature);
+        const source = playbook ? WorkflowSchema.safeParse(playbook.sourceWorkflow) : null;
+        if (
+          !playbook
+          || playbook.id !== recoveryPlaybookId
+          || !source?.success
+          || computeWorkflowDiff(source.data, sanitized).summary.totalChanges !== 0
+        ) {
+          return sendError(res, "recovery_playbook_match_changed", "This playbook no longer matches the failure", 409);
+        }
+      }
+
       const { runId } = await dlqReplay.replayDeadLetterAsValidation({
         orgId: auth.orgId,
         originalRunId: item.runId,
         suggestedWorkflow: sanitized,
         failingNode,
         createdBy: auth.userId,
+        recoveryPlaybookId,
       });
 
       await auditAction(auth, "recovery.validation_started", { targetType: "dlq", targetId: deadLetterId, metadata: {
         validationRunId: runId,
+        ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
       } });
 
       return sendJson(res, { runId });
@@ -400,7 +429,7 @@ export const dlqRoutes: Route[] = [
 
       const errors: Array<{ deadLetterId: string; error: string }> = [];
       let replayed = 0;
-      // Q-13: sum of (now - failure createdAt) across successfully replayed
+      // Sum (now - failure createdAt) across successfully replayed
       // members — "how much downtime this apply just ended". Rows without a
       // createdAt (legacy) contribute 0 rather than poisoning the sum.
       let downtimeEndedMs = 0;

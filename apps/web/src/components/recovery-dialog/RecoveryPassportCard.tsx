@@ -103,8 +103,13 @@ export function RecoveryPassportCard({
             : t('recoveryDialog.passport.none')}</dd>
         </div>
         <div>
-          <dt>{t('recoveryDialog.passport.aiSignal')}</dt>
-          <dd>{t('recoveryDialog.passport.aiSignalValue', { confidence })}</dd>
+          <dt>{t(suggestion.mode === 'playbook' ? 'recoveryDialog.passport.playbookSignal' : 'recoveryDialog.passport.aiSignal')}</dt>
+          <dd>{suggestion.mode === 'playbook' && suggestion.playbook
+            ? t('recoveryDialog.passport.playbookSignalValue', {
+                version: suggestion.playbook.version,
+                count: suggestion.playbook.successfulUses,
+              })
+            : t('recoveryDialog.passport.aiSignalValue', { confidence })}</dd>
         </div>
       </dl>
 

@@ -35,6 +35,7 @@ import { pluginsRoutes } from "./routes/plugins-routes";
 import { promptsRoutes } from "./routes/prompts-routes";
 import { recoveryHandoffRoutes } from "./routes/recovery-handoff-routes";
 import { recoveryItemsRoutes } from "./routes/recovery-items-routes";
+import { recoveryPlaybooksRoutes } from "./routes/recovery-playbooks-routes";
 import { recoveryRoutes } from "./routes/recovery-routes";
 import { reportsRoutes } from "./routes/reports-routes";
 import { rolesRoutes } from "./routes/roles-routes";
@@ -70,6 +71,7 @@ export const routes: Route[] = [
   ...credentialsRoutes,
   ...promptsRoutes,
   ...auditRoutes,
+  ...recoveryPlaybooksRoutes,
   ...recoveryRoutes,
   ...reportsRoutes,
   ...aiRoutes,

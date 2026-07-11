@@ -202,6 +202,10 @@ export const runs = pgTable(
      * `writeSide`) when set.
      */
     replayMode: text("replay_mode"),
+    /** Atomic per-run idempotency claim for Recovery Playbook validation accounting. */
+    recoveryPlaybookValidationRecordedAt: timestamp("recovery_playbook_validation_recorded_at", { withTimezone: true }),
+    /** Atomic per-run idempotency claim for Recovery Playbook production-use accounting. */
+    recoveryPlaybookAppliedRecordedAt: timestamp("recovery_playbook_applied_recorded_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -555,6 +559,53 @@ export const recoveryFeedbackHealth = pgTable(
       table.approachLabel,
     ),
     index("recovery_feedback_health_org_workflow_idx").on(table.orgId, table.workflowId),
+  ],
+);
+
+/**
+ * Versioned operator-owned recovery procedures promoted from a proven fix.
+ *
+ * Playbooks intentionally remain orphan-tolerant: workflow versions and
+ * workflows may be retention-purged while the audit record of what operators
+ * trusted remains inspectable. Runtime use re-checks that the source workflow
+ * and version are still active before returning an executable snapshot.
+ */
+export const recoveryPlaybooks = pgTable(
+  "recovery_playbooks",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id"),
+    signature: text("signature").notNull(),
+    version: integer("version").notNull(),
+    status: text("status").notNull().default("draft"),
+    title: text("title").notNull(),
+    instructionsMarkdown: text("instructions_markdown").notNull(),
+    evidenceRequirementsJson: jsonb("evidence_requirements_json").notNull(),
+    sourceWorkflowVersionId: text("source_workflow_version_id").notNull(),
+    approachLabel: text("approach_label").notNull().default("other"),
+    successfulUses: integer("successful_uses").notNull().default(0),
+    regressions: integer("regressions").notNull().default(0),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    /** Idempotency marker for terminal sandbox outcomes. */
+    lastValidationRunId: text("last_validation_run_id"),
+    /** Idempotency marker for production applies after a passed sandbox. */
+    lastAppliedValidationRunId: text("last_applied_validation_run_id"),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_playbooks_org_signature_version_idx").on(table.orgId, table.signature, table.version),
+    uniqueIndex("recovery_playbooks_org_source_version_idx").on(table.orgId, table.sourceWorkflowVersionId),
+    uniqueIndex("recovery_playbooks_one_active_match_idx")
+      .on(table.orgId, table.workflowId, table.signature)
+      .where(sql`"status" = 'active'`),
+    index("recovery_playbooks_org_signature_status_idx").on(table.orgId, table.signature, table.status),
+    index("recovery_playbooks_org_workflow_idx").on(table.orgId, table.workflowId),
   ],
 );
 

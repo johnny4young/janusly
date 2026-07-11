@@ -50,6 +50,8 @@ export type DeadLetterValidationInput = {
   failingNode: WorkflowNode;
   /** User who triggered the validation; recorded as `createdBy`. */
   createdBy?: string | null;
+  /** Explicit Recovery Playbook invocation, persisted for outcome attestation. */
+  recoveryPlaybookId?: string | null;
 };
 
 function collectAncestorNodeIds(workflow: Workflow, nodeId: string): Set<string> {
@@ -82,8 +84,8 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       nodeId: node.id,
     });
 
-    // Atomically un-terminate the run + reset the failed node to `queued`
-    // (Q-02). ONE transaction closes the pre-Q-02 gap where a cancel landing
+    // Atomically un-terminate the run + reset the failed node to `queued`.
+    // One transaction closes the previous gap where a cancel landing
     // between the reset and the queue left a queued node on a cancelled run
     // that the runtime guard skips forever (silent false recovery). Claim
     // FIRST — before the snapshot write — so a `node_mid_retry` /
@@ -115,7 +117,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
    * caller can poll until terminal status.
    */
   async replayDeadLetterAsValidation(input: DeadLetterValidationInput): Promise<{ runId: string }> {
-    const { orgId, originalRunId, suggestedWorkflow, failingNode, createdBy } = input;
+    const { orgId, originalRunId, suggestedWorkflow, failingNode, createdBy, recoveryPlaybookId } = input;
 
     const runId = crypto.randomUUID();
     const ancestorNodeIds = collectAncestorNodeIds(suggestedWorkflow, failingNode.id);
@@ -145,6 +147,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
         inputJson: {
           workflow: suggestedWorkflow,
           failingNodeId: failingNode.id,
+          ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         },
         parentRunId: originalRunId,
         parentNodeId: null,
@@ -190,6 +193,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
           workflowVersionId,
           originalRunId,
           failingNodeId: failingNode.id,
+          ...(recoveryPlaybookId ? { recoveryPlaybookId } : {}),
         }),
       });
     });

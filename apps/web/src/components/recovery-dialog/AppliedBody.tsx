@@ -7,11 +7,17 @@
  * + version, falling back to ribbon-only otherwise.
  */
 
+import { lazy, Suspense } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { useT } from '../../i18n'
 import { RecoveryDeltaCard } from '../RecoveryDeltaCard'
 import { formatDowntime } from '../recovery-center/helpers'
 import type { ClusterApplyResult, PreSaveBeforeSnapshot } from './types'
+import type { RecoveryPlaybookPromotionSource, RecoveryPlaybookSummary } from './types'
+
+const PlaybookPromotionCard = lazy(() => import('./PlaybookPromotionCard').then((module) => ({
+  default: module.PlaybookPromotionCard,
+})))
 
 export function AppliedBody({
   runId,
@@ -20,6 +26,8 @@ export function AppliedBody({
   appliedVersion,
   priorFailureSignature,
   preSaveBeforeSnapshot,
+  playbookPromotionSource,
+  appliedPlaybook,
 }: {
   runId?: string
   cluster?: ClusterApplyResult
@@ -27,12 +35,14 @@ export function AppliedBody({
   appliedVersion?: number
   priorFailureSignature?: string | null
   preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+  playbookPromotionSource?: RecoveryPlaybookPromotionSource
+  appliedPlaybook?: RecoveryPlaybookSummary
 }) {
   const { t } = useT()
   const ribbon = cluster ? (
     (() => {
       const total = cluster.replayed + cluster.failed
-      // Q-13 celebration line: name the downtime this apply just ended.
+      // Name the downtime this apply just ended.
       // Absent/0 downtimeEndedMs (legacy rows, zero-clock edge) → no line,
       // never a NaN string.
       const showDowntime = cluster.replayed > 0
@@ -88,6 +98,19 @@ export function AppliedBody({
   const nextSteps = (
     <p className="helper-text we-recovery-applied-next">{t('recoveryDialog.applied.nextSteps')}</p>
   )
+  const playbookResult = appliedPlaybook ? (
+    <section className="we-recovery-playbook-promotion we-recovery-playbook-promotion--active" data-testid="recovery-playbook-use-recorded" role="status">
+      <CheckCircle2 size={18} aria-hidden="true" />
+      <div>
+        <strong>{t('recoveryDialog.playbook.useRecorded')}</strong>
+        <p className="helper-text">{t('recoveryDialog.playbook.useRecordedBody', { count: appliedPlaybook.successfulUses })}</p>
+      </div>
+    </section>
+  ) : playbookPromotionSource ? (
+    <Suspense fallback={<p className="helper-text">{t('recoveryDialog.playbook.loading')}</p>}>
+      <PlaybookPromotionCard source={playbookPromotionSource} />
+    </Suspense>
+  ) : null
 
   // Mount the delta card alongside the ribbon when the save response
   // gave us the workflow id + version. Defensive fall-through to
@@ -96,6 +119,7 @@ export function AppliedBody({
     return (
       <div className="we-recovery-applied">
         {ribbon}
+        {playbookResult}
         {nextSteps}
       </div>
     )
@@ -110,6 +134,7 @@ export function AppliedBody({
         priorFailureSignature={priorFailureSignature ?? null}
         preSaveBeforeSnapshot={preSaveBeforeSnapshot ?? null}
       />
+      {playbookResult}
       {nextSteps}
     </div>
   )

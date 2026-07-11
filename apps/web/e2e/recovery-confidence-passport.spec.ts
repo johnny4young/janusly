@@ -106,10 +106,107 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(page.getByText('Patch applied.', { exact: true })).toBeVisible({ timeout: 30_000 })
   expect(saveRequests).toBe(1)
 
+  // Promote the proven recovery manually: create a draft, then activate in a
+  // separate action. The server re-verifies the structural diff, sandbox run,
+  // exact saved version, replayed DLQ row, and accepted feedback.
+  await page.getByRole('button', { name: 'Create playbook', exact: true }).click()
+  const playbookForm = page.getByTestId('recovery-playbook-form')
+  await expect(playbookForm).toBeVisible()
+  await captureElement(playbookForm, 'web-en-recovery-playbook-form')
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click()
+  const playbookDraft = page.getByTestId('recovery-playbook-draft')
+  await expect(playbookDraft).toBeVisible()
+  await expect(playbookDraft).toContainText('Draft ready')
+  await captureElement(playbookDraft, 'web-en-recovery-playbook-draft')
+  await page.getByRole('button', { name: 'Activate playbook', exact: true }).click()
+  const playbookActive = page.getByTestId('recovery-playbook-active')
+  await expect(playbookActive).toBeVisible()
+  await captureElement(playbookActive, 'web-en-recovery-playbook-active')
+
+  // A new exact-signature failure offers the playbook but never invokes it.
+  // Explicit use returns the immutable source, then the normal sandbox and
+  // production Apply gates run again against the fresh failure.
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  const repeatPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
+  await repeatPack.getByRole('button', { name: 'Break a node', exact: true }).click()
+  const repeatedFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
+  await expect(repeatedFailure).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Suggest fix/i }).click()
+  const playbookMatch = page.getByTestId('recovery-playbook-match')
+  await expect(playbookMatch).toBeVisible()
+  await expect(playbookMatch).toContainText('never runs automatically')
+  await captureElement(playbookMatch, 'web-en-recovery-playbook-match')
+  await page.getByRole('button', { name: 'Use and revalidate', exact: true }).click()
+  const playbookReview = page.getByTestId('recovery-playbook-revalidation')
+  await expect(playbookReview).toBeVisible()
+  await expect(page.getByRole('button', { name: /Apply validated fix/i })).toHaveCount(0)
+  await captureElement(playbookReview, 'web-en-recovery-playbook-revalidation')
+  await page.getByRole('button', { name: /Validate in sandbox/i }).click()
+  await expect(page.getByRole('button', { name: /Apply validated fix/i })).toBeVisible({ timeout: 30_000 })
+  expect(saveRequests, 'fresh playbook sandbox must not auto-save').toBe(1)
+  await page.getByRole('button', { name: /Apply validated fix/i }).click()
+  const useRecorded = page.getByTestId('recovery-playbook-use-recorded')
+  await expect(useRecorded).toBeVisible({ timeout: 30_000 })
+  await expect(useRecorded).toContainText('1 successful production use')
+  expect(saveRequests).toBe(2)
+  await captureElement(useRecorded, 'web-en-recovery-playbook-use-recorded')
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+
+  // Locale parity on the playbook's own live surface (not only a unit render).
+  await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
+  await page.reload()
+  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  const spanishPlaybookPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()
+  await spanishPlaybookPack.getByRole('button', { name: 'Romper un nodo', exact: true }).click()
+  const spanishPlaybookFailure = page.locator('[data-testid^="dlq-row-"][data-selected="true"]').filter({ hasText: 'page_oncall' }).first()
+  await expect(spanishPlaybookFailure).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Sugerir corrección/i }).click()
+  const spanishPlaybookMatch = page.getByTestId('recovery-playbook-match')
+  await expect(spanishPlaybookMatch).toContainText('nunca se ejecuta automáticamente')
+  await captureElement(spanishPlaybookMatch, 'web-es-recovery-playbook-match')
+  await page.getByRole('button', { name: 'Retirar', exact: true }).click()
+  const retireConfirm = page.getByTestId('recovery-playbook-retire-confirm')
+  await expect(retireConfirm).toContainText('¿Retirar este playbook?')
+  await captureElement(retireConfirm, 'web-es-recovery-playbook-retire-confirm')
+  await page.getByRole('button', { name: 'Mantener activo', exact: true }).click()
+  await page.getByRole('button', { name: 'Usar y volver a validar', exact: true }).click()
+  const spanishPlaybookReview = page.getByTestId('recovery-playbook-revalidation')
+  await expect(spanishPlaybookReview).toContainText('ejecuta el sandbox actual')
+  await captureElement(spanishPlaybookReview, 'web-es-recovery-playbook-revalidation')
+
+  // The backend regression transition is covered against real Postgres in
+  // integration tests. Here we isolate the terminal browser state so its
+  // explanatory copy and layout are captured deterministically.
+  await page.route('**/run?runId=*', async (route) => {
+    const runId = new URL(route.request().url()).searchParams.get('runId') ?? 'validation-regressed'
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        run: { id: runId, status: 'failed' },
+        nodes: [{ nodeId: 'page_oncall', status: 'failed', errorJson: { message: 'El timeout volvió a superar el límite.' } }],
+      }),
+    })
+  })
+  await page.route('**/recovery/playbooks/*/outcome', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ playbook: { status: 'retired' } }),
+    })
+  })
+  await page.getByRole('button', { name: /Validar en sandbox/i }).click()
+  const regression = page.getByTestId('recovery-playbook-regression')
+  await expect(regression).toContainText('Playbook retirado tras una regresión', { timeout: 30_000 })
+  await captureElement(regression, 'web-es-recovery-playbook-regression')
+  await page.unroute('**/run?runId=*')
+  await page.unroute('**/recovery/playbooks/*/outcome')
+  await page.keyboard.press('Escape')
+
   // A second real failure exercises the blocked fallback in Spanish. The
   // same dialog stays useful without an AI provider and never enables the
   // sandbox/apply actions for a no-op suggestion.
-  await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
   await page.reload()
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
   const spanishPack = page.locator('.list-card').filter({ hasText: 'Escalamiento de soporte' }).first()

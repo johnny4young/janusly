@@ -72,6 +72,13 @@ export type AuditAction =
   | "dlq.replayed"
   | "recovery.validation_started"
   | "recovery.cluster_apply"
+  | "recovery.playbook.created"
+  | "recovery.playbook.activated"
+  | "recovery.playbook.retired"
+  | "recovery.playbook.used"
+  | "recovery.playbook.validated"
+  | "recovery.playbook.regressed"
+  | "recovery.playbook.applied"
   // mcp
   | "mcp.connection.created"
   | "mcp.connection.updated"

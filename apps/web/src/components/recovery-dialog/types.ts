@@ -72,7 +72,7 @@ export type PriorSameSignatureOutcome = {
 }
 
 export type PatchSuggestion = {
-  mode: 'ai' | 'fallback'
+  mode: 'ai' | 'fallback' | 'playbook'
   /** Legacy mirror of `suggestions[0]` — kept so older test fixtures and callers still work. */
   suggestedWorkflow: WorkflowDefinition
   /** Legacy mirror of `suggestions[0].rationale`. */
@@ -100,6 +100,33 @@ export type PatchSuggestion = {
   model?: string
   provider?: string
   aiError?: string
+  playbook?: RecoveryPlaybookSummary
+}
+
+export type RecoveryPlaybookSummary = {
+  id: string
+  workflowId: string | null
+  signature: string
+  version: number
+  status: 'draft' | 'active' | 'retired'
+  title: string
+  instructionsMarkdown: string
+  approachLabel: string
+  successfulUses: number
+  regressions: number
+  lastValidatedAt: string | null
+  activatedAt: string | null
+  retiredAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type RecoveryPlaybookPromotionSource = {
+  deadLetterId: string
+  validationRunId: string
+  sourceWorkflowVersionId: string
+  defaultTitle: string
+  defaultInstructions: string
 }
 
 export type ClusterApplyError = {
@@ -111,7 +138,7 @@ export type ClusterApplyResult = {
   replayed: number
   failed: number
   errors: ClusterApplyError[]
-  /** Q-13: summed (now − failure createdAt) across successfully replayed members. */
+  /** Summed (now − failure createdAt) across successfully replayed members. */
   downtimeEndedMs?: number
 }
 
@@ -121,7 +148,7 @@ export type Step =
   | { kind: 'review'; suggestion: PatchSuggestion }
   | { kind: 'validating'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
   | { kind: 'validated'; suggestion: PatchSuggestion; selectedIndex: number; runId: string }
-  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown }
+  | { kind: 'validation-failed'; suggestion: PatchSuggestion; selectedIndex: number; runId: string; errorJson: unknown; playbookRetired?: boolean }
   | {
       kind: 'cancelling'
       suggestion: PatchSuggestion
@@ -134,6 +161,7 @@ export type Step =
       // back button can restore the prior step without losing context.
       runId?: string
       errorJson?: unknown
+      playbookRetired?: boolean
     }
   | { kind: 'applying'; mode: 'single' | 'cluster'; total?: number }
   | {
@@ -147,6 +175,8 @@ export type Step =
       appliedVersion?: number
       priorFailureSignature?: string | null
       preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
+      playbookPromotionSource?: RecoveryPlaybookPromotionSource
+      appliedPlaybook?: RecoveryPlaybookSummary
     }
   | { kind: 'error'; message: string }
 

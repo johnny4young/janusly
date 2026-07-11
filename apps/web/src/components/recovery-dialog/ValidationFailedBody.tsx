@@ -23,6 +23,7 @@ export function ValidationFailedBody({
   runId,
   errorJson,
   failureSignature,
+  playbookRetired = false,
 }: {
   suggestion: PatchSuggestion
   selectedIndex: number
@@ -30,6 +31,7 @@ export function ValidationFailedBody({
   runId: string
   errorJson: unknown
   failureSignature: string
+  playbookRetired?: boolean
 }) {
   const { t } = useT()
   const message = pickErrorMessage(errorJson)
@@ -48,6 +50,12 @@ export function ValidationFailedBody({
           />
         </div>
       </div>
+      {playbookRetired ? (
+        <div className="we-recovery-playbook-regression" data-testid="recovery-playbook-regression" role="status">
+          <strong>{t('recoveryDialog.playbook.regressionTitle')}</strong>
+          <span>{t('recoveryDialog.playbook.regressionBody')}</span>
+        </div>
+      ) : null}
       {category ? (
         <p className="helper-text we-recovery-error-summary">
           {t(`recoveryDialog.errorSummary.${category}` as never) as string}

@@ -76,7 +76,7 @@ export type RecoveryFeedbackInput = {
   userId: string | null;
   deadLetterId: string;
   workflowId: string;
-  suggestionMode: "ai" | "fallback";
+  suggestionMode: "ai" | "fallback" | "playbook";
   approachLabel: RecoveryApproachLabel;
   accepted: boolean;
   comment: string | null;

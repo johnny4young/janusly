@@ -308,6 +308,10 @@ describe('<RecoveryDialog />', () => {
         approachLabel: 'other',
       })
     }
+    // A successful, accepted recovery with a persisted source version exposes
+    // manual promotion; it never creates or activates a playbook implicitly.
+    expect(await screen.findByRole('button', { name: /Create playbook/i })).toBeInTheDocument()
+    expect(calls.some((path) => path === '/recovery/playbooks')).toBe(false)
   })
 
   it('cancel-from-review opens the cancelling step; selecting a chip writes feedback with the chip text', async () => {

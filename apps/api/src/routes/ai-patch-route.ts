@@ -49,6 +49,7 @@ import { budgetBlockedResponse, gateBudget } from "../budget-gate";
 import { localeFromRequest } from "../locale";
 import { withBudgetWarning } from "../ai-route-helpers";
 import type { Route } from "../routes";
+import { recoverySuggestionSafety, type RecoverySuggestionSafety } from "../recovery-suggestion-safety";
 
 /**
  * Index the stored calibration curves by `approachLabel` for O(1) lookup
@@ -70,37 +71,6 @@ function indexCalibrationCurves(rows: StoredCalibration[]): Map<string, Calibrat
     });
   }
   return byApproach;
-}
-
-type RecoverySuggestionSafety = {
-  writeSide: boolean;
-  approvalRequired: boolean;
-  approvalPresent: boolean;
-};
-
-/**
- * Project the existing production-readiness sensitivity rule onto one
- * concrete patch candidate. The patch route owns this projection because it
- * already has the strict workflow snapshot; the web never duplicates the
- * write-side tool allowlist or graph traversal.
- */
-function recoverySuggestionSafety(workflow: unknown, nodeId: string): RecoverySuggestionSafety {
-  const parsed = WorkflowSchema.safeParse(workflow);
-  if (!parsed.success) {
-    return { writeSide: true, approvalRequired: true, approvalPresent: false };
-  }
-  const node = parsed.data.nodes.find((candidate) => candidate.id === nodeId);
-  if (!node) {
-    return { writeSide: true, approvalRequired: true, approvalPresent: false };
-  }
-  const writeSide = isSensitiveAction(node);
-  const approvalPresent = !writeSide || hasApprovalAncestor(
-    nodeId,
-    parsed.data.edges,
-    parsed.data.nodes,
-    new Map(),
-  );
-  return { writeSide, approvalRequired: writeSide, approvalPresent };
 }
 
 export const aiPatchRoutes: Route[] = [

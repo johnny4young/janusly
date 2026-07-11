@@ -84,6 +84,12 @@ export function ReviewBody({
           </div>
         </div>
       )}
+      {suggestion.mode === 'playbook' && suggestion.playbook && (
+        <div className="we-recovery-playbook-source" role="status" data-testid="recovery-playbook-revalidation">
+          <strong>{t('recoveryDialog.playbook.reviewSource', { title: suggestion.playbook.title, version: suggestion.playbook.version })}</strong>
+          <span>{t('recoveryDialog.playbook.reviewGate')}</span>
+        </div>
+      )}
       <RecoveryPassportCard
         dlq={dlq}
         suggestion={suggestion}

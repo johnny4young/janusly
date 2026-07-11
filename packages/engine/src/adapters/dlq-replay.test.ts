@@ -125,9 +125,9 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
       nodeId: failingNode.id,
       attempt: 1,
     })
-    // Q-02: ONE atomic transition un-terminates the run + re-queues the failed
-    // node (replaces the pre-Q-02 non-atomic resetRunForReplay + markNodeQueued
-    // pair whose gap let a cancel land between them).
+    // One atomic transition un-terminates the run + re-queues the failed node,
+    // replacing the non-atomic resetRunForReplay + markNodeQueued pair whose
+    // gap let a cancel land between them.
     expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id)
     // The replayed workflow becomes the run's authoritative snapshot so the
     // slim queue worker (and the downstream cascade) reload the right DAG.
@@ -137,7 +137,7 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
   })
 
   it('claims BEFORE snapshotting/enqueueing — a rejected claim mutates nothing', async () => {
-    // Q-02 claim-first ordering: a node mid engine-retry (or a cancelled run)
+    // Claim-first ordering: a node mid engine-retry (or a cancelled run)
     // must reject without writing the snapshot (which an in-flight retry reads)
     // or enqueuing a duplicate job.
     claimReplayTransitionMock.mockRejectedValueOnce(new ReplayNotClaimableError('node_mid_retry'))
@@ -219,6 +219,25 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
     expect((runsInsertCall![1] as { inputJson: { workflow: unknown; failingNodeId: string } }).inputJson).toEqual({
       workflow: baseWorkflow,
       failingNodeId: 'fetch',
+    })
+  })
+
+  it('attests an explicit Recovery Playbook use in the validation run and start event', async () => {
+    await adapter.replayDeadLetterAsValidation({
+      orgId: 'org-1',
+      originalRunId: 'orig-run',
+      suggestedWorkflow: baseWorkflow,
+      failingNode,
+      recoveryPlaybookId: 'playbook-1',
+    })
+
+    const runsInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runsTable)
+    expect(runsInsertCall?.[1]).toMatchObject({
+      inputJson: { workflow: baseWorkflow, failingNodeId: 'fetch', recoveryPlaybookId: 'playbook-1' },
+    })
+    const eventInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runEventsTable)
+    expect(eventInsertCall?.[1]).toMatchObject({
+      payload: expect.objectContaining({ recoveryPlaybookId: 'playbook-1' }),
     })
   })
 

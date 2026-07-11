@@ -51,6 +51,7 @@ export function evidenceKindLabel(kind: EvidenceKind): string {
     case 'recent_error': return runtimeT('recoveryDialog.evidence.kind.recent_error') as string
     case 'signature_rule': return runtimeT('recoveryDialog.evidence.kind.signature_rule') as string
     case 'tool_contract': return runtimeT('recoveryDialog.evidence.kind.tool_contract') as string
+    case 'recovery_playbook': return runtimeT('recoveryDialog.evidence.kind.recovery_playbook') as string
   }
 }
 
@@ -162,7 +163,7 @@ export function isActionableSuggestion(
   suggestion: PatchSuggestion,
   selected: SuggestionTab,
 ): boolean {
-  if (suggestion.mode !== 'ai') return false
+  if (suggestion.mode === 'fallback') return false
   const diff = computeWorkflowDiff(toWorkflow(currentWorkflow), toWorkflow(selected.workflow))
   return diff.summary.totalChanges > 0
 }
