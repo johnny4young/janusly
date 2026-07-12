@@ -23,6 +23,7 @@
  */
 
 import type http from "http";
+import type { ApiRouteContract } from "./api-contract-types";
 import type { AuthContext } from "./auth";
 import type { Role } from "./permissions";
 import type { Permission } from "./permission-catalog";
@@ -58,6 +59,11 @@ export type Route = {
    * must pass).
    */
   permission?: Permission;
+  /**
+   * Stable v1 contract. Omit to keep the route legacy-only; the dispatcher
+   * rejects `/v1` aliases for routes without this metadata.
+   */
+  contract?: ApiRouteContract;
   /** Handler runs after auth + RBAC; writes the response itself. */
   handler: (ctx: RouteContext) => Promise<unknown>;
 };

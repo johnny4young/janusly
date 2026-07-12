@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 
 import { matchesRoute } from "./routes";
 import { routes } from "./routes-registry";
+import { V1_CONTRACT_ROUTES } from "./api-contracts";
 
 const WEB_SRC = fileURLToPath(new URL("../../web/src/", import.meta.url));
 
@@ -106,5 +107,25 @@ describe("web ↔ route contract", () => {
     // Dedup for a readable failure message.
     const unique = [...new Set(unresolved)].sort();
     expect(unique, `web calls with no matching route:\n${unique.join("\n")}`).toEqual([]);
+  });
+
+  it("keeps the pure v1 manifest aligned with real route metadata and gates", () => {
+    const manifest = V1_CONTRACT_ROUTES.map((route) => ({
+      method: route.method,
+      operationId: route.contract.operationId,
+      role: route.role,
+      permission: route.permission,
+    })).sort((a, b) => a.operationId.localeCompare(b.operationId));
+    const registered = routes
+      .filter((route) => route.contract)
+      .map((route) => ({
+        method: route.method,
+        operationId: route.contract!.operationId,
+        role: route.role,
+        permission: route.permission,
+      }))
+      .sort((a, b) => a.operationId.localeCompare(b.operationId));
+
+    expect(registered).toEqual(manifest);
   });
 });

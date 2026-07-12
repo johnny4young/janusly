@@ -49,6 +49,7 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
+import { getRunContract, getRunStatusContract, listRunsContract } from "../api-contracts";
 
 // SSE heartbeat cadence. The server destroys idle sockets after 60s
 // (`server.setTimeout`); a comment well under that keeps an idle run's
@@ -209,6 +210,7 @@ export const runsRoutes: Route[] = [
   // Optional `?workflowId=<id>` filter joins through `workflow_versions` so
   // the caller can scope the listing to one workflow's runs.
   { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?") && !url.startsWith("/runs/compare"),
+    contract: listRunsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));
@@ -239,6 +241,7 @@ export const runsRoutes: Route[] = [
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/run?"),
+    contract: getRunContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
@@ -273,6 +276,7 @@ export const runsRoutes: Route[] = [
   // Historical pages use `/run?eventsCursor=...` so polling cannot get
   // stuck walking older history while the run is still changing.
   { method: "GET", match: (url) => url.startsWith("/status"),
+    contract: getRunStatusContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");

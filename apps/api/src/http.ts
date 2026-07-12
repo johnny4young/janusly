@@ -16,6 +16,7 @@
 
 import http from "http";
 import { gzipSync } from "node:zlib";
+import type { ApiRouteContract } from "./api-contract-types";
 import { errorEnvelope, type ApiErrorCode } from "./error-codes";
 
 /** `Error` carrying an HTTP status. `server.ts` reads `statusCode` to map throws to responses. */
@@ -87,6 +88,9 @@ const DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://loca
 export type CorsAwareResponse = http.ServerResponse & {
   requestOrigin?: string;
   requestAcceptEncoding?: string;
+  requestId?: string;
+  apiVersion?: "v1";
+  contract?: ApiRouteContract;
 };
 
 function getAllowedOrigins() {
@@ -96,7 +100,8 @@ function getAllowedOrigins() {
 
 /** Build the CORS header dict against `API_ALLOWED_ORIGINS`. Echoes the origin only when it's allowlisted. */
 export function corsHeaders(res: http.ServerResponse) {
-  const origin = (res as CorsAwareResponse).requestOrigin;
+  const response = res as CorsAwareResponse;
+  const origin = response.requestOrigin;
   const allowedOrigins = getAllowedOrigins();
   const allowAny = allowedOrigins.includes("*");
   const allowedOrigin = !origin
@@ -108,7 +113,9 @@ export function corsHeaders(res: http.ServerResponse) {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-session, Accept-Language, Last-Event-ID",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-org-id, x-user-id, x-janusly-session, x-request-id, Accept-Language, Last-Event-ID",
+    "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
+    ...(response.requestId ? { "X-Request-Id": response.requestId } : {}),
     "Vary": "Origin",
   };
 }
@@ -124,10 +131,29 @@ export function corsHeaders(res: http.ServerResponse) {
 export function sendJson(res: http.ServerResponse, payload: unknown, status = 200) {
   let body: string;
   try {
+    const response = res as CorsAwareResponse;
+    const versioned = response.apiVersion === "v1"
+      ? buildVersionedPayload(response, payload, status)
+      : { payload, status };
+    payload = versioned.payload;
+    status = versioned.status;
     body = JSON.stringify(payload);
-  } catch {
-    body = JSON.stringify({ error: "Failed to serialize response" });
+  } catch (error) {
+    const response = res as CorsAwareResponse;
     status = 500;
+    if (response.apiVersion === "v1") {
+      console.error("[api] v1 response serialization failed", {
+        operationId: response.contract?.operationId,
+        error,
+      });
+    }
+    body = response.apiVersion === "v1"
+      ? JSON.stringify({
+          apiVersion: "v1",
+          requestId: response.requestId ?? "unknown",
+          error: { code: "server_internal_error", message: "Server error" },
+        })
+      : JSON.stringify({ error: "Failed to serialize response" });
   }
   const headers: http.OutgoingHttpHeaders = {
     "Content-Type": "application/json",
@@ -145,6 +171,96 @@ export function sendJson(res: http.ServerResponse, payload: unknown, status = 20
   }
   res.writeHead(status, headers);
   res.end(body);
+}
+
+const GENERIC_V1_ERROR_CODES = new Set<ApiErrorCode>([
+  "server_internal_error",
+  "server_not_found",
+  "server_request_failed",
+]);
+
+function buildVersionedPayload(
+  response: CorsAwareResponse,
+  payload: unknown,
+  status: number,
+): { payload: unknown; status: number } {
+  const requestId = response.requestId ?? "unknown";
+  if (status >= 400) {
+    return buildVersionedError(response, payload, status, requestId);
+  }
+
+  // Validate the exact JSON representation rather than the pre-serialization
+  // object (Drizzle timestamps are Date instances but travel as ISO strings).
+  const serialized = JSON.stringify(payload);
+  if (serialized === undefined) {
+    console.error("[api] v1 response serialization failed", {
+      operationId: response.contract?.operationId,
+      error: "JSON.stringify returned undefined",
+    });
+    return contractViolation(requestId);
+  }
+  const wirePayload: unknown = JSON.parse(serialized);
+  const validation = response.contract?.response.safeParse(wirePayload);
+  if (validation && !validation.success) {
+    const issues = validation.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    }));
+    console.error("[api] v1 response contract violation", {
+      operationId: response.contract?.operationId,
+      issues,
+    });
+    return contractViolation(requestId);
+  }
+
+  return {
+    status,
+    payload: { apiVersion: "v1", requestId, data: wirePayload },
+  };
+}
+
+function buildVersionedError(
+  response: CorsAwareResponse,
+  payload: unknown,
+  status: number,
+  requestId: string,
+): { payload: unknown; status: number } {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+  const code = typeof record.code === "string" ? record.code as ApiErrorCode : "server_request_failed";
+  const allowed = GENERIC_V1_ERROR_CODES.has(code) || response.contract?.errorCodes.includes(code);
+  if (!allowed) {
+    console.error("[api] v1 error contract violation", {
+      operationId: response.contract?.operationId,
+      code,
+    });
+    return contractViolation(requestId);
+  }
+
+  const message = typeof record.error === "string" ? record.error : "Request failed";
+  const params = record.params && typeof record.params === "object" && !Array.isArray(record.params)
+    ? record.params
+    : undefined;
+  return {
+    status,
+    payload: {
+      apiVersion: "v1",
+      requestId,
+      error: { code, message, ...(params ? { params } : {}) },
+    },
+  };
+}
+
+function contractViolation(requestId: string): { payload: unknown; status: number } {
+  return {
+    status: 500,
+    payload: {
+      apiVersion: "v1",
+      requestId,
+      error: { code: "server_internal_error", message: "Server error" },
+    },
+  };
 }
 
 /**

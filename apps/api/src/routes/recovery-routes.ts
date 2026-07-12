@@ -36,6 +36,7 @@ import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
+import { recoveryMetricsContract } from "../api-contracts";
 
 /** Extract the saved workflow identifier from a DLQ snapshot without trusting client input. */
 function workflowIdFromSnapshot(workflowJson: unknown): string | null {
@@ -49,6 +50,7 @@ export const recoveryRoutes: Route[] = [
   // a single rollup the Operations dashboard renders.
   { method: "GET", match: (url) => url === "/recovery/metrics" || url.startsWith("/recovery/metrics?"),
     role: "viewer",
+    contract: recoveryMetricsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);

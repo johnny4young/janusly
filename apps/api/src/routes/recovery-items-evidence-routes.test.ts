@@ -219,7 +219,7 @@ describe("POST /recovery/items/:id/evidence", () => {
     expect(res.headers?.["Content-Type"]).toBe("application/json");
     expect(res.headers?.["Content-Disposition"]).toContain("attachment");
     expect(res.headers?.["Content-Disposition"]).toContain(".json");
-    expect(res.headers?.["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(res.headers?.["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     expect(JSON.parse(res.body ?? "{}").incident.recoveryItemId).toBe("ri_1");
   });
 

@@ -342,13 +342,13 @@ export const reportsRoutes: Route[] = [
       if (formatRaw === "json") {
         // Use the same disposition pattern for JSON so an operator who
         // saves the response gets a filename instead of "download.bin".
-        // sendJson sets Content-Type; we layer the disposition + CORS
-        // expose header on top by writing the response manually.
+        // sendJson sets Content-Type; we write manually to layer the
+        // disposition header on top. Shared CORS headers expose it.
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify(report.json));
         return;
@@ -357,15 +357,13 @@ export const reportsRoutes: Route[] = [
       // Markdown download path — write the body directly with a
       // `Content-Disposition: attachment` header so the browser
       // downloads as a file rather than rendering inline. The
-      // `Access-Control-Expose-Headers` value lets the web's
-      // `downloadFromApi` helper read the filename from JS (without
-      // this CORS exposure the browser hides the header and the
-      // helper falls back to a generic name).
+      // Shared CORS headers expose Content-Disposition so the web's
+      // `downloadFromApi` helper can read the filename from JS.
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(report.markdown);
     } },
@@ -543,8 +541,8 @@ export const reportsRoutes: Route[] = [
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-          "Access-Control-Expose-Headers": "Content-Disposition",
           ...corsHeaders(res),
+          "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
         });
         res.end(JSON.stringify(body));
         return;
@@ -553,8 +551,8 @@ export const reportsRoutes: Route[] = [
       res.writeHead(200, {
         "Content-Type": "text/markdown; charset=utf-8",
         "Content-Disposition": contentDispositionAttachment(asciiFilename, utf8Filename),
-        "Access-Control-Expose-Headers": "Content-Disposition",
         ...corsHeaders(res),
+        "Access-Control-Expose-Headers": "Content-Disposition, X-Request-Id",
       });
       res.end(buildValueDashboardMarkdown({
         orgId: auth.orgId,

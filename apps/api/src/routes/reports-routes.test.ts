@@ -275,7 +275,7 @@ describe("/reports/run-explain — happy path", () => {
     expect(writeHeadArgs[0]).toBe(200);
     const headers = writeHeadArgs[1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("text/markdown; charset=utf-8");
-    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     // Filename pattern: janusly-<slug(workflow_name)>-<status>-<YYYY-MM-DD>-<short_id>.<ext>
     expect(headers["Content-Disposition"]).toContain('filename="janusly-billing-flow-failed-2026-05-12-run_abc.md"');
     expect(headers["Content-Disposition"]).toContain("filename*=UTF-8''");
@@ -358,7 +358,7 @@ describe("/reports/run-explain — happy path", () => {
     const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Content-Disposition"]).toContain('filename="janusly-billing-flow-failed-2026-05-12-run_xyz.json"');
-    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition");
+    expect(headers["Access-Control-Expose-Headers"]).toBe("Content-Disposition, X-Request-Id");
     // sendJsonMock should NOT have been called — we wrote the response manually.
     expect(sendJsonMock).not.toHaveBeenCalled();
   });

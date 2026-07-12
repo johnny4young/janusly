@@ -11,6 +11,7 @@
 export * from './workflow'
 export * from './workflow-slo'
 export * from './status'
+export * from './api-contract'
 export * from './iso-duration'
 export * from './prompt-variables'
 export * from './alert-policy'

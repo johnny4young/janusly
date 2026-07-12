@@ -175,6 +175,8 @@ pnpm dev:doctor      # free api/web ports (:3001, :5173, legacy :5174); add --co
 pnpm stop            # docker compose stop (keeps volumes)
 pnpm clean           # docker compose down -v (removes local volumes)
 pnpm migrate         # apply Drizzle migrations against DATABASE_URL
+pnpm contract:generate # regenerate apps/api/openapi.v1.json from Zod route contracts
+pnpm contract:check  # fail when the checked-in OpenAPI 3.1 contract has drifted
 pnpm test            # Vitest across the workspace packages
 pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
 pnpm build           # type-check + Vite production build (Rolldown, manualChunks)

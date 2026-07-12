@@ -16,6 +16,7 @@
  */
 
 import type { Route } from "./routes";
+import { openApiRoutes } from "./openapi-route";
 
 import { aiRoutes } from "./routes/ai-routes";
 import { alertsRoutes } from "./routes/alerts-routes";
@@ -52,6 +53,7 @@ import { workflowMetadataRoutes } from "./routes/workflow-metadata-routes";
 import { workflowsRoutes } from "./routes/workflows-routes";
 
 export const routes: Route[] = [
+  ...openApiRoutes,
   ...healthRoutes,
   ...toolsRoutes,
   ...templatesRoutes,

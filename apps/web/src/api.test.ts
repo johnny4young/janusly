@@ -116,6 +116,54 @@ describe('api', () => {
     expect(useWorkflowStore.getState().budgetBlocked).toEqual(budget)
   })
 
+  it('uses and unwraps the v1 envelope for contracted read paths', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      apiVersion: 'v1',
+      requestId: 'req-workflows',
+      data: [{ id: 'wf-1', name: 'Billing recovery' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'req-workflows' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api('/workflows?limit=20')).resolves.toEqual([{ id: 'wf-1', name: 'Billing recovery' }])
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:3001/v1/workflows?limit=20')
+  })
+
+  it('unwraps v1 errors and preserves the correlation ID', async () => {
+    mockJsonResponse(403, {
+      apiVersion: 'v1',
+      requestId: 'req-denied',
+      error: { code: 'runs_forbidden', message: 'Forbidden' },
+    })
+
+    const error = await api('/run?runId=elsewhere').catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(Error)
+    expect(error).toMatchObject({
+      message: 'Forbidden',
+      code: 'runs_forbidden',
+      statusCode: 403,
+      requestId: 'req-denied',
+    })
+  })
+
+  it('leaves uncontracted and mutating paths unversioned', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api('/workflows/tags')
+    await api('/workflows/save', { method: 'POST', body: '{}' })
+
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'http://localhost:3001/workflows/tags',
+      'http://localhost:3001/workflows/save',
+    ])
+  })
+
   it('dedups identical GETs within the in-flight window', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), {
       status: 200,

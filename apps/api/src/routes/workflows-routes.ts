@@ -66,6 +66,11 @@ import {
 import type { Route } from "../routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
+import {
+  getLatestWorkflowVersionContract,
+  listWorkflowsContract,
+  listWorkflowVersionsContract,
+} from "../api-contracts";
 
 /**
  * Parse a `?before=<iso>|<id>` keyset cursor for the Flows-list "Load more" into
@@ -82,6 +87,7 @@ export const workflowsRoutes: Route[] = [
   // NOTE: `/workflows/versions` and `/workflows/latest` come BEFORE `/workflows`
   // so the prefix-but-not-`/workflows/` matcher doesn't shadow them.
   { method: "GET", match: (url) => url.startsWith("/workflows/versions"),
+    contract: listWorkflowVersionsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -96,6 +102,7 @@ export const workflowsRoutes: Route[] = [
       return sendJson(res, versions);
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows/latest"),
+    contract: getLatestWorkflowVersionContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");
@@ -143,6 +150,7 @@ export const workflowsRoutes: Route[] = [
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
+    contract: listWorkflowsContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const limitParam = Number(url.searchParams.get("limit"));

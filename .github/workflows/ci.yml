@@ -37,6 +37,9 @@ jobs:
       - name: Lint (Biome)
         run: pnpm lint
 
+      - name: Check generated API contract
+        run: pnpm contract:check
+
       - name: Build
         run: pnpm build
 

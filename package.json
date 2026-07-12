@@ -15,6 +15,8 @@
     "lint:fix": "biome lint --write .",
     "bundle-report": "node scripts/bundle-report.mjs",
     "bundle-check": "node scripts/bundle-report.mjs --check --markdown artifacts/web-bundle-report.md --json artifacts/web-bundle-report.json",
+    "contract:generate": "pnpm --filter @janusly/api contract:generate",
+    "contract:check": "pnpm --filter @janusly/api contract:check",
     "test": "pnpm -r test",
     "test:browser": "pnpm --filter @janusly/web test:browser",
     "test:performance": "pnpm --filter @janusly/web build && pnpm --filter @janusly/web test:performance",

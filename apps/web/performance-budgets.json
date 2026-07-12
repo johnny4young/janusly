@@ -34,7 +34,7 @@
     }
   },
   "baselineGzipKiB": {
-    "api.js": 2.53,
+    "api.js": 2.89,
     "App.js": 49.81,
     "CommandPalette.js": 2.8,
     "CredentialRotateModal.js": 2.01,

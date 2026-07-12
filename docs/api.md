@@ -11,6 +11,33 @@ CORS allowed origins come from `API_ALLOWED_ORIGINS` (default: `http://localhost
 
 All examples below assume the dev-headers shorthand `-H "x-org-id: default" -H "x-user-id: dev-user"`.
 
+## Stable v1 contract
+
+Janusly retains every unversioned route for compatibility. Contracted reads
+also resolve under `/v1` and return stable envelopes. The current v1 set is:
+
+- `GET /v1/recovery/metrics`
+- `GET /v1/workflows`
+- `GET /v1/workflows/versions`
+- `GET /v1/workflows/latest`
+- `GET /v1/runs`
+- `GET /v1/run`
+- `GET /v1/status`
+
+Successful responses are `{ "apiVersion": "v1", "requestId": "...", "data":
+<legacy-payload> }`. Errors are `{ "apiVersion": "v1", "requestId": "...",
+"error": { "code": "...", "message": "...", "params": {} } }`. Every
+response also carries `X-Request-Id`; pass a safe `X-Request-Id` request header
+to retain your own correlation ID or let Janusly generate one.
+
+The generated OpenAPI 3.1 document is public at `GET /v1/openapi.json` and
+checked in at [`apps/api/openapi.v1.json`](../apps/api/openapi.v1.json). Run
+`pnpm contract:generate` after an intentional contract change and `pnpm
+contract:check` to verify there is no drift. Routes not present in that document
+remain available only at their legacy URL; `/v1/<uncontracted-route>` fails
+closed with 404. See [`docs/architecture/api-contract.md`](architecture/api-contract.md)
+for maintainer invariants.
+
 This file gives worked examples for the stable public HTTP surface. The
 authoritative route registry is the composed `routes: Route[]` in
 [`apps/api/src/index.ts`](../apps/api/src/index.ts); it is first-match-wins, so
@@ -41,6 +68,7 @@ that permission is the authorization gate.
 
 | Surface | Endpoint(s) | Access | Notes |
 | --- | --- | --- | --- |
+| API contract | `GET /v1/openapi.json` | public | Generated OpenAPI 3.1 document for explicitly contracted `/v1` aliases. |
 | Health | `GET /health` | public | Liveness plus additive public rate-limiter degradation snapshot. |
 | Rate limiter admin | `GET /system/rate-limiter` | admin | Process-local Redis limiter degradation details. |
 | Tools/templates/plugins | `GET /tools`, `GET /templates`, `GET /plugins`, `POST /plugins/install` | authenticated / admin install | Tool registry, static workflow templates, installed-plugin catalog. |

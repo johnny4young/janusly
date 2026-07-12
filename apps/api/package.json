@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit",
+    "contract:generate": "tsx src/openapi-cli.ts --write",
+    "contract:check": "tsx src/openapi-cli.ts --check",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:integration": "vitest run --config vite.integration.config.ts"
