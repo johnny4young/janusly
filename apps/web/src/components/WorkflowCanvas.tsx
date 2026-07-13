@@ -10,13 +10,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/react'
-import type { EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
+import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { CanvasErrorBoundary } from './CanvasErrorBoundary'
 import { useConfirm } from './ConfirmDialog'
-import { getNodeHelper, getNodeLabel } from '../constants'
+import { formatStatusLabel, getNodeHelper, getNodeLabel } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
 import '@xyflow/react/dist/style.css'
@@ -39,14 +39,23 @@ type WorkflowCanvasProps = {
    *  pan/zoom under it. Omitted (e.g. unsaved drafts, the locked browser
    *  tests) → always fit-to-view, no persistence. */
   viewportWorkflowId?: string
+  /** `observe` renders an immutable run snapshot: operators can pan/zoom and
+   *  focus nodes, but cannot drag, connect, reconnect, or delete anything. */
+  mode?: 'author' | 'observe'
+  /** Keep the mounted editor inert while its tab is hidden. This preserves
+   *  viewport/selection without letting its document-level keyboard handlers
+   *  react to an interaction in a different workspace. */
+  active?: boolean
 }
 
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
-export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId }: WorkflowCanvasProps) {
+export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onNodeClick, onEdgeClick, paletteNodeTypes, onAddNode, viewportWorkflowId, mode = 'author', active = true }: WorkflowCanvasProps) {
   const { t } = useT()
   const confirmDialog = useConfirm()
+  const observing = mode === 'observe'
+  const editing = active && !observing
   // Give every node a meaningful screen-reader name. React Flow's default node
   // aria-label is just "Node <id>"; announce the step's localized label instead
   // ("Step: Call an API"). Derived here, not in the store, so it stays localized
@@ -56,24 +65,52 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
     () =>
       nodes.map((node) => ({
         ...node,
-        ariaLabel: t('canvas.nodeAria', {
+        ariaLabel: t(observing ? 'canvas.runNodeAria' : 'canvas.nodeAria', {
           label: node.data.label?.trim() || getNodeLabel(node.data.type),
+          status: formatStatusLabel(node.data.status ?? 'pending'),
         }) as string,
       })),
-    [nodes, t],
+    [nodes, observing, t],
   )
+  const a11yEdges = useMemo(() => {
+    const nodeLabels = new Map(nodes.map(node => [
+      node.id,
+      node.data.label?.trim() || getNodeLabel(node.data.type),
+    ]))
+    return edges.map(edge => ({
+      ...edge,
+      ariaLabel: t('canvas.edgeAria', {
+        source: nodeLabels.get(edge.source) ?? edge.source,
+        target: nodeLabels.get(edge.target) ?? edge.target,
+      }) as string,
+    }))
+  }, [edges, nodes, t])
+  const ariaLabelConfig = useMemo<Partial<AriaLabelConfig>>(() => {
+    if (!observing) return {}
+    const readOnlyInstructions = t('canvas.readOnly') as string
+    return {
+      'node.a11yDescription.default': readOnlyInstructions,
+      'node.a11yDescription.keyboardDisabled': readOnlyInstructions,
+      'edge.a11yDescription.default': readOnlyInstructions,
+      'controls.ariaLabel': t('canvas.runMap') as string,
+      'controls.zoomIn.ariaLabel': t('canvas.a11y.zoomIn') as string,
+      'controls.zoomOut.ariaLabel': t('canvas.a11y.zoomOut') as string,
+      'controls.fitView.ariaLabel': t('canvas.a11y.fitView') as string,
+    }
+  }, [observing, t])
   // Confirm before a node is removed (Delete/Backspace or the toolbar) — a
   // mis-keyed delete can otherwise drop a configured step silently. Edge-only
   // deletions skip the prompt: re-drawing a connection is cheap and reversible.
   const onBeforeDelete = useCallback<OnBeforeDelete<WorkflowGraphNode, WorkflowGraphEdge>>(
     async ({ nodes: nodesToDelete }) => {
+      if (!editing) return false
       if (nodesToDelete.length === 0) return true
       return confirmDialog({
         body: t('canvas.deleteConfirm', { count: nodesToDelete.length }) as string,
         tone: 'danger',
       })
     },
-    [confirmDialog, t],
+    [confirmDialog, editing, t],
   )
   // Restore the saved viewport on mount (read once per workflow key); when none
   // exists we fall back to `fitView`. React Flow ignores `defaultViewport` while
@@ -121,13 +158,16 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   )
 
   return (
-    <div className="canvas-frame">
-      <div className="canvas-toolbar" aria-label={t('canvas.flowMapSummary')}>
+    <div className="canvas-frame" data-mode={mode} data-testid={observing ? 'run-observation-canvas' : undefined}>
+      <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
         <div>
-          <div className="section-kicker">{t('canvas.flowMap')}</div>
+          <div className="section-kicker">{t(observing ? 'canvas.runMap' : 'canvas.flowMap')}</div>
           <strong>{t('canvas.steps', { count: nodes.length })}</strong>
         </div>
-        <span>{t('canvas.paths', { count: edges.length })}</span>
+        <div className="canvas-toolbar__meta">
+          <span>{t('canvas.paths', { count: edges.length })}</span>
+          {observing && <span className="we-pill we-pill--info">{t('canvas.readOnly')}</span>}
+        </div>
       </div>
       {paletteNodeTypes && onAddNode && paletteNodeTypes.length > 0 && (
         <div className="canvas-palette" role="toolbar" aria-label={t('canvas.palette') as string}>
@@ -147,7 +187,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
       <ReactFlow
         nodes={a11yNodes}
-        edges={edges}
+        edges={a11yEdges}
         nodeTypes={workflowNodeTypes}
         edgeTypes={workflowEdgeTypes}
         onNodesChange={onNodesChange}
@@ -163,9 +203,20 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         onMoveEnd={handleMoveEnd}
         minZoom={0.45}
         maxZoom={1.35}
+        nodesDraggable={editing}
+        nodesConnectable={editing}
+        edgesReconnectable={editing}
+        deleteKeyCode={editing ? ['Backspace', 'Delete'] : null}
+        disableKeyboardA11y={!editing}
+        ariaLabelConfig={ariaLabelConfig}
       >
         <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
-        <Controls onZoomIn={persistCurrentViewport} onZoomOut={persistCurrentViewport} onFitView={persistCurrentViewport} />
+        <Controls
+          showInteractive={!observing}
+          onZoomIn={persistCurrentViewport}
+          onZoomOut={persistCurrentViewport}
+          onFitView={persistCurrentViewport}
+        />
       </ReactFlow>
       </CanvasErrorBoundary>
       {nodes.length === 0 && (
@@ -173,8 +224,8 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         // backdrop so the palette/canvas underneath remain interactive.
         <div className="canvas-empty" data-testid="canvas-empty">
           <div className="canvas-empty__card">
-            <strong>{t('canvas.empty.title')}</strong>
-            <p>{t('canvas.empty.body')}</p>
+            <strong>{t(observing ? 'canvas.runEmpty.title' : 'canvas.empty.title')}</strong>
+            <p>{t(observing ? 'canvas.runEmpty.body' : 'canvas.empty.body')}</p>
           </div>
         </div>
       )}

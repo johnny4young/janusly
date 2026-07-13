@@ -21,6 +21,7 @@
 import { useEffect } from 'react'
 import { getActiveOrg } from '../auth'
 import { useWorkflowStore } from '../store'
+import { getRunWorkflowSnapshot } from '../canvas-projections'
 import type { WorkflowDefinition } from '../types'
 
 /** One persisted draft: the serialized canvas + when it was captured. */
@@ -58,9 +59,13 @@ export function readDraft(workflowId: string): CanvasDraft | null {
   try {
     const raw = storage.getItem(draftKey(workflowId))
     if (!raw) return null
-    const parsed = JSON.parse(raw) as CanvasDraft
-    if (!parsed || typeof parsed !== 'object' || !parsed.workflow || typeof parsed.savedAt !== 'string') return null
-    return parsed
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const draft = parsed as { workflow?: unknown; savedAt?: unknown }
+    if (!draft.workflow || typeof draft.savedAt !== 'string') return null
+    const workflow = getRunWorkflowSnapshot({ workflow: draft.workflow })
+    if (!workflow) return null
+    return { workflow, savedAt: draft.savedAt }
   } catch {
     return null
   }

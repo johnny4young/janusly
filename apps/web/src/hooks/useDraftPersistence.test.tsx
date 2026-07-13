@@ -93,4 +93,43 @@ describe('useDraftAutosave (S-01 local drafts)', () => {
     clearDraft('wf_draft_test')
     expect(readLatestDraft()).toBeNull()
   })
+
+  it('rejects corrupt historical drafts instead of crashing canvas hydration', () => {
+    const key = 'janusly:draft:default:wf_corrupt'
+    const write = (workflow: unknown) => localStorage.setItem(key, JSON.stringify({ workflow, savedAt: new Date().toISOString() }))
+
+    write({ nodes: 'truncated', edges: [] })
+    expect(readDraft('wf_corrupt')).toBeNull()
+
+    write({ nodes: [{ id: 'a', type: 'noop', config: {} }], edges: [{ from: 'a', to: 'missing' }] })
+    expect(readDraft('wf_corrupt')).toBeNull()
+
+    write({
+      nodes: [
+        { id: 'duplicate', type: 'noop', config: {} },
+        { id: 'duplicate', type: 'http', config: {} },
+      ],
+      edges: [],
+    })
+    expect(readDraft('wf_corrupt')).toBeNull()
+
+    write({ id: '', nodes: [{ id: 'a', type: 'noop', config: {} }], edges: [] })
+    expect(readDraft('wf_corrupt')).toBeNull()
+
+    write({
+      id: 'wf_corrupt',
+      inputs: { type: 'object', properties: { invoiceId: null } },
+      nodes: [{ id: 'a', type: 'noop', config: {} }],
+      edges: [],
+    })
+    expect(readDraft('wf_corrupt')).toBeNull()
+
+    write({
+      id: 'wf_corrupt',
+      outputs: { result: null },
+      nodes: [{ id: 'a', type: 'noop', config: {} }],
+      edges: [],
+    })
+    expect(readDraft('wf_corrupt')).toBeNull()
+  })
 })

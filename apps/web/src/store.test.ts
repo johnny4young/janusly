@@ -229,6 +229,7 @@ describe('useWorkflowStore', () => {
   })
 
   it('resetRun clears runId, run nodes, events, pagination, and stream status', () => {
+    const generation = useWorkflowStore.getState().runTransitionGeneration
     useWorkflowStore.setState({
       runId: 'run_1',
       runNodes: [{ nodeId: 'a', status: 'running' }],
@@ -245,6 +246,76 @@ describe('useWorkflowStore', () => {
     expect(state.eventsCursor).toBeNull()
     expect(state.eventsHasMore).toBe(false)
     expect(state.streamStatus).toBe('idle')
+    expect(state.runTransitionGeneration).toBe(generation + 1)
+  })
+
+  it('invalidates run ownership atomically when the auth owner changes', () => {
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      runId: 'run-a',
+      runDetail: { id: 'run-a', status: 'running' },
+      runNodes: [{ nodeId: 'a', status: 'running' }],
+      events: [{ id: 'e1', type: 'node.running' }],
+    })
+    const generation = useWorkflowStore.getState().runTransitionGeneration
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-b',
+      orgId: 'org-b',
+    })
+
+    const state = useWorkflowStore.getState()
+    expect(state.runTransitionGeneration).toBe(generation + 1)
+    expect(state.runId).toBeNull()
+    expect(state.runDetail).toBeNull()
+    expect(state.runNodes).toEqual([])
+    expect(state.events).toEqual([])
+  })
+
+  it('preserves the active run when only the auth session refreshes', () => {
+    useWorkflowStore.setState({ userId: 'user-a', orgId: 'org-a', runId: 'run-a' })
+    const generation = useWorkflowStore.getState().runTransitionGeneration
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-a',
+      orgId: 'org-a',
+    })
+
+    expect(useWorkflowStore.getState().runId).toBe('run-a')
+    expect(useWorkflowStore.getState().runTransitionGeneration).toBe(generation)
+  })
+
+  it('switches active runs atomically and clears the prior projection', () => {
+    useWorkflowStore.setState({
+      runId: 'run-a',
+      runDetail: { id: 'run-a', status: 'running' },
+      runNodes: [{ nodeId: 'a', status: 'running' }],
+      events: [{ id: 'e1', type: 'node.running' }],
+    })
+    const generation = useWorkflowStore.getState().runTransitionGeneration
+
+    useWorkflowStore.getState().setRunId('run-b')
+
+    const state = useWorkflowStore.getState()
+    expect(state.runId).toBe('run-b')
+    expect(state.runTransitionGeneration).toBe(generation + 1)
+    expect(state.runDetail).toBeNull()
+    expect(state.runNodes).toEqual([])
+    expect(state.events).toEqual([])
+  })
+
+  it('invalidates run ownership when authoring replaces the workflow', () => {
+    const generation = useWorkflowStore.getState().runTransitionGeneration
+    useWorkflowStore.getState().hydrateWorkflow({ id: 'wf-a', nodes: [], edges: [] })
+    expect(useWorkflowStore.getState().runTransitionGeneration).toBe(generation + 1)
+
+    useWorkflowStore.getState().newWorkflow()
+    expect(useWorkflowStore.getState().runTransitionGeneration).toBe(generation + 2)
   })
 
   // Non-canvas tab transitions. The layout dispatcher in App.tsx mounts

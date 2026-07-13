@@ -125,6 +125,15 @@ function serviceExitReason(child) {
   return null;
 }
 
+async function waitForServiceStability(service, stabilityMs = 1_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < stabilityMs) {
+    const exitReason = serviceExitReason(service);
+    if (exitReason) throw new Error(`${service.serviceName ?? "service"} exited with ${exitReason} during startup`);
+    await sleep(50);
+  }
+}
+
 async function validateToolsCatalog(response) {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
@@ -275,13 +284,35 @@ try {
   const api = startService("api", "pnpm", ["--filter", "@janusly/api", "exec", "tsx", "src/index.ts"], {
     env: { PORT: String(apiPort) },
   });
-  startService("worker", "pnpm", ["--filter", "@janusly/engine", "exec", "tsx", "src/worker.ts"]);
+  // `@janusly/db` intentionally lets the root `.env` override inherited
+  // process variables. Load it first, then enable private targets only in this
+  // disposable E2E worker so the Playwright-owned loopback target can hold a
+  // real HTTP node in `running`; production and normal development retain the
+  // secure default.
+  const e2eWorkerBootstrap = [
+    'import("@janusly/db").then(() => {',
+    'process.env.ALLOW_PRIVATE_HTTP_TARGETS = "true";',
+    'return import("./src/worker.ts");',
+    "});",
+  ].join("");
+  const worker = startService("worker", "pnpm", [
+    "--filter",
+    "@janusly/engine",
+    "exec",
+    "tsx",
+    "--eval",
+    e2eWorkerBootstrap,
+  ]);
 
   await waitForHttp(`${apiUrl}/tools`, {
     headers: { "x-org-id": "default", "x-user-id": "dev-user" },
     service: api,
     validate: validateToolsCatalog,
   });
+  // The worker has no HTTP health endpoint. Keep its process handle and require
+  // it to survive the API startup window plus a short stabilization period so
+  // bootstrap/import failures fail here instead of surfacing as Playwright timeouts.
+  await waitForServiceStability(worker);
 
   await run("pnpm", [
     "--filter",

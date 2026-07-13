@@ -24,7 +24,7 @@
  */
 
 import type { EdgeMarker } from '@xyflow/react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode } from './types'
+import type { JsonObject, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape, RunNode, RunSummary } from './types'
 
 /**
  * Data envelope projected onto every edge passed to React Flow. The
@@ -48,6 +48,110 @@ export type EdgeData = { condition?: string; hasCondition?: boolean }
 export const WORKFLOW_EDGE_MARKER_END: EdgeMarker = {
   type: 'arrowclosed',
   color: 'var(--we-faint)',
+}
+
+function asObject(value: unknown): JsonObject | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonObject : null
+}
+
+function isNonemptyString(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim())
+}
+
+const WORKFLOW_INPUT_TYPES = new Set<WorkflowInputSchemaShape['type']>(['string', 'number', 'boolean', 'object', 'array'])
+
+/**
+ * Validate the recursive workflow-input subset without pulling Zod into the
+ * web boot chunk. The explicit work list avoids overflowing the JS stack when
+ * localStorage or a historical payload contains maliciously deep JSON.
+ */
+function isWorkflowInputSchema(value: unknown): value is WorkflowInputSchemaShape {
+  const pending: unknown[] = [value]
+  let visited = 0
+
+  while (pending.length > 0) {
+    const schema = asObject(pending.pop())
+    if (!schema || !WORKFLOW_INPUT_TYPES.has(schema.type as WorkflowInputSchemaShape['type'])) return false
+    if (schema.description !== undefined && typeof schema.description !== 'string') return false
+    if (schema.required !== undefined && (!Array.isArray(schema.required) || !schema.required.every(item => typeof item === 'string'))) return false
+    if (schema.enum !== undefined && !Array.isArray(schema.enum)) return false
+    if (schema.items !== undefined) pending.push(schema.items)
+
+    if (schema.properties !== undefined) {
+      const properties = asObject(schema.properties)
+      if (!properties) return false
+      pending.push(...Object.values(properties))
+    }
+
+    // A valid authoring payload is tiny. Bound adversarial historical input so
+    // validation remains fail-closed instead of monopolising the main thread.
+    visited += 1
+    if (visited > 10_000) return false
+  }
+
+  return true
+}
+
+/** Validate a persisted run workflow as a complete graph, never a partial one. */
+export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): WorkflowDefinition | null {
+  const workflow = asObject(asObject(inputJson)?.workflow)
+  if (!workflow || !Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges)) return null
+  if (workflow.id !== undefined && !isNonemptyString(workflow.id)) return null
+  if (workflow.name !== undefined && !isNonemptyString(workflow.name)) return null
+  if (workflow.inputs !== undefined && !isWorkflowInputSchema(workflow.inputs)) return null
+  if (workflow.outputs !== undefined) {
+    const outputs = asObject(workflow.outputs)
+    if (!outputs || !Object.values(outputs).every(output => typeof output === 'string')) return null
+  }
+
+  const nodeIds = new Set<string>()
+  for (const rawNode of workflow.nodes) {
+    const node = asObject(rawNode)
+    if (!isNonemptyString(node?.id) || !isNonemptyString(node.type)) return null
+    if (node.config !== undefined && !asObject(node.config)) return null
+    if (nodeIds.has(node.id)) return null
+    nodeIds.add(node.id)
+  }
+
+  for (const rawEdge of workflow.edges) {
+    const edge = asObject(rawEdge)
+    if (!isNonemptyString(edge?.from) || !isNonemptyString(edge.to)) return null
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) return null
+    if (edge.condition !== undefined && !isNonemptyString(edge.condition)) return null
+  }
+
+  return workflow as WorkflowDefinition
+}
+
+/**
+ * Convert a persisted workflow snapshot into the editor-neutral React Flow
+ * graph shape. Workflow JSON deliberately does not persist visual positions,
+ * so the projection preserves the established deterministic authoring layout.
+ * It is deliberately topology-agnostic: invalid cycles still render every
+ * persisted step instead of silently omitting evidence from the run snapshot.
+ */
+export function workflowToGraph(workflow: WorkflowDefinition): {
+  nodes: WorkflowGraphNode[]
+  edges: WorkflowGraphEdge[]
+} {
+  const nodes = workflow.nodes.map((node, index) => ({
+      id: node.id,
+      position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
+      // Keep the label empty so WorkflowStepNode resolves localized copy at
+      // render time instead of persisting one locale into the graph.
+      data: { label: '', type: node.type, config: node.config ?? {} },
+    }))
+
+  const edges = workflow.edges.map((edge, index) => ({
+    id: `e${index}`,
+    source: edge.from,
+    target: edge.to,
+    label: edge.condition ? 'condition' : undefined,
+    animated: Boolean(edge.condition),
+    data: { condition: edge.condition },
+  }))
+
+  return { nodes, edges }
 }
 
 /**

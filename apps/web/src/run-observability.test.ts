@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getRunFinishedAt, getRunTerminalAt, getRunTriggerInput, getRunWaitingInfo, getRunWorkflowIdentity } from './run-observability'
+import { getRunWorkflowSnapshot } from './canvas-projections'
 
 describe('run observability projections', () => {
   it('extracts workflow identity and trigger input without exposing the workflow snapshot as input', () => {
@@ -18,6 +19,44 @@ describe('run observability projections', () => {
   it('returns safe fallbacks for historical and malformed run payloads', () => {
     expect(getRunWorkflowIdentity({ id: 'run-1', status: 'running', inputJson: { workflow: 'bad' } })).toEqual({ id: null, name: null })
     expect(getRunTriggerInput({ id: 'run-1', status: 'running', inputJson: null })).toBeUndefined()
+  })
+
+  it('validates the authoritative workflow snapshot before exposing it to the run canvas', () => {
+    expect(getRunWorkflowSnapshot({
+      workflow: {
+        id: 'billing',
+        name: 'Billing recovery',
+        nodes: [
+          { id: 'fetch', type: 'http', config: { url: 'https://example.com' } },
+          { id: 'approve', type: 'approval', config: {} },
+        ],
+        edges: [{ from: 'fetch', to: 'approve', condition: 'output.ok' }],
+      },
+    })).toEqual({
+      id: 'billing',
+      name: 'Billing recovery',
+      nodes: [
+        { id: 'fetch', type: 'http', config: { url: 'https://example.com' } },
+        { id: 'approve', type: 'approval', config: {} },
+      ],
+      edges: [{ from: 'fetch', to: 'approve', condition: 'output.ok' }],
+    })
+  })
+
+  it('fails closed instead of drawing partial or ambiguous historical snapshots', () => {
+    const run = (workflow: unknown) => ({ workflow })
+    expect(getRunWorkflowSnapshot(run({ nodes: 'truncated', edges: [] }))).toBeNull()
+    expect(getRunWorkflowSnapshot(run({
+      nodes: [{ id: 'a', type: 'noop', config: {} }],
+      edges: [{ from: 'a', to: 'missing' }],
+    }))).toBeNull()
+    expect(getRunWorkflowSnapshot(run({
+      nodes: [
+        { id: 'duplicate', type: 'noop', config: {} },
+        { id: 'duplicate', type: 'http', config: {} },
+      ],
+      edges: [],
+    }))).toBeNull()
   })
 
   it('classifies current and legacy waiting metadata with stable timing fallbacks', () => {

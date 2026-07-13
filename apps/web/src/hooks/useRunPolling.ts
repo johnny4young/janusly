@@ -21,10 +21,11 @@
  *   never tears the interval down and races the SSE hook's `streamStatus` write.
  */
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
+import { isRunRequestCurrent } from '../run-transition'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import type { RunEvent, RunNode, RunSummary } from '../types'
 
@@ -40,8 +41,12 @@ type RunResponse = {
  *  with the shell's run-action handlers (approve / resume / replay / cancel),
  *  which fetch a fresh snapshot after mutating a run. */
 export type RunPolling = {
-  loadStatus: (id: string) => Promise<RunResponse>
+  loadStatus: (id: string) => Promise<RunStatusLoadResult>
 }
+
+export type RunStatusLoadResult =
+  | { discarded: true }
+  | { discarded: false; status: RunResponse }
 
 export type RunSummaryPatcher = (runId: string, patch: Partial<RunSummary>) => void
 
@@ -62,9 +67,29 @@ export function useRunPolling(
   const setEventsPagination = useWorkflowStore((s) => s.setEventsPagination)
   const setStreamStatus = useWorkflowStore((s) => s.setStreamStatus)
   const addToast = useWorkflowStore((s) => s.addToast)
+  const requestSequence = useRef(0)
 
-  const loadStatus = useCallback(async (id: string): Promise<RunResponse> => {
-    const status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
+  const loadStatus = useCallback(async (id: string): Promise<RunStatusLoadResult> => {
+    const requestId = ++requestSequence.current
+    const context = {
+      runId: id,
+      generation: useWorkflowStore.getState().runTransitionGeneration,
+    }
+    const isCurrentRequest = () => (
+      requestId === requestSequence.current
+      && isRunRequestCurrent(context, useWorkflowStore.getState())
+    )
+    let status: RunResponse
+    try {
+      status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
+    } catch (error) {
+      if (!isCurrentRequest()) return { discarded: true }
+      throw error
+    }
+    // A response for run A may arrive after the operator has opened run B.
+    // The generation also prevents a same-id response from an older auth or
+    // workflow owner from overwriting the current projection.
+    if (!isCurrentRequest()) return { discarded: true }
     if (status.run) patchRunSummary?.(id, status.run)
     setRunNodes(status.nodes ?? [])
     const statusEvents = status.events ?? []
@@ -81,7 +106,7 @@ export function useRunPolling(
         setEventsPagination(status.eventsCursor ?? null, true)
       }
     }
-    return status
+    return { discarded: false, status }
   }, [addEvents, patchRunSummary, setEventsPagination, setRunNodes])
 
   // Polling fallback. The original 1.5s `/status` loop loads the initial
@@ -95,22 +120,26 @@ export function useRunPolling(
 
     let closed = false
     let stopped = false
+    let inFlight = false
     let loadedInitialStatus = false
     setStreamStatus('connecting')
 
     const tick = async () => {
+      if (stopped || inFlight) return
       // SSE is the live updater after the first status snapshot. Keep the
       // initial `/status` fetch even when SSE connects first; otherwise a
       // node.waiting event published before subscription can be missed and
       // `runNodes` never materializes.
       if (loadedInitialStatus && useWorkflowStore.getState().streamTransport === 'sse') return
+      inFlight = true
       try {
-        const status = await loadStatus(runId)
-        loadedInitialStatus = true
+        const result = await loadStatus(runId)
         if (closed) return
+        if (result.discarded) return
+        loadedInitialStatus = true
         setStreamStatus('connected')
 
-        if (isTerminalRunStatus(status.run?.status)) {
+        if (isTerminalRunStatus(result.status.run?.status)) {
           stopped = true
           window.clearInterval(interval)
           await onTerminal()
@@ -120,6 +149,8 @@ export function useRunPolling(
           setStreamStatus('error')
           addToast(error instanceof Error ? error.message : t('toasts.runStatusFailed'), 'error')
         }
+      } finally {
+        inFlight = false
       }
     }
 
@@ -130,6 +161,7 @@ export function useRunPolling(
 
     return () => {
       closed = true
+      requestSequence.current += 1
       window.clearInterval(interval)
       setStreamStatus('closed')
     }

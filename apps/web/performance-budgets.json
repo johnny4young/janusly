@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalGzipKiB": 600,
+  "totalGzipKiB": 602,
   "unbudgetedRegressionPercent": 10,
   "assetGroups": {
     "reactVendor": {
@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 106
+      "maxGzipKiB": 107
     },
     "canvas": {
       "label": "Canvas workspace",

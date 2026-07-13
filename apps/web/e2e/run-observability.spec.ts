@@ -1,4 +1,7 @@
 import { mkdir } from 'node:fs/promises'
+import { createServer, type ServerResponse } from 'node:http'
+import { once } from 'node:events'
+import type { AddressInfo } from 'node:net'
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test'
 import { pollUntilTerminal, pollUntilWaitingOrTerminal, startRun } from './_helpers/demo-helpers'
 
@@ -28,6 +31,29 @@ async function captureElement(locator: Locator, name: string): Promise<void> {
   await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
 }
 
+async function assertRunObservationMap(
+  page: Page,
+  nodeId: string,
+  status: string,
+  locale: 'en' | 'es',
+): Promise<Locator> {
+  const workspace = page.getByTestId('run-observation-workspace')
+  const map = page.getByTestId('run-observation-canvas')
+  await expect(workspace).toBeVisible()
+  await expect(map).toBeVisible()
+  await expect(map).toContainText(locale === 'en' ? 'Run snapshot' : 'Instantánea de la ejecución')
+  await expect(map).toContainText(locale === 'en' ? 'Read only' : 'Solo lectura')
+  await expect(map.locator(`.react-flow__node[data-id="${nodeId}"] .workflow-node`)).toHaveAttribute('data-status', status)
+  if ((page.viewportSize()?.width ?? 0) > 1200) {
+    const mapBox = await map.boundingBox()
+    const panelBox = await workspace.locator('.run-observation-panel').boundingBox()
+    expect(mapBox).not.toBeNull()
+    expect(panelBox).not.toBeNull()
+    expect(panelBox!.x).toBeGreaterThanOrEqual(mapBox!.x + mapBox!.width)
+  }
+  return map
+}
+
 function matchesRunsFilter(rawUrl: string, workflowId: string, status: string): boolean {
   const url = new URL(rawUrl)
   return url.pathname.endsWith('/runs')
@@ -43,6 +69,9 @@ async function openRuns(page: Page, locale: 'en' | 'es'): Promise<void> {
 async function openRunFromHistory(page: Page, runId: string): Promise<void> {
   const history = page.getByTestId('runs-history-virtual-list')
   const prefix = `${runId.slice(0, 8)}…`
+  // Filter changes fetch asynchronously. Wait for the virtual list to receive
+  // at least one row before deciding that its current scroll range is empty.
+  await expect.poll(() => history.getByRole('article').count()).toBeGreaterThan(0)
   await history.evaluate(element => element.scrollTo({ top: 0 }))
   for (let offset = 0; offset < 100; offset += 4) {
     const card = history.getByRole('article').filter({ hasText: prefix }).first()
@@ -60,6 +89,122 @@ async function openRunFromHistory(page: Page, runId: string): Promise<void> {
   }
   throw new Error(`Run ${runId} was not present in the bounded history page`)
 }
+
+async function createHeldHttpTarget(): Promise<{
+  url: string
+  connected: Promise<void>
+  release: () => void
+  close: () => Promise<void>
+}> {
+  let response: ServerResponse | null = null
+  let markConnected!: () => void
+  const connected = new Promise<void>(resolve => { markConnected = resolve })
+  const server = createServer((_request, nextResponse) => {
+    response = nextResponse
+    markConnected()
+  })
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  const release = () => {
+    if (!response || response.writableEnded) return
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end(JSON.stringify({ ok: true }))
+  }
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/held-run`,
+    connected,
+    release,
+    close: async () => {
+      release()
+      server.close()
+      await once(server, 'close')
+    },
+  }
+}
+
+test('a real running node pulses, honors reduced motion, and cannot mutate the authoring canvas', async ({ page, request }) => {
+  const browserErrors = installConsoleErrorGuards(page)
+  const target = await createHeldHttpTarget()
+  let runId: string | null = null
+
+  try {
+    await page.goto('/')
+    await hideUnrelatedOverlays(page)
+    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+
+    const authorCanvas = page.locator('.workspace-canvas-wrapper .canvas-frame[data-mode="author"]')
+    const authorViewport = authorCanvas.locator('.react-flow__viewport')
+    await expect(authorCanvas).toBeVisible()
+    const authorNodeIds = await authorCanvas.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))
+    const selectedAuthorNode = authorCanvas.locator('.react-flow__node').first()
+    const selectedAuthorNodeId = await selectedAuthorNode.getAttribute('data-id')
+    await selectedAuthorNode.click()
+    const beforeZoom = await authorViewport.getAttribute('style')
+    await authorCanvas.locator('.react-flow__controls-zoomin').click()
+    await expect.poll(() => authorViewport.getAttribute('style')).not.toBe(beforeZoom)
+    const authorViewportAfterZoom = await authorViewport.getAttribute('style')
+
+    await page.getByRole('button', { name: 'Runs', exact: true }).click()
+    await expect(page.getByTestId('run-history-status-filter')).toBeVisible()
+    const running = await startRun(request, {
+      id: `e2e-observation-running-${Date.now()}`,
+      name: 'E2E held running node',
+      nodes: [{
+        id: 'held_request',
+        type: 'http',
+        config: { url: target.url, timeoutMs: 120_000, maxResponseBytes: 4096 },
+      }],
+      edges: [],
+    }, { source: 'running-map-smoke' })
+    runId = running.runId
+    await target.connected
+
+    await page.getByTestId('run-history-status-filter').selectOption('running')
+    await openRunFromHistory(page, runId)
+    const englishMap = await assertRunObservationMap(page, 'held_request', 'running', 'en')
+    const runningNode = englishMap.locator('.react-flow__node[data-id="held_request"] .workflow-node')
+    await expect.poll(() => runningNode.evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
+    await captureElement(englishMap, 'web-en-run-map-running-pulse')
+
+    await runningNode.click()
+    await page.keyboard.press('Delete')
+    await expect(englishMap.locator('.react-flow__node[data-id="held_request"]')).toHaveCount(1)
+    await expect(page.getByRole('alertdialog')).toHaveCount(0)
+    const runViewport = englishMap.locator('.react-flow__viewport')
+    const runViewportBeforeZoom = await runViewport.getAttribute('style')
+    await englishMap.locator('.react-flow__controls-zoomout').click()
+    await expect.poll(() => runViewport.getAttribute('style')).not.toBe(runViewportBeforeZoom)
+
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(() => runningNode.evaluate(element => getComputedStyle(element).animationName)).toBe('none')
+    expect(await runningNode.evaluate(element => getComputedStyle(element).boxShadow)).not.toBe('none')
+    await captureElement(englishMap, 'web-en-run-map-running-reduced-motion')
+
+    await page.getByRole('button', { name: /^AI Studio\b/ }).click()
+    await expect(authorCanvas).toBeVisible()
+    expect(await authorCanvas.locator('.react-flow__node').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-id')))).toEqual(authorNodeIds)
+    expect(await authorViewport.getAttribute('style')).toBe(authorViewportAfterZoom)
+    await expect(authorCanvas.locator(`.react-flow__node[data-id="${selectedAuthorNodeId}"]`)).toHaveClass(/selected/)
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
+    await page.reload()
+    await hideUnrelatedOverlays(page)
+    await openRuns(page, 'es')
+    await page.getByTestId('run-history-status-filter').selectOption('running')
+    await openRunFromHistory(page, runId)
+    const spanishMap = await assertRunObservationMap(page, 'held_request', 'running', 'es')
+    await expect.poll(() => spanishMap.locator('.workflow-node[data-status="running"]').evaluate(element => getComputedStyle(element).animationName)).toContain('we-running-node-pulse')
+    await captureElement(spanishMap, 'web-es-run-map-running-pulse')
+
+    target.release()
+    expect((await pollUntilTerminal(request, runId)).status).toBe('succeeded')
+    expect(browserErrors).toEqual([])
+  } finally {
+    target.release()
+    await target.close()
+  }
+})
 
 test('active runs explain identity, trigger, chronology, and waits in both locales', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
@@ -126,6 +271,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(englishOverview).toContainText('Needs attention')
   await expect(englishOverview).toContainText('Trace ID')
   await expect(page.getByRole('status', { name: /Live run connection: Polling/ })).toBeVisible()
+  const englishFailedMap = await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'en')
+  await captureElement(englishFailedMap, 'web-en-run-map-failed-readonly')
   await captureElement(englishOverview, 'web-en-run-overview-failed-default')
 
   const englishInput = page.getByTestId('run-trigger-input')
@@ -136,6 +283,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await englishOverview.getByRole('button', { name: 'View timeline', exact: true }).click()
   const englishTimeline = page.getByTestId('run-event-timeline')
+  const englishReasoningMap = await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'en')
+  await captureElement(englishReasoningMap, 'web-en-reasoning-map-failed-readonly')
   await expect(englishTimeline.locator('[data-tone="error"]')).not.toHaveCount(0)
   await expect(englishTimeline.locator('[data-noise="true"]')).not.toHaveCount(0)
   await expect(englishTimeline.locator('time')).not.toHaveCount(0)
@@ -178,6 +327,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(englishWaiting).toContainText('Confirm the invoice and customer history before release.')
   await expect(englishWaiting).toContainText('Waiting for')
   await expect(englishWaiting.getByRole('button', { name: 'Approve and resume' })).toBeVisible()
+  const englishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'en')
+  await captureElement(englishWaitingMap, 'web-en-run-map-waiting-readonly')
   await captureElement(englishWaiting, 'web-en-run-waiting-approval')
 
   await page.evaluate(() => window.localStorage.setItem('janusly:locale', 'es'))
@@ -189,6 +340,8 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   const spanishOverview = page.getByTestId('run-overview')
   await expect(spanishOverview).toContainText('Necesita atención')
   await expect(spanishOverview).toContainText('ID de traza')
+  const spanishFailedMap = await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'es')
+  await captureElement(spanishFailedMap, 'web-es-run-map-failed-readonly')
   const spanishInput = page.getByTestId('run-trigger-input')
   await spanishInput.locator('summary').click()
   await expect(spanishInput).toContainText('Entrada que inició la ejecución')
@@ -197,6 +350,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
 
   await spanishOverview.getByRole('button', { name: 'Ver cronología', exact: true }).click()
   const spanishTimeline = page.getByTestId('run-event-timeline')
+  await assertRunObservationMap(page, 'fetch_invoice', 'failed', 'es')
   await expect(spanishTimeline.locator('[data-tone="error"]')).not.toHaveCount(0)
   await expect(spanishTimeline.locator('[aria-label$="desde el evento anterior"]')).not.toHaveCount(0)
   await captureElement(spanishTimeline, 'web-es-run-events-failed-timeline')
@@ -228,7 +382,19 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(spanishWaiting).toContainText('Aprobación')
   await expect(spanishWaiting).toContainText('En espera durante')
   await expect(spanishWaiting.getByRole('button', { name: 'Aprobar y reanudar' })).toBeVisible()
+  const spanishWaitingMap = await assertRunObservationMap(page, 'approve_refund', 'waiting', 'es')
+  await captureElement(spanishWaitingMap, 'web-es-run-map-waiting-readonly')
   await captureElement(spanishWaiting, 'web-es-run-waiting-approval')
+
+  await page.setViewportSize({ width: 1150, height: 900 })
+  const stackedWorkspace = page.getByTestId('run-observation-workspace')
+  const stackedMapBox = await spanishWaitingMap.boundingBox()
+  const stackedPanelBox = await stackedWorkspace.locator('.run-observation-panel').boundingBox()
+  expect(stackedMapBox).not.toBeNull()
+  expect(stackedPanelBox).not.toBeNull()
+  expect(stackedPanelBox!.y).toBeGreaterThanOrEqual(stackedMapBox!.y + stackedMapBox!.height)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await captureElement(spanishWaitingMap, 'web-es-run-map-waiting-stacked')
 
   expect(browserErrors).toEqual([])
 })

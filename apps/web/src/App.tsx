@@ -32,6 +32,7 @@ const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((m)
 // heaviest web dependency — loads on first navigation to a canvas-bearing
 // tab, not at boot. `CanvasWorkspace` owns the `<ReactFlowProvider>`.
 const CanvasWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.CanvasWorkspace })))
+const RunObservationWorkspace = lazy(() => import('./components/CanvasWorkspace').then((m) => ({ default: m.RunObservationWorkspace })))
 import { RightPanel } from './components/RightPanel'
 import { RecoveryCenterPanel } from './components/RecoveryCenterPanel'
 import { BudgetBlockedBanner } from './components/BudgetBlockedBanner'
@@ -59,6 +60,7 @@ import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
 import { DOCS_URL } from './docs-link'
+import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
 
 type RunResponse = {
   run?: RunSummary
@@ -111,6 +113,7 @@ export default function App() {
     orgId,
     authReady,
     runId,
+    runDetail,
     runNodes,
     events,
     selectedNodeId,
@@ -136,13 +139,13 @@ export default function App() {
     updateSelectedNodeConfig,
     updateSelectedNodeType,
     setRunId,
+    setRunDetail,
     setRunNodes,
     setEvents,
     addEvents,
     eventsCursor,
     eventsHasMore,
     setEventsPagination,
-    resetRun,
     addToast,
     updateEdgeCondition: storeUpdateEdgeCondition,
     bumpPlatformVersion,
@@ -163,6 +166,7 @@ export default function App() {
     orgId: s.orgId,
     authReady: s.authReady,
     runId: s.runId,
+    runDetail: s.runDetail,
     runNodes: s.runNodes,
     events: s.events,
     selectedNodeId: s.selectedNodeId,
@@ -188,13 +192,13 @@ export default function App() {
     updateSelectedNodeConfig: s.updateSelectedNodeConfig,
     updateSelectedNodeType: s.updateSelectedNodeType,
     setRunId: s.setRunId,
+    setRunDetail: s.setRunDetail,
     setRunNodes: s.setRunNodes,
     setEvents: s.setEvents,
     addEvents: s.addEvents,
     eventsCursor: s.eventsCursor,
     eventsHasMore: s.eventsHasMore,
     setEventsPagination: s.setEventsPagination,
-    resetRun: s.resetRun,
     addToast: s.addToast,
     updateEdgeCondition: s.updateEdgeCondition,
     bumpPlatformVersion: s.bumpPlatformVersion,
@@ -422,6 +426,15 @@ export default function App() {
     return new Map(runNodes.map(node => [node.nodeId, node.status]))
   }, [runNodes])
 
+  // `/runs` intentionally omits the heavy input snapshot. `runDetail` is
+  // render-tracked in the store, while this guard rejects every stale open or
+  // start response after the operator selects a different run/auth context.
+  // An auth-owner transition also clears the complete active-run projection so
+  // no prior tenant's nodes or timeline survive while bootstrap data refreshes.
+  const runTransitionGuard = useMemo(() => createRunTransitionGuard(
+    () => useWorkflowStore.getState().runTransitionGeneration,
+  ), [])
+
   // Pure projections delegated to `./canvas-projections`. The memos
   // depend ONLY on structural inputs — locale-dependent rendering
   // (node label / helper, conditional-edge label) lives inside the
@@ -489,20 +502,42 @@ export default function App() {
    * side validation errors from `{ errors: string[] }` envelopes (the
    * shape the API emits for typed-input rejections).
    */
-  const startRunWith = useCallback(async (input: unknown | undefined): Promise<{ runId?: string; errors?: string[] }> => {
+  const startRunWith = useCallback(async (input: unknown | undefined): Promise<{ runId?: string; errors?: string[]; discarded?: true }> => {
+    const requestId = runTransitionGuard.begin()
     const workflow = getWorkflowJson()
     const body = input !== undefined ? { workflow, input } : workflow
-    const result = await api('/start', { method: 'POST', body: JSON.stringify(body) }) as { runId?: string; errors?: string[] }
-    if (result?.errors) return result
-    if (!result?.runId) throw new Error(t('toasts.apiNoRunId'))
-    resetRun()
+    let result: { runId?: string; errors?: string[] }
+    try {
+      result = await api('/start', { method: 'POST', body: JSON.stringify(body) }) as { runId?: string; errors?: string[] }
+    } catch (error) {
+      if (!runTransitionGuard.isCurrent(requestId)) return { discarded: true }
+      throw error
+    }
+    const isCurrentRequest = runTransitionGuard.isCurrent(requestId)
+    if (result?.errors) return isCurrentRequest ? result : { discarded: true }
+    if (!result?.runId) {
+      if (!isCurrentRequest) return { discarded: true }
+      throw new Error(t('toasts.apiNoRunId'))
+    }
+    if (!isCurrentRequest) {
+      // The server mutation still happened even if the operator moved on. Keep
+      // independent panels fresh, but never launch an unowned shell refresh,
+      // activate the stale run, or show its success toast in the new context.
+      bumpPlatformVersion()
+      return { discarded: true }
+    }
     setRunId(result.runId)
+    setRunDetail({
+      id: result.runId,
+      status: 'running',
+      inputJson: { workflow, ...(input !== undefined ? { input } : {}) },
+    })
     setActiveTab('multiAgent')
     addToast(t('toasts.runStarted', { runIdShort: result.runId.slice(0, 8) }), 'success')
     bumpPlatformVersion()
     await refreshPlatform()
     return result
-  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, resetRun, setActiveTab, setRunId, t])
+  }, [addToast, bumpPlatformVersion, getWorkflowJson, refreshPlatform, runTransitionGuard, setActiveTab, setRunDetail, setRunId, t])
 
   const startWorkflow = useCallback(async () => {
     if (!await validateWorkflow()) return
@@ -525,6 +560,7 @@ export default function App() {
     setRunInputServerErrors([])
     try {
       const result = await startRunWith(input)
+      if (result.discarded) return
       if (result?.errors && result.errors.length > 0) {
         setRunInputServerErrors(result.errors)
         return
@@ -559,10 +595,13 @@ export default function App() {
     // A caller-pinned `targetTab` is honoured verbatim; otherwise default to the
     // runs timeline — the default used to be `multiAgent`, which dropped every
     // ordinary run onto an empty multi-agent panel.
+    const requestId = runTransitionGuard.begin()
     setActiveTab(targetTab ?? 'runs')
     try {
       const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
+      if (!runTransitionGuard.isCurrent(requestId)) return
       setRunId(id)
+      if (data.run) setRunDetail(data.run)
       if (data.run) patchRunSummary(id, data.run)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
@@ -573,17 +612,24 @@ export default function App() {
         setActiveTab('multiAgent')
       }
     } catch (error) {
+      if (!runTransitionGuard.isCurrent(requestId)) return
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
-  }, [addToast, patchRunSummary, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes, t])
+  }, [addToast, patchRunSummary, runTransitionGuard, setActiveTab, setEvents, setEventsPagination, setRunDetail, setRunId, setRunNodes, t])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return
+    const context = {
+      runId,
+      generation: useWorkflowStore.getState().runTransitionGeneration,
+    }
     try {
       const data = await api(`/run?runId=${encodeURIComponent(runId)}&eventsCursor=${encodeURIComponent(eventsCursor)}`) as RunResponse
+      if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
       addEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
     } catch (error) {
+      if (!isRunRequestCurrent(context, useWorkflowStore.getState())) return
       addToast(error instanceof Error ? error.message : t('toasts.olderEventsFailed'), 'error')
     }
   }, [addEvents, addToast, eventsCursor, eventsHasMore, runId, setEventsPagination, t])
@@ -848,6 +894,9 @@ export default function App() {
   const recoverState: 'blocked' | 'attention' | 'clear' =
     blockerCount > 0 ? 'blocked' : openDlqCount > 0 ? 'attention' : 'clear'
   const activeRunCount = runs.filter(run => run.status === 'running' || run.status === 'paused').length
+  const observedRun = runId
+    ? (runDetail?.id === runId ? runDetail : runs.find(run => run.id === runId))
+    : undefined
   const isConnected = streamStatus === 'connected'
 
   // Extracted once so the same element instance can render in either the
@@ -1059,11 +1108,23 @@ export default function App() {
                   paletteNodeTypes={canvasPaletteTypes}
                   onAddNode={addNode}
                   viewportWorkflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined}
+                  active={visibility.visible}
                 />
               </Suspense>
             </div>
             {visibility.contextualSlot && (
-              <div data-layout="contextual">{rightPanelElement}</div>
+              (activeTab === 'runs' || activeTab === 'reasoning') && observedRun ? (
+                <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+                  <RunObservationWorkspace
+                    key={observedRun.id}
+                    run={observedRun}
+                    runNodes={runNodes}
+                    panel={rightPanelElement}
+                  />
+                </Suspense>
+              ) : (
+                <div data-layout="contextual">{rightPanelElement}</div>
+              )
             )}
           </>
         )

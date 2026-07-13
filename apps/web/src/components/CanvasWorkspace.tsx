@@ -17,9 +17,14 @@
  */
 
 import { ReactFlowProvider, addEdge, applyEdgeChanges, applyNodeChanges } from '@xyflow/react'
-import type { ComponentProps } from 'react'
+import { useMemo } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
+import type { EdgeMouseHandler, NodeMouseHandler, OnConnect, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import { registerFlowOps } from '../store'
+import { getRunWorkflowSnapshot, projectVisibleEdges, projectVisibleNodes, workflowToGraph } from '../canvas-projections'
+import { useT } from '../i18n'
+import type { RunNode, RunSummary, WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 
 // Hand the store React Flow's change-appliers as soon as this (lazy) chunk
 // evaluates — before any canvas interaction can fire a reducer. Keeping the
@@ -34,5 +39,60 @@ export function CanvasWorkspace(props: ComponentProps<typeof WorkflowCanvas>) {
     <ReactFlowProvider>
       <WorkflowCanvas {...props} />
     </ReactFlowProvider>
+  )
+}
+
+const ignoreNodeChanges: OnNodesChange<WorkflowGraphNode> = () => undefined
+const ignoreEdgeChanges: OnEdgesChange<WorkflowGraphEdge> = () => undefined
+const ignoreConnect: OnConnect = () => undefined
+const ignoreNodeClick: NodeMouseHandler<WorkflowGraphNode> = () => undefined
+const ignoreEdgeClick: EdgeMouseHandler<WorkflowGraphEdge> = () => undefined
+
+/**
+ * Immutable companion canvas for a persisted run snapshot. This uses a
+ * separate provider/React Flow instance from the editor so observing a run can
+ * never alter authoring selection, graph state, or the saved editor viewport.
+ */
+export function RunObservationWorkspace({ run, runNodes, panel }: {
+  run: RunSummary
+  runNodes: RunNode[]
+  panel: ReactNode
+}) {
+  const { t } = useT()
+  const graph = useMemo(() => {
+    const snapshot = getRunWorkflowSnapshot(run.inputJson)
+    return snapshot ? workflowToGraph(snapshot) : null
+  }, [run.inputJson])
+  const nodes = useMemo(
+    () => graph
+      ? projectVisibleNodes(graph.nodes, new Map(runNodes.map(node => [node.nodeId, node.status])), [], null)
+      : [],
+    [graph, runNodes],
+  )
+  const edges = useMemo(
+    () => graph ? projectVisibleEdges(graph.edges, null) : [],
+    [graph],
+  )
+
+  if (!graph) return <div data-layout="contextual">{panel}</div>
+
+  return (
+    <div data-layout="run-observation" data-testid="run-observation-workspace">
+      <section className="run-observation-map" aria-label={t('canvas.runMap')}>
+        <ReactFlowProvider>
+          <WorkflowCanvas
+            mode="observe"
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={ignoreNodeChanges}
+            onEdgesChange={ignoreEdgeChanges}
+            onConnect={ignoreConnect}
+            onNodeClick={ignoreNodeClick}
+            onEdgeClick={ignoreEdgeClick}
+          />
+        </ReactFlowProvider>
+      </section>
+      <div className="run-observation-panel">{panel}</div>
+    </div>
   )
 }

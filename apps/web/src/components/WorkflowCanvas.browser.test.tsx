@@ -4,6 +4,7 @@ import { render, waitFor } from '@testing-library/react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
+import { initI18n } from '../i18n'
 
 function makeNode(id: string, label: string, position: { x: number; y: number }, hasValidationError = false): WorkflowGraphNode {
   return {
@@ -131,6 +132,59 @@ describe('WorkflowCanvas (browser mode)', () => {
     // Default Controls renders four interactive buttons; the count is stable
     // across @xyflow/react patch releases.
     expect(controls!.querySelectorAll('button').length).toBeGreaterThanOrEqual(3)
+  })
+
+  it('renders run observation mode as immutable while keeping pan, zoom, focus, and live status visible', async () => {
+    const running = makeNode('running', 'Running step', { x: 100, y: 100 })
+    running.data.status = 'running'
+    const waiting = makeNode('waiting', 'Waiting step', { x: 340, y: 100 })
+    const { container, findByText, getByText } = mountCanvas({
+      mode: 'observe',
+      nodes: [running, waiting],
+      edges: [makeEdge('running-waiting', 'running', 'waiting')],
+    })
+
+    await findByText('Running step')
+    expect(getByText('Run snapshot')).toBeInTheDocument()
+    expect(container.querySelector('.canvas-toolbar__meta .we-pill')).toHaveTextContent('Read only')
+    const canvas = container.querySelector('[data-testid="run-observation-canvas"]') as HTMLElement
+    const nodeWrapper = container.querySelector('.react-flow__node[data-id="running"]') as HTMLElement
+    const node = nodeWrapper.querySelector('.workflow-node') as HTMLElement
+    expect(canvas).toHaveAttribute('data-mode', 'observe')
+    expect(nodeWrapper.classList.contains('draggable')).toBe(false)
+    expect(node).toHaveAttribute('data-status', 'running')
+    expect(getComputedStyle(node).animationName).toContain('we-running-node-pulse')
+    expect(getComputedStyle(container.querySelector('.workflow-handle') as HTMLElement).display).toBe('none')
+    expect(container.querySelector('.react-flow__controls-interactive')).toBeNull()
+    const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Path from Running step to Waiting step"]') as HTMLElement
+    expect(edgeWrapper).toBeTruthy()
+    expect(nodeWrapper).toHaveAttribute('aria-label', 'Step: Running step. Status: Running. Read only')
+    expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Read only')
+    expect(container.querySelector('[aria-label="Zoom in"]')).toBeTruthy()
+  })
+
+  it('localizes observe-mode controls, edge names, and read-only instructions in Spanish', async () => {
+    initI18n('es')
+    const { container, findByText } = mountCanvas({
+      mode: 'observe',
+      nodes: [
+        makeNode('inicio', 'Inicio', { x: 100, y: 100 }),
+        makeNode('fin', 'Final', { x: 340, y: 100 }),
+      ],
+      edges: [makeEdge('inicio-fin', 'inicio', 'fin')],
+    })
+
+    await findByText('Inicio')
+    const nodeWrapper = container.querySelector('.react-flow__node[data-id="inicio"]') as HTMLElement
+    const edgeWrapper = container.querySelector('.react-flow__edge[aria-label="Camino de Inicio a Final"]') as HTMLElement
+    expect(edgeWrapper).toBeTruthy()
+    expect(nodeWrapper).toHaveAttribute('aria-label', 'Paso: Inicio. Estado: Listo. Solo lectura')
+    expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Solo lectura')
+    expect(container.querySelector('[aria-label="Instantánea de la ejecución"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Acercar"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Alejar"]')).toBeTruthy()
+    expect(container.querySelector('[aria-label="Ajustar ejecución a la vista"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('Press delete')
   })
 
   it('renders the dotted Background layer with a pattern definition', async () => {

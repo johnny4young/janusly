@@ -29,10 +29,11 @@
 import { create } from 'zustand'
 import type { Connection, OnEdgesChange, OnNodesChange } from '@xyflow/react'
 import type { Session, User } from '@supabase/supabase-js'
-import type { ActiveTab, JsonObject, RunEvent, RunNode, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
+import type { ActiveTab, JsonObject, RunEvent, RunNode, RunSummary, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
 import type { OnboardingState } from '@janusly/shared/src/onboarding'
 import { getNodePreset } from './constants'
 import { t } from './i18n/runtime'
+import { workflowToGraph } from './canvas-projections'
 
 /**
  * React Flow's change-appliers, registered lazily by `CanvasWorkspace` when
@@ -106,6 +107,13 @@ type WorkflowStore = {
   selectedEdgeId: string | null
 
   runId: string | null
+  /** Monotonic ownership generation for async run requests. Any identity,
+   *  workflow, or active-run transition increments it atomically with the
+   *  associated reset so late responses can fail closed. */
+  runTransitionGeneration: number
+  /** Full detail for the selected run. Unlike `/runs`, this preserves the
+   *  immutable input snapshot used by the observation canvas. */
+  runDetail: RunSummary | null
   runNodes: RunNode[]
   events: RunEvent[]
   eventsCursor: string | null
@@ -149,6 +157,7 @@ type WorkflowStore = {
   updateEdgeCondition: (id: string, condition: string | null) => void
 
   setRunId: (id: string | null) => void
+  setRunDetail: (run: RunSummary | null) => void
   setRunNodes: (nodes: RunNode[]) => void
   mergeRunNode: (node: RunNode) => void
   addEvents: (events: RunEvent[]) => void
@@ -218,6 +227,20 @@ const initialNodes: WorkflowGraphNode[] = [
 
 const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
 
+function clearedRunProjection(runTransitionGeneration: number) {
+  return {
+    runId: null,
+    runTransitionGeneration: runTransitionGeneration + 1,
+    runDetail: null,
+    runNodes: [],
+    events: [],
+    eventsCursor: null,
+    eventsHasMore: false,
+    streamStatus: 'idle' as const,
+    streamTransport: 'idle' as const,
+  }
+}
+
 function graphToWorkflow(
   id: string,
   name: string,
@@ -263,6 +286,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   selectedNodeId: null,
   selectedEdgeId: null,
   runId: null,
+  runTransitionGeneration: 0,
+  runDetail: null,
   runNodes: [],
   events: [],
   eventsCursor: null,
@@ -279,8 +304,24 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   budgetBlocked: null,
   onboarding: null,
 
-  setAuth: ({ session, user, userId, orgId }) => set({ session, user, userId, orgId, authReady: true }),
-  clearAuth: () => set({ session: null, user: null, userId: null, orgId: null, authReady: true }),
+  setAuth: ({ session, user, userId, orgId }) => set((state) => ({
+    session,
+    user,
+    userId,
+    orgId,
+    authReady: true,
+    ...(state.userId !== userId || state.orgId !== orgId
+      ? clearedRunProjection(state.runTransitionGeneration)
+      : {}),
+  })),
+  clearAuth: () => set((state) => ({
+    session: null,
+    user: null,
+    userId: null,
+    orgId: null,
+    authReady: true,
+    ...clearedRunProjection(state.runTransitionGeneration),
+  })),
   setAuthReady: (authReady) => set({ authReady }),
 
   addNode: (type) => {
@@ -301,6 +342,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   hydrateWorkflow: (workflow, options) => {
     const saved = options?.saved ?? true
     const dirty = options?.dirty ?? false
+    const graph = workflowToGraph(workflow)
     set((state) => ({
       currentWorkflowId: workflow.id ?? 'ui-test',
       currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
@@ -308,29 +350,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowDirty: dirty,
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
-      nodes: (workflow.nodes ?? []).map((node, index) => ({
-        id: node.id,
-        position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
-        // `data.label` stays empty; `WorkflowStepNode` resolves the
-        // human label via `getNodeLabel(type)` so a locale toggle
-        // re-renders the leaf without re-projecting the full graph.
-        data: { label: '', type: node.type, config: node.config ?? {} },
-      })),
-      edges: (workflow.edges ?? []).map((edge, index) => ({
-        id: `e${index}`,
-        source: edge.from,
-        target: edge.to,
-        label: edge.condition ? 'condition' : undefined,
-        animated: Boolean(edge.condition),
-        data: { condition: edge.condition },
-      })),
+      nodes: graph.nodes,
+      edges: graph.edges,
       selectedNodeId: null,
       selectedEdgeId: null,
-      events: [],
-      eventsCursor: null,
-      eventsHasMore: false,
-      runNodes: [],
-      runId: null,
+      ...clearedRunProjection(state.runTransitionGeneration),
       workflowRevision: state.workflowRevision + 1,
     }))
   },
@@ -363,11 +387,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       edges: [],
       selectedNodeId: null,
       selectedEdgeId: null,
-      events: [],
-      eventsCursor: null,
-      eventsHasMore: false,
-      runNodes: [],
-      runId: null,
+      ...clearedRunProjection(state.runTransitionGeneration),
       activeTab: 'copilot',
       workflowRevision: state.workflowRevision + 1,
     }))
@@ -442,7 +462,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       : edge),
   })),
 
-  setRunId: (id) => set({ runId: id }),
+  setRunId: (id) => set((state) => state.runId === id
+    ? { runId: id }
+    : { ...clearedRunProjection(state.runTransitionGeneration), runId: id }),
+  setRunDetail: (runDetail) => set({ runDetail }),
   setRunNodes: (nodes) => set({ runNodes: nodes }),
   mergeRunNode: (incoming) => set((state) => {
     const index = state.runNodes.findIndex((node) => node.nodeId === incoming.nodeId)
@@ -477,7 +500,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
   setStreamStatus: (streamStatus) => set({ streamStatus }),
   setStreamTransport: (streamTransport) => set({ streamTransport }),
-  resetRun: () => set({ runId: null, runNodes: [], events: [], eventsCursor: null, eventsHasMore: false, streamStatus: 'idle', streamTransport: 'idle' }),
+  resetRun: () => set((state) => clearedRunProjection(state.runTransitionGeneration)),
   addToast: (message, tone = 'info') => {
     const id = crypto.randomUUID()
     set((state) => ({ toasts: [...state.toasts, { id, message, tone }] }))

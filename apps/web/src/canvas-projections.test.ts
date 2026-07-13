@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { projectVisibleEdges, projectVisibleNodes, WORKFLOW_EDGE_MARKER_END } from './canvas-projections'
+import { getRunWorkflowSnapshot, projectVisibleEdges, projectVisibleNodes, workflowToGraph, WORKFLOW_EDGE_MARKER_END } from './canvas-projections'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from './types'
 
 const baseEdge = (id: string, extra: Partial<WorkflowGraphEdge> = {}): WorkflowGraphEdge => ({
@@ -15,6 +15,36 @@ const baseNode = (id: string, type = 'http', extra: Partial<WorkflowGraphNode> =
   position: { x: 0, y: 0 },
   data: { label: '', type, config: {} },
   ...extra,
+})
+
+describe('getRunWorkflowSnapshot', () => {
+  const validWorkflow = {
+    id: 'wf-valid',
+    name: 'Valid workflow',
+    inputs: {
+      type: 'object',
+      properties: { invoiceId: { type: 'string' } },
+      required: ['invoiceId'],
+    },
+    outputs: { result: '{{context.finish.output}}' },
+    nodes: [{ id: 'finish', type: 'noop', config: {} }],
+    edges: [],
+  }
+
+  it('accepts the complete workflow shape used by drafts and run snapshots', () => {
+    expect(getRunWorkflowSnapshot({ workflow: validWorkflow })).toBe(validWorkflow)
+  })
+
+  it.each([
+    { ...validWorkflow, id: '' },
+    { ...validWorkflow, name: 42 },
+    { ...validWorkflow, inputs: { type: 'object', properties: { invoiceId: null } } },
+    { ...validWorkflow, inputs: { type: 'date' } },
+    { ...validWorkflow, outputs: { result: null } },
+    { ...validWorkflow, edges: [{ from: 'finish', to: 'finish', condition: '' }] },
+  ])('rejects a malformed top-level or input/output shape', workflow => {
+    expect(getRunWorkflowSnapshot({ workflow })).toBeNull()
+  })
 })
 
 describe('projectVisibleEdges', () => {
@@ -57,6 +87,53 @@ describe('projectVisibleEdges', () => {
     expect((first as { style?: unknown }).style).toBeUndefined()
     expect(first.markerEnd).toBe(WORKFLOW_EDGE_MARKER_END)
     expect(second.markerEnd).toBe(WORKFLOW_EDGE_MARKER_END)
+  })
+})
+
+describe('workflowToGraph', () => {
+  it('preserves persisted order in the established deterministic authoring layout', () => {
+    const graph = workflowToGraph({
+      id: 'billing',
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'left', type: 'http', config: {} },
+        { id: 'right', type: 'ai', config: {} },
+        { id: 'finish', type: 'approval', config: {} },
+      ],
+      edges: [
+        { from: 'start', to: 'left' },
+        { from: 'start', to: 'right' },
+        { from: 'left', to: 'finish' },
+        { from: 'right', to: 'finish' },
+      ],
+    })
+
+    expect(graph.nodes.map(node => ({ id: node.id, position: node.position }))).toEqual([
+      { id: 'start', position: { x: 80, y: 80 } },
+      { id: 'left', position: { x: 310, y: 200 } },
+      { id: 'right', position: { x: 540, y: 320 } },
+      { id: 'finish', position: { x: 770, y: 80 } },
+    ])
+    expect(graph.edges.map(edge => [edge.source, edge.target])).toEqual([
+      ['start', 'left'],
+      ['start', 'right'],
+      ['left', 'finish'],
+      ['right', 'finish'],
+    ])
+  })
+
+  it('keeps cyclic nodes visible because layout never drops persisted evidence', () => {
+    const graph = workflowToGraph({
+      nodes: [
+        { id: 'a', type: 'noop', config: {} },
+        { id: 'b', type: 'noop', config: {} },
+      ],
+      edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }],
+    })
+    expect(graph.nodes.map(node => node.position)).toEqual([
+      { x: 80, y: 80 },
+      { x: 310, y: 200 },
+    ])
   })
 })
 

@@ -601,6 +601,47 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   width: 100%;
 }
 
+/* Active-run observation keeps the immutable workflow snapshot beside the
+   operational panel. It is intentionally a separate React Flow instance from
+   the hidden authoring canvas, so inspecting a run cannot disturb editor
+   selection or viewport state. */
+.workspace-main > [data-layout="run-observation"] {
+  align-items: start;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(440px, 1fr) minmax(380px, 560px);
+  margin: 0 auto;
+  max-width: 1680px;
+  padding: 24px;
+  width: 100%;
+}
+
+.run-observation-map {
+  height: min(720px, calc(100vh - 128px));
+  min-height: 480px;
+  min-width: 0;
+  position: sticky;
+  top: 24px;
+}
+
+.run-observation-panel {
+  min-width: 0;
+}
+
+/* The observation pair needs 888px in the main slot. Stack before the 300px
+   sidebar squeezes it below that threshold, otherwise overflow-x clipping can
+   hide the operational panel around 1150px-wide desktop windows. */
+@media (max-width: 1200px) {
+  .workspace-main > [data-layout="run-observation"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .run-observation-map {
+    height: 500px;
+    position: static;
+  }
+}
+
 /* Tablet (≤1100px): the workspace grid drops to a 260px sidebar + 1fr
    main with no right column. At that width 48px of side padding feels
    heavy — step it down to 24px so the panels keep useful content width
@@ -617,6 +658,16 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 @media (max-width: 760px) {
   .workspace-main > [data-layout="contextual"] {
     padding: 16px;
+  }
+
+  .workspace-main > [data-layout="run-observation"] {
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .run-observation-map {
+    height: 380px;
+    min-height: 380px;
   }
 }
 
@@ -1222,6 +1273,21 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   color: var(--we-muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+.canvas-toolbar__meta {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-frame[data-mode="observe"] .workflow-handle {
+  display: none;
+}
+
+.canvas-frame[data-mode="observe"] .react-flow__node {
+  cursor: default;
 }
 
 /* AI Studio node palette — draggable-step chips over the canvas (mirrors the
@@ -3879,12 +3945,31 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   box-shadow: 0 0 0 4px var(--we-primary-ring), 0 22px 42px -28px var(--we-primary-shadow);
 }
 
-.workflow-node[data-status="running"] { border-color: var(--we-info); background: var(--we-info-soft); }
+.workflow-node[data-status="running"] {
+  background: var(--we-info-soft);
+  border-color: var(--we-info);
+}
+
+.canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
+  animation: we-running-node-pulse 1.8s ease-out infinite;
+  box-shadow: 0 0 0 0 var(--we-info-border-30);
+}
 .workflow-node[data-status="waiting"],
 .workflow-node[data-status="queued"] { border-color: var(--we-warning); background: var(--we-warning-soft); }
 .workflow-node[data-status="succeeded"] { border-color: var(--we-success); background: var(--we-success-soft); }
 .workflow-node[data-status="failed"],
 .workflow-node[data-status="error"] { border-color: var(--we-danger); background: var(--we-danger-soft); }
+
+@keyframes we-running-node-pulse {
+  50% { box-shadow: 0 0 0 8px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-frame[data-mode="observe"] .workflow-node[data-status="running"] {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--we-info-border-30), 0 18px 34px -26px var(--we-shadow-ink-45);
+  }
+}
 
 /* Custom React Flow edge — selection state rides on the data-selected
  * attribute set by `WorkflowEdge.tsx`, so the upstream `visibleEdges`
