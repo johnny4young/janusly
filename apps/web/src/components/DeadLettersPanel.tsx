@@ -6,8 +6,8 @@
  * Used by `RightPanel.tsx` (`runs` tab → Operations card).
  */
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { CircleCheck, Download, FlaskConical, GitCompare, Inbox, Sparkles, X } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, Sparkles, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
@@ -26,6 +26,9 @@ import { RecoveryItemBadge } from './RecoveryItemBadge'
 import { RecoveryItemDrawer } from './RecoveryItemDrawer'
 import { getResolvedLocale, tApiError, useT } from '../i18n'
 import { useVirtualList } from '../hooks/useVirtualList'
+import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
+import { copyText } from '../clipboard'
+import { buildRecoveryErrorSummary } from '../recovery-error-summary'
 import {
   SEVERITIES,
   SORT_KEYS,
@@ -44,16 +47,10 @@ import {
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
 
-/** Row PITCH in CSS pixels for the virtualized DLQ list — the full
- *  distance from one row's top to the next row's top in the flex
- *  flow. That's the visual height of `.we-list-row` (~48px) PLUS the
- *  `gap: 6px` `.we-list` applies between flex children. Using row
- *  pitch (54px) instead of just the row height keeps the windowing
- *  math aligned with the actual scroll surface — otherwise the
- *  spacer undercounts by `(items.length - 1) × 6px` and the operator
- *  can't reach the bottom of long lists. Tune here if either value
- *  changes (row chrome height or `.we-list`'s gap). */
-const DLQ_ROW_HEIGHT = 54
+/** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
+ *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
+ *  exact even when the queue is long. */
+const DLQ_ROW_PITCH = 60
 
 /** The recovery-item overlay the API folds inline onto each recovery-queue
  *  row, so the panel renders the badge/drawer from one cap-correct fetch. */
@@ -73,7 +70,7 @@ export type DeadLetterRecovery = {
   lastOccurredAt?: string
 }
 
-/** M-08 change-correlation envelope from the `/dlq?id=` detail read: the
+/** Change-correlation envelope from the `/dlq?id=` detail read: the
  *  failing run executed `version`, saved within the suspect window before the
  *  failure; both DAG snapshots ride along so the diff renders with no extra
  *  fetch. Copy stays temporal ("started after ... was saved"), never causal. */
@@ -112,7 +109,7 @@ export type DeadLetter = {
   createdAt?: string
   replayedAt?: string
   recovery?: DeadLetterRecovery | null
-  /** M-08 suspect-version correlation — detail reads only; null when no recent-save correlation. */
+  /** Suspect-version correlation — detail reads only; null when no recent-save correlation. */
   suspectVersion?: SuspectVersionInfo | null
 }
 
@@ -151,8 +148,20 @@ const BULK_ERROR_PREVIEW = 6
 
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
-  onReplay: (id: string) => void
-  onResolve: (id: string) => void
+  onReplay: (id: string) => boolean | Promise<boolean> | undefined
+  onResolve: (id: string) => boolean | Promise<boolean> | undefined
+}
+
+type PendingTriageFocus = {
+  actionId: string
+  neighborIds: string[]
+  fallbackIndex: number
+  queueSignature: string
+  settled: boolean
+}
+
+function triageQueueSignature(items: DeadLetter[]): string {
+  return items.map((item) => `${item.id}:${item.status}`).join('|')
 }
 
 /** Render the DLQ list with status filter, replay, and resolve controls. */
@@ -185,9 +194,11 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     counts,
   } = useRecoveryQueueFilters()
   const queueSectionRef = useRef<HTMLElement | null>(null)
-  const queueRowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const queueRowRefs = useRef<Map<string, HTMLLIElement>>(new Map())
   const [queueFocusRequest, setQueueFocusRequest] = useState<RecoveryQueueFocusRequest | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [pendingKeyboardFocusId, setPendingKeyboardFocusId] = useState<string | null>(null)
+  const [pendingTriageFocus, setPendingTriageFocus] = useState<PendingTriageFocus | null>(null)
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
@@ -359,9 +370,10 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     visibleItems: visibleDeadLetters,
     totalHeight: virtualTotalHeight,
     startOffset: virtualStartOffset,
+    scrollToIndex: scrollToQueueIndex,
   } = useVirtualList({
     items: filtered,
-    rowHeight: DLQ_ROW_HEIGHT,
+    rowHeight: DLQ_ROW_PITCH,
     // Reset scroll on filter swap, NOT on every refetch — the
     // `platformVersion`-driven refetch produces a new `filtered`
     // reference even when the content is identical, and resetting
@@ -369,6 +381,155 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     // bump. The filter signal is the real "visible set changed" cue.
     resetScrollKey: `${status}|${ownerScope}|${severityFilter}|${sortKey}`,
   })
+
+  const focusQueueRow = useCallback((index: number) => {
+    const next = filtered[index]
+    if (!next) return
+    setSelectedId(next.id)
+    const row = queueRowRefs.current.get(next.id)
+    if (row) {
+      row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+      row.focus({ preventScroll: true })
+      return
+    }
+    scrollToQueueIndex(index, 'center')
+    setPendingKeyboardFocusId(next.id)
+  }, [filtered, scrollToQueueIndex])
+
+  useEffect(() => {
+    if (!pendingKeyboardFocusId) return
+    const row = queueRowRefs.current.get(pendingKeyboardFocusId)
+    if (!row) return
+    row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    row.focus({ preventScroll: true })
+    setPendingKeyboardFocusId(null)
+  }, [pendingKeyboardFocusId, visibleDeadLetters])
+
+  const runSelectedTriageAction = async (
+    action: (id: string) => boolean | Promise<boolean> | undefined,
+  ) => {
+    if (!selected) return
+    const actionIndex = filtered.findIndex((item) => item.id === selected.id)
+    const neighborIds = [filtered[actionIndex + 1]?.id, filtered[actionIndex - 1]?.id]
+      .filter((id): id is string => Boolean(id))
+    const request: PendingTriageFocus = {
+      actionId: selected.id,
+      neighborIds,
+      fallbackIndex: Math.max(0, actionIndex),
+      queueSignature: triageQueueSignature(filtered),
+      settled: false,
+    }
+    setPendingTriageFocus(request)
+    try {
+      const succeeded = await action(selected.id)
+      setPendingTriageFocus((current) => (
+        current?.actionId === request.actionId
+          ? succeeded === false ? null : { ...current, settled: true }
+          : current
+      ))
+    } catch {
+      setPendingTriageFocus((current) => current?.actionId === request.actionId ? null : current)
+    }
+  }
+
+  const replaySelected = async () => {
+    if (!selected || selected.status === 'replayed') return
+    await runSelectedTriageAction(onReplay)
+  }
+
+  const resolveSelected = async () => {
+    if (!selected || selected.status === 'resolved') return
+    await runSelectedTriageAction(onResolve)
+  }
+
+  useEffect(() => {
+    if (!pendingTriageFocus?.settled || recoveryFilterLoading) return
+    if (triageQueueSignature(filtered) === pendingTriageFocus.queueSignature) return
+
+    const actionIndex = filtered.findIndex((item) => item.id === pendingTriageFocus.actionId)
+    if (actionIndex >= 0) {
+      focusQueueRow(actionIndex)
+      setPendingTriageFocus(null)
+      return
+    }
+
+    const neighborId = pendingTriageFocus.neighborIds.find((id) => filtered.some((item) => item.id === id))
+    const neighborIndex = neighborId ? filtered.findIndex((item) => item.id === neighborId) : -1
+    if (neighborIndex >= 0) {
+      focusQueueRow(neighborIndex)
+    } else if (filtered.length > 0) {
+      focusQueueRow(Math.min(pendingTriageFocus.fallbackIndex, filtered.length - 1))
+    } else {
+      queueSectionRef.current?.focus({ preventScroll: true })
+    }
+    setPendingTriageFocus(null)
+  }, [filtered, focusQueueRow, pendingTriageFocus, recoveryFilterLoading])
+
+  useEffect(() => {
+    if (!pendingTriageFocus?.settled) return
+    const actionId = pendingTriageFocus.actionId
+    const timeout = window.setTimeout(() => {
+      setPendingTriageFocus((current) => current?.actionId === actionId ? null : current)
+    }, 5_000)
+    return () => window.clearTimeout(timeout)
+  }, [pendingTriageFocus?.actionId, pendingTriageFocus?.settled])
+
+  const handleQueueKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.repeat || isKeyboardShortcutTypingTarget(event.target)) return
+    const key = event.key.toLowerCase()
+    const hasCommandModifier = event.metaKey || event.ctrlKey
+
+    if (!hasCommandModifier && !event.altKey && !event.shiftKey && (key === 'j' || key === 'k')) {
+      const currentIndex = selected ? filtered.findIndex((item) => item.id === selected.id) : -1
+      const nextIndex = key === 'j'
+        ? Math.min(filtered.length - 1, Math.max(0, currentIndex + 1))
+        : Math.max(0, currentIndex <= 0 ? 0 : currentIndex - 1)
+      if (filtered[nextIndex]) {
+        event.preventDefault()
+        event.stopPropagation()
+        focusQueueRow(nextIndex)
+      }
+      return
+    }
+
+    if (selectionMode) return
+    if (!hasCommandModifier && !event.altKey && !event.shiftKey && key === 'r') {
+      if (selected && selected.status !== 'replayed') {
+        event.preventDefault()
+        event.stopPropagation()
+        void replaySelected()
+      }
+      return
+    }
+
+    if (hasCommandModifier && !event.altKey && !event.shiftKey && event.key === 'Enter') {
+      if (selected && selected.status !== 'resolved') {
+        event.preventDefault()
+        event.stopPropagation()
+        void resolveSelected()
+      }
+    }
+  }
+
+  const copySelectedError = async () => {
+    const item = selectedFull ?? selected
+    if (!item) return
+    let copied = false
+    try {
+      copied = await copyText(buildRecoveryErrorSummary(item, {
+        workflow: t('dlq.copy.unknownWorkflow') as string,
+        nodeType: t('dlq.copy.unknownNodeType') as string,
+        error: t('dlq.copy.unknownError') as string,
+        timestamp: t('dlq.copy.unknownTimestamp') as string,
+      }))
+    } catch {
+      // A browser implementation can still throw outside the guarded APIs.
+    }
+    addToast(
+      copied ? (t('dlq.copy.success') as string) : (t('dlq.copy.failed') as string),
+      copied ? 'success' : 'error',
+    )
+  }
 
   // A queue CTA may fire before this panel mounts or while it is already open.
   // Adopt both paths, then wait for the server-filtered first page before
@@ -393,8 +554,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       const targetIndex = filtered.findIndex((item) => item.id === targetId)
       const targetRow = queueRowRefs.current.get(targetId)
       if (!targetRow && targetIndex >= 0 && virtualContainerRef.current) {
-        virtualContainerRef.current.scrollTop = targetIndex * DLQ_ROW_HEIGHT
-        virtualContainerRef.current.dispatchEvent(new Event('scroll'))
+        scrollToQueueIndex(targetIndex, 'center')
         return
       }
       if (targetRow) {
@@ -410,7 +570,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     queue?.scrollIntoView?.({ block: 'start', inline: 'nearest' })
     queue?.focus({ preventScroll: true })
     setQueueFocusRequest(null)
-  }, [filtered, queueFocusRequest, recoveryFilterLoading, virtualContainerRef, visibleDeadLetters])
+  }, [filtered, queueFocusRequest, recoveryFilterLoading, scrollToQueueIndex, visibleDeadLetters])
 
   return (
     <>
@@ -423,6 +583,8 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         data-testid="recovery-queue"
         tabIndex={-1}
         aria-labelledby="recovery-queue-heading"
+        aria-keyshortcuts="J K R Meta+Enter Control+Enter"
+        onKeyDown={handleQueueKeyDown}
       >
       <div className="split-row">
         <div>
@@ -660,48 +822,64 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         )}
         {filtered.length > 0 && (
           <>
-          <div ref={virtualContainerRef} className="we-virtual-list" data-testid="dlq-virtual-list">
+          <div ref={virtualContainerRef} className="we-virtual-list we-dlq-virtual-list" data-testid="dlq-virtual-list">
             <div style={{ height: virtualTotalHeight, position: 'relative' }}>
-              <ul className="we-list" style={{ transform: `translateY(${virtualStartOffset}px)` }}>
-                {visibleDeadLetters.map(({ item }) => {
+              <ul
+                className="we-list"
+                style={{ transform: `translateY(${virtualStartOffset}px)` }}
+                role="grid"
+                aria-labelledby="recovery-queue-heading"
+                aria-multiselectable={selectionMode}
+                aria-rowcount={filtered.length}
+              >
+                {visibleDeadLetters.map(({ item, index }) => {
                   const severity = rowSeverity(item.status)
                   return (
-                    <li key={item.id}>
-                      <div
-                        ref={(node) => {
-                          if (node) queueRowRefs.current.set(item.id, node)
-                          else queueRowRefs.current.delete(item.id)
-                        }}
-                        className="we-list-row"
-                        data-clickable="true"
-                        data-severity={severity}
-                        data-testid={`dlq-row-${item.id}`}
-                        data-dead-letter-id={item.id}
-                        data-selected={selected?.id === item.id ? 'true' : undefined}
-                        tabIndex={-1}
-                        aria-label={`${item.nodeId} — ${formatStatusLabel(item.status)}`}
-                        onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
-                      >
+                    <li
+                      key={item.id}
+                      ref={(node) => {
+                        if (node) queueRowRefs.current.set(item.id, node)
+                        else queueRowRefs.current.delete(item.id)
+                      }}
+                      className="we-list-row we-dlq-row"
+                      role="row"
+                      data-clickable="true"
+                      data-selection-mode={selectionMode ? 'true' : undefined}
+                      data-severity={severity}
+                      data-testid={`dlq-row-${item.id}`}
+                      data-dead-letter-id={item.id}
+                      data-selected={selected?.id === item.id ? 'true' : undefined}
+                      tabIndex={selected?.id === item.id ? 0 : -1}
+                      aria-label={`${item.nodeId} — ${formatStatusLabel(item.status)}`}
+                      aria-selected={selectionMode ? selectedIds.has(item.id) : selected?.id === item.id}
+                      aria-rowindex={index + 1}
+                      onFocus={() => setSelectedId(item.id)}
+                      onClick={() => (selectionMode ? toggleSelect(item.id) : setSelectedId(item.id))}
+                    >
                         {selectionMode && (
-                          <input
-                            type="checkbox"
-                            className="we-list-row__select"
-                            checked={selectedIds.has(item.id)}
-                            onClick={event => event.stopPropagation()}
-                            onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
-                            aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
-                            data-testid={`dlq-select-row-${item.id}`}
-                          />
+                          <span role="gridcell" className="we-dlq-row__selection-cell">
+                            <input
+                              type="checkbox"
+                              className="we-list-row__select"
+                              checked={selectedIds.has(item.id)}
+                              onClick={event => event.stopPropagation()}
+                              onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
+                              aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
+                              data-testid={`dlq-select-row-${item.id}`}
+                            />
+                          </span>
                         )}
-                        <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
-                        <div className="we-list-row__body">
-                          <strong>{item.nodeId}</strong>
-                          <small>
-                            {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
-                            {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
-                          </small>
+                        <div className="we-dlq-row__identity" role="gridcell">
+                          <span className="we-list-row__avatar" aria-hidden="true"><Inbox size={14} /></span>
+                          <div className="we-list-row__body">
+                            <strong>{item.nodeId}</strong>
+                            <small>
+                              {t('dlq.runMeta', { runIdShort: item.runId.slice(0, 8), attempt: item.attempt })}
+                              {item.createdAt ? ` · ${new Date(item.createdAt).toLocaleString(getResolvedLocale())}` : ''}
+                            </small>
+                          </div>
                         </div>
-                        <div className="we-list-row__meta">
+                        <div className="we-list-row__meta" role="gridcell">
                           {item.status === 'open' && item.createdAt && (
                             <span
                               className="we-list-row__downtime"
@@ -723,7 +901,6 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                             }}
                           />
                         </div>
-                      </div>
                     </li>
                   )
                 })}
@@ -771,11 +948,27 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             >
               <Sparkles size={12} aria-hidden="true" /> {t('dlq.action.suggest')}
             </button>
-            <button className="small-command" disabled={selected.status === 'replayed'} onClick={() => onReplay(selected.id)}>
-              {t('dlq.action.retry')}
+            <button
+              className="small-command we-command-with-kbd"
+              disabled={selected.status === 'replayed'}
+              onClick={() => { void replaySelected() }}
+            >
+              <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
             </button>
-            <button className="small-command" disabled={selected.status === 'resolved'} onClick={() => onResolve(selected.id)}>
-              {t('dlq.action.resolve')}
+            <button
+              className="small-command we-command-with-kbd"
+              disabled={selected.status === 'resolved'}
+              onClick={() => { void resolveSelected() }}
+            >
+              <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>
+            </button>
+            <button
+              type="button"
+              className="small-command"
+              onClick={() => { void copySelectedError() }}
+              data-testid="dlq-copy-error"
+            >
+              <Copy size={12} aria-hidden="true" /> {t('dlq.action.copyError')}
             </button>
             <button
               className="small-command"

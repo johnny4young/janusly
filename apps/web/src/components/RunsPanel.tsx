@@ -88,8 +88,8 @@ type RunsPanelProps = {
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
-  onReplayDeadLetter: (id: string) => void
-  onResolveDeadLetter: (id: string) => void
+  onReplayDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
 }
 
 type SubmitHumanFormResult = string[] | void

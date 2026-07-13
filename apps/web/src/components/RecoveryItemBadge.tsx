@@ -105,7 +105,10 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       data-testid="recovery-item-badge"
       data-severity={item.severity}
       data-status={item.status}
-      onClick={onOpen}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpen?.()
+      }}
       aria-label={ariaLabel}
     >
       <span

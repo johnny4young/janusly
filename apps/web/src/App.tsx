@@ -785,8 +785,10 @@ export default function App() {
       bumpPlatformVersion()
       await refreshPlatform()
       addToast(t('toasts.deadLetterReplayed'), 'success')
+      return true
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.deadLetterReplayFailed'), 'error')
+      return false
     }
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
 
@@ -864,8 +866,10 @@ export default function App() {
       bumpPlatformVersion()
       await refreshPlatform()
       addToast(t('toasts.deadLetterResolved'), 'success')
+      return true
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.deadLetterResolveFailed'), 'error')
+      return false
     }
   }, [addToast, bumpPlatformVersion, refreshPlatform, t])
 

@@ -43,3 +43,62 @@ describe('<CommandPalette /> docs capability', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 })
+
+describe('<CommandPalette /> fuzzy search', () => {
+  it('finds a workflow by non-contiguous characters', () => {
+    render(<CommandPalette {...props({
+      workflows: [{ id: 'refund-triage', name: 'Refund triage Exploit' }],
+    })} />)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'rftx' } })
+
+    expect(screen.getByRole('option', { name: /Refund triage Exploit/ })).toBeInTheDocument()
+  })
+
+  it('ranks an exact command match above a fuzzy workflow match', () => {
+    render(<CommandPalette {...props({
+      workflows: [{ id: 'refund-enrichment', name: 'Risk evaluation for urgent nightly delivery' }],
+    })} />)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'run' } })
+
+    const options = screen.getAllByRole('option')
+    expect(options[0]).toHaveTextContent('Run workflow')
+  })
+
+  it('caps queried results at five', () => {
+    render(<CommandPalette {...props({
+      workflows: Array.from({ length: 8 }, (_, index) => ({ id: `flow-${index}`, name: `Flow ${index}` })),
+    })} />)
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'flow' } })
+
+    expect(screen.getAllByRole('option')).toHaveLength(5)
+  })
+
+  it('resets the active result when a new query reorders the same result count', () => {
+    render(<CommandPalette {...props({
+      workflows: [
+        { id: 'alpha-beta', name: 'Alpha beta' },
+        { id: 'beta-alpha', name: 'Beta alpha' },
+      ],
+    })} />)
+    const input = screen.getByRole('combobox')
+
+    fireEvent.change(input, { target: { value: 'alpha' } })
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(screen.getAllByRole('option').filter(option => option.getAttribute('aria-selected') === 'true')).toHaveLength(1)
+    expect(screen.getAllByRole('option').find(option => option.getAttribute('aria-selected') === 'true')).not.toBe(
+      screen.getAllByRole('option')[0],
+    )
+
+    fireEvent.change(input, { target: { value: 'beta' } })
+
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('Beta alpha')
+    expect(input).toHaveAttribute('aria-controls', 'janusly-command-palette-options')
+    expect(input).toHaveAttribute('aria-activedescendant', screen.getAllByRole('option')[0]?.id)
+  })
+})

@@ -244,6 +244,39 @@ describe('useVirtualList', () => {
     expect(captured.current?.visibleItems.some(item => item.index === 20)).toBe(true)
   })
 
+  it('attaches measurement and scroll listeners when an async list mounts its container', async () => {
+    const captured: CapturedHandle<{ id: string }> = { current: null }
+    function AsyncList() {
+      const [items, setItems] = useState<Array<{ id: string }>>([])
+      const result = useVirtualList({ items, rowHeight: 50 })
+      captured.current = result
+      useEffect(() => {
+        const container = result.containerRef.current
+        if (!container) return
+        Object.defineProperty(container, 'clientHeight', { configurable: true, value: 100 })
+        container.dispatchEvent(new Event('scroll'))
+      }, [items.length, result.containerRef])
+      return (
+        <>
+          <button
+            data-testid="load"
+            onClick={() => setItems(Array.from({ length: 30 }, (_, index) => ({ id: `row-${index}` })))}
+          >
+            load
+          </button>
+          {items.length > 0 ? <div ref={result.containerRef} data-testid="async-container" /> : null}
+        </>
+      )
+    }
+    const { getByTestId } = render(<AsyncList />)
+
+    await act(async () => getByTestId('load').click())
+
+    expect(getByTestId('async-container')).toBeInTheDocument()
+    expect(captured.current?.visibleItems.length).toBeLessThan(30)
+    expect(captured.current?.visibleItems.at(-1)?.index).toBe(6)
+  })
+
   it('preserves the visible item and intra-row offset when live items are prepended', async () => {
     const captured: CapturedHandle<{ id: string }> = { current: null }
     function LivePrepender() {

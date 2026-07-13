@@ -42,9 +42,15 @@ import type { ActiveTab } from '../types'
 import { useT } from '../i18n'
 import { applyTheme, type ThemePreference } from '../theme'
 import { openDocsUrl, parseDocsUrl } from '../docs-link'
+import { rankPaletteMatches } from '../command-palette-search'
 
 const STORAGE_KEY = 'janusly:palette:recent'
 const RECENT_LIMIT = 4
+const COMMAND_LISTBOX_ID = 'janusly-command-palette-options'
+
+function commandOptionId(index: number): string {
+  return `janusly-command-palette-option-${index}`
+}
 
 type CommandId = string
 
@@ -57,7 +63,7 @@ type Command = {
   group: 'nav' | 'action' | 'system'
   shortcut?: string
   /** Returns `true` to keep the palette open after execution. */
-  run: (ctx: CommandContext) => boolean | void
+  run: (ctx: CommandContext) => boolean | undefined
 }
 
 type CommandContext = {
@@ -258,18 +264,20 @@ export function CommandPalette({
   const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never) as string)
 
   const ordered = useMemo<Command[]>(() => {
-    const normalised = query.trim().toLowerCase()
     const byId = new Map(commands.map(cmd => [cmd.id, cmd]))
     const recentEntries = recent.map(id => byId.get(id)).filter((cmd): cmd is Command => Boolean(cmd))
     const rest = commands.filter(cmd => !recent.includes(cmd.id))
     const all = [...recentEntries, ...rest]
-    if (!normalised) return all
-    return all.filter(cmd => {
-      const label = labelFor(cmd).toLowerCase()
-      return label.includes(normalised) || cmd.id.toLowerCase().includes(normalised)
-    })
+    return rankPaletteMatches(
+      query,
+      all.map((cmd) => ({ item: cmd, label: labelFor(cmd), keywords: [cmd.id] })),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commands, recent, query, t, dynamicLabels])
+
+  useEffect(() => {
+    setActiveIndex(0)
+  }, [query])
 
   useEffect(() => {
     setActiveIndex(idx => Math.min(idx, Math.max(0, ordered.length - 1)))
@@ -281,7 +289,7 @@ export function CommandPalette({
     const nextRecent = [cmd.id, ...recent.filter(id => id !== cmd.id)].slice(0, RECENT_LIMIT)
     setRecent(nextRecent)
     persistRecent(nextRecent)
-    if (!keepOpen) onClose()
+    if (keepOpen !== true) onClose()
   }
 
   if (!open) return null
@@ -304,6 +312,7 @@ export function CommandPalette({
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
@@ -321,11 +330,21 @@ export function CommandPalette({
             }}
             placeholder={t('palette.placeholder')}
             aria-label={t('palette.placeholder')}
+            aria-autocomplete="list"
+            aria-controls={COMMAND_LISTBOX_ID}
+            aria-expanded="true"
+            aria-activedescendant={ordered[activeIndex] ? commandOptionId(activeIndex) : undefined}
           />
           <kbd>{t('palette.key.escape')}</kbd>
         </div>
 
-        <ul ref={listRef} className="we-cmdk-list" role="listbox" aria-label={t('palette.title')}>
+        <ul
+          ref={listRef}
+          id={COMMAND_LISTBOX_ID}
+          className="we-cmdk-list"
+          role="listbox"
+          aria-label={t('palette.title')}
+        >
           {ordered.length === 0 && (
             <li className="we-cmdk-empty" role="presentation">{t('palette.empty', { query })}</li>
           )}
@@ -334,6 +353,7 @@ export function CommandPalette({
             return (
               <li
                 key={cmd.id}
+                id={commandOptionId(idx)}
                 role="option"
                 aria-selected={idx === activeIndex}
                 title={cmd.hintKey ? (t(cmd.hintKey as never) as string) : labelFor(cmd)}

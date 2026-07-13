@@ -18,6 +18,7 @@
  */
 
 import { useEffect } from 'react'
+import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
 
 /** Callbacks the shell wires into the global shortcut handler. */
 export type KeyboardShortcutHandlers = {
@@ -47,12 +48,7 @@ export type KeyboardShortcutHandlers = {
 export function useKeyboardShortcuts({ onTogglePalette, onToggleShortcuts, onFocusSidebarSearch, onSave, onSignOut }: KeyboardShortcutHandlers): void {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      const isTypingInForm = !!target && (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      )
+      const isTypingInForm = isKeyboardShortcutTypingTarget(event.target)
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         onTogglePalette()

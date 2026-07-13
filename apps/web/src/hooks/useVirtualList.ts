@@ -142,7 +142,10 @@ export function useVirtualList<T>({
     const observer = new ResizeObserver(updateHeight)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [])
+  // `items.length` also covers async lists whose scroll container is not
+  // mounted until the first page arrives. Re-run then so the ref target gets
+  // measured instead of remaining permanently in the 0-height fallback.
+  }, [items.length])
 
   // Passive scroll listener — `scrollTop` drives the window math.
   // The listener also re-reads `clientHeight` so test environments
@@ -158,7 +161,9 @@ export function useVirtualList<T>({
     }
     container.addEventListener('scroll', onScroll, { passive: true })
     return () => container.removeEventListener('scroll', onScroll)
-  }, [])
+  // See the observer effect above: the target may mount after an async empty
+  // state, so attach again when the item count makes the container available.
+  }, [items.length])
 
   const totalHeight = items.length * rowHeight
 

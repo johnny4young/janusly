@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import { RecoveryItemBadge, type RecoveryItemBadgeData } from './RecoveryItemBadge'
 
@@ -26,6 +26,21 @@ describe('<RecoveryItemBadge />', () => {
     expect(screen.getByTestId('recovery-item-severity').textContent).toMatch(/P2/)
     expect(screen.getByTestId('recovery-item-status').textContent).toMatch(/Acknowledged/)
     expect(screen.getByTitle('alice')).toBeInTheDocument()
+  })
+
+  it('opens without bubbling into its containing queue row', () => {
+    const onOpen = vi.fn()
+    const onRowClick = vi.fn()
+    render(
+      <div onClick={onRowClick}>
+        <RecoveryItemBadge item={makeItem()} onOpen={onOpen} />
+      </div>,
+    )
+
+    fireEvent.click(screen.getByTestId('recovery-item-badge'))
+
+    expect(onOpen).toHaveBeenCalledOnce()
+    expect(onRowClick).not.toHaveBeenCalled()
   })
 
   it('SLA tone is red when target is in the past', () => {

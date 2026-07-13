@@ -60,6 +60,14 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
         { keys: ['/'], description: t('shortcuts.sidebarSearch') as string },
       ],
     },
+    {
+      title: t('shortcuts.group.recovery') as string,
+      items: [
+        { keys: ['J', 'K'], description: t('shortcuts.recoveryMove') as string },
+        { keys: ['R'], description: t('shortcuts.recoveryReplay') as string },
+        { keys: ['⌘/Ctrl', '↵'], description: t('shortcuts.recoveryResolve') as string },
+      ],
+    },
   ]
 
   return (

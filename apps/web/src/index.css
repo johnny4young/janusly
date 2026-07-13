@@ -2433,8 +2433,44 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 .we-list-row:hover { border-color: var(--we-primary); }
 
+.we-list-row[data-selected="true"] {
+  background: var(--we-primary-soft);
+  border-color: color-mix(in srgb, var(--we-primary) 45%, var(--we-line) 55%);
+}
+
 .we-list-row[data-clickable="true"] { cursor: pointer; }
 .we-list-row[data-clickable="true"]:active { transform: translateY(1px); }
+
+/* Recovery rows are fixed-height because their scroll surface is virtualized.
+ * Keep metadata on one line so the 54px row + 6px list gap matches the
+ * `DLQ_ROW_PITCH` used by `DeadLettersPanel`. */
+.we-dlq-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 54px;
+  min-height: 54px;
+}
+
+.we-dlq-row[data-selection-mode="true"] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.we-dlq-row__selection-cell {
+  align-items: center;
+  display: inline-flex;
+}
+
+.we-dlq-row__identity {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.we-dlq-row .we-list-row__meta {
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
 
 .we-list-row__avatar {
   width: 32px;
@@ -3021,6 +3057,23 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   padding: 1px 4px;
   color: var(--we-ink-soft);
   margin-right: 2px;
+}
+
+.we-command-with-kbd {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.we-command-with-kbd kbd {
+  background: var(--we-surface-muted);
+  border: 1px solid var(--we-line);
+  border-radius: 4px;
+  color: var(--we-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 4px;
 }
 
 /* Snippet insert menu — reuses the cmdk shell with a target-node head + two-line rows. */
@@ -8017,7 +8070,7 @@ button.we-ops-metric-card--button {
   color: var(--we-success-text);
 }
 
-/* Q-13 cluster-recovery celebration line — the summed downtime the apply
+/* Cluster-recovery celebration line — the summed downtime the apply
    just ended, rendered under the "Replayed N of M" ribbon text. */
 .we-recovery-cluster-celebration {
   margin: 6px 0 0;

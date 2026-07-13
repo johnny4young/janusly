@@ -1,12 +1,12 @@
 /**
- * Tests for the global keyboard-shortcut listener — focused on the S-01
- * addition (Cmd/Ctrl+S saves, even while typing in a form field, and always
- * suppresses the browser's save-page dialog) plus a non-regression check that
- * the typing guard still applies to `?`.
+ * Tests for the global keyboard-shortcut listener — focused on Cmd/Ctrl+S
+ * saving even while typing and suppressing the browser's save-page dialog,
+ * plus a non-regression check that the typing guard still applies to `?`.
  */
 
 import { renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { isKeyboardShortcutTypingTarget } from '../keyboard-shortcut-target'
 import { useKeyboardShortcuts, type KeyboardShortcutHandlers } from './useKeyboardShortcuts'
 
 function mountShortcuts(overrides: Partial<KeyboardShortcutHandlers> = {}) {
@@ -28,7 +28,7 @@ function pressKey(key: string, init: KeyboardEventInit = {}, target: EventTarget
   return event
 }
 
-describe('useKeyboardShortcuts — Cmd/Ctrl+S (S-01)', () => {
+describe('useKeyboardShortcuts — Cmd/Ctrl+S', () => {
   it('fires onSave and suppresses the browser save dialog', () => {
     const handlers = mountShortcuts()
     const event = pressKey('s', { metaKey: true })
@@ -62,5 +62,21 @@ describe('useKeyboardShortcuts — Cmd/Ctrl+S (S-01)', () => {
     pressKey('?', {}, input)
     expect(handlers.onToggleShortcuts).not.toHaveBeenCalled()
     input.remove()
+  })
+})
+
+describe('isKeyboardShortcutTypingTarget', () => {
+  it('recognizes inputs, textareas, selects, and editable content', () => {
+    const input = document.createElement('input')
+    const textarea = document.createElement('textarea')
+    const select = document.createElement('select')
+    const editable = document.createElement('div')
+    editable.contentEditable = 'true'
+
+    expect(isKeyboardShortcutTypingTarget(input)).toBe(true)
+    expect(isKeyboardShortcutTypingTarget(textarea)).toBe(true)
+    expect(isKeyboardShortcutTypingTarget(select)).toBe(true)
+    expect(isKeyboardShortcutTypingTarget(editable)).toBe(true)
+    expect(isKeyboardShortcutTypingTarget(document.createElement('button'))).toBe(false)
   })
 })
