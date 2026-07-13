@@ -43,13 +43,19 @@ export type RunPolling = {
   loadStatus: (id: string) => Promise<RunResponse>
 }
 
+export type RunSummaryPatcher = (runId: string, patch: Partial<RunSummary>) => void
+
 /**
  * Polls `/status?runId=` every 1500ms while `runId` is set, merging the result
  * into the store. `onTerminal` runs once the run reaches a terminal status
  * (the caller bumps platform version + refetches platform data); it may be
  * async and is awaited.
  */
-export function useRunPolling(runId: string | null, onTerminal: () => void | Promise<void>): RunPolling {
+export function useRunPolling(
+  runId: string | null,
+  onTerminal: () => void | Promise<void>,
+  patchRunSummary?: RunSummaryPatcher,
+): RunPolling {
   const { t } = useT()
   const setRunNodes = useWorkflowStore((s) => s.setRunNodes)
   const addEvents = useWorkflowStore((s) => s.addEvents)
@@ -59,6 +65,7 @@ export function useRunPolling(runId: string | null, onTerminal: () => void | Pro
 
   const loadStatus = useCallback(async (id: string): Promise<RunResponse> => {
     const status = await api(`/status?runId=${encodeURIComponent(id)}`) as RunResponse
+    if (status.run) patchRunSummary?.(id, status.run)
     setRunNodes(status.nodes ?? [])
     const statusEvents = status.events ?? []
     addEvents(statusEvents)
@@ -75,7 +82,7 @@ export function useRunPolling(runId: string | null, onTerminal: () => void | Pro
       }
     }
     return status
-  }, [addEvents, setEventsPagination, setRunNodes])
+  }, [addEvents, patchRunSummary, setEventsPagination, setRunNodes])
 
   // Polling fallback. The original 1.5s `/status` loop loads the initial
   // timeline and stays as the safety net. Its tick is a no-op while SSE is the

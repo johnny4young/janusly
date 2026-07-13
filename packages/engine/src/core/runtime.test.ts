@@ -138,6 +138,28 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
   })
 
+  it('stamps one waitingSince value into persistence and the live event', async () => {
+    const store = makeStore()
+    const executors = makeExecutors({ status: 'waiting', metadata: { kind: 'approval', title: 'Approve refund' } })
+    const runtime = new WorkflowRuntime(store, makeQueue(), executors)
+
+    await runtime.executeQueuedNode(input)
+
+    expect(store.markNodeWaiting).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
+      kind: 'approval',
+      title: 'Approve refund',
+      waitingSince: expect.any(String),
+    }))
+    const persistedMetadata = vi.mocked(store.markNodeWaiting).mock.calls[0]?.[2] as { waitingSince: string }
+    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'node.waiting',
+      payload: expect.objectContaining({
+        metadata: expect.objectContaining({ waitingSince: persistedMetadata.waitingSince }),
+      }),
+    }))
+    expect(store.markNodeSucceededWithEvent).not.toHaveBeenCalled()
+  })
+
   it('skips downstream scheduling when the run is cancelled while a node was running', async () => {
     // First getRunStatus call (pre-execution) returns "running"; the second
     // (post-success, just before enqueueReadyNodes) returns "cancelled".

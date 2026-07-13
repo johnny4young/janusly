@@ -15,7 +15,7 @@ vi.mock('./queue', () => ({
 import { getRunNodeStatus } from './persistence'
 import { enqueueWaitUntilResume } from './queue'
 import { resumeRun } from './resume-run'
-import { handleWaitResume, resolveWaitUntilDelay } from './wait-until'
+import { handleWaitResume, resolveWaitUntilDelay, waitUntilExecutor } from './wait-until'
 
 const getRunNodeStatusMock = vi.mocked(getRunNodeStatus)
 const enqueueWaitUntilResumeMock = vi.mocked(enqueueWaitUntilResume)
@@ -43,6 +43,27 @@ describe('resolveWaitUntilDelay', () => {
     expect(() => resolveWaitUntilDelay({ duration: 'PT0S' })).toThrow(/positive number of milliseconds/)
     expect(() => resolveWaitUntilDelay({ duration: 'P0D' })).toThrow(/positive number of milliseconds/)
     expect(() => resolveWaitUntilDelay({ duration: 'P' })).toThrow(/valid ISO 8601 duration/)
+  })
+})
+
+describe('waitUntilExecutor', () => {
+  it('persists timer kind and wake-up metadata for the run UI', async () => {
+    const before = Date.now()
+    const result = await waitUntilExecutor({
+      runId: 'r1',
+      nodeId: 'pause',
+      orgId: 'org-1',
+      workflowId: null,
+      config: { duration: 'PT1M' },
+      context: {},
+      redactedValues: [],
+    })
+
+    expect(result).toMatchObject({ status: 'waiting', metadata: { kind: 'timer', durationMs: 60_000 } })
+    if (result.status === 'waiting') {
+      expect(Date.parse(String(result.metadata?.wakeAt))).toBeGreaterThanOrEqual(before + 60_000)
+    }
+    expect(enqueueWaitUntilResumeMock).toHaveBeenCalledWith('r1', 'pause', 60_000)
   })
 })
 

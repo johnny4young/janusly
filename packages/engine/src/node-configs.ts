@@ -158,6 +158,8 @@ export const AiNodeConfigSchema = z
 export const ApprovalNodeConfigSchema = z
   .object({
     message: z.string().optional(),
+    title: z.string().optional(),
+    description: z.string().optional(),
   })
   .passthrough();
 

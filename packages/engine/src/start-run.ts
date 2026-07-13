@@ -66,7 +66,9 @@ export async function startRun(workflow: StartableWorkflow) {
       inputJson: { workflow, input: workflow.input ?? {} },
       parentRunId: workflow.parentRunId ?? null,
       parentNodeId: workflow.parentNodeId ?? null,
-      traceId: workflow.traceId ?? null,
+      // Every root run gets a correlation id up front; subworkflows pass the
+      // inherited value so the whole chain remains copyable as one trace.
+      traceId: workflow.traceId ?? crypto.randomUUID(),
     });
 
     if (workflow.nodes.length > 0) {

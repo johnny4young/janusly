@@ -33,7 +33,7 @@ test('Solution Packs install, sample-run, and failure injection flows work from 
   await incidentPack.getByRole('button', { name: 'Preview sample run', exact: true }).click()
   await expect(page.getByText('Sample run started in the sandbox.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible()
-  await expect(page.getByText(/Status: (running|succeeded|failed|waiting)/)).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('run-overview').locator('.status-pill[data-status]')).toBeVisible({ timeout: 30_000 })
 
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
   await incidentPack.getByRole('button', { name: 'Break a node', exact: true }).click()

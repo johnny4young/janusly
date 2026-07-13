@@ -238,6 +238,20 @@ export function formatNodeDuration(startedAt?: string | null, finishedAt?: strin
   return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`
 }
 
+/** Compact, locale-neutral technical duration for dense run metadata. */
+export function formatCompactDuration(durationMs: number): string {
+  const safeMs = Math.max(0, Math.round(durationMs))
+  if (safeMs < 1_000) return `${safeMs}ms`
+  const seconds = Math.floor(safeMs / 1_000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  if (minutes < 60) return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`
+}
+
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }

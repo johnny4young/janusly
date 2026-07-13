@@ -226,8 +226,9 @@ export class WorkflowRuntime {
       const durationMs = Date.now() - start;
 
       if (result?.status === "waiting") {
-        await this.store.markNodeWaiting(runId, node.id, result.metadata);
-        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: result }));
+        const metadata = { ...(result.metadata ?? {}), waitingSince: new Date().toISOString() };
+        await this.store.markNodeWaiting(runId, node.id, metadata);
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: { ...result, metadata } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
         return;
       }

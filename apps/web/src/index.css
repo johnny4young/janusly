@@ -1580,6 +1580,120 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   gap: 10px;
 }
 
+.we-run-overview {
+  display: grid;
+  gap: 12px;
+  background: linear-gradient(145deg, var(--we-surface) 0%, var(--we-primary-soft) 180%);
+}
+
+.we-run-overview__header { align-items: flex-start; }
+
+.we-run-overview__title,
+.we-run-overview__actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.we-run-overview__facts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.we-run-overview__facts > div {
+  background: var(--we-surface-glass);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+}
+
+.we-run-overview__facts dt {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.we-run-overview__facts dd {
+  color: var(--we-ink);
+  font-size: 12px;
+  margin: 0;
+  min-width: 0;
+}
+
+.we-run-overview__facts code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.we-run-overview__trace dd {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.we-run-overview__trace .icon-button {
+  height: 24px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 4px;
+  width: 24px;
+}
+
+.we-run-overview__status-copy { margin: 0; }
+
+.we-run-overview__payload {
+  border-top: 1px solid var(--we-line);
+  padding-top: 9px;
+}
+
+.we-run-overview__payload summary {
+  color: var(--we-ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.we-run-overview__payload .code-field {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+}
+
+.we-wait-card {
+  background: var(--we-warning-soft);
+  border: 1px solid var(--we-warning-border-30);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.we-wait-card .we-pill {
+  background: var(--we-surface-glass);
+  border: 1px solid var(--we-warning-border-30);
+  color: var(--we-warning-text);
+}
+
+.we-wait-card .helper-text { margin: 3px 0 0; }
+
+.we-wait-card__timing {
+  color: var(--we-warning-text);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 6px 12px;
+}
+
 .we-failed-node {
   display: grid;
   gap: 6px;
@@ -1865,6 +1979,59 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   padding: 10px 11px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Run-event chronology: semantic accent, exact timestamp, inter-event delta,
+   and retained-but-de-emphasized low-signal queue/status-check events. */
+.we-run-event {
+  border-left: 3px solid var(--we-line-strong);
+  display: grid;
+  gap: 5px;
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.we-run-event[data-tone="info"] { border-left-color: var(--we-primary); }
+.we-run-event[data-tone="success"] { border-left-color: var(--we-success); }
+.we-run-event[data-tone="warning"] { border-left-color: var(--we-warning); }
+.we-run-event[data-tone="error"] {
+  background: var(--we-danger-soft);
+  border-left-color: var(--we-danger);
+}
+.we-run-event[data-noise="true"] { opacity: 0.62; }
+.we-run-event[data-noise="true"]:hover,
+.we-run-event[data-noise="true"]:focus-within { opacity: 1; }
+
+.we-run-event__header {
+  align-items: baseline;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+}
+
+.we-run-event__tone {
+  background: var(--we-line-strong);
+  border-radius: 999px;
+  height: 7px;
+  width: 7px;
+}
+
+.we-run-event[data-tone="info"] .we-run-event__tone { background: var(--we-primary); }
+.we-run-event[data-tone="success"] .we-run-event__tone { background: var(--we-success); }
+.we-run-event[data-tone="warning"] .we-run-event__tone { background: var(--we-warning); }
+.we-run-event[data-tone="error"] .we-run-event__tone { background: var(--we-danger); }
+
+.we-run-event__time,
+.we-run-event__meta {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.we-run-event__meta {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding-left: 15px;
 }
 
 /* Reasoning payload rendered as labelled key/value rows (legible) instead of a

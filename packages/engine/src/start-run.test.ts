@@ -70,10 +70,25 @@ describe('startRun persistence chokepoint', () => {
 
     const runNodesWrite = txInsertMock.mock.calls.find(([table]) => table === runNodesTable)?.[1] as Array<{ stateJson: unknown }>
     const runEventWrite = txInsertMock.mock.calls.find(([table]) => table === runEventsTable)?.[1] as { payload: unknown }
+    const runWrite = txInsertMock.mock.calls.find(([table]) => table === runsTable)?.[1] as { traceId: unknown }
 
     expect(runNodesWrite[0].stateJson).toEqual({ sanitized: {} })
     expect(runEventWrite.payload).toEqual({ sanitized: { workflowVersionId: 'workflow-version-1' } })
+    expect(runWrite.traceId).toEqual(expect.any(String))
     expect(safePersistPayloadMock).toHaveBeenCalledWith({}, { maxBytes: 1_000_000 })
     expect(safePersistPayloadMock).toHaveBeenCalledWith({ workflowVersionId: 'workflow-version-1' })
+  })
+
+  it('preserves an inherited trace id for subworkflow correlation', async () => {
+    await startRun({
+      dslVersion: '1.0',
+      id: 'child-workflow',
+      traceId: 'trace-parent',
+      nodes: [],
+      edges: [],
+    })
+
+    const runWrite = txInsertMock.mock.calls.find(([table]) => table === runsTable)?.[1] as { traceId: unknown }
+    expect(runWrite.traceId).toBe('trace-parent')
   })
 })

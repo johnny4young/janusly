@@ -43,6 +43,15 @@ const DEFAULT_RETENTION_DAYS = 30
  *  its workflows, in the same order the global filter+sort produced. */
 type FolderGroup = { key: string; items: SavedWorkflow[] }
 
+/** Return the persisted collapsed-folder set after a details section reaches
+ *  `open`. Reuses the current array for no-op native toggle notifications. */
+function updateCollapsedFolders(current: string[], key: string, open: boolean): string[] {
+  const collapsed = current.includes(key)
+  if (open && collapsed) return current.filter((entry) => entry !== key)
+  if (!open && !collapsed) return [...current, key]
+  return current
+}
+
 /** Render the saved-workflows list with click-to-open + manual refresh. */
 export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void }) {
   const { t } = useT()
@@ -93,6 +102,10 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>(
     () => readFlowsFilters()?.collapsedFolders ?? [],
   )
+  // Native <details> emits `toggle` asynchronously. Track click intent outside
+  // React state so a second click or immediate reload observes the latest value
+  // even before the first toggle event commits.
+  const collapsedFoldersRef = useRef(collapsedFolders)
   // Folder management (rename / delete) transient state — at most one folder is
   // being renamed or delete-confirmed at a time. `renameDraft` holds the in-progress
   // new name while `renamingFolder` is set.
@@ -372,14 +385,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   // so an org that never uses folders sees no change.
   const hasFolders = groups.some((group) => group.key !== UNGROUPED)
 
+  const persistCollapsedFolders = useCallback((nextCollapsed: string[]) => {
+    collapsedFoldersRef.current = nextCollapsed
+    writeFlowsFilters({ tags: tagFilters, folder: folderFilter, query, sort, collapsedFolders: nextCollapsed })
+  }, [folderFilter, query, sort, tagFilters])
+
   const toggleFolder = useCallback((key: string, open: boolean) => {
-    setCollapsedFolders((prev) => {
-      const collapsed = prev.includes(key)
-      if (open && collapsed) return prev.filter((entry) => entry !== key)
-      if (!open && !collapsed) return [...prev, key]
-      return prev
-    })
-  }, [])
+    const current = collapsedFoldersRef.current
+    const nextCollapsed = updateCollapsedFolders(current, key, open)
+    if (nextCollapsed !== current) persistCollapsedFolders(nextCollapsed)
+    // A preceding summary click may already have persisted the intent, but the
+    // later native toggle still owns reconciliation into controlled React state.
+    setCollapsedFolders(nextCollapsed)
+  }, [persistCollapsedFolders])
 
   // Reset the three stackable filters (search / tags / folder) in one click.
   // `debouncedQuery` is reset alongside `query` so the unfiltered refetch fires
@@ -1099,7 +1117,22 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 data-drop-target={dropTarget === group.key && draggingId ? 'true' : undefined}
                 data-testid={`workflows-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
               >
-                <summary className="we-list-folder__summary">
+                <summary
+                  className="we-list-folder__summary"
+                  onClick={event => {
+                    if (folderFilter !== '') return
+                    const details = event.currentTarget.parentElement as HTMLDetailsElement
+                    // The browser dispatches `toggle` asynchronously after the
+                    // summary's default action. Record the intended next state
+                    // during `click`, before an immediate reload can cancel it.
+                    // Do not set React state here: changing the controlled
+                    // `open` prop before the default action would make the
+                    // browser toggle it back in the opposite direction.
+                    const current = collapsedFoldersRef.current
+                    const nextCollapsed = updateCollapsedFolders(current, group.key, !details.open)
+                    if (nextCollapsed !== current) persistCollapsedFolders(nextCollapsed)
+                  }}
+                >
                   {renamingFolder === group.key ? (
                     // Inline rename: the controls preventDefault so a click never
                     // toggles the <details>; Enter saves, Esc cancels.

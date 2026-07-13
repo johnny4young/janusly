@@ -351,6 +351,34 @@ describe('human_form node — waiting metadata', () => {
   })
 })
 
+describe('operator waits — classified metadata', () => {
+  it('carries approval title and description into the waiting checkpoint', async () => {
+    const result = await nodeRegistry.approval({
+      ...baseCtx,
+      nodeId: 'approve',
+      config: { title: 'Approve refund', description: 'Review the supporting evidence.' },
+    })
+
+    expect(result).toMatchObject({
+      status: 'waiting',
+      reason: 'Waiting for human approval',
+      metadata: {
+        kind: 'approval',
+        title: 'Approve refund',
+        description: 'Review the supporting evidence.',
+      },
+    })
+  })
+
+  it('uses the legacy approval message as the display title and classifies webhooks', async () => {
+    const approval = await nodeRegistry.approval({ ...baseCtx, nodeId: 'approve', config: { message: 'Finance sign-off' } })
+    const webhook = await nodeRegistry.webhook({ ...baseCtx, nodeId: 'callback', config: {} })
+
+    expect(approval).toMatchObject({ metadata: { kind: 'approval', title: 'Finance sign-off' } })
+    expect(webhook).toMatchObject({ metadata: { kind: 'webhook' } })
+  })
+})
+
 describe('agent node — dryRun gating', () => {
   it('skips explicit write-side tools in dryRun mode', async () => {
     const send = vi.fn(async () => ({ ok: true, provider: 'resend' as const, providerMessageId: 'msg-1' }))

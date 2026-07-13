@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, waitFor } from '@testing-library/react'
 
 import { useRunEventStream } from './useRunEventStream'
+import type { RunSummaryPatcher } from './useRunPolling'
 import { useWorkflowStore } from '../store'
 
 const openRunEventStreamMock = vi.fn()
@@ -31,8 +32,8 @@ function streamResponse(chunks: string[]): Response {
   return { ok: true, status: 200, body } as unknown as Response
 }
 
-function Harness({ runId }: { runId: string | null }) {
-  useRunEventStream(runId)
+function Harness({ runId, patchRunSummary }: { runId: string | null; patchRunSummary?: RunSummaryPatcher }) {
+  useRunEventStream(runId, patchRunSummary)
   return <div />
 }
 
@@ -119,6 +120,7 @@ describe('useRunEventStream', () => {
   })
 
   it('ignores a run.status signal that is not terminal and stays live', async () => {
+    const patchRunSummary = vi.fn()
     openRunEventStreamMock.mockResolvedValue(
       streamResponse([
         ': connected\n\n',
@@ -127,15 +129,17 @@ describe('useRunEventStream', () => {
       ]),
     )
 
-    render(<Harness runId="run-1" />)
+    render(<Harness runId="run-1" patchRunSummary={patchRunSummary} />)
 
     await waitFor(() => {
       expect(useWorkflowStore.getState().events.map((e) => e.id)).toContain('evt-1')
     })
     expect(useWorkflowStore.getState().streamTransport).toBe('sse')
+    expect(patchRunSummary).toHaveBeenCalledWith('run-1', { status: 'running' })
   })
 
   it('hands back to polling on a terminal run.status signal', async () => {
+    const patchRunSummary = vi.fn()
     openRunEventStreamMock.mockResolvedValue(
       streamResponse([
         ': connected\n\n',
@@ -143,11 +147,12 @@ describe('useRunEventStream', () => {
       ]),
     )
 
-    render(<Harness runId="run-1" />)
+    render(<Harness runId="run-1" patchRunSummary={patchRunSummary} />)
 
     await waitFor(() => {
       expect(useWorkflowStore.getState().streamTransport).toBe('polling')
     })
+    expect(patchRunSummary).toHaveBeenCalledWith('run-1', { status: 'succeeded' })
   })
 
   it('does not open a stream and sets transport idle when runId is null', () => {

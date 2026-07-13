@@ -797,8 +797,31 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   // mostly lets the UI/API point at the waiting node. `human_form` below uses
   // an HMAC-signed token because form links can leave the app context and
   // carry user-submitted data that becomes node output.
-  webhook: async (ctx) => ({ status: "waiting", reason: "Waiting for external webhook resume", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
-  approval: async (ctx) => ({ status: "waiting", reason: "Waiting for human approval", metadata: { resumeToken: `${ctx.runId}:${ctx.nodeId}` } }),
+  webhook: async (ctx) => ({
+    status: "waiting",
+    reason: "Waiting for external webhook resume",
+    metadata: { kind: "webhook", resumeToken: `${ctx.runId}:${ctx.nodeId}` },
+  }),
+  approval: async (ctx) => {
+    const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
+      ? ctx.config.title.trim()
+      : typeof ctx.config.message === "string" && ctx.config.message.trim()
+        ? ctx.config.message.trim()
+        : undefined;
+    const description = typeof ctx.config.description === "string" && ctx.config.description.trim()
+      ? ctx.config.description.trim()
+      : undefined;
+    return {
+      status: "waiting",
+      reason: "Waiting for human approval",
+      metadata: {
+        kind: "approval",
+        title,
+        description,
+        resumeToken: `${ctx.runId}:${ctx.nodeId}`,
+      },
+    };
+  },
   human_form: async (ctx) => {
     const schema = WorkflowInputSchema.parse(ctx.config.schema);
     const title = typeof ctx.config.title === "string" && ctx.config.title.trim()

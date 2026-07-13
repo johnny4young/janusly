@@ -1,13 +1,13 @@
 /**
- * Pure helpers for the Multi-agent timeline + Reasoning panel: dedupe
- * events, project to display shape, and summarise run status from node
- * states. No I/O — used by both panels and the store reducer.
+ * Shared run-event helpers: stable deduplication and node-state aggregation.
+ * Timeline-specific order and presentation live in `run-timeline.ts` so they
+ * do not inflate the multi-agent lazy dependency chunk.
  *
  * Used by `MultiAgentTimeline.tsx`, `components/RightPanel.tsx:ReasoningPanel`,
  * and `store.ts` (`bumpPlatformVersion` after merging an events page).
  */
 
-import type { ReasoningMessage, RunEvent } from './types'
+import type { RunEvent } from './types'
 
 /** Dedupe a `RunEvent[]` by id (or composite key when id is missing). Stable order. */
 export function uniqueEvents(events: RunEvent[]): RunEvent[] {
@@ -18,40 +18,6 @@ export function uniqueEvents(events: RunEvent[]): RunEvent[] {
     seen.add(key)
     return true
   })
-}
-
-/** Project a single `RunEvent` to a `ReasoningMessage` for the Reasoning panel; returns `null` for events the panel ignores. */
-export function toReasoningMessage(event: RunEvent): ReasoningMessage | null {
-  const payload = event.payload ?? {}
-
-  if (event.type.includes('multi_agent')) {
-    return {
-      id: event.id,
-      title: event.type,
-      body: JSON.stringify(payload).slice(0, 200),
-      tone: 'info',
-    }
-  }
-
-  if (event.type.includes('failed')) {
-    return {
-      id: event.id,
-      title: 'Error',
-      body: typeof payload.message === 'string' ? payload.message : 'Failure',
-      tone: 'error',
-    }
-  }
-
-  if (event.type.includes('completed')) {
-    return {
-      id: event.id,
-      title: 'Done',
-      body: 'Completed',
-      tone: 'success',
-    }
-  }
-
-  return null
 }
 
 /** Aggregate per-node statuses into completed / waiting / failed counts for the run header chip. */

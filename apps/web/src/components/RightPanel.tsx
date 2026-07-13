@@ -52,6 +52,8 @@ import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
 import { getResolvedLocale, tRunEvent, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
+import { formatCompactDuration } from '../constants'
+import { getInterEventDeltaMs, getRunEventPresentation, sortRunEventsChronologically } from '../run-timeline'
 
 export type RightPanelProps = {
   tab: ActiveTab
@@ -218,6 +220,7 @@ function RightPanelRouter(props: RightPanelProps) {
       runs={props.runs}
       usage={props.usage}
       runNodes={props.runNodes}
+      runEvents={props.events}
       activeRunId={props.activeRunId}
       onOpenRun={props.onOpenRun}
       onRefreshPlatform={props.onRefreshPlatform}
@@ -516,15 +519,43 @@ export function ReasoningPanel({
   onLoadOlderEvents?: () => void | Promise<void>
 }) {
   const { t } = useT()
-  const visibleEvents = useMemo(() => [...events].reverse(), [events])
+  const visibleEvents = useMemo(() => {
+    const chronological = sortRunEventsChronologically(events)
+    return chronological.map((event, index) => ({
+      event,
+      deltaMs: getInterEventDeltaMs(chronological[index - 1], event),
+      presentation: getRunEventPresentation(event),
+    })).reverse()
+  }, [events])
 
   return (
-    <div className="panel-list">
+    <div className="panel-list" data-testid="run-event-timeline">
       {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.reasoning.empty.title') as string} body={t('rightPanel.reasoning.empty.body') as string} />}
-      {visibleEvents.map(event => (
-        <div key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`} className="list-card">
-          <strong>{tRunEvent(event)}</strong>
-          <span className="helper-text">{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
+      {visibleEvents.map(({ event, deltaMs, presentation }) => (
+        <div
+          key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`}
+          className="list-card we-run-event"
+          data-tone={presentation.tone}
+          data-noise={presentation.noise ? 'true' : undefined}
+          data-testid={`run-event-${event.id}`}
+        >
+          <div className="we-run-event__header">
+            <span className="we-run-event__tone" aria-hidden="true" />
+            <strong>{tRunEvent(event)}</strong>
+            {event.createdAt && (
+              <time className="we-run-event__time" dateTime={event.createdAt} title={event.createdAt}>
+                {new Date(event.createdAt).toLocaleString(getResolvedLocale(), { dateStyle: 'short', timeStyle: 'medium' })}
+              </time>
+            )}
+          </div>
+          <div className="we-run-event__meta">
+            <span>{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
+            {deltaMs !== null && (
+              <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(deltaMs) }) as string}>
+                +{formatCompactDuration(deltaMs)}
+              </span>
+            )}
+          </div>
           <ReasoningPayload payload={event.payload} />
         </div>
       ))}

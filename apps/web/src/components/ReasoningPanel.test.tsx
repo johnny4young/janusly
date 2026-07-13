@@ -34,4 +34,21 @@ describe('<ReasoningPanel />', () => {
     render(<ReasoningPanel events={events} />)
     expect(screen.queryByText('Show raw event')).not.toBeInTheDocument()
   })
+
+  it('shows exact timestamps and inter-event deltas while de-emphasizing noise', () => {
+    const events: RunEvent[] = [
+      { id: 'e3', type: 'node.failed', nodeId: 'fetch', createdAt: '2026-07-12T10:00:03.500Z' },
+      { id: 'e1', type: 'run.started', createdAt: '2026-07-12T10:00:00.000Z' },
+      { id: 'e2', type: 'node.queued', nodeId: 'fetch', createdAt: '2026-07-12T10:00:01.250Z' },
+    ]
+    render(<ReasoningPanel events={events} />)
+
+    expect(screen.getByTestId('run-event-e2')).toHaveAttribute('data-noise', 'true')
+    expect(screen.getByTestId('run-event-e2')).toHaveAttribute('data-tone', 'neutral')
+    expect(screen.getByTestId('run-event-e3')).toHaveAttribute('data-tone', 'error')
+    expect(screen.getByLabelText('1s since the previous event')).toBeInTheDocument()
+    expect(screen.getByLabelText('2s since the previous event')).toBeInTheDocument()
+    expect(screen.getAllByRole('time')).toHaveLength(3)
+    expect(screen.getAllByRole('time')[0]).toHaveAttribute('datetime', '2026-07-12T10:00:03.500Z')
+  })
 })

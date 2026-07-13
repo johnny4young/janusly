@@ -5,8 +5,17 @@
  * cases where one of those forgets to land.
  */
 import { describe, expect, it } from 'vitest'
-import { nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary, getNodePreset } from './constants'
+import { formatCompactDuration, nodePresets, nodeTypes, getNodeLabel, getNodeHelper, getNodeConfigSummary, getNodePreset } from './constants'
 import { changeAppLanguage } from './i18n'
+
+describe('run metadata formatting', () => {
+  it('formats dense durations without noisy zero units', () => {
+    expect(formatCompactDuration(250)).toBe('250ms')
+    expect(formatCompactDuration(1_250)).toBe('1s')
+    expect(formatCompactDuration(62_000)).toBe('1m 2s')
+    expect(formatCompactDuration(3_720_000)).toBe('1h 2m')
+  })
+})
 
 describe('node-type catalogue', () => {
   it('declares parallel_fork and join in the preset map and ordered list', () => {

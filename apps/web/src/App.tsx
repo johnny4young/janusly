@@ -233,6 +233,7 @@ export default function App() {
     usage,
     aiHealth,
     refreshPlatform,
+    patchRunSummary,
   } = useBootstrapData(authReady)
   // Run-input dialog state. Open when the active workflow declares typed
   // `inputs` and the user presses Run; closed otherwise. Server errors
@@ -400,7 +401,7 @@ export default function App() {
   // Live-run SSE stream (primary). Owns `streamTransport`; on first byte it
   // sets `streamStatus='connected'` and the poll loop below skips its tick. On
   // any stream fault it sets `'polling'` and the very next tick resumes.
-  useRunEventStream(runId)
+  useRunEventStream(runId, patchRunSummary)
 
   // Terminal-run callback for the poll loop: bump platform version so
   // independent panels re-fetch (cross-panel reactivity), then refetch the
@@ -412,7 +413,7 @@ export default function App() {
 
   // Polling fallback (1.5s `/status`). Loads the initial timeline + stays as the
   // safety net behind SSE. `loadStatus` is reused by the run-action handlers.
-  const { loadStatus } = useRunPolling(runId, onRunTerminal)
+  const { loadStatus } = useRunPolling(runId, onRunTerminal, patchRunSummary)
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedEdge = useMemo(() => edges.find(edge => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
@@ -562,6 +563,7 @@ export default function App() {
     try {
       const data = await api(`/run?runId=${encodeURIComponent(id)}`) as RunResponse
       setRunId(id)
+      if (data.run) patchRunSummary(id, data.run)
       setRunNodes(data.nodes ?? [])
       setEvents(data.events ?? [])
       setEventsPagination(data.eventsCursor ?? null, Boolean(data.eventsHasMore))
@@ -573,7 +575,7 @@ export default function App() {
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.runOpenFailed'), 'error')
     }
-  }, [addToast, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes, t])
+  }, [addToast, patchRunSummary, setActiveTab, setEvents, setEventsPagination, setRunId, setRunNodes, t])
 
   const loadOlderEvents = useCallback(async () => {
     if (!runId || !eventsCursor || !eventsHasMore) return

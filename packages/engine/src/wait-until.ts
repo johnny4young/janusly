@@ -65,7 +65,7 @@ export const waitUntilExecutor: NodeExecutor = async (ctx) => {
   return {
     status: "waiting",
     reason: "Waiting for absolute time",
-    metadata: { wakeAt, durationMs: delayMs },
+    metadata: { kind: "timer", wakeAt, durationMs: delayMs },
   };
 };
 

@@ -211,7 +211,12 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
   return {
     status: "waiting",
     reason: "Waiting for subworkflow",
-    metadata: { childRunId: child.runId, childWorkflowId: workflowId, traceId },
+    metadata: {
+      kind: "subworkflow",
+      childRunId: child.runId,
+      childWorkflowId: workflowId,
+      traceId,
+    },
   };
 };
 

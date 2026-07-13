@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { summarizeRunStatus, toReasoningMessage, uniqueEvents } from './eventUtils'
+import { summarizeRunStatus, uniqueEvents } from './eventUtils'
 import type { RunEvent } from './types'
 
 describe('uniqueEvents', () => {
@@ -22,54 +22,6 @@ describe('uniqueEvents', () => {
       { id: undefined as unknown as string, type: 'node.succeeded', nodeId: 'a', createdAt: 't2' },
     ]
     expect(uniqueEvents(input)).toHaveLength(2)
-  })
-})
-
-describe('toReasoningMessage', () => {
-  it('maps failed events to the error tone with a message', () => {
-    const message = toReasoningMessage({
-      id: 'evt_1',
-      type: 'node.failed',
-      payload: { message: 'boom' },
-    })
-
-    expect(message).toEqual({
-      id: 'evt_1',
-      title: 'Error',
-      body: 'boom',
-      tone: 'error',
-    })
-  })
-
-  it('maps multi_agent events to the info tone', () => {
-    const message = toReasoningMessage({
-      id: 'evt_2',
-      type: 'multi_agent.started',
-      payload: { count: 2 },
-    })
-
-    expect(message?.tone).toBe('info')
-    expect(message?.title).toBe('multi_agent.started')
-  })
-
-  it('marks completed as success', () => {
-    const message = toReasoningMessage({
-      id: 'evt_3',
-      type: 'node.completed',
-      payload: {},
-    })
-
-    expect(message?.tone).toBe('success')
-  })
-
-  it('returns null for unknown event types', () => {
-    const message = toReasoningMessage({
-      id: 'evt_4',
-      type: 'node.queued',
-      payload: {},
-    })
-
-    expect(message).toBeNull()
   })
 })
 

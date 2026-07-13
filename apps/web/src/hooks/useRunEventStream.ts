@@ -33,6 +33,7 @@ import { openRunEventStream } from '../api'
 import { useWorkflowStore } from '../store'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import type { JsonObject, RunEvent, RunNode } from '../types'
+import type { RunSummaryPatcher } from './useRunPolling'
 
 /** Abort the connect attempt if no byte arrives — catches proxy buffering. */
 const FIRST_BYTE_TIMEOUT_MS = 8_000
@@ -102,7 +103,7 @@ function parseFrame(raw: string): ParsedFrame | null {
   return { id, event, data: dataLines.join('\n') }
 }
 
-export function useRunEventStream(runId: string | null): void {
+export function useRunEventStream(runId: string | null, patchRunSummary?: RunSummaryPatcher): void {
   useEffect(() => {
     if (!runId) {
       useWorkflowStore.getState().setStreamTransport('idle')
@@ -166,6 +167,7 @@ export function useRunEventStream(runId: string | null): void {
       if (!parsed || typeof parsed !== 'object') return 'ok'
       const signal = parsed as { kind?: string; status?: string; id?: string; nodeId?: string | null; type?: string; payload?: unknown; createdAt?: string }
       if (signal.kind === 'run.status') {
+        if (typeof signal.status === 'string') patchRunSummary?.(runId, { status: signal.status })
         return isTerminalRunStatus(signal.status) ? 'terminal' : 'ok'
       }
       if (signal.kind === 'event' && typeof signal.id === 'string' && typeof signal.type === 'string') {
@@ -251,5 +253,5 @@ export function useRunEventStream(runId: string | null): void {
       controller?.abort()
       useWorkflowStore.getState().setStreamTransport('idle')
     }
-  }, [runId])
+  }, [patchRunSummary, runId])
 }

@@ -92,7 +92,6 @@ export type SolutionPackPublic = {
   samplePayloadIds: string[]
   failureFixtureIds: string[]
 }
-export type ReasoningMessage = { id: string; title: string; body: string; meta?: string; tone: 'info' | 'success' | 'warning' | 'error' }
 export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type RunSummary = {
   id: string
@@ -101,6 +100,10 @@ export type RunSummary = {
   status: string
   createdBy?: string
   createdAt?: string
+  /** Full run-start envelope. Present on `/run` and `/status`; omitted from the bounded `/runs` list. */
+  inputJson?: JsonObject | null
+  /** Correlation id shared by a subworkflow chain. Null on historical root runs that predate trace assignment. */
+  traceId?: string | null
   /** Projected workflow output. Populated only when the run reached `succeeded` AND the workflow declared `outputs`. */
   outputJson?: JsonObject | null
   /**
