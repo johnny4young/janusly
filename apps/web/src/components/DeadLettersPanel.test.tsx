@@ -806,21 +806,76 @@ describe('<DeadLettersPanel /> — keyboard triage and copy', () => {
   })
 
   it('routes R and Cmd/Ctrl+Enter through the same replay and resolve callbacks', async () => {
-    const onReplay = vi.fn()
+    const onReplay = vi.fn(async () => true)
     const onResolve = vi.fn()
     vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
     render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
     const row = await screen.findByTestId('dlq-row-a')
     row.focus()
 
-    fireEvent.keyDown(row, { key: 'r' })
+    await act(async () => {
+      fireEvent.keyDown(row, { key: 'r' })
+    })
+    await waitFor(() => expect(screen.queryByTestId('dlq-recovering-a')).toBeNull())
     fireEvent.keyDown(row, { key: 'Enter', metaKey: true })
     fireEvent.keyDown(row, { key: 'Enter', ctrlKey: true })
 
     expect(onReplay).toHaveBeenCalledOnce()
-    expect(onReplay).toHaveBeenCalledWith('a')
+    expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
     expect(onResolve).toHaveBeenCalledTimes(2)
     expect(onResolve).toHaveBeenNthCalledWith(1, 'a')
+  })
+
+  it('shows Recovering immediately, blocks duplicate actions, and clears after failure', async () => {
+    let finishReplay: ((value: boolean) => void) | undefined
+    const onReplay = vi.fn(() => new Promise<boolean>((resolve) => { finishReplay = resolve }))
+    const onResolve = vi.fn()
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={onResolve} />)
+    const row = await screen.findByTestId('dlq-row-a')
+
+    fireEvent.keyDown(row, { key: 'r' })
+
+    const recovering = await screen.findByTestId('dlq-recovering-a')
+    expect(recovering).toHaveTextContent('Recovering')
+    expect(recovering).toHaveAttribute('role', 'status')
+    expect(recovering).toHaveAttribute('aria-live', 'polite')
+    expect(onReplay).toHaveBeenCalledWith('a', '2026-05-25T12:00:00Z')
+    const retry = screen.getByRole('button', { name: /retry/i })
+    const resolve = screen.getByRole('button', { name: /resolve/i })
+    expect(retry).toBeDisabled()
+    expect(resolve).toBeDisabled()
+
+    fireEvent.keyDown(row, { key: 'r' })
+    fireEvent.keyDown(row, { key: 'Enter', ctrlKey: true })
+    expect(onReplay).toHaveBeenCalledOnce()
+    expect(onResolve).not.toHaveBeenCalled()
+
+    await act(async () => { finishReplay?.(false) })
+    await waitFor(() => expect(screen.queryByTestId('dlq-recovering-a')).toBeNull())
+    expect(retry).toBeEnabled()
+    expect(resolve).toBeEnabled()
+  })
+
+  it('keeps an in-flight replay out of bulk selection and mutations', async () => {
+    let finishReplay: ((value: boolean) => void) | undefined
+    const onReplay = vi.fn(() => new Promise<boolean>((resolve) => { finishReplay = resolve }))
+    vi.mocked(api).mockImplementation(dlqMock([mockDeadLetter('a')]))
+    render(<DeadLettersPanel onRefresh={vi.fn()} onReplay={onReplay} onResolve={vi.fn()} />)
+    const row = await screen.findByTestId('dlq-row-a')
+
+    fireEvent.keyDown(row, { key: 'r' })
+    await screen.findByTestId('dlq-recovering-a')
+    fireEvent.click(screen.getByTestId('dlq-select-toggle'))
+
+    expect(screen.getByTestId('dlq-select-row-a')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('dlq-select-all'))
+    expect(screen.queryByTestId('dlq-bulk-replay')).toBeNull()
+    expect(screen.queryByTestId('dlq-bulk-resolve')).toBeNull()
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/dlq/bulk-replay')).toBe(false)
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === '/dlq/bulk-resolve')).toBe(false)
+
+    await act(async () => { finishReplay?.(false) })
   })
 
   it('moves focus to the neighboring row after an action removes the active failure', async () => {

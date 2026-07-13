@@ -59,8 +59,10 @@ import { getCanvasVisibility, isCanvasTab } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
+import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
 import { DOCS_URL } from './docs-link'
 import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
+import { formatDowntime } from './components/recovery-center/helpers'
 
 type RunResponse = {
   run?: RunSummary
@@ -747,7 +749,10 @@ export default function App() {
       })
       await loadStatus(runId)
       bumpPlatformVersion()
-      await refreshPlatform()
+      await Promise.all([
+        refreshPlatform(),
+        requestRecoveryAllClearIfQueueEmpty(),
+      ])
       addToast(t('toasts.stepRetried', { nodeId }), 'success')
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.replayFailed'), 'error')
@@ -775,7 +780,7 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs, t])
 
-  const replayDeadLetter = useCallback(async (deadLetterId: string) => {
+  const replayDeadLetter = useCallback(async (deadLetterId: string, createdAtIso?: string) => {
     try {
       await api('/dlq/replay', {
         method: 'POST',
@@ -783,8 +788,20 @@ export default function App() {
       })
       if (runId) await loadStatus(runId)
       bumpPlatformVersion()
-      await refreshPlatform()
-      addToast(t('toasts.deadLetterReplayed'), 'success')
+      const createdAtMs = createdAtIso ? new Date(createdAtIso).getTime() : Number.NaN
+      const downtimeMs = Date.now() - createdAtMs
+      await Promise.all([
+        refreshPlatform(),
+        requestRecoveryAllClearIfQueueEmpty(
+          Number.isFinite(downtimeMs) && downtimeMs > 0 ? { downtimeMs } : {},
+        ),
+      ])
+      addToast(
+        Number.isFinite(downtimeMs) && downtimeMs > 0
+          ? t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) })
+          : t('toasts.deadLetterReplayed'),
+        'success',
+      )
       return true
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.deadLetterReplayFailed'), 'error')
@@ -864,7 +881,10 @@ export default function App() {
         body: JSON.stringify({ id: deadLetterId }),
       })
       bumpPlatformVersion()
-      await refreshPlatform()
+      await Promise.all([
+        refreshPlatform(),
+        requestRecoveryAllClearIfQueueEmpty(),
+      ])
       addToast(t('toasts.deadLetterResolved'), 'success')
       return true
     } catch (error) {
@@ -1202,8 +1222,8 @@ export default function App() {
               <span>{isConnected ? t('statusBar.operatorOnline') : t('statusBar.operatorOffline')}</span>
             </span>
             <span className="bottom-status-bar__sep" aria-hidden="true">|</span>
-            {/* DLQ count only — a queue-depth stat returns here when the
-                Q-06 gauge exists; until then we don't render a fake number. */}
+            {/* DLQ count only. Queue-depth telemetry is not available in this
+                surface, so the status bar does not render a fabricated value. */}
             <span className="bottom-status-bar__item">
               <Activity size={12} aria-hidden="true" />
               <span>{t('statusBar.dlq', { dlq: openDlqCount })}</span>

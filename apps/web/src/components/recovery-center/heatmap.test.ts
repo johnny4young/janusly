@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildHeatmapCells, heatmapOutcome, type HeatmapDay } from './helpers'
+import { buildHeatmapCells, computeStreaks, heatmapOutcome, type HeatmapCell, type HeatmapDay } from './helpers'
 
 describe('heatmapOutcome', () => {
   it('classifies each band', () => {
@@ -41,5 +41,42 @@ describe('buildHeatmapCells', () => {
       NOW,
     )
     expect(cells[0].outcome).toBe('unrecovered')
+  })
+})
+
+describe('computeStreaks', () => {
+  const cell = (failures: number, recovered: number): HeatmapCell => ({
+    day: '2026-07-06',
+    failures,
+    recovered,
+    outcome: heatmapOutcome(failures, recovered),
+  })
+
+  it('returns zero current streak when the newest day still has a failure', () => {
+    expect(computeStreaks([cell(0, 0), cell(1, 0)])).toEqual({ current: 0, longest: 0 })
+  })
+
+  it('counts recovered-only and fully recovered days as clean', () => {
+    expect(computeStreaks([cell(0, 2), cell(2, 2), cell(0, 0)])).toEqual({ current: 3, longest: 3 })
+  })
+
+  it('resets across a partial day while retaining the longest run', () => {
+    expect(computeStreaks([
+      cell(0, 0),
+      cell(1, 1),
+      cell(2, 1),
+      cell(0, 0),
+      cell(3, 3),
+      cell(0, 0),
+    ])).toEqual({ current: 3, longest: 3 })
+  })
+
+  it('does not count leading densified days before the first observed activity', () => {
+    expect(computeStreaks([
+      cell(0, 0),
+      cell(0, 0),
+      cell(1, 1),
+      cell(0, 0),
+    ])).toEqual({ current: 2, longest: 2 })
   })
 })

@@ -13,15 +13,18 @@
 import { useMemo } from 'react'
 
 import { useT } from '../../i18n'
-import { buildHeatmapCells, type HeatmapDay } from './helpers'
+import { buildHeatmapCells, type HeatmapCell, type HeatmapDay } from './helpers'
 
 export function RecoveryHeatmap({
   days,
+  cells: providedCells,
   windowDays,
   nowMs,
   onSelectDay,
 }: {
   days: HeatmapDay[]
+  /** Reuse a parent-owned densified grid when another hero signal needs it. */
+  cells?: HeatmapCell[]
   windowDays: number
   nowMs: number | null
   /** Drill into one day's failures. Only days WITH failures are clickable. */
@@ -29,8 +32,8 @@ export function RecoveryHeatmap({
 }) {
   const { t } = useT()
   const cells = useMemo(
-    () => buildHeatmapCells(days, windowDays, nowMs ?? 0),
-    [days, windowDays, nowMs],
+    () => providedCells ?? buildHeatmapCells(days, windowDays, nowMs ?? 0),
+    [days, providedCells, windowDays, nowMs],
   )
   if (nowMs === null) return null
 

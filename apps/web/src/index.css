@@ -8065,6 +8065,8 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-success {
+  position: relative;
+  overflow: hidden;
   background: var(--we-success-soft);
   border: 1px solid color-mix(in srgb, var(--we-success) 25%, transparent);
   color: var(--we-success-text);
@@ -9189,6 +9191,8 @@ button.we-ops-metric-card--button {
 /* Hero ----------------------------------------------------------------- */
 
 .we-recovery-center-hero {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -9202,7 +9206,17 @@ button.we-ops-metric-card--button {
   box-shadow: 0 4px 24px color-mix(in srgb, var(--we-primary) 6%, transparent);
 }
 
+.we-recovery-center-hero[data-all-clear="true"] {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--we-success) 12%, var(--we-surface-1)) 0%,
+    color-mix(in srgb, var(--we-accent) 7%, var(--we-surface-1)) 100%);
+  border-color: color-mix(in srgb, var(--we-success) 30%, transparent);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--we-success) 10%, transparent);
+}
+
 .we-recovery-center-hero__copy {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -9223,6 +9237,85 @@ button.we-ops-metric-card--button {
   color: var(--we-text-2);
   margin: 0;
   line-height: 1.45;
+}
+
+.we-recovery-center-hero__downtime,
+.we-recovery-center-hero__streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.we-recovery-center-hero__downtime { color: var(--we-text-2); }
+.we-recovery-center-hero__downtime[data-severity="warn"] { color: var(--we-warning-text); }
+.we-recovery-center-hero__downtime[data-severity="danger"] { color: var(--we-danger-text); }
+.we-recovery-center-hero__streak { color: var(--we-success-text); }
+
+.we-recovery-center-hero__all-clear {
+  display: grid;
+  gap: 6px;
+}
+
+.we-recovery-center-hero .we-recovery-center-ring {
+  position: relative;
+  z-index: 1;
+}
+
+/* Decorative success confetti. The React component removes this DOM for
+   reduced-motion users; the media guard also covers the first paint. */
+.we-celebration-burst {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.we-celebration-burst__particle {
+  --burst-x: 0px;
+  --burst-y: -36px;
+  --burst-rotate: 0deg;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--we-success);
+  opacity: 0;
+  animation: we-celebration-burst 720ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.we-celebration-burst__particle:nth-child(2n) { background: var(--we-accent); }
+.we-celebration-burst__particle:nth-child(3n) { background: var(--we-primary); }
+.we-celebration-burst__particle:nth-child(5n) { background: var(--we-warning); }
+.we-celebration-burst__particle:nth-child(1) { --burst-x: -112px; --burst-y: -42px; --burst-rotate: -34deg; }
+.we-celebration-burst__particle:nth-child(2) { --burst-x: -82px; --burst-y: -74px; --burst-rotate: 28deg; animation-delay: 35ms; }
+.we-celebration-burst__particle:nth-child(3) { --burst-x: -44px; --burst-y: -88px; --burst-rotate: 52deg; animation-delay: 70ms; }
+.we-celebration-burst__particle:nth-child(4) { --burst-x: -12px; --burst-y: -98px; --burst-rotate: -22deg; animation-delay: 20ms; }
+.we-celebration-burst__particle:nth-child(5) { --burst-x: 36px; --burst-y: -86px; --burst-rotate: 66deg; animation-delay: 90ms; }
+.we-celebration-burst__particle:nth-child(6) { --burst-x: 78px; --burst-y: -72px; --burst-rotate: -48deg; animation-delay: 55ms; }
+.we-celebration-burst__particle:nth-child(7) { --burst-x: 116px; --burst-y: -38px; --burst-rotate: 36deg; animation-delay: 105ms; }
+.we-celebration-burst__particle:nth-child(8) { --burst-x: -92px; --burst-y: 28px; --burst-rotate: 74deg; animation-delay: 85ms; }
+.we-celebration-burst__particle:nth-child(9) { --burst-x: 4px; --burst-y: 44px; --burst-rotate: -62deg; animation-delay: 115ms; }
+.we-celebration-burst__particle:nth-child(10) { --burst-x: 94px; --burst-y: 24px; --burst-rotate: 44deg; animation-delay: 75ms; }
+
+@keyframes we-celebration-burst {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.35) rotate(0deg); }
+  18% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--burst-x)), calc(-50% + var(--burst-y))) scale(0.9) rotate(var(--burst-rotate));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .we-celebration-burst { display: none; }
 }
 
 /* HealthRing ----------------------------------------------------------- */

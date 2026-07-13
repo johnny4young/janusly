@@ -100,7 +100,7 @@ export type RightPanelProps = {
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | void> | string[] | void
   onReplayNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
-  onReplayDeadLetter: (id: string) => void
+  onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => void
   /** Resolves `null` when the author declined the unsaved-canvas guard. */
   onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string } | null>

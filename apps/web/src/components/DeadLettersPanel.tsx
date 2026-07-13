@@ -7,7 +7,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, Sparkles, X } from 'lucide-react'
+import { CircleCheck, Copy, Download, FlaskConical, GitCompare, Inbox, RefreshCw, Sparkles, X } from 'lucide-react'
 
 import { downtimeSeverity, humanizeAge } from './recovery-center/helpers'
 import { api, downloadFromApi } from '../api'
@@ -46,6 +46,7 @@ import {
   RECOVERY_QUEUE_FOCUS_EVENT,
   type RecoveryQueueFocusRequest,
 } from './recovery-queue-focus-bus'
+import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
 
 /** Fixed DLQ row height (54px) plus the 6px `.we-list` gap. The matching
  *  `.we-dlq-row` rule prevents metadata wrapping so virtual offsets stay
@@ -148,7 +149,7 @@ const BULK_ERROR_PREVIEW = 6
 
 type DeadLettersPanelProps = {
   onRefresh: () => void | Promise<void>
-  onReplay: (id: string) => boolean | Promise<boolean> | undefined
+  onReplay: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolve: (id: string) => boolean | Promise<boolean> | undefined
 }
 
@@ -199,6 +200,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingKeyboardFocusId, setPendingKeyboardFocusId] = useState<string | null>(null)
   const [pendingTriageFocus, setPendingTriageFocus] = useState<PendingTriageFocus | null>(null)
+  const [replayingIds, setReplayingIds] = useState<ReadonlySet<string>>(() => new Set())
   const [openRecoveryItemId, setOpenRecoveryItemId] = useState<string | null>(null)
   const openRecoveryItem = openRecoveryItemId
     ? recoveryItems.find((it) => it.id === openRecoveryItemId) ?? null
@@ -227,10 +229,11 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
   // Select-all operates over the loaded (filtered) rows, so appended
   // "Load more" pages are included; the virtual window is only a render detail.
-  const loadedIds = filtered.map((item) => item.id)
+  const loadedIds = filtered.filter((item) => !replayingIds.has(item.id)).map((item) => item.id)
   const allLoadedSelected = loadedIds.length > 0 && loadedIds.every((id) => selectedIds.has(id))
 
   const toggleSelect = (id: string) => {
+    if (replayingIds.has(id)) return
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -245,6 +248,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     )
   }
 
+  useEffect(() => {
+    if (replayingIds.size === 0) return
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => !replayingIds.has(id)))
+      return next.size === current.size ? current : next
+    })
+  }, [replayingIds])
+
   const exitSelection = () => {
     setSelectionMode(false)
     setSelectedIds(new Set())
@@ -257,7 +268,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // 200 partial-success envelope, so inspect it before deciding whether to
   // clear or keep the remaining failed selections.
   const bulkResolve = async () => {
-    const ids = [...selectedIds]
+    const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
     try {
@@ -265,6 +276,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed') as string)
 
       if (result.resolved > 0) {
+        await requestRecoveryAllClearIfQueueEmpty()
         bumpPlatformVersion()
         refreshQueue()
         void onRefresh()
@@ -292,7 +304,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   // already-replayed/resolved row in the selection comes back in the failed set.
   const bulkReplay = async () => {
     setConfirmBulkReplay(false)
-    const ids = [...selectedIds]
+    const ids = [...selectedIds].filter((id) => !replayingIds.has(id))
     if (ids.length === 0) return
     setBulkErrors([])
     try {
@@ -300,6 +312,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
 
       if (result.replayed > 0) {
+        await requestRecoveryAllClearIfQueueEmpty()
         bumpPlatformVersion()
         refreshQueue()
         void onRefresh()
@@ -433,12 +446,22 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
   }
 
   const replaySelected = async () => {
-    if (!selected || selected.status === 'replayed') return
-    await runSelectedTriageAction(onReplay)
+    if (!selected || selected.status === 'replayed' || replayingIds.has(selected.id)) return
+    const replayingId = selected.id
+    setReplayingIds((current) => new Set(current).add(replayingId))
+    try {
+      await runSelectedTriageAction((id) => onReplay(id, selected.createdAt))
+    } finally {
+      setReplayingIds((current) => {
+        const next = new Set(current)
+        next.delete(replayingId)
+        return next
+      })
+    }
   }
 
   const resolveSelected = async () => {
-    if (!selected || selected.status === 'resolved') return
+    if (!selected || selected.status === 'resolved' || replayingIds.has(selected.id)) return
     await runSelectedTriageAction(onResolve)
   }
 
@@ -494,7 +517,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
     if (selectionMode) return
     if (!hasCommandModifier && !event.altKey && !event.shiftKey && key === 'r') {
-      if (selected && selected.status !== 'replayed') {
+      if (selected && selected.status !== 'replayed' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void replaySelected()
@@ -503,7 +526,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     }
 
     if (hasCommandModifier && !event.altKey && !event.shiftKey && event.key === 'Enter') {
-      if (selected && selected.status !== 'resolved') {
+      if (selected && selected.status !== 'resolved' && !replayingIds.has(selected.id)) {
         event.preventDefault()
         event.stopPropagation()
         void resolveSelected()
@@ -834,6 +857,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               >
                 {visibleDeadLetters.map(({ item, index }) => {
                   const severity = rowSeverity(item.status)
+                  const isReplaying = replayingIds.has(item.id)
                   return (
                     <li
                       key={item.id}
@@ -850,7 +874,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                       data-dead-letter-id={item.id}
                       data-selected={selected?.id === item.id ? 'true' : undefined}
                       tabIndex={selected?.id === item.id ? 0 : -1}
-                      aria-label={`${item.nodeId} — ${formatStatusLabel(item.status)}`}
+                      aria-label={`${item.nodeId} — ${isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}`}
                       aria-selected={selectionMode ? selectedIds.has(item.id) : selected?.id === item.id}
                       aria-rowindex={index + 1}
                       onFocus={() => setSelectedId(item.id)}
@@ -862,6 +886,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                               type="checkbox"
                               className="we-list-row__select"
                               checked={selectedIds.has(item.id)}
+                              disabled={isReplaying}
                               onClick={event => event.stopPropagation()}
                               onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
                               aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
@@ -890,8 +915,15 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                               {humanizeAge(item.createdAt, Date.now())}
                             </span>
                           )}
-                          <span className={`we-list-row__pill we-list-row__pill--${severity}`}>
-                            {formatStatusLabel(item.status)}
+                          <span
+                            className={`we-list-row__pill we-list-row__pill--${isReplaying ? 'cyan' : severity}`}
+                            data-testid={isReplaying ? `dlq-recovering-${item.id}` : undefined}
+                            role="status"
+                            aria-live="polite"
+                            aria-atomic="true"
+                          >
+                            {isReplaying && <RefreshCw size={11} className="we-spin" aria-hidden="true" />}
+                            {isReplaying ? t('dlq.recovering') : formatStatusLabel(item.status)}
                           </span>
                           <RecoveryItemBadge
                             item={recoveryByDeadLetterId.get(item.id) ?? null}
@@ -937,7 +969,9 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
               <div className="section-kicker">{t('dlq.selected')}</div>
               <strong>{selected.nodeId}</strong>
             </div>
-            <span className="status-pill" data-status={selected.status}>{formatStatusLabel(selected.status)}</span>
+            <span className="status-pill" data-status={replayingIds.has(selected.id) ? 'running' : selected.status}>
+              {replayingIds.has(selected.id) ? t('dlq.recovering') : formatStatusLabel(selected.status)}
+            </span>
           </div>
 
           <div className="split-row">
@@ -950,14 +984,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
             </button>
             <button
               className="small-command we-command-with-kbd"
-              disabled={selected.status === 'replayed'}
+              disabled={selected.status === 'replayed' || replayingIds.has(selected.id)}
               onClick={() => { void replaySelected() }}
             >
               <span>{t('dlq.action.retry')}</span><kbd aria-hidden="true">R</kbd>
             </button>
             <button
               className="small-command we-command-with-kbd"
-              disabled={selected.status === 'resolved'}
+              disabled={selected.status === 'resolved' || replayingIds.has(selected.id)}
               onClick={() => { void resolveSelected() }}
             >
               <span>{t('dlq.action.resolve')}</span><kbd aria-hidden="true">⌘/Ctrl ↵</kbd>

@@ -314,6 +314,8 @@ export function shouldShowOnboarding(input: {
 export type HeatmapDay = { day: string; failures: number; recovered: number; mttrSeconds: number }
 export type HeatmapOutcome = 'none' | 'recovered' | 'partial' | 'unrecovered'
 export type HeatmapCell = { day: string; failures: number; recovered: number; outcome: HeatmapOutcome }
+export type StreakSummary = { current: number; longest: number }
+export type OpenDowntimeSummary = { createdAt: string; durationMs: number }
 
 /** Classify a day's failure/recovery counts into a heatmap color band. */
 export function heatmapOutcome(failures: number, recovered: number): HeatmapOutcome {
@@ -342,6 +344,54 @@ export function buildHeatmapCells(days: HeatmapDay[], windowDays: number, nowMs:
     cells.push({ day: key, failures, recovered, outcome: heatmapOutcome(failures, recovered) })
   }
   return cells
+}
+
+/**
+ * Count contiguous clean days from the first observable recovery activity.
+ * Empty densified cells after that anchor are clean, but leading cells are not
+ * evidence that a newly observed workspace has been healthy for the full
+ * reporting window.
+ */
+export function computeStreaks(cells: HeatmapCell[]): StreakSummary {
+  const firstObservedIndex = cells.findIndex((cell) => cell.failures > 0 || cell.recovered > 0)
+  if (firstObservedIndex < 0) return { current: 0, longest: 0 }
+  const observedCells = cells.slice(firstObservedIndex)
+  let current = 0
+  let longest = 0
+  let running = 0
+
+  for (const cell of observedCells) {
+    const clean = cell.failures === 0 || cell.recovered >= cell.failures
+    running = clean ? running + 1 : 0
+    longest = Math.max(longest, running)
+  }
+
+  for (let index = observedCells.length - 1; index >= 0; index -= 1) {
+    const cell = observedCells[index]
+    if (!cell || (cell.failures > 0 && cell.recovered < cell.failures)) break
+    current += 1
+  }
+
+  return { current, longest }
+}
+
+/** Find the oldest valid open failure using the Recovery Center's shared clock. */
+export function computeLongestOpenDowntime(
+  items: ReadonlyArray<{ createdAt?: string }>,
+  nowMs: number | null,
+): OpenDowntimeSummary | null {
+  if (nowMs === null || !Number.isFinite(nowMs)) return null
+  let longest: OpenDowntimeSummary | null = null
+  for (const item of items) {
+    if (!item.createdAt) continue
+    const createdAtMs = new Date(item.createdAt).getTime()
+    const durationMs = nowMs - createdAtMs
+    if (!Number.isFinite(durationMs) || durationMs < 0) continue
+    if (!longest || durationMs > longest.durationMs) {
+      longest = { createdAt: item.createdAt, durationMs }
+    }
+  }
+  return longest
 }
 
 export type DowntimeSeverity = 'ok' | 'warn' | 'danger'

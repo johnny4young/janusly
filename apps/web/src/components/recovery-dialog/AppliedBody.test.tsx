@@ -1,6 +1,6 @@
 /**
- * Tests for the Applied-step success ribbon — focused on the Q-13
- * cluster-recovery celebration line: present with count + formatted summed
+ * Tests for the Applied-step success ribbon and decorative recovery burst:
+ * present with count + formatted summed
  * downtime on a hit, absent (never a NaN string) when `downtimeEndedMs` is
  * missing/0, and never rendered on the single-replay path.
  */
@@ -14,13 +14,14 @@ function renderCluster(cluster: ClusterApplyResult) {
   return render(<AppliedBody cluster={cluster} />)
 }
 
-describe('<AppliedBody /> cluster celebration (Q-13)', () => {
+describe('<AppliedBody /> cluster celebration', () => {
   it('renders count + summed downtime when the apply ended real downtime', () => {
     renderCluster({ replayed: 3, failed: 0, errors: [], downtimeEndedMs: 3_600_000 })
 
     const line = screen.getByTestId('cluster-recovered-line')
     // 3 replays, 1h of summed downtime — the plural `_other` copy.
     expect(line).toHaveTextContent('Recovered 3 cascading failures · 1h of downtime ended')
+    expect(screen.getByTestId('celebration-burst').children).toHaveLength(10)
   })
 
   it('uses the singular copy for one replayed member', () => {
@@ -47,5 +48,6 @@ describe('<AppliedBody /> cluster celebration (Q-13)', () => {
 
     render(<AppliedBody runId="run-12345678" />)
     expect(screen.queryByTestId('cluster-recovered-line')).toBeNull()
+    expect(screen.queryByTestId('celebration-burst')).toBeNull()
   })
 })

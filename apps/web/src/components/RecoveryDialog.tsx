@@ -49,6 +49,7 @@ import { formatDowntime } from './recovery-center/helpers'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
+import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
 import { CancellingBody } from './recovery-dialog/CancellingBody'
 import { ReviewBody } from './recovery-dialog/ReviewBody'
 import { ValidationFailedBody } from './recovery-dialog/ValidationFailedBody'
@@ -468,19 +469,27 @@ export function RecoveryDialog({
           }),
         }) as ClusterApplyResult
         bumpPlatformVersion()
+        const clusterDowntimeMs = typeof result.downtimeEndedMs === 'number'
+          && Number.isFinite(result.downtimeEndedMs)
+          && result.downtimeEndedMs > 0
+          ? result.downtimeEndedMs
+          : null
+        if (result.replayed > 0) {
+          await requestRecoveryAllClearIfQueueEmpty(
+            clusterDowntimeMs === null ? {} : { downtimeMs: clusterDowntimeMs },
+          )
+        }
         // In cluster mode, name the summed downtime the
         // batch just ended (the single-replay path below already celebrates
         // its own). Gated so legacy rows / a 0 sum never render a NaN string.
         if (
           result.replayed > 0
-          && typeof result.downtimeEndedMs === 'number'
-          && Number.isFinite(result.downtimeEndedMs)
-          && result.downtimeEndedMs > 0
+          && clusterDowntimeMs !== null
         ) {
           addToast(
             t('recoveryDialog.clusterRecovered', {
               count: result.replayed,
-              duration: formatDowntime(result.downtimeEndedMs),
+              duration: formatDowntime(clusterDowntimeMs),
             }) as string,
             'success',
           )
@@ -539,17 +548,20 @@ export function RecoveryDialog({
         body: JSON.stringify({ deadLetterId: dlq.id, suggestedWorkflow: selected.workflow }),
       }) as { runId?: string }
       bumpPlatformVersion()
+      const downtimeMs = dlq.createdAt
+        ? Date.now() - new Date(dlq.createdAt).getTime()
+        : Number.NaN
+      await requestRecoveryAllClearIfQueueEmpty(
+        Number.isFinite(downtimeMs) && downtimeMs > 0 ? { downtimeMs } : {},
+      )
       // Wedge moment: name the time we just gave back. The dead letter's
       // `createdAt` is the failure instant; recovering it now closes that
       // downtime window, so surface "Recovered after 3h 14m".
-      if (dlq.createdAt) {
-        const downtimeMs = Date.now() - new Date(dlq.createdAt).getTime()
-        if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
-          addToast(
-            t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
-            'success',
-          )
-        }
+      if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
+        addToast(
+          t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
+          'success',
+        )
       }
       // Operator → system feedback: same as cluster mode above. The
       // `rationale` here seeds the `patch_rationale` memory kind so

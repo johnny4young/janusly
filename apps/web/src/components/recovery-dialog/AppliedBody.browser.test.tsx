@@ -1,6 +1,6 @@
 /**
- * Real-Chromium render of the Applied-step ribbon with the Q-13 cluster
- * celebration line — the browser-mode counterpart of the jsdom unit tests,
+ * Real-Chromium render of the Applied-step ribbon and cluster celebration —
+ * the browser-mode counterpart of the jsdom unit tests,
  * proving the line lays out and reads correctly in an actual renderer
  * (the live-smoke dialog state is transient; this pins the visual contract).
  */
@@ -21,5 +21,8 @@ describe('<AppliedBody /> cluster celebration (browser smoke)', () => {
     const rect = line.getBoundingClientRect()
     expect(rect.height).toBeGreaterThan(0)
     expect(getComputedStyle(line).display).not.toBe('none')
+    const burst = getByTestId('celebration-burst')
+    expect(burst.children).toHaveLength(10)
+    expect(getComputedStyle(burst.firstElementChild as Element).animationName).toContain('we-celebration-burst')
   })
 })

@@ -21,7 +21,8 @@
  *
  * Data sources (all already shipped):
  * - `GET /recovery/metrics` → metric strip, health badge, severities.
- * - `GET /dlq?status=open` → recovery-queue tile (via props).
+ * - `GET /dlq/counts` + oldest-first `GET /dlq/queue` → authoritative hero
+ *   count and longest open downtime; the bounded bootstrap page feeds tiles.
  * - `GET /dlq/clusters` → failure-clusters tile.
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
@@ -37,7 +38,7 @@
  * tiles → recommended actions → empty-state CTAs.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
@@ -51,7 +52,11 @@ import { OnboardingBanner } from './OnboardingBanner'
 import { VitalSignsStrip, withSeverityLabels, type VitalSignsTile } from './VitalSignsStrip'
 import {
   buildGreeting,
+  buildHeatmapCells,
+  computeLongestOpenDowntime,
   computeRecommendedActions,
+  computeStreaks,
+  downtimeSeverity,
   formatDowntime,
   readDisplayName,
   readHealthScore,
@@ -62,6 +67,13 @@ import {
 } from './recovery-center/helpers'
 import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
 import { requestRecoveryDayFocus } from './recovery-day-focus-bus'
+import {
+  consumeRecoveryAllClear,
+  parseRecoveryAllClearEvent,
+  RECOVERY_ALL_CLEAR_EVENT,
+  RECOVERY_ALL_CLEAR_WINDOW_MS,
+  type RecoveryAllClearRequest,
+} from './recovery-all-clear-bus'
 import { RecoveryCenterHero } from './recovery-center/RecoveryCenterHero'
 import { RecoveryCenterComposer } from './recovery-center/RecoveryCenterComposer'
 import {
@@ -90,17 +102,30 @@ type RecoveryCenterPanelProps = {
   onTryDemoRecovery?: () => void | Promise<void>
 }
 
+type RecoveryQueueOverview = {
+  orgId: string
+  openCount: number
+  oldestOpen: DeadLetter | null
+}
+
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const activeOrgId = useWorkflowStore((state) => state.orgId)
+  const resolvedOrgId = activeOrgId ?? 'default'
   const user = useWorkflowStore((state) => state.user)
   const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
   const [clusters, setClusters] = useState<ClustersResponse | null>(null)
   const [heatmap, setHeatmap] = useState<HeatmapDay[]>([])
+  const [queueOverview, setQueueOverview] = useState<RecoveryQueueOverview | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsError, setMetricsError] = useState<string | null>(null)
   const [currentHour, setCurrentHour] = useState(12)
   const [nowMs, setNowMs] = useState<number | null>(null)
+  const [allClear, setAllClear] = useState(false)
+  const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
+  const [celebrationTrigger, setCelebrationTrigger] = useState(0)
+  const previousOpenFailuresRef = useRef<{ orgId: string; count: number } | null>(null)
   const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
     try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
   })
@@ -143,6 +168,32 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
   useEffect(() => {
     let cancelled = false
+    void Promise.allSettled([
+      api('/dlq/counts'),
+      api('/dlq/queue?status=open&sort=oldest&limit=1'),
+    ]).then(([countsResult, queueResult]) => {
+      if (cancelled || countsResult.status !== 'fulfilled') return
+      const open = (countsResult.value as { open?: unknown } | null)?.open
+      if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) return
+
+      if (open === 0) {
+        setQueueOverview({ orgId: resolvedOrgId, openCount: 0, oldestOpen: null })
+        return
+      }
+      const items = queueResult.status === 'fulfilled'
+        ? (queueResult.value as { items?: unknown } | null)?.items
+        : null
+      setQueueOverview({
+        orgId: resolvedOrgId,
+        openCount: open,
+        oldestOpen: Array.isArray(items) && items.length > 0 ? items[0] as DeadLetter : null,
+      })
+    })
+    return () => { cancelled = true }
+  }, [platformVersion, resolvedOrgId])
+
+  useEffect(() => {
+    let cancelled = false
     api('/recovery/heatmap?days=90')
       .then((payload) => {
         if (cancelled) return
@@ -159,6 +210,58 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
     [props.deadLetters],
   )
+  const currentQueueOverview = queueOverview?.orgId === resolvedOrgId ? queueOverview : null
+  // A fresh bootstrap page can know about a newly-opened failure before the
+  // overview refetch settles, so never let an older zero-count snapshot mask
+  // visible work. The authoritative count still raises the total when an old
+  // open row lives beyond the capped bootstrap page.
+  const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, openDeadLetters.length)
+
+  const celebrateAllClear = useCallback((request?: RecoveryAllClearRequest | null) => {
+    setAllClearDowntimeOverride(request?.downtimeMs ?? null)
+    setAllClear(true)
+    setCelebrationTrigger((trigger) => trigger + 1)
+  }, [])
+
+  useEffect(() => {
+    const current = openFailureCount
+    const previous = previousOpenFailuresRef.current
+    previousOpenFailuresRef.current = { orgId: resolvedOrgId, count: current }
+
+    if (current > 0) {
+      setAllClear(false)
+      setAllClearDowntimeOverride(null)
+      return
+    }
+    if (previous?.orgId === resolvedOrgId && previous.count > 0) {
+      celebrateAllClear(consumeRecoveryAllClear(resolvedOrgId))
+    }
+  }, [celebrateAllClear, openFailureCount, resolvedOrgId])
+
+  useEffect(() => {
+    if (openFailureCount !== 0) return
+
+    const pending = consumeRecoveryAllClear(resolvedOrgId)
+    if (pending) celebrateAllClear(pending)
+
+    const onAllClear = (event: Event) => {
+      const request = parseRecoveryAllClearEvent(event, resolvedOrgId)
+      if (!request) return
+      consumeRecoveryAllClear(resolvedOrgId)
+      celebrateAllClear(request)
+    }
+    window.addEventListener(RECOVERY_ALL_CLEAR_EVENT, onAllClear)
+    return () => window.removeEventListener(RECOVERY_ALL_CLEAR_EVENT, onAllClear)
+  }, [celebrateAllClear, openFailureCount, resolvedOrgId])
+
+  useEffect(() => {
+    if (!allClear) return
+    const id = window.setTimeout(() => {
+      setAllClear(false)
+      setAllClearDowntimeOverride(null)
+    }, RECOVERY_ALL_CLEAR_WINDOW_MS)
+    return () => window.clearTimeout(id)
+  }, [allClear, celebrationTrigger])
 
   useEffect(() => {
     setCurrentHour(new Date().getHours())
@@ -171,7 +274,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setNowMs(Date.now())
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000)
     return () => window.clearInterval(id)
-  }, [platformVersion, openDeadLetters.length])
+  }, [platformVersion, openFailureCount])
 
   const waitingNodes = useMemo(
     () => props.runNodes.filter((node) => node.status === 'waiting'),
@@ -182,6 +285,26 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     [clusters],
   )
   const topClusterFrequency = topClusters[0]?.frequency ?? 0
+  const heatmapCells = useMemo(
+    () => nowMs === null ? [] : buildHeatmapCells(heatmap, 90, nowMs),
+    [heatmap, nowMs],
+  )
+  const hasRecoveryHistory = heatmapCells.some((cell) => cell.failures > 0 || cell.recovered > 0)
+  const streak = useMemo(
+    () => hasRecoveryHistory ? computeStreaks(heatmapCells) : { current: 0, longest: 0 },
+    [hasRecoveryHistory, heatmapCells],
+  )
+  const longestOpen = useMemo(
+    () => computeLongestOpenDowntime(
+      currentQueueOverview?.oldestOpen
+        ? [currentQueueOverview.oldestOpen]
+        : currentQueueOverview?.openCount
+          ? []
+          : openDeadLetters,
+      nowMs,
+    ),
+    [currentQueueOverview, nowMs, openDeadLetters],
+  )
 
   const totalRuns = props.runs.length
   const healthScore = readHealthScore(metrics)
@@ -192,36 +315,36 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const greeting = useMemo(() => buildGreeting({
     hour: currentHour,
     displayName: readDisplayName(user),
-    openFailures: openDeadLetters.length,
+    openFailures: openFailureCount,
     pendingApprovals: waitingNodes.length,
     healthScore,
     totalRuns,
-  }), [currentHour, user, openDeadLetters.length, waitingNodes.length, healthScore, totalRuns, i18n.language])
+  }), [currentHour, user, openFailureCount, waitingNodes.length, healthScore, totalRuns, i18n.language])
 
   const recommendedActions = useMemo(() => computeRecommendedActions({
-    openFailures: openDeadLetters.length,
+    openFailures: openFailureCount,
     pendingApprovals: waitingNodes.length,
     topClusterFrequency,
     healthScore,
     totalRuns,
-  }), [openDeadLetters.length, waitingNodes.length, topClusterFrequency, healthScore, totalRuns, i18n.language])
+  }), [openFailureCount, waitingNodes.length, topClusterFrequency, healthScore, totalRuns, i18n.language])
 
-  const isEmpty = openDeadLetters.length === 0
+  const isEmpty = openFailureCount === 0
     && waitingNodes.length === 0
     && (clusters?.clusters.length ?? 0) === 0
   // The onboarding walkthrough is stricter than `isEmpty`: only a truly fresh
   // workspace (no runs either) sees it, and a dismissal hides it for good.
   const showOnboarding = shouldShowOnboarding({
     runs: props.runs.length,
-    openFailures: openDeadLetters.length,
+    openFailures: openFailureCount,
     waitingApprovals: waitingNodes.length,
     dismissed: introDismissed,
   })
     && totalRuns === 0
 
   const failuresLabel = t('recoveryCenter.metric.failures.label') as string
-  const failuresDisplay = openDeadLetters.length === 0 ? '0' : String(openDeadLetters.length)
-  const failuresRationale = openDeadLetters.length === 0
+  const failuresDisplay = openFailureCount === 0 ? '0' : String(openFailureCount)
+  const failuresRationale = openFailureCount === 0
     ? t('recoveryCenter.metric.failures.rationaleEmpty') as string
     : t('recoveryCenter.metric.failures.rationale') as string
   const homeTiles: VitalSignsTile[] = [
@@ -229,8 +352,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       icon: <AlertTriangle size={14} aria-hidden="true" />,
       label: failuresLabel,
       display: failuresDisplay,
-      numericValue: openDeadLetters.length,
-      severity: openDeadLetters.length === 0 ? 'healthy' : openDeadLetters.length > 5 ? 'unhealthy' : 'warn',
+      numericValue: openFailureCount,
+      severity: openFailureCount === 0 ? 'healthy' : openFailureCount > 5 ? 'unhealthy' : 'warn',
       rationale: failuresRationale,
       ariaLabel: t('recoveryCenter.metric.aria', { label: failuresLabel, display: failuresDisplay, rationale: failuresRationale }) as string,
       onClick: props.onOpenRecoveryQueue,
@@ -332,7 +455,13 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         salutation={greeting.salutation}
         subline={greeting.subline}
         healthScore={healthScore}
-        openFailures={openDeadLetters.length}
+        openFailures={openFailureCount}
+        streak={streak}
+        longestOpenMs={longestOpen?.durationMs}
+        longestOpenSeverity={downtimeSeverity(longestOpen?.createdAt, nowMs)}
+        allClear={allClear && openFailureCount === 0}
+        allClearDowntimeMs={allClearDowntimeOverride ?? metrics?.downtimeEndedMs}
+        celebrationTrigger={celebrationTrigger}
         onOpenQueue={props.onOpenRecoveryQueue}
       />
 
@@ -342,6 +471,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
 
       <RecoveryHeatmap
         days={heatmap}
+        cells={heatmapCells}
         windowDays={90}
         nowMs={nowMs}
         onSelectDay={(day) => {
@@ -390,7 +520,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
           <CalibrationHealthTile />
           <OperatorTodayTile
             metrics={metrics}
-            openDeadLetters={openDeadLetters.length}
+            openDeadLetters={openFailureCount}
             waitingNodes={waitingNodes.length}
             onOpenTab={props.onOpenTab}
           />

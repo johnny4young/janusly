@@ -36,6 +36,7 @@
   "baselineGzipKiB": {
     "api.js": 2.89,
     "App.js": 49.81,
+    "CelebrationBurst.js": 0.27,
     "CommandPalette.js": 2.8,
     "CredentialRotateModal.js": 2.01,
     "docs-link.js": 0.25,
@@ -51,6 +52,7 @@
     "operations-section-bus.js": 0.27,
     "OperationsPage.js": 21.58,
     "panel-primitives.js": 0.67,
+    "recovery-all-clear-coordinator.js": 1.63,
     "recovery-item.js": 0.61,
     "recovery-queue-focus-bus.js": 0.71,
     "ReasoningPanel.js": 2.87,

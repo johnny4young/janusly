@@ -12,6 +12,7 @@ import { CheckCircle2 } from 'lucide-react'
 import { useT } from '../../i18n'
 import { RecoveryDeltaCard } from '../RecoveryDeltaCard'
 import { formatDowntime } from '../recovery-center/helpers'
+import { CelebrationBurst } from '../recovery-center/CelebrationBurst'
 import type { ClusterApplyResult, PreSaveBeforeSnapshot } from './types'
 import type { RecoveryPlaybookPromotionSource, RecoveryPlaybookSummary } from './types'
 
@@ -51,6 +52,7 @@ export function AppliedBody({
         && cluster.downtimeEndedMs > 0
       return (
         <div className="we-recovery-success" role="alert">
+          {cluster.replayed > 0 && <CelebrationBurst trigger={cluster.replayed} />}
           <CheckCircle2 size={14} aria-hidden="true" />
           <div>
             <strong>{t('recoveryDialog.applied.title')}</strong>

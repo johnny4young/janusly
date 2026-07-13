@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DOWNTIME_DANGER_MINUTES,
   DOWNTIME_WARN_MINUTES,
+  computeLongestOpenDowntime,
   downtimeSeverity,
   formatDowntime,
 } from './helpers'
@@ -47,5 +48,24 @@ describe('formatDowntime', () => {
   it('returns empty for bad input', () => {
     expect(formatDowntime(-1)).toBe('')
     expect(formatDowntime(Number.NaN)).toBe('')
+  })
+})
+
+describe('computeLongestOpenDowntime', () => {
+  it('returns the oldest valid failure and its duration', () => {
+    expect(computeLongestOpenDowntime([
+      { createdAt: isoMinutesAgo(30) },
+      { createdAt: isoMinutesAgo(240) },
+      { createdAt: isoMinutesAgo(60) },
+    ], NOW)).toEqual({ createdAt: isoMinutesAgo(240), durationMs: 240 * MIN })
+  })
+
+  it('ignores missing, invalid, and future timestamps', () => {
+    expect(computeLongestOpenDowntime([
+      {},
+      { createdAt: 'not-a-date' },
+      { createdAt: new Date(NOW + MIN).toISOString() },
+    ], NOW)).toBeNull()
+    expect(computeLongestOpenDowntime([{ createdAt: isoMinutesAgo(10) }], null)).toBeNull()
   })
 })

@@ -1,7 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { RecoveryCenterPanel } from './RecoveryCenterPanel'
+import {
+  consumeRecoveryAllClear,
+  requestRecoveryAllClear,
+} from './recovery-all-clear-bus'
 import {
   buildGreeting,
   computeRecommendedActions,
@@ -47,6 +51,7 @@ const baseMetrics = {
 const baseClusters = { clusters: [], totalSamples: 0, windowDays: 30 }
 
 beforeEach(() => {
+  consumeRecoveryAllClear()
   vi.mocked(api).mockReset()
   bumpPlatformVersion.mockReset()
   addToast.mockReset()
@@ -465,6 +470,148 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
       const hero = screen.getByTestId('recovery-center-greeting').closest('header')
       expect(hero?.textContent).toMatch(/jane/i)
     })
+  })
+
+  it('surfaces the longest open downtime and a real clean streak', async () => {
+    const dayMs = 86_400_000
+    const todayMs = Date.now()
+    const recoveryDays = [2, 1, 0].map((daysAgo) => ({
+      day: new Date(todayMs - daysAgo * dayMs).toISOString().slice(0, 10),
+      failures: 1,
+      recovered: 1,
+    }))
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') {
+        return { days: recoveryDays }
+      }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+    const oldFailure = {
+      ...populatedDlq[0],
+      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    }
+
+    render(<RecoveryCenterPanel {...baseProps} deadLetters={[oldFailure] as never} />)
+
+    const downtime = await screen.findByTestId('recovery-center-longest-downtime')
+    expect(downtime).toHaveTextContent(/5h/)
+    expect(downtime).toHaveAttribute('data-severity', 'danger')
+    expect(await screen.findByTestId('recovery-center-clean-streak')).toHaveTextContent('3-day clean streak')
+  })
+
+  it('uses the org-wide count and oldest queue row instead of the capped bootstrap page', async () => {
+    const oldest = {
+      ...populatedDlq[0],
+      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+    }
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/dlq/counts') return { total: 150, open: 1, replayed: 149, resolved: 0 }
+      if (path === '/dlq/queue?status=open&sort=oldest&limit=1') {
+        return { items: [oldest], nextCursor: null, hasMore: false }
+      }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+
+    expect(await screen.findByTestId('recovery-center-greeting')).toHaveTextContent('1 run needs recovery')
+    const downtime = await screen.findByTestId('recovery-center-longest-downtime')
+    expect(downtime).toHaveTextContent(/5h/)
+    expect(downtime).toHaveAttribute('data-severity', 'danger')
+  })
+
+  it('does not invent a clean streak for a workspace without heatmap activity', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return baseMetrics
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+
+    render(<RecoveryCenterPanel {...baseProps} />)
+
+    await screen.findByTestId('recovery-flow-demo')
+    expect(screen.queryByTestId('recovery-center-clean-streak')).toBeNull()
+  })
+})
+
+describe('<RecoveryCenterPanel /> — all-clear moment', () => {
+  function mockAllClearApis() {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return { ...baseMetrics, downtimeEndedMs: 7_200_000 }
+      if (path === '/dlq/clusters') return baseClusters
+      if (path === '/recovery/heatmap?days=90') return { days: [] }
+      if (path === '/billing/budget' || path.startsWith('/billing/budget?')) {
+        return { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn' }
+      }
+      throw new Error(`unexpected fetch: ${path}`)
+    })
+  }
+
+  it('celebrates one in-session transition from an open failure to an empty queue', async () => {
+    mockAllClearApis()
+    const failure = {
+      id: 'dlq-last', runId: 'run-last', nodeId: 'charge', attempt: 1, status: 'open' as const,
+      workflowJson: {}, nodeJson: {}, errorJson: {}, createdAt: new Date().toISOString(),
+    }
+    const { rerender } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[failure] as never} />)
+    await screen.findByTestId('recovery-center-longest-downtime')
+
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        rerender(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+      })
+
+      expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/)
+      expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('2h of downtime ended')
+      expect(screen.getByTestId('celebration-burst')).toBeInTheDocument()
+
+      act(() => { vi.advanceTimersByTime(30_000) })
+      expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
+      expect(screen.queryByTestId('celebration-burst')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never celebrates an initially empty workspace', async () => {
+    mockAllClearApis()
+
+    render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+
+    await screen.findByTestId('recovery-flow-demo')
+    expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
+    expect(screen.queryByTestId('celebration-burst')).toBeNull()
+  })
+
+  it('consumes the transient Runs-to-Home handoff once and prefers its downtime', async () => {
+    mockAllClearApis()
+    requestRecoveryAllClear({ downtimeMs: 3_660_000 })
+
+    const { unmount } = render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+
+    await waitFor(() => expect(screen.getByTestId('recovery-center-greeting')).toHaveTextContent(/^All clear$/))
+    expect(screen.getByTestId('recovery-center-all-clear-summary')).toHaveTextContent('1h 1m of downtime ended')
+    unmount()
+
+    render(<RecoveryCenterPanel {...baseProps} deadLetters={[]} />)
+    await screen.findByTestId('recovery-flow-demo')
+    expect(screen.getByTestId('recovery-center-greeting')).not.toHaveTextContent(/^All clear$/)
   })
 })
 
