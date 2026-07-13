@@ -6,7 +6,7 @@
  * Used by `RightPanel.tsx` (the `workflows` tab).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { LoadingSkeleton } from './LoadingSkeleton'
 import { CircleCheck, FolderPlus, ListChecks, Pencil, RefreshCw, Trash, Trash2, Workflow } from 'lucide-react'
 import { api } from '../api'
@@ -214,10 +214,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     return () => clearTimeout(id)
   }, [query])
 
-  // Persist the tag / folder / search / sort / collapsed-folders view
-  // per-browser so it survives navigation + reload. The initial run re-writes
-  // the restored values (a harmless no-op).
-  useEffect(() => {
+  // Persist the tag / folder / search / sort / collapsed-folders view before
+  // the browser paints the committed state. In particular, this closes the
+  // window where an operator can collapse a section and immediately reload
+  // before a deferred effect has written the new preference.
+  useLayoutEffect(() => {
     writeFlowsFilters({ tags: tagFilters, folder: folderFilter, query, sort, collapsedFolders })
   }, [tagFilters, folderFilter, query, sort, collapsedFolders])
 
