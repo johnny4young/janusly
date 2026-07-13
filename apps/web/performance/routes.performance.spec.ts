@@ -30,7 +30,7 @@ function installConsoleErrorGuards(page: Page) {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text())
   })
-  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('pageerror', (error) => errors.push(error.stack ?? error.message))
   return errors
 }
 
@@ -102,10 +102,14 @@ async function stubApi(page: Page) {
   await page.route('https://fonts.gstatic.com/**', (route) => route.fulfill({ status: 204, body: '' }))
   await page.route('http://localhost:3001/**', async (route) => {
     const url = new URL(route.request().url())
+    // The API helper transparently promotes contract-backed GETs to `/v1`.
+    // Normalize those aliases so this production-build harness exercises the
+    // same fixture envelope as the unversioned compatibility route.
+    const pathname = url.pathname.startsWith('/v1/') ? url.pathname.slice(3) : url.pathname
     let body: unknown
-    if (url.pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
-    else if (url.pathname === '/dlq/counts') body = { total: 2, open: 2, replayed: 0, resolved: 0 }
-    else if (url.pathname === '/dlq' && url.searchParams.has('id')) {
+    if (pathname === '/dlq/queue') body = { items: rows, nextCursor: null, hasMore: false }
+    else if (pathname === '/dlq/counts') body = { total: 2, open: 2, replayed: 0, resolved: 0 }
+    else if (pathname === '/dlq' && url.searchParams.has('id')) {
       const id = url.searchParams.get('id') ?? 'perf-a'
       const row = rows.find((candidate) => candidate.id === id) ?? rows[0]
       body = {
@@ -113,7 +117,7 @@ async function stubApi(page: Page) {
         workflowJson: { id: 'workflow-perf', name: row.workflowName, nodes: [{ id: row.nodeId, type: 'noop', config: {} }], edges: [] },
         nodeJson: { id: row.nodeId, type: 'noop', config: {} },
       }
-    } else if (url.pathname === '/recovery/metrics') {
+    } else if (pathname === '/recovery/metrics') {
       body = {
         successRate: { value: 0, display: '—', severity: 'neutral', rationale: 'No terminal runs.' },
         mttr: { value: 0, display: '—', severity: 'neutral', rationale: 'No recovered runs.' },
@@ -124,17 +128,17 @@ async function stubApi(page: Page) {
         windowDays: 30,
         terminalRuns: 0,
       }
-    } else if (url.pathname === '/dlq/clusters') body = { clusters: [], totalSamples: 0, windowDays: 30 }
-    else if (url.pathname === '/billing/budget') {
+    } else if (pathname === '/dlq/clusters') body = { clusters: [], totalSamples: 0, windowDays: 30 }
+    else if (pathname === '/billing/budget') {
       body = { allowed: true, monthlyUsdSpent: 0, monthlyUsdLimit: null, policy: 'warn', warningPercent: 80, warningThresholdCrossed: false, exceededAt: null, resolvedScope: 'org' }
-    } else if (['/tools', '/templates', '/solution-packs', '/credentials', '/runs', '/dlq', '/workflows'].includes(url.pathname)) {
+    } else if (['/tools', '/templates', '/solution-packs', '/credentials', '/runs', '/dlq', '/workflows'].includes(pathname)) {
       body = []
-    } else if (url.pathname === '/recovery/heatmap') body = { days: [], totalFailures: 0, totalRecovered: 0 }
-    else if (url.pathname === '/workflows/readiness') body = { status: 'ready', issues: [] }
-    else if (url.pathname === '/recovery/calibration-status') body = { status: 'collecting', sampleCount: 0 }
-    else if (url.pathname === '/ai/health') body = { configured: false, provider: 'anthropic' }
-    else if (url.pathname === '/billing/usage') body = { totalCostUsd: 0, totalTokens: 0, byProvider: [] }
-    else if (url.pathname === '/onboarding') body = { steps: [] }
+    } else if (pathname === '/recovery/heatmap') body = { days: [], totalFailures: 0, totalRecovered: 0 }
+    else if (pathname === '/workflows/readiness') body = { status: 'ready', issues: [] }
+    else if (pathname === '/recovery/calibration-status') body = { status: 'collecting', sampleCount: 0 }
+    else if (pathname === '/ai/health') body = { configured: false, provider: 'anthropic' }
+    else if (pathname === '/billing/usage') body = { totalCostUsd: 0, totalTokens: 0, byProvider: [] }
+    else if (pathname === '/onboarding') body = { steps: [] }
     else {
       body = {}
     }

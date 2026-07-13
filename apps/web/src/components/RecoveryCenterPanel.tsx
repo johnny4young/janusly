@@ -27,8 +27,9 @@
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
  * The Recovery Center is composition over the recovery API + engine metrics.
- * Each child tile refetches independently on the cross-panel
- * `platformVersion` tick (same pattern OperationsPage uses today).
+ * Its top-level metrics, clusters, and heatmap reads start together on the
+ * cross-panel `platformVersion` tick; urgent metrics settle independently from
+ * the contextual cluster/heatmap transition.
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
@@ -38,7 +39,7 @@
  * tiles → recommended actions → empty-state CTAs.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
@@ -102,6 +103,11 @@ type RecoveryCenterPanelProps = {
   onTryDemoRecovery?: () => void | Promise<void>
 }
 
+type OrgSnapshot<T> = {
+  orgId: string
+  value: T
+}
+
 type RecoveryQueueOverview = {
   orgId: string
   openCount: number
@@ -114,57 +120,106 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const activeOrgId = useWorkflowStore((state) => state.orgId)
   const resolvedOrgId = activeOrgId ?? 'default'
   const user = useWorkflowStore((state) => state.user)
-  const [metrics, setMetrics] = useState<RecoveryMetrics | null>(null)
-  const [clusters, setClusters] = useState<ClustersResponse | null>(null)
-  const [heatmap, setHeatmap] = useState<HeatmapDay[]>([])
+  const introDismissedThisSession = useWorkflowStore(
+    (state) => state.recoveryIntroDismissedThisSession,
+  )
+  const dismissIntroThisSession = useWorkflowStore(
+    (state) => state.dismissRecoveryIntroThisSession,
+  )
+  const [metricsSnapshot, setMetricsSnapshot] = useState<OrgSnapshot<RecoveryMetrics> | null>(null)
+  const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
+  const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
+  const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
+  const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
+  const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
   const [queueOverview, setQueueOverview] = useState<RecoveryQueueOverview | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
-  const [metricsError, setMetricsError] = useState<string | null>(null)
+  const [metricsErrorSnapshot, setMetricsErrorSnapshot] = useState<OrgSnapshot<string> | null>(null)
+  const metricsError = metricsErrorSnapshot?.orgId === resolvedOrgId
+    ? metricsErrorSnapshot.value
+    : null
   const [currentHour, setCurrentHour] = useState(12)
   const [nowMs, setNowMs] = useState<number | null>(null)
   const [allClear, setAllClear] = useState(false)
   const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
   const [celebrationTrigger, setCelebrationTrigger] = useState(0)
   const previousOpenFailuresRef = useRef<{ orgId: string; count: number } | null>(null)
-  const [introDismissed, setIntroDismissed] = useState<boolean>(() => {
+  const [persistedIntroDismissed, setPersistedIntroDismissed] = useState<boolean>(() => {
     try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
   })
   const dismissIntro = () => {
-    setIntroDismissed(true)
+    dismissIntroThisSession()
+    if ((metrics?.terminalRuns ?? 0) <= 0) return
+    setPersistedIntroDismissed(true)
     try { localStorage.setItem('janusly:recovery:hideIntro', 'true') } catch { /* storage unavailable — session-only dismiss */ }
   }
 
   useEffect(() => {
     let cancelled = false
     setMetricsLoading(true)
-    setMetricsError(null)
-    api('/recovery/metrics')
-      .then((payload) => {
-        if (cancelled) return
-        setMetrics(payload as RecoveryMetrics)
-        setMetricsLoading(false)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setMetricsError(err instanceof Error ? err.message : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'))
-        setMetricsLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [platformVersion, i18n.language])
+    setMetricsErrorSnapshot(null)
 
-  useEffect(() => {
-    let cancelled = false
-    api('/dlq/clusters')
+    // Invoke all three reads before attaching handlers so one render commits
+    // one coordinated request burst without making any result wait for a
+    // slower sibling endpoint.
+    const metricsRequest = api('/recovery/metrics')
+    const clustersRequest = api('/dlq/clusters')
+    const heatmapRequest = api('/recovery/heatmap?days=90')
+
+    void metricsRequest
       .then((payload) => {
         if (cancelled) return
-        setClusters(payload as ClustersResponse)
+        setMetricsSnapshot({ orgId: resolvedOrgId, value: payload as RecoveryMetrics })
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setMetricsErrorSnapshot({
+          orgId: resolvedOrgId,
+          value: error instanceof Error
+            ? error.message
+            : runtimeT('recoveryCenter.empty.metricsUnavailableFallback'),
+        })
+      })
+      .finally(() => {
+        if (!cancelled) setMetricsLoading(false)
+      })
+
+    void clustersRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setClustersSnapshot({
+            orgId: resolvedOrgId,
+            value: payload as ClustersResponse,
+          })
+        })
       })
       .catch(() => {
         if (cancelled) return
-        setClusters(null)
+        startTransition(() => {
+          setClustersSnapshot({ orgId: resolvedOrgId, value: null })
+        })
       })
+
+    void heatmapRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setHeatmapSnapshot({
+            orgId: resolvedOrgId,
+            value: ((payload as { days?: HeatmapDay[] })?.days ?? []),
+          })
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        startTransition(() => {
+          setHeatmapSnapshot({ orgId: resolvedOrgId, value: [] })
+        })
+      })
+
     return () => { cancelled = true }
-  }, [platformVersion])
+  }, [platformVersion, i18n.language, resolvedOrgId])
 
   useEffect(() => {
     let cancelled = false
@@ -191,20 +246,6 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     })
     return () => { cancelled = true }
   }, [platformVersion, resolvedOrgId])
-
-  useEffect(() => {
-    let cancelled = false
-    api('/recovery/heatmap?days=90')
-      .then((payload) => {
-        if (cancelled) return
-        setHeatmap(((payload as { days?: HeatmapDay[] })?.days) ?? [])
-      })
-      .catch(() => {
-        if (cancelled) return
-        setHeatmap([])
-      })
-    return () => { cancelled = true }
-  }, [platformVersion])
 
   const openDeadLetters = useMemo(
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
@@ -332,14 +373,19 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const isEmpty = openFailureCount === 0
     && waitingNodes.length === 0
     && (clusters?.clusters.length ?? 0) === 0
-  // The onboarding walkthrough is stricter than `isEmpty`: only a truly fresh
-  // workspace (no runs either) sees it, and a dismissal hides it for good.
-  const showOnboarding = shouldShowOnboarding({
-    runs: props.runs.length,
-    openFailures: openFailureCount,
-    waitingApprovals: waitingNodes.length,
-    dismissed: introDismissed,
-  })
+  // Before the first terminal run, dismissal lasts only for this authenticated
+  // store session so a reload restores the demo. Real history upgrades the
+  // same choice to the durable preference operators already had.
+  const introDismissed = (metrics?.terminalRuns ?? 0) > 0
+    ? persistedIntroDismissed
+    : introDismissedThisSession
+  const showOnboarding = metrics !== null
+    && shouldShowOnboarding({
+      runs: props.runs.length,
+      openFailures: openFailureCount,
+      waitingApprovals: waitingNodes.length,
+      dismissed: introDismissed,
+    })
     && totalRuns === 0
 
   const failuresLabel = t('recoveryCenter.metric.failures.label') as string
@@ -372,7 +418,10 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   // title lists the exact per-day values the sparkline plots.
   const mttrTrend = metrics?.mttrTrend ?? []
   const mttrTrendSeconds = mttrTrend.map((point) => point.seconds)
-  const mttrTrendTitle = mttrTrend.map((point) => `${point.day}: ${formatDowntime(point.seconds * 1000)}`).join('\n')
+  const mttrTrendPointLabels = mttrTrend.map(
+    (point) => `${point.day}: ${formatDowntime(point.seconds * 1000)}`,
+  )
+  const mttrTrendTitle = mttrTrendPointLabels.join('\n')
   homeTiles.push({
     icon: <RefreshCw size={14} aria-hidden="true" />,
     label: mttrLabel,
@@ -384,6 +433,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
     sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }) as string,
     sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
+    sparklinePointLabels: mttrTrendSeconds.length >= 2 ? mttrTrendPointLabels : undefined,
+    onSelectSparklinePoint: mttrTrendSeconds.length >= 2
+      ? (index) => {
+          const day = mttrTrend[index]?.day
+          if (!day) return
+          requestRecoveryDayFocus(day)
+          props.onOpenTab('runs')
+        }
+      : undefined,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })

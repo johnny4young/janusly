@@ -131,10 +131,14 @@ type WorkflowStore = {
    *  OnboardingBanner self-fetches `/onboarding` on mount + every platformVersion bump
    *  and stores the result here; renders only while `status === 'active'`. */
   onboarding: OnboardingState | null
+  /** Session-only Recovery Center walkthrough dismissal. Fresh workspaces do
+   *  not persist this preference until they have real terminal history. */
+  recoveryIntroDismissedThisSession: boolean
 
   setAuth: (payload: { session: Session | null; user: User | null; userId: string | null; orgId: string | null }) => void
   clearAuth: () => void
   setAuthReady: (ready: boolean) => void
+  dismissRecoveryIntroThisSession: () => void
 
   addNode: (type: string) => void
   hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
@@ -303,6 +307,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   platformVersion: 0,
   budgetBlocked: null,
   onboarding: null,
+  recoveryIntroDismissedThisSession: false,
 
   setAuth: ({ session, user, userId, orgId }) => set((state) => ({
     session,
@@ -311,7 +316,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     orgId,
     authReady: true,
     ...(state.userId !== userId || state.orgId !== orgId
-      ? clearedRunProjection(state.runTransitionGeneration)
+      ? {
+          ...clearedRunProjection(state.runTransitionGeneration),
+          recoveryIntroDismissedThisSession: false,
+        }
       : {}),
   })),
   clearAuth: () => set((state) => ({
@@ -320,9 +328,11 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     userId: null,
     orgId: null,
     authReady: true,
+    recoveryIntroDismissedThisSession: false,
     ...clearedRunProjection(state.runTransitionGeneration),
   })),
   setAuthReady: (authReady) => set({ authReady }),
+  dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
 
   addNode: (type) => {
     const id = crypto.randomUUID().slice(0, 8)

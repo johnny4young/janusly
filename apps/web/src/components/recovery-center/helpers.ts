@@ -416,10 +416,26 @@ export function downtimeSeverity(iso: string | undefined, nowMs: number | null):
   return 'ok'
 }
 
-/** Compact downtime duration for the "recovered after" toast: "3h 14m" / "12m" / "45s". Empty for bad input. */
-export function formatDowntime(ms: number): string {
+export type DurationStyle = 'clock' | 'age'
+
+/**
+ * Canonical compact duration formatter for every Recovery Center surface.
+ * `clock` is terse measured time (`3h 14m`); `age` is localized relative
+ * copy (`3h ago`). Invalid or negative input stays empty rather than leaking
+ * `NaN` into operator-facing text.
+ */
+export function formatDuration(ms: number, style: DurationStyle = 'clock'): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
   const totalSeconds = Math.round(ms / 1000)
+  if (style === 'age') {
+    if (totalSeconds < 60) return runtimeT('recoveryCenter.relative.seconds', { count: totalSeconds })
+    const totalMinutes = Math.floor(totalSeconds / 60)
+    if (totalMinutes < 60) return runtimeT('recoveryCenter.relative.minutes', { count: totalMinutes })
+    const hours = Math.floor(totalMinutes / 60)
+    if (hours < 48) return runtimeT('recoveryCenter.relative.hours', { count: hours })
+    return runtimeT('recoveryCenter.relative.days', { count: Math.floor(hours / 24) })
+  }
+
   if (totalSeconds < 60) return `${totalSeconds}s`
   const totalMinutes = Math.floor(totalSeconds / 60)
   if (totalMinutes < 60) return `${totalMinutes}m`
@@ -428,19 +444,17 @@ export function formatDowntime(ms: number): string {
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
+/** @deprecated Prefer `formatDuration(ms)` in new Recovery Center code. */
+export function formatDowntime(ms: number): string {
+  return formatDuration(ms)
+}
+
 export function humanizeAge(iso: string | undefined, nowMs: number | null): string {
   if (nowMs === null) return ''
   if (!iso) return ''
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return ''
-  const secs = Math.max(0, Math.round((nowMs - then) / 1000))
-  if (secs < 60) return runtimeT('recoveryCenter.relative.seconds', { count: secs })
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return runtimeT('recoveryCenter.relative.minutes', { count: mins })
-  const hours = Math.floor(mins / 60)
-  if (hours < 48) return runtimeT('recoveryCenter.relative.hours', { count: hours })
-  const days = Math.floor(hours / 24)
-  return runtimeT('recoveryCenter.relative.days', { count: days })
+  return formatDuration(Math.max(0, nowMs - then), 'age')
 }
 
 export function readErrorSignature(errorJson: unknown): string {

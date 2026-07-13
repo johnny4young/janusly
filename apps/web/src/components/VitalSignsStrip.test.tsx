@@ -228,6 +228,36 @@ describe('<VitalSignsStrip />', () => {
     expect(spark.tagName.toLowerCase()).toBe('svg')
     expect(spark.getAttribute('aria-label')).toBe('MTTR trend')
   })
+
+  it('keeps interactive sparkline points outside the metric card button', () => {
+    const onClick = vi.fn()
+    const onSelectPoint = vi.fn()
+    render(
+      <VitalSignsStrip
+        tiles={[{
+          icon: <Activity />,
+          label: 'MTTR',
+          display: '3m',
+          severity: 'healthy',
+          sparkline: [300, 240, 180],
+          sparklineLabel: 'MTTR trend',
+          sparklinePointLabels: ['day 1', 'day 2', 'day 3'],
+          onSelectSparklinePoint: onSelectPoint,
+          onClick,
+          testId: 'tile-mttr',
+        }]}
+      />,
+    )
+
+    const tileAction = screen.getByTestId('tile-mttr')
+    const point = screen.getByTestId('vitals-sparkline-point-1')
+    expect(tileAction.tagName).toBe('BUTTON')
+    expect(tileAction.contains(point)).toBe(false)
+    fireEvent.click(tileAction)
+    fireEvent.click(point)
+    expect(onClick).toHaveBeenCalledOnce()
+    expect(onSelectPoint).toHaveBeenCalledWith(1)
+  })
 })
 
 describe('<Sparkline />', () => {
@@ -268,6 +298,35 @@ describe('<Sparkline />', () => {
     expect(spark.getAttribute('role')).toBeNull()
     expect(spark.getAttribute('aria-label')).toBeNull()
     expect(spark.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('uses one roving point stop and supports arrows, Home/End, and keyboard selection', () => {
+    const onSelectPoint = vi.fn()
+    render(
+      <Sparkline
+        points={[300, 240, 180]}
+        ariaLabel="MTTR trend"
+        pointLabels={['day 1', 'day 2', 'day 3']}
+        onSelectPoint={onSelectPoint}
+      />,
+    )
+
+    const first = screen.getByTestId('vitals-sparkline-point-0')
+    const second = screen.getByTestId('vitals-sparkline-point-1')
+    const last = screen.getByTestId('vitals-sparkline-point-2')
+    expect([first, second, last].filter((point) => point.tabIndex === 0)).toEqual([last])
+
+    last.focus()
+    fireEvent.keyDown(last, { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(second)
+    fireEvent.keyDown(second, { key: 'Home' })
+    expect(document.activeElement).toBe(first)
+    fireEvent.keyDown(first, { key: 'End' })
+    expect(document.activeElement).toBe(last)
+    fireEvent.keyDown(last, { key: 'Enter' })
+    expect(onSelectPoint).toHaveBeenCalledWith(2)
+    fireEvent.keyDown(last, { key: ' ' })
+    expect(onSelectPoint).toHaveBeenNthCalledWith(2, 2)
   })
 })
 

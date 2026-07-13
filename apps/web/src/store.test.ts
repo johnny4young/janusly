@@ -29,6 +29,7 @@ beforeEach(() => {
       toasts: [],
       platformVersion: 0,
       budgetBlocked: null,
+      recoveryIntroDismissedThisSession: false,
     },
     true,
   )
@@ -273,6 +274,23 @@ describe('useWorkflowStore', () => {
     expect(state.runDetail).toBeNull()
     expect(state.runNodes).toEqual([])
     expect(state.events).toEqual([])
+  })
+
+  it('resets the session-only recovery intro dismissal across auth owners', () => {
+    useWorkflowStore.setState({
+      userId: 'user-a',
+      orgId: 'org-a',
+      recoveryIntroDismissedThisSession: true,
+    })
+
+    useWorkflowStore.getState().setAuth({
+      session: null,
+      user: null,
+      userId: 'user-a',
+      orgId: 'org-b',
+    })
+
+    expect(useWorkflowStore.getState().recoveryIntroDismissedThisSession).toBe(false)
   })
 
   it('preserves the active run when only the auth session refreshes', () => {

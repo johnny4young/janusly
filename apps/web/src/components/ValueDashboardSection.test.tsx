@@ -80,6 +80,20 @@ describe('<ValueDashboardSection />', () => {
     expect(badges.length).toBeGreaterThanOrEqual(3)
   })
 
+  it('uses the canonical recovery duration for measured downtime', () => {
+    render(
+      <ValueDashboardSection
+        mttrMs={60_000}
+        mttrDisplay="1m"
+        terminalRunsZero={false}
+        windowDays={30}
+        downtimeEndedMs={(3 * 60 + 14) * 60_000}
+      />,
+    )
+
+    expect(screen.getByTestId('value-downtime-ended')).toHaveTextContent('3h 14m')
+  })
+
   it('renders "Awaiting private-beta data" when baseline is unset (sentinel 0)', () => {
     render(
       <ValueDashboardSection

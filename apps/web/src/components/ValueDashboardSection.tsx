@@ -21,6 +21,7 @@ import { Award, Download, FileText } from 'lucide-react'
 
 import { downloadFromApi } from '../api'
 import { getResolvedLocale, useT } from '../i18n'
+import { formatDuration } from './recovery-center/helpers'
 
 export type ClustersResolvedMetric = {
   value: number | null
@@ -52,16 +53,6 @@ export type ValueDashboardSectionProps = {
   downtimeEndedMs?: number
   /** When true, the section renders the private-beta-pending empty state. */
   terminalRunsZero: boolean
-}
-
-/** Compact hours/minutes for the "downtime ended" figure: "3h 12m" / "45m" / "0m". */
-function formatDurationHm(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '0m'
-  const totalMinutes = Math.round(ms / 60000)
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-  if (hours === 0) return `${minutes}m`
-  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
 }
 
 function formatCurrency(amount: number): string {
@@ -206,7 +197,7 @@ export function ValueDashboardSection(props: ValueDashboardSectionProps) {
             {t('recoveryCenter.value.downtimeEnded.label')}
           </div>
           <div className="we-recovery-center-value__value">
-            {formatDurationHm(props.downtimeEndedMs ?? 0)}
+            {formatDuration(props.downtimeEndedMs ?? 0)}
           </div>
         </div>
 

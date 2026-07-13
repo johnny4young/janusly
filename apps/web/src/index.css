@@ -3575,6 +3575,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .we-flow-demo {
   position: relative;
   display: grid;
+  container-type: inline-size;
   gap: 16px;
   padding: 18px 20px 20px;
   border-radius: 14px;
@@ -3779,6 +3780,37 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   place-items: center;
   padding: 0 6px;
   color: var(--we-faint);
+}
+
+/* The demo often lives in the operator grid's narrow main column even when
+   the viewport itself is desktop-wide. Collapse its header from the actual
+   component width rather than relying only on viewport breakpoints. */
+@container (max-width: 700px) {
+  .we-flow-demo__head {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .we-flow-demo__ctas {
+    flex-wrap: wrap;
+  }
+
+  .we-flow-demo__steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 430px) {
+  .we-flow-demo__steps {
+    grid-template-columns: 1fr;
+  }
+
+  .we-flow-demo__arrow {
+    display: grid;
+    grid-column: 1 / -1;
+    transform: rotate(90deg);
+    padding: 4px 0;
+  }
 }
 
 /* The demo renders inside the ~790px left column of .we-operator-grid, so
@@ -7497,6 +7529,54 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   stroke: var(--we-danger);
 }
 
+.we-sparkline__hit-target {
+  fill: transparent;
+  cursor: pointer;
+  outline: none;
+}
+
+.we-sparkline__focus-dot {
+  fill: var(--we-surface-1);
+  stroke: var(--we-primary);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.we-sparkline__hit-target:hover + .we-sparkline__focus-dot,
+.we-sparkline__hit-target:focus-visible + .we-sparkline__focus-dot {
+  opacity: 1;
+}
+
+.we-ops-metric-card--split-action {
+  transition: border-color 80ms ease-out, background-color 80ms ease-out;
+}
+
+.we-ops-metric-card--split-action:focus-within {
+  border-color: color-mix(in srgb, var(--we-primary) 30%, var(--we-line));
+}
+
+.we-ops-metric-card__main-action {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.we-ops-metric-card__main-action:focus-visible {
+  outline: 2px solid var(--we-primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
 .we-ops-progress {
   position: relative;
   height: 6px;
@@ -7552,6 +7632,7 @@ button.we-ops-metric-card--button {
 @media (prefers-reduced-motion: reduce) {
   .we-ops-metric-card--button { transition: none; }
   .we-ops-metric-card--button:hover { transform: none; }
+  .we-ops-metric-card--split-action { transition: none; }
 }
 
 .we-ops-cost-table {
@@ -9661,9 +9742,13 @@ button.we-ops-metric-card--button {
 .we-recovery-heatmap__cell[data-outcome="partial"] { background: var(--we-warning); }
 .we-recovery-heatmap__cell[data-outcome="unrecovered"] { background: var(--we-danger); }
 
-button.we-recovery-heatmap__cell--clickable {
+button.we-recovery-heatmap__cell {
   padding: 0;
   border: none;
+  color: inherit;
+}
+
+button.we-recovery-heatmap__cell--clickable {
   cursor: pointer;
   transition: transform 90ms ease, box-shadow 90ms ease;
 }
@@ -9673,7 +9758,7 @@ button.we-recovery-heatmap__cell--clickable:hover {
   box-shadow: 0 0 0 1px var(--we-surface-1);
 }
 
-button.we-recovery-heatmap__cell--clickable:focus-visible {
+button.we-recovery-heatmap__cell:focus-visible {
   outline: 2px solid var(--we-primary);
   outline-offset: 1px;
 }

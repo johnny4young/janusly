@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { changeRuntimeLocale } from '../../i18n'
 
 import {
   DOWNTIME_DANGER_MINUTES,
   DOWNTIME_WARN_MINUTES,
   computeLongestOpenDowntime,
   downtimeSeverity,
+  formatDuration,
   formatDowntime,
 } from './helpers'
 
@@ -48,6 +50,29 @@ describe('formatDowntime', () => {
   it('returns empty for bad input', () => {
     expect(formatDowntime(-1)).toBe('')
     expect(formatDowntime(Number.NaN)).toBe('')
+  })
+})
+
+describe('formatDuration', () => {
+  it.each([
+    [0, '0s'],
+    [45_000, '45s'],
+    [12 * MIN, '12m'],
+    [60 * MIN, '1h'],
+    [(3 * 60 + 14) * MIN, '3h 14m'],
+  ])('formats %dms in the shared clock style', (ms, expected) => {
+    expect(formatDuration(ms)).toBe(expected)
+    expect(formatDowntime(ms)).toBe(expected)
+  })
+
+  it('localizes the shared age style in English and Spanish', () => {
+    expect(formatDuration(2 * MIN, 'age')).toBe('2m ago')
+    try {
+      changeRuntimeLocale('es')
+      expect(formatDuration(2 * MIN, 'age')).toBe('hace 2m')
+    } finally {
+      changeRuntimeLocale('en')
+    }
   })
 })
 

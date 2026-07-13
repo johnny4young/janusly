@@ -40,7 +40,7 @@ export function RecoveryFlowDemo({
   /** When set, renders a primary "try a demo recovery" CTA that injects a real
    *  demo failure so the operator can experience the loop, not just read it. */
   onTryDemo?: () => void | Promise<void>
-  /** When set, renders a dismiss control that hides the walkthrough for good. */
+  /** When set, renders a dismiss control whose persistence policy belongs to the parent. */
   onDismiss?: () => void
 }) {
   const { t } = useT()
