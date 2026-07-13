@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 105
+      "maxGzipKiB": 106
     },
     "canvas": {
       "label": "Canvas workspace",
@@ -59,7 +59,7 @@
     "RollbackConfirmDialog.js": 1.58,
     "rolldown-runtime.js": 0.41,
     "RunInputDialog.js": 3.29,
-    "RunsPanel.js": 25.63,
+    "RunsPanel.js": 29.25,
     "RunStreamChip.js": 3.58,
     "ScheduleHistoryPanel.js": 2.37,
     "schemas.js": 17.87,

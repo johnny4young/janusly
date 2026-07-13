@@ -12,7 +12,7 @@
  * runs.
  */
 
-import { and, asc, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 
 import {
   getOrgConfigSnapshot,
@@ -31,7 +31,7 @@ import { startRun } from "@janusly/engine/src/start-run";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
-import { isTerminalRunStatus } from "@janusly/shared/src/status";
+import { isTerminalRunStatus, runStatusValues } from "@janusly/shared/src/status";
 
 import { decisionCandidatesFromPayload, orgLlmRuntime, sanitizeAiWorkflow } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
@@ -39,7 +39,7 @@ import { MAX_JSON_BODY_BYTES, RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT } f
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { asRecord, corsHeaders, readJson, sendEventFrame, sendError, sendJson, sendSseComment } from "../http";
 import { guardMcpWrite } from "../mcp-consent";
-import { paginateRunEvents, parseEventsCursor, parseEventsLimit } from "../run-pagination";
+import { paginateRunEvents, parseEventsCursor, parseEventsLimit, parseKeysetCursor } from "../run-pagination";
 import { enforceRateLimit } from "../rate-limit";
 import { getRunStreamHub } from "../run-stream";
 import {
@@ -71,6 +71,13 @@ const STREAM_CATCHUP_MAX = 500;
 const runListColumns = {
   id: runs.id,
   orgId: runs.orgId,
+  // Run rows created from the live authoring surface carry the workflow id
+  // directly, while scheduled/triggered runs carry an immutable version id.
+  // Resolve both into one stable list field without exposing the full version.
+  workflowId: sql<string>`coalesce(${workflowVersions.workflowId}, ${runs.workflowVersionId})`,
+  // Project only the captured display name from input_json. The list still
+  // avoids returning the workflow snapshot and trigger payload.
+  workflowName: sql<string | null>`${runs.inputJson}->'workflow'->>'name'`,
   workflowVersionId: runs.workflowVersionId,
   status: runs.status,
   outputJson: runs.outputJson,
@@ -207,8 +214,9 @@ export const runsRoutes: Route[] = [
   // NOTE: `/runs` prefix excludes `/run?` so the GET `/run?…` entry below
   // can claim it, and excludes `/runs/compare` so the Replay Lab compare
   // route below can claim it (both are first-match-wins).
-  // Optional `?workflowId=<id>` filter joins through `workflow_versions` so
-  // the caller can scope the listing to one workflow's runs.
+  // Optional workflow/status filters compose with a stable keyset boundary.
+  // The `workflow_versions` join is tenant-scoped: an inconsistent cross-org
+  // version reference cannot resolve another tenant's workflow identity.
   { method: "GET", match: (url) => url.startsWith("/runs") && !url.startsWith("/run?") && !url.startsWith("/runs/compare"),
     contract: listRunsContract,
     handler: async ({ req, res, auth }) => {
@@ -216,28 +224,45 @@ export const runsRoutes: Route[] = [
       const limitParam = Number(url.searchParams.get("limit"));
       const limitValue = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 100;
       const workflowIdFilter = url.searchParams.get("workflowId");
-
+      const statusParam = url.searchParams.get("status");
+      const runKindParam = url.searchParams.get("runKind");
+      if (statusParam && !runStatusValues.some((status) => status === statusParam)) {
+        return sendError(res, "invalid_input", "status must be a valid run status", 400);
+      }
+      if (runKindParam && runKindParam !== "production" && runKindParam !== "validation") {
+        return sendError(res, "invalid_input", "runKind must be production or validation", 400);
+      }
+      const before = parseKeysetCursor(url.searchParams.get("before"));
+      const filters = [eq(runs.orgId, auth.orgId)];
       if (workflowIdFilter) {
-        const rows = await db
-          .select(runListColumns)
-          .from(runs)
-          .leftJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
-          .where(and(
-            eq(runs.orgId, auth.orgId),
-            or(
-              and(
-                eq(workflowVersions.orgId, auth.orgId),
-                eq(workflowVersions.workflowId, workflowIdFilter),
-              ),
-              eq(runs.workflowVersionId, workflowIdFilter),
-            ),
-          ))
-          .orderBy(desc(runs.createdAt))
-          .limit(limitValue);
-        return sendJson(res, rows);
+        filters.push(or(
+          eq(workflowVersions.workflowId, workflowIdFilter),
+          and(
+            isNull(workflowVersions.id),
+            eq(runs.workflowVersionId, workflowIdFilter),
+          ),
+        )!);
+      }
+      if (statusParam) filters.push(eq(runs.status, statusParam));
+      if (runKindParam === "production") filters.push(isNull(runs.replayMode));
+      if (runKindParam === "validation") filters.push(eq(runs.replayMode, "validation"));
+      if (before) {
+        filters.push(or(
+          lt(runs.createdAt, before.createdAt),
+          and(eq(runs.createdAt, before.createdAt), lt(runs.id, before.id)),
+        )!);
       }
 
-      const rows = await db.select(runListColumns).from(runs).where(eq(runs.orgId, auth.orgId)).orderBy(desc(runs.createdAt)).limit(limitValue);
+      const rows = await db
+        .select(runListColumns)
+        .from(runs)
+        .leftJoin(workflowVersions, and(
+          eq(workflowVersions.id, runs.workflowVersionId),
+          eq(workflowVersions.orgId, auth.orgId),
+        ))
+        .where(and(...filters))
+        .orderBy(desc(runs.createdAt), desc(runs.id))
+        .limit(limitValue);
       return sendJson(res, rows);
     } },
   { method: "GET", match: (url) => url.startsWith("/run?"),

@@ -875,6 +875,7 @@ export default function App() {
       solutionPacks={solutionPacks}
       credentials={credentials}
       runs={runs}
+      workflows={savedWorkflows}
       activeRunId={runId}
       usage={usage}
       aiHealth={aiHealth}

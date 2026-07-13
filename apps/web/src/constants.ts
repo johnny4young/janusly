@@ -210,8 +210,8 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
 
 /** Status strings we ship UI labels for — mirrors the `status.*` i18n keys. */
 const KNOWN_STATUSES: ReadonlySet<string> = new Set([
-  'draft', 'pending', 'queued', 'running', 'waiting', 'skipped',
-  'succeeded', 'failed', 'cancelled', 'open', 'replayed', 'resolved',
+  'created', 'draft', 'pending', 'queued', 'running', 'waiting', 'skipped',
+  'succeeded', 'failed', 'cancelled', 'timed_out', 'open', 'replayed', 'resolved',
 ])
 
 /** Human label for a node/run status string (e.g. `"running"` → `"Running"`). */

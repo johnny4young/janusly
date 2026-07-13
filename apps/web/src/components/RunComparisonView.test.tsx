@@ -122,4 +122,17 @@ describe('<RunComparisonView />', () => {
     // which goes through i18n — `Done` (en) / `Hecho` (es) is what users see.
     expect(summary).toHaveTextContent(/Done/)
   })
+
+  it('uses historical labels without changing the replay default', () => {
+    const node: RunComparisonNode = { nodeId: 'fetch', base: side(), replay: side({ status: 'failed' }) }
+    const historicalPayload = payload([node])
+    historicalPayload.replayRun.status = 'failed'
+    render(<RunComparisonView payload={historicalPayload} context="history" />)
+
+    expect(screen.getByRole('columnheader', { name: 'Last successful' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Selected run' })).toBeInTheDocument()
+    expect(screen.getByText('Selected run Needs attention')).toBeInTheDocument()
+    expect(screen.getByRole('banner', { name: 'Historical run comparison summary' })).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Historical comparison by step' })).toBeInTheDocument()
+  })
 })

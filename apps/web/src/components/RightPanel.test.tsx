@@ -25,6 +25,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
     solutionPacks: [],
     credentials: [],
     runs: [],
+    workflows: [],
     usage: {},
     aiHealth: null,
     currentWorkflowName: 'Untitled',

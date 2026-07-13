@@ -96,6 +96,10 @@ export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy
 export type RunSummary = {
   id: string
   orgId?: string
+  /** Resolved owning workflow id from the bounded `/runs` projection. */
+  workflowId?: string
+  /** Captured workflow display name without the full run input snapshot. */
+  workflowName?: string | null
   workflowVersionId?: string
   status: string
   createdBy?: string

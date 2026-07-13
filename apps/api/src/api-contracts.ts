@@ -71,6 +71,9 @@ const RunSummarySchema = RunSchema.omit({
   inputJson: true,
   recoveryPlaybookValidationRecordedAt: true,
   recoveryPlaybookAppliedRecordedAt: true,
+}).extend({
+  workflowId: z.string(),
+  workflowName: z.string().nullable(),
 });
 
 const RunNodeSchema = z.object({
@@ -214,12 +217,15 @@ export const getLatestWorkflowVersionContract = {
 export const listRunsContract = {
   operationId: "listRuns",
   path: V1_READ_PATHS.runs,
-  summary: "List tenant runs with optional workflow filtering",
+  summary: "List tenant runs with optional workflow, status, and run-kind filtering",
   tags: ["Runs"],
   request: {
     query: z.object({
       limit: PositiveLimitSchema.optional(),
       workflowId: z.string().trim().min(1).optional(),
+      status: z.enum(runStatusValues).optional(),
+      runKind: z.enum(["production", "validation"]).optional(),
+      before: KeysetCursorSchema.optional(),
     }).strict(),
   },
   response: z.array(RunSummarySchema),

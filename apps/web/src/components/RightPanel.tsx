@@ -22,7 +22,7 @@
 
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
@@ -73,6 +73,7 @@ export type RightPanelProps = {
   solutionPacks: SolutionPackPublic[]
   credentials: Credential[]
   runs: RunSummary[]
+  workflows: SavedWorkflow[]
   activeRunId?: string | null
   usage: Record<string, number>
   aiHealth: AiHealth | null
@@ -218,6 +219,7 @@ function RightPanelRouter(props: RightPanelProps) {
   if (props.tab === 'runs') return (
     <RunsPanel
       runs={props.runs}
+      workflows={props.workflows}
       usage={props.usage}
       runNodes={props.runNodes}
       runEvents={props.events}

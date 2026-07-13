@@ -28,6 +28,7 @@ vi.mock("drizzle-orm", () => ({
   gt: vi.fn(() => ({})),
   lt: vi.fn(() => ({})),
   or: vi.fn(() => ({})),
+  sql: vi.fn(() => ({})),
 }));
 
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({

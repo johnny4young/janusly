@@ -46,6 +46,7 @@ function renderPanel(runNodes: RunNode[]) {
   const props: Parameters<typeof RunsPanel>[0] = {
     ...handlers,
     runs: [],
+    workflows: [],
     usage: {},
     runNodes,
     activeRunId: 'run-1',
@@ -106,6 +107,7 @@ describe('<RunsPanel /> observability', () => {
       <RunsPanel
         {...handlers}
         activeRunId="run-1234567890"
+        workflows={[]}
         runs={[{
           id: 'run-1234567890',
           status: 'failed',
@@ -136,6 +138,7 @@ describe('<RunsPanel /> observability', () => {
       <RunsPanel
         {...handlers}
         activeRunId="run-1"
+        workflows={[]}
         runs={[{ id: 'run-1', status: 'running', createdAt: new Date(Date.now() - 10_000).toISOString() }]}
         runNodes={[
           {

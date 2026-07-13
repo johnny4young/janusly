@@ -1254,7 +1254,7 @@
     "/runs": {
       "get": {
         "operationId": "listRuns",
-        "summary": "List tenant runs with optional workflow filtering",
+        "summary": "List tenant runs with optional workflow, status, and run-kind filtering",
         "tags": [
           "Runs"
         ],
@@ -1289,6 +1289,46 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "created",
+                "running",
+                "waiting",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "timed_out"
+              ]
+            }
+          },
+          {
+            "name": "runKind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "production",
+                "validation"
+              ]
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 512,
+              "description": "Opaque `<iso>|<id>` keyset cursor returned by the preceding page."
             }
           }
         ],
@@ -1409,6 +1449,19 @@
                                 "type": "null"
                               }
                             ]
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "workflowName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -1422,7 +1475,9 @@
                           "traceId",
                           "replayMode",
                           "createdBy",
-                          "createdAt"
+                          "createdAt",
+                          "workflowId",
+                          "workflowName"
                         ]
                       }
                     }

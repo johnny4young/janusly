@@ -8458,18 +8458,16 @@ button.we-ops-metric-card--button {
   gap: 8px;
 }
 
-.we-replay-lab-history-button,
-.we-run-history-export-button {
-  align-self: flex-end;
-  margin-top: 4px;
-}
-
 .we-run-history-card {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  height: 148px;
+  justify-content: space-between;
+  overflow: hidden;
   /* Self-spacing: the virtualized list renders cards in a plain flow container
      (not the `.panel-list` grid), so the 8px row gap lives on the card. The
-     pitch (card height + this margin) must equal RUN_ROW_HEIGHT in RunsPanel. */
+     pitch (card height + this margin) must equal RUN_HISTORY_ROW_HEIGHT. */
   margin-bottom: 8px;
 }
 
@@ -8486,6 +8484,159 @@ button.we-ops-metric-card--button {
   outline: 2px solid var(--we-primary);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+.we-run-history {
+  gap: 12px;
+}
+
+.we-run-history__heading {
+  align-items: flex-end;
+}
+
+.we-run-history__heading p {
+  margin: 4px 0 0;
+}
+
+.we-run-history__count {
+  color: var(--we-text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.we-run-history-filters {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 1fr) minmax(150px, 0.55fr) auto;
+}
+
+.we-run-history-filters label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.we-run-history-filters label > span {
+  color: var(--we-text-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.we-run-history-filters select {
+  min-width: 0;
+  width: 100%;
+}
+
+.we-run-history-state {
+  align-items: center;
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-text-2);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  padding: 12px;
+}
+
+.we-run-history-state--error {
+  background: var(--we-danger-soft);
+  border-color: var(--we-danger-border-30);
+  color: var(--we-danger-text);
+}
+
+.we-run-history-card__identity {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.we-run-history-card__identity code {
+  color: var(--we-text-1);
+  font-size: 11px;
+}
+
+.we-run-history-card__actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 1px;
+}
+
+.we-run-history-card__actions .small-command {
+  flex: 0 0 auto;
+}
+
+.we-run-history-comparison-dialog {
+  max-width: 940px;
+  width: min(940px, calc(100vw - 32px));
+}
+
+.we-run-history-comparison-state {
+  align-items: flex-start;
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  color: var(--we-text-2);
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+}
+
+.we-run-history-comparison-state p {
+  margin: 4px 0 0;
+}
+
+.we-run-history-comparison-facts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+
+.we-run-history-comparison-facts > div {
+  background: var(--we-surface-2);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.we-run-history-comparison-facts dt {
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.we-run-history-comparison-facts dd {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.we-run-history-comparison-facts dd span {
+  color: var(--we-text-2);
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .we-run-history-filters,
+  .we-run-history-comparison-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .we-run-history-filters > .small-command {
+    justify-self: start;
+  }
 }
 
 .we-comparison {
@@ -8519,6 +8670,16 @@ button.we-ops-metric-card--button {
   gap: 6px;
 }
 
+.we-comparison-summary__line > span {
+  white-space: nowrap;
+}
+
+.we-comparison-summary__metric {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
 .we-comparison-summary__line strong {
   color: var(--we-text-1);
 }
@@ -8528,7 +8689,14 @@ button.we-ops-metric-card--button {
   margin-left: 4px;
 }
 
+.we-comparison-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
 .we-comparison-table {
+  min-width: 680px;
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -8639,11 +8807,6 @@ button.we-ops-metric-card--button {
 
 .we-report-delivery-dialog {
   max-width: 640px;
-}
-
-.we-run-history-send-button {
-  align-self: flex-end;
-  margin-top: 4px;
 }
 
 .we-report-delivery-form {
