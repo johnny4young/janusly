@@ -138,12 +138,13 @@ describe('useRunEventStream', () => {
     expect(patchRunSummary).toHaveBeenCalledWith('run-1', { status: 'running' })
   })
 
-  it('hands back to polling on a terminal run.status signal', async () => {
+  it('hands back to polling but keeps consuming trailing events after a terminal status', async () => {
     const patchRunSummary = vi.fn()
     openRunEventStreamMock.mockResolvedValue(
       streamResponse([
         ': connected\n\n',
         `event: run-status\ndata: ${JSON.stringify({ kind: 'run.status', status: 'succeeded' })}\n\n`,
+        eventFrame('evt-after-terminal', '2026-05-28T00:00:03.000Z'),
       ]),
     )
 
@@ -152,7 +153,37 @@ describe('useRunEventStream', () => {
     await waitFor(() => {
       expect(useWorkflowStore.getState().streamTransport).toBe('polling')
     })
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().events.map(event => event.id)).toContain('evt-after-terminal')
+    })
     expect(patchRunSummary).toHaveBeenCalledWith('run-1', { status: 'succeeded' })
+    expect(openRunEventStreamMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('lands a truncated catch-up page and reconnects immediately from its newest cursor', async () => {
+    const createdAt = '2026-05-28T00:08:20.000Z'
+    openRunEventStreamMock
+      .mockResolvedValueOnce(streamResponse([
+        ': connected\n\n',
+        eventFrame('evt-500', createdAt),
+        `event: catchup-truncated\ndata: ${JSON.stringify({ kind: 'catchup-truncated', replayed: 500 })}\n\n`,
+      ]))
+      .mockResolvedValueOnce(streamResponse([
+        ': connected\n\n',
+        `event: run-status\ndata: ${JSON.stringify({ kind: 'run.status', status: 'running' })}\n\n`,
+        eventFrame('evt-501', '2026-05-28T00:08:21.000Z'),
+      ]))
+
+    render(<Harness runId="run-1" />)
+
+    await waitFor(() => expect(openRunEventStreamMock).toHaveBeenCalledTimes(2))
+    expect(openRunEventStreamMock.mock.calls[1]?.[1]).toMatchObject({
+      lastEventId: `${createdAt}|evt-500`,
+    })
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().events.map(event => event.id)).toEqual(['evt-500', 'evt-501'])
+    })
+    expect(useWorkflowStore.getState().streamTransport).toBe('sse')
   })
 
   it('does not open a stream and sets transport idle when runId is null', () => {

@@ -14,7 +14,11 @@
  *   transient blip auto-recovers to live mode.
  * - On a terminal `run.status` it hands back to `'polling'` so the existing
  *   poll-loop terminal path (`bumpPlatformVersion` + platform refresh) runs in
- *   one place, then stops.
+ *   one place, but keeps draining the current SSE response until the server's
+ *   grace close so trailing cancellation/node frames are not lost.
+ * - A `catchup-truncated` frame means the bounded reconnect page has more
+ *   history. Buffered events land first, then the hook reconnects immediately
+ *   from the new cursor instead of silently skipping to the live tail.
  *
  * Used by `apps/web/src/App.tsx` alongside the polling effect.
  *
@@ -112,6 +116,7 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
 
     let stopped = false
     let failures = 0
+    let terminalSeen = false
     let controller: AbortController | null = null
     let retryTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -157,7 +162,7 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
       if (flushHandle === null) flushHandle = requestAnimationFrame(flushPending)
     }
 
-    const handleData = (frame: ParsedFrame): 'terminal' | 'ok' => {
+    const handleData = (frame: ParsedFrame): 'terminal' | 'catchup-truncated' | 'ok' => {
       let parsed: unknown
       try {
         parsed = JSON.parse(frame.data)
@@ -166,6 +171,7 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
       }
       if (!parsed || typeof parsed !== 'object') return 'ok'
       const signal = parsed as { kind?: string; status?: string; id?: string; nodeId?: string | null; type?: string; payload?: unknown; createdAt?: string }
+      if (signal.kind === 'catchup-truncated') return 'catchup-truncated'
       if (signal.kind === 'run.status') {
         if (typeof signal.status === 'string') patchRunSummary?.(runId, { status: signal.status })
         return isTerminalRunStatus(signal.status) ? 'terminal' : 'ok'
@@ -221,25 +227,49 @@ export function useRunEventStream(runId: string | null, patchRunSummary?: RunSum
             buffer = buffer.slice(sep + 2)
             const frame = parseFrame(rawFrame)
             if (!frame) continue
-            if (handleData(frame) === 'terminal') {
-              // Hand finalization (platform refresh) back to the poll loop.
-              // Flip transport BEFORE marking stopped — `fallbackToPolling`
-              // is guarded on `stopped`, so the order matters.
-              clearTimeout(firstByteTimer)
-              flushPending() // land any buffered events before handing off
+            const outcome = handleData(frame)
+            if (outcome === 'terminal') {
+              // Resume polling immediately for final state convergence, but
+              // keep consuming the SSE response until the server's terminal
+              // grace closes it. Cancellation can publish trailing node events
+              // after run.status, and aborting here would drop those frames.
+              terminalSeen = true
+              flushPending()
               if (!stopped) store.getState().setStreamTransport('polling')
-              stopped = true
+              continue
+            }
+            if (outcome === 'catchup-truncated') {
+              // Land the page before deriving the next Last-Event-ID. The
+              // server intentionally closes truncated responses; reconnect
+              // immediately rather than counting this protocol signal as a
+              // transport failure/backoff.
+              clearTimeout(firstByteTimer)
+              flushPending()
+              if (!stopped) store.getState().setStreamTransport('polling')
               controller?.abort()
+              if (!stopped) retryTimer = setTimeout(() => { void connect() }, 0)
               return
             }
           }
         }
-        // Stream ended without a terminal signal (server grace close or a
-        // dropped connection) — reconnect from the last cursor.
+        // A terminal stream ends after the server's grace window. Polling is
+        // already active, so there is no reason to reconnect the live channel.
         clearTimeout(firstByteTimer)
+        flushPending()
+        if (terminalSeen) {
+          stopped = true
+          return
+        }
+        // Stream ended without a terminal signal — reconnect from the last
+        // composite cursor.
         if (!stopped) { failures += 1; fallbackToPolling(); scheduleReconnect() }
       } catch {
         clearTimeout(firstByteTimer)
+        flushPending()
+        if (terminalSeen) {
+          stopped = true
+          return
+        }
         if (!stopped) { failures += 1; fallbackToPolling(); scheduleReconnect() }
       }
     }

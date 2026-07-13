@@ -296,6 +296,7 @@ export type ApiErrorCode =
   | "sso_policy_violation"
   // streaming
   | "stream_cap_exceeded"
+  | "stream_unavailable"
   // upstream health sources
   | "upstream_source_id_required"
   // workflow metadata

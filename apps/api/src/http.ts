@@ -295,12 +295,12 @@ export function sendEventFrame(
   if (frame.id !== undefined) out += `id: ${frame.id}\n`;
   if (frame.event !== undefined) out += `event: ${frame.event}\n`;
   out += `data: ${JSON.stringify(frame.data)}\n\n`;
-  res.write(out);
+  return res.write(out);
 }
 
 /** Write a bare SSE comment line (`: text`). Used for keep-alive heartbeats. */
 export function sendSseComment(res: http.ServerResponse, text: string) {
-  res.write(`: ${text}\n\n`);
+  return res.write(`: ${text}\n\n`);
 }
 
 /**

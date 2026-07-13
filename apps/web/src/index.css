@@ -1983,11 +1983,104 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 /* Run-event chronology: semantic accent, exact timestamp, inter-event delta,
    and retained-but-de-emphasized low-signal queue/status-check events. */
+.we-reasoning-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.we-reasoning-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1fr) auto;
+}
+
+.we-reasoning-filter {
+  color: var(--we-muted);
+  display: grid;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+}
+
+.we-reasoning-filter__input {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 9px;
+  color: var(--we-muted);
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.we-reasoning-filter__input:focus-within {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-primary) 16%, transparent);
+}
+
+.we-reasoning-filter__input input {
+  background: transparent;
+  border: 0;
+  color: var(--we-ink);
+  font: inherit;
+  font-size: 12px;
+  min-width: 0;
+  outline: 0;
+  padding: 9px 0;
+  width: 100%;
+}
+
+.we-reasoning-toolbar__actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.we-reasoning-toolbar__actions .command-button {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.we-reasoning-list {
+  max-height: 64vh;
+  min-height: min(360px, 52vh);
+  position: relative;
+}
+
+.we-reasoning-list__spacer {
+  position: relative;
+}
+
+.we-reasoning-list__window {
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  will-change: transform;
+}
+
 .we-run-event {
   border-left: 3px solid var(--we-line-strong);
+  box-sizing: border-box;
   display: grid;
   gap: 5px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 164px;
+  margin-bottom: 8px;
+  overflow: hidden;
   transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.we-run-event:focus {
+  border-color: var(--we-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-primary) 18%, transparent);
+  outline: 0;
 }
 
 .we-run-event[data-tone="info"] { border-left-color: var(--we-primary); }
@@ -2034,6 +2127,13 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   padding-left: 15px;
 }
 
+.we-run-event__body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-left: 15px;
+}
+
 /* Reasoning payload rendered as labelled key/value rows (legible) instead of a
    raw JSON dump; the exact JSON stays behind the .we-reasoning-raw toggle. */
 .we-reasoning-fields {
@@ -2073,6 +2173,25 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 .we-reasoning-raw summary:hover {
   color: var(--we-ink);
+}
+
+@media (max-width: 760px) {
+  .we-reasoning-toolbar {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .we-reasoning-toolbar__actions {
+    justify-content: space-between;
+  }
+
+  .we-reasoning-toolbar__actions .command-button {
+    min-height: 44px;
+  }
+
+  .we-reasoning-list {
+    max-height: 58vh;
+  }
 }
 
 .version-button {

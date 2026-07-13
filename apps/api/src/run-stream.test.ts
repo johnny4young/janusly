@@ -72,6 +72,27 @@ describe("run-stream hub", () => {
     expect(fake.isSubscribed(runEventChannel("run-1"))).toBe(false);
   });
 
+  it("exposes one shared readiness barrier for every subscriber of a run", async () => {
+    let acknowledge!: () => void;
+    const ready = new Promise<void>((resolve) => { acknowledge = resolve; });
+    const fake = buildFakeSubscriber();
+    fake.client.subscribe = vi.fn(() => ready);
+    const hub = createRunStreamHub(fake.client);
+
+    const first = hub.addSubscriber("run-1", "org-A", () => {}, 50);
+    const second = hub.addSubscriber("run-1", "org-A", () => {}, 50);
+    if (!first.ok || !second.ok) throw new Error("subscriber was unexpectedly rejected");
+
+    expect(first.ready).toBe(second.ready);
+    let settled = false;
+    void first.ready.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    acknowledge();
+    await expect(first.ready).resolves.toBeUndefined();
+  });
+
   it("fans a message to every client of the run", () => {
     const fake = buildFakeSubscriber();
     const hub = createRunStreamHub(fake.client);
@@ -151,6 +172,7 @@ describe("run-stream hub", () => {
 
     const added = hub.addSubscriber("run-1", "org-A", () => {}, 1, unavailable);
     expect(added.ok).toBe(true);
+    if (added.ok) await expect(added.ready).rejects.toThrow("subscribe failed");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(unavailable).toHaveBeenCalledTimes(1);

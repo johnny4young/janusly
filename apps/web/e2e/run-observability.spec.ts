@@ -66,6 +66,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   const stamp = Date.now()
   const failedName = `E2E Failed invoice ${stamp}`
   const waitingName = `E2E Approval ${stamp}`
+  const longName = `E2E Long timeline ${stamp}`
 
   const failed = await startRun(request, {
     id: `e2e-observability-failed-${stamp}`,
@@ -97,6 +98,24 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   expect(waitingSnapshot.status).toBe('running')
   expect(waitingSnapshot.nodes.find(node => node.nodeId === 'approve_refund')?.status).toBe('waiting')
 
+  const long = await startRun(request, {
+    id: `e2e-observability-long-${stamp}`,
+    name: longName,
+    nodes: Array.from({ length: 75 }, (_, index) => ({
+      id: `step_${String(index).padStart(2, '0')}`,
+      type: 'noop',
+      config: {},
+    })),
+    // Keep the smoke deterministic: a sequential long run produces more than
+    // one bounded event page without flooding the worker with 75 simultaneous
+    // roots (which would test queue saturation rather than timeline paging).
+    edges: Array.from({ length: 74 }, (_, index) => ({
+      from: `step_${String(index).padStart(2, '0')}`,
+      to: `step_${String(index + 1).padStart(2, '0')}`,
+    })),
+  }, { source: 'long-run-smoke' })
+  expect((await pollUntilTerminal(request, long.runId)).status).toBe('succeeded')
+
   await page.goto('/')
   await hideUnrelatedOverlays(page)
   await openRuns(page, 'en')
@@ -106,6 +125,7 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(englishOverview).toContainText(failedName)
   await expect(englishOverview).toContainText('Needs attention')
   await expect(englishOverview).toContainText('Trace ID')
+  await expect(page.getByRole('status', { name: /Live run connection: Polling/ })).toBeVisible()
   await captureElement(englishOverview, 'web-en-run-overview-failed-default')
 
   const englishInput = page.getByTestId('run-trigger-input')
@@ -121,6 +141,34 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(englishTimeline.locator('time')).not.toHaveCount(0)
   await expect(englishTimeline.locator('[aria-label$="since the previous event"]')).not.toHaveCount(0)
   await captureElement(englishTimeline, 'web-en-run-events-failed-timeline')
+
+  const englishEventFilter = englishTimeline.getByTestId('run-event-filter')
+  await englishEventFilter.fill('fetch_invoice')
+  await expect(englishTimeline.getByRole('listitem')).not.toHaveCount(0)
+  await expect(englishTimeline.getByText(/of \d+ events?/)).toBeVisible()
+  await captureElement(englishTimeline, 'web-en-run-events-filtered-node')
+
+  await englishEventFilter.fill('event-that-does-not-exist')
+  await expect(englishTimeline).toContainText('No matching events')
+  await captureElement(englishTimeline, 'web-en-run-events-filter-empty')
+  await englishTimeline.getByRole('button', { name: 'Clear filter' }).click()
+
+  await englishTimeline.getByRole('button', { name: 'Jump to first failure' }).click()
+  const englishFirstFailure = englishTimeline.getByRole('listitem').filter({ hasText: 'Step fetch_invoice failed' })
+  await expect(englishFirstFailure).toBeFocused()
+  await captureElement(englishTimeline, 'web-en-run-events-first-failure')
+
+  await openRuns(page, 'en')
+  await openRunFromHistory(page, long.runId)
+  await page.getByTestId('run-overview').getByRole('button', { name: 'View timeline', exact: true }).click()
+  const englishLoadedTimeline = page.getByTestId('run-event-timeline')
+  await expect(englishLoadedTimeline.getByText(/\d+ of \d+ loaded events/)).toBeVisible()
+  await expect(englishLoadedTimeline.getByRole('button', { name: 'Jump to first loaded failure' })).toBeDisabled()
+  await expect(englishLoadedTimeline.getByRole('button', { name: 'Load older events' })).toBeVisible()
+  await captureElement(englishLoadedTimeline, 'web-en-run-events-loaded-page')
+  await englishLoadedTimeline.getByTestId('run-event-filter').fill('event-that-does-not-exist')
+  await expect(englishLoadedTimeline).toContainText('No loaded events match. Load older events to search more history.')
+  await captureElement(englishLoadedTimeline, 'web-en-run-events-loaded-filter-empty')
 
   await openRuns(page, 'en')
   await openRunFromHistory(page, waiting.runId)
@@ -152,6 +200,27 @@ test('active runs explain identity, trigger, chronology, and waits in both local
   await expect(spanishTimeline.locator('[data-tone="error"]')).not.toHaveCount(0)
   await expect(spanishTimeline.locator('[aria-label$="desde el evento anterior"]')).not.toHaveCount(0)
   await captureElement(spanishTimeline, 'web-es-run-events-failed-timeline')
+
+  const spanishEventFilter = spanishTimeline.getByTestId('run-event-filter')
+  await spanishEventFilter.fill('fetch_invoice')
+  await expect(spanishTimeline.getByRole('listitem')).not.toHaveCount(0)
+  await captureElement(spanishTimeline, 'web-es-run-events-filtered-node')
+  await spanishTimeline.getByRole('button', { name: 'Ir al primer fallo' }).click()
+  const spanishFirstFailure = spanishTimeline.getByRole('listitem').filter({ hasText: 'Paso fetch_invoice falló' })
+  await expect(spanishFirstFailure).toBeFocused()
+  await captureElement(spanishTimeline, 'web-es-run-events-first-failure')
+
+  await openRuns(page, 'es')
+  await openRunFromHistory(page, long.runId)
+  await page.getByTestId('run-overview').getByRole('button', { name: 'Ver cronología', exact: true }).click()
+  const spanishLoadedTimeline = page.getByTestId('run-event-timeline')
+  await expect(spanishLoadedTimeline.getByText(/\d+ de \d+ eventos cargados/)).toBeVisible()
+  await expect(spanishLoadedTimeline.getByRole('button', { name: 'Ir al primer fallo cargado' })).toBeDisabled()
+  await expect(spanishLoadedTimeline.getByRole('button', { name: 'Cargar eventos anteriores' })).toBeVisible()
+  await captureElement(spanishLoadedTimeline, 'web-es-run-events-loaded-page')
+  await spanishLoadedTimeline.getByTestId('run-event-filter').fill('evento-inexistente')
+  await expect(spanishLoadedTimeline).toContainText('Ningún evento cargado coincide.')
+  await captureElement(spanishLoadedTimeline, 'web-es-run-events-loaded-filter-empty')
 
   await openRuns(page, 'es')
   await openRunFromHistory(page, waiting.runId)

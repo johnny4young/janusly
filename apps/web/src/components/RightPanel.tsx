@@ -20,7 +20,7 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
 import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
@@ -43,6 +43,7 @@ const SolutionPacksPanel = lazy(() => import('./SolutionPacksPanel').then((m) =>
 const OperationsPage = lazy(() => import('./OperationsPage').then((m) => ({ default: m.OperationsPage })))
 const ExperimentsPanel = lazy(() => import('./ExperimentsPanel').then((m) => ({ default: m.ExperimentsPanel })))
 const RunsPanel = lazy(() => import('./RunsPanel').then((m) => ({ default: m.RunsPanel })))
+const ReasoningPanel = lazy(() => import('./ReasoningPanel').then((m) => ({ default: m.ReasoningPanel })))
 const CredentialRotateModal = lazy(() => import('./CredentialRotateModal').then((m) => ({ default: m.CredentialRotateModal })))
 const VersionHistoryPanel = lazy(() => import('./VersionHistoryPanel').then((m) => ({ default: m.VersionHistoryPanel })))
 const WorkflowSloPanel = lazy(() => import('./WorkflowSloPanel').then((m) => ({ default: m.WorkflowSloPanel })))
@@ -51,9 +52,7 @@ const WorkflowMetadataPanel = lazy(() => import('./WorkflowMetadataPanel').then(
 import { api } from '../api'
 import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
-import { getResolvedLocale, tRunEvent, tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
-import { formatCompactDuration } from '../constants'
-import { getInterEventDeltaMs, getRunEventPresentation, sortRunEventsChronologically } from '../run-timeline'
+import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
 export type RightPanelProps = {
   tab: ActiveTab
@@ -508,119 +507,5 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
         </Suspense>
       )}
     </PanelChrome>
-  )
-}
-
-export function ReasoningPanel({
-  events,
-  eventsHasMore,
-  onLoadOlderEvents,
-}: {
-  events: RunEvent[]
-  eventsHasMore?: boolean
-  onLoadOlderEvents?: () => void | Promise<void>
-}) {
-  const { t } = useT()
-  const visibleEvents = useMemo(() => {
-    const chronological = sortRunEventsChronologically(events)
-    return chronological.map((event, index) => ({
-      event,
-      deltaMs: getInterEventDeltaMs(chronological[index - 1], event),
-      presentation: getRunEventPresentation(event),
-    })).reverse()
-  }, [events])
-
-  return (
-    <div className="panel-list" data-testid="run-event-timeline">
-      {visibleEvents.length === 0 && <EmptyView icon={<Activity size={22} />} title={t('rightPanel.reasoning.empty.title') as string} body={t('rightPanel.reasoning.empty.body') as string} />}
-      {visibleEvents.map(({ event, deltaMs, presentation }) => (
-        <div
-          key={event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`}
-          className="list-card we-run-event"
-          data-tone={presentation.tone}
-          data-noise={presentation.noise ? 'true' : undefined}
-          data-testid={`run-event-${event.id}`}
-        >
-          <div className="we-run-event__header">
-            <span className="we-run-event__tone" aria-hidden="true" />
-            <strong>{tRunEvent(event)}</strong>
-            {event.createdAt && (
-              <time className="we-run-event__time" dateTime={event.createdAt} title={event.createdAt}>
-                {new Date(event.createdAt).toLocaleString(getResolvedLocale(), { dateStyle: 'short', timeStyle: 'medium' })}
-              </time>
-            )}
-          </div>
-          <div className="we-run-event__meta">
-            <span>{event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
-            {deltaMs !== null && (
-              <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(deltaMs) }) as string}>
-                +{formatCompactDuration(deltaMs)}
-              </span>
-            )}
-          </div>
-          <ReasoningPayload payload={event.payload} />
-        </div>
-      ))}
-      {eventsHasMore && onLoadOlderEvents && <LoadOlderEventsButton onClick={onLoadOlderEvents} />}
-    </div>
-  )
-}
-
-/** Render an event payload as labelled key/value rows instead of a raw JSON
- *  dump, with the full pretty-printed JSON tucked behind a "show raw" toggle so
- *  power users can still copy the exact shape. */
-function ReasoningPayload({ payload }: { payload?: RunEvent['payload'] }) {
-  const { t } = useT()
-  const entries =
-    payload && typeof payload === 'object' && !Array.isArray(payload)
-      ? Object.entries(payload as Record<string, unknown>)
-      : []
-  if (entries.length === 0) return null
-  return (
-    <>
-      <dl className="we-reasoning-fields">
-        {entries.map(([key, value]) => (
-          <div key={key} className="we-reasoning-field">
-            <dt>{key}</dt>
-            <dd>{formatReasoningValue(value)}</dd>
-          </div>
-        ))}
-      </dl>
-      <details className="we-reasoning-raw">
-        <summary>{t('rightPanel.reasoning.rawJson')}</summary>
-        <pre className="mini-pre">{JSON.stringify(payload, null, 2)}</pre>
-      </details>
-    </>
-  )
-}
-
-/** Primitive payload values render as plain text; nested objects/arrays collapse
- *  to compact inline JSON (the raw toggle still exposes the full structure). */
-function formatReasoningValue(value: unknown): React.ReactNode {
-  if (value === null || value === undefined) return <span className="helper-text">—</span>
-  if (typeof value === 'string') return value.length ? value : <span className="helper-text">—</span>
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return <code className="we-reasoning-field__json">{JSON.stringify(value)}</code>
-}
-
-function LoadOlderEventsButton({ onClick }: { onClick: () => void | Promise<void> }) {
-  const { t } = useT()
-  const [busy, setBusy] = useState(false)
-  return (
-    <button
-      type="button"
-      className="load-older-events"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true)
-        try {
-          await onClick()
-        } finally {
-          setBusy(false)
-        }
-      }}
-    >
-      {busy ? t('rightPanel.reasoning.loading') : t('rightPanel.reasoning.loadOlder')}
-    </button>
   )
 }

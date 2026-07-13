@@ -29,7 +29,9 @@
  * Used by:
  * - `apps/web/src/components/DeadLettersPanel.tsx` (primary —
  *   100-200 DLQ rows in the Recovery Center).
- * - Future operator panels with comparable list lengths land here.
+ * - `apps/web/src/components/RunHistoryList.tsx` (bounded run history).
+ * - `apps/web/src/components/ReasoningPanel.tsx` (long-run event feed and
+ *   programmatic first-failure navigation).
  *
  * Invariants:
  * - The `containerRef` MUST be attached to the element that owns the
@@ -43,7 +45,7 @@
  *   row in the list, or split into multiple lists.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 /** Hook arguments. */
 export type UseVirtualListArgs<T> = {
@@ -68,6 +70,11 @@ export type UseVirtualListArgs<T> = {
    * to disable auto-reset and manage scroll yourself.
    */
   resetScrollKey?: string | number | null
+  /**
+   * Stable item identity used to preserve the visible row + intra-row offset
+   * when new items are prepended. Omit when index stability is sufficient.
+   */
+  getItemKey?: (item: T) => string | number
 }
 
 /** Hook return shape. */
@@ -80,6 +87,8 @@ export type UseVirtualListResult<T> = {
   totalHeight: number
   /** `translateY` offset for the inner wrapper so visible rows align with their virtual index. */
   startOffset: number
+  /** Imperatively reveal an item without forcing callers to duplicate row math. */
+  scrollToIndex: (index: number, align?: 'start' | 'center' | 'end') => void
 }
 
 const DEFAULT_OVERSCAN = 5
@@ -89,9 +98,12 @@ export function useVirtualList<T>({
   rowHeight,
   overscan = DEFAULT_OVERSCAN,
   resetScrollKey,
+  getItemKey,
 }: UseVirtualListArgs<T>): UseVirtualListResult<T> {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const didResetScrollRef = useRef(false)
+  const previousItemsRef = useRef(items)
+  const previousResetScrollKeyRef = useRef(resetScrollKey)
   const [clientHeight, setClientHeight] = useState<number>(0)
   const [scrollTop, setScrollTop] = useState<number>(0)
 
@@ -150,6 +162,31 @@ export function useVirtualList<T>({
 
   const totalHeight = items.length * rowHeight
 
+  // A newest-first live feed prepends rows. Numeric scrollTop alone would move
+  // an operator inspecting older history one row toward the present for every
+  // publication. Before paint, find the previously visible row by stable key
+  // and restore its exact intra-row offset in the new item order.
+  useLayoutEffect(() => {
+    const previousItems = previousItemsRef.current
+    const resetKeyChanged = previousResetScrollKeyRef.current !== resetScrollKey
+    previousItemsRef.current = items
+    previousResetScrollKeyRef.current = resetScrollKey
+    if (resetKeyChanged || !getItemKey || clientHeight === 0 || scrollTop <= 0 || previousItems.length === 0) return
+
+    const previousIndex = Math.min(previousItems.length - 1, Math.floor(scrollTop / rowHeight))
+    const anchor = previousItems[previousIndex]
+    if (anchor === undefined) return
+    const anchorKey = getItemKey(anchor)
+    const nextIndex = items.findIndex(item => getItemKey(item) === anchorKey)
+    if (nextIndex < 0 || nextIndex === previousIndex) return
+
+    const offsetWithinRow = scrollTop - previousIndex * rowHeight
+    const nextScrollTop = nextIndex * rowHeight + offsetWithinRow
+    const container = containerRef.current
+    if (container) container.scrollTop = nextScrollTop
+    setScrollTop(nextScrollTop)
+  }, [clientHeight, getItemKey, items, resetScrollKey, rowHeight, scrollTop])
+
   // If the list shrinks while the reset key stays stable, an old
   // scrollTop can point past the new end and produce an empty window.
   // Clamp the stored position to the new maximum without treating every
@@ -191,5 +228,19 @@ export function useVirtualList<T>({
     return { visibleItems: window, startOffset: startIndex * rowHeight }
   }, [items, clientHeight, scrollTop, rowHeight, overscan])
 
-  return { containerRef, visibleItems, totalHeight, startOffset }
+  const scrollToIndex = useCallback((index: number, align: 'start' | 'center' | 'end' = 'start') => {
+    const container = containerRef.current
+    if (!container || items.length === 0) return
+    const boundedIndex = Math.max(0, Math.min(items.length - 1, index))
+    const measuredHeight = container.clientHeight || clientHeight
+    let nextScrollTop = boundedIndex * rowHeight
+    if (align === 'center') nextScrollTop -= Math.max(0, (measuredHeight - rowHeight) / 2)
+    if (align === 'end') nextScrollTop -= Math.max(0, measuredHeight - rowHeight)
+    const maxScrollTop = Math.max(0, totalHeight - measuredHeight)
+    nextScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop))
+    container.scrollTop = nextScrollTop
+    setScrollTop(nextScrollTop)
+  }, [clientHeight, items.length, rowHeight, totalHeight])
+
+  return { containerRef, visibleItems, totalHeight, startOffset, scrollToIndex }
 }
