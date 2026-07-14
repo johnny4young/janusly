@@ -30,6 +30,7 @@ import { experimentsRoutes } from "./routes/experiments-routes";
 import { healthRoutes } from "./routes/health-routes";
 import { mcpRoutes } from "./routes/mcp-routes";
 import { membersRoutes } from "./routes/members-routes";
+import { memoryRoutes } from "./routes/memory-routes";
 import { onboardingRoutes } from "./routes/onboarding-routes";
 import { orgRoutes } from "./routes/org-routes";
 import { pluginsRoutes } from "./routes/plugins-routes";
@@ -59,6 +60,7 @@ export const routes: Route[] = [
   ...templatesRoutes,
   ...billingRoutes,
   ...orgRoutes,
+  ...memoryRoutes,
   ...membersRoutes,
   ...ssoRoutes,
   ...scimRoutes,

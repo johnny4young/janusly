@@ -65,6 +65,19 @@ describe('<AuditLogPanel />', () => {
     await waitFor(() => expect(calls).toContain('/audit?action=org.scim'))
   })
 
+  it('applies the memory audit preset as an action-prefix filter', async () => {
+    const calls: string[] = []
+    mockApi((url) => {
+      calls.push(url)
+      return { rows: [], nextCursor: null, hasMore: false }
+    })
+    render(<AuditLogPanel />)
+    await screen.findByText(/No audit rows match/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Memory events' }))
+    await waitFor(() => expect(calls).toContain('/audit?action=memory.'))
+    expect(screen.getByLabelText('Filter by action')).toHaveValue('memory.')
+  })
+
   it('appends the next page on Load more', async () => {
     mockApi((url) => {
       if (url === '/audit') {

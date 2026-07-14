@@ -12,7 +12,7 @@
  * presentational shell. Used only by the composer.
  */
 
-import { Award, Flame, ListTree } from 'lucide-react'
+import { Award, Clock3, Flame, ListTree } from 'lucide-react'
 import { useT } from '../../i18n'
 import { HealthRing } from './HealthRing'
 import { CelebrationBurst } from './CelebrationBurst'
@@ -30,6 +30,8 @@ export function RecoveryCenterHero({
   allClearDowntimeMs,
   celebrationTrigger,
   personalWins = null,
+  memoryPurgeCountdown = null,
+  onOpenMemoryGovernance,
   onOpenQueue,
 }: {
   salutation: string
@@ -43,6 +45,8 @@ export function RecoveryCenterHero({
   allClearDowntimeMs?: number | null
   celebrationTrigger?: number
   personalWins?: OperatorWins | null
+  memoryPurgeCountdown?: string | null
+  onOpenMemoryGovernance?: () => void
   onOpenQueue: () => void
 }) {
   const { t } = useT()
@@ -132,6 +136,18 @@ export function RecoveryCenterHero({
           </>
         )}
         <p className="we-recovery-center-hero__pitch">{t('recoveryCenter.hero.pitch')}</p>
+        {memoryPurgeCountdown && onOpenMemoryGovernance && (
+          <div className="we-recovery-center-hero__memory-purge" data-testid="memory-purge-countdown">
+            <Clock3 size={16} aria-hidden="true" />
+            <div role="status">
+              <strong>{t('recoveryCenter.hero.memoryPurgeTitle')}</strong>
+              <span>{memoryPurgeCountdown}</span>
+            </div>
+            <button type="button" className="we-btn we-btn--secondary" onClick={onOpenMemoryGovernance}>
+              {t('recoveryCenter.hero.memoryPurgeCta')}
+            </button>
+          </div>
+        )}
       </div>
       <HealthRing score={healthScore} />
     </header>

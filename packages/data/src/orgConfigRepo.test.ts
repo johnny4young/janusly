@@ -79,6 +79,22 @@ describe("normalizeOrgConfigValue — memory.enabled", () => {
   });
 });
 
+describe("normalizeOrgConfigValue — runs.humanFormResumeTtlSeconds", () => {
+  const def = findDef("runs.humanFormResumeTtlSeconds");
+
+  it("defaults to seven days and accepts the 5-minute..7-day range", () => {
+    expect(def.defaultValue).toBe(604_800);
+    expect(normalizeOrgConfigValue(def, 300)).toBe(300);
+    expect(normalizeOrgConfigValue(def, 604_800)).toBe(604_800);
+  });
+
+  it("rejects shorter, longer, and non-numeric values", () => {
+    expect(() => normalizeOrgConfigValue(def, 299)).toThrow(/>= 300/);
+    expect(() => normalizeOrgConfigValue(def, 604_801)).toThrow(/<= 604800/);
+    expect(() => normalizeOrgConfigValue(def, "3600")).toThrow(/must be a finite number/);
+  });
+});
+
 describe("normalizeOrgConfigValue — memory.allowedKinds CSV validator", () => {
   const def = findDef("memory.allowedKinds");
 

@@ -1,11 +1,12 @@
 /**
  * Authentication policy admin editor — mounted inside `OperationsPage`.
  *
- * Three controls written to `POST /org/config`:
+ * Four controls written to `POST /org/config`:
  *
  *   - `auth.allowedEmailDomains` (CSV, empty = no restriction)
  *   - `auth.mfaRequired` (boolean, marker only — provider enforces)
  *   - `auth.sessionTtlSeconds` (range 300..86400)
+ *   - `runs.humanFormResumeTtlSeconds` (range 300..604800)
  *
  * Admin-only. Calls `bumpPlatformVersion()` after a successful save so
  * any panel that reads org config refetches.
@@ -23,11 +24,15 @@ const KEYS = {
   allowedEmailDomains: "auth.allowedEmailDomains",
   mfaRequired: "auth.mfaRequired",
   sessionTtlSeconds: "auth.sessionTtlSeconds",
+  humanFormResumeTtlSeconds: "runs.humanFormResumeTtlSeconds",
 } as const;
 
 const SESSION_TTL_MIN = 300;
 const SESSION_TTL_MAX = 86400;
 const SESSION_TTL_DEFAULT = 28800;
+const RESUME_TTL_MIN = 300;
+const RESUME_TTL_MAX = 604800;
+const RESUME_TTL_DEFAULT = 604800;
 
 type OrgConfigEntry = {
   key: string;
@@ -40,12 +45,14 @@ type FormState = {
   allowedEmailDomains: string;
   mfaRequired: boolean;
   sessionTtlSeconds: string;
+  humanFormResumeTtlSeconds: string;
 };
 
 const EMPTY_FORM: FormState = {
   allowedEmailDomains: "",
   mfaRequired: false,
   sessionTtlSeconds: String(SESSION_TTL_DEFAULT),
+  humanFormResumeTtlSeconds: String(RESUME_TTL_DEFAULT),
 };
 
 export function AuthPolicySettingsPanel() {
@@ -80,6 +87,9 @@ export function AuthPolicySettingsPanel() {
           if (entry.key === KEYS.sessionTtlSeconds && typeof entry.value === "number") {
             next.sessionTtlSeconds = String(entry.value);
           }
+          if (entry.key === KEYS.humanFormResumeTtlSeconds && typeof entry.value === "number") {
+            next.humanFormResumeTtlSeconds = String(entry.value);
+          }
         }
         setForm(next);
       })
@@ -101,6 +111,13 @@ export function AuthPolicySettingsPanel() {
     }
     if (ttl < SESSION_TTL_MIN || ttl > SESSION_TTL_MAX) {
       return t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX }) as string;
+    }
+    const resumeTtl = Number(form.humanFormResumeTtlSeconds);
+    if (!Number.isFinite(resumeTtl) || !Number.isInteger(resumeTtl)) {
+      return t("authPolicy.errorResumeTtlInteger") as string;
+    }
+    if (resumeTtl < RESUME_TTL_MIN || resumeTtl > RESUME_TTL_MAX) {
+      return t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX }) as string;
     }
     // Lightweight domain-list validation: each entry shouldn't contain spaces
     // or `@`; the server normalizes case + trims further.
@@ -135,6 +152,13 @@ export function AuthPolicySettingsPanel() {
       });
       await api("/org/config", {
         method: "POST",
+        body: JSON.stringify({
+          key: KEYS.humanFormResumeTtlSeconds,
+          value: Number(form.humanFormResumeTtlSeconds),
+        }),
+      });
+      await api("/org/config", {
+        method: "POST",
         body: JSON.stringify({ key: KEYS.mfaRequired, value: form.mfaRequired }),
       });
       await api("/org/config", {
@@ -159,6 +183,9 @@ export function AuthPolicySettingsPanel() {
   const ttlNumber = Number(form.sessionTtlSeconds);
   const ttlValid =
     Number.isInteger(ttlNumber) && ttlNumber >= SESSION_TTL_MIN && ttlNumber <= SESSION_TTL_MAX;
+  const resumeTtlNumber = Number(form.humanFormResumeTtlSeconds);
+  const resumeTtlValid =
+    Number.isInteger(resumeTtlNumber) && resumeTtlNumber >= RESUME_TTL_MIN && resumeTtlNumber <= RESUME_TTL_MAX;
 
   return (
     <section className="we-budget-settings" aria-labelledby="auth-policy-heading">
@@ -184,6 +211,7 @@ export function AuthPolicySettingsPanel() {
               />
               <small className="we-field__hint">{t("authPolicy.allowedDomainsHint")}</small>
             </label>
+
           </fieldset>
 
           <fieldset className="we-fieldset">
@@ -220,6 +248,29 @@ export function AuthPolicySettingsPanel() {
                 </small>
               )}
             </label>
+
+            <label className="we-field">
+              <span className="we-field__label">{t("authPolicy.resumeTtl")}</span>
+              <input
+                type="number"
+                className="we-field__input"
+                min={RESUME_TTL_MIN}
+                max={RESUME_TTL_MAX}
+                step={60}
+                value={form.humanFormResumeTtlSeconds}
+                onChange={(e) => setForm({ ...form, humanFormResumeTtlSeconds: e.target.value })}
+                aria-invalid={!resumeTtlValid}
+                aria-describedby={!resumeTtlValid ? "auth-resume-ttl-error" : undefined}
+              />
+              <small className="we-field__hint">
+                {t("authPolicy.resumeTtlHint", { defaultTtl: RESUME_TTL_DEFAULT, min: RESUME_TTL_MIN, max: RESUME_TTL_MAX })}
+              </small>
+              {!resumeTtlValid && (
+                <small id="auth-resume-ttl-error" className="helper-text helper-text--error" role="alert">
+                  {t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX })}
+                </small>
+              )}
+            </label>
           </fieldset>
 
           {error && (
@@ -231,7 +282,7 @@ export function AuthPolicySettingsPanel() {
           <button
             type="submit"
             className="we-button we-button--primary we-budget-settings__save"
-            disabled={saving || !ttlValid}
+            disabled={saving || !ttlValid || !resumeTtlValid}
           >
             {saving ? (
               <>{t("authPolicy.saving")}</>

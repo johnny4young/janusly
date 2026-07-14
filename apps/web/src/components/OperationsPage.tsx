@@ -28,6 +28,7 @@ import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { AuditLogPanel } from './AuditLogPanel'
 import { PermissionGrantsPanel } from './PermissionGrantsPanel'
+import { MemoryGovernancePanel } from './MemoryGovernancePanel'
 import { CredentialHealthCard } from './CredentialHealthCard'
 import { AlertPoliciesPanel } from './AlertPoliciesPanel'
 import { UpstreamHealthPanel } from './UpstreamHealthPanel'
@@ -425,6 +426,7 @@ function AccessSection() {
       <AuthPolicySettingsPanel />
       <ScimDirectorySettingsPanel />
       <PermissionGrantsPanel />
+      <MemoryGovernancePanel />
       <AuditLogPanel />
     </>
   )

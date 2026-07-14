@@ -73,9 +73,10 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   expect(openapi.ok()).toBe(true)
   const openapiBody = await openapi.json() as { openapi: string; paths: Record<string, unknown> }
   expect(openapiBody.openapi).toBe('3.1.0')
-  expect(Object.keys(openapiBody.paths)).toHaveLength(10)
+  expect(Object.keys(openapiBody.paths)).toHaveLength(11)
 
   const stablePaths = [
+    '/memory/consent-status',
     '/recovery/metrics?windowDays=30',
     '/recovery/ledger',
     '/recovery/my-wins?days=30',

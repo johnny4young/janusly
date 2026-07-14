@@ -47,6 +47,8 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import { AlertTriangle, Hourglass, RefreshCw, ShieldCheck, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
+import { useMemoryConsentStatus } from '../hooks/useMemoryConsentStatus'
+import { getMemoryPurgeCountdown } from '../memory-consent-status'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
 import { tRecoveryMetricRationale, useT } from '../i18n'
@@ -133,6 +135,7 @@ const RECOVERY_IMPACT_POLL_MS = 10_000
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
   const platformVersion = useWorkflowStore((state) => state.platformVersion)
+  const { status: memoryConsentStatus } = useMemoryConsentStatus()
   const activeOrgId = useWorkflowStore((state) => state.orgId)
   const resolvedOrgId = activeOrgId ?? 'default'
   const user = useWorkflowStore((state) => state.user)
@@ -456,6 +459,23 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ),
     [currentQueueOverview, nowMs, openDeadLetters],
   )
+  const memoryPurgeCountdown = useMemo(() => {
+    if (
+      nowMs === null ||
+      memoryConsentStatus?.tenantEnabled !== false ||
+      memoryConsentStatus.purge.status !== 'scheduled'
+    ) return null
+    return getMemoryPurgeCountdown(memoryConsentStatus.purge.scheduledFor, nowMs)
+  }, [memoryConsentStatus, nowMs])
+  const memoryPurgeCountdownLabel = memoryPurgeCountdown
+    ? memoryPurgeCountdown.days > 0
+      ? t('recoveryCenter.hero.memoryPurgeDays', memoryPurgeCountdown) as string
+      : memoryPurgeCountdown.hours > 0
+        ? t('recoveryCenter.hero.memoryPurgeHours', memoryPurgeCountdown) as string
+        : memoryPurgeCountdown.minutes > 0
+          ? t('recoveryCenter.hero.memoryPurgeMinutes', memoryPurgeCountdown) as string
+          : t('recoveryCenter.hero.memoryPurgeDue') as string
+    : null
 
   const totalRuns = props.runs.length
   const healthScore = readHealthScore(metrics)
@@ -664,6 +684,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         allClearDowntimeMs={allClearDowntimeOverride ?? metrics?.downtimeEndedMs}
         celebrationTrigger={celebrationTrigger}
         personalWins={operatorWins}
+        memoryPurgeCountdown={memoryPurgeCountdownLabel}
+        onOpenMemoryGovernance={() => {
+          void import('./operations-section-bus')
+            .then(({ requestOperationsSection }) => {
+              requestOperationsSection('access')
+              props.onOpenTab('operations')
+            })
+            .catch(() => props.onOpenTab('operations'))
+        }}
         onOpenQueue={props.onOpenRecoveryQueue}
       />
 

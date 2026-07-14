@@ -833,6 +833,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   },
   human_form: async (ctx) => {
     const schema = WorkflowInputSchema.parse(ctx.config.schema);
+    const orgConfig = await getOrgConfigSnapshot(ctx.orgId);
     const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
       ? ctx.config.title.trim()
       : "Human input required";
@@ -847,7 +848,10 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
         title,
         description,
         schema,
-        resumeToken: signResumeToken({ orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" }),
+        resumeToken: signResumeToken(
+          { orgId: ctx.orgId, runId: ctx.runId, nodeId: ctx.nodeId, purpose: "human_form" },
+          { ttlSeconds: orgConfig.runs.humanFormResumeTtlSeconds },
+        ),
       },
     };
   },

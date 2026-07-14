@@ -101,6 +101,7 @@ export type OrgConfigSnapshot = {
     requireSavedWorkflow: boolean;
     subworkflowMaxDepth: number;
     streamMaxSubscriptions: number;
+    humanFormResumeTtlSeconds: number;
   };
   mcp: {
     writeConsent: boolean;
@@ -315,6 +316,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
       subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
       streamMaxSubscriptions: readNumber(values, "runs.streamMaxSubscriptions"),
+      humanFormResumeTtlSeconds: readNumber(values, "runs.humanFormResumeTtlSeconds"),
     },
     mcp: {
       writeConsent: readBoolean(values, "mcp.writeConsent"),

@@ -4,7 +4,7 @@
  * `executeNode` with `ctx.dryRun = true`; this suite pins the executor
  * behavior independently of the persistence chain.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./http-policy', () => ({
   consumeStreamToPreview: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('@janusly/data/src/orgConfigRepo', () => ({
     ai: { provider: 'openai', model: 'gpt-4o-mini', rateLimitPerMin: 60 },
     http: { timeoutMs: 30_000, maxResponseBytes: 1_000_000, maxRedirects: 5, streamPreviewBytes: 65_536 },
     email: { provider: 'noop', from: 'sender@example.com', rateLimitPerMin: 100 },
-    runs: {},
+    runs: { humanFormResumeTtlSeconds: 604_800 },
   }),
   applyOrgConfigToEnv: vi.fn(() => ({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })),
 }))
@@ -51,7 +51,7 @@ vi.mock('./agent-planner', async (importOriginal) => {
   }
 })
 
-import { applyOrgConfigToEnv } from '@janusly/data/src/orgConfigRepo'
+import { applyOrgConfigToEnv, getOrgConfigSnapshot } from '@janusly/data/src/orgConfigRepo'
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
 import { verifyResumeToken } from './secrets'
@@ -62,6 +62,7 @@ import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
 const applyOrgConfigToEnvMock = vi.mocked(applyOrgConfigToEnv)
+const getOrgConfigSnapshotMock = vi.mocked(getOrgConfigSnapshot)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 const appendEventMock = vi.mocked(appendEvent)
 const recallAgentEpisodesMock = vi.mocked(recallAgentEpisodes)
@@ -88,6 +89,10 @@ beforeEach(() => {
   planAgentToolWithLLMMock.mockReset()
   applyOrgConfigToEnvMock.mockReturnValue({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })
   setMailerForTests(null)
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('http node — dryRun gating', () => {
@@ -354,6 +359,27 @@ describe('human_form node — waiting metadata', () => {
     const token = result.metadata?.resumeToken
     expect(typeof token).toBe('string')
     verifyResumeToken(String(token), { orgId: 'org-1', runId: 'run-1', nodeId: 'collect', purpose: 'human_form' })
+  })
+
+  it('signs newly-issued tokens with the organization resume TTL', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    getOrgConfigSnapshotMock.mockResolvedValueOnce({ runs: { humanFormResumeTtlSeconds: 900 } } as never)
+
+    const result = await nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: {
+        schema: { type: 'object', properties: { note: { type: 'string' } } },
+      },
+    })
+
+    expect(result.status).toBe('waiting')
+    if (result.status !== 'waiting') return
+    const payload = verifyResumeToken(String(result.metadata?.resumeToken), {
+      orgId: 'org-1', runId: 'run-1', nodeId: 'collect', purpose: 'human_form',
+    })
+    expect(payload.expiresAt! - payload.issuedAt).toBe(900)
   })
 
   it('rejects invalid schemas instead of parking an unusable form', async () => {

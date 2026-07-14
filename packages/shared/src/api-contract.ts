@@ -7,6 +7,7 @@
  */
 
 export const V1_READ_PATHS = {
+  memoryConsentStatus: "/memory/consent-status",
   recoveryMetrics: "/recovery/metrics",
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",

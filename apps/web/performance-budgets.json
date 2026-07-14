@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 110
+      "maxGzipKiB": 112
     },
     "canvas": {
       "label": "Canvas workspace",
@@ -50,7 +50,7 @@
     "LoadingSkeleton.js": 0.41,
     "MembersPanel.js": 2.42,
     "MultiAgentTimeline.js": 2.06,
-    "operations-section-bus.js": 0.27,
+    "operations-section-bus.js": 0.4,
     "OperationsPage.js": 21.58,
     "panel-primitives.js": 0.67,
     "recovery-all-clear-coordinator.js": 1.63,
@@ -74,6 +74,7 @@
     "constants.js": 1.93,
     "supabase-vendor.js": 49.98,
     "useDialogFocusTrap.js": 0.57,
+    "useMemoryConsentStatus.js": 0.77,
     "usePrefersReducedMotion.js": 2.1,
     "useVirtualList.js": 0.91,
     "VersionHistoryPanel.js": 3,

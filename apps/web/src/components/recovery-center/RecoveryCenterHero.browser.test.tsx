@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { RecoveryCenterHero } from './RecoveryCenterHero'
@@ -13,6 +13,18 @@ const baseProps = {
 }
 
 describe('<RecoveryCenterHero /> (browser smoke)', () => {
+  it('renders the pending memory purge countdown and governance handoff', () => {
+    const onOpenMemoryGovernance = vi.fn()
+    render(<RecoveryCenterHero
+      {...baseProps}
+      memoryPurgeCountdown="Memory deletion in 6d 23h"
+      onOpenMemoryGovernance={onOpenMemoryGovernance}
+    />)
+    expect(screen.getByTestId('memory-purge-countdown')).toHaveTextContent('Memory deletion scheduled')
+    fireEvent.click(screen.getByRole('button', { name: 'Review memory governance' }))
+    expect(onOpenMemoryGovernance).toHaveBeenCalledTimes(1)
+  })
+
   it('lays out downtime severity and clean-streak momentum in real Chromium', () => {
     render(<RecoveryCenterHero
       {...baseProps}

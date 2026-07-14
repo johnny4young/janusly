@@ -171,6 +171,25 @@ export const recoveryMetricsContract = {
   errorCodes: ["invalid_input"],
 } satisfies ApiRouteContract;
 
+export const memoryConsentStatusContract = {
+  operationId: "getMemoryConsentStatus",
+  path: V1_READ_PATHS.memoryConsentStatus,
+  summary: "Get effective memory consent and pending purge status",
+  tags: ["Memory"],
+  response: z.object({
+    enabled: z.boolean(),
+    processEnabled: z.boolean(),
+    tenantEnabled: z.boolean(),
+    purge: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("none"), scheduledFor: z.null() }),
+      z.object({ status: z.literal("scheduled"), scheduledFor: IsoDateSchema }),
+      z.object({ status: z.literal("running"), scheduledFor: IsoDateSchema.nullable() }),
+      z.object({ status: z.literal("unknown"), scheduledFor: z.null() }),
+    ]),
+  }),
+  errorCodes: [],
+} satisfies ApiRouteContract;
+
 export const recoveryLedgerContract = {
   operationId: "getRecoveryLedger",
   path: V1_READ_PATHS.recoveryLedger,
@@ -322,6 +341,7 @@ export const getRunStatusContract = {
  * A registry contract test pins parity with the real route entries.
  */
 export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
+  { method: "GET", role: "viewer", permission: "recovery.read", contract: memoryConsentStatusContract },
   { method: "GET", role: "viewer", contract: recoveryMetricsContract },
   { method: "GET", role: "viewer", contract: recoveryLedgerContract },
   { method: "GET", role: "viewer", contract: recoveryMyWinsContract },

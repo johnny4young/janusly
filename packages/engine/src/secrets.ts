@@ -27,7 +27,8 @@ const DEV_RESUME_TOKEN_SECRET = "janusly-dev-resume-token-secret";
  * surface. Seven days lines up with "left over a long weekend" without
  * giving a stale link an indefinite shelf life.
  */
-const RESUME_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const MIN_RESUME_TOKEN_TTL_SECONDS = 5 * 60;
+export const DEFAULT_RESUME_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /** Resolve a `{{secret.NAME}}` reference to `process.env.NAME`; throws when missing. */
 export function getSecret(name: string) {
@@ -74,15 +75,30 @@ export type ResumeTokenPayload = {
   runId: string;
   nodeId: string;
   purpose: ResumeTokenPurpose;
-  /** Unix seconds. Used against `RESUME_TOKEN_TTL_SECONDS` for expiry. */
+  /** Unix seconds. Legacy tokens without `expiresAt` use the seven-day fallback. */
   issuedAt: number;
+  /** Unix seconds. Signed at issuance so later policy changes cannot rewrite this token's lifetime. */
+  expiresAt?: number;
 };
 
 /** Create a signed token for resume surfaces that carry user-submitted data. */
-export function signResumeToken(input: Omit<ResumeTokenPayload, "issuedAt">): string {
+export function signResumeToken(
+  input: Omit<ResumeTokenPayload, "issuedAt" | "expiresAt">,
+  options: { ttlSeconds?: number } = {},
+): string {
+  const ttlSeconds = options.ttlSeconds ?? DEFAULT_RESUME_TOKEN_TTL_SECONDS;
+  if (
+    !Number.isInteger(ttlSeconds) ||
+    ttlSeconds < MIN_RESUME_TOKEN_TTL_SECONDS ||
+    ttlSeconds > DEFAULT_RESUME_TOKEN_TTL_SECONDS
+  ) {
+    throw new Error("Invalid resume token TTL");
+  }
+  const issuedAt = Math.floor(Date.now() / 1000);
   const payload: ResumeTokenPayload = {
     ...input,
-    issuedAt: Math.floor(Date.now() / 1000),
+    issuedAt,
+    expiresAt: issuedAt + ttlSeconds,
   };
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signature = signPayload(encodedPayload);
@@ -91,7 +107,8 @@ export function signResumeToken(input: Omit<ResumeTokenPayload, "issuedAt">): st
 
 /**
  * Verify a signed resume token against the expected `(orgId, runId, nodeId,
- * purpose)` triple and the TTL. Returns the parsed payload on success;
+ * purpose)` binding and its signed expiry. Legacy tokens without `expiresAt`
+ * retain the original seven-day lifetime. Returns the parsed payload on success;
  * throws "Invalid resume token" on any failure (bad signature, wrong
  * binding, expired). The error message is deliberately uniform so a
  * caller can map it to a single 403 without leaking which constraint
@@ -99,7 +116,7 @@ export function signResumeToken(input: Omit<ResumeTokenPayload, "issuedAt">): st
  */
 export function verifyResumeToken(
   token: string,
-  expected: Omit<ResumeTokenPayload, "issuedAt">,
+  expected: Omit<ResumeTokenPayload, "issuedAt" | "expiresAt">,
 ): ResumeTokenPayload {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== RESUME_TOKEN_VERSION) {
@@ -124,13 +141,26 @@ export function verifyResumeToken(
     payload.runId !== expected.runId ||
     payload.nodeId !== expected.nodeId ||
     payload.purpose !== expected.purpose ||
-    typeof payload.issuedAt !== "number"
+    typeof payload.issuedAt !== "number" ||
+    !Number.isInteger(payload.issuedAt)
   ) {
     throw new Error("Invalid resume token");
   }
 
   const nowSeconds = Math.floor(Date.now() / 1000);
-  if (nowSeconds - payload.issuedAt > RESUME_TOKEN_TTL_SECONDS) {
+  if (payload.expiresAt === undefined) {
+    // Preserve the legacy verifier's exact boundary: tokens issued before the
+    // signed-expiry rollout remain valid at exactly seven days and expire one
+    // second later.
+    if (nowSeconds - payload.issuedAt > DEFAULT_RESUME_TOKEN_TTL_SECONDS) {
+      throw new Error("Invalid resume token");
+    }
+  } else if (
+    !Number.isInteger(payload.expiresAt) ||
+    payload.expiresAt <= payload.issuedAt ||
+    payload.expiresAt - payload.issuedAt > DEFAULT_RESUME_TOKEN_TTL_SECONDS ||
+    payload.expiresAt <= nowSeconds
+  ) {
     throw new Error("Invalid resume token");
   }
 

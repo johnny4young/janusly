@@ -454,6 +454,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     max: 1000,
   },
   {
+    key: "runs.humanFormResumeTtlSeconds",
+    category: "runs",
+    description:
+      "Lifetime of newly-issued human-form resume tokens, in seconds. Range 300..604800 (5 minutes..7 days), default 604800. Each token carries its signed expiry, so changing this affects only tokens issued afterwards.",
+    valueType: "number",
+    defaultValue: 604_800,
+    min: 300,
+    max: 604_800,
+  },
+  {
     key: "mcp.writeConsent",
     category: "mcp",
     description: "Allow MCP write tools (workflows.save, etc.) to mutate this organization. Process-wide JANUSLY_MCP_WRITES_ENABLED must also be true. NO env fallback by design — each tenant must opt in explicitly via the admin API.",

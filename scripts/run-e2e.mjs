@@ -281,7 +281,18 @@ try {
   await run("pnpm", ["--filter", "@janusly/api", "test:integration"]);
   await run("pnpm", ["--filter", "@janusly/engine", "test:integration"]);
 
-  const api = startService("api", "pnpm", ["--filter", "@janusly/api", "exec", "tsx", "src/index.ts"], {
+  // Load root env first, then force the memory platform gate on only inside
+  // this disposable E2E stack. Tenant consent still defaults off, so existing
+  // scenarios remain unchanged while governance tests can exercise both gates.
+  const e2eApiBootstrap = [
+    'import("@janusly/db").then(() => {',
+    'process.env.JANUSLY_MEMORY_ENABLED = "true";',
+    'return import("./src/index.ts");',
+    "});",
+  ].join("");
+  const api = startService("api", "pnpm", [
+    "--filter", "@janusly/api", "exec", "tsx", "--eval", e2eApiBootstrap,
+  ], {
     env: { PORT: String(apiPort) },
   });
   // `@janusly/db` intentionally lets the root `.env` override inherited
@@ -292,6 +303,7 @@ try {
   const e2eWorkerBootstrap = [
     'import("@janusly/db").then(() => {',
     'process.env.ALLOW_PRIVATE_HTTP_TARGETS = "true";',
+    'process.env.JANUSLY_MEMORY_ENABLED = "true";',
     'return import("./src/worker.ts");',
     "});",
   ].join("");
