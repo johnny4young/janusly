@@ -368,8 +368,8 @@ export const recoveryPlaybooksRoutes: Route[] = [
           recorded: validationOutcome.recorded,
         });
       }
-      if (!succeeded || facts.deadLetter.status !== "replayed") {
-        return sendError(res, "recovery_playbook_apply_required", "A passed sandbox and replayed recovery are required", 422);
+      if (!succeeded || !facts.impactEvent) {
+        return sendError(res, "recovery_playbook_apply_required", "A passed sandbox and terminally successful recovery are required", 422);
       }
       const applied = await recordRecoveryPlaybookApplied({
         orgId: auth.orgId,

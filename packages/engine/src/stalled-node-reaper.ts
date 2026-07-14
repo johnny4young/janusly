@@ -47,12 +47,13 @@
  *   `runs.input_json`): if the snapshot is missing/unparseable the node is
  *   still failed and the run still terminates, so the recoverability promise
  *   holds even without a replay surface.
- * - Known residual: a process crash in the sub-millisecond window between the
- *   CAS fail and the status rollup leaves a `failed` node under a non-terminal
- *   run that the node-status scan won't re-find. This matches the engine's
- *   existing non-transactional multi-step write posture (the runtime's own
- *   catch block has the same shape) and is self-corrected if the run has any
- *   other stalled node; otherwise a manual rollup is the fallback.
+ * - Known residual: unlike the ordinary runtime's atomic terminal-failure
+ *   transaction, this recovery sweep still performs its CAS fail, DLQ write,
+ *   event, and status rollup as separate best-effort steps. A process crash in
+ *   the sub-millisecond window after the CAS can therefore leave a `failed`
+ *   node under a non-terminal run that the running-node scan won't re-find.
+ *   Another stalled node can trigger a later rollup; otherwise an operator
+ *   must repair the run. Do not copy this posture into normal execution.
  */
 
 import { auditLogs, db } from "@janusly/db";

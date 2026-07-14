@@ -169,6 +169,37 @@ export const recoveryMetricsContract = {
   errorCodes: ["invalid_input"],
 } satisfies ApiRouteContract;
 
+export const recoveryLedgerContract = {
+  operationId: "getRecoveryLedger",
+  path: V1_READ_PATHS.recoveryLedger,
+  summary: "Get the tenant lifetime recovery impact ledger",
+  tags: ["Recovery"],
+  response: z.object({
+    totalRecovered: z.number().int().nonnegative(),
+    downtimeEndedMs: z.number().nonnegative(),
+    sinceIso: NullableIsoDateSchema,
+  }),
+  errorCodes: [],
+} satisfies ApiRouteContract;
+
+export const recoveryMyWinsContract = {
+  operationId: "getRecoveryMyWins",
+  path: V1_READ_PATHS.recoveryMyWins,
+  summary: "Get the authenticated operator's recent DLQ recoveries",
+  tags: ["Recovery"],
+  request: {
+    query: z.object({
+      days: z.coerce.number().int().optional()
+        .describe("Rolling window in days; values are clamped to 1-90 (default 30)."),
+    }).strict(),
+  },
+  response: z.object({
+    recovered: z.number().int().nonnegative(),
+    windowDays: z.number().int().min(1).max(90),
+  }),
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
 export const listWorkflowsContract = {
   operationId: "listWorkflows",
   path: V1_READ_PATHS.workflows,
@@ -267,6 +298,8 @@ export const getRunStatusContract = {
  */
 export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: recoveryMetricsContract },
+  { method: "GET", role: "viewer", contract: recoveryLedgerContract },
+  { method: "GET", role: "viewer", contract: recoveryMyWinsContract },
   { method: "GET", contract: listWorkflowsContract },
   { method: "GET", contract: listWorkflowVersionsContract },
   { method: "GET", contract: getLatestWorkflowVersionContract },

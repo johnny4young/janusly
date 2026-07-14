@@ -45,11 +45,9 @@ import { normalizeErrorSignature } from '@janusly/shared/src/error-signature'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import type { DeadLetter } from './DeadLettersPanel'
-import { formatDowntime } from './recovery-center/helpers'
 import { Trans, useT } from '../i18n'
 import { t as runtimeT } from '../i18n/runtime'
 import { AppliedBody } from './recovery-dialog/AppliedBody'
-import { requestRecoveryAllClearIfQueueEmpty } from './recovery-all-clear-coordinator'
 import { CancellingBody } from './recovery-dialog/CancellingBody'
 import { ReviewBody } from './recovery-dialog/ReviewBody'
 import { ValidationFailedBody } from './recovery-dialog/ValidationFailedBody'
@@ -466,34 +464,14 @@ export function RecoveryDialog({
             // Apply the fix to same-workflow members so they recover, not just
             // re-run the broken snapshot; cross-workflow members re-run plainly.
             suggestedWorkflow: selected.workflow,
+            ...(suggestion.playbook ? {
+              recoveryPlaybookId: suggestion.playbook.id,
+              recoveryValidationRunId: validationRunId,
+              recoveryPlaybookDeadLetterId: dlq.id,
+            } : {}),
           }),
         }) as ClusterApplyResult
         bumpPlatformVersion()
-        const clusterDowntimeMs = typeof result.downtimeEndedMs === 'number'
-          && Number.isFinite(result.downtimeEndedMs)
-          && result.downtimeEndedMs > 0
-          ? result.downtimeEndedMs
-          : null
-        if (result.replayed > 0) {
-          await requestRecoveryAllClearIfQueueEmpty(
-            clusterDowntimeMs === null ? {} : { downtimeMs: clusterDowntimeMs },
-          )
-        }
-        // In cluster mode, name the summed downtime the
-        // batch just ended (the single-replay path below already celebrates
-        // its own). Gated so legacy rows / a 0 sum never render a NaN string.
-        if (
-          result.replayed > 0
-          && clusterDowntimeMs !== null
-        ) {
-          addToast(
-            t('recoveryDialog.clusterRecovered', {
-              count: result.replayed,
-              duration: formatDowntime(clusterDowntimeMs),
-            }) as string,
-            'success',
-          )
-        }
         // Operator → system feedback: Apply succeeded, so the operator
         // accepted this approach for THIS workflow. Future patch
         // suggestions for the same workflow will see this as accepted.
@@ -508,18 +486,6 @@ export function RecoveryDialog({
           rationale: selected.rationale,
           rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
         })
-        let appliedPlaybook: RecoveryPlaybookSummary | undefined
-        if (suggestion.playbook) {
-          try {
-            const outcome = await api(`/recovery/playbooks/${encodeURIComponent(suggestion.playbook.id)}/outcome`, {
-              method: 'POST',
-              body: JSON.stringify({ deadLetterId: dlq.id, validationRunId, phase: 'applied' }),
-            }) as { playbook?: RecoveryPlaybookSummary | null }
-            appliedPlaybook = outcome.playbook ?? undefined
-          } catch (error) {
-            console.warn('[recovery-playbook] apply outcome write failed', error)
-          }
-        }
         setStep({
           kind: 'applied',
           cluster: result,
@@ -527,7 +493,7 @@ export function RecoveryDialog({
           appliedVersion,
           priorFailureSignature,
           preSaveBeforeSnapshot,
-          appliedPlaybook,
+          playbookUsePending: Boolean(suggestion.playbook),
           ...(!suggestion.playbook && feedbackRecorded && sourceWorkflowVersionId ? {
             playbookPromotionSource: {
               deadLetterId: dlq.id,
@@ -545,24 +511,17 @@ export function RecoveryDialog({
       // as the sandbox and writes it as the run's authoritative workflow.
       const replay = await api('/dlq/replay', {
         method: 'POST',
-        body: JSON.stringify({ deadLetterId: dlq.id, suggestedWorkflow: selected.workflow }),
+        body: JSON.stringify({
+          deadLetterId: dlq.id,
+          suggestedWorkflow: selected.workflow,
+          ...(suggestion.playbook ? {
+            recoveryPlaybookId: suggestion.playbook.id,
+            recoveryValidationRunId: validationRunId,
+          } : {}),
+        }),
       }) as { runId?: string }
       bumpPlatformVersion()
-      const downtimeMs = dlq.createdAt
-        ? Date.now() - new Date(dlq.createdAt).getTime()
-        : Number.NaN
-      await requestRecoveryAllClearIfQueueEmpty(
-        Number.isFinite(downtimeMs) && downtimeMs > 0 ? { downtimeMs } : {},
-      )
-      // Wedge moment: name the time we just gave back. The dead letter's
-      // `createdAt` is the failure instant; recovering it now closes that
-      // downtime window, so surface "Recovered after 3h 14m".
-      if (Number.isFinite(downtimeMs) && downtimeMs > 0) {
-        addToast(
-          t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) }) as string,
-          'success',
-        )
-      }
+      addToast(t('toasts.deadLetterReplayed'), 'success')
       // Operator → system feedback: same as cluster mode above. The
       // `rationale` here seeds the `patch_rationale` memory kind so
       // future similar failures recall the LLM's explanation, not just
@@ -575,18 +534,6 @@ export function RecoveryDialog({
         rationale: selected.rationale,
         rawConfidence: suggestion.mode === 'playbook' ? undefined : selected.confidence,
       })
-      let appliedPlaybook: RecoveryPlaybookSummary | undefined
-      if (suggestion.playbook) {
-        try {
-          const outcome = await api(`/recovery/playbooks/${encodeURIComponent(suggestion.playbook.id)}/outcome`, {
-            method: 'POST',
-            body: JSON.stringify({ deadLetterId: dlq.id, validationRunId, phase: 'applied' }),
-          }) as { playbook?: RecoveryPlaybookSummary | null }
-          appliedPlaybook = outcome.playbook ?? undefined
-        } catch (error) {
-          console.warn('[recovery-playbook] apply outcome write failed', error)
-        }
-      }
       setStep({
         kind: 'applied',
         runId: replay.runId,
@@ -594,7 +541,7 @@ export function RecoveryDialog({
         appliedVersion,
         priorFailureSignature,
         preSaveBeforeSnapshot,
-        appliedPlaybook,
+        playbookUsePending: Boolean(suggestion.playbook),
         ...(!suggestion.playbook && feedbackRecorded && sourceWorkflowVersionId ? {
           playbookPromotionSource: {
             deadLetterId: dlq.id,
@@ -814,7 +761,7 @@ export function RecoveryDialog({
               priorFailureSignature={step.priorFailureSignature ?? null}
               preSaveBeforeSnapshot={step.preSaveBeforeSnapshot ?? null}
               playbookPromotionSource={step.playbookPromotionSource}
-              appliedPlaybook={step.appliedPlaybook}
+              playbookUsePending={step.playbookUsePending}
             />
           )}
 

@@ -142,7 +142,10 @@ export type RecoveryQueueOverlay = {
  *  render a table. The list carries cheap `nodeType` / `workflowName`
  *  projections instead; `GET /dlq?id=` (`getDeadLetter`) returns the full row
  *  and is what the web fetches before opening the Recovery dialog. */
-export type RecoveryQueueRow = Omit<typeof deadLetters.$inferSelect, "workflowJson" | "nodeJson"> & {
+export type RecoveryQueueRow = Omit<
+  typeof deadLetters.$inferSelect,
+  "workflowJson" | "nodeJson" | "replayClaimToken" | "replayClaimedAt"
+> & {
   /** `node_json->>'type'` — enough for list rendering without the full node. */
   nodeType: string | null;
   /** `workflow_json->>'name'` — enough for list titles without the snapshot. */

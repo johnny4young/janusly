@@ -22,6 +22,8 @@
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
  * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
+ * - `recovery_impact_events`, `recovery_impact_rollups` — terminally verified
+ *   recovery value and its constant-time tenant lifetime projection.
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
@@ -40,7 +42,7 @@
  */
 
 import { sql } from "drizzle-orm";
-import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, bigint, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
@@ -227,6 +229,16 @@ export const runNodes = pgTable(
     attempts: integer("attempts").default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** DLQ replay claim carried until this node reaches terminal success. */
+    recoveryDeadLetterId: text("recovery_dead_letter_id"),
+    /** Operator/system actor that initiated `recoveryDeadLetterId`. */
+    recoveryRequestedBy: text("recovery_requested_by"),
+    /** Per-replay generation carried by the BullMQ job and CAS-checked on completion. */
+    recoveryClaimToken: text("recovery_claim_token"),
+    /** Active Recovery Playbook explicitly chosen for this replay generation. */
+    recoveryPlaybookId: text("recovery_playbook_id"),
+    /** Fresh sandbox run that attested `recoveryPlaybookId` before production replay. */
+    recoveryValidationRunId: text("recovery_validation_run_id"),
     errorJson: jsonb("error_json"),
   },
   (table) => [
@@ -270,6 +282,10 @@ export const deadLetters = pgTable(
     nodeJson: jsonb("node_json").notNull(),
     errorJson: jsonb("error_json").notNull(),
     status: text("status").notNull().default("open"),
+    /** Replay generation persisted before the BullMQ job becomes visible. */
+    replayClaimToken: text("replay_claim_token"),
+    /** Causal replay boundary; unlike replayedAt, this lands before enqueue. */
+    replayClaimedAt: timestamp("replay_claimed_at", { withTimezone: true }),
     replayedAt: timestamp("replayed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -280,8 +296,51 @@ export const deadLetters = pgTable(
     // above, Postgres can't produce keyset-ordered output and re-sorts the
     // org's entire DLQ per page.
     index("dead_letters_org_created_idx").on(table.orgId, table.createdAt.desc(), table.id.desc()),
+    index("dead_letters_org_replay_claimed_idx").on(table.orgId, table.replayClaimedAt.desc()),
+    index("dead_letters_org_run_node_created_idx").on(
+      table.orgId,
+      table.runId,
+      table.nodeId,
+      table.createdAt,
+    ),
   ],
 );
+
+/**
+ * One immutable fact per DLQ replay that reached terminal node success.
+ * `deadLetterId` is the idempotency key: worker retries cannot double-count a
+ * recovery. No FK is intentional — recovery evidence remains inspectable
+ * after orphan-tolerant parent retention, matching the rest of the DLQ model.
+ */
+export const recoveryImpactEvents = pgTable(
+  "recovery_impact_events",
+  {
+    deadLetterId: text("dead_letter_id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    runId: text("run_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    userId: text("user_id"),
+    recoveredAt: timestamp("recovered_at", { withTimezone: true }).notNull(),
+    downtimeEndedMs: bigint("downtime_ended_ms", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("recovery_impact_events_org_recovered_idx").on(table.orgId, table.recoveredAt.desc()),
+    index("recovery_impact_events_org_user_recovered_idx").on(table.orgId, table.userId, table.recoveredAt.desc()),
+  ],
+);
+
+/**
+ * Constant-time lifetime projection derived atomically from
+ * `recovery_impact_events`. One row per tenant; intentionally no FK so org
+ * deletion retains the same operational history posture as other tables.
+ */
+export const recoveryImpactRollups = pgTable("recovery_impact_rollups", {
+  orgId: text("org_id").primaryKey(),
+  totalRecovered: integer("total_recovered").notNull().default(0),
+  downtimeEndedMs: bigint("downtime_ended_ms", { mode: "number" }).notNull().default(0),
+  firstRecoveredAt: timestamp("first_recovered_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const routingStats = pgTable(
   "routing_stats",
@@ -1434,9 +1493,9 @@ export const alertDispatches = pgTable(
  * `createRecoveryItem` idempotent so cluster-apply fan-out can call it N
  * times safely.
  *
- * Closure path: either `/dlq/replay` succeeds (auto-close with
- * `resolutionReason: sandbox_replay_succeeded`) or the operator explicitly
- * resolves with a closed-enum reason. Comments live in jsonb as
+ * Closure path: either a generation-matched replay reaches terminal node
+ * success (auto-close with `resolutionReason: sandbox_replay_succeeded`) or
+ * the operator explicitly resolves with a closed-enum reason. Comments live in jsonb as
  * `Array<{ id, authorUserId, body, createdAt }>` and are append-only via
  * the repo helper (cap 200).
  */
@@ -1523,6 +1582,10 @@ export const recoveryItemChildren = pgTable(
     index("recovery_item_children_item_occurred_idx").on(
       table.recoveryItemId,
       table.occurredAt.desc(),
+    ),
+    index("recovery_item_children_org_dlq_idx").on(
+      table.orgId,
+      table.deadLetterId,
     ),
   ],
 );

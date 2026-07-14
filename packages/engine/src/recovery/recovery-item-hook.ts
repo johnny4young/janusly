@@ -11,9 +11,9 @@
  *    at BOTH api and worker boot. Honours
  *    `org_configs.recovery.autoCreateItems` (default `true`). Idempotent
  *    on `(orgId, deadLetterId)` so cluster-apply fan-out is safe.
- *  - `autoResolveRecoveryItemFromReplay` — called from
- *    `/dlq/replay` and `/dlq/resolve` and the `/dlq/cluster-apply` loop
- *    after the DLQ row is marked replayed / resolved.
+ *  - `resolveRecoveryItemForDismiss` — closes an incident only when the
+ *    operator explicitly accepts the loss. Replay-driven closure now happens
+ *    atomically in `recordRecoveryImpactTx` after terminal node success.
  *
  * Both helpers NEVER throw. Audit writes go inline via
  * `db.insert(auditLogs)` + the shared `safePersistPayload` chokepoint
@@ -211,24 +211,22 @@ export async function createRecoveryItemForDeadLetter(
   }
 }
 
-export type AutoResolveRecoveryItemFromReplayInput = {
+export type ResolveRecoveryItemForDismissInput = {
   orgId: string;
   deadLetterId: string;
   actor: string;
-  resolutionReason?: "sandbox_replay_succeeded" | "accepted_loss";
-  via?: string;
+  via: string;
 };
 
-/** Closes the recovery_item linked to a replayed DLQ row. Safe to call when no item exists. */
-export async function autoResolveRecoveryItemFromReplay(
-  input: AutoResolveRecoveryItemFromReplayInput,
+/** Records an explicit accepted-loss dismissal. Safe when no item exists. */
+export async function resolveRecoveryItemForDismiss(
+  input: ResolveRecoveryItemForDismissInput,
 ): Promise<void> {
   try {
     const item = await getRecoveryItemByDeadLetterId(input.orgId, input.deadLetterId);
     if (!item) return;
     if (item.status === "resolved") return;
-    const resolutionReason = input.resolutionReason ?? "sandbox_replay_succeeded";
-    const via = input.via ?? "dlq_replay";
+    const resolutionReason = "accepted_loss";
     const result = await resolveRecoveryItem(input.orgId, item.id, {
       actor: input.actor,
       reason: resolutionReason,
@@ -244,12 +242,12 @@ export async function autoResolveRecoveryItemFromReplay(
         before: { status: result.before.status, resolutionReason: result.before.resolutionReason },
         after: { status: result.after.status, resolutionReason: result.after.resolutionReason },
         resolutionReason,
-        via,
+        via: input.via,
       },
     });
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("[recovery-item-hook] autoResolveRecoveryItemFromReplay failed", {
+    console.warn("[recovery-item-hook] resolveRecoveryItemForDismiss failed", {
       orgId: input.orgId,
       deadLetterId: input.deadLetterId,
       err,

@@ -12,11 +12,11 @@
  * presentational shell. Used only by the composer.
  */
 
-import { Flame, ListTree } from 'lucide-react'
+import { Award, Flame, ListTree } from 'lucide-react'
 import { useT } from '../../i18n'
 import { HealthRing } from './HealthRing'
 import { CelebrationBurst } from './CelebrationBurst'
-import { formatDowntime, type DowntimeSeverity, type StreakSummary } from './helpers'
+import { formatDowntime, type DowntimeSeverity, type OperatorWins, type StreakSummary } from './helpers'
 
 export function RecoveryCenterHero({
   salutation,
@@ -29,6 +29,7 @@ export function RecoveryCenterHero({
   allClear,
   allClearDowntimeMs,
   celebrationTrigger,
+  personalWins = null,
   onOpenQueue,
 }: {
   salutation: string
@@ -41,6 +42,7 @@ export function RecoveryCenterHero({
   allClear?: boolean
   allClearDowntimeMs?: number | null
   celebrationTrigger?: number
+  personalWins?: OperatorWins | null
   onOpenQueue: () => void
 }) {
   const { t } = useT()
@@ -108,6 +110,15 @@ export function RecoveryCenterHero({
           <>
             <h1 className="we-recovery-center-hero__greeting" data-testid="recovery-center-greeting">{salutation}</h1>
             <p className="we-recovery-center-hero__subline">{subline}</p>
+            {personalWins && personalWins.recovered > 0 && (
+              <p className="we-recovery-center-hero__wins" data-testid="recovery-center-personal-wins">
+                <Award size={14} aria-hidden="true" />
+                {t('recoveryCenter.hero.personalWins', {
+                  count: personalWins.recovered,
+                  days: personalWins.windowDays,
+                })}
+              </p>
+            )}
             {showStreak && (
               <p
                 className="we-recovery-center-hero__streak"

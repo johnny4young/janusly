@@ -14,6 +14,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const replayHoisted = vi.hoisted(() => ({ replayDeadLetterMock: vi.fn() }));
+
 vi.mock("@janusly/data/src/autoHealingRepo", () => ({
   getByIdForOrg: vi.fn(),
   listPendingForOrg: vi.fn(),
@@ -26,9 +28,7 @@ vi.mock("@janusly/data/src/recoveryFeedbackRepo", () => ({
 
 vi.mock("@janusly/engine/src/adapters/dlq-replay", () => ({
   DLQReplayAdapter: class {
-    async replayDeadLetter() {
-      return undefined;
-    }
+    replayDeadLetter = replayHoisted.replayDeadLetterMock;
   },
 }));
 
@@ -81,6 +81,7 @@ import {
 import { recordRecoveryFeedback } from "@janusly/data/src/recoveryFeedbackRepo";
 import { runOrgScan } from "../auto-healing-scanner";
 import { audit } from "../audit";
+import { markDeadLetterReplayed } from "../dlq";
 import { readJson, sendJson } from "../http";
 import type { Route } from "../routes";
 
@@ -90,6 +91,8 @@ const decisionMock = vi.mocked(recordDecision);
 const feedbackMock = vi.mocked(recordRecoveryFeedback);
 const runOrgScanMock = vi.mocked(runOrgScan);
 const auditMock = vi.mocked(audit);
+const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
+const replayDeadLetterMock = replayHoisted.replayDeadLetterMock;
 const readJsonMock = vi.mocked(readJson);
 const sendJsonMock = vi.mocked(sendJson);
 const selectFromMock = hoisted.selectFromMock;
@@ -127,6 +130,8 @@ beforeEach(() => {
   feedbackMock.mockReset().mockResolvedValue(undefined);
   runOrgScanMock.mockReset().mockResolvedValue(undefined);
   auditMock.mockReset().mockResolvedValue(undefined);
+  markDeadLetterReplayedMock.mockReset().mockResolvedValue(undefined);
+  replayDeadLetterMock.mockReset().mockResolvedValue(undefined);
   readJsonMock.mockReset();
   sendJsonMock.mockClear();
   selectFromMock.mockReset();
@@ -207,6 +212,12 @@ describe("POST /auto-healing/:id/decide", () => {
     })) as { status: number };
 
     expect(result.status).toBe(200);
+    expect(replayDeadLetterMock).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      deadLetterId: "dlq-1",
+      recoveryActorId: "user-1",
+    }));
+    expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dlq-1");
     expect(feedbackMock).toHaveBeenCalledWith(expect.objectContaining({
       orgId: "org-1",
       workflowId: "wf-1",

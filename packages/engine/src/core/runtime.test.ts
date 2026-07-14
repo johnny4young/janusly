@@ -36,13 +36,13 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
       createdBy: null,
     }),
     getNodeStatus: vi.fn().mockResolvedValue('pending'),
-    markNodeQueued: vi.fn().mockResolvedValue(undefined),
+    markNodeQueued: vi.fn().mockResolvedValue(true),
     tryClaimNodeForQueue: vi.fn().mockResolvedValue(true),
     markNodeRunning: vi.fn().mockResolvedValue(true),
-    markNodeSucceeded: vi.fn().mockResolvedValue(undefined),
-    markNodeSucceededWithEvent: vi.fn().mockResolvedValue(undefined),
-    markNodeFailed: vi.fn().mockResolvedValue(undefined),
-    markNodeWaiting: vi.fn().mockResolvedValue(undefined),
+    markNodeSucceeded: vi.fn().mockResolvedValue(true),
+    markNodeSucceededWithEvent: vi.fn().mockResolvedValue(true),
+    markNodeFailed: vi.fn().mockResolvedValue(true),
+    markNodeWaiting: vi.fn().mockResolvedValue(true),
     markNodeSkipped: vi.fn().mockResolvedValue(undefined),
     appendEvent: vi.fn().mockResolvedValue(undefined),
     updateRunStatusFromNodes: vi.fn().mockResolvedValue(undefined),
@@ -53,6 +53,7 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
 function makeQueue(): QueueAdapter {
   return {
     enqueueNode: vi.fn().mockResolvedValue(undefined),
+    persistTerminalFailure: vi.fn().mockResolvedValue(true),
     enqueueDeadLetter: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -129,13 +130,35 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode(input)
 
-    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1)
+    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1, undefined)
     expect(executors.execute).toHaveBeenCalled()
     // The succeeded transition + its node.succeeded event commit together via
     // markNodeSucceededWithEvent (not markNodeSucceeded + a separate appendEvent).
-    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1)
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith('r1', 'n1', { x: 1 }, 1, undefined)
     // appendEvent still fires for node.running (and enqueueReadyNodes events).
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'node.running' }))
+  })
+
+  it('stops a stale recovery generation before success events or downstream scheduling', async () => {
+    const store = makeStore({
+      markNodeSucceededWithEvent: vi.fn().mockResolvedValue(false),
+    })
+    const queue = makeQueue()
+    const executors = makeExecutors({ status: 'completed', output: { stale: true } })
+    const runtime = new WorkflowRuntime(store, queue, executors)
+
+    await runtime.executeQueuedNode({ ...input, recoveryClaimToken: 'claim-old' })
+
+    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1, 'claim-old')
+    expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith(
+      'r1',
+      'n1',
+      { stale: true },
+      1,
+      'claim-old',
+    )
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
   })
 
   it('stamps one waitingSince value into persistence and the live event', async () => {
@@ -149,7 +172,7 @@ describe('executeQueuedNode — cancellation guards', () => {
       kind: 'approval',
       title: 'Approve refund',
       waitingSince: expect.any(String),
-    }))
+    }), undefined)
     const persistedMetadata = vi.mocked(store.markNodeWaiting).mock.calls[0]?.[2] as { waitingSince: string }
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'node.waiting',
@@ -169,7 +192,10 @@ describe('executeQueuedNode — cancellation guards', () => {
     const store = makeStore({ getRunStatus })
     const executors = makeExecutors({ status: 'completed', output: { x: 1 } })
     const enqueueNode = vi.fn().mockResolvedValue(undefined)
-    const queue: QueueAdapter = { enqueueNode }
+    const queue: QueueAdapter = {
+      enqueueNode,
+      persistTerminalFailure: vi.fn().mockResolvedValue(true),
+    }
     const runtime = new WorkflowRuntime(store, queue, executors)
 
     await runtime.executeQueuedNode(input)
@@ -194,7 +220,7 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow })
 
-    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2)
+    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2, undefined)
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'node.retry',
       payload: expect.objectContaining({ attempt: 2 }),
@@ -231,13 +257,43 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await expect(runtime.executeQueuedNode(input)).rejects.toThrow('temporary outage')
 
-    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
       orgId: 'test-org',
       workflowId: 'wf-1',
       node,
       attempt: 1,
     }))
+  })
+
+  it('does not update routing rewards when a stale generation loses terminal ownership', async () => {
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const queue = makeQueue()
+    vi.mocked(queue.persistTerminalFailure).mockResolvedValueOnce(false)
+    const runtime = new WorkflowRuntime(makeStore(), queue, makeFailingExecutors())
+
+    await expect(runtime.executeQueuedNode({ ...input, recoveryClaimToken: 'stale-claim' }))
+      .resolves.toBeUndefined()
+
+    expect(updateRoutingStats).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      recoveryClaimToken: 'stale-claim',
+    }))
+  })
+
+  it('updates a retry failure reward only after the running-to-queued CAS wins', async () => {
+    const { updateRoutingStats } = await import('@janusly/data/src/routingStatsRepo')
+    const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const store = makeStore({
+      getRunStatus: vi.fn().mockResolvedValue('running'),
+      markNodeQueued: vi.fn().mockResolvedValue(false),
+    })
+    const runtime = new WorkflowRuntime(store, makeQueue(), makeFailingExecutors())
+
+    await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow })
+
+    expect(updateRoutingStats).not.toHaveBeenCalled()
   })
 })
 
@@ -261,7 +317,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
         chosenNodeId: 'fast_path',
         ranking: expect.arrayContaining([expect.objectContaining({ nodeId: 'fast_path' })]),
       }),
-    }))
+    }), undefined)
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'decision.made',
       payload: expect.objectContaining({ chosenNodeId: 'fast_path' }),
@@ -291,7 +347,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
 
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'fast' }),
-    }))
+    }), undefined)
   })
 
   it('preserves scoring fields across mixed-shape candidates so the cheaper one wins under default scoring', async () => {
@@ -317,7 +373,7 @@ describe('executeQueuedNode — router candidate normalization', () => {
 
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'cheap' }),
-    }))
+    }), undefined)
   })
 })
 
@@ -382,7 +438,7 @@ describe('executeQueuedNode — runtime learning metadata', () => {
     // shape) and that chosenNodeId is real.
     expect(store.markNodeSucceeded).toHaveBeenCalledWith('r1', 'pick', expect.objectContaining({
       decision: expect.objectContaining({ chosenNodeId: 'fast_path' }),
-    }))
+    }), undefined)
   })
 
   it('records workflow improvement when metadata.workflowId is present', async () => {
@@ -478,23 +534,16 @@ describe('executeQueuedNode — runtime learning metadata', () => {
     await expect(runtime.executeQueuedNode(input)).rejects.toThrow('metadata query failed')
 
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(queue.enqueueDeadLetter).toHaveBeenCalledWith(expect.objectContaining({
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'r1',
       orgId: 'default',
       node,
       attempt: 1,
       error: expect.objectContaining({ message: 'metadata query failed' }),
     }))
-    expect(store.markNodeFailed).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
-      message: 'metadata query failed',
-    }))
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.failed',
-      payload: expect.objectContaining({
-        error: expect.objectContaining({ message: 'metadata query failed' }),
-      }),
-    }))
-    expect(store.updateRunStatusFromNodes).toHaveBeenCalledWith('r1')
+    expect(store.markNodeFailed).not.toHaveBeenCalled()
+    expect(store.appendEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'node.failed' }))
+    expect(store.updateRunStatusFromNodes).not.toHaveBeenCalled()
   })
 })
 

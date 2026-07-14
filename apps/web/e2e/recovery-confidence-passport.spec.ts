@@ -153,7 +153,16 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const repeatPack = page.locator('.list-card').filter({ hasText: 'Incident triage' }).first()
   const selectedBeforeRepeatedFailure = await selectedDeadLetterTestId(page)
   await repeatPack.getByRole('button', { name: 'Break a node', exact: true }).click()
-  await waitForNewSelectedFailure(page, selectedBeforeRepeatedFailure, 'page_oncall')
+  const repeatedFailure = await waitForNewSelectedFailure(page, selectedBeforeRepeatedFailure, 'page_oncall')
+  const repeatedTestId = await repeatedFailure.getAttribute('data-testid')
+  const repeatedDeadLetterId = repeatedTestId?.replace('dlq-row-', '')
+  expect(repeatedDeadLetterId).toBeTruthy()
+  const repeatedDetailResponse = await request.get(
+    `${API_URL}/dlq?id=${encodeURIComponent(repeatedDeadLetterId!)}`,
+    { headers: AUTH_HEADERS },
+  )
+  expect(repeatedDetailResponse.ok()).toBe(true)
+  const repeatedDetail = await repeatedDetailResponse.json() as { runId: string }
   await page.getByRole('button', { name: /Suggest fix/i }).click()
   const playbookMatch = page.getByTestId('recovery-playbook-match')
   await expect(playbookMatch).toBeVisible()
@@ -164,15 +173,52 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect(playbookReview).toBeVisible()
   await expect(page.getByRole('button', { name: /Apply validated fix/i })).toHaveCount(0)
   await captureElement(playbookReview, 'web-en-recovery-playbook-revalidation')
+  const validationResponsePromise = page.waitForResponse((response) => (
+    new URL(response.url()).pathname === '/dlq/validate-fix' && response.request().method() === 'POST'
+  ))
   await page.getByRole('button', { name: /Validate in sandbox/i }).click()
+  const validationResponse = await validationResponsePromise
+  const validation = await validationResponse.json() as { runId: string }
   await expect(page.getByRole('button', { name: /Apply validated fix/i })).toBeVisible({ timeout: 30_000 })
   expect(saveRequests, 'fresh playbook sandbox must not auto-save').toBe(1)
   await page.getByRole('button', { name: /Apply validated fix/i }).click()
-  const useRecorded = page.getByTestId('recovery-playbook-use-recorded')
-  await expect(useRecorded).toBeVisible({ timeout: 30_000 })
-  await expect(useRecorded).toContainText('1 successful production use')
+  const usePending = page.getByTestId('recovery-playbook-use-pending')
+  await expect(usePending).toBeVisible({ timeout: 30_000 })
+  await expect(usePending).toContainText('awaiting verification')
   expect(saveRequests).toBe(2)
-  await captureElement(useRecorded, 'web-en-recovery-playbook-use-recorded')
+  await captureElement(usePending, 'web-en-recovery-playbook-use-pending')
+
+  await expect.poll(async () => {
+    const response = await request.get(
+      `${API_URL}/run?runId=${encodeURIComponent(repeatedDetail.runId)}`,
+      { headers: AUTH_HEADERS },
+    )
+    if (!response.ok()) return 'missing'
+    return ((await response.json()) as { run?: { status?: string } }).run?.status ?? 'missing'
+  }, { timeout: 30_000 }).toBe('succeeded')
+
+  const matchResponse = await request.get(
+    `${API_URL}/recovery/playbooks/match?deadLetterId=${encodeURIComponent(repeatedDeadLetterId!)}`,
+    { headers: AUTH_HEADERS },
+  )
+  expect(matchResponse.ok()).toBe(true)
+  const matched = await matchResponse.json() as { playbook: { id: string } }
+  const outcomeResponse = await request.post(
+    `${API_URL}/recovery/playbooks/${encodeURIComponent(matched.playbook.id)}/outcome`,
+    {
+      headers: AUTH_HEADERS,
+      data: {
+        deadLetterId: repeatedDeadLetterId,
+        validationRunId: validation.runId,
+        phase: 'applied',
+      },
+    },
+  )
+  expect(outcomeResponse.ok()).toBe(true)
+  await expect(outcomeResponse.json()).resolves.toMatchObject({
+    playbook: { successfulUses: 1 },
+    recorded: false,
+  })
   await page.getByRole('button', { name: 'Close', exact: true }).click()
 
   // Locale parity on the playbook's own live surface (not only a unit render).
@@ -196,6 +242,26 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const spanishPlaybookReview = page.getByTestId('recovery-playbook-revalidation')
   await expect(spanishPlaybookReview).toContainText('ejecuta el sandbox actual')
   await captureElement(spanishPlaybookReview, 'web-es-recovery-playbook-revalidation')
+
+  await page.getByRole('button', { name: /Validar en sandbox/i }).click()
+  await expect(page.getByRole('button', { name: /Aplicar corrección validada/i })).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('button', { name: /Aplicar corrección validada/i }).click()
+  const spanishUsePending = page.getByTestId('recovery-playbook-use-pending')
+  await expect(spanishUsePending).toContainText('Uso del playbook pendiente de verificación', { timeout: 30_000 })
+  await expect(spanishUsePending).toContainText('solo cuando este reintento termine correctamente')
+  await captureElement(spanishUsePending, 'web-es-recovery-playbook-use-pending')
+
+  // A separate occurrence drives the regression state so the successful-use
+  // smoke above and the failed-validation smoke below remain causally honest.
+  await page.getByRole('button', { name: 'Cerrar', exact: true }).click()
+  await page.getByRole('button', { name: 'Packs', exact: true }).click()
+  const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
+  await spanishPlaybookPack.getByRole('button', { name: 'Romper un nodo', exact: true }).click()
+  await waitForNewSelectedFailure(page, selectedBeforeSpanishRegression, 'page_oncall')
+  await page.getByRole('button', { name: /Sugerir corrección/i }).click()
+  await expect(page.getByTestId('recovery-playbook-match')).toBeVisible()
+  await page.getByRole('button', { name: 'Usar y volver a validar', exact: true }).click()
+  await expect(page.getByTestId('recovery-playbook-revalidation')).toBeVisible()
 
   // The backend regression transition is covered against real Postgres in
   // integration tests. Here we isolate the terminal browser state so its

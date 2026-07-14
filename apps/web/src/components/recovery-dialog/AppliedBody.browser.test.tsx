@@ -1,28 +1,39 @@
-/**
- * Real-Chromium render of the Applied-step ribbon and cluster celebration —
- * the browser-mode counterpart of the jsdom unit tests,
- * proving the line lays out and reads correctly in an actual renderer
- * (the live-smoke dialog state is transient; this pins the visual contract).
- */
+/** Real-Chromium layout smoke for truthful Recovery replay queue feedback. */
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { AppliedBody } from './AppliedBody'
+import { changeRuntimeLocale } from '../../i18n'
 
-describe('<AppliedBody /> cluster celebration (browser smoke)', () => {
-  it('renders the summed-downtime line under the cluster ribbon in real Chromium', async () => {
-    const { getByTestId } = render(
+afterEach(() => {
+  changeRuntimeLocale('en')
+})
+
+describe('<AppliedBody /> replay queue state (browser smoke)', () => {
+  it('lays out the queued cluster ribbon without terminal-recovery decoration', () => {
+    const { getByRole, queryByTestId } = render(
       <AppliedBody cluster={{ replayed: 2, failed: 0, errors: [], downtimeEndedMs: 4_560_000 }} />,
     )
 
-    const line = getByTestId('cluster-recovered-line')
-    expect(line.textContent).toBe('Recovered 2 cascading failures · 1h 16m of downtime ended')
-    // Visible and laid out (a real box, not display:none) in the actual renderer.
-    const rect = line.getBoundingClientRect()
+    const ribbon = getByRole('alert')
+    expect(ribbon.textContent).toContain('Patch applied. Queued 2 of 2.')
+    expect(ribbon.textContent).not.toContain('downtime ended')
+    const rect = ribbon.getBoundingClientRect()
     expect(rect.height).toBeGreaterThan(0)
-    expect(getComputedStyle(line).display).not.toBe('none')
-    const burst = getByTestId('celebration-burst')
-    expect(burst.children).toHaveLength(10)
-    expect(getComputedStyle(burst.firstElementChild as Element).animationName).toContain('we-celebration-burst')
+    expect(getComputedStyle(ribbon).display).not.toBe('none')
+    expect(queryByTestId('celebration-burst')).toBeNull()
+  })
+
+  it('renders the terminal-verification state in Spanish without clipping', () => {
+    changeRuntimeLocale('es')
+    const { getByTestId } = render(
+      <AppliedBody runId="run-12345678" playbookUsePending />,
+    )
+
+    const pending = getByTestId('recovery-playbook-use-pending')
+    expect(pending.textContent).toContain('Uso del playbook pendiente de verificación')
+    expect(pending.textContent).toContain('solo cuando este reintento termine correctamente')
+    expect(pending.scrollWidth).toBeLessThanOrEqual(pending.clientWidth + 1)
+    expect(pending.getBoundingClientRect().height).toBeGreaterThan(0)
   })
 })

@@ -16,8 +16,9 @@
  *   use `getRunOrgId` when they need it (the route layer is the gate).
  */
 
-import { db, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
-import { eq, ne, and, inArray } from "drizzle-orm";
+import { db, deadLetters, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
+import { recordRecoveryImpactTx } from "@janusly/data";
+import { eq, ne, and, inArray, isNull, sql } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
@@ -201,7 +202,7 @@ export async function cancelRun(runId: string, reason?: any) {
   await appendEvent(runId, null, "run.cancelled", reason ?? {});
   // Subworkflow children: a cancelled child still notifies the parent so the
   // parent's subworkflow node fails (the parent decides whether to roll up).
-  await notifyOnTerminal(runId, "cancelled");
+  await notifyCommittedRunTerminal(runId, "cancelled");
   publishRunEvent(runId, { kind: "run.status", status: "cancelled" });
 }
 
@@ -217,23 +218,64 @@ export async function cancelRun(runId: string, reason?: any) {
  * when the claim fails, so a cancellation that lands while a queued job is
  * being pulled never re-flips the cancelled row back to running.
  */
-export async function markNodeRunning(runId: string, nodeId: string, attempt = 1): Promise<boolean> {
+function recoveryClaimPredicate(recoveryClaimToken?: string) {
+  return recoveryClaimToken
+    ? eq(runNodes.recoveryClaimToken, recoveryClaimToken)
+    : isNull(runNodes.recoveryClaimToken);
+}
+
+export async function markNodeRunning(
+  runId: string,
+  nodeId: string,
+  attempt = 1,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
   const claimed = await db.update(runNodes)
     .set({ status: "running", attempts: attempt, startedAt: new Date() })
     .where(and(
       eq(runNodes.runId, runId),
       eq(runNodes.nodeId, nodeId),
       eq(runNodes.status, "queued"),
+      recoveryClaimPredicate(recoveryClaimToken),
     ))
     .returning({ id: runNodes.id });
   return claimed.length > 0;
 }
 
-/** Unconditional transition to `queued` (caller has already claimed). */
+/** Queue a non-executing node and clear any prior DLQ replay attribution. */
 export async function markNodeQueued(runId: string, nodeId: string, attempt = 1) {
-  await db.update(runNodes)
+  const queued = await db.update(runNodes)
+    .set({
+      status: "queued",
+      attempts: attempt,
+      recoveryDeadLetterId: null,
+      recoveryRequestedBy: null,
+      recoveryClaimToken: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    })
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
+    .returning({ id: runNodes.id });
+  return queued.length > 0;
+}
+
+/** Retry transition owned by the currently executing replay generation. */
+export async function markExecutingNodeQueued(
+  runId: string,
+  nodeId: string,
+  attempt = 1,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
+  const queued = await db.update(runNodes)
     .set({ status: "queued", attempts: attempt })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "running"),
+      recoveryClaimPredicate(recoveryClaimToken),
+    ))
+    .returning({ id: runNodes.id });
+  return queued.length > 0;
 }
 
 /**
@@ -274,7 +316,18 @@ export class ReplayNotClaimableError extends Error {
  * The caller writes the workflow snapshot + enqueues AFTER a successful claim,
  * so a rejected claim mutates nothing (no snapshot write, no job).
  */
-export async function claimReplayTransition(runId: string, nodeId: string): Promise<void> {
+export async function claimReplayTransition(
+  runId: string,
+  nodeId: string,
+  recovery: {
+    deadLetterId?: string | null;
+    recoveryActorId?: string | null;
+    recoveryPlaybookId?: string | null;
+    recoveryValidationRunId?: string | null;
+  } = {},
+): Promise<string> {
+  const recoveryClaimToken = crypto.randomUUID();
+  const replayClaimedAt = new Date();
   await db.transaction(async (tx) => {
     await tx.update(runs)
       .set({ status: "running" })
@@ -288,12 +341,41 @@ export async function claimReplayTransition(runId: string, nodeId: string): Prom
       .from(runNodes)
       .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
       .limit(1);
-    if (nodeRows[0]?.status === "queued") throw new ReplayNotClaimableError("node_mid_retry");
+    if (nodeRows[0]?.status !== "failed") throw new ReplayNotClaimableError("node_mid_retry");
 
-    await tx.update(runNodes)
-      .set({ status: "queued", attempts: 1 })
-      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+    if (recovery.deadLetterId) {
+      const [claimedDeadLetter] = await tx
+        .update(deadLetters)
+        .set({ replayClaimToken: recoveryClaimToken, replayClaimedAt })
+        .where(and(
+          eq(deadLetters.id, recovery.deadLetterId),
+          eq(deadLetters.runId, runId),
+          eq(deadLetters.nodeId, nodeId),
+          eq(deadLetters.status, "open"),
+        ))
+        .returning({ id: deadLetters.id });
+      if (!claimedDeadLetter) throw new ReplayNotClaimableError("node_mid_retry");
+    }
+
+    const claimed = await tx.update(runNodes)
+      .set({
+        status: "queued",
+        attempts: 1,
+        recoveryDeadLetterId: recovery.deadLetterId ?? null,
+        recoveryRequestedBy: recovery.recoveryActorId ?? null,
+        recoveryClaimToken,
+        recoveryPlaybookId: recovery.recoveryPlaybookId ?? null,
+        recoveryValidationRunId: recovery.recoveryValidationRunId ?? null,
+      })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "failed"),
+      ))
+      .returning({ id: runNodes.id });
+    if (claimed.length === 0) throw new ReplayNotClaimableError("node_mid_retry");
   });
+  return recoveryClaimToken;
 }
 
 /**
@@ -319,10 +401,22 @@ export async function tryClaimNodeForQueue(runId: string, nodeId: string, attemp
 }
 
 /** Transition a node to `waiting` (webhook / approval pause). Metadata stored under `state_json.waiting`. */
-export async function markNodeWaiting(runId: string, nodeId: string, metadata?: any) {
-  await db.update(runNodes)
+export async function markNodeWaiting(
+  runId: string,
+  nodeId: string,
+  metadata?: any,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
+  const waiting = await db.update(runNodes)
     .set({ status: "waiting", stateJson: safePersistPayload({ waiting: metadata ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }) })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "running"),
+      recoveryClaimPredicate(recoveryClaimToken),
+    ))
+    .returning({ id: runNodes.id });
+  return waiting.length > 0;
 }
 
 /** Mark a node skipped (e.g. edge condition false). Terminal — `finishedAt` set. */
@@ -333,10 +427,41 @@ export async function markNodeSkipped(runId: string, nodeId: string, reason?: an
 }
 
 /** Mark a node succeeded; `output` lands under `state_json.output` (the web Inspector reads from there). */
-export async function markNodeSucceeded(runId: string, nodeId: string, output?: any) {
-  await db.update(runNodes)
-    .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+export async function markNodeSucceeded(
+  runId: string,
+  nodeId: string,
+  output?: any,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
+  const finishedAt = new Date();
+  const completed = await db.transaction(async (tx) => {
+    const [completed] = await tx.update(runNodes)
+      .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "running"),
+        recoveryClaimPredicate(recoveryClaimToken),
+      ))
+      .returning({
+        deadLetterId: runNodes.recoveryDeadLetterId,
+        userId: runNodes.recoveryRequestedBy,
+        playbookId: runNodes.recoveryPlaybookId,
+        validationRunId: runNodes.recoveryValidationRunId,
+      });
+    if (!completed) return false;
+    await recordRecoveryImpactTx(tx, {
+      deadLetterId: completed?.deadLetterId ?? null,
+      userId: completed?.userId ?? null,
+      playbookId: completed?.playbookId ?? null,
+      validationRunId: completed?.validationRunId ?? null,
+      runId,
+      nodeId,
+      recoveredAt: finishedAt,
+    });
+    return true;
+  });
+  return completed;
 }
 
 /**
@@ -375,7 +500,8 @@ export async function markNodeSucceededWithEvent(
   nodeId: string,
   output: unknown,
   attempt: number,
-): Promise<void> {
+  recoveryClaimToken?: string,
+): Promise<boolean> {
   const finishedAt = new Date();
   const eventId = crypto.randomUUID();
   const stateJson = safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES });
@@ -387,10 +513,22 @@ export async function markNodeSucceededWithEvent(
   // Still run the chokepoint for key-redaction (and as a size backstop).
   const eventPayload = safePersistPayload(rawEventPayload);
 
-  await db.transaction(async (tx) => {
-    await tx.update(runNodes)
+  const completed = await db.transaction(async (tx) => {
+    const [completed] = await tx.update(runNodes)
       .set({ status: "succeeded", stateJson, finishedAt })
-      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "running"),
+        recoveryClaimPredicate(recoveryClaimToken),
+      ))
+      .returning({
+        deadLetterId: runNodes.recoveryDeadLetterId,
+        userId: runNodes.recoveryRequestedBy,
+        playbookId: runNodes.recoveryPlaybookId,
+        validationRunId: runNodes.recoveryValidationRunId,
+      });
+    if (!completed) return false;
     await tx.insert(runEvents).values({
       id: eventId,
       runId,
@@ -399,7 +537,19 @@ export async function markNodeSucceededWithEvent(
       payload: eventPayload,
       createdAt: finishedAt,
     });
+    await recordRecoveryImpactTx(tx, {
+      deadLetterId: completed?.deadLetterId ?? null,
+      userId: completed?.userId ?? null,
+      playbookId: completed?.playbookId ?? null,
+      validationRunId: completed?.validationRunId ?? null,
+      runId,
+      nodeId,
+      recoveredAt: finishedAt,
+    });
+    return true;
   });
+
+  if (!completed) return false;
 
   publishRunEvent(runId, {
     kind: "event",
@@ -409,15 +559,149 @@ export async function markNodeSucceededWithEvent(
     payload: eventPayload,
     createdAt: finishedAt.toISOString(),
   });
+  return true;
 }
 
 /** Conditionally complete a paused node. Returns false when it was already resumed/cancelled/failed. */
 export async function markWaitingNodeSucceeded(runId: string, nodeId: string, output?: any): Promise<boolean> {
-  const completed = await db.update(runNodes)
-    .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt: new Date() })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId), eq(runNodes.status, "waiting")))
-    .returning({ id: runNodes.id });
-  return completed.length > 0;
+  const finishedAt = new Date();
+  return db.transaction(async (tx) => {
+    const [completed] = await tx.update(runNodes)
+      .set({ status: "succeeded", stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }), finishedAt })
+      .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId), eq(runNodes.status, "waiting")))
+      .returning({
+        id: runNodes.id,
+        deadLetterId: runNodes.recoveryDeadLetterId,
+        userId: runNodes.recoveryRequestedBy,
+        playbookId: runNodes.recoveryPlaybookId,
+        validationRunId: runNodes.recoveryValidationRunId,
+      });
+    if (!completed) return false;
+    await recordRecoveryImpactTx(tx, {
+      deadLetterId: completed.deadLetterId,
+      userId: completed.userId,
+      playbookId: completed.playbookId,
+      validationRunId: completed.validationRunId,
+      runId,
+      nodeId,
+      recoveredAt: finishedAt,
+    });
+    return true;
+  });
+}
+
+/**
+ * Complete only the paused subworkflow node that still waits on
+ * `expectedChildRunId`. The child-generation predicate prevents a late child
+ * from consuming the recovery claim or output of a newer replay generation.
+ */
+export async function completeWaitingSubworkflowNode(
+  runId: string,
+  nodeId: string,
+  expectedChildRunId: string,
+  output: unknown,
+): Promise<boolean> {
+  const finishedAt = new Date();
+  const eventId = crypto.randomUUID();
+  const eventPayload = safePersistPayload({ childRunId: expectedChildRunId, childOutput: output ?? {} });
+  const completed = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(runNodes)
+      .set({
+        status: "succeeded",
+        stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }),
+        finishedAt,
+      })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "waiting"),
+        sql`${runNodes.stateJson} #>> '{waiting,childRunId}' = ${expectedChildRunId}`,
+      ))
+      .returning({
+        deadLetterId: runNodes.recoveryDeadLetterId,
+        userId: runNodes.recoveryRequestedBy,
+        playbookId: runNodes.recoveryPlaybookId,
+        validationRunId: runNodes.recoveryValidationRunId,
+      });
+    if (!row) return false;
+    await tx.insert(runEvents).values({
+      id: eventId,
+      runId,
+      nodeId,
+      type: "node.subworkflow.completed",
+      payload: eventPayload,
+      createdAt: finishedAt,
+    });
+    await recordRecoveryImpactTx(tx, {
+      deadLetterId: row.deadLetterId,
+      userId: row.userId,
+      playbookId: row.playbookId,
+      validationRunId: row.validationRunId,
+      runId,
+      nodeId,
+      recoveredAt: finishedAt,
+    });
+    return true;
+  });
+  if (!completed) return false;
+  publishRunEvent(runId, {
+    kind: "event",
+    id: eventId,
+    nodeId,
+    type: "node.subworkflow.completed",
+    payload: eventPayload,
+    createdAt: finishedAt.toISOString(),
+  });
+  return true;
+}
+
+/** Fail only a paused subworkflow node that still belongs to this child run. */
+export async function failWaitingSubworkflowNode(
+  runId: string,
+  nodeId: string,
+  expectedChildRunId: string,
+  childStatus: "failed" | "cancelled",
+): Promise<boolean> {
+  const finishedAt = new Date();
+  const eventId = crypto.randomUUID();
+  const error = safePersistPayload({
+    reason: `Subworkflow ${childStatus}`,
+    childRunId: expectedChildRunId,
+  }, { maxBytes: ERROR_JSON_MAX_BYTES });
+  const eventPayload = safePersistPayload({ childRunId: expectedChildRunId, childStatus });
+  const failed = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(runNodes)
+      .set({ status: "failed", errorJson: error, finishedAt })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "waiting"),
+        sql`${runNodes.stateJson} #>> '{waiting,childRunId}' = ${expectedChildRunId}`,
+      ))
+      .returning({ id: runNodes.id });
+    if (!row) return false;
+    await tx.insert(runEvents).values({
+      id: eventId,
+      runId,
+      nodeId,
+      type: "node.subworkflow.failed",
+      payload: eventPayload,
+      createdAt: finishedAt,
+    });
+    return true;
+  });
+  if (!failed) return false;
+  publishRunEvent(runId, {
+    kind: "event",
+    id: eventId,
+    nodeId,
+    type: "node.subworkflow.failed",
+    payload: eventPayload,
+    createdAt: finishedAt.toISOString(),
+  });
+  return true;
 }
 
 /** Mark a node failed with the serialized error in `error_json`. Terminal. */
@@ -425,6 +709,25 @@ export async function markNodeFailed(runId: string, nodeId: string, error: any) 
   await db.update(runNodes)
     .set({ status: "failed", errorJson: safePersistPayload(error, { maxBytes: ERROR_JSON_MAX_BYTES }), finishedAt: new Date() })
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)));
+}
+
+/** Fail only the execution generation that still owns the running row. */
+export async function markExecutingNodeFailed(
+  runId: string,
+  nodeId: string,
+  error: any,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
+  const failed = await db.update(runNodes)
+    .set({ status: "failed", errorJson: safePersistPayload(error, { maxBytes: ERROR_JSON_MAX_BYTES }), finishedAt: new Date() })
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "running"),
+      recoveryClaimPredicate(recoveryClaimToken),
+    ))
+    .returning({ id: runNodes.id });
+  return failed.length > 0;
 }
 
 /**
@@ -458,7 +761,10 @@ export function setSubworkflowNotifier(notifier: SubworkflowNotifier | null): vo
   subworkflowNotifier = notifier;
 }
 
-async function notifyOnTerminal(runId: string, status: "succeeded" | "failed" | "cancelled"): Promise<void> {
+export async function notifyCommittedRunTerminal(
+  runId: string,
+  status: "succeeded" | "failed" | "cancelled",
+): Promise<void> {
   if (!subworkflowNotifier) return;
   try {
     await subworkflowNotifier(runId, status);
@@ -497,7 +803,7 @@ export async function updateRunStatusFromNodes(runId: string) {
       await appendEvent(runId, null, "run.failed", {
         failedNodes: nodes.filter(node => node.status === "failed").length,
       });
-      await notifyOnTerminal(runId, "failed");
+      await notifyCommittedRunTerminal(runId, "failed");
     }
     publishRunEvent(runId, { kind: "run.status", status: "failed" });
     return "failed";
@@ -515,7 +821,7 @@ export async function updateRunStatusFromNodes(runId: string) {
       .returning({ id: runs.id });
     if (flipped.length > 0) {
       await appendEvent(runId, null, "run.succeeded", { nodes: nodes.length });
-      await notifyOnTerminal(runId, "succeeded");
+      await notifyCommittedRunTerminal(runId, "succeeded");
     }
     publishRunEvent(runId, { kind: "run.status", status: "succeeded" });
     return "succeeded";

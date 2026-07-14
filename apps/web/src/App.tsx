@@ -62,7 +62,6 @@ import { requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus
 import { requestRecoveryAllClearIfQueueEmpty } from './components/recovery-all-clear-coordinator'
 import { DOCS_URL } from './docs-link'
 import { createRunTransitionGuard, isRunRequestCurrent } from './run-transition'
-import { formatDowntime } from './components/recovery-center/helpers'
 
 type RunResponse = {
   run?: RunSummary
@@ -749,10 +748,7 @@ export default function App() {
       })
       await loadStatus(runId)
       bumpPlatformVersion()
-      await Promise.all([
-        refreshPlatform(),
-        requestRecoveryAllClearIfQueueEmpty(),
-      ])
+      await refreshPlatform()
       addToast(t('toasts.stepRetried', { nodeId }), 'success')
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.replayFailed'), 'error')
@@ -780,7 +776,7 @@ export default function App() {
     }
   }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs, t])
 
-  const replayDeadLetter = useCallback(async (deadLetterId: string, createdAtIso?: string) => {
+  const replayDeadLetter = useCallback(async (deadLetterId: string, _createdAtIso?: string) => {
     try {
       await api('/dlq/replay', {
         method: 'POST',
@@ -788,20 +784,8 @@ export default function App() {
       })
       if (runId) await loadStatus(runId)
       bumpPlatformVersion()
-      const createdAtMs = createdAtIso ? new Date(createdAtIso).getTime() : Number.NaN
-      const downtimeMs = Date.now() - createdAtMs
-      await Promise.all([
-        refreshPlatform(),
-        requestRecoveryAllClearIfQueueEmpty(
-          Number.isFinite(downtimeMs) && downtimeMs > 0 ? { downtimeMs } : {},
-        ),
-      ])
-      addToast(
-        Number.isFinite(downtimeMs) && downtimeMs > 0
-          ? t('recoveryDialog.recoveredAfter', { duration: formatDowntime(downtimeMs) })
-          : t('toasts.deadLetterReplayed'),
-        'success',
-      )
+      await refreshPlatform()
+      addToast(t('toasts.deadLetterReplayed'), 'success')
       return true
     } catch (error) {
       addToast(error instanceof Error ? error.message : t('toasts.deadLetterReplayFailed'), 'error')

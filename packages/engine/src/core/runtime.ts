@@ -97,7 +97,7 @@ export class WorkflowRuntime {
   ) {}
 
   async executeQueuedNode(input: ExecuteQueuedNodeInput): Promise<void> {
-    const { runId, node } = input;
+    const { runId, node, recoveryClaimToken } = input;
     const attempt = input.attempt ?? 1;
     const start = Date.now();
 
@@ -120,8 +120,9 @@ export class WorkflowRuntime {
     // between the run-status read above and this UPDATE: if cancellation
     // lands in between, the conditional WHERE clause won't match the
     // now-cancelled row, the claim fails, and we emit a skip event.
-    const claimed = await this.store.markNodeRunning(runId, node.id, attempt);
+    const claimed = await this.store.markNodeRunning(runId, node.id, attempt, recoveryClaimToken);
     if (!claimed) {
+      if (recoveryClaimToken) return;
       await this.store.appendEvent(workflowEvent({
         runId, nodeId: node.id,
         type: "node.skipped",
@@ -182,7 +183,13 @@ export class WorkflowRuntime {
 
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
-          await this.store.markNodeSucceeded(runId, node.id, { decision });
+          const completed = await this.store.markNodeSucceeded(
+            runId,
+            node.id,
+            { decision },
+            recoveryClaimToken,
+          );
+          if (!completed) return;
 
           // ROUTE the decision: mark every non-chosen candidate that is a
           // direct successor of this router as skipped BEFORE the readiness
@@ -227,7 +234,8 @@ export class WorkflowRuntime {
 
       if (result?.status === "waiting") {
         const metadata = { ...(result.metadata ?? {}), waitingSince: new Date().toISOString() };
-        await this.store.markNodeWaiting(runId, node.id, metadata);
+        const waiting = await this.store.markNodeWaiting(runId, node.id, metadata, recoveryClaimToken);
+        if (!waiting) return;
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: { ...result, metadata } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
         return;
@@ -237,17 +245,19 @@ export class WorkflowRuntime {
       // not the loose context bag. The repo's own `if (!orgId) return`
       // guard remains as defence in depth, but on a healthy run the
       // metadata helper above hands it a structured value every time.
-      // Independent writes (different tables, no ordering contract between
-      // them) run concurrently — the completion path is a chain of
-      // sequential DB round-trips and this is the one safely parallel pair.
       // The `succeeded` node transition + its `node.succeeded` event commit
       // together in one transaction (`markNodeSucceededWithEvent`), so the
       // event never repeats the (potentially 1 MB) output the node row
       // already stores.
-      await Promise.all([
-        updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true }),
-        this.store.markNodeSucceededWithEvent(runId, node.id, result?.output ?? {}, attempt),
-      ]);
+      const completed = await this.store.markNodeSucceededWithEvent(
+        runId,
+        node.id,
+        result?.output ?? {},
+        attempt,
+        recoveryClaimToken,
+      );
+      if (!completed) return;
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
       await this.evaluateImprovement(runId, context, metadata);
@@ -266,8 +276,6 @@ export class WorkflowRuntime {
       // blind replay of a possibly-committed side effect can be gated.
       if (err?.writeSide === true) error.writeSide = true;
 
-      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
-
       const retryPolicy = node.config?.retry as RetryPolicy | undefined;
       const maxAttempts = retryPolicy?.maxAttempts ?? 1;
 
@@ -277,30 +285,36 @@ export class WorkflowRuntime {
         const retryRunStatus = await this.store.getRunStatus(runId);
         if (retryRunStatus === "cancelled" || retryRunStatus === "failed") return;
 
-        await this.store.markNodeQueued(runId, node.id, nextAttempt);
+        const queued = await this.store.markNodeQueued(runId, node.id, nextAttempt, recoveryClaimToken);
+        if (!queued) return;
+        await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
 
-        await this.queue.enqueueNode({ runId, nodeId: node.id, delayMs, attempt: nextAttempt });
+        await this.queue.enqueueNode({
+          runId,
+          nodeId: node.id,
+          delayMs,
+          attempt: nextAttempt,
+          recoveryClaimToken,
+        });
         return;
       }
 
-      if (this.queue.enqueueDeadLetter) {
-        await this.queue.enqueueDeadLetter({
-          runId,
-          orgId: metadata?.orgId ?? "default",
-          workflowId: metadata?.workflowId ?? input.workflow.id ?? null,
-          workflow: input.workflow,
-          node,
-          attempt,
-          error,
-        });
-      }
+      const failed = await this.queue.persistTerminalFailure({
+        runId,
+        orgId: metadata?.orgId ?? "default",
+        workflowId: metadata?.workflowId ?? input.workflow.id ?? null,
+        workflow: input.workflow,
+        node,
+        attempt,
+        error,
+        recoveryClaimToken,
+      });
+      if (!failed) return;
 
-      await this.store.markNodeFailed(runId, node.id, error);
-      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.failed", payload: { error, attempt } }));
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
       logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
-      await this.store.updateRunStatusFromNodes(runId);
       throw err;
     }
   }

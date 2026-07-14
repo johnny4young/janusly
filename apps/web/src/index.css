@@ -9321,7 +9321,8 @@ button.we-ops-metric-card--button {
 }
 
 .we-recovery-center-hero__downtime,
-.we-recovery-center-hero__streak {
+.we-recovery-center-hero__streak,
+.we-recovery-center-hero__wins {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -9336,6 +9337,7 @@ button.we-ops-metric-card--button {
 .we-recovery-center-hero__downtime[data-severity="warn"] { color: var(--we-warning-text); }
 .we-recovery-center-hero__downtime[data-severity="danger"] { color: var(--we-danger-text); }
 .we-recovery-center-hero__streak { color: var(--we-success-text); }
+.we-recovery-center-hero__wins { color: var(--we-primary); }
 
 .we-recovery-center-hero__all-clear {
   display: grid;
@@ -10014,6 +10016,21 @@ button.we-recovery-heatmap__cell:focus-visible {
   line-height: 1.5;
   color: var(--we-text-2);
   margin: 6px 0 0;
+}
+
+.we-recovery-center-value__lifetime {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 0 0;
+  color: var(--we-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.we-recovery-center-value__lifetime svg {
+  flex: 0 0 auto;
 }
 
 .we-recovery-center-value__actions {

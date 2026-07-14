@@ -17,8 +17,8 @@ import {
   getRunContext,
   getRunMetadata,
   getRunStatus,
-  markNodeFailed,
-  markNodeQueued,
+  markExecutingNodeFailed,
+  markExecutingNodeQueued,
   markNodeRunning,
   markNodeSkipped,
   markNodeSucceeded,
@@ -48,32 +48,32 @@ export class PostgresExecutionStore implements ExecutionStore {
     return getNodeStatus(runId, nodeId) as Promise<NodeStatus>;
   }
 
-  markNodeQueued(runId: string, nodeId: string, attempt?: number) {
-    return markNodeQueued(runId, nodeId, attempt);
+  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string) {
+    return markExecutingNodeQueued(runId, nodeId, attempt, recoveryClaimToken);
   }
 
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number) {
     return tryClaimNodeForQueue(runId, nodeId, attempt);
   }
 
-  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean> {
-    return markNodeRunning(runId, nodeId, attempt);
+  markNodeRunning(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean> {
+    return markNodeRunning(runId, nodeId, attempt, recoveryClaimToken);
   }
 
-  markNodeSucceeded(runId: string, nodeId: string, output: unknown) {
-    return markNodeSucceeded(runId, nodeId, output);
+  markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string) {
+    return markNodeSucceeded(runId, nodeId, output, recoveryClaimToken);
   }
 
-  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number) {
-    return markNodeSucceededWithEvent(runId, nodeId, output, attempt);
+  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number, recoveryClaimToken?: string) {
+    return markNodeSucceededWithEvent(runId, nodeId, output, attempt, recoveryClaimToken);
   }
 
-  markNodeFailed(runId: string, nodeId: string, error: SerializedError) {
-    return markNodeFailed(runId, nodeId, error);
+  markNodeFailed(runId: string, nodeId: string, error: SerializedError, recoveryClaimToken?: string) {
+    return markExecutingNodeFailed(runId, nodeId, error, recoveryClaimToken);
   }
 
-  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown) {
-    return markNodeWaiting(runId, nodeId, metadata);
+  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown, recoveryClaimToken?: string) {
+    return markNodeWaiting(runId, nodeId, metadata, recoveryClaimToken);
   }
 
   markNodeSkipped(runId: string, nodeId: string, metadata?: unknown) {

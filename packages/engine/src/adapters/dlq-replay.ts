@@ -92,7 +92,12 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // `run_not_replayable` rejection mutates nothing: no snapshot is written
     // under an in-flight retry, no job is enqueued. Throws
     // `ReplayNotClaimableError`, mapped to 409 by the `/dlq/replay` route.
-    await claimReplayTransition(runId, node.id);
+    const recoveryClaimToken = await claimReplayTransition(runId, node.id, {
+      deadLetterId: input.deadLetterId ?? null,
+      recoveryActorId: input.recoveryActorId ?? null,
+      recoveryPlaybookId: input.recoveryPlaybookId ?? null,
+      recoveryValidationRunId: input.recoveryValidationRunId ?? null,
+    });
 
     // Make the replayed workflow authoritative for the run before enqueueing.
     // Slim jobs carry only `{ runId, nodeId }`; the worker reloads the DAG
@@ -107,6 +112,7 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       runId,
       nodeId: node.id,
       attempt: 1,
+      recoveryClaimToken,
     });
   }
 

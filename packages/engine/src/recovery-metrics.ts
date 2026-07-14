@@ -168,7 +168,7 @@ export type RecoveryMetrics = {
   terminalRuns: number;
   /** Per-day avg recovery time (last ≤14 days, oldest-first) driving the MTTR tile's trend sparkline. `[]` when nothing replayed. */
   mttrTrend: MttrTrendPoint[];
-  /** Total automation downtime CLOSED in the window (ms) — the summed `replayedAt − createdAt` of recovered failures. A MEASURED figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
+  /** Total automation downtime closed in the window (ms), summed from terminal recovery-impact events. A measured figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
   downtimeEndedMs: number;
 };
 

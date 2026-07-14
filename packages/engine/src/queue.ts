@@ -23,7 +23,8 @@
  *   is Postgres `dead_letters`, not Redis — without a bound, BullMQ keeps
  *   failed jobs forever, so a poisoned producer or schema drift would grow
  *   Redis unboundedly.
- * - `execute-node` job payloads are SLIM (`{ runId, nodeId, attempt }`) — the
+ * - `execute-node` job payloads are SLIM (`{ runId, nodeId, attempt,
+ *   recoveryClaimToken? }`) — the
  *   worker reloads the workflow from `runs.inputJson` per job rather than
  *   carrying the full workflow JSON in every Redis message.
  */
@@ -55,7 +56,12 @@ const REMOVE_ON_FAIL = { count: 1000, age: 7 * 24 * 60 * 60 };
 export async function enqueueNode(payload: EnqueueNodeInput) {
   return workflowQueue.add(
     "execute-node",
-    { runId: payload.runId, nodeId: payload.nodeId, attempt: payload.attempt },
+    {
+      runId: payload.runId,
+      nodeId: payload.nodeId,
+      attempt: payload.attempt,
+      ...(payload.recoveryClaimToken ? { recoveryClaimToken: payload.recoveryClaimToken } : {}),
+    },
     {
       attempts: 1,
       delay: payload.delayMs ?? 0,

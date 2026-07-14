@@ -1,7 +1,7 @@
 /**
- * Real-browser proof for recovery momentum and direct-replay feedback.
+ * Real-browser proof for recovery momentum and truthful replay feedback.
  * Each case uses a private dev-header org and the product's own demo-failure
- * injection, so all queue, heatmap, metrics, replay, and all-clear states are
+ * injection, so all queue, heatmap, metrics, and replay states are
  * backed by the live API, worker, Postgres, and Redis stack.
  */
 
@@ -17,9 +17,7 @@ type LocaleContract = {
   retryName: string
   recoveringText: string
   longestDowntime: RegExp
-  recoveredToast: RegExp
-  allClearTitle: string
-  allClearSummary: RegExp
+  queuedToast: string
 }
 
 const ENGLISH: LocaleContract = {
@@ -28,9 +26,7 @@ const ENGLISH: LocaleContract = {
   retryName: 'Retry',
   recoveringText: 'Recovering…',
   longestDowntime: /^Longest downtime:/,
-  recoveredToast: /^Recovered after .* of downtime$/,
-  allClearTitle: 'All clear',
-  allClearSummary: /downtime ended this window/,
+  queuedToast: 'Replay queued',
 }
 
 const SPANISH: LocaleContract = {
@@ -39,9 +35,7 @@ const SPANISH: LocaleContract = {
   retryName: 'Reintentar',
   recoveringText: 'Recuperando…',
   longestDowntime: /^Inactividad más larga:/,
-  recoveredToast: /^Recuperado tras .* de inactividad$/,
-  allClearTitle: 'Todo en orden',
-  allClearSummary: /Finalizó un periodo de inactividad/,
+  queuedToast: 'Reintento en cola',
 }
 
 async function hideUnrelatedOverlays(page: Page): Promise<void> {
@@ -69,6 +63,13 @@ async function captureElement(
     })
   }
   await locator.screenshot({ path: `${EVIDENCE_DIR}/${name}.png` })
+}
+
+async function waitForHealthRingToSettle(hero: Locator): Promise<void> {
+  const ring = hero.locator('.we-recovery-center-ring')
+  await expect(ring).toBeVisible()
+  const score = (await ring.getAttribute('aria-label'))?.match(/\d+/)?.[0]
+  if (score) await expect(ring.locator('.we-recovery-center-ring__value')).toHaveText(score)
 }
 
 async function prepareIsolatedSession(page: Page, locale: 'en' | 'es', reducedMotion: boolean): Promise<string> {
@@ -121,6 +122,7 @@ async function runRecoveryCycle(
   await page.getByRole('button', { name: contract.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')
   await expect(hero.getByTestId('recovery-center-longest-downtime')).toHaveText(contract.longestDowntime)
+  await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
   await captureElement(hero, `web-${contract.locale}-recovery-hero-action`)
 
@@ -158,34 +160,31 @@ async function runRecoveryCycle(
     await page.unroute('**/dlq/replay')
   }
 
-  const recoveredToast = page.getByText(contract.recoveredToast)
-  await expect(recoveredToast).toBeVisible()
-  await captureElement(recoveredToast.locator('..'), `web-${contract.locale}-recovery-toast-result`)
+  const queuedToast = page.getByText(contract.queuedToast)
+  await expect(queuedToast).toBeVisible()
+  await captureElement(queuedToast.locator('..'), `web-${contract.locale}-recovery-toast-queued`)
 
   await page.getByRole('button', { name: contract.homeName }).click()
-  await expect(hero.getByTestId('recovery-center-greeting')).toHaveText(contract.allClearTitle)
-  await expect(hero.getByTestId('recovery-center-all-clear-summary')).toHaveText(contract.allClearSummary)
-  if (options.reducedMotion) {
-    await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
-  } else {
-    await expect(hero.getByTestId('celebration-burst')).toBeVisible()
-  }
+  await expect(hero).not.toHaveAttribute('data-all-clear', 'true')
+  await expect(hero.getByTestId('celebration-burst')).toHaveCount(0)
+  await expect(hero.getByTestId('recovery-center-all-clear-summary')).toHaveCount(0)
+  await waitForHealthRingToSettle(hero)
   await hideUnrelatedOverlays(page)
-  await captureElement(hero, `web-${contract.locale}-recovery-hero-all-clear`, { finishAnimations: false })
+  await captureElement(hero, `web-${contract.locale}-recovery-hero-replay-queued`, { finishAnimations: false })
 
   return { consoleErrors, pageErrors }
 }
 
 test.describe.configure({ mode: 'serial' })
 
-test('English recovery momentum shows action, optimistic replay, contextual success, and all-clear', async ({ page }) => {
+test('English recovery momentum shows action, optimistic replay, and truthful queued feedback', async ({ page }) => {
   test.setTimeout(90_000)
   const errors = await runRecoveryCycle(page, ENGLISH, { reducedMotion: false })
   expect(errors.consoleErrors).toEqual([])
   expect(errors.pageErrors).toEqual([])
 })
 
-test('Spanish recovery momentum keeps the all-clear copy when reduced motion removes decoration', async ({ page }) => {
+test('Spanish recovery momentum keeps queued feedback truthful with reduced motion', async ({ page }) => {
   test.setTimeout(90_000)
   const errors = await runRecoveryCycle(page, SPANISH, { reducedMotion: true })
   expect(errors.consoleErrors).toEqual([])
@@ -207,7 +206,7 @@ test('replaying one of two failures never publishes a false all-clear', async ({
   await expect(queue.locator('[data-dead-letter-id]')).toHaveCount(2)
   await queue.locator('[data-dead-letter-id]').first().click()
   await queue.locator('.detail-box').getByRole('button', { name: ENGLISH.retryName }).click()
-  await expect(page.getByText(ENGLISH.recoveredToast)).toBeVisible()
+  await expect(page.getByText(ENGLISH.queuedToast)).toBeVisible()
 
   await page.getByRole('button', { name: ENGLISH.homeName }).click()
   const hero = page.locator('.we-recovery-center-hero')

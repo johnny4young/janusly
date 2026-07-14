@@ -58,6 +58,15 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
       ${sqlLiteral(createdAt.toISOString())}::timestamptz
     )`
   }).join(',')
+  const impactValues = days.map((recoveredAt, index) => `(
+    ${sqlLiteral(ids[index] ?? '')},
+    ${sqlLiteral(orgId)},
+    ${sqlLiteral(`history-run-${suffix}-${index}`)},
+    ${sqlLiteral(`history-node-${index}`)},
+    'dev-user',
+    ${sqlLiteral(recoveredAt.toISOString())}::timestamptz,
+    ${(index + 1) * 5 * 60_000}
+  )`).join(',')
 
   await execFileAsync('docker', [
     'compose', '-f', COMPOSE_FILE,
@@ -66,7 +75,10 @@ async function seedRecoveryHistory(orgId: string): Promise<{ days: string[]; ids
     '-c', `INSERT INTO dead_letters (
       id, org_id, run_id, node_id, attempt, workflow_json, node_json,
       error_json, status, replayed_at, created_at
-    ) VALUES ${values};`,
+    ) VALUES ${values};
+    INSERT INTO recovery_impact_events (
+      dead_letter_id, org_id, run_id, node_id, user_id, recovered_at, downtime_ended_ms
+    ) VALUES ${impactValues};`,
   ])
 
   return { days: days.map((day) => day.toISOString().slice(0, 10)), ids }

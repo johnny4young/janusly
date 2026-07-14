@@ -63,10 +63,12 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   expect(openapi.ok()).toBe(true)
   const openapiBody = await openapi.json() as { openapi: string; paths: Record<string, unknown> }
   expect(openapiBody.openapi).toBe('3.1.0')
-  expect(Object.keys(openapiBody.paths)).toHaveLength(7)
+  expect(Object.keys(openapiBody.paths)).toHaveLength(9)
 
   const stablePaths = [
     '/recovery/metrics?windowDays=30',
+    '/recovery/ledger',
+    '/recovery/my-wins?days=30',
     `/workflows?q=${encodeURIComponent(workflowId)}&limit=20`,
     `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`,
     `/workflows/latest?workflowId=${encodeURIComponent(workflowId)}`,
@@ -82,6 +84,32 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
     expect(versioned.response.ok(), `v1 ${path}: ${JSON.stringify(versioned.body)}`).toBe(true)
     expect(versioned.response.headers()['x-request-id']).toBeTruthy()
     expect(versioned.body).toMatchObject({ apiVersion: 'v1', data: legacy.body })
+  }
+
+  const publicRunNodeKeys = [
+    'attempts',
+    'errorJson',
+    'finishedAt',
+    'id',
+    'nodeId',
+    'runId',
+    'startedAt',
+    'stateJson',
+    'status',
+  ]
+  for (const path of [
+    `/run?runId=${encodeURIComponent(runId)}`,
+    `/status?runId=${encodeURIComponent(runId)}`,
+  ]) {
+    const legacy = await json(request, path)
+    const versioned = await json(request, `/v1${path}`)
+    const legacyNode = (legacy.body.nodes as Array<Record<string, unknown>>)[0]
+    const versionedNode = ((versioned.body.data as { nodes: Array<Record<string, unknown>> }).nodes)[0]
+    expect(Object.keys(legacyNode ?? {}).sort()).toEqual(publicRunNodeKeys)
+    expect(Object.keys(versionedNode ?? {}).sort()).toEqual(publicRunNodeKeys)
+    expect(legacyNode).not.toHaveProperty('recoveryClaimToken')
+    expect(legacyNode).not.toHaveProperty('recoveryDeadLetterId')
+    expect(legacyNode).not.toHaveProperty('recoveryRequestedBy')
   }
 
   const denied = await request.get(`${API_URL}/v1/run?runId=missing-${stamp}`, { headers: AUTH_HEADERS })

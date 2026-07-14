@@ -28,7 +28,7 @@ const {
     appendEventMock: vi.fn().mockResolvedValue(undefined),
     enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
     markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
-    claimReplayTransitionMock: vi.fn().mockResolvedValue(undefined),
+    claimReplayTransitionMock: vi.fn().mockResolvedValue('claim-token-1'),
     setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
     ReplayNotClaimableError,
     originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
@@ -106,7 +106,7 @@ beforeEach(() => {
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
   markNodeQueuedMock.mockReset()
-  claimReplayTransitionMock.mockReset().mockResolvedValue(undefined)
+  claimReplayTransitionMock.mockReset().mockResolvedValue('claim-token-1')
   appendEventMock.mockReset()
   setRunWorkflowSnapshotMock.mockReset()
 })
@@ -124,16 +124,58 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
       runId: 'orig-run',
       nodeId: failingNode.id,
       attempt: 1,
+      recoveryClaimToken: 'claim-token-1',
     })
     // One atomic transition un-terminates the run + re-queues the failed node,
     // replacing the non-atomic resetRunForReplay + markNodeQueued pair whose
     // gap let a cancel land between them.
-    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id)
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: null,
+      recoveryActorId: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    })
     // The replayed workflow becomes the run's authoritative snapshot so the
     // slim queue worker (and the downstream cascade) reload the right DAG.
     expect(setRunWorkflowSnapshotMock).toHaveBeenCalledWith('orig-run', baseWorkflow)
     // Production replay is a single enqueue — no new run row, no new node rows.
     expect(txInsertMock).not.toHaveBeenCalled()
+  })
+
+  it('carries the DLQ recovery claim and initiating actor into the node transition', async () => {
+    await adapter.replayDeadLetter({
+      runId: 'orig-run',
+      workflow: baseWorkflow,
+      node: failingNode,
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+    })
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    })
+  })
+
+  it('binds a verified playbook and validation run to the replay generation', async () => {
+    await adapter.replayDeadLetter({
+      runId: 'orig-run',
+      workflow: baseWorkflow,
+      node: failingNode,
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: 'playbook-1',
+      recoveryValidationRunId: 'validation-1',
+    })
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: 'playbook-1',
+      recoveryValidationRunId: 'validation-1',
+    })
   })
 
   it('claims BEFORE snapshotting/enqueueing — a rejected claim mutates nothing', async () => {
@@ -145,7 +187,12 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
     await expect(adapter.replayDeadLetter({ runId: 'orig-run', workflow: baseWorkflow, node: failingNode }))
       .rejects.toBeInstanceOf(ReplayNotClaimableError)
 
-    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id)
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: null,
+      recoveryActorId: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    })
     expect(setRunWorkflowSnapshotMock).not.toHaveBeenCalled()
     expect(enqueueNodeMock).not.toHaveBeenCalled()
   })

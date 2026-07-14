@@ -21,15 +21,18 @@
  *
  * Data sources (all already shipped):
  * - `GET /recovery/metrics` → metric strip, health badge, severities.
+ * - `GET /recovery/ledger` + `GET /recovery/my-wins` → verified lifetime and
+ *   operator impact; polled cheaply so background-run completions surface.
  * - `GET /dlq/counts` + oldest-first `GET /dlq/queue` → authoritative hero
  *   count and longest open downtime; the bounded bootstrap page feeds tiles.
  * - `GET /dlq/clusters` → failure-clusters tile.
  * - Run nodes from the store (`status === "waiting"`) → pending approvals.
  *
  * The Recovery Center is composition over the recovery API + engine metrics.
- * Its top-level metrics, clusters, and heatmap reads start together on the
- * cross-panel `platformVersion` tick; urgent metrics settle independently from
- * the contextual cluster/heatmap transition.
+ * Its heavier metrics, clusters, and heatmap reads start together on the
+ * cross-panel `platformVersion` tick. Ledger, personal wins, and queue counts
+ * use a separate bounded poll because the completing worker may belong to a
+ * run that is not the operator's active SSE target.
  *
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
@@ -64,6 +67,8 @@ import {
   shouldShowOnboarding,
   type ClustersResponse,
   type HeatmapDay,
+  type OperatorWins,
+  type RecoveryLedger,
   type RecoveryMetrics,
 } from './recovery-center/helpers'
 import { RecoveryHeatmap } from './recovery-center/RecoveryHeatmap'
@@ -108,11 +113,21 @@ type OrgSnapshot<T> = {
   value: T
 }
 
+type IdentitySnapshot<T> = OrgSnapshot<T> & {
+  userId: string
+}
+
 type RecoveryQueueOverview = {
   orgId: string
   openCount: number
   oldestOpen: DeadLetter | null
+  observedOpenIds: string[]
 }
+
+// Terminal recovery may complete in a worker for a run that is not the
+// operator's active SSE/polling target. Keep this cheap projection live without
+// repeatedly running the heavier metrics, cluster, and heatmap queries.
+const RECOVERY_IMPACT_POLL_MS = 10_000
 
 export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const { t, i18n } = useT()
@@ -120,6 +135,8 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const activeOrgId = useWorkflowStore((state) => state.orgId)
   const resolvedOrgId = activeOrgId ?? 'default'
   const user = useWorkflowStore((state) => state.user)
+  const authenticatedUserId = useWorkflowStore((state) => state.userId)
+  const resolvedUserId = authenticatedUserId ?? user?.id ?? 'dev-user'
   const introDismissedThisSession = useWorkflowStore(
     (state) => state.recoveryIntroDismissedThisSession,
   )
@@ -129,9 +146,16 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [metricsSnapshot, setMetricsSnapshot] = useState<OrgSnapshot<RecoveryMetrics> | null>(null)
   const [clustersSnapshot, setClustersSnapshot] = useState<OrgSnapshot<ClustersResponse | null> | null>(null)
   const [heatmapSnapshot, setHeatmapSnapshot] = useState<OrgSnapshot<HeatmapDay[]> | null>(null)
+  const [ledgerSnapshot, setLedgerSnapshot] = useState<OrgSnapshot<RecoveryLedger | null> | null>(null)
+  const [winsSnapshot, setWinsSnapshot] = useState<IdentitySnapshot<OperatorWins | null> | null>(null)
+  const [impactPollVersion, setImpactPollVersion] = useState(0)
   const metrics = metricsSnapshot?.orgId === resolvedOrgId ? metricsSnapshot.value : null
   const clusters = clustersSnapshot?.orgId === resolvedOrgId ? clustersSnapshot.value : null
   const heatmap = heatmapSnapshot?.orgId === resolvedOrgId ? heatmapSnapshot.value : []
+  const ledger = ledgerSnapshot?.orgId === resolvedOrgId ? ledgerSnapshot.value : null
+  const operatorWins = winsSnapshot?.orgId === resolvedOrgId && winsSnapshot.userId === resolvedUserId
+    ? winsSnapshot.value
+    : null
   const [queueOverview, setQueueOverview] = useState<RecoveryQueueOverview | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(false)
   const [metricsErrorSnapshot, setMetricsErrorSnapshot] = useState<OrgSnapshot<string> | null>(null)
@@ -143,7 +167,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   const [allClear, setAllClear] = useState(false)
   const [allClearDowntimeOverride, setAllClearDowntimeOverride] = useState<number | null>(null)
   const [celebrationTrigger, setCelebrationTrigger] = useState(0)
-  const previousOpenFailuresRef = useRef<{ orgId: string; count: number } | null>(null)
+  const previousRecoveryLedgerRef = useRef<OrgSnapshot<RecoveryLedger> | null>(null)
+  const pendingVerifiedRecoveryRef = useRef<{
+    orgId: string
+    totalRecovered: number
+    downtimeMs: number
+  } | null>(null)
   const [persistedIntroDismissed, setPersistedIntroDismissed] = useState<boolean>(() => {
     try { return localStorage.getItem('janusly:recovery:hideIntro') === 'true' } catch { return false }
   })
@@ -159,7 +188,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     setMetricsLoading(true)
     setMetricsErrorSnapshot(null)
 
-    // Invoke all three reads before attaching handlers so one render commits
+    // Invoke all three heavier reads before attaching handlers so one render commits
     // one coordinated request burst without making any result wait for a
     // slower sibling endpoint.
     const metricsRequest = api('/recovery/metrics')
@@ -219,44 +248,101 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       })
 
     return () => { cancelled = true }
-  }, [platformVersion, i18n.language, resolvedOrgId])
+  }, [platformVersion, resolvedOrgId])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setImpactPollVersion((version) => version + 1)
+    }, RECOVERY_IMPACT_POLL_MS)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
-    void Promise.allSettled([
-      api('/dlq/counts'),
-      api('/dlq/queue?status=open&sort=oldest&limit=1'),
-    ]).then(([countsResult, queueResult]) => {
-      if (cancelled || countsResult.status !== 'fulfilled') return
-      const open = (countsResult.value as { open?: unknown } | null)?.open
-      if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) return
+    const ledgerRequest = api('/recovery/ledger')
+    const winsRequest = api('/recovery/my-wins?days=30')
 
-      if (open === 0) {
-        setQueueOverview({ orgId: resolvedOrgId, openCount: 0, oldestOpen: null })
-        return
-      }
-      const items = queueResult.status === 'fulfilled'
-        ? (queueResult.value as { items?: unknown } | null)?.items
-        : null
-      setQueueOverview({
-        orgId: resolvedOrgId,
-        openCount: open,
-        oldestOpen: Array.isArray(items) && items.length > 0 ? items[0] as DeadLetter : null,
+    void ledgerRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setLedgerSnapshot({ orgId: resolvedOrgId, value: payload as RecoveryLedger })
+        })
       })
-    })
+      .catch(() => {
+        if (cancelled) return
+        startTransition(() => {
+          setLedgerSnapshot({ orgId: resolvedOrgId, value: null })
+        })
+      })
+
+    void winsRequest
+      .then((payload) => {
+        if (cancelled) return
+        startTransition(() => {
+          setWinsSnapshot({
+            orgId: resolvedOrgId,
+            userId: resolvedUserId,
+            value: payload as OperatorWins,
+          })
+        })
+      })
+      .catch(() => {
+        if (cancelled) return
+        startTransition(() => {
+          setWinsSnapshot({ orgId: resolvedOrgId, userId: resolvedUserId, value: null })
+        })
+      })
+
     return () => { cancelled = true }
-  }, [platformVersion, resolvedOrgId])
+  }, [impactPollVersion, platformVersion, resolvedOrgId, resolvedUserId])
+
+  useEffect(() => {
+    let cancelled = false
+    const observedOpenIds = props.deadLetters
+      .filter((deadLetter) => deadLetter.status === 'open')
+      .map((deadLetter) => deadLetter.id)
+    void api('/dlq/counts')
+      .then(async (payload) => {
+        if (cancelled) return
+        const open = (payload as { open?: unknown } | null)?.open
+        if (typeof open !== 'number' || !Number.isInteger(open) || open < 0) return
+
+        if (open === 0) {
+          setQueueOverview({ orgId: resolvedOrgId, openCount: 0, oldestOpen: null, observedOpenIds })
+          return
+        }
+
+        const queuePayload = await api('/dlq/queue?status=open&sort=oldest&limit=1').catch(() => null)
+        if (cancelled) return
+        const items = (queuePayload as { items?: unknown } | null)?.items
+        setQueueOverview({
+          orgId: resolvedOrgId,
+          openCount: open,
+          oldestOpen: Array.isArray(items) && items.length > 0 ? items[0] as DeadLetter : null,
+          observedOpenIds,
+        })
+      })
+      .catch(() => {
+        // Keep the bounded bootstrap-page fallback when the summary is unavailable.
+      })
+    return () => { cancelled = true }
+  }, [impactPollVersion, platformVersion, props.deadLetters, resolvedOrgId])
 
   const openDeadLetters = useMemo(
     () => props.deadLetters.filter((dlq) => dlq.status === 'open'),
     [props.deadLetters],
   )
   const currentQueueOverview = queueOverview?.orgId === resolvedOrgId ? queueOverview : null
-  // A fresh bootstrap page can know about a newly-opened failure before the
-  // overview refetch settles, so never let an older zero-count snapshot mask
-  // visible work. The authoritative count still raises the total when an old
-  // open row lives beyond the capped bootstrap page.
-  const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, openDeadLetters.length)
+  // A fresh bootstrap page can learn about a newly-opened failure after the
+  // count request starts, so rows absent from that request's input snapshot
+  // remain a fail-safe lower bound. Rows the request already observed can be
+  // retired by a later authoritative zero; otherwise a worker-owned terminal
+  // recovery would leave a stale bootstrap row blocking all-clear forever.
+  const unobservedVisibleFailures = currentQueueOverview
+    ? openDeadLetters.filter((deadLetter) => !currentQueueOverview.observedOpenIds.includes(deadLetter.id)).length
+    : openDeadLetters.length
+  const openFailureCount = Math.max(currentQueueOverview?.openCount ?? 0, unobservedVisibleFailures)
 
   const celebrateAllClear = useCallback((request?: RecoveryAllClearRequest | null) => {
     setAllClearDowntimeOverride(request?.downtimeMs ?? null)
@@ -265,30 +351,53 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   }, [])
 
   useEffect(() => {
-    const current = openFailureCount
-    const previous = previousOpenFailuresRef.current
-    previousOpenFailuresRef.current = { orgId: resolvedOrgId, count: current }
-
-    if (current > 0) {
-      setAllClear(false)
-      setAllClearDowntimeOverride(null)
+    if (!ledger) return
+    const previous = previousRecoveryLedgerRef.current
+    previousRecoveryLedgerRef.current = { orgId: resolvedOrgId, value: ledger }
+    if (previous?.orgId !== resolvedOrgId) {
+      pendingVerifiedRecoveryRef.current = null
       return
     }
-    if (previous?.orgId === resolvedOrgId && previous.count > 0) {
-      celebrateAllClear(consumeRecoveryAllClear(resolvedOrgId))
+    if (ledger.totalRecovered > previous.value.totalRecovered) {
+      const current = pendingVerifiedRecoveryRef.current
+      pendingVerifiedRecoveryRef.current = {
+        orgId: resolvedOrgId,
+        totalRecovered: ledger.totalRecovered,
+        downtimeMs:
+          (current?.orgId === resolvedOrgId ? current.downtimeMs : 0)
+          + Math.max(0, ledger.downtimeEndedMs - previous.value.downtimeEndedMs),
+      }
     }
-  }, [celebrateAllClear, openFailureCount, resolvedOrgId])
+  }, [ledger, resolvedOrgId])
+
+  useEffect(() => {
+    const pending = pendingVerifiedRecoveryRef.current
+    if (!pending || pending.orgId !== resolvedOrgId || openFailureCount !== 0) return
+    pendingVerifiedRecoveryRef.current = null
+    celebrateAllClear({ downtimeMs: pending.downtimeMs })
+  }, [celebrateAllClear, ledger, openFailureCount, resolvedOrgId])
+
+  useEffect(() => {
+    if (openFailureCount > 0) {
+      setAllClear(false)
+      setAllClearDowntimeOverride(null)
+    }
+  }, [openFailureCount])
 
   useEffect(() => {
     if (openFailureCount !== 0) return
 
     const pending = consumeRecoveryAllClear(resolvedOrgId)
-    if (pending) celebrateAllClear(pending)
+    if (pending) {
+      pendingVerifiedRecoveryRef.current = null
+      celebrateAllClear(pending)
+    }
 
     const onAllClear = (event: Event) => {
       const request = parseRecoveryAllClearEvent(event, resolvedOrgId)
       if (!request) return
       consumeRecoveryAllClear(resolvedOrgId)
+      pendingVerifiedRecoveryRef.current = null
       celebrateAllClear(request)
     }
     window.addEventListener(RECOVERY_ALL_CLEAR_EVENT, onAllClear)
@@ -520,6 +629,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         allClear={allClear && openFailureCount === 0}
         allClearDowntimeMs={allClearDowntimeOverride ?? metrics?.downtimeEndedMs}
         celebrationTrigger={celebrationTrigger}
+        personalWins={operatorWins}
         onOpenQueue={props.onOpenRecoveryQueue}
       />
 
@@ -593,6 +703,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
         valueEstimate={metrics?.valueEstimate}
         windowDays={metrics?.windowDays ?? 30}
         downtimeEndedMs={metrics?.downtimeEndedMs}
+        ledger={ledger}
         terminalRunsZero={(metrics?.terminalRuns ?? 0) === 0}
       />
 

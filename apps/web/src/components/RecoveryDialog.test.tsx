@@ -635,7 +635,7 @@ describe('<RecoveryDialog />', () => {
   })
 
   describe('cluster mode', () => {
-    it('calls /dlq/cluster-apply (not /dlq/replay) and surfaces "Replayed N of M"', async () => {
+    it('calls /dlq/cluster-apply (not /dlq/replay) and surfaces "Queued N of M"', async () => {
       vi.mocked(api)
         .mockResolvedValueOnce(aiSuggestion)
         // /dlq/validate-fix
@@ -685,8 +685,8 @@ describe('<RecoveryDialog />', () => {
       await waitFor(() => {
         expect(screen.getByText(/Patch applied/i)).toBeInTheDocument()
       }, { timeout: 4000 })
-      expect(screen.getByText(/Replayed 9 of 10/i)).toBeInTheDocument()
-      expect(screen.getByText(/1 failed/i)).toBeInTheDocument()
+      expect(screen.getByText(/Queued 9 of 10/i)).toBeInTheDocument()
+      expect(screen.getByText(/1 could not be queued/i)).toBeInTheDocument()
       expect(screen.getByText(/Show per-row errors/i)).toBeInTheDocument()
 
       const calls = vi.mocked(api).mock.calls.map((call) => call[0])

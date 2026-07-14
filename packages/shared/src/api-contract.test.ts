@@ -6,7 +6,7 @@ describe("v1 API read paths", () => {
   it("keeps the closed path catalog unique", () => {
     const paths = Object.values(V1_READ_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(7);
+    expect(paths).toHaveLength(9);
   });
 
   it("matches exact paths only", () => {

@@ -176,7 +176,7 @@ export type Step =
       priorFailureSignature?: string | null
       preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
       playbookPromotionSource?: RecoveryPlaybookPromotionSource
-      appliedPlaybook?: RecoveryPlaybookSummary
+      playbookUsePending?: boolean
     }
   | { kind: 'error'; message: string }
 

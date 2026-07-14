@@ -239,7 +239,7 @@ describe("explicit use and outcome", () => {
     expect(auditActionMock).toHaveBeenCalledWith(auth, "recovery.playbook.regressed", expect.any(Object));
   });
 
-  it("counts production apply only after a passed sandbox and replayed DLQ", async () => {
+  it("rejects enqueue-only apply evidence even after a passed sandbox", async () => {
     readJsonMock.mockResolvedValueOnce({ deadLetterId: "dlq-a", validationRunId: "validation-ok", phase: "applied" });
     dataMocks.resolveOutcome.mockResolvedValue({
       playbook,
@@ -255,8 +255,40 @@ describe("explicit use and outcome", () => {
 
     const result = await call("POST", "/recovery/playbooks/pb-a/outcome");
     expect(dataMocks.recordValidation).toHaveBeenCalledWith(expect.objectContaining({ succeeded: true }));
+    expect(dataMocks.recordApplied).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ status: 422, payload: { code: "recovery_playbook_apply_required" } });
+  });
+
+  it("confirms an automatically attributed use only after terminal impact exists", async () => {
+    readJsonMock.mockResolvedValueOnce({ deadLetterId: "dlq-a", validationRunId: "validation-ok", phase: "applied" });
+    dataMocks.resolveOutcome.mockResolvedValue({
+      playbook,
+      deadLetter,
+      validationRun: {
+        id: "validation-ok",
+        status: "succeeded",
+        replayMode: "validation",
+        parentRunId: "run-a",
+        inputJson: { workflow, recoveryPlaybookId: "pb-a" },
+      },
+      impactEvent: {
+        deadLetterId: "dlq-a",
+        orgId: "org-a",
+        runId: "run-a",
+        nodeId: "fetch",
+        userId: "operator",
+        recoveredAt: new Date("2026-07-11T10:07:00Z"),
+        downtimeEndedMs: 420_000,
+      },
+    });
+    dataMocks.recordApplied.mockResolvedValue({
+      playbook: { ...playbook, successfulUses: 3 },
+      recorded: false,
+    });
+
+    const result = await call("POST", "/recovery/playbooks/pb-a/outcome");
     expect(dataMocks.recordApplied).toHaveBeenCalledWith(expect.objectContaining({ validationRunId: "validation-ok" }));
-    expect(result).toMatchObject({ payload: { playbook: { successfulUses: 3 } }, status: 200 });
-    expect(auditActionMock).toHaveBeenCalledWith(auth, "recovery.playbook.applied", expect.any(Object));
+    expect(result).toMatchObject({ payload: { playbook: { successfulUses: 3 }, recorded: false }, status: 200 });
+    expect(auditActionMock).not.toHaveBeenCalledWith(auth, "recovery.playbook.applied", expect.any(Object));
   });
 });

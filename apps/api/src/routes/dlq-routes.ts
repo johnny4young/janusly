@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import {
   findMatchingActiveRecoveryPlaybook,
   queryFailureSamples,
+  resolveRecoveryPlaybookOutcomeFacts,
 } from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
 import { DLQReplayAdapter } from "@janusly/engine/src/adapters/dlq-replay";
@@ -35,7 +36,7 @@ import { CLUSTER_MEMBERS_DEFAULT_LIMIT, CLUSTER_MEMBERS_MAX_LIMIT, findClusterMe
 import { countDeadLettersByStatus, decodeRecoveryQueueCursor, getDeadLetter, isDeadLetterStatus, isRecoveryQueueSort, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage } from "../dlq";
 import { RECOVERY_ITEM_SEVERITIES, type RecoveryItemSeverity } from "@janusly/shared";
 import {
-  autoResolveRecoveryItemFromReplay,
+  resolveRecoveryItemForDismiss,
   createRecoveryItemForDeadLetter,
 } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { asRecord, readJson, sendError, sendJson } from "../http";
@@ -65,6 +66,77 @@ function sendReplayConflictIfClaimError(res: import("node:http").ServerResponse,
     sendError(res, "dlq_replay_conflict", "This run can no longer be replayed — it was cancelled or already recovered", 409);
   }
   return true;
+}
+
+type RecoveryPlaybookReplayClaim = {
+  recoveryPlaybookId: string;
+  recoveryValidationRunId: string;
+};
+
+function readRecoveryPlaybookReplayClaim(
+  body: Record<string, unknown>,
+): { claim: RecoveryPlaybookReplayClaim | null; invalid: boolean } {
+  const recoveryPlaybookId = typeof body.recoveryPlaybookId === "string"
+    ? body.recoveryPlaybookId
+    : null;
+  const recoveryValidationRunId = typeof body.recoveryValidationRunId === "string"
+    ? body.recoveryValidationRunId
+    : null;
+  if (!recoveryPlaybookId && !recoveryValidationRunId) return { claim: null, invalid: false };
+  if (!recoveryPlaybookId || !recoveryValidationRunId) return { claim: null, invalid: true };
+  return { claim: { recoveryPlaybookId, recoveryValidationRunId }, invalid: false };
+}
+
+function validationPlaybookId(run: { inputJson: unknown }): string | null {
+  const value = (run.inputJson as { recoveryPlaybookId?: unknown } | null)?.recoveryPlaybookId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function validationWorkflow(run: { inputJson: unknown }): unknown {
+  return (run.inputJson as { workflow?: unknown } | null)?.workflow;
+}
+
+/**
+ * Verify the server-owned facts that causally bind an active playbook and a
+ * fresh successful sandbox to this exact DLQ replay snapshot.
+ */
+async function verifyRecoveryPlaybookReplayClaim(input: {
+  orgId: string;
+  deadLetter: NonNullable<Awaited<ReturnType<typeof getDeadLetter>>>;
+  workflow: Workflow;
+  claim: RecoveryPlaybookReplayClaim;
+}): Promise<boolean> {
+  const facts = await resolveRecoveryPlaybookOutcomeFacts({
+    orgId: input.orgId,
+    playbookId: input.claim.recoveryPlaybookId,
+    deadLetterId: input.deadLetter.id,
+    validationRunId: input.claim.recoveryValidationRunId,
+  });
+  const run = facts.validationRun;
+  const validated = run ? WorkflowSchema.safeParse(validationWorkflow(run)) : null;
+  const sourceNode = input.deadLetter.nodeJson as {
+    type?: unknown;
+    config?: { tool?: unknown };
+  } | null;
+  const signature = normalizeErrorSignature(input.deadLetter.errorJson, {
+    nodeId: input.deadLetter.nodeId,
+    nodeType: typeof sourceNode?.type === "string" ? sourceNode.type : undefined,
+    toolName: typeof sourceNode?.config?.tool === "string" ? sourceNode.config.tool : undefined,
+  }).signature;
+
+  return Boolean(
+    facts.playbook
+    && facts.playbook.status === "active"
+    && facts.playbook.workflowId === input.workflow.id
+    && facts.playbook.signature === signature
+    && run
+    && run.replayMode === "validation"
+    && run.parentRunId === input.deadLetter.runId
+    && run.status === "succeeded"
+    && validationPlaybookId(run) === input.claim.recoveryPlaybookId
+    && validated?.success
+    && computeWorkflowDiff(validated.data, input.workflow).summary.totalChanges === 0
+  );
 }
 
 export const dlqRoutes: Route[] = [
@@ -193,7 +265,8 @@ export const dlqRoutes: Route[] = [
           item.runId,
           item.createdAt ?? null,
         ).catch(() => null);
-        return sendJson(res, { ...item, suspectVersion });
+        const { replayClaimToken: _replayClaimToken, replayClaimedAt: _replayClaimedAt, ...publicItem } = item;
+        return sendJson(res, { ...publicItem, suspectVersion });
       }
       if (status && !isDeadLetterStatus(status)) {
         return sendError(res, "dlq_invalid_status", "Invalid DLQ status", 400);
@@ -231,11 +304,10 @@ export const dlqRoutes: Route[] = [
       // Auto-close the recovery_item linked to this DLQ row (no-op when
       // no item exists). Manual DLQ resolve is not a replay, so keep the
       // linked recovery item's resolution reason honest.
-      await autoResolveRecoveryItemFromReplay({
+      await resolveRecoveryItemForDismiss({
         orgId: auth.orgId,
         deadLetterId: id,
         actor: auth.userId,
-        resolutionReason: "accepted_loss",
         via: "dlq_resolve",
       });
 
@@ -278,11 +350,10 @@ export const dlqRoutes: Route[] = [
           await auditAction(auth, "dlq.resolved", { targetType: "dlq", targetId: id, metadata: { bulk: true } });
           // Manual dismiss is not a replay — keep the linked recovery item's
           // resolution reason honest (accepted_loss), mirroring single resolve.
-          await autoResolveRecoveryItemFromReplay({
+          await resolveRecoveryItemForDismiss({
             orgId: auth.orgId,
             deadLetterId: id,
             actor: auth.userId,
-            resolutionReason: "accepted_loss",
             via: "dlq_resolve",
           });
           resolved += 1;
@@ -409,6 +480,14 @@ export const dlqRoutes: Route[] = [
         deadLetterIds.push(candidate);
       }
 
+      const playbookClaim = readRecoveryPlaybookReplayClaim(body);
+      if (playbookClaim.invalid) {
+        return sendError(res, "recovery_playbook_invalid_body", "recoveryPlaybookId and recoveryValidationRunId must be provided together", 400);
+      }
+      const playbookDeadLetterId = typeof body.recoveryPlaybookDeadLetterId === "string"
+        ? body.recoveryPlaybookDeadLetterId
+        : null;
+
       // Optional applied fix (the representative patch the operator accepted).
       // Validated ONCE through the same gate as `/dlq/validate-fix`; applied
       // per-member below only to cluster members of the SAME workflow whose
@@ -427,12 +506,32 @@ export const dlqRoutes: Route[] = [
         }
       }
 
+
+      if (playbookClaim.claim) {
+        if (
+          !playbookDeadLetterId
+          || !deadLetterIds.includes(playbookDeadLetterId)
+          || !sanitizedFix
+        ) {
+          return sendError(res, "recovery_playbook_outcome_invalid", "Recovery Playbook replay evidence is incomplete", 422);
+        }
+        const representative = await getDeadLetter(auth.orgId, playbookDeadLetterId);
+        if (
+          !representative
+          || representative.status !== "open"
+          || !await verifyRecoveryPlaybookReplayClaim({
+            orgId: auth.orgId,
+            deadLetter: representative,
+            workflow: sanitizedFix,
+            claim: playbookClaim.claim,
+          })
+        ) {
+          return sendError(res, "recovery_playbook_outcome_invalid", "Recovery Playbook replay evidence cannot be verified", 422);
+        }
+      }
+
       const errors: Array<{ deadLetterId: string; error: string }> = [];
       let replayed = 0;
-      // Sum (now - failure createdAt) across successfully replayed
-      // members — "how much downtime this apply just ended". Rows without a
-      // createdAt (legacy) contribute 0 rather than poisoning the sum.
-      let downtimeEndedMs = 0;
       const totalInCluster = deadLetterIds.length;
 
       for (let i = 0; i < deadLetterIds.length; i += 1) {
@@ -456,34 +555,33 @@ export const dlqRoutes: Route[] = [
           // Apply the fix only to same-workflow members whose failing node
           // survives it; every other member re-runs its own snapshot.
           const { workflow: replayWorkflow, fixNode } = pickClusterReplayWorkflow(workflow, item.nodeId, sanitizedFix);
-          await dlqReplay.replayDeadLetter({
-            runId: item.runId,
-            workflow: replayWorkflow,
-            node: fixNode ?? NodeSchema.parse(item.nodeJson),
-          });
-          await markDeadLetterReplayed(auth.orgId, id);
-          // Ensure the recovery_item exists (idempotent) so the cluster
-          // accounts for it AND auto-close it because the replay succeeded.
+          // Ensure ownership exists before the replay job can reach terminal
+          // success. Passing the verified cluster signature preserves
+          // debounce grouping for child occurrences.
           await createRecoveryItemForDeadLetter({
             orgId: auth.orgId,
             deadLetterId: id,
             createdBy: auth.userId,
             workflowId: workflow.id ?? null,
+            errorSignature: clusterSignature,
           });
-          await autoResolveRecoveryItemFromReplay({
-            orgId: auth.orgId,
+          await dlqReplay.replayDeadLetter({
+            runId: item.runId,
+            workflow: replayWorkflow,
+            node: fixNode ?? NodeSchema.parse(item.nodeJson),
             deadLetterId: id,
-            actor: auth.userId,
+            recoveryActorId: auth.userId,
+            ...(playbookClaim.claim && id === playbookDeadLetterId && fixNode
+              ? playbookClaim.claim
+              : {}),
           });
+          await markDeadLetterReplayed(auth.orgId, id);
           await auditAction(auth, "recovery.cluster_apply", { targetType: "dlq", targetId: id, metadata: {
             clusterSignature,
             sequenceIndex: i,
             totalInCluster,
           } });
           replayed += 1;
-          if (item.createdAt) {
-            downtimeEndedMs += Math.max(0, Date.now() - item.createdAt.getTime());
-          }
         } catch (err) {
           errors.push({
             deadLetterId: id,
@@ -492,7 +590,10 @@ export const dlqRoutes: Route[] = [
         }
       }
 
-      return sendJson(res, { replayed, failed: errors.length, errors, downtimeEndedMs });
+      // Legacy field remains present, but the synchronous enqueue response
+      // cannot truthfully claim any downtime ended. Terminal impact is read
+      // from `/recovery/ledger` and `/recovery/metrics` after node success.
+      return sendJson(res, { replayed, failed: errors.length, errors, downtimeEndedMs: 0 });
     } },
   // Bulk replay across an arbitrary multi-select — the multi-select
   // equivalent of POST /dlq/replay, and the retry-many sibling of
@@ -541,20 +642,30 @@ export const dlqRoutes: Route[] = [
           continue;
         }
         try {
+          const workflow = WorkflowSchema.parse(item.workflowJson);
+          const node = NodeSchema.parse(item.nodeJson);
+          const signature = normalizeErrorSignature(item.errorJson, {
+            nodeId: item.nodeId,
+            nodeType: node.type,
+            toolName: typeof node.config?.tool === "string" ? node.config.tool : undefined,
+          }).signature;
+          await createRecoveryItemForDeadLetter({
+            orgId: auth.orgId,
+            deadLetterId: id,
+            createdBy: auth.userId,
+            workflowId: workflow.id ?? null,
+            errorSignature: signature,
+          });
           await dlqReplay.replayDeadLetter({
             runId: item.runId,
-            workflow: WorkflowSchema.parse(item.workflowJson),
-            node: NodeSchema.parse(item.nodeJson),
+            workflow,
+            node,
+            deadLetterId: id,
+            recoveryActorId: auth.userId,
           });
           await markDeadLetterReplayed(auth.orgId, id);
           await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: id, metadata: { bulk: true, sequenceIndex: i, total } });
-          // Auto-close the recovery_item linked to this DLQ row, if any —
-          // mirrors single /dlq/replay (no cluster-apply ensure-then-close).
-          await autoResolveRecoveryItemFromReplay({
-            orgId: auth.orgId,
-            deadLetterId: id,
-            actor: auth.userId,
-          });
+          // The linked recovery item remains open until terminal node success.
           replayed += 1;
         } catch (err) {
           errors.push({ deadLetterId: id, error: err instanceof Error ? err.message : String(err) });
@@ -601,8 +712,43 @@ export const dlqRoutes: Route[] = [
           node = failingNode;
         }
 
+        const playbookClaim = readRecoveryPlaybookReplayClaim(body);
+        if (playbookClaim.invalid) {
+          return sendError(res, "recovery_playbook_invalid_body", "recoveryPlaybookId and recoveryValidationRunId must be provided together", 400);
+        }
+        if (
+          playbookClaim.claim
+          && !await verifyRecoveryPlaybookReplayClaim({
+            orgId: auth.orgId,
+            deadLetter: item,
+            workflow,
+            claim: playbookClaim.claim,
+          })
+        ) {
+          return sendError(res, "recovery_playbook_outcome_invalid", "Recovery Playbook replay evidence cannot be verified", 422);
+        }
+
         try {
-          await dlqReplay.replayDeadLetter({ runId: item.runId, workflow, node });
+          const signature = normalizeErrorSignature(item.errorJson, {
+            nodeId: item.nodeId,
+            nodeType: node.type,
+            toolName: typeof node.config?.tool === "string" ? node.config.tool : undefined,
+          }).signature;
+          await createRecoveryItemForDeadLetter({
+            orgId: auth.orgId,
+            deadLetterId: body.deadLetterId,
+            createdBy: auth.userId,
+            workflowId: workflow.id ?? null,
+            errorSignature: signature,
+          });
+          await dlqReplay.replayDeadLetter({
+            runId: item.runId,
+            workflow,
+            node,
+            deadLetterId: body.deadLetterId,
+            recoveryActorId: auth.userId,
+            ...(playbookClaim.claim ?? {}),
+          });
         } catch (err) {
           if (sendReplayConflictIfClaimError(res, err)) return;
           throw err;
@@ -610,13 +756,6 @@ export const dlqRoutes: Route[] = [
 
         await markDeadLetterReplayed(auth.orgId, body.deadLetterId);
         await auditAction(auth, "dlq.replayed", { targetType: "dlq", targetId: body.deadLetterId });
-
-        // Auto-close the recovery_item linked to this DLQ row, if any.
-        await autoResolveRecoveryItemFromReplay({
-          orgId: auth.orgId,
-          deadLetterId: body.deadLetterId,
-          actor: auth.userId,
-        });
 
         return sendJson(res, { ok: true });
       }

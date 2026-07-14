@@ -15,6 +15,8 @@ import {
   getOrgConfigSnapshot,
   listCalibrations,
   queryRecoveryFeedbackHealth,
+  queryOperatorRecoveryCount,
+  queryRecoveryLedger,
   recordRecoveryFeedback,
   queryRecoveryMetricsSignals,
   queryRecoveryHeatmap,
@@ -36,7 +38,11 @@ import { getDeadLetter } from "../dlq";
 import { asRecord, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
 import type { Route } from "../routes";
-import { recoveryMetricsContract } from "../api-contracts";
+import {
+  recoveryLedgerContract,
+  recoveryMetricsContract,
+  recoveryMyWinsContract,
+} from "../api-contracts";
 
 /** Extract the saved workflow identifier from a DLQ snapshot without trusting client input. */
 function workflowIdFromSnapshot(workflowJson: unknown): string | null {
@@ -71,6 +77,28 @@ export const recoveryRoutes: Route[] = [
       const metrics = composeRecoveryMetrics(signals, windowDays, snapshot.value);
       setCachedRecoveryMetrics(auth.orgId, windowDays, metrics);
       return sendJson(res, metrics);
+    } },
+
+  // Lifetime measured recovery value. This remains separate from the rolling
+  // metrics cache because it is a constant-time durable projection and has no
+  // window-dependent assumptions.
+  { method: "GET", match: "/recovery/ledger",
+    role: "viewer",
+    contract: recoveryLedgerContract,
+    handler: async ({ res, auth }) => sendJson(res, await queryRecoveryLedger(auth.orgId)) },
+
+  // Personal momentum for the authenticated operator. The route accepts no
+  // user id from the caller; identity comes exclusively from AuthContext.
+  { method: "GET", match: (url) => url === "/recovery/my-wins" || url.startsWith("/recovery/my-wins?"),
+    role: "viewer",
+    contract: recoveryMyWinsContract,
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const rawDays = Number(url.searchParams.get("days") ?? Number.NaN);
+      const windowDays = Number.isInteger(rawDays) ? Math.min(90, Math.max(1, rawDays)) : 30;
+      const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+      const recovered = await queryOperatorRecoveryCount(auth.orgId, auth.userId, since);
+      return sendJson(res, { recovered, windowDays });
     } },
 
   // Read-only view of the curves that already calibrate patch suggestions.

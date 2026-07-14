@@ -101,6 +101,21 @@ const runListColumns = {
   createdAt: runs.createdAt,
 };
 
+// Public run-node projection shared by legacy and `/v1` detail reads.
+// Recovery claim columns are internal worker CAS state and must never become
+// an accidental wire-contract addition through Drizzle's select-all shape.
+const runNodePublicColumns = {
+  id: runNodes.id,
+  runId: runNodes.runId,
+  nodeId: runNodes.nodeId,
+  status: runNodes.status,
+  stateJson: runNodes.stateJson,
+  attempts: runNodes.attempts,
+  startedAt: runNodes.startedAt,
+  finishedAt: runNodes.finishedAt,
+  errorJson: runNodes.errorJson,
+};
+
 export const runsRoutes: Route[] = [
   // Live run stream (SSE over Redis pub/sub). MUST precede the `/runs` list
   // matcher below — both are GET and `/runs/<id>/stream` starts with `/runs`,
@@ -413,7 +428,7 @@ export const runsRoutes: Route[] = [
       if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const nodes = await db.select(runNodePublicColumns).from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const cursor = parseEventsCursor(url.searchParams.get("eventsCursor"));
       // Composite (createdAt, id) keyset cursor: events sharing exact createdAt
@@ -448,7 +463,7 @@ export const runsRoutes: Route[] = [
       if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
       const run = await db.select().from(runs).where(eq(runs.id, runId));
       if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
-      const nodes = await db.select().from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
+      const nodes = await db.select(runNodePublicColumns).from(runNodes).where(eq(runNodes.runId, runId)).orderBy(asc(runNodes.startedAt), asc(runNodes.nodeId));
       const limit = parseEventsLimit(url.searchParams.get("eventsLimit"), RUN_EVENTS_DEFAULT_LIMIT, RUN_EVENTS_MAX_LIMIT);
       const rows = await db
         .select()

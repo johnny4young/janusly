@@ -1,9 +1,20 @@
 /** Real-Postgres proof for Recovery Playbook versioning and outcome CAS. */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { db, recoveryPlaybooks, runs, workflowVersions, workflows } from "@janusly/db";
+import {
+  auditLogs,
+  db,
+  deadLetters,
+  recoveryImpactEvents,
+  recoveryImpactRollups,
+  recoveryPlaybooks,
+  runs,
+  workflowVersions,
+  workflows,
+} from "@janusly/db";
+import { recordRecoveryImpactTx } from "../recoveryMetricsRepo";
 import {
   activateRecoveryPlaybook,
   createRecoveryPlaybookDraft,
@@ -28,6 +39,10 @@ const workflow = {
 };
 
 afterAll(async () => {
+  await db.delete(recoveryImpactEvents).where(eq(recoveryImpactEvents.orgId, ORG));
+  await db.delete(recoveryImpactRollups).where(eq(recoveryImpactRollups.orgId, ORG));
+  await db.delete(auditLogs).where(eq(auditLogs.orgId, ORG));
+  await db.delete(deadLetters).where(eq(deadLetters.orgId, ORG));
   await db.delete(recoveryPlaybooks).where(eq(recoveryPlaybooks.orgId, ORG));
   await db.delete(runs).where(eq(runs.orgId, ORG));
   await db.delete(workflowVersions).where(eq(workflowVersions.orgId, ORG));
@@ -145,5 +160,99 @@ describe("Recovery Playbooks (real Postgres)", () => {
     });
     expect(regression.playbook).toMatchObject({ status: "retired", regressions: 1, successfulUses: 2 });
     expect(await findMatchingActiveRecoveryPlaybook(ORG, WORKFLOW, SIGNATURE)).toBeNull();
+  });
+
+  it("credits one successful use only when terminal recovery impact commits", async () => {
+    const workflowId = `${WORKFLOW}-terminal`;
+    const versionId = `wv-terminal-${RUN_TAG}`;
+    const validationRunId = `validation-terminal-${RUN_TAG}`;
+    const deadLetterId = `dlq-terminal-${RUN_TAG}`;
+    const productionRunId = `production-terminal-${RUN_TAG}`;
+    const nodeId = `fetch-terminal-${RUN_TAG}`;
+    const recoveredAt = new Date();
+    const terminalWorkflow = { ...workflow, id: workflowId };
+
+    await db.insert(workflows).values({
+      id: workflowId,
+      orgId: ORG,
+      name: terminalWorkflow.name,
+      createdBy: "operator",
+    });
+    await db.insert(workflowVersions).values({
+      id: versionId,
+      orgId: ORG,
+      workflowId,
+      version: 1,
+      dagJson: terminalWorkflow,
+      createdBy: "operator",
+    });
+    const draft = await createRecoveryPlaybookDraft({
+      orgId: ORG,
+      workflowId,
+      signature: `${SIGNATURE}:terminal`,
+      title: "Terminally verified retry",
+      instructionsMarkdown: "Count this use only after production succeeds.",
+      evidenceRequirementsJson: { requiredOnEveryUse: ["sandbox_validation"] },
+      sourceWorkflowVersionId: versionId,
+      approachLabel: "add_retry",
+      validationRunId,
+      actor: "operator",
+    });
+    expect((await activateRecoveryPlaybook(ORG, draft.playbook.id, "operator")).kind).toBe("ok");
+
+    await db.insert(runs).values({
+      id: validationRunId,
+      orgId: ORG,
+      workflowVersionId: versionId,
+      status: "succeeded",
+      replayMode: "validation",
+    });
+    await db.insert(deadLetters).values({
+      id: deadLetterId,
+      orgId: ORG,
+      runId: productionRunId,
+      nodeId,
+      status: "replayed",
+      replayClaimedAt: new Date(recoveredAt.getTime() - 1_000),
+      replayedAt: new Date(recoveredAt.getTime() - 500),
+      createdAt: new Date(recoveredAt.getTime() - 60_000),
+      workflowJson: terminalWorkflow,
+      nodeJson: { id: nodeId, type: "http", config: {} },
+      errorJson: { message: "fixture failure" },
+    });
+
+    await expect(db.transaction((tx) => recordRecoveryImpactTx(tx, {
+      deadLetterId,
+      userId: "operator",
+      playbookId: draft.playbook.id,
+      validationRunId,
+      runId: productionRunId,
+      nodeId,
+      recoveredAt,
+    }))).resolves.toBe(true);
+    await expect(db.transaction((tx) => recordRecoveryImpactTx(tx, {
+      deadLetterId,
+      userId: "operator",
+      playbookId: draft.playbook.id,
+      validationRunId,
+      runId: productionRunId,
+      nodeId,
+      recoveredAt: new Date(recoveredAt.getTime() + 1_000),
+    }))).resolves.toBe(false);
+
+    expect(await getRecoveryPlaybook(ORG, draft.playbook.id)).toMatchObject({
+      successfulUses: 1,
+      lastAppliedValidationRunId: validationRunId,
+    });
+    const [validationRun] = await db.select({
+      appliedAt: runs.recoveryPlaybookAppliedRecordedAt,
+    }).from(runs).where(and(eq(runs.orgId, ORG), eq(runs.id, validationRunId))).limit(1);
+    expect(validationRun?.appliedAt).toEqual(recoveredAt);
+    const appliedAudits = await db.select({ id: auditLogs.id }).from(auditLogs).where(and(
+      eq(auditLogs.orgId, ORG),
+      eq(auditLogs.action, "recovery.playbook.applied"),
+      eq(auditLogs.targetId, draft.playbook.id),
+    ));
+    expect(appliedAudits).toHaveLength(1);
   });
 });

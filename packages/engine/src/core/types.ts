@@ -107,12 +107,15 @@ export type ExecuteQueuedNodeInput = {
   workflow: Workflow;
   node: WorkflowNode;
   attempt?: number;
+  /** Present only for a DLQ replay; rejects stale workers from an older replay generation. */
+  recoveryClaimToken?: string;
 };
 
 /**
  * Input the runtime hands to `QueueAdapter.enqueueNode` to schedule a node.
  *
- * The payload is deliberately SLIM — `{ runId, nodeId }` only. The full
+ * The payload is deliberately SLIM — identifiers plus an optional replay
+ * generation token. The full
  * workflow is NOT shipped in every BullMQ job: the worker reloads it once per
  * job from `runs.inputJson.workflow` (the authoritative snapshot, updated on
  * replay) and resolves the node by id. This keeps a 100-node run from writing
@@ -123,10 +126,14 @@ export type EnqueueNodeInput = {
   nodeId: string;
   delayMs?: number;
   attempt?: number;
+  /** DLQ replay generation; retained across engine retries. */
+  recoveryClaimToken?: string;
 };
 
 /** Payload the queue adapter writes when a node exhausts its retries. */
 export type DeadLetterInput = {
+  /** Optional deterministic id used by integration callers and idempotent producers. */
+  deadLetterId?: string;
   runId: string;
   /** Org that owns the failed run. Required for multi-tenant DLQ reads. */
   orgId: string;
@@ -138,12 +145,30 @@ export type DeadLetterInput = {
   error: SerializedError;
 };
 
+/**
+ * Generation-owned terminal failure persisted by the queue/DLQ boundary.
+ * The node transition, dead-letter row, node event, and run failure commit
+ * together; callers must not split those writes across adapters.
+ */
+export type TerminalFailureInput = DeadLetterInput & {
+  /** Replay generation that must still own the running node. */
+  recoveryClaimToken?: string;
+};
+
 /** Payload the DLQ replay adapter accepts when re-enqueueing a failed node. */
 export type DeadLetterReplayInput = {
   runId: string;
   workflow: Workflow;
   node: WorkflowNode;
   attempt?: number;
+  /** DLQ identity whose terminal success may become verified recovery impact. */
+  deadLetterId?: string | null;
+  /** Authenticated operator or system actor that initiated the replay. */
+  recoveryActorId?: string | null;
+  /** Active playbook explicitly selected for this production replay. */
+  recoveryPlaybookId?: string | null;
+  /** Fresh successful sandbox run that attested `recoveryPlaybookId`. */
+  recoveryValidationRunId?: string | null;
 };
 
 /** Hint used by the runtime when scanning for newly-ready downstream nodes. */
@@ -160,15 +185,15 @@ export interface ExecutionStore {
   /** Stable per-run metadata (orgId/workflow/createdBy) — `null` when the run row is absent. */
   getRunMetadata(runId: string): Promise<RunMetadata | null>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
-  markNodeQueued(runId: string, nodeId: string, attempt?: number): Promise<void>;
+  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean>;
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
   /** Conditional `queued → running` transition. Returns `true` on a successful claim, `false` when the row had already advanced past `queued`. */
-  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
-  markNodeSucceeded(runId: string, nodeId: string, output: unknown): Promise<void>;
+  markNodeRunning(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean>;
+  markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string): Promise<boolean>;
   /** Combine the `succeeded` transition + its `node.succeeded` event in one transaction (the hot completion path). */
-  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number): Promise<void>;
-  markNodeFailed(runId: string, nodeId: string, error: SerializedError): Promise<void>;
-  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
+  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number, recoveryClaimToken?: string): Promise<boolean>;
+  markNodeFailed(runId: string, nodeId: string, error: SerializedError, recoveryClaimToken?: string): Promise<boolean>;
+  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown, recoveryClaimToken?: string): Promise<boolean>;
   markNodeSkipped(runId: string, nodeId: string, metadata?: unknown): Promise<void>;
   appendEvent(event: WorkflowEvent): Promise<void>;
   updateRunStatusFromNodes(runId: string): Promise<void>;
@@ -177,6 +202,9 @@ export interface ExecutionStore {
 /** Queue boundary the runtime uses to schedule work + (optionally) emit dead letters. */
 export interface QueueAdapter {
   enqueueNode(input: EnqueueNodeInput): Promise<void>;
+  /** Atomically persist an exhausted attempt and its DLQ/timeline effects. */
+  persistTerminalFailure(input: TerminalFailureInput): Promise<boolean>;
+  /** Used by the stalled-node reaper after it has already acquired its CAS. */
   enqueueDeadLetter?(input: DeadLetterInput): Promise<void>;
 }
 

@@ -8,13 +8,11 @@
  */
 
 import { lazy, Suspense } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, RefreshCw } from 'lucide-react'
 import { useT } from '../../i18n'
 import { RecoveryDeltaCard } from '../RecoveryDeltaCard'
-import { formatDowntime } from '../recovery-center/helpers'
-import { CelebrationBurst } from '../recovery-center/CelebrationBurst'
 import type { ClusterApplyResult, PreSaveBeforeSnapshot } from './types'
-import type { RecoveryPlaybookPromotionSource, RecoveryPlaybookSummary } from './types'
+import type { RecoveryPlaybookPromotionSource } from './types'
 
 const PlaybookPromotionCard = lazy(() => import('./PlaybookPromotionCard').then((module) => ({
   default: module.PlaybookPromotionCard,
@@ -28,7 +26,7 @@ export function AppliedBody({
   priorFailureSignature,
   preSaveBeforeSnapshot,
   playbookPromotionSource,
-  appliedPlaybook,
+  playbookUsePending,
 }: {
   runId?: string
   cluster?: ClusterApplyResult
@@ -37,35 +35,19 @@ export function AppliedBody({
   priorFailureSignature?: string | null
   preSaveBeforeSnapshot?: PreSaveBeforeSnapshot | null
   playbookPromotionSource?: RecoveryPlaybookPromotionSource
-  appliedPlaybook?: RecoveryPlaybookSummary
+  playbookUsePending?: boolean
 }) {
   const { t } = useT()
   const ribbon = cluster ? (
     (() => {
       const total = cluster.replayed + cluster.failed
-      // Name the downtime this apply just ended.
-      // Absent/0 downtimeEndedMs (legacy rows, zero-clock edge) → no line,
-      // never a NaN string.
-      const showDowntime = cluster.replayed > 0
-        && typeof cluster.downtimeEndedMs === 'number'
-        && Number.isFinite(cluster.downtimeEndedMs)
-        && cluster.downtimeEndedMs > 0
       return (
         <div className="we-recovery-success" role="alert">
-          {cluster.replayed > 0 && <CelebrationBurst trigger={cluster.replayed} />}
           <CheckCircle2 size={14} aria-hidden="true" />
           <div>
             <strong>{t('recoveryDialog.applied.title')}</strong>
             {' '}{t('recoveryDialog.applied.replayedNofM', { replayed: cluster.replayed, total })}
             {cluster.failed > 0 ? `; ${t('recoveryDialog.applied.numFailed', { count: cluster.failed })}` : ''}.
-            {showDowntime && (
-              <p className="we-recovery-cluster-celebration" data-testid="cluster-recovered-line">
-                {t('recoveryDialog.clusterRecovered', {
-                  count: cluster.replayed,
-                  duration: formatDowntime(cluster.downtimeEndedMs as number),
-                })}
-              </p>
-            )}
             {cluster.errors.length > 0 ? (
               <details className="we-recovery-cluster-errors">
                 <summary>{t('recoveryDialog.applied.showRowErrors', { count: cluster.errors.length })}</summary>
@@ -100,12 +82,12 @@ export function AppliedBody({
   const nextSteps = (
     <p className="helper-text we-recovery-applied-next">{t('recoveryDialog.applied.nextSteps')}</p>
   )
-  const playbookResult = appliedPlaybook ? (
-    <section className="we-recovery-playbook-promotion we-recovery-playbook-promotion--active" data-testid="recovery-playbook-use-recorded" role="status">
-      <CheckCircle2 size={18} aria-hidden="true" />
+  const playbookResult = playbookUsePending ? (
+    <section className="we-recovery-playbook-promotion we-recovery-playbook-promotion--active" data-testid="recovery-playbook-use-pending" role="status">
+      <RefreshCw size={18} aria-hidden="true" />
       <div>
-        <strong>{t('recoveryDialog.playbook.useRecorded')}</strong>
-        <p className="helper-text">{t('recoveryDialog.playbook.useRecordedBody', { count: appliedPlaybook.successfulUses })}</p>
+        <strong>{t('recoveryDialog.playbook.usePending')}</strong>
+        <p className="helper-text">{t('recoveryDialog.playbook.usePendingBody')}</p>
       </div>
     </section>
   ) : playbookPromotionSource ? (

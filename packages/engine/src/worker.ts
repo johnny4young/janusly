@@ -307,7 +307,14 @@ const runtime = new WorkflowRuntime(
 
 type ResolvedJob =
   | { skip: true }
-  | { skip: false; runId: string; node: z.infer<typeof NodeSchema>; workflow: Workflow };
+  | {
+      skip: false;
+      runId: string;
+      node: z.infer<typeof NodeSchema>;
+      workflow: Workflow;
+      attempt: number;
+      recoveryClaimToken?: string;
+    };
 
 /**
  * Resolve a slim `execute-node` job (`{ runId, nodeId }`) into the full
@@ -335,6 +342,15 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   if (typeof obj.nodeId !== "string" || obj.nodeId.length === 0) {
     throw new UnrecoverableError("Invalid job data: missing nodeId");
   }
+  if (
+    obj.recoveryClaimToken !== undefined
+    && (typeof obj.recoveryClaimToken !== "string" || obj.recoveryClaimToken.length === 0)
+  ) {
+    throw new UnrecoverableError("Invalid job data: invalid recoveryClaimToken");
+  }
+  const attempt = typeof obj.attempt === "number" && Number.isSafeInteger(obj.attempt) && obj.attempt > 0
+    ? obj.attempt
+    : 1;
 
   const { found, workflow: rawWorkflow } = await loadRunWorkflowRaw(obj.runId);
   if (!found) {
@@ -349,7 +365,14 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   if (!node) {
     throw new UnrecoverableError(`Node ${obj.nodeId} not found in workflow for run ${obj.runId}`);
   }
-  return { skip: false, runId: obj.runId, node, workflow: parsed.workflow };
+  return {
+    skip: false,
+    runId: obj.runId,
+    node,
+    workflow: parsed.workflow,
+    attempt,
+    ...(typeof obj.recoveryClaimToken === "string" ? { recoveryClaimToken: obj.recoveryClaimToken } : {}),
+  };
 }
 
 export const worker = new Worker(
@@ -404,10 +427,10 @@ export const worker = new Worker(
     }
     const resolved = await resolveJobData(job.data);
     if (resolved.skip) return;
-    const { runId, node, workflow } = resolved;
+    const { runId, node, workflow, attempt, recoveryClaimToken } = resolved;
     await withSpan(
       "workflow.node.execute",
-      () => runtime.executeQueuedNode({ runId, node, workflow }),
+      () => runtime.executeQueuedNode({ runId, node, workflow, attempt, recoveryClaimToken }),
       { "run.id": runId, "node.id": node.id, "node.type": node.type },
     );
   },

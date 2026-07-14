@@ -28,6 +28,7 @@ import {
   db,
   deadLetters,
   recoveryFeedback,
+  recoveryImpactEvents,
   recoveryPlaybooks,
   runs,
   workflowVersions,
@@ -153,8 +154,9 @@ export async function resolveRecoveryPlaybookOutcomeFacts(input: {
   playbook: RecoveryPlaybook | null;
   deadLetter: typeof deadLetters.$inferSelect | null;
   validationRun: typeof runs.$inferSelect | null;
+  impactEvent: typeof recoveryImpactEvents.$inferSelect | null;
 }> {
-  const [playbook, deadLetterRows, runRows] = await Promise.all([
+  const [playbook, deadLetterRows, runRows, impactRows] = await Promise.all([
     getRecoveryPlaybook(input.orgId, input.playbookId),
     db.select().from(deadLetters).where(and(
       eq(deadLetters.orgId, input.orgId),
@@ -164,11 +166,16 @@ export async function resolveRecoveryPlaybookOutcomeFacts(input: {
       eq(runs.orgId, input.orgId),
       eq(runs.id, input.validationRunId),
     )).limit(1),
+    db.select().from(recoveryImpactEvents).where(and(
+      eq(recoveryImpactEvents.orgId, input.orgId),
+      eq(recoveryImpactEvents.deadLetterId, input.deadLetterId),
+    )).limit(1),
   ]);
   return {
     playbook,
     deadLetter: deadLetterRows[0] ?? null,
     validationRun: runRows[0] ?? null,
+    impactEvent: impactRows[0] ?? null,
   };
 }
 
@@ -413,7 +420,7 @@ export async function recordRecoveryPlaybookValidationOutcome(input: {
     const currentRows = await tx.select().from(recoveryPlaybooks).where(and(
       eq(recoveryPlaybooks.orgId, input.orgId),
       eq(recoveryPlaybooks.id, input.id),
-    )).limit(1);
+    )).limit(1).for("update");
     if (!currentRows[0]) return { playbook: null, recorded: false };
 
     const claimed = await tx.update(runs).set({
@@ -446,44 +453,62 @@ export async function recordRecoveryPlaybookValidationOutcome(input: {
   });
 }
 
-/** Increment successful use once for a passed validation run. */
-export async function recordRecoveryPlaybookApplied(input: {
+type RecoveryPlaybookTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export type RecordRecoveryPlaybookAppliedInput = {
   orgId: string;
   id: string;
   validationRunId: string;
   actor: string | null;
-}): Promise<{ playbook: RecoveryPlaybook | null; recorded: boolean }> {
-  const now = new Date();
-  return db.transaction(async (tx) => {
-    const currentRows = await tx.select().from(recoveryPlaybooks).where(and(
-      eq(recoveryPlaybooks.orgId, input.orgId),
-      eq(recoveryPlaybooks.id, input.id),
-    )).limit(1);
-    const current = currentRows[0];
-    if (!current || toPlaybook(current).status !== "active") {
-      return { playbook: current ? toPlaybook(current) : null, recorded: false };
-    }
+  /** Terminal production-success timestamp; defaults to the current time for legacy callers. */
+  recordedAt?: Date;
+};
 
-    const claimed = await tx.update(runs).set({
-      recoveryPlaybookAppliedRecordedAt: now,
-    }).where(and(
-      eq(runs.orgId, input.orgId),
-      eq(runs.id, input.validationRunId),
-      eq(runs.replayMode, "validation"),
-      isNull(runs.recoveryPlaybookAppliedRecordedAt),
-    )).returning({ id: runs.id });
-    if (!claimed[0]) return { playbook: toPlaybook(current), recorded: false };
+/**
+ * Increment successful use once for a passed validation run inside the
+ * caller's transaction. Terminal recovery uses this so node success, impact,
+ * and the playbook counter cannot commit independently.
+ */
+export async function recordRecoveryPlaybookAppliedTx(
+  tx: RecoveryPlaybookTx,
+  input: RecordRecoveryPlaybookAppliedInput,
+): Promise<{ playbook: RecoveryPlaybook | null; recorded: boolean }> {
+  const now = input.recordedAt ?? new Date();
+  const currentRows = await tx.select().from(recoveryPlaybooks).where(and(
+    eq(recoveryPlaybooks.orgId, input.orgId),
+    eq(recoveryPlaybooks.id, input.id),
+  )).limit(1).for("update");
+  const current = currentRows[0];
+  if (!current || toPlaybook(current).status !== "active") {
+    return { playbook: current ? toPlaybook(current) : null, recorded: false };
+  }
 
-    const rows = await tx.update(recoveryPlaybooks).set({
-      successfulUses: sql`${recoveryPlaybooks.successfulUses} + 1`,
-      lastAppliedValidationRunId: input.validationRunId,
-      updatedAt: now,
-      updatedBy: input.actor,
-    }).where(and(
-      eq(recoveryPlaybooks.orgId, input.orgId),
-      eq(recoveryPlaybooks.id, input.id),
-      eq(recoveryPlaybooks.status, "active"),
-    )).returning();
-    return { playbook: rows[0] ? toPlaybook(rows[0]) : null, recorded: Boolean(rows[0]) };
-  });
+  const claimed = await tx.update(runs).set({
+    recoveryPlaybookAppliedRecordedAt: now,
+  }).where(and(
+    eq(runs.orgId, input.orgId),
+    eq(runs.id, input.validationRunId),
+    eq(runs.replayMode, "validation"),
+    isNull(runs.recoveryPlaybookAppliedRecordedAt),
+  )).returning({ id: runs.id });
+  if (!claimed[0]) return { playbook: toPlaybook(current), recorded: false };
+
+  const rows = await tx.update(recoveryPlaybooks).set({
+    successfulUses: sql`${recoveryPlaybooks.successfulUses} + 1`,
+    lastAppliedValidationRunId: input.validationRunId,
+    updatedAt: now,
+    updatedBy: input.actor,
+  }).where(and(
+    eq(recoveryPlaybooks.orgId, input.orgId),
+    eq(recoveryPlaybooks.id, input.id),
+    eq(recoveryPlaybooks.status, "active"),
+  )).returning();
+  return { playbook: rows[0] ? toPlaybook(rows[0]) : null, recorded: Boolean(rows[0]) };
+}
+
+/** Increment successful use once for a terminally successful production replay. */
+export async function recordRecoveryPlaybookApplied(
+  input: RecordRecoveryPlaybookAppliedInput,
+): Promise<{ playbook: RecoveryPlaybook | null; recorded: boolean }> {
+  return db.transaction((tx) => recordRecoveryPlaybookAppliedTx(tx, input));
 }

@@ -78,4 +78,19 @@ describe('<RecoveryCenterHero /> (browser smoke)', () => {
     )
     expect(screen.getByTestId('recovery-center-all-clear-summary')).not.toHaveTextContent('clean streak')
   })
+
+  it('shows personal recovery momentum only in the calm hero state', () => {
+    const personalWins = { recovered: 3, windowDays: 30 }
+    const { rerender } = render(<RecoveryCenterHero {...baseProps} personalWins={personalWins} />)
+
+    const wins = screen.getByTestId('recovery-center-personal-wins')
+    expect(wins).toHaveTextContent('You recovered 3 failures in the last 30 days')
+    expect(wins.getBoundingClientRect().height).toBeGreaterThan(0)
+
+    rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} openFailures={1} />)
+    expect(screen.queryByTestId('recovery-center-personal-wins')).toBeNull()
+
+    rerender(<RecoveryCenterHero {...baseProps} personalWins={personalWins} allClear />)
+    expect(screen.queryByTestId('recovery-center-personal-wins')).toBeNull()
+  })
 })

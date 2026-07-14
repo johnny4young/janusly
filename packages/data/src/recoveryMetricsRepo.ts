@@ -1,6 +1,6 @@
 /**
- * Repository for the org-level recovery metrics dashboard. Six parallel
- * windowed queries that the engine layer (`composeRecoveryMetrics` in
+ * Repository for org-level recovery metrics and durable impact summaries.
+ * Windowed queries feed the engine layer (`composeRecoveryMetrics` in
  * `@janusly/engine`) rolls up into the UI-friendly shape rendered by
  * `OperationsPage.tsx`.
  *
@@ -25,9 +25,22 @@
  */
 
 import { db } from "@janusly/db";
-import { deadLetters, recoveryItems, runEvents, runNodes, runs, usageEvents } from "@janusly/db";
-import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
+import {
+  auditLogs,
+  deadLetters,
+  recoveryImpactEvents,
+  recoveryImpactRollups,
+  recoveryItemChildren,
+  recoveryItems,
+  runEvents,
+  runNodes,
+  runs,
+  usageEvents,
+} from "@janusly/db";
+import { and, eq, gte, or, sql } from "drizzle-orm";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
+import { safePersistPayload } from "@janusly/shared/src/safe-persist";
+import { recordRecoveryPlaybookAppliedTx } from "./recoveryPlaybooksRepo";
 
 const DEFAULT_WINDOW_DAYS = 30;
 const RUN_STATUS_ROW_CAP = 10_000;
@@ -60,8 +73,8 @@ export type ReplayOutcomeCountsRepo = {
 };
 
 /**
- * Per-window count of distinct failure signatures that flipped from `open`
- * to a closed status (`replayed` / `resolved`). Drives the Value Dashboard's
+ * Per-window count of distinct failure signatures whose replay reached
+ * terminal node success. Drives the Value Dashboard's
  * "clusters resolved" metric + the hours-saved / dollars-saved estimate.
  *
  * `totalEntries` is the raw row count (informational, surfaced as
@@ -111,6 +124,249 @@ export type RecoveryMetricsSignals = {
   slaAttainment: SlaAttainmentRepo;
 };
 
+/** Lifetime measured value from DLQ replays that reached terminal success. */
+export type RecoveryLedgerRepo = {
+  totalRecovered: number;
+  downtimeEndedMs: number;
+  sinceIso: string | null;
+};
+
+/**
+ * Transaction handle accepted by the node-success persistence path. Keeping
+ * impact-event insertion and rollup increment inside the SAME transaction as
+ * `run_nodes.status = 'succeeded'` prevents crash gaps and false wins.
+ */
+type RecoveryImpactTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export type RecoveryImpactCompletion = {
+  deadLetterId: string | null;
+  userId: string | null;
+  playbookId?: string | null;
+  validationRunId?: string | null;
+  runId: string;
+  nodeId: string;
+  recoveredAt: Date;
+};
+
+/**
+ * Record one terminally successful DLQ recovery and increment its tenant's
+ * lifetime projection. `dead_letter_id` is unique, so duplicate worker
+ * completion attempts are idempotent and never inflate value.
+ */
+export async function recordRecoveryImpactTx(
+  tx: RecoveryImpactTx,
+  input: RecoveryImpactCompletion,
+): Promise<boolean> {
+  if (!input.deadLetterId) return false;
+
+  const [dlq] = await tx
+    .select({ orgId: deadLetters.orgId, createdAt: deadLetters.createdAt })
+    .from(deadLetters)
+    .where(and(
+      eq(deadLetters.id, input.deadLetterId),
+      eq(deadLetters.runId, input.runId),
+      eq(deadLetters.nodeId, input.nodeId),
+    ))
+    .limit(1);
+  if (!dlq) return false;
+
+  // The API normally stamps queue acceptance immediately after BullMQ
+  // enqueue, but a process crash can land between those two operations. A
+  // generation-matched terminal success is stronger evidence than enqueue
+  // acceptance, so converge a still-open row here in the same transaction as
+  // the impact fact. Preserve `resolved`: an explicit accepted-loss dismissal
+  // must not be rewritten by a late in-flight worker.
+  await tx
+    .update(deadLetters)
+    .set({ status: "replayed", replayedAt: input.recoveredAt })
+    .where(and(
+      eq(deadLetters.id, input.deadLetterId),
+      eq(deadLetters.orgId, dlq.orgId),
+      eq(deadLetters.runId, input.runId),
+      eq(deadLetters.nodeId, input.nodeId),
+      eq(deadLetters.status, "open"),
+    ));
+
+  const downtimeEndedMs = dlq.createdAt
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, input.recoveredAt.getTime() - dlq.createdAt.getTime()))
+    : 0;
+  const inserted = await tx
+    .insert(recoveryImpactEvents)
+    .values({
+      deadLetterId: input.deadLetterId,
+      orgId: dlq.orgId,
+      runId: input.runId,
+      nodeId: input.nodeId,
+      userId: input.userId,
+      recoveredAt: input.recoveredAt,
+      downtimeEndedMs,
+    })
+    .onConflictDoNothing({ target: recoveryImpactEvents.deadLetterId })
+    .returning({ deadLetterId: recoveryImpactEvents.deadLetterId });
+  if (inserted.length === 0) return false;
+
+  await tx
+    .insert(recoveryImpactRollups)
+    .values({
+      orgId: dlq.orgId,
+      totalRecovered: 1,
+      downtimeEndedMs,
+      firstRecoveredAt: input.recoveredAt,
+      updatedAt: input.recoveredAt,
+    })
+    .onConflictDoUpdate({
+      target: recoveryImpactRollups.orgId,
+      set: {
+        totalRecovered: sql`${recoveryImpactRollups.totalRecovered} + 1`,
+        downtimeEndedMs: sql`${recoveryImpactRollups.downtimeEndedMs} + ${downtimeEndedMs}`,
+        firstRecoveredAt: sql`least(
+          coalesce(${recoveryImpactRollups.firstRecoveredAt}, excluded."first_recovered_at"),
+          excluded."first_recovered_at"
+        )`,
+        updatedAt: sql`greatest(
+          ${recoveryImpactRollups.updatedAt},
+          excluded."updated_at"
+        )`,
+      },
+    });
+
+  // The incident closes only alongside terminal node success. Keeping this
+  // CAS transition and its audit row in the same transaction as the impact
+  // fact prevents enqueue acceptance from masquerading as recovery and
+  // eliminates a crash gap between the Value Dashboard and ownership views.
+  const [linkedChild] = await tx
+    .select({ recoveryItemId: recoveryItemChildren.recoveryItemId })
+    .from(recoveryItemChildren)
+    .where(and(
+      eq(recoveryItemChildren.orgId, dlq.orgId),
+      eq(recoveryItemChildren.deadLetterId, input.deadLetterId),
+    ))
+    .limit(1);
+  const itemIdentity = linkedChild
+    ? or(
+        eq(recoveryItems.deadLetterId, input.deadLetterId),
+        eq(recoveryItems.id, linkedChild.recoveryItemId),
+      )
+    : eq(recoveryItems.deadLetterId, input.deadLetterId);
+  const [item] = await tx
+    .select({
+      id: recoveryItems.id,
+      status: recoveryItems.status,
+      resolutionReason: recoveryItems.resolutionReason,
+    })
+    .from(recoveryItems)
+    .where(and(
+      eq(recoveryItems.orgId, dlq.orgId),
+      itemIdentity,
+    ))
+    .limit(1)
+    .for("update");
+  if (item && item.status !== "resolved") {
+    const actor = input.userId ?? "system";
+    const [resolved] = await tx
+      .update(recoveryItems)
+      .set({
+        status: "resolved",
+        resolutionReason: "sandbox_replay_succeeded",
+        resolvedBy: actor,
+        resolvedAt: input.recoveredAt,
+        updatedAt: input.recoveredAt,
+      })
+      .where(and(
+        eq(recoveryItems.orgId, dlq.orgId),
+        eq(recoveryItems.id, item.id),
+        eq(recoveryItems.status, item.status),
+      ))
+      .returning({ id: recoveryItems.id });
+    if (resolved) {
+      await tx.insert(auditLogs).values({
+        id: crypto.randomUUID(),
+        orgId: dlq.orgId,
+        userId: actor,
+        action: "recovery.item.resolved",
+        targetType: "recovery-item",
+        targetId: item.id,
+        metadata: safePersistPayload({
+          before: { status: item.status, resolutionReason: item.resolutionReason },
+          after: { status: "resolved", resolutionReason: "sandbox_replay_succeeded" },
+          resolutionReason: "sandbox_replay_succeeded",
+          via: "terminal_recovery",
+        }),
+        createdAt: input.recoveredAt,
+      });
+    }
+  }
+
+  if (input.playbookId && input.validationRunId) {
+    const actor = input.userId ?? "system";
+    const applied = await recordRecoveryPlaybookAppliedTx(tx, {
+      orgId: dlq.orgId,
+      id: input.playbookId,
+      validationRunId: input.validationRunId,
+      actor,
+      recordedAt: input.recoveredAt,
+    });
+    if (applied.recorded) {
+      await tx.insert(auditLogs).values({
+        id: crypto.randomUUID(),
+        orgId: dlq.orgId,
+        userId: actor,
+        action: "recovery.playbook.applied",
+        targetType: "recovery_playbook",
+        targetId: input.playbookId,
+        metadata: safePersistPayload({
+          deadLetterId: input.deadLetterId,
+          validationRunId: input.validationRunId,
+          via: "terminal_recovery",
+        }),
+        createdAt: input.recoveredAt,
+      });
+    }
+  }
+  return true;
+}
+
+/** Read the tenant's constant-time lifetime recovery projection. */
+export async function queryRecoveryLedger(orgId: string): Promise<RecoveryLedgerRepo> {
+  const rows = await db
+    .select({
+      totalRecovered: recoveryImpactRollups.totalRecovered,
+      downtimeEndedMs: recoveryImpactRollups.downtimeEndedMs,
+      since: recoveryImpactRollups.firstRecoveredAt,
+    })
+    .from(recoveryImpactRollups)
+    .where(eq(recoveryImpactRollups.orgId, orgId))
+    .limit(1);
+
+  const row = rows[0];
+  const totalRecovered = Number(row?.totalRecovered ?? 0);
+  const downtimeEndedMs = Number(row?.downtimeEndedMs ?? 0);
+  const since = row?.since ?? null;
+  return {
+    totalRecovered: Number.isFinite(totalRecovered) ? Math.max(0, Math.floor(totalRecovered)) : 0,
+    downtimeEndedMs: Number.isFinite(downtimeEndedMs) ? Math.max(0, Math.round(downtimeEndedMs)) : 0,
+    sinceIso: since ? (since instanceof Date ? since : new Date(since)).toISOString() : null,
+  };
+}
+
+/** Count terminally successful DLQ recoveries attributed to one operator. */
+export async function queryOperatorRecoveryCount(
+  orgId: string,
+  userId: string,
+  since: Date,
+): Promise<number> {
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(recoveryImpactEvents)
+    .where(and(
+      eq(recoveryImpactEvents.orgId, orgId),
+      eq(recoveryImpactEvents.userId, userId),
+      gte(recoveryImpactEvents.recoveredAt, since),
+    ));
+  const count = Number(rows[0]?.count ?? 0);
+  return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+}
+
 /** Collect raw recovery-metrics signals for one org over a rolling window. */
 export async function queryRecoveryMetricsSignals(
   orgId: string,
@@ -154,24 +410,23 @@ export async function queryRecoveryMetricsSignals(
 }
 
 /**
- * Per-day average recovery time (`replayedAt − createdAt`) for DLQ rows that
- * replayed cleanly, bucketed by the day the replay landed. Aggregated entirely
+ * Per-day average terminal recovery impact, bucketed by the day success
+ * committed. Aggregated entirely
  * in Postgres (one GROUP BY, no row materialization) and bounded to the most
  * recent 14 days with data, returned oldest-first for the MTTR trend sparkline.
- * Multi-tenant scope: `eq(deadLetters.orgId, orgId)`.
+ * Multi-tenant scope: `eq(recoveryImpactEvents.orgId, orgId)`.
  */
 async function queryMttrTrend(orgId: string, since: Date): Promise<MttrTrendPointRepo[]> {
-  const dayBucket = sql`date_trunc('day', ${deadLetters.replayedAt})`;
+  const dayBucket = sql`date_trunc('day', ${recoveryImpactEvents.recoveredAt})`;
   const rows = await db
     .select({
       day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
-      seconds: sql<number>`avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt})))::float8`,
+      seconds: sql<number>`avg(${recoveryImpactEvents.downtimeEndedMs})::float8 / 1000`,
     })
-    .from(deadLetters)
+    .from(recoveryImpactEvents)
     .where(and(
-      eq(deadLetters.orgId, orgId),
-      eq(deadLetters.status, "replayed"),
-      gte(deadLetters.replayedAt, since),
+      eq(recoveryImpactEvents.orgId, orgId),
+      gte(recoveryImpactEvents.recoveredAt, since),
     ))
     .groupBy(dayBucket)
     .orderBy(sql`${dayBucket} desc`)
@@ -198,8 +453,8 @@ const HEATMAP_MAX_DAYS = 90;
 /**
  * Per-day failure/recovery counts over the last `days` (clamped 1..90),
  * bucketed by the day the failure landed: `failures` = dead letters created
- * that day, `recovered` = the subset now replayed, `mttrSeconds` = avg recovery
- * time for the recovered ones. One Postgres GROUP BY (no row materialization),
+ * that day, `recovered` = the subset with terminal impact evidence,
+ * `mttrSeconds` = avg terminal recovery time. One Postgres GROUP BY,
  * oldest-first. Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. The existing
  * `dead_letters_org_created_idx` covers the window scan.
  */
@@ -211,10 +466,11 @@ export async function queryRecoveryHeatmap(orgId: string, days: number): Promise
     .select({
       day: sql<string>`to_char(${dayBucket}, 'YYYY-MM-DD')`,
       failures: sql<number>`count(*)::int`,
-      recovered: sql<number>`count(*) filter (where ${deadLetters.status} = 'replayed')::int`,
-      mttrSeconds: sql<number>`coalesce(avg(extract(epoch from (${deadLetters.replayedAt} - ${deadLetters.createdAt}))) filter (where ${deadLetters.status} = 'replayed' and ${deadLetters.replayedAt} is not null), 0)::float8`,
+      recovered: sql<number>`count(${recoveryImpactEvents.deadLetterId})::int`,
+      mttrSeconds: sql<number>`coalesce(avg(${recoveryImpactEvents.downtimeEndedMs}) / 1000, 0)::float8`,
     })
     .from(deadLetters)
+    .leftJoin(recoveryImpactEvents, eq(recoveryImpactEvents.deadLetterId, deadLetters.id))
     .where(and(eq(deadLetters.orgId, orgId), gte(deadLetters.createdAt, since)))
     .groupBy(dayBucket)
     .orderBy(sql`${dayBucket} asc`)
@@ -291,29 +547,22 @@ async function queryRunStatusCounts(orgId: string, since: Date): Promise<RunStat
 }
 
 async function queryMttrDurations(orgId: string, since: Date): Promise<number[]> {
-  // Replay duration in ms for DLQ rows that recovered cleanly via
-  // `/dlq/replay`. Skip `status='resolved'` — those were closed by the
-  // operator without a replay (fix-by-other-means isn't a recovery time).
+  // Terminal recovery duration is materialized atomically with node success.
+  // Enqueue acceptance (`dead_letters.status='replayed'`) is not evidence.
   const rows = await db
     .select({
-      createdAt: deadLetters.createdAt,
-      replayedAt: deadLetters.replayedAt,
+      downtimeEndedMs: recoveryImpactEvents.downtimeEndedMs,
     })
-    .from(deadLetters)
+    .from(recoveryImpactEvents)
     .where(and(
-      eq(deadLetters.orgId, orgId),
-      eq(deadLetters.status, "replayed"),
-      gte(deadLetters.createdAt, since),
+      eq(recoveryImpactEvents.orgId, orgId),
+      gte(recoveryImpactEvents.recoveredAt, since),
     ))
     .limit(MTTR_SAMPLE_CAP);
 
-  const durations: number[] = [];
-  for (const row of rows) {
-    if (!row.createdAt || !row.replayedAt) continue;
-    const ms = row.replayedAt.getTime() - row.createdAt.getTime();
-    if (ms > 0) durations.push(ms);
-  }
-  return durations;
+  return rows
+    .map((row) => Number(row.downtimeEndedMs))
+    .filter((ms) => Number.isFinite(ms) && ms > 0);
 }
 
 async function queryApprovalsPending(orgId: string): Promise<number> {
@@ -399,43 +648,66 @@ async function queryP95Latency(orgId: string, since: Date): Promise<number | nul
 }
 
 async function queryReplayOutcomes(orgId: string, since: Date): Promise<ReplayOutcomeCountsRepo> {
-  // Group replay attempts by status. Never-replayed open DLQ rows must not
-  // count as replay failures; only rows with `replayedAt` stamped represent
-  // an operator-triggered replay attempt.
-  const rows = await db
-    .select({
-      status: deadLetters.status,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(deadLetters)
-    .where(and(
-      eq(deadLetters.orgId, orgId),
-      gte(deadLetters.createdAt, since),
-      isNotNull(deadLetters.replayedAt),
-    ))
-    .groupBy(deadLetters.status);
-
-  const counts: ReplayOutcomeCountsRepo = {
-    totalEntries: 0,
-    replayedSuccess: 0,
-    replayedAndReopened: 0,
+  // Count only terminally observed outcomes. A replay is successful when its
+  // immutable impact event exists; it re-failed when a later DLQ row exists
+  // for the same run/node. In-flight attempts are excluded from both sides of
+  // the rate instead of being mislabeled as failures.
+  // Raw `sql` parameters bypass Drizzle's timestamp column encoder. Pass ISO
+  // text with an explicit cast so postgres-js never receives a JavaScript Date
+  // for a timestamptz bind (which it cannot serialize on this path).
+  const sinceIso = since.toISOString();
+  const rows = await db.execute<{
+    replayed_success: number;
+    replayed_and_reopened: number;
+  }>(sql`
+    WITH attempts AS (
+      SELECT
+        "id",
+        "org_id",
+        "run_id",
+        "node_id",
+        coalesce("replay_claimed_at", "replayed_at") AS "replay_boundary"
+      FROM "dead_letters"
+      WHERE "org_id" = ${orgId}
+        AND coalesce("replay_claimed_at", "replayed_at") >= ${sinceIso}::timestamptz
+    ), outcomes AS (
+      SELECT
+        attempts."id",
+        bool_or(impact."dead_letter_id" IS NOT NULL) AS "succeeded",
+        bool_or(later."id" IS NOT NULL) AS "reopened"
+      FROM attempts
+      LEFT JOIN "recovery_impact_events" impact
+        ON impact."dead_letter_id" = attempts."id"
+      LEFT JOIN "dead_letters" later
+        ON later."org_id" = attempts."org_id"
+       AND later."run_id" = attempts."run_id"
+       AND later."node_id" = attempts."node_id"
+       AND later."id" <> attempts."id"
+       AND later."created_at" > attempts."replay_boundary"
+      GROUP BY attempts."id"
+    )
+    SELECT
+      count(*) FILTER (WHERE "succeeded")::int AS "replayed_success",
+      count(*) FILTER (WHERE NOT "succeeded" AND "reopened")::int AS "replayed_and_reopened"
+    FROM outcomes
+  `);
+  const replayedSuccess = Number(rows[0]?.replayed_success ?? 0);
+  const replayedAndReopened = Number(rows[0]?.replayed_and_reopened ?? 0);
+  return {
+    totalEntries: replayedSuccess + replayedAndReopened,
+    replayedSuccess,
+    replayedAndReopened,
   };
-  for (const row of rows) {
-    counts.totalEntries += row.count ?? 0;
-    if (row.status === "replayed") counts.replayedSuccess += row.count ?? 0;
-    else counts.replayedAndReopened += row.count ?? 0;
-  }
-  return counts;
 }
 
 /**
- * Count of distinct failure signatures that flipped from `open` to a closed
- * status (`replayed` or `resolved`) inside the window. Group-by happens in
+ * Count of distinct failure signatures with terminal recovery impact inside
+ * the window. Group-by happens in
  * JS — pgvector / pg-extension functions for signature normalization don't
  * exist; the existing `normalizeErrorSignature` helper is the chokepoint and
  * lives in `@janusly/shared`.
  *
- * Multi-tenant scope: `eq(deadLetters.orgId, orgId)`. Bounded at
+ * Multi-tenant scope: `eq(recoveryImpactEvents.orgId, orgId)`. Bounded at
  * `RESOLVED_CLUSTERS_ROW_CAP`; past the cap, the result is capped and
  * downstream rollup labels the count as "≥ cap" in the UI.
  *
@@ -454,11 +726,11 @@ export async function queryFailureClustersResolved(
       nodeJson: deadLetters.nodeJson,
       errorJson: deadLetters.errorJson,
     })
-    .from(deadLetters)
+    .from(recoveryImpactEvents)
+    .innerJoin(deadLetters, eq(deadLetters.id, recoveryImpactEvents.deadLetterId))
     .where(and(
-      eq(deadLetters.orgId, orgId),
-      gte(deadLetters.createdAt, since),
-      inArray(deadLetters.status, ["replayed", "resolved"]),
+      eq(recoveryImpactEvents.orgId, orgId),
+      gte(recoveryImpactEvents.recoveredAt, since),
     ))
     .limit(RESOLVED_CLUSTERS_ROW_CAP + 1);
 

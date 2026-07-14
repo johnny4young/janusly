@@ -81,7 +81,7 @@ vi.mock("../cluster-recovery", async (importOriginal) => {
   return { ...actual, recheckSignature: vi.fn(() => true) };
 });
 vi.mock("@janusly/engine/src/recovery/recovery-item-hook", () => ({
-  autoResolveRecoveryItemFromReplay: vi.fn(),
+  resolveRecoveryItemForDismiss: vi.fn(),
   createRecoveryItemForDeadLetter: vi.fn(),
 }));
 
@@ -107,7 +107,7 @@ import { requireRole } from "../permissions";
 import { countDeadLettersByStatus, encodeRecoveryQueueCursor, getDeadLetter, listRecoveryQueue, markDeadLetterReplayed, markDeadLetterResolved, queryRecoveryQueuePage, type RecoveryQueueRow } from "../dlq";
 import { auditAction } from "../audit-helper";
 import { resolveSuspectVersion } from "../suspect-version";
-import { autoResolveRecoveryItemFromReplay } from "@janusly/engine/src/recovery/recovery-item-hook";
+import { resolveRecoveryItemForDismiss } from "@janusly/engine/src/recovery/recovery-item-hook";
 import { createApiServer } from "../server";
 import { dlqRoutes } from "./dlq-routes";
 import type { Route } from "../routes";
@@ -121,7 +121,7 @@ const getDeadLetterMock = vi.mocked(getDeadLetter);
 const markDeadLetterResolvedMock = vi.mocked(markDeadLetterResolved);
 const markDeadLetterReplayedMock = vi.mocked(markDeadLetterReplayed);
 const auditActionMock = vi.mocked(auditAction);
-const autoResolveMock = vi.mocked(autoResolveRecoveryItemFromReplay);
+const resolveForDismissMock = vi.mocked(resolveRecoveryItemForDismiss);
 const resolveSuspectVersionMock = vi.mocked(resolveSuspectVersion);
 
 /** A cursor minted by the REAL encoder, for the /dlq/queue wiring tests. */
@@ -489,7 +489,7 @@ describe("POST /dlq/bulk-resolve", () => {
     requireRoleMock.mockResolvedValueOnce("editor");
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never));
     markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -501,12 +501,18 @@ describe("POST /dlq/bulk-resolve", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ resolved: 2, failed: 0, errors: [] });
-      // Each id is org-scoped, marked resolved, audited (bulk flag), auto-closed.
+      // Each id is org-scoped, marked resolved, audited (bulk flag), and
+      // dismissed as an explicitly accepted loss.
       expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-1");
       expect(markDeadLetterResolvedMock).toHaveBeenCalledWith("org-1", "dl-2");
       expect(auditActionMock).toHaveBeenCalledTimes(2);
       expect(auditActionMock).toHaveBeenCalledWith(expect.anything(), "dlq.resolved", expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: { bulk: true } }));
-      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", resolutionReason: "accepted_loss", via: "dlq_resolve" }));
+      expect(resolveForDismissMock).toHaveBeenCalledWith({
+        orgId: "org-1",
+        deadLetterId: "dl-2",
+        actor: "user-1",
+        via: "dlq_resolve",
+      });
     } finally {
       await close(server);
     }
@@ -518,7 +524,7 @@ describe("POST /dlq/bulk-resolve", () => {
     // dl-1 exists in the org; ghost is not found (cross-org / bogus → null).
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? ({ id, orgId: "org-1", runId: "r", nodeId: "n", status: "open" } as never) : (null as never)));
     markDeadLetterResolvedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -596,7 +602,7 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
     getDeadLetterMock.mockResolvedValueOnce(failedItem as never);
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const fix = { id: "wf-1", name: "WF", nodes: [{ id: "n", type: "noop", config: {} }], edges: [] };
     const server = createApiServer({ routes: dlqRoutes });
@@ -609,8 +615,13 @@ describe("POST /dlq/replay suggestedWorkflow (apply-a-fix)", () => {
       });
       expect(response.status).toBe(200);
       // The adapter receives the FIX (node `n` is now a noop), not the original http node.
-      const call = replayDeadLetterMock.mock.calls[0][0] as { workflow: { nodes: Array<{ id: string; type: string }> } };
+      const call = replayDeadLetterMock.mock.calls[0][0] as {
+        deadLetterId: string;
+        recoveryActorId: string;
+        workflow: { nodes: Array<{ id: string; type: string }> };
+      };
       expect(call.workflow.nodes.find((x) => x.id === "n")?.type).toBe("noop");
+      expect(call).toMatchObject({ deadLetterId: "dl-1", recoveryActorId: "user-1" });
     } finally {
       await close(server);
     }
@@ -789,7 +800,7 @@ describe("POST /dlq/bulk-replay", () => {
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => openItem(id) as never);
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -801,9 +812,17 @@ describe("POST /dlq/bulk-replay", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ replayed: 2, failed: 0, errors: [] });
-      // Each id is replayed via the shared adapter, marked replayed, audited
-      // (bulk flag), and its recovery item auto-closed.
+      // Each id is queued via the shared adapter, marked replayed, and audited.
+      // Terminal node success closes the linked recovery item later.
       expect(replayDeadLetterMock).toHaveBeenCalledTimes(2);
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        deadLetterId: "dl-1",
+        recoveryActorId: "user-1",
+      }));
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        deadLetterId: "dl-2",
+        recoveryActorId: "user-1",
+      }));
       expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-1");
       expect(markDeadLetterReplayedMock).toHaveBeenCalledWith("org-1", "dl-2");
       expect(auditActionMock).toHaveBeenCalledTimes(2);
@@ -812,7 +831,7 @@ describe("POST /dlq/bulk-replay", () => {
         "dlq.replayed",
         expect.objectContaining({ targetType: "dlq", targetId: "dl-1", metadata: expect.objectContaining({ bulk: true }) }),
       );
-      expect(autoResolveMock).toHaveBeenCalledWith(expect.objectContaining({ orgId: "org-1", deadLetterId: "dl-2", actor: "user-1" }));
+      expect(resolveForDismissMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
@@ -825,7 +844,7 @@ describe("POST /dlq/bulk-replay", () => {
     getDeadLetterMock.mockImplementation(async (_orgId: string, id: string) => (id === "dl-1" ? (openItem(id) as never) : (null as never)));
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -858,7 +877,7 @@ describe("POST /dlq/bulk-replay", () => {
     );
     replayDeadLetterMock.mockResolvedValue(undefined as never);
     markDeadLetterReplayedMock.mockResolvedValue(undefined as never);
-    autoResolveMock.mockResolvedValue(undefined as never);
+    resolveForDismissMock.mockResolvedValue(undefined as never);
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
@@ -956,6 +975,8 @@ describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
     runId: "run-1",
     nodeId: "n-1",
     status: "open",
+    replayClaimToken: "internal-claim-token",
+    replayClaimedAt: new Date("2026-07-10T12:00:01.000Z"),
     createdAt: new Date("2026-07-10T12:00:00.000Z"),
     errorJson: { message: "boom" },
   };
@@ -980,9 +1001,11 @@ describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
     try {
       const response = await fetch(`${baseUrl}/dlq?id=dl-1`);
       expect(response.status).toBe(200);
-      const payload = await response.json() as { id: string; suspectVersion: unknown };
+      const payload = await response.json() as Record<string, unknown> & { id: string; suspectVersion: unknown };
       expect(payload.id).toBe("dl-1");
       expect(payload.suspectVersion).toEqual(envelope);
+      expect(payload).not.toHaveProperty("replayClaimToken");
+      expect(payload).not.toHaveProperty("replayClaimedAt");
       // The resolver gets the row's own runId + failure timestamp.
       expect(resolveSuspectVersionMock).toHaveBeenCalledWith("org-1", "run-1", DETAIL_ROW.createdAt);
     } finally {
@@ -1012,7 +1035,7 @@ describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
   });
 });
 
-describe("POST /dlq/cluster-apply downtime accounting", () => {
+describe("POST /dlq/cluster-apply enqueue accounting", () => {
   function openMember(id: string, createdAt: Date | null) {
     return {
       id,
@@ -1039,7 +1062,7 @@ describe("POST /dlq/cluster-apply downtime accounting", () => {
     });
   }
 
-  it("sums (now − createdAt) across successfully replayed members", async () => {
+  it("keeps downtime at zero until accepted replays reach terminal success", async () => {
     editorAuth();
     const now = Date.now();
     getDeadLetterMock
@@ -1056,15 +1079,22 @@ describe("POST /dlq/cluster-apply downtime accounting", () => {
       const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
       expect(payload.replayed).toBe(2);
       expect(payload.failed).toBe(0);
-      // ~60s + ~120s of downtime ended; bounded loosely for wall-clock drift.
-      expect(payload.downtimeEndedMs).toBeGreaterThanOrEqual(180_000);
-      expect(payload.downtimeEndedMs).toBeLessThan(200_000);
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        deadLetterId: "dl-1",
+        recoveryActorId: "user-1",
+      }));
+      expect(replayDeadLetterMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        deadLetterId: "dl-2",
+        recoveryActorId: "user-1",
+      }));
+      expect(payload.downtimeEndedMs).toBe(0);
+      expect(resolveForDismissMock).not.toHaveBeenCalled();
     } finally {
       await close(server);
     }
   });
 
-  it("a failed member contributes nothing; legacy rows without createdAt contribute 0", async () => {
+  it("reports partial enqueue acceptance without manufacturing downtime", async () => {
     editorAuth();
     const now = Date.now();
     getDeadLetterMock
@@ -1082,9 +1112,7 @@ describe("POST /dlq/cluster-apply downtime accounting", () => {
       const payload = await response.json() as { replayed: number; failed: number; downtimeEndedMs: number };
       expect(payload.replayed).toBe(2);
       expect(payload.failed).toBe(1);
-      // Only dl-1's ~60s counts — dl-2 errored, dl-3 has no failure clock.
-      expect(payload.downtimeEndedMs).toBeGreaterThanOrEqual(60_000);
-      expect(payload.downtimeEndedMs).toBeLessThan(90_000);
+      expect(payload.downtimeEndedMs).toBe(0);
     } finally {
       await close(server);
     }

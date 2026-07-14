@@ -312,7 +312,6 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
 
       if (result.replayed > 0) {
-        await requestRecoveryAllClearIfQueueEmpty()
         bumpPlatformVersion()
         refreshQueue()
         void onRefresh()

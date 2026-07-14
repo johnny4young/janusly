@@ -142,7 +142,7 @@ test('operator triages genuine failures by keyboard, copies context, and fuzzy-s
 
   await firstRow.focus()
   await page.keyboard.press('r')
-  await expect(page.getByText(/^Recovered after .* of downtime$/)).toBeVisible()
+  await expect(page.getByText('Replay queued')).toBeVisible()
   await expect(secondRow).toBeFocused()
 
   await page.keyboard.press('Control+Enter')

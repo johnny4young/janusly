@@ -11,14 +11,21 @@
  *   the exact job payload — don't trim fields here.
  */
 
-import { db, deadLetters } from "@janusly/db";
+import { db, deadLetters, runEvents, runNodes, runs } from "@janusly/db";
 import {
   recordAlertEvent,
   recordRecoveryItemCreationEvent,
 } from "@janusly/data";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { safePersistPayload } from "../safe-persist";
-import type { DeadLetterInput, QueueAdapter } from "../core/types";
+import { notifyCommittedRunTerminal } from "../persistence";
+import { publishRunEvent } from "../run-event-stream";
+import type {
+  DeadLetterInput,
+  QueueAdapter,
+  TerminalFailureInput,
+} from "../core/types";
 
 // `errorJson` gets the regular 64 KB cap — errors carry serialized stacks
 // + cause that occasionally include large request/response bodies, but
@@ -35,9 +42,139 @@ const DLQ_PAYLOAD_NO_TRUNCATE = Number.POSITIVE_INFINITY;
 
 /** Persists exhausted-retry jobs to `dead_letters` for later replay or resolution. */
 export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
+  /**
+   * Atomically commit an exhausted execution generation. The running-node
+   * CAS, DLQ row, node.failed event, and first run.failed transition are one
+   * Postgres transaction; a DLQ insert failure leaves the node eligible for
+   * recovery instead of stranding a half-failed run.
+   */
+  async persistTerminalFailure(input: TerminalFailureInput): Promise<boolean> {
+    const deadLetterId = input.deadLetterId ?? crypto.randomUUID();
+    const workflowId = input.workflowId ?? input.workflow.id ?? null;
+    const failedAt = new Date();
+    // `node.failed` is the causal failure and `run.failed` is its aggregate
+    // consequence. Keep their keyset order explicit even though both commit in
+    // one transaction; equal timestamps would otherwise fall back to random
+    // UUID ordering and could put the run-level event first in the timeline.
+    const runFailedAt = new Date(failedAt.getTime() + 1);
+    const nodeEventId = crypto.randomUUID();
+    const runEventId = crypto.randomUUID();
+    const nodeEventPayload = safePersistPayload({ error: input.error, attempt: input.attempt });
+
+    const result = await db.transaction(async (tx) => {
+      const [run] = await tx
+        .select({ status: runs.status })
+        .from(runs)
+        .where(eq(runs.id, input.runId))
+        .limit(1)
+        .for("update");
+      if (!run || (run.status !== "running" && run.status !== "failed")) {
+        return { persisted: false, runFlipped: false, failedNodes: 0 };
+      }
+
+      const claimPredicate = input.recoveryClaimToken
+        ? eq(runNodes.recoveryClaimToken, input.recoveryClaimToken)
+        : isNull(runNodes.recoveryClaimToken);
+      const [failedNode] = await tx
+        .update(runNodes)
+        .set({
+          status: "failed",
+          errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
+          finishedAt: failedAt,
+        })
+        .where(and(
+          eq(runNodes.runId, input.runId),
+          eq(runNodes.nodeId, input.node.id),
+          eq(runNodes.status, "running"),
+          claimPredicate,
+        ))
+        .returning({ id: runNodes.id });
+      if (!failedNode) return { persisted: false, runFlipped: false, failedNodes: 0 };
+
+      await tx.insert(deadLetters).values({
+        id: deadLetterId,
+        orgId: input.orgId,
+        runId: input.runId,
+        nodeId: input.node.id,
+        attempt: input.attempt,
+        workflowJson: safePersistPayload(input.workflow, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
+        nodeJson: safePersistPayload(input.node, { maxBytes: DLQ_PAYLOAD_NO_TRUNCATE }),
+        errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
+        createdAt: failedAt,
+      });
+
+      await tx.insert(runEvents).values({
+        id: nodeEventId,
+        runId: input.runId,
+        nodeId: input.node.id,
+        type: "node.failed",
+        payload: nodeEventPayload,
+        createdAt: failedAt,
+      });
+
+      let runFlipped = false;
+      let failedNodes = 1;
+      if (run.status === "running") {
+        const countRows = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(runNodes)
+          .where(and(eq(runNodes.runId, input.runId), eq(runNodes.status, "failed")));
+        failedNodes = Number(countRows[0]?.count ?? 1);
+        const [flipped] = await tx
+          .update(runs)
+          .set({ status: "failed" })
+          .where(and(eq(runs.id, input.runId), eq(runs.status, "running")))
+          .returning({ id: runs.id });
+        runFlipped = Boolean(flipped);
+        if (runFlipped) {
+          await tx.insert(runEvents).values({
+            id: runEventId,
+            runId: input.runId,
+            nodeId: null,
+            type: "run.failed",
+            payload: safePersistPayload({ failedNodes }),
+            createdAt: runFailedAt,
+          });
+        }
+      }
+
+      return { persisted: true, runFlipped, failedNodes };
+    });
+
+    if (!result.persisted) return false;
+
+    publishRunEvent(input.runId, {
+      kind: "event",
+      id: nodeEventId,
+      nodeId: input.node.id,
+      type: "node.failed",
+      payload: nodeEventPayload,
+      createdAt: failedAt.toISOString(),
+    });
+    if (result.runFlipped) {
+      publishRunEvent(input.runId, {
+        kind: "event",
+        id: runEventId,
+        nodeId: null,
+        type: "run.failed",
+        payload: safePersistPayload({ failedNodes: result.failedNodes }),
+        createdAt: runFailedAt.toISOString(),
+      });
+      await notifyCommittedRunTerminal(input.runId, "failed");
+    }
+    publishRunEvent(input.runId, { kind: "run.status", status: "failed" });
+
+    await this.afterDeadLetterCommitted({
+      input,
+      deadLetterId,
+      workflowId,
+    });
+    return true;
+  }
+
   /** Insert one row capturing the full failed job payload. */
   async enqueueDeadLetter(input: DeadLetterInput): Promise<void> {
-    const deadLetterId = crypto.randomUUID();
+    const deadLetterId = input.deadLetterId ?? crypto.randomUUID();
     const workflowId = input.workflowId ?? input.workflow.id ?? null;
     await db.insert(deadLetters).values({
       id: deadLetterId,
@@ -53,10 +190,19 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
       errorJson: safePersistPayload(input.error, { maxBytes: DLQ_ERROR_JSON_MAX_BYTES }),
     });
 
+    await this.afterDeadLetterCommitted({ input, deadLetterId, workflowId });
+  }
+
+  /** Fire non-transactional ownership and alert side effects after commit. */
+  private async afterDeadLetterCommitted(input: {
+    input: DeadLetterInput;
+    deadLetterId: string;
+    workflowId: string | null;
+  }): Promise<void> {
     console.error("[DLQ] node persisted to dead letters", {
-      runId: input.runId,
-      nodeId: input.node.id,
-      attempt: input.attempt,
+      runId: input.input.runId,
+      nodeId: input.input.node.id,
+      attempt: input.input.attempt,
     });
 
     // Fire the recovery-alerting event hook. The DI seam in `@janusly/data`
@@ -64,15 +210,17 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
     // `apps/api/src/alerts-bootstrap.ts` and `packages/engine/src/worker.ts`
     // registers `dispatchAlert` so subscribed policies fan out via Slack /
     // webhook / email / GitHub. Never blocks the DLQ insert.
-    const errorSignature = normalizeErrorSignature(input.error, { nodeType: input.node.type }).signature;
+    const errorSignature = normalizeErrorSignature(input.input.error, {
+      nodeType: input.input.node.type,
+    }).signature;
 
     void recordAlertEvent({
-      orgId: input.orgId,
+      orgId: input.input.orgId,
       trigger: "dlq.entry_created",
       payload: {
-        runId: input.runId,
-        nodeId: input.node.id,
-        workflowId,
+        runId: input.input.runId,
+        nodeId: input.input.node.id,
+        workflowId: input.workflowId,
         errorSignature,
       },
     });
@@ -81,10 +229,10 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
     // create a `recovery_items` row idempotently. The api-side helper
     // honours `org_configs.recovery.autoCreateItems` and also fires the
     // `recovery_item.created` alert event when the row is genuinely new.
-    void recordRecoveryItemCreationEvent({
-      orgId: input.orgId,
-      deadLetterId,
-      workflowId,
+    await recordRecoveryItemCreationEvent({
+      orgId: input.input.orgId,
+      deadLetterId: input.deadLetterId,
+      workflowId: input.workflowId,
       errorSignature,
       createdBy: "system",
     });

@@ -34,8 +34,8 @@ import { eq, and, desc } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import {
   appendEvent,
-  markNodeFailed,
-  markNodeSucceeded,
+  completeWaitingSubworkflowNode,
+  failWaitingSubworkflowNode,
   setSubworkflowNotifier,
   updateRunStatusFromNodes,
 } from "./persistence";
@@ -260,24 +260,25 @@ export async function notifyParentOnTerminal(childRunId: string, childStatus: "s
 
     if (childStatus === "succeeded") {
       const childOutput = (child.outputJson as Record<string, unknown> | null) ?? {};
-      await markNodeSucceeded(parent.id, child.parentNodeId, childOutput);
-      await appendEvent(parent.id, child.parentNodeId, "node.subworkflow.completed", {
+      const completed = await completeWaitingSubworkflowNode(
+        parent.id,
+        child.parentNodeId,
         childRunId,
         childOutput,
-      });
+      );
+      if (!completed) return;
 
       const parentInputJson = parent.inputJson as { workflow?: unknown } | null;
       const parentWorkflow = WorkflowSchema.parse(parentInputJson?.workflow);
       await getRuntime().enqueueReadyNodes({ runId: parent.id, workflow: parentWorkflow });
     } else {
-      await markNodeFailed(parent.id, child.parentNodeId, {
-        reason: `Subworkflow ${childStatus}`,
-        childRunId,
-      });
-      await appendEvent(parent.id, child.parentNodeId, "node.subworkflow.failed", {
+      const failed = await failWaitingSubworkflowNode(
+        parent.id,
+        child.parentNodeId,
         childRunId,
         childStatus,
-      });
+      );
+      if (!failed) return;
       await updateRunStatusFromNodes(parent.id);
     }
   } catch (err) {

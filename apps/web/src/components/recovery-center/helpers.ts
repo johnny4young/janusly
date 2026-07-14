@@ -9,7 +9,8 @@
  * (`./RecoveryCenterTiles.tsx`), and `./HealthRing.tsx`.
  *
  * The data-shape types mirror the API envelopes the existing panels read
- * (`GET /recovery/metrics`, `GET /dlq/clusters`, `GET /billing/budget`).
+ * (`GET /recovery/metrics`, `GET /recovery/ledger`,
+ * `GET /recovery/my-wins`, `GET /dlq/clusters`, `GET /billing/budget`).
  *
  * Used by `../RecoveryCenterPanel.test.tsx` — `computeRecommendedActions`
  * and `buildGreeting` are unit-tested here directly (no React render
@@ -69,6 +70,17 @@ export type RecoveryMetrics = {
   mttrTrend?: MttrTrendPoint[]
   /** Total automation downtime closed in the window (ms). Optional — older API responses omit it. */
   downtimeEndedMs?: number
+}
+
+export type RecoveryLedger = {
+  totalRecovered: number
+  downtimeEndedMs: number
+  sinceIso: string | null
+}
+
+export type OperatorWins = {
+  recovered: number
+  windowDays: number
 }
 
 export type ClusterCategory =

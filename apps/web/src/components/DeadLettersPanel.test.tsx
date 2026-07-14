@@ -699,7 +699,7 @@ describe('<DeadLettersPanel /> — bulk replay', () => {
       expect(screen.getByTestId('dlq-bulk-bar')).toHaveTextContent('1 selected')
       expect(screen.getByTestId('dlq-select-row-a')).not.toBeChecked()
       expect(screen.getByTestId('dlq-select-row-b')).toBeChecked()
-      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 replayed, 1 failed')
+      expect(useWorkflowStore.getState().toasts.at(-1)?.message).toContain('1 queued; 1 could not be queued')
     })
   })
 })

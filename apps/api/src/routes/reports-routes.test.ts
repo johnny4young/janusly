@@ -5,6 +5,7 @@ const {
   buildRunExplainReportMock,
   composeRecoveryMetricsMock,
   queryRecoveryMetricsSignalsMock,
+  queryRecoveryLedgerMock,
   getOrgConfigSnapshotMock,
   selectRowsBox,
   sendJsonMock,
@@ -17,6 +18,7 @@ const {
   buildRunExplainReportMock: vi.fn(),
   composeRecoveryMetricsMock: vi.fn(),
   queryRecoveryMetricsSignalsMock: vi.fn(),
+  queryRecoveryLedgerMock: vi.fn(),
   getOrgConfigSnapshotMock: vi.fn(),
   selectRowsBox: { rows: [] as unknown[][] },
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
@@ -59,6 +61,7 @@ vi.mock("@janusly/db", () => {
       where: vi.fn(() => chain),
       orderBy: vi.fn(() => chain),
       limit: vi.fn(() => chain),
+      // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are intentionally thenable.
       then: ((resolve, reject) => settle().then(resolve, reject)) as PromiseLike<unknown[]>["then"],
     };
     return chain;
@@ -88,6 +91,7 @@ vi.mock("@janusly/engine/src/recovery-metrics", () => ({
 
 vi.mock("@janusly/data/src/recoveryMetricsRepo", () => ({
   queryRecoveryMetricsSignals: queryRecoveryMetricsSignalsMock,
+  queryRecoveryLedger: queryRecoveryLedgerMock,
 }));
 
 vi.mock("@janusly/data/src/orgConfigRepo", () => ({
@@ -160,8 +164,12 @@ function makeJsonRequest(body: unknown) {
   // next tick after the listener subscribes.
   queueMicrotask(() => {
     const json = JSON.stringify(body);
-    handlers.data.forEach((handler) => handler(json));
-    handlers.end.forEach((handler) => handler());
+    handlers.data.forEach((handler) => {
+      handler(json);
+    });
+    handlers.end.forEach((handler) => {
+      handler();
+    });
   });
   return req;
 }
@@ -236,6 +244,7 @@ beforeEach(() => {
   buildRunExplainReportMock.mockReset();
   composeRecoveryMetricsMock.mockReset();
   queryRecoveryMetricsSignalsMock.mockReset();
+  queryRecoveryLedgerMock.mockReset();
   getOrgConfigSnapshotMock.mockReset();
   sendJsonMock.mockClear();
   resWriteHeadMock.mockReset();
@@ -244,6 +253,11 @@ beforeEach(() => {
   enforceRateLimitMock.mockReset();
   buildRunExplainReportMock.mockReturnValue(baseReport);
   queryRecoveryMetricsSignalsMock.mockResolvedValue(valueSignals);
+  queryRecoveryLedgerMock.mockResolvedValue({
+    totalRecovered: 4,
+    downtimeEndedMs: 12_000,
+    sinceIso: "2026-01-02T03:04:05.000Z",
+  });
   getOrgConfigSnapshotMock.mockResolvedValue({ value: valueAssumptions });
   composeRecoveryMetricsMock.mockReturnValue(valueMetrics);
 });
@@ -505,6 +519,8 @@ describe("/reports/value-dashboard — export", () => {
     expect(headers["Content-Disposition"]).toContain("-30d.md");
     const markdown = resEndMock.mock.calls[0]![0] as string;
     expect(markdown).toContain("**SLA attainment**: 90.0% — 9 of 10 resolved within SLA.");
+    expect(markdown).toContain("**Failures recovered**: 4");
+    expect(markdown).toContain("**Downtime ended (measured)**: 12000 ms");
     expect(markdown).toContain("Estimate based on operator-supplied assumptions");
     expect(markdown).toContain("dollarSaved = hoursSaved");
     expect(markdown).toContain("Engineer hourly cost: $80.00");
@@ -529,9 +545,18 @@ describe("/reports/value-dashboard — export", () => {
     const headers = resWriteHeadMock.mock.calls[0]![1] as Record<string, string>;
     expect(headers["Content-Type"]).toBe("application/json");
     expect(headers["Content-Disposition"]).toContain("-7d.json");
-    const body = JSON.parse(resEndMock.mock.calls[0]![0] as string) as { org: { orgId: string; windowDays: number }; metrics: unknown };
+    const body = JSON.parse(resEndMock.mock.calls[0]![0] as string) as {
+      org: { orgId: string; windowDays: number };
+      metrics: unknown;
+      ledger: unknown;
+    };
     expect(body.org).toMatchObject({ orgId: "org-1", windowDays: 7 });
     expect(body.metrics).toEqual(valueMetrics);
+    expect(body.ledger).toEqual({
+      totalRecovered: 4,
+      downtimeEndedMs: 12_000,
+      sinceIso: "2026-01-02T03:04:05.000Z",
+    });
   });
 
   it("rejects unknown formats before querying metrics or writing audit", async () => {
