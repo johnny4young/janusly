@@ -140,6 +140,28 @@ describe('tRecoveryMetricRationale', () => {
 
     expect(result).toBe('4 repeticiones terminaron bien · 2 volvieron a fallar.')
   })
+
+  it('translates first-action and recurrence rationale metadata', () => {
+    initI18n('es')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'time_to_first_action.summary',
+      rationaleMeta: { avg: '8m', p95: '15m', sampleSize: 4, count: 4 },
+    })).toBe('La primera acción tardó en promedio 8m en 4 incidentes · p95 15m.')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'time_to_first_action.summary',
+      rationaleMeta: { avg: '2m', p95: '2m', sampleSize: 1, count: 1 },
+    })).toBe('La primera acción tardó en promedio 2m en 1 incidente · p95 2m.')
+
+    expect(tRecoveryMetricRationale({
+      rationale: 'fallback',
+      rationaleCode: 'recurrence.summary',
+      rationaleMeta: { held: 9, resolved: 10, recurred: 1 },
+    })).toBe('9 de 10 recuperaciones terminales no han vuelto a fallar con la misma firma durante los siete días siguientes.')
+  })
 })
 
 describe('tServerFallback', () => {

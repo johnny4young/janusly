@@ -114,13 +114,15 @@ test.describe("Recovery loop", () => {
     expect(itemsAfter.ok()).toBe(true);
     expect(otherLedgerAfter.ok()).toBe(true);
 
-    expect(await ledgerAfter.json()).toMatchObject({
-      totalRecovered: ledgerBaseline.totalRecovered + 1,
-    });
-    expect(await winsAfter.json()).toMatchObject({
-      recovered: winsBaseline.recovered + 1,
-      windowDays: 30,
-    });
+    // These are organization/operator rollups, so another parallel E2E using
+    // the shared dev tenant may legitimately add a recovery after our
+    // baseline read. The linked incident assertion below proves this replay's
+    // own terminal effect; the rollups must advance by at least one.
+    expect((await ledgerAfter.json() as { totalRecovered: number }).totalRecovered)
+      .toBeGreaterThanOrEqual(ledgerBaseline.totalRecovered + 1);
+    const winsAfterPayload = await winsAfter.json() as { recovered: number; windowDays: number };
+    expect(winsAfterPayload.recovered).toBeGreaterThanOrEqual(winsBaseline.recovered + 1);
+    expect(winsAfterPayload.windowDays).toBe(30);
     const recoveryItems = await itemsAfter.json() as {
       items: Array<{ id: string; deadLetterId: string; status: string; resolutionReason: string | null }>;
     };

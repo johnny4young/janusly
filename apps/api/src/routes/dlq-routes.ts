@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import {
   findMatchingActiveRecoveryPlaybook,
   queryFailureSamples,
+  queryRecoveryRecurrence,
   resolveRecoveryPlaybookOutcomeFacts,
 } from "@janusly/data";
 import { db, runs, workflowVersions } from "@janusly/db";
@@ -148,8 +149,16 @@ export const dlqRoutes: Route[] = [
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);
       const windowDays = Number.isFinite(rawWindow) ? Math.min(90, Math.max(1, rawWindow)) : 30;
-      const samples = await queryFailureSamples(auth.orgId, windowDays);
-      const clusters = clusterFailureSamples(samples);
+      const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+      const [samples, recurrence] = await Promise.all([
+        queryFailureSamples(auth.orgId, windowDays),
+        queryRecoveryRecurrence(auth.orgId, since),
+      ]);
+      const recurredSignatures = new Set(recurrence.recurredSignatures);
+      const clusters = clusterFailureSamples(samples).map((cluster) => ({
+        ...cluster,
+        recurredAfterRecovery: recurredSignatures.has(cluster.signature),
+      }));
       return sendJson(res, { clusters, totalSamples: samples.length, windowDays });
     } },
   // Cluster member listing — feeds the bulk recovery dialog with the
@@ -256,7 +265,7 @@ export const dlqRoutes: Route[] = [
       if (id) {
         const item = await getDeadLetter(auth.orgId, id);
         if (!item) return sendError(res, "dlq_not_found", "Not found", 404);
-        // M-08 change correlation: when the failing run executed a version
+        // Change correlation: when the failing run executed a version
         // saved shortly before the failure, attach the suspect version + both
         // DAG snapshots so the panel renders "Started after vN was saved" +
         // the diff. Null on any miss — the detail read never fails over it.

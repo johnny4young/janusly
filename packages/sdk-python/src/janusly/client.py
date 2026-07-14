@@ -354,7 +354,11 @@ class RecoveryResource:
         self._config = config
 
     def get_metrics(self, *, window_days: int = 30) -> dict[str, Any]:
-        """``GET /recovery/metrics?windowDays=N`` — fetch the rollup."""
+        """``GET /recovery/metrics?windowDays=N`` — fetch the rollup.
+
+        Includes ``timeToFirstAction`` and ``recurrenceRate`` alongside the
+        existing recovery, SLA, cluster, cost, and value signals.
+        """
         params = {"windowDays": str(window_days)}
         response = request(
             self._config,

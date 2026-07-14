@@ -5880,6 +5880,12 @@ path.react-flow__edge-path.we-edge[data-selected="true"] {
   border: 1px solid var(--we-line);
 }
 
+.we-recovery-watch-row__state--recurrent {
+  background: var(--we-danger-soft);
+  color: var(--we-danger-text);
+  border: 1px solid var(--we-danger-border-30);
+}
+
 .we-recovery-watch-row__state--cleared {
   background: var(--we-success-soft);
   color: var(--we-success-text);

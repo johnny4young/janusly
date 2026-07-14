@@ -1,8 +1,8 @@
 /**
  * Cross-surface "vital signs" strip. Renders a `.we-ops-grid` containing
  * one card per `VitalSignsTile`. Used today by the Operations dashboard
- * (header strip, 6 read-only tiles) and the home page (4 interactive tiles
- * that navigate to other tabs on click).
+ * (read-only tiles) and the home page (interactive tiles that navigate to
+ * other tabs on click).
  *
  * Tiles are presentational — every label, display value, severity, and
  * optional rationale comes in as a prop. The strip never owns its own data

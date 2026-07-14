@@ -138,6 +138,8 @@ const RecoveryMetricsSchema = z.object({
     resolvedInWindow: z.number().int().nonnegative(),
     metSla: z.number().int().nonnegative(),
   }),
+  timeToFirstAction: RecoveryMetricSchema,
+  recurrenceRate: RecoveryMetricSchema,
   valueEstimate: z.object({
     hoursSaved: z.number(),
     dollarSaved: z.number(),

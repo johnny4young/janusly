@@ -305,10 +305,14 @@ export function FailureClustersTile({
       ) : (
         <ul className="we-recovery-watch">
           {clusters.map((cluster) => {
-            const state = cluster.frequency >= 2 ? 'ready' : 'monitoring'
-            const stateLabel = state === 'ready'
-              ? t('recoveryCenter.tile.clusters.statePatchReady')
-              : t('recoveryCenter.tile.clusters.stateMonitoring')
+            const state = cluster.recurredAfterRecovery
+              ? 'recurrent'
+              : cluster.frequency >= 2 ? 'ready' : 'monitoring'
+            const stateLabel = state === 'recurrent'
+              ? t('recoveryCenter.tile.clusters.stateRecurred')
+              : state === 'ready'
+                ? t('recoveryCenter.tile.clusters.statePatchReady')
+                : t('recoveryCenter.tile.clusters.stateMonitoring')
             return (
               <li key={cluster.signature}>
                 <div className="we-recovery-watch-row" data-testid={`recovery-center-watch-row-${cluster.signature}`}>

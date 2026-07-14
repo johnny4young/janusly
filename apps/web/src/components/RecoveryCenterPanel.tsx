@@ -3,7 +3,8 @@
  *
  * Composes recovery signals from existing endpoints into a one-screen
  * summary: a hero strip with the org-wide health ring + greeting, a
- * five-cell metric strip (open failures / MTTR / approvals / replay / SLA),
+ * seven-cell metric strip (open failures / MTTR / first action / approvals /
+ * replay / fix durability / SLA),
  * the operator composer + content tiles (recovery queue / failure
  * clusters / pending approvals / recommended actions / budget / today),
  * the value dashboard, and a teaching empty-state hero for new operators.
@@ -43,7 +44,7 @@
  */
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, RefreshCw, Target, Users, Zap } from 'lucide-react'
+import { AlertTriangle, Hourglass, RefreshCw, ShieldCheck, Target, Users, Zap } from 'lucide-react'
 import type { ActiveTab, JsonObject, RunNode, RunSummary } from '../types'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
@@ -515,7 +516,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       testId: 'recovery-center-metric-failures',
     },
   ]
-  // Append the three computed tiles. Each pushes a fully-formed VitalSignsTile;
+  // Append the computed tiles. Each pushes a fully-formed VitalSignsTile;
   // the inline composition keeps the rich aria-label (label + display + rationale)
   // the legacy RecoveryCenterMetric provided to screen readers.
   const mttrLabel = t('recoveryCenter.metric.mttr.label') as string
@@ -554,6 +555,22 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })
+  const firstActionLabel = t('recoveryCenter.metric.firstAction.label') as string
+  const firstActionDisplay = metrics?.timeToFirstAction?.display ?? '—'
+  const firstActionRationale = metrics?.timeToFirstAction
+    ? tRecoveryMetricRationale(metrics.timeToFirstAction)
+    : t('recoveryCenter.metric.firstAction.rationaleFallback') as string
+  homeTiles.push({
+    icon: <Hourglass size={14} aria-hidden="true" />,
+    label: firstActionLabel,
+    display: firstActionDisplay,
+    numericValue: metrics?.timeToFirstAction?.value ?? null,
+    severity: metrics?.timeToFirstAction?.severity ?? 'neutral',
+    rationale: firstActionRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: firstActionLabel, display: firstActionDisplay, rationale: firstActionRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-first-action',
+  })
   const approvalsLabel = t('recoveryCenter.metric.approvals.label') as string
   const approvalsDisplay = waitingNodes.length === 0 ? '0' : String(waitingNodes.length)
   const approvalsRationale = waitingNodes.length === 0
@@ -585,6 +602,23 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     ariaLabel: t('recoveryCenter.metric.aria', { label: replayLabel, display: replayDisplay, rationale: replayRationale }) as string,
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-replay',
+  })
+  const durabilityLabel = t('recoveryCenter.metric.durability.label') as string
+  const durabilityDisplay = metrics?.recurrenceRate?.display ?? '—'
+  const durabilityRationale = metrics?.recurrenceRate
+    ? tRecoveryMetricRationale(metrics.recurrenceRate)
+    : t('recoveryCenter.metric.durability.rationaleFallback') as string
+  homeTiles.push({
+    icon: <ShieldCheck size={14} aria-hidden="true" />,
+    label: durabilityLabel,
+    display: durabilityDisplay,
+    numericValue: metrics?.recurrenceRate?.value ?? null,
+    progressValue: metrics?.recurrenceRate?.value ?? null,
+    severity: metrics?.recurrenceRate?.severity ?? 'neutral',
+    rationale: durabilityRationale,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: durabilityLabel, display: durabilityDisplay, rationale: durabilityRationale }) as string,
+    onClick: () => props.onOpenTab('operations'),
+    testId: 'recovery-center-metric-durability',
   })
   const slaLabel = t('recoveryCenter.metric.sla.label') as string
   const slaDisplay = metrics?.slaAttainment?.display ?? '—'

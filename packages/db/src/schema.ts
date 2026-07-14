@@ -1513,6 +1513,10 @@ export const recoveryItems = pgTable(
     resolutionReason: text("resolution_reason"),
     resolvedBy: text("resolved_by"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // Set once on the first meaningful recovery action. This is intentionally
+    // independent from `updatedAt`, which also moves for passive occurrence
+    // grouping and would overstate operator reaction time.
+    firstActionAt: timestamp("first_action_at", { withTimezone: true }),
     comments: jsonb("comments").notNull().default([]),
     // Debounce / failure-storm grouping. The normalized error signature is
     // the match key (alongside orgId + workflowId) for collapsing repeated
@@ -1534,6 +1538,12 @@ export const recoveryItems = pgTable(
       table.slaTargetAt,
     ),
     index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
+    index("recovery_items_org_created_idx").on(table.orgId, table.createdAt),
+    index("recovery_items_org_signature_first_idx").on(
+      table.orgId,
+      table.errorSignature,
+      table.firstOccurredAt,
+    ),
     // Backs the debounce lookup: find a recent open item with the same
     // (orgId, workflowId, errorSignature) to attach a new occurrence to.
     index("recovery_items_org_wf_sig_idx").on(

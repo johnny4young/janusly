@@ -113,7 +113,7 @@ export type RunDetails = {
  * Severity bands the server emits with each recovery metric. Mirrors the
  * `MetricSeverity` type in `packages/engine/src/recovery-metrics.ts`.
  */
-export type RecoveryMetricSeverity = "healthy" | "warn" | "alert" | "neutral";
+export type RecoveryMetricSeverity = "healthy" | "warn" | "unhealthy" | "neutral";
 
 /** Single recovery metric card shape. */
 export type RecoveryMetric = {
@@ -133,14 +133,34 @@ export type RecoveryMetric = {
 /** Single cost-provider row inside the `costThisWindow` metric. */
 export type RecoveryCostProviderRow = {
   provider: string;
-  costUsd: number;
-  spendShare: number;
+  model: string;
+  usd: number;
+  tokens: number;
+  calls: number;
 };
 
 /** SLA-attainment card inside the recovery metrics payload. */
 export type RecoverySlaAttainmentMetric = RecoveryMetric & {
   resolvedInWindow: number;
   metSla: number;
+};
+
+/** Distinct resolved-cluster card inside the recovery metrics payload. */
+export type RecoveryClustersResolvedMetric = RecoveryMetric & {
+  totalEntries: number;
+  capped: boolean;
+};
+
+/** Operator-supplied assumptions and the value estimate derived from them. */
+export type RecoveryValueEstimate = {
+  hoursSaved: number;
+  dollarSaved: number;
+  mttrDeltaSeconds: number | null;
+  assumptions: {
+    hourlyCost: number;
+    minutesSavedPerRecovery: number;
+    baselineMttrSeconds: number;
+  };
 };
 
 /** One per-day point of the MTTR trend sparkline. `day` is `YYYY-MM-DD`. */
@@ -154,7 +174,11 @@ export type RecoveryMetrics = {
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
   slaAttainment: RecoverySlaAttainmentMetric;
+  timeToFirstAction: RecoveryMetric;
+  recurrenceRate: RecoveryMetric;
   costThisWindow: RecoveryMetric & { providers: RecoveryCostProviderRow[] };
+  clustersResolved: RecoveryClustersResolvedMetric;
+  valueEstimate: RecoveryValueEstimate;
   windowDays: number;
   /** Total terminal runs in the window — denominator for downstream rollups. */
   terminalRuns: number;

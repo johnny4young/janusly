@@ -745,6 +745,124 @@
                             "metSla"
                           ]
                         },
+                        "timeToFirstAction": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "display": {
+                              "type": "string"
+                            },
+                            "severity": {
+                              "type": "string",
+                              "enum": [
+                                "healthy",
+                                "warn",
+                                "unhealthy",
+                                "neutral"
+                              ]
+                            },
+                            "rationale": {
+                              "type": "string"
+                            },
+                            "rationaleCode": {
+                              "type": "string"
+                            },
+                            "rationaleMeta": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "display",
+                            "severity",
+                            "rationale",
+                            "rationaleCode"
+                          ]
+                        },
+                        "recurrenceRate": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "display": {
+                              "type": "string"
+                            },
+                            "severity": {
+                              "type": "string",
+                              "enum": [
+                                "healthy",
+                                "warn",
+                                "unhealthy",
+                                "neutral"
+                              ]
+                            },
+                            "rationale": {
+                              "type": "string"
+                            },
+                            "rationaleCode": {
+                              "type": "string"
+                            },
+                            "rationaleMeta": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "value",
+                            "display",
+                            "severity",
+                            "rationale",
+                            "rationaleCode"
+                          ]
+                        },
                         "valueEstimate": {
                           "type": "object",
                           "properties": {
@@ -833,6 +951,8 @@
                         "costThisWindow",
                         "clustersResolved",
                         "slaAttainment",
+                        "timeToFirstAction",
+                        "recurrenceRate",
                         "valueEstimate",
                         "windowDays",
                         "terminalRuns",

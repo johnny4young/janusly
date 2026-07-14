@@ -17,6 +17,8 @@ function baseSignals(partial: Partial<RecoveryMetricsSignals> = {}): RecoveryMet
     replayOutcomes: { totalEntries: 0, replayedSuccess: 0, replayedAndReopened: 0 },
     resolvedClusters: { totalClusters: 0, totalEntries: 0, capped: false },
     slaAttainment: { resolvedInWindow: 0, metSla: 0 },
+    timeToFirstAction: { avgSeconds: null, p95Seconds: null, sampleSize: 0 },
+    recurrence: { resolved: 0, recurred: 0, recurredSignatures: [] },
     ...partial,
   };
 }
@@ -126,6 +128,71 @@ describe("composeRecoveryMetrics — SLA attainment band", () => {
     expect(result.slaAttainment.value).toBe(null);
     expect(result.slaAttainment.severity).toBe("neutral");
     expect(result.slaAttainment.rationaleCode).toBe("sla_attainment.empty");
+  });
+});
+
+describe("composeRecoveryMetrics — time to first action", () => {
+  it("formats a healthy average and preserves the p95 context", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({ timeToFirstAction: { avgSeconds: 480, p95Seconds: 900, sampleSize: 4 } }),
+      30,
+    );
+    expect(result.timeToFirstAction).toMatchObject({
+      value: 480,
+      display: "8m",
+      severity: "healthy",
+      rationaleCode: "time_to_first_action.summary",
+      rationaleMeta: { avg: "8m", p95: "15m", sampleSize: 4, count: 4 },
+    });
+  });
+
+  it("uses warn and unhealthy bands above 15 and 60 minutes", () => {
+    expect(composeRecoveryMetrics(baseSignals({
+      timeToFirstAction: { avgSeconds: 901, p95Seconds: 1_800, sampleSize: 2 },
+    }), 30).timeToFirstAction.severity).toBe("warn");
+    expect(composeRecoveryMetrics(baseSignals({
+      timeToFirstAction: { avgSeconds: 3_601, p95Seconds: 4_000, sampleSize: 2 },
+    }), 30).timeToFirstAction.severity).toBe("unhealthy");
+  });
+
+  it("is neutral when the window has no first actions", () => {
+    expect(composeRecoveryMetrics(baseSignals(), 30).timeToFirstAction).toMatchObject({
+      value: null,
+      severity: "neutral",
+      rationaleCode: "time_to_first_action.empty",
+    });
+  });
+});
+
+describe("composeRecoveryMetrics — fix durability", () => {
+  it("is healthy when at least 90 percent have not recurred", () => {
+    const metric = composeRecoveryMetrics(baseSignals({
+      recurrence: { resolved: 10, recurred: 1, recurredSignatures: ["http_error:timeout"] },
+    }), 30).recurrenceRate;
+    expect(metric).toMatchObject({
+      value: 90,
+      display: "90.0%",
+      severity: "healthy",
+      rationaleCode: "recurrence.summary",
+      rationaleMeta: { held: 9, resolved: 10, recurred: 1 },
+    });
+  });
+
+  it("uses warn and unhealthy bands below 90 and 75 percent", () => {
+    expect(composeRecoveryMetrics(baseSignals({
+      recurrence: { resolved: 10, recurred: 2, recurredSignatures: [] },
+    }), 30).recurrenceRate.severity).toBe("warn");
+    expect(composeRecoveryMetrics(baseSignals({
+      recurrence: { resolved: 10, recurred: 3, recurredSignatures: [] },
+    }), 30).recurrenceRate.severity).toBe("unhealthy");
+  });
+
+  it("is neutral before the first terminal recovery", () => {
+    expect(composeRecoveryMetrics(baseSignals(), 30).recurrenceRate).toMatchObject({
+      value: null,
+      severity: "neutral",
+      rationaleCode: "recurrence.empty",
+    });
   });
 });
 

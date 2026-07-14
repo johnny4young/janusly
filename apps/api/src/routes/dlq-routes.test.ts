@@ -22,15 +22,28 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { findMatchingPlaybookMock, replayDeadLetterMock, replayValidationMock } = vi.hoisted(() => ({
+const {
+  findMatchingPlaybookMock,
+  queryFailureSamplesMock,
+  queryRecoveryRecurrenceMock,
+  replayDeadLetterMock,
+  replayValidationMock,
+} = vi.hoisted(() => ({
   findMatchingPlaybookMock: vi.fn(),
+  queryFailureSamplesMock: vi.fn(),
+  queryRecoveryRecurrenceMock: vi.fn(),
   replayDeadLetterMock: vi.fn(),
   replayValidationMock: vi.fn(),
 }));
 
 vi.mock("@janusly/data", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@janusly/data")>();
-  return { ...actual, findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock };
+  return {
+    ...actual,
+    findMatchingActiveRecoveryPlaybook: findMatchingPlaybookMock,
+    queryFailureSamples: queryFailureSamplesMock,
+    queryRecoveryRecurrence: queryRecoveryRecurrenceMock,
+  };
 });
 
 vi.mock("../auth", () => ({
@@ -61,7 +74,7 @@ vi.mock("../dlq", async (importOriginal) => {
 // Bulk-resolve also audits per entry + auto-closes the linked recovery item.
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
 
-// M-08: the detail read attaches the suspect-version correlation; mocked so
+// The detail read attaches the suspect-version correlation; mocked so
 // the route tests control hit/miss without a DB.
 vi.mock("../suspect-version", () => ({ resolveSuspectVersion: vi.fn() }));
 
@@ -176,7 +189,7 @@ describe("GET /dlq route declaration", () => {
     expect(route.role).toBe("viewer");
   });
 
-  it("does NOT declare a permission gate (no migration to permission: form per ROADMAP non-goal)", () => {
+  it("does NOT declare a permission gate because this read still uses the role gate", () => {
     const route = findRoute("GET", "/dlq");
     expect(route.permission).toBeUndefined();
   });
@@ -184,6 +197,65 @@ describe("GET /dlq route declaration", () => {
   it("matches the role posture of its sibling list routes", () => {
     expect(findRoute("GET", "/dlq/clusters").role).toBe("viewer");
     expect(findRoute("GET", "/dlq/cluster-members?signature=x").role).toBe("viewer");
+  });
+});
+
+describe("GET /dlq/clusters recovery recurrence", () => {
+  it("marks only signatures that re-failed after a terminal recovery", async () => {
+    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "supabase", source: "web" });
+    requireRoleMock.mockResolvedValueOnce("viewer");
+    const samples = [
+      {
+        source: "dead_letter",
+        id: "dl-1",
+        workflowId: "wf-1",
+        workflowName: "Orders",
+        runId: "run-1",
+        nodeId: "http-1",
+        nodeType: "http",
+        errorJson: { message: "Connection refused" },
+        createdAt: new Date("2026-07-12T12:00:00.000Z"),
+      },
+      {
+        source: "dead_letter",
+        id: "dl-2",
+        workflowId: "wf-2",
+        workflowName: "Invoices",
+        runId: "run-2",
+        nodeId: "http-2",
+        nodeType: "http",
+        errorJson: { message: "Request timed out" },
+        createdAt: new Date("2026-07-12T13:00:00.000Z"),
+      },
+    ] satisfies import("@janusly/engine/src/cluster-failures").FailureSample[];
+    queryFailureSamplesMock.mockResolvedValueOnce(samples);
+
+    const firstClusters = (await import("@janusly/engine/src/cluster-failures")).clusterFailureSamples(
+      samples,
+    );
+    queryRecoveryRecurrenceMock.mockResolvedValueOnce({
+      resolved: 2,
+      recurred: 1,
+      recurredSignatures: [firstClusters[0]!.signature],
+    });
+
+    const server = createApiServer({ routes: dlqRoutes });
+    const baseUrl = await listen(server);
+    try {
+      const response = await fetch(`${baseUrl}/dlq/clusters?windowDays=14`);
+      expect(response.status).toBe(200);
+      const payload = await response.json() as {
+        clusters: Array<{ signature: string; recurredAfterRecovery: boolean }>;
+      };
+      expect(payload.clusters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ signature: firstClusters[0]!.signature, recurredAfterRecovery: true }),
+        expect.objectContaining({ signature: firstClusters[1]!.signature, recurredAfterRecovery: false }),
+      ]));
+      expect(queryFailureSamplesMock).toHaveBeenCalledWith("org-1", 14);
+      expect(queryRecoveryRecurrenceMock).toHaveBeenCalledWith("org-1", expect.any(Date));
+    } finally {
+      await close(server);
+    }
   });
 });
 
@@ -968,7 +1040,7 @@ describe("POST /dlq/replay — MCP-source write consent gate", () => {
   });
 });
 
-describe("GET /dlq?id= detail read (M-08 suspect version)", () => {
+describe("GET /dlq?id= detail read with suspect version", () => {
   const DETAIL_ROW = {
     id: "dl-1",
     orgId: "org-1",

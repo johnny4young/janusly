@@ -104,6 +104,20 @@ export type SlaAttainmentRepo = {
   metSla: number;
 };
 
+/** Set-once first-action latency over recovery incidents and untracked DLQ replays. */
+export type TimeToFirstActionRepo = {
+  avgSeconds: number | null;
+  p95Seconds: number | null;
+  sampleSize: number;
+};
+
+/** Successful fixes evaluated for a same-signature production recurrence within seven days. */
+export type RecoveryRecurrenceRepo = {
+  resolved: number;
+  recurred: number;
+  recurredSignatures: string[];
+};
+
 /**
  * Raw signals consumed by the engine's `composeRecoveryMetrics`. Field
  * names + shape match `RecoveryMetricsSignals` there — both modules
@@ -122,6 +136,8 @@ export type RecoveryMetricsSignals = {
   replayOutcomes: ReplayOutcomeCountsRepo;
   resolvedClusters: ResolvedClustersRepo;
   slaAttainment: SlaAttainmentRepo;
+  timeToFirstAction: TimeToFirstActionRepo;
+  recurrence: RecoveryRecurrenceRepo;
 };
 
 /** Lifetime measured value from DLQ replays that reached terminal success. */
@@ -160,7 +176,12 @@ export async function recordRecoveryImpactTx(
   if (!input.deadLetterId) return false;
 
   const [dlq] = await tx
-    .select({ orgId: deadLetters.orgId, createdAt: deadLetters.createdAt })
+    .select({
+      orgId: deadLetters.orgId,
+      createdAt: deadLetters.createdAt,
+      replayClaimedAt: deadLetters.replayClaimedAt,
+      replayedAt: deadLetters.replayedAt,
+    })
     .from(deadLetters)
     .where(and(
       eq(deadLetters.id, input.deadLetterId),
@@ -263,6 +284,7 @@ export async function recordRecoveryImpactTx(
     .for("update");
   if (item && item.status !== "resolved") {
     const actor = input.userId ?? "system";
+    const firstActionAt = dlq.replayClaimedAt ?? dlq.replayedAt ?? input.recoveredAt;
     const [resolved] = await tx
       .update(recoveryItems)
       .set({
@@ -270,6 +292,12 @@ export async function recordRecoveryImpactTx(
         resolutionReason: "sandbox_replay_succeeded",
         resolvedBy: actor,
         resolvedAt: input.recoveredAt,
+        // Raw sql interpolations do not inherit Drizzle's timestamp encoder;
+        // pass an ISO string and cast explicitly instead of binding a JS Date.
+        firstActionAt: sql`coalesce(
+          ${recoveryItems.firstActionAt},
+          ${firstActionAt.toISOString()}::timestamptz
+        )`,
         updatedAt: input.recoveredAt,
       })
       .where(and(
@@ -384,6 +412,8 @@ export async function queryRecoveryMetricsSignals(
     replayOutcomes,
     resolvedClusters,
     slaAttainment,
+    timeToFirstAction,
+    recurrence,
   ] = await Promise.all([
     queryRunStatusCounts(orgId, since),
     queryMttrDurations(orgId, since),
@@ -394,6 +424,8 @@ export async function queryRecoveryMetricsSignals(
     queryReplayOutcomes(orgId, since),
     queryFailureClustersResolved(orgId, since),
     queryRecoverySlaAttainment(orgId, since),
+    queryTimeToFirstAction(orgId, since),
+    queryRecoveryRecurrence(orgId, since),
   ]);
 
   return {
@@ -406,6 +438,177 @@ export async function queryRecoveryMetricsSignals(
     replayOutcomes,
     resolvedClusters,
     slaAttainment,
+    timeToFirstAction,
+    recurrence,
+  };
+}
+
+/**
+ * Average + p95 delay from a recovery incident landing to its first meaningful
+ * action. Recovery-item transitions use the set-once `first_action_at`; tenants
+ * that intentionally disable item creation still contribute through the
+ * pre-enqueue DLQ replay claim. Direct and child-linked items are excluded from
+ * the fallback branch so one incident is never sampled twice.
+ */
+export async function queryTimeToFirstAction(
+  orgId: string,
+  since: Date,
+): Promise<TimeToFirstActionRepo> {
+  const rows = await db.execute<{
+    sample_size: number;
+    avg_seconds: number | null;
+    p95_seconds: number | null;
+  }>(sql`
+    WITH samples AS (
+      SELECT extract(epoch FROM ("first_action_at" - "created_at"))::float8 AS seconds
+      FROM "recovery_items"
+      WHERE "org_id" = ${orgId}
+        AND "created_at" >= ${since.toISOString()}::timestamptz
+        AND "first_action_at" IS NOT NULL
+
+      UNION ALL
+
+      SELECT extract(epoch FROM (
+        coalesce(dlq."replay_claimed_at", dlq."replayed_at") - dlq."created_at"
+      ))::float8 AS seconds
+      FROM "dead_letters" dlq
+      WHERE dlq."org_id" = ${orgId}
+        AND dlq."created_at" >= ${since.toISOString()}::timestamptz
+        AND coalesce(dlq."replay_claimed_at", dlq."replayed_at") IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "recovery_items" item
+          WHERE item."org_id" = ${orgId}
+            AND item."dead_letter_id" = dlq."id"
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "recovery_item_children" child
+          WHERE child."org_id" = ${orgId}
+            AND child."dead_letter_id" = dlq."id"
+        )
+    )
+    SELECT
+      count(*) FILTER (WHERE seconds >= 0)::int AS sample_size,
+      avg(seconds) FILTER (WHERE seconds >= 0)::float8 AS avg_seconds,
+      percentile_disc(0.95) WITHIN GROUP (ORDER BY seconds)
+        FILTER (WHERE seconds >= 0)::float8 AS p95_seconds
+    FROM samples
+  `);
+  const row = rows[0];
+  const avgSeconds = row?.avg_seconds == null ? null : Number(row.avg_seconds);
+  const p95Seconds = row?.p95_seconds == null ? null : Number(row.p95_seconds);
+  return {
+    avgSeconds: avgSeconds != null && Number.isFinite(avgSeconds) ? Math.max(0, avgSeconds) : null,
+    p95Seconds: p95Seconds != null && Number.isFinite(p95Seconds) ? Math.max(0, p95Seconds) : null,
+    sampleSize: Math.max(0, Number(row?.sample_size ?? 0)),
+  };
+}
+
+/**
+ * Evaluate whether a terminally successful recovery stayed fixed for seven
+ * days. The immutable impact event is the fix boundary. A recurrence is either
+ * a new item with the same normalized signature or a later child occurrence on
+ * the same reopened item. Validation/sandbox runs never count as recurrence.
+ */
+export async function queryRecoveryRecurrence(
+  orgId: string,
+  since: Date,
+): Promise<RecoveryRecurrenceRepo> {
+  const rows = await db.execute<{
+    resolved: number;
+    recurred: number;
+    recurred_signatures: string[] | null;
+  }>(sql`
+    WITH impact_items AS (
+      SELECT
+        item."id" AS item_id,
+        item."error_signature" AS error_signature,
+        impact."recovered_at" AS recovered_at
+      FROM "recovery_impact_events" impact
+      INNER JOIN "recovery_items" item
+        ON item."org_id" = impact."org_id"
+       AND item."dead_letter_id" = impact."dead_letter_id"
+      WHERE impact."org_id" = ${orgId}
+        AND impact."recovered_at" >= ${since.toISOString()}::timestamptz
+
+      UNION ALL
+
+      SELECT
+        item."id" AS item_id,
+        item."error_signature" AS error_signature,
+        impact."recovered_at" AS recovered_at
+      FROM "recovery_impact_events" impact
+      INNER JOIN "recovery_item_children" child
+        ON child."org_id" = impact."org_id"
+       AND child."dead_letter_id" = impact."dead_letter_id"
+      INNER JOIN "recovery_items" item
+        ON item."org_id" = child."org_id"
+       AND item."id" = child."recovery_item_id"
+      WHERE impact."org_id" = ${orgId}
+        AND impact."recovered_at" >= ${since.toISOString()}::timestamptz
+    ), recovered_items AS (
+      SELECT
+        item_id,
+        error_signature,
+        min(recovered_at) AS recovered_at
+      FROM impact_items
+      WHERE error_signature IS NOT NULL
+      GROUP BY item_id, error_signature
+    ), evaluated AS (
+      SELECT
+        recovered.error_signature,
+        (
+          EXISTS (
+            SELECT 1
+            FROM "recovery_items" later_item
+            INNER JOIN "dead_letters" later_dlq
+              ON later_dlq."org_id" = later_item."org_id"
+             AND later_dlq."id" = later_item."dead_letter_id"
+            INNER JOIN "runs" later_run
+              ON later_run."id" = later_dlq."run_id"
+             AND later_run."org_id" = later_item."org_id"
+            WHERE later_item."org_id" = ${orgId}
+              AND later_item."id" <> recovered.item_id
+              AND later_item."error_signature" = recovered.error_signature
+              AND later_item."first_occurred_at" > recovered.recovered_at
+              AND later_item."first_occurred_at" <= recovered.recovered_at + interval '7 days'
+              AND later_run."replay_mode" IS NULL
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "recovery_item_children" later_child
+            INNER JOIN "dead_letters" later_dlq
+              ON later_dlq."org_id" = later_child."org_id"
+             AND later_dlq."id" = later_child."dead_letter_id"
+            INNER JOIN "runs" later_run
+              ON later_run."id" = later_dlq."run_id"
+             AND later_run."org_id" = later_child."org_id"
+            WHERE later_child."org_id" = ${orgId}
+              AND later_child."recovery_item_id" = recovered.item_id
+              AND later_child."occurred_at" > recovered.recovered_at
+              AND later_child."occurred_at" <= recovered.recovered_at + interval '7 days'
+              AND later_run."replay_mode" IS NULL
+          )
+        ) AS recurred
+      FROM recovered_items recovered
+    )
+    SELECT
+      count(*)::int AS resolved,
+      count(*) FILTER (WHERE recurred)::int AS recurred,
+      coalesce(
+        array_agg(DISTINCT error_signature) FILTER (WHERE recurred),
+        ARRAY[]::text[]
+      ) AS recurred_signatures
+    FROM evaluated
+  `);
+  const row = rows[0];
+  return {
+    resolved: Math.max(0, Number(row?.resolved ?? 0)),
+    recurred: Math.max(0, Number(row?.recurred ?? 0)),
+    recurredSignatures: Array.isArray(row?.recurred_signatures)
+      ? row.recurred_signatures.filter((value): value is string => typeof value === "string")
+      : [],
   };
 }
 

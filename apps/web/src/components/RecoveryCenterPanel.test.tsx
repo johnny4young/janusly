@@ -67,6 +67,8 @@ const baseMetrics = {
   approvalsPending: { value: 0, display: '0', severity: 'healthy', rationale: 'No human action waiting' },
   replayRate: { value: 78, display: '78%', severity: 'healthy', rationale: 'Replay success rate' },
   slaAttainment: { value: 92, display: '92.0%', severity: 'healthy', rationale: 'SLA attainment', rationaleCode: 'sla_attainment.summary', rationaleMeta: { metSla: 46, resolvedInWindow: 50 } },
+  timeToFirstAction: { value: 480, display: '8m', severity: 'healthy', rationale: 'First action', rationaleCode: 'time_to_first_action.summary', rationaleMeta: { avg: '8m', p95: '15m', sampleSize: 4 } },
+  recurrenceRate: { value: 90, display: '90.0%', severity: 'healthy', rationale: 'Fix durability', rationaleCode: 'recurrence.summary', rationaleMeta: { held: 9, resolved: 10, recurred: 1 } },
   windowDays: 30,
   terminalRuns: 87,
 }
@@ -579,13 +581,13 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
   const populatedNodes = [{ nodeId: 'human-approve', status: 'waiting', stateJson: { waiting: { kind: 'approval', title: 'Approve invoice' } } }]
   const populatedClusters = {
     clusters: [
-      { signature: 'Missing secret: GITHUB_TOKEN', category: 'secret_missing' as const, frequency: 3, suggestedOwner: 'ops' as const, lastSeen: new Date().toISOString() },
+      { signature: 'Missing secret: GITHUB_TOKEN', category: 'secret_missing' as const, frequency: 3, suggestedOwner: 'ops' as const, lastSeen: new Date().toISOString(), recurredAfterRecovery: true },
     ],
     totalSamples: 5,
     windowDays: 30,
   }
 
-  it('renders all four tiles when signals are populated', async () => {
+  it('renders the populated recovery metrics and operator tiles', async () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === '/recovery/metrics') return baseMetrics
       if (path === '/dlq/clusters') return populatedClusters
@@ -616,6 +618,11 @@ describe('<RecoveryCenterPanel /> — populated state', () => {
     // means the numeric text isn't settled synchronously in jsdom.
     expect(screen.getByText('SLA attainment')).toBeInTheDocument()
     expect(screen.getByTestId('recovery-center-metric-sla')).toBeInTheDocument()
+    expect(screen.getByText('Time to first action')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-metric-first-action')).toBeInTheDocument()
+    expect(screen.getByText('Fixes that held')).toBeInTheDocument()
+    expect(screen.getByTestId('recovery-center-metric-durability')).toBeInTheDocument()
+    expect(screen.getByText('Re-failed after fix')).toBeInTheDocument()
   })
 
   it('hands Open queue to the focused recovery navigation callback', async () => {

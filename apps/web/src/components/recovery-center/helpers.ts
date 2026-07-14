@@ -62,6 +62,8 @@ export type RecoveryMetrics = {
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
   slaAttainment?: RecoveryMetric
+  timeToFirstAction?: RecoveryMetric
+  recurrenceRate?: RecoveryMetric
   clustersResolved?: ClustersResolvedMetric
   valueEstimate?: ValueEstimate
   windowDays: number
@@ -100,6 +102,8 @@ export type FailureCluster = {
   frequency: number
   suggestedOwner: ClusterOwner
   lastSeen: string
+  /** True when this normalized signature returned after a terminal recovery. */
+  recurredAfterRecovery?: boolean
 }
 
 export type ClustersResponse = {
