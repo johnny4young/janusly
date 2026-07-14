@@ -25,6 +25,18 @@ function ToggleDialog({ active }: { active: boolean }) {
   ) : null
 }
 
+function PreferredFocusDialog({ active, preferredDisabled = false }: { active: boolean; preferredDisabled?: boolean }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const preferredRef = useRef<HTMLButtonElement>(null)
+  useDialogFocusTrap(dialogRef, { active, initialFocus: preferredRef })
+  return active ? (
+    <div ref={dialogRef} role="dialog">
+      <button data-testid="fallback">fallback</button>
+      <button ref={preferredRef} data-testid="preferred" disabled={preferredDisabled}>preferred</button>
+    </div>
+  ) : null
+}
+
 describe('useDialogFocusTrap', () => {
   it('wraps Tab from the last focusable back to the first', () => {
     const { getByTestId } = render(<Dialog />)
@@ -70,6 +82,24 @@ describe('useDialogFocusTrap', () => {
     await waitFor(() => expect(document.activeElement).toBe(getByTestId('initial')))
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
     expect(document.activeElement).toBe(getByTestId('initial'))
+  })
+
+  it('focuses a preferred control and keeps it focused through the Strict Mode effect replay', async () => {
+    const { getByTestId } = render(
+      <StrictMode>
+        <PreferredFocusDialog active />
+      </StrictMode>,
+    )
+
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId('preferred')))
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(document.activeElement).toBe(getByTestId('preferred'))
+  })
+
+  it('falls back to the first focusable control when the preferred target is disabled', async () => {
+    const { getByTestId } = render(<PreferredFocusDialog active preferredDisabled />)
+
+    await waitFor(() => expect(document.activeElement).toBe(getByTestId('fallback')))
   })
 
   it('restores focus to the trigger when an active dialog closes', async () => {

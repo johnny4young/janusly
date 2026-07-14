@@ -16,6 +16,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { useT } from '../i18n'
+import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 
 /**
  * One confirm() invocation's copy + styling. `body` is the already-localized
@@ -50,9 +51,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const { t } = useT()
   const [options, setOptions] = useState<ConfirmOptions | null>(null)
   const resolveRef = useRef<((ok: boolean) => void) | null>(null)
-  const triggerRef = useRef<HTMLElement | null>(null)
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
+  useDialogFocusTrap(dialogRef, {
+    active: options !== null,
+    initialFocus: confirmButtonRef,
+  })
 
   const confirm = useCallback<ConfirmFn>((next) => {
     // Only one modal can own the shared provider at a time. A re-entrant call
@@ -60,8 +64,6 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     // active resolver/options because that would leave the first caller's
     // Promise hanging. Treat overlapping requests as "not confirmed".
     if (resolveRef.current) return Promise.resolve(false)
-    // Remember the element that opened the dialog so focus can return to it.
-    triggerRef.current = (document.activeElement as HTMLElement | null) ?? null
     return new Promise<boolean>((resolve) => {
       resolveRef.current = resolve
       setOptions(next)
@@ -72,16 +74,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     resolveRef.current?.(ok)
     resolveRef.current = null
     setOptions(null)
-    const trigger = triggerRef.current
-    triggerRef.current = null
-    // Restore focus after the dialog unmounts.
-    if (trigger) requestAnimationFrame(() => trigger.focus())
   }, [])
-
-  // Focus the confirm button when the dialog opens.
-  useEffect(() => {
-    if (options) confirmButtonRef.current?.focus()
-  }, [options])
 
   // If the provider unmounts while a confirm is open (test cleanup, route-level
   // teardown, or a future conditional mount), resolve the pending caller instead
@@ -93,29 +86,14 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // Escape closes; Tab is trapped between the dialog's buttons.
+  // Escape remains dialog-specific; the shared hook owns initial focus, the
+  // Tab trap, Strict Mode replay safety, and trigger restoration.
   useEffect(() => {
     if (!options) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
         close(false)
-        return
-      }
-      if (event.key === 'Tab') {
-        const root = dialogRef.current
-        if (!root) return
-        const focusable = Array.from(root.querySelectorAll<HTMLElement>('button:not([disabled])'))
-        if (focusable.length === 0) return
-        const first = focusable[0]!
-        const last = focusable[focusable.length - 1]!
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault()
-          last.focus()
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault()
-          first.focus()
-        }
       }
     }
     window.addEventListener('keydown', onKeyDown)

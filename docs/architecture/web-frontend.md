@@ -19,6 +19,20 @@ it is the canonical exact-path catalog for reads transported over `/v1` and
 prevents the browser from maintaining a second list beside OpenAPI. Do not
 replace it with a broad `@janusly/shared` barrel import.
 
+## Modal focus contract
+
+Every surface that can expose `aria-modal=true` uses `useDialogFocusTrap`, a
+`dialog`/`alertdialog` role, and an accessible name. The hook is the single
+owner of trigger capture, optional initial focus (`true` for the first
+focusable control or a preferred ref with a focusable fallback), Tab wrapping,
+React Strict Mode replay safety, and trigger restoration. Each component keeps
+its own Escape/backdrop behavior and state machine; do not move those semantics
+into the generic hook. `apps/web/src/modal-contract.test.ts` inventories the
+true modals and fails when a new one bypasses this contract. Deliberately
+non-modal drawers such as `RecoveryItemDrawer` retain `aria-modal=false` and
+their independent close/restore behavior — trapping them would make background
+content incorrectly inert.
+
 ## i18n
 
 **i18n:** the `apps/web/src/i18n/` module is the single chokepoint for translations. Two locales today (`en`, `es`) plus a `'system'` setting that resolves once at boot via `navigator.languages`. Persistence: `localStorage["janusly:locale"]` (defensive try/catch mirroring `auth.ts`). Bootstrap: `initI18n()` runs synchronously before `createRoot` in `apps/web/src/main.tsx`; no Suspense, no async backend. JSON catalogs live at `apps/web/src/i18n/locales/<lng>/common.json` (single namespace `common`, dot-notation flat keys, plurals via i18next `_one`/`_other`, interpolation `{{var}}`). TypeScript safety via i18next's `CustomTypeOptions` augmentation in `types.d.ts` — every key autocompletes and unknown keys are a compile error. Two flavours of consumer: React components use `useT()` (subscribes to language changes), non-React helpers (`constants.ts` formatters, server-event mappers) use `t` from `apps/web/src/i18n/runtime.ts` (shares the same `i18next` instance). Server-emitted strings are translated client-side via the dedicated helpers `tValidationIssue` / `tReadinessIssue` / `tAiReviewIssue` / `tRunEvent` / `tFailureCluster` / `tApiError` — they look up `<surface>.<code>` in the catalog and fall back to `serverEvents.fallback` (`{{message}}`) for unknown codes. **API error envelopes** ship `{ error: "<EN fallback>", code: "<snake_code>", params? }` built via `errorEnvelope(code, message, params?)` from `apps/api/src/error-codes.ts` (closed `ApiErrorCode` union); `tApiError(err)` on the web reads the `code` first and resolves `apiErrors.<code>` in the catalog, falling back to the literal `error` (then `message`) when the key is missing. Adding a new API error code is three edits: the closed-union entry in `error-codes.ts`, an `apiErrors.<code>` line in `en/common.json`, and the matching line in `es/common.json` (parity test catches mismatches). **Date and number formatting** in components passes `getResolvedLocale()` to `.toLocaleString()` / `.toLocaleDateString()` so timestamps and counts respect the operator's UI language; never call those formatters without an explicit locale argument. The server stays locale-blind; the client owns 100% of translations. Adding a new code from the engine is one entry in `en/common.json` + `es/common.json`; adding a new locale is one new `locales/<lng>/common.json`. Parity between locales is gated by `apps/web/src/i18n/parity.test.ts` (runs as part of `pnpm test`). Free-form server messages (Supabase errors, generic `Error.message`) pass through `serverEvents.fallback` unchanged.

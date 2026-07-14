@@ -175,9 +175,14 @@ for (const contract of LOCALES) {
     await page.getByRole('button', { name: contract.homeName }).click()
     const heatmap = page.getByTestId('recovery-heatmap')
     const latestCell = page.getByTestId(`recovery-heatmap-cell-${days[2]}`)
+    const previousDayCell = page.getByTestId(`recovery-heatmap-cell-${days[1]}`)
+    // The densified grid renders empty cells before the remounted Home panel's
+    // history request settles. Wait for the seeded days to become actionable
+    // so Enter proves keyboard drill-in instead of racing the transient shell.
+    await expect(latestCell).toHaveAttribute('aria-disabled', 'false')
+    await expect(previousDayCell).toHaveAttribute('aria-disabled', 'false')
     await latestCell.focus()
     await page.keyboard.press('ArrowUp')
-    const previousDayCell = page.getByTestId(`recovery-heatmap-cell-${days[1]}`)
     await expect(previousDayCell).toBeFocused()
     await hideUnrelatedOverlays(page)
     await capture(heatmap, `web-${contract.locale}-recovery-heatmap-keyboard`)

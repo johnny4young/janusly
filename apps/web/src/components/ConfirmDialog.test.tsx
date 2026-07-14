@@ -65,9 +65,9 @@ describe('<ConfirmProvider /> / useConfirm', () => {
     const confirm = screen.getByTestId('confirm-dialog-confirm')
 
     await waitFor(() => expect(document.activeElement).toBe(confirm))
-    fireEvent.keyDown(window, { key: 'Tab' })
+    fireEvent.keyDown(document, { key: 'Tab' })
     expect(document.activeElement).toBe(cancel)
-    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
     expect(document.activeElement).toBe(confirm)
 
     fireEvent.keyDown(window, { key: 'Escape' })

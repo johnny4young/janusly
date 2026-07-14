@@ -13,11 +13,12 @@
  *  - Traps Tab / Shift+Tab so focus wraps within the dialog instead of escaping
  *    to the background. It only acts while focus is already inside the dialog,
  *    so it never yanks focus from a nested dialog or the page.
- *  - With `initialFocus: true`, focuses the first focusable on open (use for
- *    dialogs that don't focus a control themselves, e.g. ShortcutsModal).
+ *  - With `initialFocus: true`, focuses the first focusable on open. A ref can
+ *    select a preferred initial control and falls back to the first focusable
+ *    if that control is unavailable.
  *
- * Used by the app's modal dialogs. The always-mounted ConfirmDialog provider
- * manages focus itself (it can't use this) — see `ConfirmDialog.tsx`.
+ * Used by every `aria-modal="true"` surface in the app. Dialog-specific Escape
+ * and state-machine behavior remains with each component.
  */
 
 import { useEffect, useRef } from 'react'
@@ -34,7 +35,10 @@ const FOCUSABLE_SELECTOR = [
 
 export function useDialogFocusTrap(
   dialogRef: RefObject<HTMLElement | null>,
-  options?: { active?: boolean; initialFocus?: boolean },
+  options?: {
+    active?: boolean
+    initialFocus?: boolean | RefObject<HTMLElement | null>
+  },
 ): void {
   const active = options?.active ?? true
   const initialFocus = options?.initialFocus ?? false
@@ -66,7 +70,12 @@ export function useDialogFocusTrap(
     const root = dialogRef.current
 
     if (initialFocus && root) {
-      root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]?.focus()
+      const firstFocusable = root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)[0]
+      const preferred = initialFocus === true ? null : initialFocus.current
+      const target = preferred && root.contains(preferred) && preferred.matches(FOCUSABLE_SELECTOR)
+        ? preferred
+        : firstFocusable
+      target?.focus()
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
