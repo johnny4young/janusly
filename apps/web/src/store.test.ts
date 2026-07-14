@@ -48,6 +48,19 @@ describe('useWorkflowStore', () => {
     expect(nodes[0].data.config).toEqual({ url: 'https://api.github.com' })
   })
 
+  it('seeds a representative request, condition, and approval workflow', () => {
+    expect(initialState.nodes.map(node => node.data.type)).toEqual(['http', 'condition', 'approval'])
+    expect(initialState.nodes.find(node => node.id === 'check')?.data.config).toEqual({
+      expression: 'context.fetch.output.statusCode === 200',
+    })
+    expect(initialState.edges.map(edge => [edge.source, edge.target])).toEqual([
+      ['fetch', 'check'],
+      ['check', 'approve'],
+    ])
+    expect(initialState.edges.find(edge => edge.source === 'check')?.data?.condition)
+      .toBe('context.check.output.result === true')
+  })
+
   it('hydrateWorkflow loads nodes/edges and resets selection and run state', () => {
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf_1',
@@ -126,6 +139,38 @@ describe('useWorkflowStore', () => {
     unregister()
 
     expect(useWorkflowStore.getState().nodes[0].position).toEqual({ x: 640, y: 360 })
+  })
+
+  it('prefers an explicit drop position over the viewport placement resolver', () => {
+    const unregister = registerNodePlacementResolver(() => ({ x: 640, y: 360 }))
+    useWorkflowStore.getState().addNode('noop', { x: 75, y: 95 })
+    unregister()
+
+    expect(useWorkflowStore.getState().nodes[0].position).toEqual({ x: 75, y: 95 })
+  })
+
+  it('duplicates a step beside the source with independent config and selection ownership', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{ id: 'source', type: 'http', label: 'Fetch invoice', config: { url: 'https://example.com', headers: { accept: 'json' } } }],
+      edges: [],
+      ui: { positions: { source: { x: 100, y: 200 } } },
+    })
+    const revision = useWorkflowStore.getState().workflowRevision
+
+    useWorkflowStore.getState().duplicateNode('source')
+
+    const state = useWorkflowStore.getState()
+    expect(state.nodes).toHaveLength(2)
+    expect(state.nodes[1]).toMatchObject({
+      position: { x: 132, y: 232 },
+      data: { type: 'http', label: 'Fetch invoice', config: { url: 'https://example.com', headers: { accept: 'json' } } },
+    })
+    expect(state.nodes[1].id).not.toBe('source')
+    expect(state.nodes[1].data.config).not.toBe(state.nodes[0].data.config)
+    expect(state.selectedNodeId).toBe(state.nodes[1].id)
+    expect(state.workflowDirty).toBe(true)
+    expect(state.workflowRevision).toBe(revision + 1)
   })
 
   it('updateSelectedNodeType swaps type and config with the matching preset', () => {

@@ -42,6 +42,8 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
       items: [
         { keys: ['⌘', 'K'], description: t('shortcuts.cmdk') as string },
         { keys: ['⌘', 'S'], description: t('shortcuts.save') as string },
+        { keys: ['⌘', '1'], description: t('shortcuts.home') as string },
+        { keys: ['⌘', '2'], description: t('shortcuts.studio') as string },
         { keys: ['?'], description: t('shortcuts.helpThis') as string },
         { keys: ['⌃', '⇧', 'Q'], description: t('shortcuts.signOut') as string },
       ],

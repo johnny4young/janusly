@@ -31,6 +31,7 @@ function renderPanel(overrides: Partial<Parameters<typeof InspectorPanel>[0]> = 
     runNodes: [],
     validationIssues: [],
     tools: [],
+    workflows: [],
     workflowNodes: [],
     workflowEdges: [],
     onUpdateNodeConfig: vi.fn(),
@@ -49,6 +50,7 @@ function renderPanelWithConfirm(overrides: Partial<Parameters<typeof InspectorPa
     runNodes: [],
     validationIssues: [],
     tools: [],
+    workflows: [],
     workflowNodes: [],
     workflowEdges: [],
     onUpdateNodeConfig: vi.fn(),
@@ -181,6 +183,24 @@ describe('<InspectorPanel /> step-kind changes', () => {
     expect(nameInput).toHaveAccessibleDescription('Optional. Clear it to use the localized step kind name.')
     fireEvent.change(nameInput, { target: { value: 'Approve invoice' } })
     expect(useWorkflowStore.getState().nodes[0].data.label).toBe('Approve invoice')
+  })
+
+  it('duplicates the selected step through the explicit inspector action', () => {
+    const node = makeNode('node-a')
+    node.position = { x: 80, y: 120 }
+    node.data = { label: 'Review invoice', type: 'approval', config: { message: 'Check total' } }
+    useWorkflowStore.setState({ nodes: [node], edges: [], selectedNodeId: node.id, workflowRevision: 0 })
+    renderPanel({ selectedNode: node, workflowNodes: [node] })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate step' }))
+
+    const state = useWorkflowStore.getState()
+    expect(state.nodes).toHaveLength(2)
+    expect(state.nodes[1]).toMatchObject({
+      position: { x: 112, y: 152 },
+      data: { label: 'Review invoice', type: 'approval', config: { message: 'Check total' } },
+    })
+    expect(state.selectedNodeId).toBe(state.nodes[1].id)
   })
 
   it('keeps the current kind and restores focus when the operator cancels', async () => {

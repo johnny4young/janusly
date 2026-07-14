@@ -11,6 +11,7 @@ vi.mock('../api', () => ({
 }))
 
 const initialNodes = useWorkflowStore.getState().nodes
+const initialResilienceNodeId = initialNodes.find(node => node.data.type === 'http')?.id
 
 describe('<WorkflowReadinessBadge />', () => {
   beforeEach(() => {
@@ -58,13 +59,14 @@ describe('<WorkflowReadinessBadge />', () => {
   })
 
   it('deep-links a retry blocker to the selected node resilience controls', async () => {
+    expect(initialResilienceNodeId).toBeTruthy()
     vi.mocked(api).mockResolvedValueOnce({
       status: 'fail',
       issues: [{
         code: 'external_node_missing_retry',
         severity: 'fail',
         message: 'Missing retry policy',
-        nodeId: '1',
+        nodeId: initialResilienceNodeId,
         suggestion: 'Set retry.maxAttempts.',
       }],
     })
@@ -75,9 +77,9 @@ describe('<WorkflowReadinessBadge />', () => {
     fireEvent.click(summary)
     fireEvent.click(await screen.findByRole('button', { name: 'Open resilience controls' }))
 
-    expect(useWorkflowStore.getState().selectedNodeId).toBe('1')
+    expect(useWorkflowStore.getState().selectedNodeId).toBe(initialResilienceNodeId)
     expect(useWorkflowStore.getState().activeTab).toBe('inspector')
-    expect(consumeResilienceFocus('1')).toBe(true)
+    expect(consumeResilienceFocus(initialResilienceNodeId!)).toBe(true)
   })
 
   it('does not offer a dead link for readiness blockers on unsupported AI nodes', async () => {

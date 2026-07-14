@@ -147,6 +147,128 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(controls!.querySelectorAll('button').length).toBeGreaterThanOrEqual(3)
   })
 
+  it('accepts a palette drop at the pointer while retaining click-based authoring', async () => {
+    const onAddNode = vi.fn()
+    const { container, findByText } = mountCanvas({
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    await findByText('Alpha step')
+    const pane = container.querySelector('.react-flow__pane') as HTMLElement
+    const bounds = pane.getBoundingClientRect()
+    const dataTransfer = new DataTransfer()
+    dataTransfer.setData('application/x-janusly-node-type', 'http')
+
+    pane.dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX: bounds.left + 700,
+      clientY: bounds.top + 420,
+    }))
+    pane.dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX: bounds.left + 700,
+      clientY: bounds.top + 420,
+    }))
+
+    expect(onAddNode).toHaveBeenCalledTimes(1)
+    expect(onAddNode).toHaveBeenCalledWith('http', {
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+    const position = onAddNode.mock.calls[0][1]
+    expect(Number.isFinite(position.x)).toBe(true)
+    expect(Number.isFinite(position.y)).toBe(true)
+  })
+
+  it('does not create a node when a palette payload is dropped on canvas chrome', async () => {
+    const onAddNode = vi.fn()
+    const nodes = Array.from({ length: 6 }, (_, index) => makeNode(
+      `chrome-${index}`,
+      index === 0 ? 'Alpha step' : `Chrome ${index}`,
+      { x: index * 140, y: 0 },
+    ))
+    const { container, findByText } = mountCanvas({
+      nodes,
+      edges: [],
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    await findByText('Alpha step')
+    const targets = [
+      container.querySelector('.canvas-toolbar'),
+      container.querySelector('.canvas-palette'),
+      container.querySelector('.react-flow__controls'),
+      container.querySelector('.react-flow__minimap'),
+    ]
+
+    for (const target of targets) {
+      expect(target).toBeTruthy()
+      const dataTransfer = new DataTransfer()
+      dataTransfer.setData('application/x-janusly-node-type', 'http')
+      target!.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+        clientX: 32,
+        clientY: 32,
+      }))
+    }
+
+    expect(onAddNode).not.toHaveBeenCalled()
+  })
+
+  it('lets the blank-canvas teaching card pass a first palette drop through to the flow surface', async () => {
+    const onAddNode = vi.fn()
+    const { findByTestId } = mountCanvas({
+      nodes: [],
+      edges: [],
+      paletteNodeTypes: ['http'],
+      onAddNode,
+    })
+    const empty = await findByTestId('canvas-empty')
+    const card = empty.querySelector('.canvas-empty__card') as HTMLElement
+    const bounds = card.getBoundingClientRect()
+    // The browser-test viewport can clip the fixed-size 1024px canvas host;
+    // choose a visible point inside the card rather than its off-screen center.
+    const clientX = Math.min(bounds.left + 20, document.documentElement.clientWidth - 1)
+    const clientY = Math.min(bounds.top + 20, document.documentElement.clientHeight - 1)
+    const target = document.elementFromPoint(clientX, clientY)
+    expect(target?.closest('.canvas-flow-surface')).toBeTruthy()
+
+    const dataTransfer = new DataTransfer()
+    dataTransfer.setData('application/x-janusly-node-type', 'http')
+    target!.dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer,
+      clientX,
+      clientY,
+    }))
+
+    expect(onAddNode).toHaveBeenCalledOnce()
+    expect(onAddNode).toHaveBeenCalledWith('http', {
+      x: expect.any(Number),
+      y: expect.any(Number),
+    })
+  })
+
+  it('reveals the interactive minimap only for larger authoring graphs', async () => {
+    const fiveNodes = Array.from({ length: 5 }, (_, index) => makeNode(`small-${index}`, `Small ${index}`, { x: index * 140, y: 0 }))
+    const small = mountCanvas({ nodes: fiveNodes, edges: [] })
+    await small.findByText('Small 0')
+    expect(small.queryByRole('img', { name: 'Workflow overview map' })).toBeNull()
+    small.unmount()
+
+    const sixNodes = Array.from({ length: 6 }, (_, index) => makeNode(`large-${index}`, `Large ${index}`, { x: index * 140, y: 0 }))
+    const large = mountCanvas({ nodes: sixNodes, edges: [] })
+    await large.findByText('Large 0')
+    expect(await large.findByRole('img', { name: 'Workflow overview map' })).toBeInTheDocument()
+  })
+
   it('renders run observation mode as immutable while keeping pan, zoom, focus, and live status visible', async () => {
     const running = makeNode('running', 'Running step', { x: 100, y: 100 })
     running.data.status = 'running'

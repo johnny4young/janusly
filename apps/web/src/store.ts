@@ -197,7 +197,8 @@ type WorkflowStore = {
   setAuthReady: (ready: boolean) => void
   dismissRecoveryIntroThisSession: () => void
 
-  addNode: (type: string) => void
+  addNode: (type: string, position?: { x: number; y: number }) => void
+  duplicateNode: (nodeId: string) => void
   hydrateWorkflow: (workflow: WorkflowDefinition, options?: { saved?: boolean; dirty?: boolean }) => void
   getWorkflowJson: () => WorkflowDefinition
   newWorkflow: () => void
@@ -285,11 +286,15 @@ function persistActiveTab(tab: ActiveTab): void {
 // re-evaluates through the i18n runtime on locale toggles. Leaving
 // the field empty lets the OR-fallback (`data.label || ...`) kick in.
 const initialNodes: WorkflowGraphNode[] = [
-  { id: '1', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
-  { id: '2', position: { x: 260, y: 90 }, data: { label: '', type: 'multi_agent', config: getNodePreset('multi_agent') } },
+  { id: 'fetch', position: { x: 0, y: 0 }, data: { label: '', type: 'http', config: { url: 'https://api.github.com' } } },
+  { id: 'check', position: { x: 280, y: 90 }, data: { label: '', type: 'condition', config: { expression: 'context.fetch.output.statusCode === 200' } } },
+  { id: 'approve', position: { x: 560, y: 180 }, data: { label: '', type: 'approval', config: getNodePreset('approval') } },
 ]
 
-const initialEdges: WorkflowGraphEdge[] = [{ id: 'e1-2', source: '1', target: '2', data: {} }]
+const initialEdges: WorkflowGraphEdge[] = [
+  { id: 'e-fetch-check', source: 'fetch', target: 'check', data: {} },
+  { id: 'e-check-approve', source: 'check', target: 'approve', data: { condition: 'context.check.output.result === true' } },
+]
 
 function clearedRunProjection(runTransitionGeneration: number) {
   return {
@@ -400,19 +405,42 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setAuthReady: (authReady) => set({ authReady }),
   dismissRecoveryIntroThisSession: () => set({ recoveryIntroDismissedThisSession: true }),
 
-  addNode: (type) => {
+  addNode: (type, position) => {
     const id = crypto.randomUUID().slice(0, 8)
     set((state) => ({
       workflowDirty: true,
       workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.concat({
         id,
-        position: nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
+        position: position ?? nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
         // Leave `data.label` empty so the canvas component resolves the
         // human label via `getNodeLabel(type)` at render time.
         data: { label: '', type, config: getNodePreset(type) },
       })
     }))
+  },
+
+  duplicateNode: (nodeId) => {
+    const id = crypto.randomUUID().slice(0, 8)
+    set((state) => {
+      const source = state.nodes.find((node) => node.id === nodeId)
+      if (!source) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        selectedNodeId: id,
+        selectedEdgeId: null,
+        nodes: state.nodes.concat({
+          id,
+          type: source.type,
+          position: { x: source.position.x + 32, y: source.position.y + 32 },
+          data: {
+            ...source.data,
+            config: structuredClone(source.data.config),
+          },
+        }),
+      }
+    })
   },
 
   hydrateWorkflow: (workflow, options) => {

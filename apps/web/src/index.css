@@ -1186,6 +1186,11 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
     linear-gradient(135deg, var(--we-surface) 0%, var(--we-surface-muted) 100%);
 }
 
+.canvas-flow-surface {
+  position: absolute;
+  inset: 0;
+}
+
 /* Teaching overlay shown over a blank canvas (no nodes). The backdrop ignores
    pointer events so the palette + canvas underneath stay fully interactive. */
 .canvas-empty {
@@ -1199,7 +1204,6 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 .canvas-empty__card {
-  pointer-events: auto;
   max-width: 22rem;
   text-align: center;
   display: flex;
@@ -1296,8 +1300,7 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .canvas-palette {
   position: absolute;
   top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 220px;
   z-index: 3;
   display: flex;
   flex-wrap: wrap;
@@ -1308,10 +1311,20 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   border-radius: 8px;
   box-shadow: 0 10px 28px -18px var(--we-shadow-ink-35);
   backdrop-filter: blur(10px);
-  max-width: calc(100% - 32px);
+  max-width: calc(100% - 236px);
 }
 
 .canvas-palette .sb-chip { grid-template-columns: 1fr; }
+
+.workflow-minimap {
+  border: 1px solid var(--we-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px -22px var(--we-shadow-ink-45);
+  overflow: hidden;
+}
+
+.sb-chip[draggable="true"] { cursor: grab; }
+.sb-chip[draggable="true"]:active { cursor: grabbing; }
 
 /* ==========================================================================
    10. Panel, list, and empty states
@@ -1658,6 +1671,29 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 .config-field-row {
   display: grid;
   gap: 2px;
+}
+
+.we-cron-preview {
+  min-height: 20px;
+  margin-top: 6px;
+}
+
+.we-cron-preview[data-state="ready"] {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--we-primary-ring);
+  border-radius: 8px;
+  background: var(--we-primary-soft);
+  color: var(--we-ink-soft);
+  font-size: 11px;
+}
+
+.we-cron-preview ol {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .checkbox-row {
@@ -3167,6 +3203,15 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 
 /* Inspector "Insert snippet…" button — full-width with the layers icon. */
 .we-inspector-snippet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.we-inspector-duplicate-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -10,8 +10,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
-import { Copy, GitBranch, Layers } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import { Copy, CopyPlus, GitBranch, Layers } from 'lucide-react'
+import type { WorkflowGraphEdge, WorkflowGraphNode, RunNode, SavedWorkflow, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { formatNodeDuration, formatStatusLabel, getNodeConfigSummary, getNodeLabel, nodeTypes } from '../constants'
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
@@ -35,6 +35,7 @@ type InspectorPanelProps = {
   runNodes: RunNode[]
   validationIssues: ValidationIssue[]
   tools: ToolSchema[]
+  workflows: SavedWorkflow[]
   workflowNodes: WorkflowGraphNode[]
   workflowEdges: WorkflowGraphEdge[]
   currentWorkflowId?: string
@@ -54,6 +55,7 @@ export function InspectorPanel({
   runNodes,
   validationIssues,
   tools,
+  workflows,
   workflowNodes,
   workflowEdges,
   currentWorkflowId,
@@ -69,6 +71,7 @@ export function InspectorPanel({
   const confirm = useConfirm()
   const addToast = useWorkflowStore(state => state.addToast)
   const updateNodeLabel = useWorkflowStore(state => state.updateNodeLabel)
+  const duplicateNode = useWorkflowStore(state => state.duplicateNode)
   const updateWorkflowInputs = useWorkflowStore(state => state.updateWorkflowInputs)
   const updateWorkflowOutputs = useWorkflowStore(state => state.updateWorkflowOutputs)
   const [jsonError, setJsonError] = useState<string | null>(null)
@@ -230,6 +233,15 @@ export function InspectorPanel({
           <span className="helper-text helper-text--hint">{t('rightPanel.inspector.stepKindWarning')}</span>
         </div>
 
+        <button
+          type="button"
+          className="we-btn we-btn--ghost we-inspector-duplicate-btn"
+          onClick={() => duplicateNode(selectedNode.id)}
+        >
+          <CopyPlus size={14} aria-hidden="true" />
+          <span>{t('rightPanel.inspector.duplicateStep')}</span>
+        </button>
+
         <QuickConfigEditor
           key={selectedNode.id}
           nodeId={selectedNode.id}
@@ -239,6 +251,8 @@ export function InspectorPanel({
           workflowNodes={workflowNodes}
           workflowEdges={workflowEdges}
           workflowInputs={currentWorkflowInputs}
+          workflows={workflows}
+          currentWorkflowId={currentWorkflowId}
           onUpdate={onUpdateNodeConfig}
         />
 

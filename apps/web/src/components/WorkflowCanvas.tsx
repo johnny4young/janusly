@@ -9,17 +9,18 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, useReactFlow } from '@xyflow/react'
 import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
 import { workflowEdgeTypes } from './WorkflowEdge'
 import { CanvasErrorBoundary } from './CanvasErrorBoundary'
 import { useConfirm } from './ConfirmDialog'
-import { formatStatusLabel, getNodeHelper, getNodeLabel } from '../constants'
+import { formatStatusLabel, getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
 import { registerNodePlacementResolver } from '../store'
+import { hasNodePaletteDrag, readNodePaletteDrag, writeNodePaletteDrag } from '../canvas-node-drag'
 import '@xyflow/react/dist/style.css'
 
 type WorkflowCanvasProps = {
@@ -34,7 +35,7 @@ type WorkflowCanvasProps = {
    *  canvas. Omitted elsewhere — the palette renders null, so the locked
    *  browser tests (which pass neither prop) are unaffected. */
   paletteNodeTypes?: string[]
-  onAddNode?: (type: string) => void
+  onAddNode?: (type: string, position?: { x: number; y: number }) => void
   /** When present, the canvas restores this workflow's last saved viewport
    *  (zoom + pan) on mount instead of fitting-to-view, and persists user
    *  pan/zoom under it. Omitted (e.g. unsaved drafts, the locked browser
@@ -50,6 +51,12 @@ type WorkflowCanvasProps = {
 }
 
 const DEFAULT_WORKFLOW_NODE_SCREEN_SIZE = { width: 238, height: 96 }
+export const MINIMAP_NODE_THRESHOLD = 6
+
+function acceptsCanvasDrop(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest('.react-flow__controls, .react-flow__minimap') === null
+}
 
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
@@ -61,28 +68,44 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   const editing = active && !observing
   const frameRef = useRef<HTMLDivElement | null>(null)
   const { getZoom, screenToFlowPosition } = useReactFlow<WorkflowGraphNode, WorkflowGraphEdge>()
-  useEffect(() => {
-    if (!editing) return
-    return registerNodePlacementResolver(() => {
+  const resolveNodeTopLeft = useCallback((screenPoint: { x: number; y: number }) => {
     const frame = frameRef.current
     if (!frame) return null
     const bounds = frame.getBoundingClientRect()
     if (bounds.width <= 0 || bounds.height <= 0) return null
-    // React Flow's durable position contract uses its backwards-compatible
-    // top-left origin. Estimate the new node's rendered size from an existing
-    // sibling (same node renderer and zoom) so the node itself, rather than its
-    // top-left corner, appears at the visible viewport centre. A blank canvas
-    // falls back to the renderer's CSS minimum dimensions.
     const sampleBounds = frame.querySelector<HTMLElement>('.react-flow__node')?.getBoundingClientRect()
     const zoom = getZoom()
     const nodeWidth = sampleBounds?.width ?? DEFAULT_WORKFLOW_NODE_SCREEN_SIZE.width * zoom
     const nodeHeight = sampleBounds?.height ?? DEFAULT_WORKFLOW_NODE_SCREEN_SIZE.height * zoom
     return screenToFlowPosition({
-      x: bounds.left + bounds.width / 2 - nodeWidth / 2,
-      y: bounds.top + bounds.height / 2 - nodeHeight / 2,
+      x: screenPoint.x - nodeWidth / 2,
+      y: screenPoint.y - nodeHeight / 2,
     })
+  }, [getZoom, screenToFlowPosition])
+  useEffect(() => {
+    if (!editing) return
+    return registerNodePlacementResolver(() => {
+      const frame = frameRef.current
+      if (!frame) return null
+      const bounds = frame.getBoundingClientRect()
+      // React Flow's durable position contract uses its backwards-compatible
+      // top-left origin. Resolve the node itself around the viewport centre.
+      return resolveNodeTopLeft({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 })
     })
-  }, [editing, getZoom, screenToFlowPosition])
+  }, [editing, resolveNodeTopLeft])
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!editing || !acceptsCanvasDrop(event.target) || !hasNodePaletteDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }, [editing])
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!editing || !onAddNode || !acceptsCanvasDrop(event.target)) return
+    const type = readNodePaletteDrag(event.dataTransfer)
+    if (!type || !nodeTypes.includes(type)) return
+    event.preventDefault()
+    const position = resolveNodeTopLeft({ x: event.clientX, y: event.clientY })
+    onAddNode(type, position ?? undefined)
+  }, [editing, onAddNode, resolveNodeTopLeft])
   // Give every node a meaningful screen-reader name. React Flow's default node
   // aria-label is just "Node <id>"; announce the step's localized label instead
   // ("Step: Call an API"). Derived here, not in the store, so it stays localized
@@ -185,7 +208,12 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   )
 
   return (
-    <div ref={frameRef} className="canvas-frame" data-mode={mode} data-testid={observing ? 'run-observation-canvas' : undefined}>
+    <div
+      ref={frameRef}
+      className="canvas-frame"
+      data-mode={mode}
+      data-testid={observing ? 'run-observation-canvas' : undefined}
+    >
       <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
         <div>
           <div className="section-kicker">{t(observing ? 'canvas.runMap' : 'canvas.flowMap')}</div>
@@ -203,6 +231,8 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
               key={type}
               type="button"
               className="sb-chip"
+              draggable
+              onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
               onClick={() => onAddNode(type)}
               title={`${getNodeLabel(type)} — ${getNodeHelper(type)}`}
             >
@@ -211,41 +241,56 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
           ))}
         </div>
       )}
-      <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
-      <ReactFlow
-        nodes={a11yNodes}
-        edges={a11yEdges}
-        nodeTypes={workflowNodeTypes}
-        edgeTypes={workflowEdgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onNodeClick={onNodeClick}
-        onEdgeClick={onEdgeClick}
-        onBeforeDelete={onBeforeDelete}
-        fitView={!restoredViewport}
-        fitViewOptions={{ padding: 0.22 }}
-        defaultViewport={restoredViewport ?? undefined}
-        onMove={handleMove}
-        onMoveEnd={handleMoveEnd}
-        minZoom={0.45}
-        maxZoom={1.35}
-        nodesDraggable={editing}
-        nodesConnectable={editing}
-        edgesReconnectable={editing}
-        deleteKeyCode={editing ? ['Backspace', 'Delete'] : null}
-        disableKeyboardA11y={!editing}
-        ariaLabelConfig={ariaLabelConfig}
-      >
-        <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
-        <Controls
-          showInteractive={!observing}
-          onZoomIn={persistCurrentViewport}
-          onZoomOut={persistCurrentViewport}
-          onFitView={persistCurrentViewport}
-        />
-      </ReactFlow>
-      </CanvasErrorBoundary>
+      <div className="canvas-flow-surface" onDragOver={handleDragOver} onDrop={handleDrop}>
+        <CanvasErrorBoundary fallback={canvasErrorFallback} resetKey={viewportWorkflowId}>
+          <ReactFlow
+            nodes={a11yNodes}
+            edges={a11yEdges}
+            nodeTypes={workflowNodeTypes}
+            edgeTypes={workflowEdgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={onNodeClick}
+            onEdgeClick={onEdgeClick}
+            onBeforeDelete={onBeforeDelete}
+            fitView={!restoredViewport}
+            fitViewOptions={{ padding: 0.22 }}
+            defaultViewport={restoredViewport ?? undefined}
+            onMove={handleMove}
+            onMoveEnd={handleMoveEnd}
+            minZoom={0.45}
+            maxZoom={1.35}
+            nodesDraggable={editing}
+            nodesConnectable={editing}
+            edgesReconnectable={editing}
+            deleteKeyCode={editing ? ['Backspace', 'Delete'] : null}
+            disableKeyboardA11y={!editing}
+            ariaLabelConfig={ariaLabelConfig}
+          >
+            <Background color="var(--we-grid-strong)" gap={24} size={1.2} variant={BackgroundVariant.Dots} />
+            <Controls
+              showInteractive={!observing}
+              onZoomIn={persistCurrentViewport}
+              onZoomOut={persistCurrentViewport}
+              onFitView={persistCurrentViewport}
+            />
+            {!observing && nodes.length >= MINIMAP_NODE_THRESHOLD && (
+              <MiniMap
+                className="workflow-minimap"
+                ariaLabel={t('canvas.minimap')}
+                pannable
+                zoomable
+                nodeColor="var(--we-primary)"
+                nodeStrokeColor="var(--we-surface)"
+                bgColor="var(--we-surface-overlay)"
+                maskColor="var(--we-primary-ring)"
+                maskStrokeColor="var(--we-primary)"
+              />
+            )}
+          </ReactFlow>
+        </CanvasErrorBoundary>
+      </div>
       {nodes.length === 0 && (
         // Teaching overlay for a blank canvas — pointer-events stay off the
         // backdrop so the palette/canvas underneath remain interactive.

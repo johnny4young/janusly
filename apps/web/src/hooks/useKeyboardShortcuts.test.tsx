@@ -15,6 +15,8 @@ function mountShortcuts(overrides: Partial<KeyboardShortcutHandlers> = {}) {
     onToggleShortcuts: vi.fn(),
     onFocusSidebarSearch: vi.fn(() => false),
     onSave: vi.fn(),
+    onOpenHome: vi.fn(),
+    onOpenStudio: vi.fn(),
     onSignOut: vi.fn(),
     ...overrides,
   }
@@ -62,6 +64,22 @@ describe('useKeyboardShortcuts — Cmd/Ctrl+S', () => {
     pressKey('?', {}, input)
     expect(handlers.onToggleShortcuts).not.toHaveBeenCalled()
     input.remove()
+  })
+
+  it('navigates with the advertised Cmd/Ctrl+1 and Cmd/Ctrl+2 shortcuts', () => {
+    const handlers = mountShortcuts()
+    const home = pressKey('1', { metaKey: true })
+    const studio = pressKey('2', { ctrlKey: true })
+
+    expect(handlers.onOpenHome).toHaveBeenCalledTimes(1)
+    expect(handlers.onOpenStudio).toHaveBeenCalledTimes(1)
+    expect(home.defaultPrevented).toBe(true)
+    expect(studio.defaultPrevented).toBe(true)
+
+    pressKey('1', { metaKey: true, shiftKey: true })
+    pressKey('2')
+    expect(handlers.onOpenHome).toHaveBeenCalledTimes(1)
+    expect(handlers.onOpenStudio).toHaveBeenCalledTimes(1)
   })
 })
 

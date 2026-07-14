@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 109
+      "maxGzipKiB": 110
     },
     "canvas": {
       "label": "Canvas workspace",
@@ -36,6 +36,7 @@
   "baselineGzipKiB": {
     "api.js": 2.89,
     "App.js": 49.81,
+    "canvas-node-drag.js": 0.2,
     "CelebrationBurst.js": 0.27,
     "CommandPalette.js": 2.8,
     "CredentialRotateModal.js": 2.01,

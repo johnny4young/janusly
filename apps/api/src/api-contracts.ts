@@ -223,6 +223,29 @@ export const listWorkflowsContract = {
   errorCodes: ["invalid_input"],
 } satisfies ApiRouteContract;
 
+export const getSchedulePreviewContract = {
+  operationId: "getSchedulePreview",
+  path: V1_READ_PATHS.schedulePreview,
+  summary: "Preview the next three fires for a five-field cron expression",
+  tags: ["Workflows"],
+  request: {
+    query: z.object({
+      cron: z.string().max(100),
+    }).strict(),
+  },
+  response: z.discriminatedUnion("valid", [
+    z.object({
+      valid: z.literal(true),
+      nextFires: z.tuple([IsoDateSchema, IsoDateSchema, IsoDateSchema]),
+    }),
+    z.object({
+      valid: z.literal(false),
+      nextFires: z.tuple([]),
+    }),
+  ]),
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
 export const listWorkflowVersionsContract = {
   operationId: "listWorkflowVersions",
   path: V1_READ_PATHS.workflowVersions,
@@ -303,6 +326,7 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: recoveryLedgerContract },
   { method: "GET", role: "viewer", contract: recoveryMyWinsContract },
   { method: "GET", contract: listWorkflowsContract },
+  { method: "GET", role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract },
   { method: "GET", contract: listWorkflowVersionsContract },
   { method: "GET", contract: getLatestWorkflowVersionContract },
   { method: "GET", contract: listRunsContract },

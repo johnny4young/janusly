@@ -181,6 +181,7 @@ function RightPanelRouter(props: RightPanelProps) {
         runNodes={props.runNodes}
         validationIssues={props.validationIssues}
         tools={props.tools}
+        workflows={props.workflows}
         workflowNodes={props.workflowNodes}
         workflowEdges={props.workflowEdges}
         currentWorkflowId={props.currentWorkflowId}

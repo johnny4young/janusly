@@ -38,7 +38,6 @@ import {
   Layers3,
   Mail,
   ListTree,
-  Megaphone,
   Network,
   Package,
   PanelLeftClose,
@@ -66,6 +65,7 @@ import { getNodeHelper, getNodeLabel, nodeTypes } from '../constants'
 import type { ActiveTab, AiHealth } from '../types'
 import { useT } from '../i18n'
 import { MOBILE_WORKSPACE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
+import { writeNodePaletteDrag } from '../canvas-node-drag'
 
 type BuilderSidebarProps = {
   workflowName: string
@@ -82,6 +82,7 @@ type BuilderSidebarProps = {
   onNew: () => void
   onStart: () => void | Promise<void>
   onOpenTab: (tab: ActiveTab) => void
+  onOpenHelp: () => void
 }
 
 const STORAGE_KEY = 'janusly:sidebar:state'
@@ -260,6 +261,7 @@ export function BuilderSidebar({
   onNew,
   onStart,
   onOpenTab,
+  onOpenHelp,
   onWorkflowNameChange,
 }: BuilderSidebarProps) {
   const { t } = useT()
@@ -518,6 +520,8 @@ export function BuilderSidebar({
                   key={`pinned-${type}`}
                   className="sb-chip sb-chip--pinned"
                   type="button"
+                  draggable
+                  onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
                   onClick={() => onAdd(type)}
                   title={`${label} — ${helper}`}
                 >
@@ -557,6 +561,8 @@ export function BuilderSidebar({
                         key={type}
                         className="sb-chip"
                         type="button"
+                        draggable
+                        onDragStart={(event) => writeNodePaletteDrag(event.dataTransfer, type)}
                         onClick={() => onAdd(type)}
                         title={`${label} — ${helper}`}
                       >
@@ -589,10 +595,7 @@ export function BuilderSidebar({
           >
             {collapsed ? <PanelLeftOpen size={13} aria-hidden="true" /> : <PanelLeftClose size={13} aria-hidden="true" />}
           </button>
-          <button type="button" className="sb-footer__whatsnew" title={t('sidebar.footer.whatsnew')} aria-label={t('sidebar.footer.whatsnew')}>
-            <Megaphone size={13} aria-hidden="true" />
-          </button>
-          <button type="button" className="sb-footer__help" title={t('sidebar.footer.help')} aria-label={t('sidebar.footer.help')}>
+          <button type="button" className="sb-footer__help" title={t('sidebar.footer.help')} aria-label={t('sidebar.footer.help')} onClick={onOpenHelp}>
             <HelpCircle size={13} aria-hidden="true" />
           </button>
         </span>

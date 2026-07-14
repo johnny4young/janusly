@@ -11,6 +11,7 @@ export const V1_READ_PATHS = {
   recoveryLedger: "/recovery/ledger",
   recoveryMyWins: "/recovery/my-wins",
   workflows: "/workflows",
+  schedulePreview: "/workflows/schedule-preview",
   workflowVersions: "/workflows/versions",
   latestWorkflowVersion: "/workflows/latest",
   runs: "/runs",

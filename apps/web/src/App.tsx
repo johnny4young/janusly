@@ -71,6 +71,8 @@ type RunResponse = {
   eventsHasMore?: boolean
 }
 
+const CANVAS_PALETTE_TYPES: string[] = ['http', 'ai', 'condition', 'tool', 'agent']
+
 type ValidationResponse = {
   valid: boolean
   issues?: ValidationIssue[]
@@ -256,6 +258,7 @@ export default function App() {
   // inside each modal's `useEffect`. useCallback pins the ref.
   const closePalette = useCallback(() => setPaletteOpen(false), [])
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), [])
+  const openShortcuts = useCallback(() => setShortcutsOpen(true), [])
   const closeSnippetMenu = useCallback(() => setSnippetMenuOpen(false), [])
 
   // Stable canvas handlers + palette list so React.memo(WorkflowCanvas) holds
@@ -269,10 +272,7 @@ export default function App() {
     selectEdge(edge.id)
     setActiveTab('inspector')
   }, [selectEdge, setActiveTab])
-  const canvasPaletteTypes = useMemo(
-    () => (activeTab === 'copilot' ? ['http', 'ai', 'condition', 'tool', 'agent'] : undefined),
-    [activeTab],
-  )
+  const canvasPaletteTypes = isCanvasTab(activeTab) ? CANVAS_PALETTE_TYPES : undefined
 
   // One sign-out driver for keyboard and Command Palette entry points:
   // AuthProvider.signOut → clearAuth → toast.
@@ -305,6 +305,8 @@ export default function App() {
     return false
   }, [])
   const fireSignOut = useCallback(() => { void signOut() }, [signOut])
+  const openHomeShortcut = useCallback(() => setActiveTab('home'), [setActiveTab])
+  const openStudioShortcut = useCallback(() => setActiveTab('copilot'), [setActiveTab])
   // NOTE: `useKeyboardShortcuts` is mounted further down, after `saveWorkflow`
   // exists (Cmd/Ctrl+S needs it and const hoisting doesn't apply).
 
@@ -494,6 +496,8 @@ export default function App() {
     onToggleShortcuts: toggleShortcuts,
     onFocusSidebarSearch: focusSidebarSearch,
     onSave: fireSave,
+    onOpenHome: openHomeShortcut,
+    onOpenStudio: openStudioShortcut,
     onSignOut: fireSignOut,
   })
 
@@ -1034,7 +1038,7 @@ export default function App() {
               aiHealth={aiHealth}
               docsUrl={DOCS_URL}
               onOpenTab={setActiveTab}
-              onOpenShortcuts={() => setShortcutsOpen(true)}
+              onOpenShortcuts={openShortcuts}
             />
           </div>
         </>
@@ -1053,6 +1057,7 @@ export default function App() {
           onValidate={validateWorkflow}
           onSave={saveWorkflow}
           onOpenTab={setActiveTab}
+          onOpenHelp={openShortcuts}
           onNew={() => {
             void (async () => {
               if (!await confirmReplaceCanvas()) return

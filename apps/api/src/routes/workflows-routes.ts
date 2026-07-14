@@ -37,6 +37,7 @@ import {
   setWorkflowSlo,
 } from "@janusly/data";
 import { unregisterAllForWorkflow, syncWorkflowSchedules } from "@janusly/engine/src/schedule-scheduler";
+import { validateCronExpression } from "@janusly/engine/src/schedule";
 import {
   bucketScheduleFires,
   computeNextFires,
@@ -67,6 +68,7 @@ import type { Route } from "../routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
 import {
+  getSchedulePreviewContract,
   getLatestWorkflowVersionContract,
   listWorkflowsContract,
   listWorkflowVersionsContract,
@@ -148,6 +150,25 @@ export const workflowsRoutes: Route[] = [
       const before = cursor ? { deletedAt: cursor.createdAt, id: cursor.id } : undefined;
       const rows = await listDeletedWorkflowsWithRunSummary(auth.orgId, limitValue, before);
       return sendJson(res, rows);
+    } },
+  // Stateless authoring preview for an unsaved schedule node. Keeping cron
+  // parsing on the server reuses the engine's canonical cron-parser grammar
+  // without adding a second parser (or a new dependency) to the browser.
+  { method: "GET", match: (url) => url === "/workflows/schedule-preview" || url.startsWith("/workflows/schedule-preview?"),
+    role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract,
+    handler: async ({ req, res }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const cron = url.searchParams.get("cron")?.trim() ?? "";
+      if (!cron || cron.length > 100) return sendJson(res, { valid: false, nextFires: [] });
+      try {
+        validateCronExpression(cron);
+      } catch {
+        return sendJson(res, { valid: false, nextFires: [] });
+      }
+      const nextFires = computeNextFires(cron, 3);
+      return nextFires.length === 3
+        ? sendJson(res, { valid: true, nextFires })
+        : sendJson(res, { valid: false, nextFires: [] });
     } },
   { method: "GET", match: (url) => url.startsWith("/workflows") && !url.startsWith("/workflows/"),
     contract: listWorkflowsContract,
@@ -415,7 +436,7 @@ export const workflowsRoutes: Route[] = [
       const rest = url.slice("/workflows/".length).split("?")[0];
       if (rest.length === 0 || rest.includes("/")) return false;
       const reserved = new Set([
-        "save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash",
+        "save", "rollback", "versions", "latest", "validate", "readiness", "health", "tags", "folders", "trash", "schedule-preview",
       ]);
       return !reserved.has(rest);
     },

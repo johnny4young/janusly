@@ -25,6 +25,16 @@ async function json(request: APIRequestContext, path: string) {
   return { response, body: await response.json() as Record<string, unknown> }
 }
 
+function expectValidSchedulePreview(body: Record<string, unknown>, requestedAt: number) {
+  expect(body.valid).toBe(true)
+  expect(body.nextFires).toHaveLength(3)
+  const nextFires = (body.nextFires as string[]).map(value => Date.parse(value))
+  expect(nextFires.every(Number.isFinite)).toBe(true)
+  expect(nextFires.every(value => value > requestedAt)).toBe(true)
+  expect(nextFires[1]).toBeGreaterThan(nextFires[0])
+  expect(nextFires[2]).toBeGreaterThan(nextFires[1])
+}
+
 test('v1 contracts stay legacy-compatible and power the real web reads', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
   const stamp = Date.now()
@@ -63,7 +73,7 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   expect(openapi.ok()).toBe(true)
   const openapiBody = await openapi.json() as { openapi: string; paths: Record<string, unknown> }
   expect(openapiBody.openapi).toBe('3.1.0')
-  expect(Object.keys(openapiBody.paths)).toHaveLength(9)
+  expect(Object.keys(openapiBody.paths)).toHaveLength(10)
 
   const stablePaths = [
     '/recovery/metrics?windowDays=30',
@@ -72,18 +82,26 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
     `/workflows?q=${encodeURIComponent(workflowId)}&limit=20`,
     `/workflows/versions?workflowId=${encodeURIComponent(workflowId)}`,
     `/workflows/latest?workflowId=${encodeURIComponent(workflowId)}`,
+    `/workflows/schedule-preview?cron=${encodeURIComponent('0 9 * * *')}`,
     `/runs?workflowId=${encodeURIComponent(workflowId)}&limit=20`,
     `/run?runId=${encodeURIComponent(runId)}`,
     `/status?runId=${encodeURIComponent(runId)}`,
   ]
 
   for (const path of stablePaths) {
+    const requestedAt = Date.now()
     const legacy = await json(request, path)
     const versioned = await json(request, `/v1${path}`)
     expect(legacy.response.ok(), `legacy ${path}: ${JSON.stringify(legacy.body)}`).toBe(true)
     expect(versioned.response.ok(), `v1 ${path}: ${JSON.stringify(versioned.body)}`).toBe(true)
     expect(versioned.response.headers()['x-request-id']).toBeTruthy()
-    expect(versioned.body).toMatchObject({ apiVersion: 'v1', data: legacy.body })
+    if (path.startsWith('/workflows/schedule-preview?')) {
+      expectValidSchedulePreview(legacy.body, requestedAt)
+      expect(versioned.body).toMatchObject({ apiVersion: 'v1' })
+      expectValidSchedulePreview(versioned.body.data as Record<string, unknown>, requestedAt)
+    } else {
+      expect(versioned.body).toMatchObject({ apiVersion: 'v1', data: legacy.body })
+    }
   }
 
   const publicRunNodeKeys = [

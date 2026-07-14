@@ -8,11 +8,14 @@
  * - `InspectorPanel.tsx` (rendered inside the per-node card).
  */
 
-import type { JsonObject, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
+import { useCallback, useState } from 'react'
+import type { JsonObject, SavedWorkflow, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
 import { Trans, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
 import { ExpressionAssistant } from './ExpressionAssistant'
+import { ScheduleCronPreview } from './ScheduleCronPreview'
+import type { ScheduleCronPreviewSnapshot } from './ScheduleCronPreview'
 import {
   asJsonObject,
   fieldId,
@@ -24,6 +27,65 @@ import {
   TextConfigField,
 } from './quick-config-fields'
 
+function ScheduleConfigFields({ nodeId, config, onPatch }: {
+  nodeId: string
+  config: JsonObject
+  onPatch: (next: Record<string, unknown>) => void
+}) {
+  const { t } = useT()
+  const [preview, setPreview] = useState<ScheduleCronPreviewSnapshot | null>(null)
+  const enabled = config.enabled !== false
+  const cronExpression = readConfigString(config, 'cronExpression')
+  const normalizedExpression = cronExpression.trim()
+  const cronId = fieldId(nodeId, 'cron expression')
+  const cronHelperId = `${cronId}-helper`
+  const cronPreviewId = `${cronId}-preview`
+  const invalid = enabled
+    && normalizedExpression.length > 0
+    && preview?.expression === normalizedExpression
+    && preview.kind === 'invalid'
+  const handlePreviewState = useCallback((next: ScheduleCronPreviewSnapshot) => {
+    setPreview(previous => previous?.expression === next.expression && previous.kind === next.kind ? previous : next)
+  }, [])
+
+  return (
+    <section className="quick-config">
+      <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+      <div className="config-field-row">
+        <label className="field-label" htmlFor={cronId}>{t('rightPanel.quickConfig.cronExpression')}</label>
+        <input
+          id={cronId}
+          className="text-field"
+          value={cronExpression}
+          maxLength={100}
+          aria-describedby={`${cronHelperId} ${cronPreviewId}`}
+          aria-invalid={invalid || undefined}
+          aria-errormessage={invalid ? cronPreviewId : undefined}
+          onChange={event => onPatch({ cronExpression: event.target.value })}
+        />
+        <p id={cronHelperId} className="helper-text">
+          <Trans i18nKey="rightPanel.quickConfig.scheduleHelper" components={{ code: <code /> }} />
+        </p>
+        <ScheduleCronPreview
+          id={cronPreviewId}
+          expression={cronExpression}
+          enabled={enabled}
+          onStateChange={handlePreviewState}
+        />
+      </div>
+      <div className="config-field-row">
+        <label className="field-label" htmlFor={fieldId(nodeId, 'Enabled')}>{t('rightPanel.quickConfig.scheduleEnabled')}</label>
+        <input
+          id={fieldId(nodeId, 'Enabled')}
+          type="checkbox"
+          checked={enabled}
+          onChange={event => onPatch({ enabled: event.target.checked })}
+        />
+      </div>
+    </section>
+  )
+}
+
 export function QuickConfigEditor({
   nodeId,
   type,
@@ -32,6 +94,8 @@ export function QuickConfigEditor({
   workflowNodes,
   workflowEdges,
   workflowInputs,
+  workflows = [],
+  currentWorkflowId,
   onUpdate,
 }: {
   nodeId: string
@@ -41,6 +105,8 @@ export function QuickConfigEditor({
   workflowNodes: WorkflowGraphNode[]
   workflowEdges: WorkflowGraphEdge[]
   workflowInputs?: WorkflowInputSchemaShape
+  workflows?: Array<Pick<SavedWorkflow, 'id' | 'name'>>
+  currentWorkflowId?: string
   onUpdate: (config: Record<string, unknown>) => void
 }) {
   const { t } = useT()
@@ -185,10 +251,46 @@ export function QuickConfigEditor({
   }
 
   if (type === 'subworkflow') {
+    const selectedWorkflowId = readConfigString(config, 'workflowId')
+    const choices = workflows.filter(workflow => workflow.id !== currentWorkflowId)
+    const workflowId = fieldId(nodeId, 'subworkflow workflow')
+    const workflowListId = `${workflowId}-choices`
+    const workflowHelperId = `${workflowId}-helper`
+    const isSelfReference = Boolean(selectedWorkflowId && currentWorkflowId && selectedWorkflowId === currentWorkflowId)
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.workflowId') as string} value={readConfigString(config, 'workflowId')} onChange={value => patch({ workflowId: value })} />
+        <div className="config-field-row">
+          <label className="field-label" htmlFor={workflowId}>{t('rightPanel.quickConfig.workflowId')}</label>
+          <input
+            id={workflowId}
+            className="text-field"
+            list={workflowListId}
+            value={selectedWorkflowId}
+            placeholder={t('rightPanel.quickConfig.pickWorkflow') as string}
+            autoComplete="off"
+            aria-describedby={workflowHelperId}
+            aria-invalid={isSelfReference || undefined}
+            aria-errormessage={isSelfReference ? workflowHelperId : undefined}
+            onChange={event => patch({ workflowId: event.target.value })}
+          />
+          <datalist id={workflowListId}>
+            {choices.map(workflow => (
+              <option
+                key={workflow.id}
+                value={workflow.id}
+                label={t('rightPanel.quickConfig.workflowOption', { name: workflow.name, id: workflow.id }) as string}
+              />
+            ))}
+          </datalist>
+          <p id={workflowHelperId} className={isSelfReference ? 'helper-text helper-text--error' : 'helper-text'}>
+            {isSelfReference
+              ? t('rightPanel.quickConfig.subworkflowSelfReference')
+              : choices.length > 0
+                ? t('rightPanel.quickConfig.subworkflowHelper')
+                : t('rightPanel.quickConfig.noSubworkflowChoices')}
+          </p>
+        </div>
         <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.overrideInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
@@ -282,30 +384,7 @@ export function QuickConfigEditor({
   }
 
   if (type === 'schedule') {
-    const enabled = config.enabled !== false
-    return (
-      <section className="quick-config">
-        <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextConfigField
-          scope={nodeId}
-          label={t('rightPanel.quickConfig.cronExpression') as string}
-          value={readConfigString(config, 'cronExpression')}
-          onChange={value => patch({ cronExpression: value })}
-        />
-        <div className="config-field-row">
-          <label className="field-label" htmlFor={fieldId(nodeId, 'Enabled')}>{t('rightPanel.quickConfig.scheduleEnabled')}</label>
-          <input
-            id={fieldId(nodeId, 'Enabled')}
-            type="checkbox"
-            checked={enabled}
-            onChange={event => patch({ enabled: event.target.checked })}
-          />
-        </div>
-        <p className="helper-text">
-          <Trans i18nKey="rightPanel.quickConfig.scheduleHelper" components={{ code: <code /> }} />
-        </p>
-      </section>
-    )
+    return <ScheduleConfigFields nodeId={nodeId} config={config} onPatch={patch} />
   }
 
   if (type === 'email_received') {
