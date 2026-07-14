@@ -12,6 +12,12 @@ describe('NodeSchema', () => {
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.config).toEqual({})
   })
+
+  it('accepts a bounded custom label and rejects empty or overlong labels', () => {
+    expect(NodeSchema.safeParse({ id: 'n1', type: 'noop', label: 'Review invoice' }).success).toBe(true)
+    expect(NodeSchema.safeParse({ id: 'n1', type: 'noop', label: '   ' }).success).toBe(false)
+    expect(NodeSchema.safeParse({ id: 'n1', type: 'noop', label: 'x'.repeat(81) }).success).toBe(false)
+  })
 })
 
 describe('EdgeSchema', () => {
@@ -56,5 +62,26 @@ describe('WorkflowSchema', () => {
   it('accepts workflows without id or name (client-side drafts)', () => {
     const result = WorkflowSchema.safeParse({ nodes: [], edges: [] })
     expect(result.success).toBe(true)
+  })
+
+  it('accepts finite editor positions and rejects non-finite coordinates', () => {
+    const workflow = {
+      nodes: [{ id: 'start', type: 'noop', config: {} }],
+      edges: [],
+      ui: { positions: { start: { x: 240, y: -12.5 } } },
+    }
+    expect(WorkflowSchema.safeParse(workflow).success).toBe(true)
+    expect(WorkflowSchema.safeParse({
+      ...workflow,
+      ui: { positions: { start: { x: Number.POSITIVE_INFINITY, y: 0 } } },
+    }).success).toBe(false)
+  })
+
+  it('rejects editor positions that do not reference a workflow node', () => {
+    expect(WorkflowSchema.safeParse({
+      nodes: [{ id: 'start', type: 'noop', config: {} }],
+      edges: [],
+      ui: { positions: { missing: { x: 0, y: 0 } } },
+    }).success).toBe(false)
   })
 })

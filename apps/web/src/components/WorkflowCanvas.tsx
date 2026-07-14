@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Background, BackgroundVariant, Controls, ReactFlow } from '@xyflow/react'
+import { Background, BackgroundVariant, Controls, ReactFlow, useReactFlow } from '@xyflow/react'
 import type { AriaLabelConfig, EdgeMouseHandler, NodeMouseHandler, OnBeforeDelete, OnConnect, OnEdgesChange, OnMove, OnMoveEnd, OnNodesChange, Viewport } from '@xyflow/react'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { workflowNodeTypes } from './WorkflowStepNode'
@@ -19,6 +19,7 @@ import { useConfirm } from './ConfirmDialog'
 import { formatStatusLabel, getNodeHelper, getNodeLabel } from '../constants'
 import { readCanvasViewport, writeCanvasViewport } from '../canvas-viewport'
 import { useT } from '../i18n'
+import { registerNodePlacementResolver } from '../store'
 import '@xyflow/react/dist/style.css'
 
 type WorkflowCanvasProps = {
@@ -48,6 +49,8 @@ type WorkflowCanvasProps = {
   active?: boolean
 }
 
+const DEFAULT_WORKFLOW_NODE_SCREEN_SIZE = { width: 238, height: 96 }
+
 /** Render the workflow editor canvas with React Flow + custom step nodes.
  *  Memoized so it only re-renders when its (stable) graph + handler props
  *  actually change, not on every unrelated store tick from the App root. */
@@ -56,6 +59,30 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   const confirmDialog = useConfirm()
   const observing = mode === 'observe'
   const editing = active && !observing
+  const frameRef = useRef<HTMLDivElement | null>(null)
+  const { getZoom, screenToFlowPosition } = useReactFlow<WorkflowGraphNode, WorkflowGraphEdge>()
+  useEffect(() => {
+    if (!editing) return
+    return registerNodePlacementResolver(() => {
+    const frame = frameRef.current
+    if (!frame) return null
+    const bounds = frame.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return null
+    // React Flow's durable position contract uses its backwards-compatible
+    // top-left origin. Estimate the new node's rendered size from an existing
+    // sibling (same node renderer and zoom) so the node itself, rather than its
+    // top-left corner, appears at the visible viewport centre. A blank canvas
+    // falls back to the renderer's CSS minimum dimensions.
+    const sampleBounds = frame.querySelector<HTMLElement>('.react-flow__node')?.getBoundingClientRect()
+    const zoom = getZoom()
+    const nodeWidth = sampleBounds?.width ?? DEFAULT_WORKFLOW_NODE_SCREEN_SIZE.width * zoom
+    const nodeHeight = sampleBounds?.height ?? DEFAULT_WORKFLOW_NODE_SCREEN_SIZE.height * zoom
+    return screenToFlowPosition({
+      x: bounds.left + bounds.width / 2 - nodeWidth / 2,
+      y: bounds.top + bounds.height / 2 - nodeHeight / 2,
+    })
+    })
+  }, [editing, getZoom, screenToFlowPosition])
   // Give every node a meaningful screen-reader name. React Flow's default node
   // aria-label is just "Node <id>"; announce the step's localized label instead
   // ("Step: Call an API"). Derived here, not in the store, so it stays localized
@@ -158,7 +185,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
   )
 
   return (
-    <div className="canvas-frame" data-mode={mode} data-testid={observing ? 'run-observation-canvas' : undefined}>
+    <div ref={frameRef} className="canvas-frame" data-mode={mode} data-testid={observing ? 'run-observation-canvas' : undefined}>
       <div className="canvas-toolbar" aria-label={t(observing ? 'canvas.runMap' : 'canvas.flowMapSummary')}>
         <div>
           <div className="section-kicker">{t(observing ? 'canvas.runMap' : 'canvas.flowMap')}</div>

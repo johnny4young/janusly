@@ -27,7 +27,8 @@ describe('getRunWorkflowSnapshot', () => {
       required: ['invoiceId'],
     },
     outputs: { result: '{{context.finish.output}}' },
-    nodes: [{ id: 'finish', type: 'noop', config: {} }],
+    ui: { positions: { finish: { x: 240, y: 90 } } },
+    nodes: [{ id: 'finish', type: 'noop', label: 'Finish billing', config: {} }],
     edges: [],
   }
 
@@ -41,9 +42,25 @@ describe('getRunWorkflowSnapshot', () => {
     { ...validWorkflow, inputs: { type: 'object', properties: { invoiceId: null } } },
     { ...validWorkflow, inputs: { type: 'date' } },
     { ...validWorkflow, outputs: { result: null } },
+    { ...validWorkflow, ui: { positions: { finish: { x: Number.NaN, y: 0 } } } },
+    { ...validWorkflow, ui: { positions: { missing: { x: 0, y: 0 } } } },
+    { ...validWorkflow, nodes: [{ id: 'finish', type: 'noop', label: 'x'.repeat(81), config: {} }] },
+    { ...validWorkflow, nodes: [{ id: 'finish', type: 'noop', label: `${' '.repeat(80)}x`, config: {} }] },
     { ...validWorkflow, edges: [{ from: 'finish', to: 'finish', condition: '' }] },
   ])('rejects a malformed top-level or input/output shape', workflow => {
     expect(getRunWorkflowSnapshot({ workflow })).toBeNull()
+  })
+
+  it('does not invent a position-count cap absent from the canonical workflow contract', () => {
+    const nodes = Array.from({ length: 10_001 }, (_, index) => ({
+      id: `node-${index}`,
+      type: 'noop',
+      config: {},
+    }))
+    const positions = Object.fromEntries(nodes.map((node, index) => [node.id, { x: index, y: index }]))
+    const workflow = { nodes, edges: [], ui: { positions } }
+
+    expect(getRunWorkflowSnapshot({ workflow })).toBe(workflow)
   })
 })
 
@@ -134,6 +151,22 @@ describe('workflowToGraph', () => {
       { x: 80, y: 80 },
       { x: 310, y: 200 },
     ])
+  })
+
+  it('restores persisted positions and custom labels while falling back per node', () => {
+    const graph = workflowToGraph({
+      nodes: [
+        { id: 'placed', type: 'noop', label: 'Review invoice', config: {} },
+        { id: 'fallback', type: 'http', config: {} },
+      ],
+      edges: [],
+      ui: { positions: { placed: { x: 777, y: 333 } } },
+    })
+
+    expect(graph.nodes[0].position).toEqual({ x: 777, y: 333 })
+    expect(graph.nodes[0].data.label).toBe('Review invoice')
+    expect(graph.nodes[1].position).toEqual({ x: 310, y: 200 })
+    expect(graph.nodes[1].data.label).toBe('')
   })
 })
 

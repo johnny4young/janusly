@@ -76,6 +76,7 @@ export type RightPanelProps = {
   activeRunId?: string | null
   usage: Record<string, number>
   aiHealth: AiHealth | null
+  currentWorkflowId: string
   currentWorkflowName: string
   /** Declared workflow input shape; rendered in the no-selection inspector card. */
   currentWorkflowInputs?: WorkflowDefinition['inputs']
@@ -182,6 +183,7 @@ function RightPanelRouter(props: RightPanelProps) {
         tools={props.tools}
         workflowNodes={props.workflowNodes}
         workflowEdges={props.workflowEdges}
+        currentWorkflowId={props.currentWorkflowId}
         currentWorkflowName={props.currentWorkflowName}
         currentWorkflowInputs={props.currentWorkflowInputs}
         currentWorkflowOutputs={props.currentWorkflowOutputs}

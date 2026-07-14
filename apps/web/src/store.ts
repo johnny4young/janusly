@@ -98,6 +98,17 @@ export function registerFlowOps(ops: FlowOps): void {
   flowOps = ops
 }
 
+type NodePlacementResolver = () => { x: number; y: number } | null
+let nodePlacementResolver: NodePlacementResolver | null = null
+
+/** Register a lazy-canvas placement resolver without importing React Flow here. */
+export function registerNodePlacementResolver(resolver: NodePlacementResolver): () => void {
+  nodePlacementResolver = resolver
+  return () => {
+    if (nodePlacementResolver === resolver) nodePlacementResolver = null
+  }
+}
+
 type StreamStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'error'
 /**
  * How the active run's timeline is being kept fresh:
@@ -136,13 +147,12 @@ type WorkflowStore = {
   /**
    * Whether the canvas holds semantic edits not yet persisted as a workflow
    * version. False for the untouched sample and right after hydrate/new/save;
-   * true after any node/edge/config/name mutation (position drags don't count —
-   * layout isn't serialized). Drives the unsaved-work guards
+   * true after any persisted node/edge/config/name/layout mutation. Drives the unsaved-work guards
    * (confirm-before-replace, beforeunload) and the local draft autosave.
    */
   workflowDirty: boolean
-  /** Monotonic serialized-workflow revision. Canvas position/selection changes
-   *  never increment it; authoring checks use it to invalidate stale findings. */
+  /** Monotonic semantic-workflow revision. Canvas position/selection changes
+   * never increment it; authoring checks use it to invalidate stale findings. */
   workflowRevision: number
   /** Declared input shape — surfaced in the Inspector + validated at run start. */
   currentWorkflowInputs: WorkflowDefinition['inputs']
@@ -205,6 +215,9 @@ type WorkflowStore = {
   selectEdge: (id: string | null) => void
   updateSelectedNodeConfig: (config: JsonObject) => void
   updateSelectedNodeType: (type: string) => void
+  updateNodeLabel: (nodeId: string, label: string) => void
+  updateWorkflowInputs: (inputs: WorkflowDefinition['inputs']) => void
+  updateWorkflowOutputs: (outputs: WorkflowDefinition['outputs']) => void
   updateEdgeCondition: (id: string, condition: string | null) => void
 
   setRunId: (id: string | null) => void
@@ -306,6 +319,7 @@ function graphToWorkflow(
     nodes: nodes.map((node) => ({
       id: node.id,
       type: node.data.type,
+      ...(node.data.label.trim() ? { label: node.data.label.trim() } : {}),
       config: node.data.config ?? {},
     })),
     edges: edges.map((edge) => ({
@@ -315,6 +329,11 @@ function graphToWorkflow(
     })),
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
+    ui: {
+      positions: Object.fromEntries(nodes
+        .filter(node => Number.isFinite(node.position.x) && Number.isFinite(node.position.y))
+        .map(node => [node.id, { x: node.position.x, y: node.position.y }])),
+    },
   }
 }
 
@@ -388,7 +407,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowRevision: state.workflowRevision + 1,
       nodes: state.nodes.concat({
         id,
-        position: { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
+        position: nodePlacementResolver?.() ?? { x: 120 + state.nodes.length * 80, y: 120 + state.nodes.length * 40 },
         // Leave `data.label` empty so the canvas component resolves the
         // human label via `getNodeLabel(type)` at render time.
         data: { label: '', type, config: getNodePreset(type) },
@@ -453,13 +472,15 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   setWorkflowName: (currentWorkflowName) => set((state) => ({ currentWorkflowName, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
   setNodes: (nodes) => set((state) => ({ nodes, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
   setEdges: (edges) => set((state) => ({ edges, workflowDirty: true, workflowRevision: state.workflowRevision + 1 })),
-  // Position/dimension/selection changes are layout-only (never serialized by
-  // `graphToWorkflow`) — only a node/edge REMOVAL is a semantic edit here.
+  // A completed position change is persisted and marks the draft dirty, but it
+  // does not invalidate semantic readiness/AI findings. Removal does both.
   onNodesChange: (changes) => set((state) => (flowOps
     ? {
         nodes: flowOps.applyNodeChanges(changes, state.nodes),
         ...(changes.some((c) => c.type === 'remove')
           ? { workflowDirty: true, workflowRevision: state.workflowRevision + 1 }
+          : changes.some((c) => c.type === 'position' && c.dragging !== true)
+            ? { workflowDirty: true }
           : {}),
       }
     : state)),
@@ -502,13 +523,37 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         workflowDirty: true,
         workflowRevision: state.workflowRevision + 1,
         nodes: state.nodes.map((node) => node.id === selectedNodeId
-          // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
-          // empty so the canvas resolves it via `getNodeLabel(type)`.
-          ? { ...node, data: { label: '', type, config: getNodeTypeChangeConfig(type, node.data.config) } }
+          ? { ...node, data: { ...node.data, type, config: getNodeTypeChangeConfig(type, node.data.config) } }
           : node),
       }
     })
   },
+
+  updateNodeLabel: (nodeId, label) => {
+    set((state) => {
+      const targetNode = state.nodes.find(node => node.id === nodeId)
+      if (!targetNode || targetNode.data.label === label) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        nodes: state.nodes.map(node => node.id === nodeId
+          ? { ...node, data: { ...node.data, label } }
+          : node),
+      }
+    })
+  },
+
+  updateWorkflowInputs: (currentWorkflowInputs) => set((state) => ({
+    currentWorkflowInputs,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
+
+  updateWorkflowOutputs: (currentWorkflowOutputs) => set((state) => ({
+    currentWorkflowOutputs,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
 
   updateEdgeCondition: (id, condition) => set((state) => ({
     workflowDirty: true,

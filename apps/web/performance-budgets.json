@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 108
+      "maxGzipKiB": 109
     },
     "canvas": {
       "label": "Canvas workspace",
@@ -80,6 +80,7 @@
     "workflow-diff.js": 1.29,
     "WorkflowDiffView.js": 2.08,
     "WorkflowHealthBadge.js": 1.51,
+    "WorkflowIoEditor.js": 1.97,
     "WorkflowMetadataPanel.js": 1.91,
     "WorkflowsDashboard.js": 8.97,
     "WorkflowSloPanel.js": 1.43

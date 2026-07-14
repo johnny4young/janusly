@@ -95,6 +95,7 @@ function isWorkflowInputSchema(value: unknown): value is WorkflowInputSchemaShap
 /** Validate a persisted run workflow as a complete graph, never a partial one. */
 export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): WorkflowDefinition | null {
   const workflow = asObject(asObject(inputJson)?.workflow)
+  let positionKeys: string[] = []
   if (!workflow || !Array.isArray(workflow.nodes) || !Array.isArray(workflow.edges)) return null
   if (workflow.id !== undefined && !isNonemptyString(workflow.id)) return null
   if (workflow.name !== undefined && !isNonemptyString(workflow.name)) return null
@@ -103,15 +104,31 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
     const outputs = asObject(workflow.outputs)
     if (!outputs || !Object.values(outputs).every(output => typeof output === 'string')) return null
   }
+  if (workflow.ui !== undefined) {
+    const ui = asObject(workflow.ui)
+    if (!ui) return null
+    if (ui.positions !== undefined) {
+      const positions = asObject(ui.positions)
+      if (!positions) return null
+      positionKeys = Object.keys(positions)
+      for (const positionValue of Object.values(positions)) {
+        const position = asObject(positionValue)
+        if (!position || typeof position.x !== 'number' || !Number.isFinite(position.x)
+          || typeof position.y !== 'number' || !Number.isFinite(position.y)) return null
+      }
+    }
+  }
 
   const nodeIds = new Set<string>()
   for (const rawNode of workflow.nodes) {
     const node = asObject(rawNode)
     if (!isNonemptyString(node?.id) || !isNonemptyString(node.type)) return null
+    if (node.label !== undefined && (!isNonemptyString(node.label) || node.label.length > 80)) return null
     if (node.config !== undefined && !asObject(node.config)) return null
     if (nodeIds.has(node.id)) return null
     nodeIds.add(node.id)
   }
+  if (positionKeys.some(nodeId => !nodeIds.has(nodeId))) return null
 
   for (const rawEdge of workflow.edges) {
     const edge = asObject(rawEdge)
@@ -125,8 +142,8 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
 
 /**
  * Convert a persisted workflow snapshot into the editor-neutral React Flow
- * graph shape. Workflow JSON deliberately does not persist visual positions,
- * so the projection preserves the established deterministic authoring layout.
+ * graph shape. New workflow JSON may persist visual positions; historical
+ * snapshots fall back to the established deterministic authoring layout.
  * It is deliberately topology-agnostic: invalid cycles still render every
  * persisted step instead of silently omitting evidence from the run snapshot.
  */
@@ -136,10 +153,9 @@ export function workflowToGraph(workflow: WorkflowDefinition): {
 } {
   const nodes = workflow.nodes.map((node, index) => ({
       id: node.id,
-      position: { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
-      // Keep the label empty so WorkflowStepNode resolves localized copy at
-      // render time instead of persisting one locale into the graph.
-      data: { label: '', type: node.type, config: node.config ?? {} },
+      position: workflow.ui?.positions?.[node.id] ?? { x: 80 + index * 230, y: 80 + (index % 3) * 120 },
+      // Empty labels keep resolving localized type copy at render time.
+      data: { label: node.label ?? '', type: node.type, config: node.config ?? {} },
     }))
 
   const edges = workflow.edges.map((edge, index) => ({

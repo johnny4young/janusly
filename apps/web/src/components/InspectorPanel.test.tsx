@@ -10,6 +10,7 @@ import { InspectorPanel } from './InspectorPanel'
 import { ConfirmProvider } from './ConfirmDialog'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { requestAuthoringFocus } from './authoring-focus-bus'
+import { useWorkflowStore } from '../store'
 
 function makeEdge(id: string, condition: string): WorkflowGraphEdge {
   return { id, source: `${id}-src`, target: `${id}-dst`, data: { condition } }
@@ -169,6 +170,19 @@ describe('<InspectorPanel /> failed-node header', () => {
 })
 
 describe('<InspectorPanel /> step-kind changes', () => {
+  it('edits a persisted custom step name and uses it in the heading', () => {
+    const node = makeNode('node-a')
+    node.data.label = 'Review invoice'
+    useWorkflowStore.setState({ nodes: [node], selectedNodeId: node.id })
+    renderPanel({ selectedNode: node })
+
+    expect(screen.getByRole('heading', { name: 'Review invoice' })).toBeInTheDocument()
+    const nameInput = screen.getByLabelText('Step name')
+    expect(nameInput).toHaveAccessibleDescription('Optional. Clear it to use the localized step kind name.')
+    fireEvent.change(nameInput, { target: { value: 'Approve invoice' } })
+    expect(useWorkflowStore.getState().nodes[0].data.label).toBe('Approve invoice')
+  })
+
   it('keeps the current kind and restores focus when the operator cancels', async () => {
     const onUpdateNodeType = vi.fn()
     renderPanelWithConfirm({ selectedNode: makeNode('node-a'), onUpdateNodeType })

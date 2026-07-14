@@ -936,6 +936,7 @@ export default function App() {
       activeRunId={runId}
       usage={usage}
       aiHealth={aiHealth}
+      currentWorkflowId={currentWorkflowId}
       currentWorkflowName={currentWorkflowName}
       currentWorkflowInputs={currentWorkflowInputs}
       currentWorkflowOutputs={currentWorkflowOutputs}

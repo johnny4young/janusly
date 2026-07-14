@@ -234,12 +234,14 @@ export type WorkflowInputSchemaShape = {
 export type WorkflowDefinition = {
   id?: string
   name?: string
-  nodes: Array<{ id: string; type: string; config: JsonObject }>
+  nodes: Array<{ id: string; type: string; label?: string; config: JsonObject }>
   edges: Array<{ from: string; to: string; condition?: string }>
   /** Typed inputs surfaced in the Inspector + validated at run start. */
   inputs?: WorkflowInputSchemaShape
   /** Output projection map; engine renders each template at terminal `succeeded`. */
   outputs?: Record<string, string>
+  /** Editor-only layout metadata; runtime consumers ignore it. */
+  ui?: { positions?: Record<string, { x: number; y: number }> }
 }
 export type WorkflowGraphNode = Node<WorkflowNodeData>
 export type WorkflowGraphEdge = Edge<WorkflowEdgeData>

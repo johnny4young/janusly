@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { __resetBumpCoalesceForTests, registerFlowOps, useWorkflowStore } from './store'
+import { __resetBumpCoalesceForTests, registerFlowOps, registerNodePlacementResolver, useWorkflowStore } from './store'
 
 const initialState = useWorkflowStore.getState()
 
@@ -53,10 +53,11 @@ describe('useWorkflowStore', () => {
       id: 'wf_1',
       name: 'Pipeline',
       nodes: [
-        { id: 'a', type: 'noop', config: {} },
+        { id: 'a', type: 'noop', label: 'Start here', config: {} },
         { id: 'b', type: 'http', config: { url: 'https://example.com' } },
       ],
       edges: [{ from: 'a', to: 'b', condition: 'true' }],
+      ui: { positions: { a: { x: 25, y: 40 }, b: { x: 280, y: 120 } } },
     })
 
     const state = useWorkflowStore.getState()
@@ -73,8 +74,9 @@ describe('useWorkflowStore', () => {
     // time. Regression-pin: a writer that reintroduces
     // `String(type).toUpperCase()` would shadow the locale-correct
     // label and the e2e tests would fail.
-    expect(state.nodes[0].data.label).toBe('')
+    expect(state.nodes[0].data.label).toBe('Start here')
     expect(state.nodes[1].data.label).toBe('')
+    expect(state.nodes.map(node => node.position)).toEqual([{ x: 25, y: 40 }, { x: 280, y: 120 }])
   })
 
   it('hydrates generated/template content as an unsaved dirty draft when requested', () => {
@@ -100,7 +102,30 @@ describe('useWorkflowStore', () => {
       name: 'Sample',
       nodes: [{ id: 'n1', type: 'noop', config: { foo: 'bar' } }],
       edges: [],
+      ui: { positions: { n1: { x: 80, y: 80 } } },
     })
+  })
+
+  it('serializes trimmed custom labels and editor positions', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf-layout',
+      nodes: [{ id: 'named', type: 'noop', label: '  Review invoice  ', config: {} }],
+      edges: [],
+      ui: { positions: { named: { x: 420, y: -15 } } },
+    })
+
+    expect(useWorkflowStore.getState().getWorkflowJson()).toMatchObject({
+      nodes: [{ id: 'named', type: 'noop', label: 'Review invoice', config: {} }],
+      ui: { positions: { named: { x: 420, y: -15 } } },
+    })
+  })
+
+  it('places new nodes through the lazy canvas resolver when available', () => {
+    const unregister = registerNodePlacementResolver(() => ({ x: 640, y: 360 }))
+    useWorkflowStore.getState().addNode('noop')
+    unregister()
+
+    expect(useWorkflowStore.getState().nodes[0].position).toEqual({ x: 640, y: 360 })
   })
 
   it('updateSelectedNodeType swaps type and config with the matching preset', () => {
@@ -116,6 +141,58 @@ describe('useWorkflowStore', () => {
     // resolves the new label via `getNodeLabel('approval')` at render
     // time, so the upstream visibleNodes memo doesn't carry locale deps.
     expect(state.nodes[0].data.label).toBe('')
+  })
+
+  it('preserves a custom step name when its kind changes', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{ id: 'named', type: 'noop', label: 'Human review', config: {} }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('named')
+    useWorkflowStore.getState().updateSelectedNodeType('approval')
+    expect(useWorkflowStore.getState().nodes[0].data.label).toBe('Human review')
+  })
+
+  it('updates custom names and typed workflow I/O as semantic edits', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{ id: 'named', type: 'noop', config: {} }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('named')
+    const revision = useWorkflowStore.getState().workflowRevision
+
+    useWorkflowStore.getState().updateNodeLabel('named', 'Review invoice')
+    useWorkflowStore.getState().updateWorkflowInputs({
+      type: 'object',
+      properties: { invoiceId: { type: 'string' } },
+      required: ['invoiceId'],
+    })
+    useWorkflowStore.getState().updateWorkflowOutputs({ result: '{{context.named.output}}' })
+
+    const state = useWorkflowStore.getState()
+    expect(state.nodes[0].data.label).toBe('Review invoice')
+    expect(state.currentWorkflowInputs?.properties).toHaveProperty('invoiceId')
+    expect(state.currentWorkflowOutputs).toEqual({ result: '{{context.named.output}}' })
+    expect(state.workflowDirty).toBe(true)
+    expect(state.workflowRevision).toBe(revision + 3)
+  })
+
+  it('updates the explicit label target even when store selection has moved', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [
+        { id: 'node-a', type: 'noop', config: {} },
+        { id: 'node-b', type: 'noop', config: {} },
+      ],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('node-b')
+
+    useWorkflowStore.getState().updateNodeLabel('node-a', 'Name node A')
+
+    expect(useWorkflowStore.getState().nodes.map(node => node.data.label)).toEqual(['Name node A', ''])
   })
 
   it('preserves generic execution controls and drops source-specific config on a type change', () => {
@@ -497,8 +574,14 @@ describe('useWorkflowStore semantic workflow signals', () => {
   // does it at import time in production) — stub the two we exercise here.
   beforeEach(() => {
     registerFlowOps({
-      applyNodeChanges: (changes, nodes) =>
-        nodes.filter((node) => !changes.some((change) => change.type === 'remove' && 'id' in change && change.id === node.id)),
+      applyNodeChanges: (changes, nodes) => nodes
+        .filter((node) => !changes.some((change) => change.type === 'remove' && 'id' in change && change.id === node.id))
+        .map((node) => {
+          const position = changes.find(change => change.type === 'position' && change.id === node.id)
+          return position && position.type === 'position' && position.position
+            ? { ...node, position: position.position }
+            : node
+        }),
       applyEdgeChanges: (_changes, edges) => edges,
       addEdge: (_connection, edges) => edges,
     } as never)
@@ -541,21 +624,28 @@ describe('useWorkflowStore semantic workflow signals', () => {
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 
-  it('node position changes do NOT mark dirty (layout is never serialized), removals do', () => {
+  it('marks completed position changes dirty, ignores in-progress drag events, and marks removals semantic', () => {
     useWorkflowStore.getState().addNode('http')
     const nodeId = useWorkflowStore.getState().nodes[0].id
     useWorkflowStore.setState({ workflowDirty: false })
 
     useWorkflowStore.getState().onNodesChange([
-      { id: nodeId, type: 'position', position: { x: 500, y: 500 } },
+      { id: nodeId, type: 'position', position: { x: 400, y: 400 }, dragging: true },
     ])
     expect(useWorkflowStore.getState().workflowDirty).toBe(false)
 
+    useWorkflowStore.getState().onNodesChange([
+      { id: nodeId, type: 'position', position: { x: 500, y: 500 }, dragging: false },
+    ])
+    expect(useWorkflowStore.getState().workflowDirty).toBe(true)
+    expect(useWorkflowStore.getState().getWorkflowJson().ui?.positions?.[nodeId]).toEqual({ x: 500, y: 500 })
+
+    useWorkflowStore.setState({ workflowDirty: false })
     useWorkflowStore.getState().onNodesChange([{ id: nodeId, type: 'remove' }])
     expect(useWorkflowStore.getState().workflowDirty).toBe(true)
   })
 
-  it('increments workflowRevision only for serialized graph changes', () => {
+  it('increments workflowRevision only for semantic graph changes', () => {
     expect(useWorkflowStore.getState().workflowRevision).toBe(0)
     useWorkflowStore.getState().addNode('http')
     const nodeId = useWorkflowStore.getState().nodes[0].id

@@ -28,6 +28,7 @@ function props(overrides: Partial<RightPanelProps> = {}): RightPanelProps {
     workflows: [],
     usage: {},
     aiHealth: null,
+    currentWorkflowId: 'untitled',
     currentWorkflowName: 'Untitled',
     onOpenWorkflow: vi.fn(),
     onUseTemplate: vi.fn(),

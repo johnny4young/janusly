@@ -32,6 +32,7 @@ import { SENSITIVE_KEY_PATTERN } from "./sensitive-keys";
 export type DiffableNode = {
   id: string;
   type: string;
+  label?: string;
   config?: unknown;
 };
 
@@ -194,6 +195,7 @@ function diffNodes(before: DiffableNode[], after: DiffableNode[]): NodeChange[] 
     if (!afterNode) continue;
     const fields: FieldChange[] = [];
     walkValue("type", beforeNode.type, afterNode.type, fields);
+    walkValue("label", beforeNode.label, afterNode.label, fields);
     walkValue("config", beforeNode.config, afterNode.config, fields);
     if (fields.length > 0) {
       fields.sort((a, b) => a.path.localeCompare(b.path));

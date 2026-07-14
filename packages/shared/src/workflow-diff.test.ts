@@ -68,6 +68,24 @@ describe("computeWorkflowDiff — node add / remove", () => {
 });
 
 describe("computeWorkflowDiff — node config changes + tags", () => {
+  it.each([
+    [undefined, "Review invoice"],
+    ["Review invoice", "Approve invoice"],
+    ["Review invoice", undefined],
+  ])("records a node label change from %s to %s", (beforeLabel, afterLabel) => {
+    const before = makeWorkflow({
+      nodes: [{ id: "review", type: "noop", ...(beforeLabel ? { label: beforeLabel } : {}), config: {} }],
+    });
+    const after = makeWorkflow({
+      nodes: [{ id: "review", type: "noop", ...(afterLabel ? { label: afterLabel } : {}), config: {} }],
+    });
+    const result = computeWorkflowDiff(before, after);
+    expect(result.summary.nodesChanged).toBe(1);
+    const changed = result.nodes[0];
+    if (changed.kind !== "changed") throw new Error("expected changed node");
+    expect(changed.fields).toEqual([{ path: "label", before: beforeLabel, after: afterLabel, tag: null }]);
+  });
+
   it("records a single config field change with no tag", () => {
     const before = makeWorkflow({
       nodes: [{ id: "fetch", type: "http", config: { url: "https://a" } }],

@@ -5,6 +5,7 @@ import { ReactFlowProvider } from '@xyflow/react'
 import { WorkflowCanvas } from './WorkflowCanvas'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { initI18n } from '../i18n'
+import { useWorkflowStore } from '../store'
 
 function makeNode(id: string, label: string, position: { x: number; y: number }, hasValidationError = false): WorkflowGraphNode {
   return {
@@ -44,7 +45,9 @@ function mountCanvas(overrides: Partial<Parameters<typeof WorkflowCanvas>[0]> = 
   // canvas room to render handles and observe layout.
   const utils = render(
     <div style={{ width: 1024, height: 720, position: 'relative' }}>
-      <WorkflowCanvas {...props} />
+      <ReactFlowProvider>
+        <WorkflowCanvas {...props} />
+      </ReactFlowProvider>
     </div>,
   )
 
@@ -62,6 +65,16 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(getByText('2 paths')).toBeInTheDocument()
     // React Flow renders one DOM node per workflow node.
     expect(container.querySelectorAll('.react-flow__node')).toHaveLength(3)
+  })
+
+  it('falls back to the localized kind name for a whitespace-only custom label', async () => {
+    const { findByText, queryByText } = mountCanvas({
+      nodes: [makeNode('blank-label', '   ', { x: 100, y: 100 })],
+      edges: [],
+    })
+
+    expect(await findByText('Do nothing')).toBeInTheDocument()
+    expect(queryByText(/^\s+$/)).toBeNull()
   })
 
   it('fires onNodeClick with the matching node when a node is clicked', async () => {
@@ -161,6 +174,53 @@ describe('WorkflowCanvas (browser mode)', () => {
     expect(nodeWrapper).toHaveAttribute('aria-label', 'Step: Running step. Status: Running. Read only')
     expect(document.getElementById(edgeWrapper.getAttribute('aria-describedby') ?? '')).toHaveTextContent('Read only')
     expect(container.querySelector('[aria-label="Zoom in"]')).toBeTruthy()
+  })
+
+  it('centers blank-canvas insertion under a restored non-default zoom', async () => {
+    initI18n('en')
+    const storageKey = 'janusly:canvasViewport:wf-empty-zoom'
+    window.localStorage.setItem(storageKey, JSON.stringify({ x: 0, y: 0, zoom: 0.5 }))
+    const previous = useWorkflowStore.getState()
+    useWorkflowStore.setState({ nodes: [], edges: [], workflowDirty: false })
+    try {
+      const props = {
+        nodes: [],
+        edges: [],
+        onNodesChange: vi.fn(),
+        onEdgesChange: vi.fn(),
+        onConnect: vi.fn(),
+        onNodeClick: vi.fn(),
+        onEdgeClick: vi.fn(),
+        paletteNodeTypes: ['noop'],
+        onAddNode: (type: string) => useWorkflowStore.getState().addNode(type),
+        viewportWorkflowId: 'wf-empty-zoom',
+      }
+      const { container, getByRole } = render(
+        <ReactFlowProvider>
+          <div style={{ width: 1024, height: 720, position: 'relative' }}>
+            <WorkflowCanvas {...props} />
+          </div>
+        </ReactFlowProvider>,
+      )
+
+      await waitFor(() => {
+        const viewport = container.querySelector('.react-flow__viewport') as HTMLElement
+        expect(viewport.style.transform).toMatch(/translate\(\s*0px,\s*0px\s*\)\s*scale\(\s*0\.5\s*\)/)
+      })
+      getByRole('button', { name: 'Do nothing', exact: true }).click()
+
+      const [added] = useWorkflowStore.getState().nodes
+      expect(added.position.x).toBeCloseTo(905, 0)
+      expect(added.position.y).toBeCloseTo(672, 0)
+    } finally {
+      window.localStorage.removeItem(storageKey)
+      useWorkflowStore.setState({
+        nodes: previous.nodes,
+        edges: previous.edges,
+        workflowDirty: previous.workflowDirty,
+        workflowRevision: previous.workflowRevision,
+      })
+    }
   })
 
   it('localizes observe-mode controls, edge names, and read-only instructions in Spanish', async () => {

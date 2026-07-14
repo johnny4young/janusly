@@ -106,6 +106,38 @@ describe("POST /ai/suggest-improvement — auth gate", () => {
 });
 
 describe("POST /ai/suggest-improvement — AI mode", () => {
+  it("keeps operator-authored labels and layout out of the prompt and restores them after replacement", async () => {
+    readJsonMock.mockResolvedValue({ workflow: {
+      ...VALID_WORKFLOW,
+      nodes: [{ ...VALID_WORKFLOW.nodes[0], label: "Billing API" }],
+      ui: { positions: { n1: { x: 320, y: 180 } } },
+    } } as never);
+    suggestMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedWorkflowJson: JSON.stringify({
+          ...VALID_WORKFLOW,
+          nodes: [{ ...VALID_WORKFLOW.nodes[0], config: { url: "https://example.com", timeoutMs: 30_000 } }],
+        }),
+        rationale: "bound the request",
+        approachLabel: "resilience",
+        confidence: 90,
+      }],
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+    } as never);
+
+    const res = await callImprove();
+
+    const helperInput = suggestMock.mock.calls[0]?.[0] as {
+      workflow: { ui?: unknown; nodes: Array<{ label?: string }> };
+    } | undefined;
+    expect(helperInput?.workflow.ui).toBeUndefined();
+    expect(helperInput?.workflow.nodes[0]?.label).toBeUndefined();
+    expect(res.payload.suggestedWorkflow.nodes[0].label).toBe("Billing API");
+    expect(res.payload.suggestedWorkflow.ui).toEqual({ positions: { n1: { x: 320, y: 180 } } });
+  });
+
   it("validates each suggestion and returns mode:ai + audits mode:ai", async () => {
     suggestMock.mockResolvedValue({
       mode: "ai",

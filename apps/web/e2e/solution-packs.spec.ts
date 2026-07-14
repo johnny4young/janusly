@@ -26,7 +26,7 @@ test('Solution Packs install, sample-run, and failure injection flows work from 
   await incidentPack.getByRole('button', { name: 'Install', exact: true }).click()
   await expect(page.getByText(/Pack installed/)).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Step setup', exact: true })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: 'Name' })).toHaveValue('Incident triage')
+  await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Incident triage')
   await expect(page.locator('.workflow-node').filter({ hasText: 'Run a tool' })).toHaveCount(2)
 
   await page.getByRole('button', { name: 'Packs', exact: true }).click()

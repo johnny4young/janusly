@@ -27,6 +27,8 @@ import {
   type AuthoringFocusRequest,
 } from './authoring-focus-bus'
 
+const WorkflowIoEditor = React.lazy(() => import('./WorkflowIoEditor').then(module => ({ default: module.WorkflowIoEditor })))
+
 type InspectorPanelProps = {
   selectedNode: WorkflowGraphNode | null
   selectedEdge: WorkflowGraphEdge | null
@@ -35,6 +37,7 @@ type InspectorPanelProps = {
   tools: ToolSchema[]
   workflowNodes: WorkflowGraphNode[]
   workflowEdges: WorkflowGraphEdge[]
+  currentWorkflowId?: string
   currentWorkflowName?: string
   currentWorkflowInputs?: WorkflowDefinition['inputs']
   currentWorkflowOutputs?: WorkflowDefinition['outputs']
@@ -53,6 +56,7 @@ export function InspectorPanel({
   tools,
   workflowNodes,
   workflowEdges,
+  currentWorkflowId,
   currentWorkflowName,
   currentWorkflowInputs,
   currentWorkflowOutputs,
@@ -64,6 +68,9 @@ export function InspectorPanel({
   const { t } = useT()
   const confirm = useConfirm()
   const addToast = useWorkflowStore(state => state.addToast)
+  const updateNodeLabel = useWorkflowStore(state => state.updateNodeLabel)
+  const updateWorkflowInputs = useWorkflowStore(state => state.updateWorkflowInputs)
+  const updateWorkflowOutputs = useWorkflowStore(state => state.updateWorkflowOutputs)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [jsonDraft, setJsonDraft] = useState(() => selectedNode ? JSON.stringify(selectedNode.data.config, null, 2) : '')
   const [typeChangePending, setTypeChangePending] = useState(false)
@@ -158,7 +165,7 @@ export function InspectorPanel({
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
-            <h3>{getNodeLabel(selectedNode.data.type)}</h3>
+            <h3>{selectedNode.data.label?.trim() || getNodeLabel(selectedNode.data.type)}</h3>
             <p className="helper-text mono">
               {currentWorkflowName ? `${currentWorkflowName} › ` : ''}{t('rightPanel.inspector.stepIdLabel', { id: selectedNode.id })}
               <button
@@ -199,6 +206,17 @@ export function InspectorPanel({
 
 
         <div className="form-grid">
+          <label className="field-label" htmlFor="node-label">{t('rightPanel.inspector.stepNameLabel')}</label>
+          <input
+            id="node-label"
+            className="text-field"
+            value={selectedNode.data.label ?? ''}
+            maxLength={80}
+            placeholder={getNodeLabel(selectedNode.data.type)}
+            aria-describedby="node-label-helper"
+            onChange={(event) => updateNodeLabel(selectedNode.id, event.target.value)}
+          />
+          <span id="node-label-helper" className="helper-text helper-text--hint">{t('rightPanel.inspector.stepNameHelper')}</span>
           <label className="field-label" htmlFor="node-type">{t('rightPanel.inspector.stepKindLabel')}</label>
           <select
             id="node-type"
@@ -281,11 +299,17 @@ export function InspectorPanel({
     )
   }
 
-  const hasIoSchema = Boolean(currentWorkflowInputs || (currentWorkflowOutputs && Object.keys(currentWorkflowOutputs).length > 0))
-
   return (
     <>
-      {hasIoSchema && <WorkflowIoCard inputs={currentWorkflowInputs} outputs={currentWorkflowOutputs} />}
+      <React.Suspense fallback={<section className="panel-card"><p className="helper-text">{t('common.working')}</p></section>}>
+        <WorkflowIoEditor
+          workflowId={currentWorkflowId ?? 'unsaved-workflow'}
+          inputs={currentWorkflowInputs}
+          outputs={currentWorkflowOutputs}
+          onChangeInputs={updateWorkflowInputs}
+          onChangeOutputs={updateWorkflowOutputs}
+        />
+      </React.Suspense>
       <section className="panel-card">
         <div className="empty-panel">
           <GitBranch size={24} aria-hidden="true" />
@@ -304,73 +328,4 @@ export function InspectorPanel({
       </section>
     </>
   )
-}
-
-/**
- * Render the workflow's declared I/O contract when no node/edge is selected.
- * Reads the JSON-Schema-subset `inputs` shape and the `outputs` projection
- * map. Empty when the workflow declares neither.
- */
-function WorkflowIoCard({
-  inputs,
-  outputs,
-}: {
-  inputs?: WorkflowDefinition['inputs']
-  outputs?: WorkflowDefinition['outputs']
-}) {
-  const { t } = useT()
-  return (
-    <section className="panel-card" data-testid="workflow-io-card">
-      <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
-      <h3>{t('rightPanel.inspector.ioTitle')}</h3>
-      <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>
-
-      {inputs && (
-        <div className="form-grid">
-          <div className="field-label">{t('rightPanel.inspector.inputsLabel')}</div>
-          <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {renderInputFields(inputs).map((row, idx) => (
-              <li key={`${row.path}-${idx}`}>
-                <span>{row.path}</span>
-                <span>{row.type}{row.required ? t('rightPanel.inspector.requiredSuffix') : ''}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {outputs && Object.keys(outputs).length > 0 && (
-        <div className="form-grid">
-          <div className="field-label">{t('rightPanel.inspector.outputsLabel')}</div>
-          <ul className="inspector-meta" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {Object.entries(outputs).map(([key, template]) => (
-              <li key={key}>
-                <span>{key}</span>
-                <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{template}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
-  )
-}
-
-/** Flatten a nested input schema into a list of `{ path, type, required }` rows for the Inspector. */
-function renderInputFields(
-  schema: NonNullable<WorkflowDefinition['inputs']>,
-  basePath = '',
-): Array<{ path: string; type: string; required: boolean }> {
-  if (schema.type === 'object' && schema.properties) {
-    const requiredSet = new Set(schema.required ?? [])
-    return Object.entries(schema.properties).flatMap(([key, child]) => {
-      const path = basePath ? `${basePath}.${key}` : key
-      const isRequired = requiredSet.has(key)
-      if (child.type === 'object' && child.properties) {
-        return [{ path, type: child.type, required: isRequired }, ...renderInputFields(child, path)]
-      }
-      return [{ path, type: child.type, required: isRequired }]
-    })
-  }
-  return [{ path: basePath || '$', type: schema.type, required: false }]
 }
