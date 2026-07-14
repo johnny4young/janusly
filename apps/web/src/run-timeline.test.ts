@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { RunEvent } from './types'
-import { getInterEventDeltaMs, getRunEventPresentation, sortRunEventsChronologically } from './run-timeline'
+import {
+  getInterEventDeltaMs,
+  getRunEventPresentation,
+  parseCausalReplay,
+  sortRunEventsChronologically,
+  summarizeRunDiagnostics,
+} from './run-timeline'
 
 describe('run event timeline projection', () => {
   it('maps lifecycle families to semantic tones', () => {
@@ -31,5 +37,54 @@ describe('run event timeline projection', () => {
     ]
     expect(sortRunEventsChronologically(events).map(event => event.id)).toEqual(['1', '2', '3'])
     expect(events.map(event => event.id)).toEqual(['3', '1', '2'])
+  })
+
+  it('summarizes only honest loaded-history diagnostics and ignores malformed recall counts', () => {
+    expect(summarizeRunDiagnostics([
+      { id: '1', type: 'run.started', createdAt: '2026-07-12T10:00:00.000Z' },
+      { id: '2', type: 'node.retry', nodeId: 'fetch', createdAt: '2026-07-12T10:00:01.000Z' },
+      { id: '3', type: 'node.failed', nodeId: 'fetch', createdAt: '2026-07-12T10:00:02.000Z' },
+      { id: '4', type: 'decision.made', nodeId: 'route', createdAt: '2026-07-12T10:00:03.000Z' },
+      { id: '5', type: 'agent.memory.recalled', nodeId: 'agent', payload: { count: 3 }, createdAt: '2026-07-12T10:00:04.500Z' },
+      { id: '6', type: 'agent.memory.recalled', nodeId: 'agent', payload: { count: -1 }, createdAt: 'bad' },
+    ])).toEqual({
+      loadedEvents: 6,
+      observedDurationMs: 4_500,
+      retryCount: 1,
+      failedNodeCount: 1,
+      decisionCount: 1,
+      recalledEpisodeCount: 3,
+    })
+  })
+
+  it('parses a complete causal replay and rejects partial server shapes', () => {
+    const candidate = {
+      nodeId: 'fast_path',
+      score: 2.5,
+      breakdown: { cost: 0.01, latency: 25, quality: 0.98, penalty: 0.02 },
+    }
+    expect(parseCausalReplay({ chosen: candidate, best: candidate, ranking: [candidate] }))
+      .toEqual({ chosen: candidate, best: candidate, ranking: [candidate] })
+    expect(parseCausalReplay({ chosen: candidate, ranking: [{ ...candidate, score: 'bad' }] })).toBeNull()
+    expect(parseCausalReplay({ chosen: candidate, ranking: [candidate, { nodeId: 'partial' }] })).toBeNull()
+    expect(parseCausalReplay({ chosen: null, best: candidate, ranking: [candidate] })).toBeNull()
+    expect(parseCausalReplay({ chosen: candidate, best: null, ranking: [candidate] })).toBeNull()
+    expect(parseCausalReplay({
+      chosen: { ...candidate, nodeId: 'outside' },
+      best: candidate,
+      ranking: [candidate],
+    })).toBeNull()
+    expect(parseCausalReplay({
+      chosen: candidate,
+      best: { ...candidate, score: 3 },
+      ranking: [candidate],
+    })).toBeNull()
+    expect(parseCausalReplay({ chosen: candidate, best: candidate, ranking: [candidate, candidate] })).toBeNull()
+    expect(parseCausalReplay({
+      chosen: candidate,
+      best: { ...candidate, nodeId: 'slow_path', score: 3 },
+      ranking: [{ ...candidate, nodeId: 'slow_path', score: 3 }, candidate],
+    })).toBeNull()
+    expect(parseCausalReplay({ ranking: [] })).toBeNull()
   })
 })

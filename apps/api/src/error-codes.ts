@@ -242,6 +242,7 @@ export type ApiErrorCode =
   | "runs_not_production_ready"
   | "runs_resume_conflict"
   | "runs_resume_token_required"
+  | "runs_run_id_event_id_and_node_id_required"
   | "runs_run_id_and_node_id_required"
   | "runs_run_id_required"
   | "runs_run_not_found"

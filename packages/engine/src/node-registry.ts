@@ -205,13 +205,13 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
   // rules planner ignores memory) — skip the embedding call otherwise. Empty
   // when memory is off / the episodic kind is disallowed, so the prompt is then
   // byte-for-byte today's.
-  const episodicBlock = planner === "openai"
-    ? (await recallAgentEpisodes({
+  const episodicRecall = planner === "openai" && llm
+    ? await recallAgentEpisodes({
         orgId: ctx.orgId,
         workflowId: ctx.workflowId ?? undefined,
         goal: agentConfig.goal ?? "",
-      })).block
-    : "";
+      })
+    : { block: "", count: 0, fingerprints: [] };
 
   await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.started`, {
     name: agentConfig.name,
@@ -227,6 +227,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
   const steps: AgentLoopStepRecord[] = [];
   let lastResult: unknown = null;
   let lastReflection: AgentReflection | null = null;
+  let memoryInfluenceEmitted = false;
 
   for (let i = 0; i < maxSteps; i++) {
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.started`, { agent: agentConfig.name, iteration: i });
@@ -238,8 +239,16 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
           runId: ctx.runId,
           nodeId: ctx.nodeId,
           workflowId: ctx.workflowId ?? undefined,
-        }, episodicBlock)
+        }, episodicRecall.block)
       : planAgentTool(agentConfig, planningContext);
+
+    if (!memoryInfluenceEmitted && episodicRecall.count > 0 && plan.mode === "ai") {
+      await appendEvent(ctx.runId, ctx.nodeId, "agent.memory.recalled", {
+        count: episodicRecall.count,
+        fingerprints: episodicRecall.fingerprints,
+      });
+      memoryInfluenceEmitted = true;
+    }
 
     await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
 

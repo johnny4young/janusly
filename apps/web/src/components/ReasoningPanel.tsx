@@ -13,12 +13,20 @@
  *   the operator's position.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Activity, AlertCircle, Search } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Activity, AlertCircle, GitCompareArrows, LoaderCircle, Search, X } from 'lucide-react'
 
 import { formatCompactDuration } from '../constants'
-import { getResolvedLocale, tRunEvent, useT } from '../i18n'
-import { getInterEventDeltaMs, getRunEventPresentation, sortRunEventsChronologically } from '../run-timeline'
+import { getResolvedLocale, tApiError, tRunEvent, useT } from '../i18n'
+import {
+  getInterEventDeltaMs,
+  getRunEventPresentation,
+  parseCausalReplay,
+  sortRunEventsChronologically,
+  summarizeRunDiagnostics,
+  type CausalReplay,
+  type RunDiagnostics,
+} from '../run-timeline'
 import type { RunEvent } from '../types'
 import { useVirtualList } from '../hooks/useVirtualList'
 import { EmptyView } from './panel-primitives'
@@ -31,6 +39,15 @@ type TimelineItem = {
   deltaMs: number | null
   presentation: ReturnType<typeof getRunEventPresentation>
 }
+
+type CausalState =
+  | { status: 'idle' }
+  | { status: 'loading'; runId: string; eventKey: string; nodeId: string }
+  | { status: 'ready'; runId: string; eventKey: string; nodeId: string; replay: CausalReplay }
+  | { status: 'error'; runId: string; eventKey: string; nodeId: string; error: unknown; invalidResponse: boolean }
+
+type CausalResponsePromise = Promise<unknown>
+type ReplayDecision = (eventId: string, nodeId: string, signal: AbortSignal) => CausalResponsePromise
 
 function eventKey(event: RunEvent): string {
   return event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`
@@ -48,17 +65,25 @@ export function ReasoningPanel({
   events,
   eventsHasMore,
   onLoadOlderEvents,
+  activeRunId,
+  onReplayDecision,
 }: {
   events: RunEvent[]
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
+  activeRunId?: string | null
+  onReplayDecision?: ReplayDecision
 }) {
   const { t, i18n } = useT()
   const [query, setQuery] = useState('')
   const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null)
   const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null)
+  const [causalState, setCausalState] = useState<CausalState>({ status: 'idle' })
+  const causalRequestRef = useRef<{ generation: number; controller: AbortController } | null>(null)
+  const causalTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const chronological = useMemo(() => sortRunEventsChronologically(events), [events])
+  const diagnostics = useMemo(() => summarizeRunDiagnostics(events), [events])
   const timelineItems = useMemo<TimelineItem[]>(() => chronological.map((event, index) => ({
     key: eventKey(event),
     event,
@@ -115,6 +140,39 @@ export function ReasoningPanel({
     return () => cancelAnimationFrame(frame)
   }, [containerRef, pendingFocusKey, visibleItems])
 
+  useEffect(() => {
+    causalRequestRef.current?.controller.abort()
+    causalRequestRef.current = null
+    causalTriggerRef.current = null
+    setCausalState({ status: 'idle' })
+    return () => causalRequestRef.current?.controller.abort()
+  }, [activeRunId])
+
+  const inspectDecision = async (item: TimelineItem) => {
+    const nodeId = item.event.nodeId
+    const eventId = item.event.id
+    if (!activeRunId || !eventId || !nodeId || item.event.type !== 'decision.made' || !onReplayDecision) return
+    const runId = activeRunId
+    causalRequestRef.current?.controller.abort()
+    const controller = new AbortController()
+    const generation = (causalRequestRef.current?.generation ?? 0) + 1
+    causalRequestRef.current = { generation, controller }
+    setCausalState({ status: 'loading', runId, eventKey: item.key, nodeId })
+    try {
+      const payload = await onReplayDecision(eventId, nodeId, controller.signal)
+      if (controller.signal.aborted || causalRequestRef.current?.generation !== generation) return
+      const replay = parseCausalReplay(payload)
+      if (!replay) {
+        setCausalState({ status: 'error', runId, eventKey: item.key, nodeId, error: null, invalidResponse: true })
+        return
+      }
+      setCausalState({ status: 'ready', runId, eventKey: item.key, nodeId, replay })
+    } catch (error) {
+      if (controller.signal.aborted || causalRequestRef.current?.generation !== generation) return
+      setCausalState({ status: 'error', runId, eventKey: item.key, nodeId, error, invalidResponse: false })
+    }
+  }
+
   const jumpToFirstFailure = () => {
     if (!firstFailure) return
     setQuery('')
@@ -124,8 +182,26 @@ export function ReasoningPanel({
   const noEvents = timelineItems.length === 0
   const noMatches = !noEvents && filteredItems.length === 0
 
+  const visibleCausalState = causalState.status !== 'idle' && causalState.runId === activeRunId
+    ? causalState
+    : null
+
   return (
     <div className="we-reasoning-panel" data-testid="run-event-timeline">
+      {!noEvents && (
+        <RunDiagnosticsCard diagnostics={diagnostics} partial={Boolean(eventsHasMore)} />
+      )}
+      {visibleCausalState && (
+        <CausalAnalysisCard
+          state={visibleCausalState}
+          onClose={() => {
+            causalRequestRef.current?.controller.abort()
+            causalRequestRef.current = null
+            setCausalState({ status: 'idle' })
+            requestAnimationFrame(() => causalTriggerRef.current?.focus())
+          }}
+        />
+      )}
       <div className="we-reasoning-toolbar">
         <label className="we-reasoning-filter">
           <span>{t('rightPanel.reasoning.filterLabel')}</span>
@@ -219,11 +295,28 @@ export function ReasoningPanel({
                   </div>
                   <div className="we-run-event__meta">
                     <span>{item.event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
-                    {item.deltaMs !== null && (
-                      <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(item.deltaMs) }) as string}>
-                        +{formatCompactDuration(item.deltaMs)}
-                      </span>
-                    )}
+                    <span className="we-run-event__meta-actions">
+                      {item.deltaMs !== null && (
+                        <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(item.deltaMs) }) as string}>
+                          +{formatCompactDuration(item.deltaMs)}
+                        </span>
+                      )}
+                      {activeRunId && onReplayDecision && item.event.type === 'decision.made' && item.event.id && item.event.nodeId && (
+                        <button
+                          type="button"
+                          className="we-run-event__what-if"
+                          aria-expanded={visibleCausalState?.eventKey === item.key}
+                          aria-controls="run-causal-analysis"
+                          onClick={event => {
+                            causalTriggerRef.current = event.currentTarget
+                            void inspectDecision(item)
+                          }}
+                        >
+                          <GitCompareArrows size={12} aria-hidden="true" />
+                          {t('rightPanel.reasoning.causal.action')}
+                        </button>
+                      )}
+                    </span>
                   </div>
                   <div className="we-run-event__body">
                     <ReasoningPayload payload={item.event.payload} />
@@ -236,6 +329,95 @@ export function ReasoningPanel({
       </div>
       {eventsHasMore && onLoadOlderEvents && <LoadOlderEventsButton onClick={onLoadOlderEvents} />}
     </div>
+  )
+}
+
+function RunDiagnosticsCard({ diagnostics, partial }: { diagnostics: RunDiagnostics; partial: boolean }) {
+  const { t } = useT()
+  const locale = getResolvedLocale()
+  const values = [
+    { key: 'events', label: t('rightPanel.reasoning.diagnostics.events'), value: diagnostics.loadedEvents.toLocaleString(locale) },
+    { key: 'span', label: t('rightPanel.reasoning.diagnostics.span'), value: diagnostics.observedDurationMs === null ? '—' : formatCompactDuration(diagnostics.observedDurationMs) },
+    { key: 'retries', label: t('rightPanel.reasoning.diagnostics.retries'), value: diagnostics.retryCount.toLocaleString(locale) },
+    { key: 'failures', label: t('rightPanel.reasoning.diagnostics.failures'), value: diagnostics.failedNodeCount.toLocaleString(locale) },
+    { key: 'decisions', label: t('rightPanel.reasoning.diagnostics.decisions'), value: diagnostics.decisionCount.toLocaleString(locale) },
+    { key: 'memory', label: t('rightPanel.reasoning.diagnostics.memory'), value: diagnostics.recalledEpisodeCount.toLocaleString(locale) },
+  ]
+  return (
+    <section className="we-run-diagnostics" aria-label={t('rightPanel.reasoning.diagnostics.aria') as string} data-testid="run-diagnostics">
+      <div className="we-run-diagnostics__heading">
+        <div>
+          <strong>{t(partial ? 'rightPanel.reasoning.diagnostics.loadedTitle' : 'rightPanel.reasoning.diagnostics.title')}</strong>
+          <p>{t('rightPanel.reasoning.diagnostics.helper', { count: diagnostics.loadedEvents })}</p>
+        </div>
+        {partial && <span className="mode-pill mode-pill-neutral">{t('rightPanel.reasoning.diagnostics.partial')}</span>}
+      </div>
+      <dl className="we-run-diagnostics__grid">
+        {values.map(item => (
+          <div key={item.key}>
+            <dt>{item.label}</dt>
+            <dd>{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { status: 'idle' }>; onClose: () => void }) {
+  const { t } = useT()
+  const closeButton = (
+    <button type="button" className="icon-button" onClick={onClose} aria-label={t('rightPanel.reasoning.causal.close') as string}>
+      <X size={14} aria-hidden="true" />
+    </button>
+  )
+  if (state.status === 'loading') {
+    return (
+      <section id="run-causal-analysis" className="we-causal-analysis" role="status" aria-live="polite" data-state="loading" data-testid="causal-analysis">
+        <div className="we-causal-analysis__header">
+          <span><LoaderCircle className="we-spin" size={16} aria-hidden="true" /> {t('rightPanel.reasoning.causal.loading', { nodeId: state.nodeId })}</span>
+          {closeButton}
+        </div>
+      </section>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <section id="run-causal-analysis" className="we-causal-analysis" role="alert" data-state="error" data-testid="causal-analysis">
+        <div className="we-causal-analysis__header">
+          <span><AlertCircle size={16} aria-hidden="true" /> {t('rightPanel.reasoning.causal.errorTitle')}</span>
+          {closeButton}
+        </div>
+        <p>{state.invalidResponse ? t('rightPanel.reasoning.causal.invalidResponse') : tApiError(state.error)}</p>
+      </section>
+    )
+  }
+
+  const chosenId = state.replay.chosen.nodeId
+  const bestId = state.replay.best.nodeId
+  const unchanged = chosenId === bestId
+  return (
+    <section id="run-causal-analysis" className="we-causal-analysis" data-state="ready" data-testid="causal-analysis" aria-label={t('rightPanel.reasoning.causal.resultAria', { nodeId: state.nodeId }) as string}>
+      <div className="we-causal-analysis__header">
+        <span><GitCompareArrows size={16} aria-hidden="true" /> {t('rightPanel.reasoning.causal.title', { nodeId: state.nodeId })}</span>
+        {closeButton}
+      </div>
+      <p>{unchanged
+        ? t('rightPanel.reasoning.causal.unchanged', { nodeId: chosenId })
+        : t('rightPanel.reasoning.causal.changed', { chosenNodeId: chosenId, bestNodeId: bestId })}</p>
+      <ol className="we-causal-ranking" aria-label={t('rightPanel.reasoning.causal.rankingAria') as string}>
+        {state.replay.ranking.slice(0, 3).map((candidate, index) => (
+          <li key={candidate.nodeId}>
+            <span><strong>{index + 1}. {candidate.nodeId}</strong> · {t('rightPanel.reasoning.causal.score', { score: candidate.score.toFixed(3) })}</span>
+            <span>{t('rightPanel.reasoning.causal.breakdown', {
+              cost: candidate.breakdown.cost.toFixed(3),
+              latency: formatCompactDuration(candidate.breakdown.latency),
+              quality: `${Math.round(candidate.breakdown.quality * 100)}%`,
+            })}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }
 

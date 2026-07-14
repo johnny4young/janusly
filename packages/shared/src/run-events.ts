@@ -31,6 +31,7 @@ export const WORKFLOW_EVENT_TYPES = [
   "node.failed",
   "node.skipped",
   "decision.made",
+  "agent.memory.recalled",
   "improvement.evaluated",
   "rollback.triggered",
   "rollback.completed",

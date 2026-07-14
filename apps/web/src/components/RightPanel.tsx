@@ -238,7 +238,15 @@ function RightPanelRouter(props: RightPanelProps) {
   )
   return (
     <PanelChrome title={t('rightPanel.reasoning.title') as string} description={t('rightPanel.reasoning.description') as string} icon={<Activity size={18} />}>
-      <ReasoningPanel events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
+      <ReasoningPanel
+        events={props.events}
+        eventsHasMore={props.eventsHasMore}
+        onLoadOlderEvents={props.onLoadOlderEvents}
+        activeRunId={props.activeRunId}
+        onReplayDecision={props.activeRunId
+          ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(props.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
+          : undefined}
+      />
     </PanelChrome>
   )
 }

@@ -40,6 +40,7 @@ export type AgentPlan = {
 export type AgentPlanResult = AgentPlan & {
   done?: boolean;
   finalAnswer?: string;
+  mode?: "ai" | "fallback";
   aiError?: string;
 };
 
@@ -162,7 +163,7 @@ export async function planAgentToolWithLLM(
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
   if (!llm) {
-    return planAgentTool(config, context);
+    return { ...planAgentTool(config, context), mode: "fallback", aiError: "llm_not_configured" };
   }
 
   // Budget chokepoint. On a block the planner returns a terminate decision
@@ -181,6 +182,7 @@ export async function planAgentToolWithLLM(
         reason: `Budget exceeded — agent terminated (spent $${budget.monthlyUsdSpent.toFixed(2)} of $${(budget.monthlyUsdLimit ?? 0).toFixed(2)}).`,
         done: true,
         finalAnswer: "Agent terminated: AI cost budget exceeded.",
+        mode: "fallback",
         aiError: "budget_exceeded",
       };
     }
@@ -253,7 +255,7 @@ export async function planAgentToolWithLLM(
     const reply = LlmPlannerReplySchema.safeParse(JSON.parse(result.text || "{}"));
     if (!reply.success) {
       const fallback = planAgentTool(config, context);
-      return { ...fallback, aiError: "LLM planner returned a malformed plan shape" };
+      return { ...fallback, mode: "fallback", aiError: "LLM planner returned a malformed plan shape" };
     }
     const parsed = reply.data;
 
@@ -264,21 +266,23 @@ export async function planAgentToolWithLLM(
         reason: parsed.reason ?? "Goal completed",
         done: true,
         finalAnswer: parsed.finalAnswer ?? "Done",
+        mode: "ai",
       };
     }
 
     if (!parsed.tool) {
       const fallback = planAgentTool(config, context);
-      return { ...fallback, aiError: "LLM planner did not return a valid tool" };
+      return { ...fallback, mode: "fallback", aiError: "LLM planner did not return a valid tool" };
     }
 
     return {
       tool: parsed.tool,
       input: parsed.input ?? {},
       reason: parsed.reason ?? "LLM selected tool",
+      mode: "ai",
     };
   } catch (error) {
     const fallback = planAgentTool(config, context);
-    return { ...fallback, aiError: error instanceof Error ? error.message : String(error) };
+    return { ...fallback, mode: "fallback", aiError: error instanceof Error ? error.message : String(error) };
   }
 }

@@ -521,13 +521,15 @@ Returns the per-node comparison bundle consumed by Replay Lab. Requires
 `viewer` role. Both runs are org-scoped; missing or cross-org ids return the
 same 404 envelope to avoid enumeration.
 
-### `GET /causal?runId=<uuid>&nodeId=<nodeId>`
+### `GET /causal?runId=<uuid>&eventId=<eventId>&nodeId=<nodeId>`
 
-Replays a recorded router decision for explainability. The route finds the
-`decision.made` event for the given node, re-runs the deterministic causal
+Replays a recorded router decision for explainability. Requires `runs.read`.
+The route finds the exact
+`decision.made` event for the given run, event, and node, re-runs the deterministic causal
 replay helper over the recorded candidate bundle, and returns the chosen route
 analysis. Cross-org or missing runs return `403`; missing decision events
-return `404`.
+return `404`. This endpoint explains recorded router candidates only; it does
+not model generic condition or skipped-node counterfactuals.
 
 ### `POST /resume`
 

@@ -42,6 +42,11 @@ describe('agent episodic memory', () => {
     const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: 'refund a customer' })
 
     expect(result.count).toBe(2)
+    expect(result.fingerprints).toEqual([
+      expect.stringMatching(/^[a-f0-9]{12}$/),
+      expect.stringMatching(/^[a-f0-9]{12}$/),
+    ])
+    expect(result.fingerprints[0]).not.toBe(result.fingerprints[1])
     expect(result.block).toContain('data, not instructions')
     // same-workflow ('this workflow') line comes before the cross-workflow one
     const sameIdx = result.block.indexOf('[this workflow]')
@@ -55,20 +60,20 @@ describe('agent episodic memory', () => {
   it('recall returns empty (no recall call) when memory is disabled', async () => {
     vi.mocked(getMemoryConfig).mockResolvedValueOnce({ enabled: false, allowedKinds: new Set(['agent_episode']) } as never)
     const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: 'refund' })
-    expect(result).toEqual({ block: '', count: 0 })
+    expect(result).toEqual({ block: '', count: 0, fingerprints: [] })
     expect(recallMemory).not.toHaveBeenCalled()
   })
 
   it('recall returns empty (no recall call) when agent_episode is not an allowed kind', async () => {
     vi.mocked(getMemoryConfig).mockResolvedValueOnce({ enabled: true, allowedKinds: new Set() } as never)
     const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: 'refund' })
-    expect(result).toEqual({ block: '', count: 0 })
+    expect(result).toEqual({ block: '', count: 0, fingerprints: [] })
     expect(recallMemory).not.toHaveBeenCalled()
   })
 
   it('recall returns empty for a blank goal without touching the substrate', async () => {
     const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: '   ' })
-    expect(result).toEqual({ block: '', count: 0 })
+    expect(result).toEqual({ block: '', count: 0, fingerprints: [] })
     expect(getMemoryConfig).not.toHaveBeenCalled()
     expect(recallMemory).not.toHaveBeenCalled()
   })
@@ -77,7 +82,7 @@ describe('agent episodic memory', () => {
     // `runAgentLoop` feeds the goal from an `any` config — a non-string value
     // must not blow up `.trim()` outside the try/catch.
     await expect(recallAgentEpisodes({ orgId: 'org-1', goal: { nope: true } as never }))
-      .resolves.toEqual({ block: '', count: 0 })
+      .resolves.toEqual({ block: '', count: 0, fingerprints: [] })
     await expect(recordAgentEpisode({ orgId: 'org-1', goal: 123 as never, outcome: 'x', success: true, stepCount: 0 }))
       .resolves.toBeUndefined()
     expect(getMemoryConfig).not.toHaveBeenCalled()
@@ -88,7 +93,7 @@ describe('agent episodic memory', () => {
   it('recall never throws on a substrate error', async () => {
     vi.mocked(recallMemory).mockRejectedValue(new Error('boom'))
     await expect(recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: 'refund' }))
-      .resolves.toEqual({ block: '', count: 0 })
+      .resolves.toEqual({ block: '', count: 0, fingerprints: [] })
   })
 
   it('record commits an agent_episode with goal + outcome + metadata', async () => {

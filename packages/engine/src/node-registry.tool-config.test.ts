@@ -33,7 +33,7 @@ vi.mock("./memory", () => ({
 }));
 
 vi.mock("./agent-memory", () => ({
-  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: "", count: 0 }),
+  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: "", count: 0, fingerprints: [] }),
   recordAgentEpisode: vi.fn().mockResolvedValue(undefined),
 }));
 

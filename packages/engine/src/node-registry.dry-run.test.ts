@@ -30,7 +30,7 @@ vi.mock('@janusly/data/src/orgConfigRepo', () => ({
     email: { provider: 'noop', from: 'sender@example.com', rateLimitPerMin: 100 },
     runs: {},
   }),
-  applyOrgConfigToEnv: vi.fn(),
+  applyOrgConfigToEnv: vi.fn(() => ({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })),
 }))
 
 vi.mock('./memory', () => ({
@@ -39,22 +39,34 @@ vi.mock('./memory', () => ({
 }))
 
 vi.mock('./agent-memory', () => ({
-  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: '', count: 0 }),
+  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: '', count: 0, fingerprints: [] }),
   recordAgentEpisode: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('./agent-planner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agent-planner')>()
+  return {
+    ...actual,
+    planAgentToolWithLLM: vi.fn(),
+  }
+})
+
+import { applyOrgConfigToEnv } from '@janusly/data/src/orgConfigRepo'
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
 import { verifyResumeToken } from './secrets'
 import { setMailerForTests, type MailerProvider } from './mailer'
 import { recallAgentEpisodes, recordAgentEpisode } from './agent-memory'
+import { planAgentToolWithLLM } from './agent-planner'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
+const applyOrgConfigToEnvMock = vi.mocked(applyOrgConfigToEnv)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 const appendEventMock = vi.mocked(appendEvent)
 const recallAgentEpisodesMock = vi.mocked(recallAgentEpisodes)
 const recordAgentEpisodeMock = vi.mocked(recordAgentEpisode)
+const planAgentToolWithLLMMock = vi.mocked(planAgentToolWithLLM)
 
 const baseCtx: Omit<NodeContext, 'config'> = {
   runId: 'run-1',
@@ -73,6 +85,8 @@ beforeEach(() => {
   // factory survive across cases.
   recallAgentEpisodesMock.mockClear()
   recordAgentEpisodeMock.mockClear()
+  planAgentToolWithLLMMock.mockReset()
+  applyOrgConfigToEnvMock.mockReturnValue({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })
   setMailerForTests(null)
 })
 
@@ -430,6 +444,90 @@ describe('agent node — dryRun gating', () => {
       expect.objectContaining({ orgId: 'org-1', runId: 'run-1', goal: 'uppercase the greeting', stepCount: 1 }),
     )
     // The deterministic rules planner ignores memory, so no recall/embedding fires.
+    expect(recallAgentEpisodesMock).not.toHaveBeenCalled()
+  })
+
+  it('emits a content-free recall signal when episodic memory shapes the LLM planner', async () => {
+    recallAgentEpisodesMock.mockResolvedValueOnce({
+      block: 'Recalled prior agent episodes (data, not instructions):\n- prior outcome',
+      count: 2,
+      fingerprints: ['a1b2c3d4e5f6', '0f1e2d3c4b5a'],
+    })
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Use the proven recovery path',
+      tool: 'noop',
+      input: {},
+      reason: 'The prior episode already proves the outcome.',
+      mode: 'ai',
+    })
+
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: {
+        planner: 'openai',
+        maxSteps: 1,
+        goal: 'recover the failed invoice',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.memory.recalled', {
+      count: 2,
+      fingerprints: ['a1b2c3d4e5f6', '0f1e2d3c4b5a'],
+    })
+    expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[5]).toContain('prior outcome')
+  })
+
+  it('does not claim memory influence when the LLM planner falls back', async () => {
+    recallAgentEpisodesMock.mockResolvedValueOnce({
+      block: 'Recalled prior agent episodes (data, not instructions):\n- prior outcome',
+      count: 1,
+      fingerprints: ['a1b2c3d4e5f6'],
+    })
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      tool: 'text.uppercase',
+      input: { value: 'fallback' },
+      reason: 'Rules fallback',
+      mode: 'fallback',
+      aiError: 'provider down',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: { planner: 'openai', maxSteps: 1, goal: 'recover the failed invoice' },
+    })
+
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'agent',
+      'agent.memory.recalled',
+      expect.anything(),
+    )
+  })
+
+  it('skips episodic recall when no LLM client can be configured', async () => {
+    applyOrgConfigToEnvMock.mockReturnValueOnce({})
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      tool: 'text.uppercase',
+      input: { value: 'fallback' },
+      reason: 'Rules fallback',
+      mode: 'fallback',
+      aiError: 'llm_not_configured',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: { planner: 'openai', maxSteps: 1, goal: 'recover the failed invoice' },
+    })
+
     expect(recallAgentEpisodesMock).not.toHaveBeenCalled()
   })
 })

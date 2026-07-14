@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { RunEvent } from '../types'
 import { ReasoningPanel } from './ReasoningPanel'
 
@@ -120,5 +120,91 @@ describe('<ReasoningPanel />', () => {
     expect(screen.getAllByRole('listitem')[0]).toHaveAttribute('aria-setsize', '1000')
     expect(screen.getAllByRole('listitem')[0]).toHaveAccessibleName(/node-999/i)
     expect(screen.getByText('1000 of 1000 events')).toBeInTheDocument()
+  })
+
+  it('summarizes the loaded history without claiming partial pages are complete', () => {
+    render(<ReasoningPanel
+      events={[
+        { id: 'e1', type: 'run.started', createdAt: '2026-07-12T10:00:00.000Z' },
+        { id: 'e2', type: 'node.retry', nodeId: 'fetch', createdAt: '2026-07-12T10:00:01.000Z' },
+        { id: 'e3', type: 'node.failed', nodeId: 'fetch', createdAt: '2026-07-12T10:00:02.000Z' },
+        { id: 'e4', type: 'decision.made', nodeId: 'route', createdAt: '2026-07-12T10:00:03.000Z' },
+        { id: 'e5', type: 'agent.memory.recalled', nodeId: 'agent', payload: { count: 2 }, createdAt: '2026-07-12T10:00:04.000Z' },
+      ]}
+      eventsHasMore
+    />)
+
+    const diagnostics = screen.getByTestId('run-diagnostics')
+    expect(diagnostics).toHaveAccessibleName('Loaded run diagnostics')
+    expect(diagnostics).toHaveTextContent('Loaded-history diagnostics')
+    expect(diagnostics).toHaveTextContent('Partial history')
+    expect(diagnostics).toHaveTextContent('Episodes recalled2')
+    expect(diagnostics).toHaveTextContent('Observed span4s')
+  })
+
+  it('offers deterministic What-if replay only for recorded decisions and renders the ranking', async () => {
+    let release!: (value: unknown) => void
+    const replayDecision = vi.fn(() => new Promise(resolve => { release = resolve }))
+    render(<ReasoningPanel
+      activeRunId="run/with spaces"
+      onReplayDecision={replayDecision}
+      events={[
+        { id: 'e1', type: 'node.skipped', nodeId: 'losing_path' },
+        { id: 'e2', type: 'decision.made', nodeId: 'route-a' },
+      ]}
+    />)
+
+    expect(screen.getAllByRole('button', { name: 'What if?' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'What if?' }))
+    expect(screen.getByTestId('causal-analysis')).toHaveAttribute('data-state', 'loading')
+    expect(replayDecision).toHaveBeenCalledWith('e2', 'route-a', expect.any(AbortSignal))
+
+    const fast = { nodeId: 'fast_path', score: 1, breakdown: { cost: 0.01, latency: 25, quality: 0.98, penalty: 0.02 } }
+    const safe = { nodeId: 'safe_path', score: 2, breakdown: { cost: 0.02, latency: 80, quality: 0.99, penalty: 0.01 } }
+    release({ chosen: safe, best: fast, ranking: [fast, safe] })
+
+    await waitFor(() => expect(screen.getByTestId('causal-analysis')).toHaveAttribute('data-state', 'ready'))
+    expect(screen.getByTestId('causal-analysis')).toHaveTextContent('The run chose safe_path; current scoring now ranks fast_path first.')
+    expect(screen.getByRole('list', { name: 'Replayed candidate ranking' })).toHaveTextContent('1. fast_path')
+  })
+
+  it('fails closed on a malformed causal response and allows the operator to dismiss it', async () => {
+    const replayDecision = vi.fn().mockResolvedValueOnce({ ranking: [] })
+    render(<ReasoningPanel
+      activeRunId="run-1"
+      onReplayDecision={replayDecision}
+      events={[{ id: 'e1', type: 'decision.made', nodeId: 'route-a' }]}
+    />)
+
+    const trigger = screen.getByRole('button', { name: 'What if?' })
+    fireEvent.click(trigger)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('returned an incomplete result'))
+    fireEvent.click(screen.getByRole('button', { name: 'Close What-if analysis' }))
+    expect(screen.queryByTestId('causal-analysis')).not.toBeInTheDocument()
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it('never renders a causal result under a different selected run', async () => {
+    let release!: (value: unknown) => void
+    const replayDecision = vi.fn(() => new Promise(resolve => { release = resolve }))
+    const { rerender } = render(<ReasoningPanel
+      activeRunId="run-1"
+      onReplayDecision={replayDecision}
+      events={[{ id: 'e1', type: 'decision.made', nodeId: 'route-a' }]}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'What if?' }))
+    expect(screen.getByTestId('causal-analysis')).toHaveAttribute('data-state', 'loading')
+
+    rerender(<ReasoningPanel
+      activeRunId="run-2"
+      onReplayDecision={replayDecision}
+      events={[{ id: 'e2', type: 'decision.made', nodeId: 'route-b' }]}
+    />)
+    expect(screen.queryByTestId('causal-analysis')).not.toBeInTheDocument()
+
+    const candidate = { nodeId: 'old_path', score: 1, breakdown: { cost: 0.01, latency: 25, quality: 0.98, penalty: 0.02 } }
+    release({ chosen: candidate, best: candidate, ranking: [candidate] })
+    await waitFor(() => expect(screen.queryByTestId('causal-analysis')).not.toBeInTheDocument())
   })
 })

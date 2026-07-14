@@ -13,6 +13,32 @@ export type RunEventPresentation = {
   noise: boolean
 }
 
+export type RunDiagnostics = {
+  loadedEvents: number
+  observedDurationMs: number | null
+  retryCount: number
+  failedNodeCount: number
+  decisionCount: number
+  recalledEpisodeCount: number
+}
+
+export type CausalCandidate = {
+  nodeId: string
+  score: number
+  breakdown: {
+    cost: number
+    latency: number
+    quality: number
+    penalty: number
+  }
+}
+
+export type CausalReplay = {
+  chosen: CausalCandidate
+  best: CausalCandidate
+  ranking: CausalCandidate[]
+}
+
 const NOISE_EVENT_TYPES = new Set(['node.queued', 'run.status_checked'])
 
 /** Classify a low-level event without hiding any of it from the operator. */
@@ -54,4 +80,87 @@ export function getInterEventDeltaMs(previous: RunEvent | undefined, current: Ru
   const currentMs = Date.parse(current.createdAt)
   if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs < previousMs) return null
   return currentMs - previousMs
+}
+
+/** Summarize only the events currently loaded by the bounded run-history API. */
+export function summarizeRunDiagnostics(events: RunEvent[]): RunDiagnostics {
+  let firstTimestamp = Number.POSITIVE_INFINITY
+  let lastTimestamp = Number.NEGATIVE_INFINITY
+  let timestampCount = 0
+  for (const event of events) {
+    const timestamp = event.createdAt ? Date.parse(event.createdAt) : Number.NaN
+    if (!Number.isFinite(timestamp)) continue
+    firstTimestamp = Math.min(firstTimestamp, timestamp)
+    lastTimestamp = Math.max(lastTimestamp, timestamp)
+    timestampCount += 1
+  }
+  const observedDurationMs = timestampCount >= 2 ? lastTimestamp - firstTimestamp : null
+
+  return {
+    loadedEvents: events.length,
+    observedDurationMs,
+    retryCount: events.filter(event => event.type === 'node.retry').length,
+    failedNodeCount: events.filter(event => event.type === 'node.failed').length,
+    decisionCount: events.filter(event => event.type === 'decision.made').length,
+    recalledEpisodeCount: events.reduce((total, event) => {
+      if (event.type !== 'agent.memory.recalled') return total
+      const count = event.payload && typeof event.payload === 'object'
+        ? Number((event.payload as Record<string, unknown>).count)
+        : Number.NaN
+      return Number.isSafeInteger(count) && count > 0 ? total + count : total
+    }, 0),
+  }
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function parseCausalCandidate(value: unknown): CausalCandidate | null {
+  const candidate = record(value)
+  const breakdown = record(candidate?.breakdown)
+  const nodeId = candidate?.nodeId
+  const score = finiteNumber(candidate?.score)
+  const cost = finiteNumber(breakdown?.cost)
+  const latency = finiteNumber(breakdown?.latency)
+  const quality = finiteNumber(breakdown?.quality)
+  const penalty = finiteNumber(breakdown?.penalty)
+  if (typeof nodeId !== 'string' || !nodeId || score === null || cost === null || latency === null || quality === null || penalty === null) {
+    return null
+  }
+  return { nodeId, score, breakdown: { cost, latency, quality, penalty } }
+}
+
+function sameCausalCandidate(left: CausalCandidate, right: CausalCandidate): boolean {
+  return left.nodeId === right.nodeId
+    && left.score === right.score
+    && left.breakdown.cost === right.breakdown.cost
+    && left.breakdown.latency === right.breakdown.latency
+    && left.breakdown.quality === right.breakdown.quality
+    && left.breakdown.penalty === right.breakdown.penalty
+}
+
+/** Fail-closed parser for the legacy `/causal` response consumed by the web. */
+export function parseCausalReplay(value: unknown): CausalReplay | null {
+  const response = record(value)
+  if (!response || !Array.isArray(response.ranking)) return null
+  const parsedRanking = response.ranking.map(parseCausalCandidate)
+  if (parsedRanking.length === 0 || parsedRanking.some(candidate => candidate === null)) return null
+  const ranking = parsedRanking as CausalCandidate[]
+  const chosenResponse = parseCausalCandidate(response.chosen)
+  const bestResponse = parseCausalCandidate(response.best)
+  if (!chosenResponse || !bestResponse) return null
+  const ids = new Set(ranking.map(candidate => candidate.nodeId))
+  if (ids.size !== ranking.length) return null
+  if (ranking.some((candidate, index) => index > 0 && candidate.score < ranking[index - 1]!.score)) return null
+  const best = ranking[0]!
+  const chosen = ranking.find(candidate => candidate.nodeId === chosenResponse.nodeId)
+  if (!chosen || !sameCausalCandidate(chosen, chosenResponse) || !sameCausalCandidate(best, bestResponse)) return null
+  return { chosen, best, ranking }
 }

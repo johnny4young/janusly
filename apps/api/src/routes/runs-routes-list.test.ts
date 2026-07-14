@@ -2,17 +2,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { eqMock, isNullMock, limitMock, ltMock, selectMock, sendJsonMock } = vi.hoisted(() => {
+const { directLimitMock, eqMock, isNullMock, limitMock, ltMock, replayDecisionMock, selectMock, sendJsonMock } = vi.hoisted(() => {
   const limit = vi.fn(async () => [{ id: 'run-1', workflowId: 'wf-1', status: 'failed' }])
   const orderBy = vi.fn(() => ({ limit }))
   const where = vi.fn(() => ({ orderBy }))
   const leftJoin = vi.fn(() => ({ where }))
-  const from = vi.fn(() => ({ leftJoin }))
+  const directLimit = vi.fn()
+  const directWhere = vi.fn(() => ({ limit: directLimit }))
+  const from = vi.fn(() => ({ leftJoin, where: directWhere }))
   return {
+    directLimitMock: directLimit,
     eqMock: vi.fn((left: unknown, right: unknown) => ({ kind: 'eq', left, right })),
     isNullMock: vi.fn((value: unknown) => ({ kind: 'isNull', value })),
     limitMock: limit,
     ltMock: vi.fn((left: unknown, right: unknown) => ({ kind: 'lt', left, right })),
+    replayDecisionMock: vi.fn(),
     selectMock: vi.fn(() => ({ from })),
     sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
   }
@@ -39,7 +43,12 @@ vi.mock('@janusly/data', () => ({
 
 vi.mock('@janusly/db', () => ({
   db: { select: selectMock },
-  runEvents: {},
+  runEvents: {
+    id: 'run_events.id',
+    runId: 'run_events.run_id',
+    nodeId: 'run_events.node_id',
+    type: 'run_events.type',
+  },
   runNodes: {},
   runs: {
     id: 'runs.id',
@@ -62,7 +71,7 @@ vi.mock('@janusly/db', () => ({
   },
 }))
 
-vi.mock('@janusly/domain', () => ({ replayDecision: vi.fn() }))
+vi.mock('@janusly/domain', () => ({ replayDecision: replayDecisionMock }))
 vi.mock('@janusly/engine/src/adapters/replay-lab', () => ({
   replayRunAsValidation: vi.fn(),
   replayRunAsValidationFork: vi.fn(),
@@ -123,14 +132,77 @@ function listRoute() {
 
 beforeEach(() => {
   eqMock.mockClear()
+  directLimitMock.mockReset()
   isNullMock.mockClear()
   limitMock.mockClear()
   ltMock.mockClear()
   selectMock.mockClear()
   sendJsonMock.mockClear()
+  replayDecisionMock.mockReset()
+  replayDecisionMock.mockReturnValue({ chosen: {}, best: {}, ranking: [] })
 })
 
 describe('GET /runs history filters', () => {
+  it('keeps causal replay behind the run-read permission', () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/causal?runId=run-1&eventId=event-1&nodeId=route'))
+    expect(route?.permission).toBe('runs.read')
+    if (!route || typeof route.match !== 'function') throw new Error('GET /causal route not found')
+    expect(route.match('/causal-export?runId=run-1&eventId=event-1&nodeId=route')).toBe(false)
+  })
+
+  it('bounds causal replay to the tenant run and exact decision event', async () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/causal?runId=run-1&eventId=event-1&nodeId=route'))
+    if (!route) throw new Error('GET /causal route not found')
+    directLimitMock
+      .mockResolvedValueOnce([{ id: 'run-1', orgId: 'org-1' }])
+      .mockResolvedValueOnce([{ id: 'event-1', nodeId: 'route', type: 'decision.made', payload: {} }])
+
+    await route.handler({
+      req: { url: '/causal?runId=run-1&eventId=event-1&nodeId=route' } as never,
+      res: {} as never,
+      auth,
+    })
+
+    expect(eqMock).toHaveBeenCalledWith('runs.id', 'run-1')
+    expect(eqMock).toHaveBeenCalledWith('runs.org_id', 'org-1')
+    expect(eqMock).toHaveBeenCalledWith('run_events.id', 'event-1')
+    expect(eqMock).toHaveBeenCalledWith('run_events.run_id', 'run-1')
+    expect(eqMock).toHaveBeenCalledWith('run_events.node_id', 'route')
+    expect(eqMock).toHaveBeenCalledWith('run_events.type', 'decision.made')
+    expect(directLimitMock).toHaveBeenCalledTimes(2)
+    expect(directLimitMock).toHaveBeenNthCalledWith(1, 1)
+    expect(directLimitMock).toHaveBeenNthCalledWith(2, 1)
+    expect(replayDecisionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a foreign causal run before reading any event', async () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/causal?runId=foreign&eventId=event-1&nodeId=route'))
+    if (!route) throw new Error('GET /causal route not found')
+    directLimitMock.mockResolvedValueOnce([])
+
+    await route.handler({
+      req: { url: '/causal?runId=foreign&eventId=event-1&nodeId=route' } as never,
+      res: {} as never,
+      auth,
+    })
+
+    expect(eqMock).toHaveBeenCalledWith('runs.org_id', 'org-1')
+    expect(selectMock).toHaveBeenCalledTimes(1)
+    expect(directLimitMock).toHaveBeenCalledTimes(1)
+    expect(replayDecisionMock).not.toHaveBeenCalled()
+    expect(sendJsonMock).toHaveBeenLastCalledWith(
+      {},
+      { error: 'Forbidden', code: 'runs_forbidden' },
+      403,
+    )
+  })
+
   it('composes tenant, workflow, status, and strict before-cursor predicates', async () => {
     await listRoute().handler({
       req: { url: '/runs?workflowId=wf-1&status=failed&runKind=production&before=2026-07-10T12%3A00%3A00.000Z%7Crun-9&limit=1' } as never,

@@ -2151,6 +2151,99 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   min-width: 0;
 }
 
+.we-run-diagnostics,
+.we-causal-analysis {
+  background: color-mix(in srgb, var(--we-surface) 92%, var(--we-primary-soft));
+  border: 1px solid var(--we-line);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.we-run-diagnostics__heading,
+.we-causal-analysis__header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.we-run-diagnostics__heading p,
+.we-causal-analysis p {
+  color: var(--we-muted);
+  font-size: 11px;
+  margin: 3px 0 0;
+}
+
+.we-run-diagnostics__grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  margin: 10px 0 0;
+}
+
+.we-run-diagnostics__grid > div {
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 9px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.we-run-diagnostics__grid dt {
+  color: var(--we-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.we-run-diagnostics__grid dd {
+  color: var(--we-ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  margin: 3px 0 0;
+}
+
+.we-causal-analysis {
+  border-color: color-mix(in srgb, var(--we-primary) 34%, var(--we-line));
+}
+
+.we-causal-analysis[data-state="error"] {
+  background: var(--we-danger-soft);
+  border-color: color-mix(in srgb, var(--we-danger) 45%, var(--we-line));
+}
+
+.we-causal-analysis__header > span {
+  align-items: center;
+  display: inline-flex;
+  font-weight: 700;
+  gap: 7px;
+}
+
+.we-causal-ranking {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.we-causal-ranking li {
+  align-items: center;
+  background: var(--we-surface);
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  display: flex;
+  font-size: 11px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 7px 9px;
+}
+
+.we-causal-ranking li > span:last-child {
+  color: var(--we-muted);
+  text-align: right;
+}
+
 .we-reasoning-toolbar {
   align-items: end;
   display: grid;
@@ -2282,6 +2375,38 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   font-variant-numeric: tabular-nums;
 }
 
+.we-run-event__meta-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.we-run-event__what-if {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--we-line);
+  border-radius: 999px;
+  color: var(--we-primary);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-weight: 700;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 8px;
+}
+
+.we-run-event__what-if:hover,
+.we-run-event__what-if[aria-expanded="true"] {
+  background: var(--we-primary-soft);
+  border-color: color-mix(in srgb, var(--we-primary) 42%, var(--we-line));
+}
+
+.we-run-event__what-if:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--we-primary) 20%, transparent);
+  outline: 0;
+}
+
 .we-run-event__meta {
   display: flex;
   gap: 10px;
@@ -2338,6 +2463,19 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 
 @media (max-width: 760px) {
+  .we-run-diagnostics__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .we-causal-ranking li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .we-causal-ranking li > span:last-child {
+    text-align: left;
+  }
+
   .we-reasoning-toolbar {
     align-items: stretch;
     grid-template-columns: 1fr;

@@ -890,18 +890,30 @@ export const runsRoutes: Route[] = [
     } },
 
   // Causal replay
-  { method: "GET", match: (url) => url.startsWith("/causal"),
+  { method: "GET", match: (url) => url === "/causal" || url.startsWith("/causal?"), permission: "runs.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
+      const eventId = url.searchParams.get("eventId");
       const nodeId = url.searchParams.get("nodeId");
-      if (!runId || !nodeId) return sendError(res, "runs_run_id_and_node_id_required", "runId and nodeId are required", 400);
+      if (!runId || !eventId || !nodeId) {
+        return sendError(res, "runs_run_id_event_id_and_node_id_required", "runId, eventId, and nodeId are required", 400);
+      }
 
-      const run = await db.select().from(runs).where(eq(runs.id, runId));
-      if (!run[0] || run[0].orgId !== auth.orgId) return sendError(res, "runs_forbidden", "Forbidden", 403);
+      const run = await db.select().from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)))
+        .limit(1);
+      if (!run[0]) return sendError(res, "runs_forbidden", "Forbidden", 403);
 
-      const events = await db.select().from(runEvents).where(eq(runEvents.runId, runId));
-      const decisionEvent = events.find(event => event.type === "decision.made" && event.nodeId === nodeId);
+      const events = await db.select().from(runEvents)
+        .where(and(
+          eq(runEvents.id, eventId),
+          eq(runEvents.runId, runId),
+          eq(runEvents.nodeId, nodeId),
+          eq(runEvents.type, "decision.made"),
+        ))
+        .limit(1);
+      const decisionEvent = events[0];
       if (!decisionEvent) return sendError(res, "runs_no_decision_event", "No decision event", 404);
 
       const payload = asRecord(decisionEvent.payload);
