@@ -16,6 +16,7 @@ import { formatNodeDuration, formatStatusLabel, getNodeConfigSummary, getNodeLab
 import { useWorkflowStore } from '../store'
 import { useT } from '../i18n'
 import { AiUsageFooter } from './AiUsageFooter'
+import { useConfirm } from './ConfirmDialog'
 import { pickErrorMessage } from './recovery-dialog/helpers'
 import { QuickConfigEditor } from './QuickConfigEditor'
 import { ExpressionAssistant } from './ExpressionAssistant'
@@ -61,19 +62,29 @@ export function InspectorPanel({
   onInsertSnippet,
 }: InspectorPanelProps) {
   const { t } = useT()
+  const confirm = useConfirm()
   const addToast = useWorkflowStore(state => state.addToast)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const [jsonDraft, setJsonDraft] = useState(() => selectedNode ? JSON.stringify(selectedNode.data.config, null, 2) : '')
+  const [typeChangePending, setTypeChangePending] = useState(false)
+  const typeChangePendingRef = useRef(false)
   const entityRef = useRef<HTMLElement | null>(null)
+  const selectedNodeIdRef = useRef<string | null>(selectedNode?.id ?? null)
+  selectedNodeIdRef.current = selectedNode?.id ?? null
   const [focusRequest, setFocusRequest] = useState<AuthoringFocusRequest | null>(null)
   const nodeStatus = selectedNode ? runNodes.find(node => node.nodeId === selectedNode.id) : null
   const nodeIssues = selectedNode ? validationIssues.filter(issue => issue.nodeId === selectedNode.id) : []
 
-  // A stale parse error from node A must not linger under node B's card —
-  // the error banner describes the PREVIOUS selection's JSON, not this one's.
+  // Keep Advanced JSON aligned with quick edits and kind changes on the SAME
+  // node. The old uncontrolled textarea only remounted for a different node id,
+  // so it could display (and later write back) stale config after a kind swap.
   const selectedNodeId = selectedNode?.id ?? null
+  const selectedNodeType = selectedNode?.data.type ?? null
+  const selectedNodeConfig = selectedNode?.data.config ?? null
   React.useEffect(() => {
     setJsonError(null)
-  }, [selectedNodeId])
+    setJsonDraft(selectedNodeConfig ? JSON.stringify(selectedNodeConfig, null, 2) : '')
+  }, [selectedNodeConfig, selectedNodeId, selectedNodeType])
 
   useEffect(() => {
     const pending = consumeAuthoringFocus()
@@ -107,6 +118,27 @@ export function InspectorPanel({
       () => addToast(t('rightPanel.inspector.idCopied'), 'success'),
       () => addToast(t('rightPanel.inspector.idCopyFailed'), 'error'),
     )
+  }
+
+  const requestNodeTypeChange = async (nextType: string) => {
+    if (!selectedNode || nextType === selectedNode.data.type || typeChangePendingRef.current) return
+    const sourceNodeId = selectedNode.id
+    typeChangePendingRef.current = true
+    setTypeChangePending(true)
+    try {
+      const accepted = await confirm({
+        title: t('rightPanel.inspector.changeKindTitle') as string,
+        body: t('rightPanel.inspector.changeKindBody', {
+          from: getNodeLabel(selectedNode.data.type),
+          to: getNodeLabel(nextType),
+        }) as string,
+        confirmLabel: t('rightPanel.inspector.changeKindConfirm') as string,
+      })
+      if (accepted && selectedNodeIdRef.current === sourceNodeId) onUpdateNodeType(nextType)
+    } finally {
+      typeChangePendingRef.current = false
+      setTypeChangePending(false)
+    }
   }
 
   if (selectedNode) {
@@ -168,7 +200,13 @@ export function InspectorPanel({
 
         <div className="form-grid">
           <label className="field-label" htmlFor="node-type">{t('rightPanel.inspector.stepKindLabel')}</label>
-          <select id="node-type" className="text-field" value={selectedNode.data.type} onChange={event => onUpdateNodeType(event.target.value)}>
+          <select
+            id="node-type"
+            className="text-field"
+            value={selectedNode.data.type}
+            aria-busy={typeChangePending}
+            onChange={(event) => { void requestNodeTypeChange(event.target.value) }}
+          >
             {nodeTypes.map(type => <option key={type} value={type}>{getNodeLabel(type)}</option>)}
           </select>
           <span className="helper-text helper-text--hint">{t('rightPanel.inspector.stepKindWarning')}</span>
@@ -200,10 +238,10 @@ export function InspectorPanel({
           <summary>{t('rightPanel.inspector.advancedJsonSummary')}</summary>
           <p className="helper-text">{t('rightPanel.inspector.advancedJsonHelper')}</p>
           <textarea
-            key={`${selectedNode.id}-json`}
             id="node-config"
             className="code-field"
-            defaultValue={JSON.stringify(selectedNode.data.config, null, 2)}
+            value={jsonDraft}
+            onChange={(event) => setJsonDraft(event.target.value)}
             onBlur={(event) => {
               try {
                 const parsed = JSON.parse(event.target.value) as Record<string, unknown>

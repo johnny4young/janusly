@@ -9,7 +9,7 @@
  * props.
  */
 
-import type { Dispatch, SetStateAction } from 'react'
+import { memo, type Dispatch, type SetStateAction } from 'react'
 import { Folder, GripVertical, Trash2, Workflow, X } from 'lucide-react'
 import type { SavedWorkflow } from '../types'
 import { WorkflowHealthBadge } from './WorkflowHealthBadge'
@@ -38,7 +38,7 @@ export type FlowRowProps = {
   t: TFunc
 }
 
-export function FlowRow({
+export const FlowRow = memo(function FlowRow({
   workflow,
   folderOptions,
   tagOptions,
@@ -231,4 +231,4 @@ export function FlowRow({
       </div>
     </li>
   )
-}
+})

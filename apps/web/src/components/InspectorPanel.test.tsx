@@ -7,6 +7,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { InspectorPanel } from './InspectorPanel'
+import { ConfirmProvider } from './ConfirmDialog'
 import type { WorkflowGraphEdge, WorkflowGraphNode } from '../types'
 import { requestAuthoringFocus } from './authoring-focus-bus'
 
@@ -38,6 +39,34 @@ function renderPanel(overrides: Partial<Parameters<typeof InspectorPanel>[0]> = 
     ...overrides,
   }
   return { ...render(<InspectorPanel {...props} />), props }
+}
+
+function renderPanelWithConfirm(overrides: Partial<Parameters<typeof InspectorPanel>[0]> = {}) {
+  const props: Parameters<typeof InspectorPanel>[0] = {
+    selectedNode: null,
+    selectedEdge: null,
+    runNodes: [],
+    validationIssues: [],
+    tools: [],
+    workflowNodes: [],
+    workflowEdges: [],
+    onUpdateNodeConfig: vi.fn(),
+    onUpdateNodeType: vi.fn(),
+    onUpdateEdgeCondition: vi.fn(),
+    onInsertSnippet: vi.fn(),
+    ...overrides,
+  }
+  const view = render(
+    <ConfirmProvider>
+      <InspectorPanel {...props} />
+    </ConfirmProvider>,
+  )
+  const rerender = (next: Parameters<typeof InspectorPanel>[0]) => view.rerender(
+    <ConfirmProvider>
+      <InspectorPanel {...next} />
+    </ConfirmProvider>,
+  )
+  return { ...view, rerender, props }
 }
 
 describe('<InspectorPanel /> selection-change hygiene', () => {
@@ -81,6 +110,26 @@ describe('<InspectorPanel /> selection-change hygiene', () => {
     expect(document.querySelector('.issue-error')).toBeNull()
   })
 
+  it('refreshes Advanced JSON when the same selected node receives a new kind and config', () => {
+    const node = makeNode('node-a')
+    const { rerender, props } = renderPanel({ selectedNode: node })
+    expect((document.getElementById('node-config') as HTMLTextAreaElement).value).toBe('{}')
+
+    rerender(
+      <InspectorPanel
+        {...props}
+        selectedNode={{
+          ...node,
+          data: { label: '', type: 'ai', config: { prompt: 'Summarize this', timeoutMs: 5000 } },
+        }}
+      />,
+    )
+
+    expect((document.getElementById('node-config') as HTMLTextAreaElement).value).toBe(
+      '{\n  "prompt": "Summarize this",\n  "timeoutMs": 5000\n}',
+    )
+  })
+
   it('moves focus to the exact selected entity requested by Problems', async () => {
     const node = makeNode('node-a')
     requestAuthoringFocus({ kind: 'node', id: 'node-a' })
@@ -116,5 +165,53 @@ describe('<InspectorPanel /> failed-node header', () => {
     })
 
     expect(screen.queryByTestId('inspector-failed-node')).toBeNull()
+  })
+})
+
+describe('<InspectorPanel /> step-kind changes', () => {
+  it('keeps the current kind and restores focus when the operator cancels', async () => {
+    const onUpdateNodeType = vi.fn()
+    renderPanelWithConfirm({ selectedNode: makeNode('node-a'), onUpdateNodeType })
+    const select = screen.getByLabelText('Step kind') as HTMLSelectElement
+    select.focus()
+
+    fireEvent.change(select, { target: { value: 'approval' } })
+
+    expect(await screen.findByRole('alertdialog', { name: 'Change step kind?' })).toHaveTextContent(
+      'Change Do nothing to Ask approval?',
+    )
+    expect(onUpdateNodeType).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('confirm-dialog-cancel'))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(select.value).toBe('noop')
+    await waitFor(() => expect(select).toHaveFocus())
+    expect(onUpdateNodeType).not.toHaveBeenCalled()
+  })
+
+  it('applies the requested kind only after confirmation', async () => {
+    const onUpdateNodeType = vi.fn()
+    renderPanelWithConfirm({ selectedNode: makeNode('node-a'), onUpdateNodeType })
+
+    fireEvent.change(screen.getByLabelText('Step kind'), { target: { value: 'approval' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Change kind' }))
+
+    await waitFor(() => expect(onUpdateNodeType).toHaveBeenCalledOnce())
+    expect(onUpdateNodeType).toHaveBeenCalledWith('approval')
+  })
+
+  it('does not mutate a different selection if the selected node changes while confirmation is open', async () => {
+    const onUpdateNodeType = vi.fn()
+    const nodeA = makeNode('node-a')
+    const nodeB = makeNode('node-b')
+    const { rerender, props } = renderPanelWithConfirm({ selectedNode: nodeA, onUpdateNodeType })
+
+    fireEvent.change(screen.getByLabelText('Step kind'), { target: { value: 'approval' } })
+    await screen.findByRole('alertdialog')
+    rerender({ ...props, selectedNode: nodeB })
+    fireEvent.click(screen.getByTestId('confirm-dialog-confirm'))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(onUpdateNodeType).not.toHaveBeenCalled()
   })
 })

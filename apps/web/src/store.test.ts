@@ -118,6 +118,104 @@ describe('useWorkflowStore', () => {
     expect(state.nodes[0].data.label).toBe('')
   })
 
+  it('preserves generic execution controls and drops source-specific config on a type change', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{
+        id: 'http-call',
+        type: 'http',
+        config: {
+          url: 'https://example.com',
+          method: 'POST',
+          maxResponseBytes: 2048,
+          retry: { maxAttempts: 4, backoff: 'exponential' },
+          timeoutMs: 45_000,
+        },
+      }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('http-call')
+    const previousRetry = useWorkflowStore.getState().nodes[0].data.config.retry
+
+    useWorkflowStore.getState().updateSelectedNodeType('ai')
+
+    const config = useWorkflowStore.getState().nodes[0].data.config
+    expect(config).toEqual({
+      prompt: 'Summarize the latest workflow result and suggest the next action.',
+      retry: { maxAttempts: 4, backoff: 'exponential' },
+      timeoutMs: 45_000,
+    })
+    expect(config.retry).not.toBe(previousRetry)
+    expect(config).not.toHaveProperty('url')
+    expect(config).not.toHaveProperty('method')
+    expect(config).not.toHaveProperty('maxResponseBytes')
+  })
+
+  it('drops a source timeout that exceeds the MCP target limit', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{ id: 'long-call', type: 'http', config: { url: 'https://example.com', timeoutMs: 120_001 } }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('long-call')
+
+    useWorkflowStore.getState().updateSelectedNodeType('mcp_tool')
+
+    expect(useWorkflowStore.getState().nodes[0].data.config).toEqual({ connectionAlias: '', toolName: '', input: {} })
+  })
+
+  it('carries only valid runtime retry controls into the target kind', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{
+        id: 'invalid-retry',
+        type: 'http',
+        config: {
+          url: 'https://example.com',
+          retry: {
+            maxAttempts: 'forever',
+            delayMs: 0,
+            maxDelayMs: Number.POSITIVE_INFINITY,
+            backoff: 'random',
+            jitter: true,
+            retryOn: ['5xx'],
+            ignoreOn: ['4xx', 401],
+            sourceOnly: 'discard me',
+          },
+          timeoutMs: 1.5,
+        },
+      }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('invalid-retry')
+
+    useWorkflowStore.getState().updateSelectedNodeType('ai')
+
+    expect(useWorkflowStore.getState().nodes[0].data.config.retry).toEqual({
+      delayMs: 0,
+      jitter: true,
+      retryOn: ['5xx'],
+    })
+    expect(useWorkflowStore.getState().nodes[0].data.config).not.toHaveProperty('timeoutMs')
+  })
+
+  it('does not dirty or increment the revision for a same-kind no-op', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf',
+      nodes: [{ id: 'same', type: 'noop', config: {} }],
+      edges: [],
+    })
+    useWorkflowStore.getState().selectNode('same')
+    const before = useWorkflowStore.getState()
+
+    useWorkflowStore.getState().updateSelectedNodeType('noop')
+
+    const after = useWorkflowStore.getState()
+    expect(after.workflowRevision).toBe(before.workflowRevision)
+    expect(after.workflowDirty).toBe(before.workflowDirty)
+    expect(after.nodes).toBe(before.nodes)
+  })
+
   it('updateSelectedNodeConfig only mutates the selected node', () => {
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf',

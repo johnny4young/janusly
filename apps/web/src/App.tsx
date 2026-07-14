@@ -274,8 +274,8 @@ export default function App() {
     [activeTab],
   )
 
-  // Sign-out driver for the Ctrl+Shift+Q shortcut (same body as the original
-  // inline keydown handler: AuthProvider.signOut → clearAuth → toast).
+  // One sign-out driver for keyboard and Command Palette entry points:
+  // AuthProvider.signOut → clearAuth → toast.
   const signOut = useCallback(async () => {
     try {
       await AuthProvider.signOut()
@@ -1167,15 +1167,7 @@ export default function App() {
                 setCurrentWorkflowVersion(null)
               })()
             }}
-            onSignOut={async () => {
-              try {
-                await AuthProvider.signOut()
-                clearAuth()
-                addToast(t('toasts.signedOut'), 'info')
-              } catch (error) {
-                addToast(error instanceof Error ? error.message : t('toasts.signOutFailed'), 'error')
-              }
-            }}
+            onSignOut={fireSignOut}
             docsUrl={DOCS_URL}
             onInsertSnippet={() => setSnippetMenuOpen(true)}
             workflows={savedWorkflows.map(wf => ({ id: wf.id, name: wf.name }))}

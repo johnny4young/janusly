@@ -36,6 +36,53 @@ import { t } from './i18n/runtime'
 import { workflowToGraph } from './canvas-projections'
 
 /**
+ * Build the config for an explicit step-kind change.
+ *
+ * The transition starts from the localized target preset, keeps only valid
+ * runtime-wide retry/timeout controls, and drops source-kind fields. MCP calls
+ * cap timeout at 120 seconds, so a larger source value cannot cross the seam.
+ */
+function getNodeTypeChangeConfig(type: string, previous: JsonObject): JsonObject {
+  const next = getNodePreset(type)
+  const retry = sanitizeRetryPolicy(previous.retry)
+  if (retry) next.retry = retry
+
+  const timeoutMs = previous.timeoutMs
+  if (
+    typeof timeoutMs === 'number'
+    && Number.isFinite(timeoutMs)
+    && Number.isInteger(timeoutMs)
+    && timeoutMs > 0
+    && (type !== 'mcp_tool' || timeoutMs <= 120_000)
+  ) next.timeoutMs = timeoutMs
+
+  return next
+}
+
+/** Copy only the closed, runtime-supported subset of a serialized retry policy. */
+function sanitizeRetryPolicy(value: unknown): JsonObject | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  const retry: JsonObject = {}
+
+  if (typeof source.maxAttempts === 'number' && Number.isInteger(source.maxAttempts) && source.maxAttempts > 0) {
+    retry.maxAttempts = source.maxAttempts
+  }
+  for (const key of ['delayMs', 'maxDelayMs'] as const) {
+    const candidate = source[key]
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0) retry[key] = candidate
+  }
+  if (source.backoff === 'fixed' || source.backoff === 'exponential') retry.backoff = source.backoff
+  if (typeof source.jitter === 'boolean') retry.jitter = source.jitter
+  for (const key of ['retryOn', 'ignoreOn'] as const) {
+    const candidate = source[key]
+    if (Array.isArray(candidate) && candidate.every((entry) => typeof entry === 'string')) retry[key] = [...candidate]
+  }
+
+  return Object.keys(retry).length > 0 ? retry : null
+}
+
+/**
  * React Flow's change-appliers, registered lazily by `CanvasWorkspace` when
  * the editor canvas chunk first loads. They live in the deferred
  * `@xyflow/react` chunk, so importing them statically here would drag the
@@ -448,15 +495,19 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   updateSelectedNodeType: (type) => {
     const selectedNodeId = get().selectedNodeId
     if (!selectedNodeId) return
-    set((state) => ({
-      workflowDirty: true,
-      workflowRevision: state.workflowRevision + 1,
-      nodes: state.nodes.map((node) => node.id === selectedNodeId
-        // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
-        // empty so the canvas resolves it via `getNodeLabel(type)`.
-        ? { ...node, data: { label: '', type, config: getNodePreset(type) } }
-        : node)
-    }))
+    set((state) => {
+      const selectedNode = state.nodes.find((node) => node.id === selectedNodeId)
+      if (!selectedNode || selectedNode.data.type === type) return state
+      return {
+        workflowDirty: true,
+        workflowRevision: state.workflowRevision + 1,
+        nodes: state.nodes.map((node) => node.id === selectedNodeId
+          // Same as `addNode` / `hydrateWorkflow`: leave `data.label`
+          // empty so the canvas resolves it via `getNodeLabel(type)`.
+          ? { ...node, data: { label: '', type, config: getNodeTypeChangeConfig(type, node.data.config) } }
+          : node),
+      }
+    })
   },
 
   updateEdgeCondition: (id, condition) => set((state) => ({
