@@ -6,16 +6,8 @@ import { useWorkflowStore } from './store'
 let mockSessionToken: string | null = null
 let mockActiveOrg = 'default'
 let mockSupabaseAccessToken: string | null = null
-const mockSupabaseClient = {
-  auth: {
-    getSession: async () => ({ data: { session: mockSupabaseAccessToken ? { access_token: mockSupabaseAccessToken } : null } }),
-  },
-}
 vi.mock('./auth', () => ({
-  // Falsy => Supabase mode is "off" by default. Tests that exercise
-  // the Supabase JWT path set `mockSupabaseAccessToken` AND flip this
-  // to the mock client via `vi.doMock` per case.
-  get supabase() { return mockSupabaseAccessToken !== null ? mockSupabaseClient : null },
+  getSupabaseAccessToken: async () => mockSupabaseAccessToken,
   getActiveOrg: () => mockActiveOrg,
   getSessionToken: () => mockSessionToken,
 }))

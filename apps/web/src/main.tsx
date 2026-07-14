@@ -7,7 +7,7 @@
 
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import { getStoredLanguage, initI18n, resolveAppLanguage } from './i18n'
+import { bootstrapI18n, FALLBACK_LOCALE, getStoredLanguage, resolveAppLanguage } from './i18n'
 import { bootTheme } from './theme'
 import { ConfirmProvider } from './components/ConfirmDialog'
 import './index.css'
@@ -17,14 +17,24 @@ import './index.css'
 // `'system'` sentinel resolves once against `navigator.languages`; explicit
 // choices win indefinitely.
 const stored = getStoredLanguage()
-initI18n(resolveAppLanguage(stored))
+const initialLocale = resolveAppLanguage(stored)
 
-// Apply the stored theme + density preference BEFORE createRoot so the
-// dark token block resolves during first paint — avoids a light→dark flicker
-// when the user reloads with a non-default theme.
+// Theme does not depend on the locale chunk. Apply it immediately so a slow
+// catalog request cannot reintroduce a light→dark first-paint flicker.
 bootTheme()
 
-void import('./App').then(({ default: App }) => {
+async function mountApp(): Promise<void> {
+  try {
+    await bootstrapI18n(initialLocale)
+  } catch (error) {
+    if (initialLocale === FALLBACK_LOCALE) throw error
+    // A transient non-English chunk failure should not leave a blank screen.
+    // Keep the stored preference untouched so the next reload retries it.
+    console.warn(`[i18n] Failed to load ${initialLocale}; using ${FALLBACK_LOCALE}`)
+    await bootstrapI18n(FALLBACK_LOCALE)
+  }
+
+  const { default: App } = await import('./App')
   // `<App>` is dynamically imported so the entry chunk stays lean. The React
   // Flow provider is deliberately NOT mounted here — it lives inside the lazy
   // `CanvasWorkspace` (`apps/web/src/components/CanvasWorkspace.tsx`), mounted
@@ -40,4 +50,8 @@ void import('./App').then(({ default: App }) => {
       </ConfirmProvider>
     </React.StrictMode>
   )
+}
+
+void mountApp().catch((error: unknown) => {
+  console.error('[web] Failed to bootstrap Janusly', error)
 })

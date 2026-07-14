@@ -25,7 +25,13 @@
  *   that claim.
  */
 
-import { createClient, type AuthChangeEvent, type AuthResponse, type Session, type User } from '@supabase/supabase-js'
+import type {
+  AuthChangeEvent,
+  AuthResponse,
+  Session,
+  SupabaseClient,
+  User,
+} from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -33,10 +39,32 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 /** True when both Supabase env vars are present in the build. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 
-/** Singleton Supabase client; `null` when env is unconfigured (dev mode). */
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl!, supabaseAnonKey!)
-  : null
+let supabaseClientPromise: Promise<SupabaseClient | null> | null = null
+
+/**
+ * Demand-load the singleton Supabase client. Dev-header builds return before
+ * evaluating the dynamic import, so the vendor chunk stays off the cold path.
+ */
+export function getSupabaseClient(): Promise<SupabaseClient | null> {
+  if (!isSupabaseConfigured) return Promise.resolve(null)
+  if (!supabaseClientPromise) {
+    supabaseClientPromise = import('./supabase-runtime')
+      .then(({ createClient }) => createClient(supabaseUrl!, supabaseAnonKey!))
+      .catch((error: unknown) => {
+        // Allow a later retry after a transient chunk-loading failure.
+        supabaseClientPromise = null
+        throw error
+      })
+  }
+  return supabaseClientPromise
+}
+
+/** Resolve the current Bearer token without exposing the client to API code. */
+export async function getSupabaseAccessToken(): Promise<string | null> {
+  const client = await getSupabaseClient()
+  if (!client) return null
+  return (await client.auth.getSession()).data.session?.access_token ?? null
+}
 
 /** localStorage key carrying the user's currently-selected org. */
 const ACTIVE_ORG_STORAGE_KEY = 'janusly:activeOrg'
@@ -176,7 +204,7 @@ export function consumeSsoSessionFragment(): string | null {
   return token
 }
 
-type SupabaseAuthClient = NonNullable<typeof supabase>['auth']
+type SupabaseAuthClient = SupabaseClient['auth']
 type SignOutResponse = Awaited<ReturnType<SupabaseAuthClient['signOut']>>
 type SessionResponse = Awaited<ReturnType<SupabaseAuthClient['getSession']>>
 type AuthSubscriptionResponse = ReturnType<SupabaseAuthClient['onAuthStateChange']>
@@ -242,43 +270,57 @@ export function normalizeAuth(session: Session | null): NormalizedAuth {
 
 /** Auth methods used by Login / UserMenu / MembersPanel. Stubs to no-ops when Supabase isn't configured. */
 export const AuthProvider = {
-  signIn: (email: string, password: string) => {
-    if (!supabase) return Promise.resolve(devAuthResponse)
-    return supabase.auth.signInWithPassword({ email, password })
+  signIn: async (email: string, password: string) => {
+    const client = await getSupabaseClient()
+    if (!client) return devAuthResponse
+    return client.auth.signInWithPassword({ email, password })
   },
-  signUp: (email: string, password: string) => {
-    if (!supabase) return Promise.resolve(devAuthResponse)
-    return supabase.auth.signUp({ email, password })
+  signUp: async (email: string, password: string) => {
+    const client = await getSupabaseClient()
+    if (!client) return devAuthResponse
+    return client.auth.signUp({ email, password })
   },
-  signOut: () => {
+  signOut: async () => {
     clearSessionToken()
-    if (!supabase) return Promise.resolve(devSignOutResponse)
-    return supabase.auth.signOut()
+    const client = await getSupabaseClient()
+    if (!client) return devSignOutResponse
+    return client.auth.signOut()
   },
   getSession: async () => {
-    if (!supabase) return devSessionResponse
-    return supabase.auth.getSession()
+    if (getSessionToken()) return devSessionResponse
+    const client = await getSupabaseClient()
+    if (!client) return devSessionResponse
+    return client.auth.getSession()
   },
   updateOrg: async (orgId: string) => {
     // Active-org is a client-side preference now. Writing to Supabase
     // `user_metadata.orgId` would mislead readers — the API ignores it
     // and resolves membership through `org_members`.
     writeToStorage(ACTIVE_ORG_STORAGE_KEY, orgId)
-    if (!supabase) {
+    if (getSessionToken()) {
+      return { result: { data: { user: null }, error: null }, auth: normalizeAuth(null) }
+    }
+    const client = await getSupabaseClient()
+    if (!client) {
       devAuth.orgId = orgId
       return { result: { data: { user: null }, error: null }, auth: devAuth }
     }
-    const session = await supabase.auth.getSession()
+    const session = await client.auth.getSession()
     return {
       result: { data: { user: session.data.session?.user ?? null }, error: null },
       auth: normalizeAuth(session.data.session),
     }
   },
-  onAuthStateChange: (callback: (auth: NormalizedAuth) => void) => {
-    if (!supabase) {
+  onAuthStateChange: async (callback: (auth: NormalizedAuth) => void) => {
+    if (getSessionToken()) {
+      callback(normalizeAuth(null))
+      return devAuthSubscription()
+    }
+    const client = await getSupabaseClient()
+    if (!client) {
       callback(devAuth)
       return devAuthSubscription()
     }
-    return supabase.auth.onAuthStateChange((_event, session) => callback(normalizeAuth(session)))
+    return client.auth.onAuthStateChange((_event, session) => callback(normalizeAuth(session)))
   },
 }

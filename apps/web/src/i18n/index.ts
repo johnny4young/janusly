@@ -12,12 +12,13 @@
 
 import { Trans, useTranslation } from 'react-i18next'
 import type i18next from 'i18next'
-import { changeRuntimeLocale, initI18n } from './init'
+import { bootstrapI18n, changeRuntimeLocale, initI18n } from './init'
 import { resolveSystemLocale, getBrowserSystemLanguages } from './resolve'
 import { getStoredLanguage, setStoredLanguage } from './storage'
 import { COMMON_NAMESPACE, FALLBACK_LOCALE, isSupportedLanguage, SUPPORTED_LANGUAGES, type AppLanguage, type RuntimeLocale } from './resources'
 
 export { initI18n }
+export { bootstrapI18n }
 export { changeRuntimeLocale }
 export { resolveSystemLocale, getBrowserSystemLanguages }
 export { getStoredLanguage, setStoredLanguage }
@@ -54,10 +55,13 @@ export function resolveAppLanguage(language: AppLanguage): RuntimeLocale {
  * Imperative locale change. Persists to localStorage, resolves `'system'`,
  * dispatches `i18next.changeLanguage`, and updates `<html lang>`.
  */
-export function changeAppLanguage(language: AppLanguage): void {
-  setStoredLanguage(language)
+export function changeAppLanguage(language: AppLanguage): Promise<void> {
   const resolved = resolveAppLanguage(language)
-  changeRuntimeLocale(resolved)
+  return changeRuntimeLocale(resolved).then(() => {
+    // Persist only after the local chunk loaded successfully. A transient
+    // chunk failure must not trap the next reload on an unavailable catalog.
+    setStoredLanguage(language)
+  })
 }
 
 /** Read the currently-active runtime locale. */

@@ -162,6 +162,9 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   const homeMeasurement = await measureRoute(page, 'home')
   expect(homeMeasurement.resourceCount).toBeGreaterThan(0)
   expect(homeMeasurement.resources.some((path) => /CanvasWorkspace-.*\.(js|css)$/.test(path))).toBe(false)
+  expect(homeMeasurement.resources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(true)
+  expect(homeMeasurement.resources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(false)
+  expect(homeMeasurement.resources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
   expectWithinBudget(homeMeasurement)
   await captureElement(home, 'web-en-performance-home')
 
@@ -187,6 +190,44 @@ test('production routes stay inside resource and long-task budgets', async ({ pa
   expect(recoveryMeasurement.transferredBytes).toBeGreaterThan(0)
   expectWithinBudget(recoveryMeasurement)
   await captureElement(detail, 'web-en-performance-selected-recovery')
+
+  await resetRouteMeasurement(page)
+  await page.getByRole('button', { name: 'Open user menu' }).click()
+  const localeSwitcher = page.getByRole('combobox', { name: 'Change language' })
+  await localeSwitcher.selectOption('es')
+  await expect(page.getByRole('combobox', { name: 'Cambiar idioma' })).toHaveValue('es')
+  const localeSwitchResources = await page.evaluate(() => (
+    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+      .map((entry) => new URL(entry.name).pathname)
+  ))
+  expect(localeSwitchResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
+  expect(localeSwitchResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  await captureElement(page.locator('.we-locale-switcher--row'), 'web-es-locale-switcher-loaded')
+
+  // A fresh Spanish boot must fetch only Spanish. This catches two easy-to-
+  // miss regressions: eagerly importing both catalogs and reintroducing an
+  // English fallback download before the first localized render.
+  const esPage = await page.context().newPage()
+  const esBrowserErrors = installConsoleErrorGuards(esPage)
+  await stubApi(esPage)
+  await esPage.addInitScript(() => {
+    window.localStorage.clear()
+    window.localStorage.setItem('janusly:locale', 'es')
+  })
+  await esPage.goto('/')
+  const esHome = esPage.locator('.we-recovery-center-hero')
+  await expect(esHome).toBeVisible()
+  await expect(esPage.getByTestId('recovery-center-greeting')).toContainText('ejecuciones necesitan recuperación')
+  const esResources = await esPage.evaluate(() => (
+    (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
+      .map((entry) => new URL(entry.name).pathname)
+  ))
+  expect(esResources.some((path) => /catalog-es-.*\.js$/.test(path))).toBe(true)
+  expect(esResources.some((path) => /catalog-en-.*\.js$/.test(path))).toBe(false)
+  expect(esResources.some((path) => /supabase-runtime-.*\.js$/.test(path))).toBe(false)
+  await captureElement(esHome, 'web-es-performance-home')
+  expect(esBrowserErrors).toEqual([])
+  await esPage.close()
 
   const measurements = [homeMeasurement, aiStudioMeasurement, recoveryMeasurement]
   if (PERF_REPORT) {

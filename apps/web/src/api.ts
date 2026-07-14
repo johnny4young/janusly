@@ -28,7 +28,7 @@
  *   post-write refreshes cannot reuse pre-write snapshots.
  */
 
-import { getActiveOrg, getSessionToken, supabase } from './auth'
+import { getActiveOrg, getSessionToken, getSupabaseAccessToken } from './auth'
 import { isV1ReadPath } from '@janusly/shared/src/api-contract'
 import { getResolvedLocale, t } from './i18n/runtime'
 import { useWorkflowStore } from './store'
@@ -145,9 +145,7 @@ export async function api(path: string, options: RequestInit = {}): Promise<unkn
   // resolves synchronously from the in-memory cache (no network round
   // trip), so the extra `await` costs microseconds. SSO mode + dev
   // mode skip this branch entirely.
-  const supabaseAccessToken = !sessionToken && supabase
-    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
-    : null
+  const supabaseAccessToken = !sessionToken ? await getSupabaseAccessToken() : null
   const requestScope: ApiRequestScope = {
     activeOrg: getActiveOrg(),
     resolvedLocale: getResolvedLocale(),
@@ -326,9 +324,7 @@ export async function openRunEventStream(
   options: { lastEventId?: string | null; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const sessionToken = getSessionToken()
-  const token = !sessionToken && supabase
-    ? (await supabase.auth.getSession()).data.session?.access_token ?? null
-    : null
+  const token = !sessionToken ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
@@ -415,10 +411,7 @@ export async function downloadFromApi(
   const filename = options.filename
 
   const sessionToken = getSessionToken()
-  const session = !sessionToken && supabase
-    ? await supabase.auth.getSession()
-    : { data: { session: null } }
-  const token = session.data.session?.access_token
+  const token = !sessionToken ? await getSupabaseAccessToken() : null
 
   const headers: Record<string, string> = {
     'x-org-id': getActiveOrg(),

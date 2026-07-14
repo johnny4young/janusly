@@ -10,7 +10,7 @@
 
 import React from 'react'
 import { Languages } from 'lucide-react'
-import { changeAppLanguage, getStoredLanguage, useT } from './index'
+import { changeAppLanguage, getResolvedLocale, getStoredLanguage, resolveAppLanguage, useT } from './index'
 import type { AppLanguage } from './resources'
 
 type LocaleSwitcherProps = {
@@ -24,12 +24,28 @@ type LocaleSwitcherProps = {
 /** Compact 3-option locale picker. Persists to localStorage on change. */
 export function LocaleSwitcher({ variant }: LocaleSwitcherProps) {
   const { t } = useT()
-  const [value, setValue] = React.useState<AppLanguage>(() => getStoredLanguage())
+  const [value, setValue] = React.useState<AppLanguage>(() => {
+    const stored = getStoredLanguage()
+    if (stored === 'system' || resolveAppLanguage(stored) === getResolvedLocale()) return stored
+    // A boot-time catalog failure may have fallen back without overwriting the
+    // preference. Reflect the language the UI actually renders; reload retries
+    // the stored choice.
+    return getResolvedLocale()
+  })
+  const [pending, setPending] = React.useState(false)
 
-  const onChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+  const onChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
     const next = event.target.value as AppLanguage
+    const previous = value
     setValue(next)
-    changeAppLanguage(next)
+    setPending(true)
+    try {
+      await changeAppLanguage(next)
+    } catch {
+      setValue(previous)
+    } finally {
+      setPending(false)
+    }
   }
 
   const containerClass = variant === 'auth-corner' ? 'we-locale-switcher we-locale-switcher--corner' : 'we-locale-switcher we-locale-switcher--row'
@@ -46,6 +62,8 @@ export function LocaleSwitcher({ variant }: LocaleSwitcherProps) {
         className="we-locale-switcher__select text-field"
         value={value}
         onChange={onChange}
+        disabled={pending}
+        aria-busy={pending}
         aria-label={t('auth.locale.changeLanguage')}
       >
         <option value="system">{t('auth.locale.system')}</option>

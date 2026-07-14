@@ -386,22 +386,31 @@ export default function App() {
     // very first API request after login carries the session token.
     consumeSsoSessionFragment()
 
-    AuthProvider.getSession().then(({ data }) => {
+    void AuthProvider.getSession().then(({ data }) => {
       if (!mounted) return
       setAuth(normalizeAuth(data.session))
+    }).catch(() => {
+      if (mounted) clearAuth()
     }).finally(() => {
       if (mounted) setAuthReady(true)
     })
 
-    const { data: listener } = AuthProvider.onAuthStateChange((auth) => {
+    let unsubscribe: (() => void) | undefined
+    void AuthProvider.onAuthStateChange((auth) => {
       if (!mounted) return
       if (!auth.session && !auth.userId) clearAuth()
       else setAuth(auth)
+    }).then(({ data: listener }) => {
+      if (!mounted) listener.subscription.unsubscribe()
+      else unsubscribe = () => listener.subscription.unsubscribe()
+    }).catch(() => {
+      // `getSession` above owns auth readiness. A listener chunk failure is
+      // non-fatal and will be retried on the next page load.
     })
 
     return () => {
       mounted = false
-      listener?.subscription.unsubscribe()
+      unsubscribe?.()
     }
   }, [clearAuth, setAuth, setAuthReady])
 

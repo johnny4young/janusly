@@ -46,7 +46,6 @@ export default defineConfig(({ mode }) => ({
           // matcher below doesn't sweep `@xyflow/react` into the eager
           // react-vendor bundle.
           if (id.includes('@xyflow/')) return undefined
-          if (id.includes('@supabase/supabase-js')) return 'supabase-vendor'
           if (id.includes('lucide-react')) return 'icons-vendor'
           if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'react-vendor'
           return undefined
