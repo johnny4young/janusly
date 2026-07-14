@@ -196,9 +196,7 @@ export async function runOrgCalibration(
  * (listing orgs) degrades to a warn log; per-org errors are isolated
  * inside `runOrgCalibration`.
  */
-export async function handleConfidenceCalibrationTrigger(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
+export async function handleConfidenceCalibrationTrigger(): Promise<void> {
   const windowDays = DEFAULT_CALIBRATION_WINDOW_DAYS;
   let orgIds: string[];
   try {

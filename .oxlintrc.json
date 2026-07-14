@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "vitest"],
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "args": "all",
+        "argsIgnorePattern": "^_",
+        "caughtErrors": "none",
+        "ignoreRestSiblings": true,
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "no-unsafe-optional-chaining": "error",
+    "array-callback-return": "warn",
+    "no-shadow-restricted-names": "warn",
+    "eqeqeq": ["warn", "always", { "null": "ignore" }],
+    "no-unneeded-ternary": "warn",
+    "react/jsx-no-useless-fragment": "warn",
+    "typescript/no-invalid-void-type": "warn",
+    "unicorn/no-thenable": "warn",
+    "unicorn/no-useless-switch-case": "warn",
+    "vitest/no-focused-tests": "error",
+    "vitest/no-identical-title": "error",
+    "vitest/valid-title": "error"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "packages/db/migrations/**",
+    "**/playwright-report/**",
+    "**/test-results/**",
+    ".claude/**"
+  ],
+  "env": {
+    "builtin": true
+  }
+}

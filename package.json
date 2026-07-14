@@ -11,8 +11,8 @@
     "stop": "docker compose stop",
     "clean": "docker compose down -v",
     "build": "pnpm -r build",
-    "lint": "biome ci .",
-    "lint:fix": "biome lint --write .",
+    "lint": "oxlint --max-warnings 20",
+    "lint:fix": "oxlint --fix",
     "bundle-report": "node scripts/bundle-report.mjs",
     "bundle-check": "node scripts/bundle-report.mjs --check --markdown artifacts/web-bundle-report.md --json artifacts/web-bundle-report.json",
     "contract:generate": "pnpm --filter @janusly/api contract:generate",
@@ -34,6 +34,6 @@
     "test:integration": "node scripts/run-integration.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.3"
+    "oxlint": "^1.73.0"
   }
 }

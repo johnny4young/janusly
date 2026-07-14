@@ -34,7 +34,7 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Lint (Biome)
+      - name: Lint (Oxlint)
         run: pnpm lint
 
       - name: Check generated API contract

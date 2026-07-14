@@ -61,7 +61,7 @@ vi.mock("@janusly/db", () => {
       where: vi.fn(() => chain),
       orderBy: vi.fn(() => chain),
       limit: vi.fn(() => chain),
-      // biome-ignore lint/suspicious/noThenProperty: Drizzle query builders are intentionally thenable.
+      // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
       then: ((resolve, reject) => settle().then(resolve, reject)) as PromiseLike<unknown[]>["then"],
     };
     return chain;
