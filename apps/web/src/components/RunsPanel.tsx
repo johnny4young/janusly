@@ -92,7 +92,7 @@ type RunsPanelProps = {
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
 }
 
-type SubmitHumanFormResult = string[] | void
+type SubmitHumanFormResult = string[] | undefined
 type SubmitHumanFormPromise = Promise<
   SubmitHumanFormResult
 >

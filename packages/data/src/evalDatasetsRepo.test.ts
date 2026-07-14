@@ -52,6 +52,7 @@ vi.mock("@janusly/db", () => {
       where: vi.fn(() => chain),
       orderBy: vi.fn(() => chain),
       limit: vi.fn(() => chain),
+      // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
       then: (resolve: (v: unknown[]) => unknown, reject: (e: unknown) => unknown) =>
         settle().then(resolve, reject),
     };

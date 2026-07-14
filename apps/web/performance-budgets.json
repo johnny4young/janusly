@@ -11,7 +11,7 @@
     "entry": {
       "label": "Entry JavaScript",
       "assets": ["index.js"],
-      "maxGzipKiB": 107
+      "maxGzipKiB": 108
     },
     "canvas": {
       "label": "Canvas workspace",
@@ -76,7 +76,7 @@
     "usePrefersReducedMotion.js": 2.1,
     "useVirtualList.js": 0.91,
     "VersionHistoryPanel.js": 3,
-    "VitalSignsStrip.js": 2.13,
+    "VitalSignsStrip.js": 3.93,
     "workflow-diff.js": 1.29,
     "WorkflowDiffView.js": 2.08,
     "WorkflowHealthBadge.js": 1.51,

@@ -41,6 +41,7 @@ function whereHandle(queue: Array<() => Promise<unknown>>) {
   return {
     limit: () => resolved,
     orderBy: () => resolved,
+    // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
     then: (onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
       resolved.then(onFulfilled, onRejected),
   };

@@ -102,8 +102,10 @@ function evaluateBoolean(expression: string, scope: ExpressionScope): unknown {
       case "!==":
         return left !== right;
       case "==":
+        // oxlint-disable-next-line eqeqeq -- The workflow expression grammar intentionally exposes JavaScript loose equality.
         return left == right;
       case "!=":
+        // oxlint-disable-next-line eqeqeq -- The workflow expression grammar intentionally exposes JavaScript loose inequality.
         return left != right;
       case ">":
         return Number(left) > Number(right);

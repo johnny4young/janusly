@@ -196,7 +196,6 @@ function recoveryQueueOrderBy(sort: RecoveryQueueSort): SQL[] {
       return [sql`${recoveryItems.severity} asc nulls last`, desc(deadLetters.createdAt), desc(deadLetters.id)];
     case "sla":
       return [sql`${recoveryItems.slaTargetAt} asc nulls last`, desc(deadLetters.createdAt), desc(deadLetters.id)];
-    case "newest":
     default:
       return [desc(deadLetters.createdAt), desc(deadLetters.id)];
   }
@@ -243,7 +242,6 @@ function recoveryQueueKeysetPredicate(sort: RecoveryQueueSort, cursor: RecoveryQ
         and(eq(recoveryItems.slaTargetAt, slaKey), createdDescTie),
       );
     }
-    case "newest":
     default:
       return createdDescTie;
   }

@@ -289,7 +289,7 @@ describe('GET /runs/:runId/stream protocol', () => {
 
   it('waits for Redis subscription readiness before taking the catch-up snapshot', async () => {
     arrangeRun('running')
-    const readiness = deferred<void>()
+    const readiness = deferred<undefined>()
     addSubscriberMock.mockReturnValue({ ok: true, ready: readiness.promise, remove: removeSubscriberMock })
     const { req, close } = request()
     const res = response()
@@ -300,7 +300,7 @@ describe('GET /runs/:runId/stream protocol', () => {
     expect(selectMock).toHaveBeenCalledTimes(1)
     expect(limitMock).not.toHaveBeenCalled()
 
-    readiness.resolve()
+    readiness.resolve(undefined)
     await handling
     expect(limitMock).toHaveBeenCalledWith(501)
     close()

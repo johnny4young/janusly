@@ -57,6 +57,7 @@ vi.mock("@janusly/db", () => {
         }
         return Promise.resolve(rows);
       }),
+      // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
       then: (resolve: (value: unknown[]) => unknown) => resolve(rows),
     };
     return chain;

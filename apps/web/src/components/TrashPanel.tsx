@@ -103,51 +103,47 @@ export function TrashPanel({
   // Trash view — a flat, filter-free list of soft-deleted workflows (uses
   // the raw server-ordered `workflows`, NOT `visible`, so a stale active-
   // view search term never filters it). Restore-only; no folders/tags/bulk.
-  return (
+  return workflows.length === 0 && !loading ? (
+    <div className="we-allclear" data-testid="workflows-trash-empty">
+      <span className="we-allclear__ring" aria-hidden="true"><Trash size={18} /></span>
+      <div className="we-allclear__copy">
+        <strong>{t('workflowsDashboard.trashEmpty')}</strong>
+        <span>{t('workflowsDashboard.trashEmptyHelper')}</span>
+      </div>
+    </div>
+  ) : workflows.length > 0 ? (
     <>
-      {workflows.length === 0 && !loading ? (
-        <div className="we-allclear" data-testid="workflows-trash-empty">
-          <span className="we-allclear__ring" aria-hidden="true"><Trash size={18} /></span>
-          <div className="we-allclear__copy">
-            <strong>{t('workflowsDashboard.trashEmpty')}</strong>
-            <span>{t('workflowsDashboard.trashEmptyHelper')}</span>
-          </div>
-        </div>
-      ) : workflows.length > 0 ? (
-        <>
-          {/* Bulk-restore action bar — selection is always available in Trash.
-              Select-all operates on the raw trash `workflows` (the rendered
-              set). Restore-selected is disabled until ≥1 row is ticked. */}
-          <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
-            {selectedIds.size > 0 && (
-              <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
-            )}
-            <button
-              type="button"
-              className="small-command"
-              aria-pressed={workflows.every((w) => selectedIds.has(w.id))}
-              onClick={() => setSelectedIds(workflows.every((w) => selectedIds.has(w.id)) ? new Set() : new Set(workflows.map((w) => w.id)))}
-              data-testid="workflows-trash-select-all"
-            >
-              {workflows.every((w) => selectedIds.has(w.id))
-                ? t('workflowsDashboard.clearSelection')
-                : t('workflowsDashboard.trashSelectAll', { count: workflows.length })}
-            </button>
-            <button
-              type="button"
-              className="small-command"
-              disabled={selectedIds.size === 0}
-              onClick={() => void bulkRestore()}
-              data-testid="workflows-trash-restore-selected"
-            >
-              <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
-            </button>
-          </div>
-          <ul className="we-list" data-testid="workflows-trash-list">
-            {workflows.map(renderTrashRow)}
-          </ul>
-        </>
-      ) : null}
+      {/* Bulk-restore action bar — selection is always available in Trash.
+          Select-all operates on the raw trash `workflows` (the rendered
+          set). Restore-selected is disabled until ≥1 row is ticked. */}
+      <div className="we-list-bulk-bar" data-testid="workflows-trash-actions">
+        {selectedIds.size > 0 && (
+          <span className="we-list-bulk-bar__count">{t('workflowsDashboard.bulkSelectedCount', { count: selectedIds.size })}</span>
+        )}
+        <button
+          type="button"
+          className="small-command"
+          aria-pressed={workflows.every((w) => selectedIds.has(w.id))}
+          onClick={() => setSelectedIds(workflows.every((w) => selectedIds.has(w.id)) ? new Set() : new Set(workflows.map((w) => w.id)))}
+          data-testid="workflows-trash-select-all"
+        >
+          {workflows.every((w) => selectedIds.has(w.id))
+            ? t('workflowsDashboard.clearSelection')
+            : t('workflowsDashboard.trashSelectAll', { count: workflows.length })}
+        </button>
+        <button
+          type="button"
+          className="small-command"
+          disabled={selectedIds.size === 0}
+          onClick={() => void bulkRestore()}
+          data-testid="workflows-trash-restore-selected"
+        >
+          <RotateCcw size={14} aria-hidden="true" /> {t('workflowsDashboard.trashRestoreSelected', { count: selectedIds.size })}
+        </button>
+      </div>
+      <ul className="we-list" data-testid="workflows-trash-list">
+        {workflows.map(renderTrashRow)}
+      </ul>
     </>
-  )
+  ) : null
 }

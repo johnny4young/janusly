@@ -97,7 +97,7 @@ export type RightPanelProps = {
   /** Opens the "Insert snippet…" dialog (also bound to a Cmd+K palette entry). */
   onInsertSnippet: () => void
   onApproveNode: (nodeId: string) => void
-  onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | void> | string[] | void
+  onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | undefined> | string[] | undefined
   onReplayNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined

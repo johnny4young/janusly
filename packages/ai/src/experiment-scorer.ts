@@ -104,7 +104,6 @@ function compileJsonSchema(schema: unknown): z.ZodTypeAny | null {
       const itemSchema = compileJsonSchema(node.items) ?? z.unknown();
       return z.array(itemSchema);
     }
-    case "object":
     default: {
       const props = (node.properties && typeof node.properties === "object")
         ? (node.properties as Record<string, unknown>)
