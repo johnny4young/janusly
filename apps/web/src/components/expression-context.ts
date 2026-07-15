@@ -8,6 +8,8 @@ export type ExpressionSuggestion = {
   token: string
   kind: ExpressionSuggestionKind
   nodeId?: string
+  /** Caret position relative to the inserted token; defaults to its end. */
+  caretOffset?: number
 }
 
 const knownOutputFields: Record<string, string[]> = {
@@ -126,6 +128,10 @@ export function buildExpressionSuggestions({
     { id: 'operator-true', token: ' === true', kind: 'operator' },
     { id: 'operator-not-null', token: ' != null', kind: 'operator' },
     { id: 'operator-positive', token: ' > 0', kind: 'operator' },
+    { id: 'operator-contains', token: ' contains ""', kind: 'operator', caretOffset: 11 },
+    { id: 'operator-starts-with', token: ' startsWith ""', kind: 'operator', caretOffset: 13 },
+    { id: 'operator-matches', token: ' matches ""', kind: 'operator', caretOffset: 10 },
+    { id: 'operator-in', token: ' in []', kind: 'operator', caretOffset: 5 },
     { id: 'operator-and', token: ' && ', kind: 'operator' },
     { id: 'operator-or', token: ' || ', kind: 'operator' },
   )

@@ -512,6 +512,28 @@ describe('agent node — dryRun gating', () => {
     expect(recordAgentEpisodeMock).not.toHaveBeenCalled()
   })
 
+  it('passes the dry-run posture into LLM planning', async () => {
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Validation complete',
+      tool: 'done',
+      input: {},
+      reason: 'No write required',
+      mode: 'ai',
+    })
+
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: true,
+      config: { planner: 'openai', maxSteps: 1, goal: 'validate the workflow' },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[6]).toEqual({ dryRun: true })
+  })
+
   it('records an episode on completion in production mode (rules planner skips recall)', async () => {
     const result = await nodeRegistry.agent({
       ...baseCtx,
@@ -567,6 +589,7 @@ describe('agent node — dryRun gating', () => {
     })
     expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
     expect(planAgentToolWithLLMMock.mock.calls[0]?.[5]).toContain('prior outcome')
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[6]).toEqual({ dryRun: false })
   })
 
   it('does not claim memory influence when the LLM planner falls back', async () => {

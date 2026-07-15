@@ -8,6 +8,7 @@ import { useT } from '../i18n'
 import {
   buildExpressionSuggestions,
   findUnresolvedExpressionReferences,
+  type ExpressionSuggestion,
   type ExpressionSuggestionKind,
 } from './expression-context'
 
@@ -60,14 +61,14 @@ export function ExpressionAssistant({
       : null
   const statusId = `${id}-expression-status`
 
-  const insertToken = (token: string) => {
+  const insertToken = ({ token, caretOffset }: ExpressionSuggestion) => {
     const textarea = textareaRef.current
     const start = textarea?.selectionStart ?? value.length
     const end = textarea?.selectionEnd ?? start
     const next = `${value.slice(0, start)}${token}${value.slice(end)}`
     onChange(next)
     window.requestAnimationFrame(() => {
-      const caret = start + token.length
+      const caret = start + (caretOffset ?? token.length)
       textareaRef.current?.focus()
       textareaRef.current?.setSelectionRange(caret, caret)
     })
@@ -127,7 +128,7 @@ export function ExpressionAssistant({
                       type="button"
                       key={suggestion.id}
                       className="we-expression-assistant__token"
-                      onClick={() => insertToken(suggestion.token)}
+                      onClick={() => insertToken(suggestion)}
                       title={t('expressionAssistant.insert', { token: suggestion.token })}
                       aria-label={t('expressionAssistant.insert', { token: suggestion.token })}
                     >

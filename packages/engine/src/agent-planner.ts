@@ -26,6 +26,7 @@ import { loadRootEnv } from "@janusly/db";
 import { getLlmClient, type LlmClient } from "@janusly/ai";
 import { checkBudget } from "./budget";
 import type { AgentNodeConfig } from "./node-configs";
+import { listPlannerTools } from "./tool-registry";
 
 loadRootEnv();
 
@@ -69,24 +70,6 @@ const LlmPlannerReplySchema = z.object({
   input: z.record(z.string(), z.unknown()).optional(),
   reason: z.string().optional(),
 });
-
-const availableTools = [
-  {
-    name: "http.request",
-    description: "Make an HTTP request to an external API.",
-    inputShape: { url: "string", method: "GET|POST", headers: "object optional", body: "object optional" }
-  },
-  {
-    name: "text.uppercase",
-    description: "Convert text to uppercase.",
-    inputShape: { value: "string" }
-  },
-  {
-    name: "json.pick",
-    description: "Pick a value from workflow context using a dot path.",
-    inputShape: { path: "string" }
-  }
-];
 
 export function planAgentTool(config: AgentNodeConfig, context: Record<string, unknown>): AgentPlan {
   if (config.tool) {
@@ -159,6 +142,12 @@ export async function planAgentToolWithLLM(
    * Empty / omitted when memory is off — the prompt is then byte-for-byte today's.
    */
   recalledEpisodes?: string,
+  /**
+   * Runtime planning posture. A validation/sandbox run hides every registered
+   * write-side tool from the model before it chooses a plan; execution keeps
+   * its own skip gate in case an explicit config or fallback still names one.
+   */
+  options: { dryRun?: boolean } = {},
 ): Promise<AgentPlanResult> {
   const llm = llmOverride !== undefined ? llmOverride : getLlmClient();
 
@@ -230,6 +219,11 @@ export async function planAgentToolWithLLM(
   }
 
   try {
+    // Catalog projection can fail if a future registered Zod schema cannot be
+    // represented as JSON Schema. Keep it inside the same fallback boundary
+    // as the provider call so one bad registration never rejects the run.
+    const availableTools = listPlannerTools({ dryRun: options.dryRun });
+    const availableToolNames = new Set(availableTools.map((tool) => tool.name));
     const result = await llm.generateText({
       system: systemPrompt,
       prompt: JSON.stringify({
@@ -270,9 +264,9 @@ export async function planAgentToolWithLLM(
       };
     }
 
-    if (!parsed.tool) {
+    if (!parsed.tool || !availableToolNames.has(parsed.tool)) {
       const fallback = planAgentTool(config, context);
-      return { ...fallback, mode: "fallback", aiError: "LLM planner did not return a valid tool" };
+      return { ...fallback, mode: "fallback", aiError: "LLM planner did not return an available tool" };
     }
 
     return {

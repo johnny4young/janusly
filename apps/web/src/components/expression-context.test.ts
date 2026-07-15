@@ -26,6 +26,12 @@ describe('expression graph context', () => {
     expect(tokens).toContain('context.fetch.output.json')
     expect(tokens).toContain('context.fetch.output.jsonParseSkipped')
     expect(tokens).toContain('context.shape.output.total')
+    expect(tokens).toEqual(expect.arrayContaining([
+      ' contains ""',
+      ' startsWith ""',
+      ' matches ""',
+      ' in []',
+    ]))
     expect(tokens).not.toContain('context.gate.output')
     expect(tokens).not.toContain('context.isolated.output')
   })

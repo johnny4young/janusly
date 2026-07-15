@@ -61,4 +61,22 @@ describe('<ExpressionAssistant />', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Unsupported expression token')
     expect(screen.getByRole('alert')).not.toHaveTextContent('Not reachable here')
   })
+
+  it('offers the richer runtime operators as editable expression templates', () => {
+    const { props } = renderAssistant({ value: 'context.input.customerTier' })
+    fireEvent.click(screen.getByRole('button', { name: /use context/i }))
+
+    const buttons = screen.getAllByRole('button')
+    for (const token of [' contains ""', ' startsWith ""', ' matches ""', ' in []']) {
+      expect(buttons.find(button => button.getAttribute('title') === `Insert ${token} at the cursor`)).toBeVisible()
+    }
+
+    const textarea = screen.getByLabelText('Branch expression') as HTMLTextAreaElement
+    textarea.focus()
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    const containsButton = buttons.find(button => button.getAttribute('title') === 'Insert  contains "" at the cursor')
+    expect(containsButton).toBeDefined()
+    fireEvent.click(containsButton!)
+    expect(props.onChange).toHaveBeenCalledWith('context.input.customerTier contains ""')
+  })
 })

@@ -6,7 +6,7 @@ vi.mock('./http-policy', () => ({
 }))
 
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
-import { listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
+import { listPlannerTools, listTools, validateToolInput, executeTool, isToolWriteSide } from './tool-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
@@ -205,6 +205,43 @@ describe('tool-registry', () => {
     const vectorUpsert = tools.find(tool => tool.name === 'vector.upsert')
     expect(vectorUpsert?.required).toEqual(['content'])
     expect(vectorUpsert?.optional).toEqual(['metadata'])
+  })
+
+  it('derives a typed planner catalog and omits write-side tools in dry-run mode', () => {
+    const publicTools = listTools()
+    const plannerTools = listPlannerTools()
+    expect(plannerTools).toHaveLength(publicTools.length)
+
+    const http = plannerTools.find(tool => tool.name === 'http.request')
+    expect(http).toMatchObject({ writeSide: true })
+    expect(http?.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string' },
+        method: { type: 'string' },
+      },
+    })
+
+    const dryRunTools = listPlannerTools({ dryRun: true })
+    expect(dryRunTools.every(tool => !tool.writeSide)).toBe(true)
+    expect(dryRunTools.map(tool => tool.name)).toEqual(expect.arrayContaining([
+      'db.query.read',
+      'json.parse',
+      'text.uppercase',
+      'vector.search',
+    ]))
+    expect(dryRunTools.map(tool => tool.name)).not.toEqual(expect.arrayContaining([
+      'db.query.write',
+      'email.send',
+      'http.request',
+      'vector.upsert',
+    ]))
+
+    // The web-facing contract remains compact; planner-only schemas do not
+    // increase the GET /tools payload.
+    expect(publicTools[0]).not.toHaveProperty('inputSchema')
+    expect(publicTools[0]).not.toHaveProperty('writeSide')
   })
 
   /* -------- text.* -------- */

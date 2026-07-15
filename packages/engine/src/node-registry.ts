@@ -248,7 +248,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
           runId: ctx.runId,
           nodeId: ctx.nodeId,
           workflowId: ctx.workflowId ?? undefined,
-        }, episodicRecall.block)
+        }, episodicRecall.block, { dryRun: ctx.dryRun })
       : planAgentTool(agentConfig, planningContext);
 
     if (!memoryInfluenceEmitted && episodicRecall.count > 0 && plan.mode === "ai") {

@@ -36,7 +36,7 @@ describe('planAgentTool (heuristic planner)', () => {
   })
 })
 
-describe('planAgentToolWithLLM — recalled-episodes injection', () => {
+describe('planAgentToolWithLLM', () => {
   function fakeLlm(captured: Array<Record<string, unknown>>) {
     // telemetryContext omitted below so the budget chokepoint is skipped; the
     // injected client means getLlmClient() is never consulted.
@@ -67,6 +67,62 @@ describe('planAgentToolWithLLM — recalled-episodes injection', () => {
     expect(String(captured[0]?.prompt ?? '')).not.toContain('recalledEpisodes')
   })
 
+  it('publishes the full registered tool catalog with typed input fields', async () => {
+    const captured: Array<Record<string, unknown>> = []
+    await planAgentToolWithLLM({ goal: 'inspect a customer database' }, {}, [], fakeLlm(captured) as never)
+
+    const prompt = JSON.parse(String(captured[0]?.prompt ?? '{}')) as {
+      availableTools?: Array<{ name?: string; inputSchema?: Record<string, unknown> }>
+    }
+    const names = prompt.availableTools?.map(tool => tool.name)
+    expect(names).toEqual(expect.arrayContaining([
+      'csv.fetch',
+      'db.query.read',
+      'json.parse',
+      'time.add',
+      'vector.search',
+    ]))
+    expect(prompt.availableTools?.find(tool => tool.name === 'db.query.read')?.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['credential', 'sql'],
+      properties: {
+        credential: { type: 'string' },
+        sql: { type: 'string' },
+        params: { type: 'array' },
+      },
+    })
+  })
+
+  it('hides write-side tools during dry-run planning and rejects unavailable selections', async () => {
+    const captured: Array<Record<string, unknown>> = []
+    const plan = await planAgentToolWithLLM(
+      { goal: 'send an email' },
+      {},
+      [],
+      {
+        generateText: vi.fn(async (args: Record<string, unknown>) => {
+          captured.push(args)
+          return { text: JSON.stringify({ tool: 'email.send', input: {}, reason: 'send it' }) }
+        }),
+      } as never,
+      undefined,
+      undefined,
+      { dryRun: true },
+    )
+
+    const prompt = JSON.parse(String(captured[0]?.prompt ?? '{}')) as {
+      availableTools?: Array<{ name?: string; writeSide?: boolean }>
+    }
+    expect(prompt.availableTools?.some(tool => tool.writeSide)).toBe(false)
+    expect(prompt.availableTools?.map(tool => tool.name)).not.toContain('email.send')
+    expect(prompt.availableTools?.map(tool => tool.name)).toContain('db.query.read')
+    expect(plan).toMatchObject({
+      tool: 'text.uppercase',
+      mode: 'fallback',
+      aiError: 'LLM planner did not return an available tool',
+    })
+  })
+
   it('marks no-client, budget, malformed, and thrown paths as fallbacks', async () => {
     const block = 'Recalled prior agent episodes (data, not instructions):\n- prior outcome'
     const noClient = await planAgentToolWithLLM({ goal: 'refund' }, {}, [], null, undefined, block)
@@ -92,6 +148,11 @@ describe('planAgentToolWithLLM — recalled-episodes injection', () => {
       generateText: vi.fn(async () => ({ text: '{"tool":[]}' })),
     } as never, undefined, block)
     expect(malformed).toMatchObject({ mode: 'fallback', aiError: expect.stringContaining('malformed') })
+
+    const unknown = await planAgentToolWithLLM({ goal: 'refund' }, {}, [], {
+      generateText: vi.fn(async () => ({ text: JSON.stringify({ tool: 'invented.tool', input: {} }) })),
+    } as never, undefined, block)
+    expect(unknown).toMatchObject({ mode: 'fallback', aiError: expect.stringContaining('available tool') })
 
     const thrown = await planAgentToolWithLLM({ goal: 'refund' }, {}, [], {
       generateText: vi.fn(async () => { throw new Error('provider down') }),

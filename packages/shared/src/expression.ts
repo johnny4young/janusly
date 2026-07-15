@@ -2,8 +2,9 @@
  * Limited-grammar expression evaluator used by `condition` nodes and edge
  * `condition` strings. Recursive-descent parser over a tiny grammar:
  * boolean composition (`||`, `&&`, `!`, parens), comparisons (`===`, `!==`,
- * `==`, `!=`, `>`, `<`, `>=`, `<=`), boolean / number / string literals,
- * `null`, and dotted paths starting with `context.` or `inputs.`.
+ * `==`, `!=`, `>`, `<`, `>=`, `<=`), string/collection operators
+ * (`contains`, `startsWith`, `matches`, `in`), boolean / number / string / array
+ * literals, `null`, and dotted paths starting with `context.` or `inputs.`.
  *
  * Used by the engine (`condition` executor + edge guard), API workflow
  * sanitization, and the web Inspector's Expression Assistant. Keeping this
@@ -31,7 +32,25 @@ export type ExpressionValidationResult =
   | { valid: true; message: null; code: null }
   | { valid: false; message: string; code: ExpressionValidationCode; token?: string };
 
-const comparisonOperators = ["===", "!==", ">=", "<=", "==", "!=", ">", "<"] as const;
+const comparisonOperators = [
+  "===",
+  "!==",
+  ">=",
+  "<=",
+  "==",
+  "!=",
+  ">",
+  "<",
+  "contains",
+  "startsWith",
+  "matches",
+  "in",
+] as const;
+type ComparisonOperator = (typeof comparisonOperators)[number];
+
+const wordComparisonOperators = new Set<ComparisonOperator>(["contains", "startsWith", "matches", "in"]);
+const MAX_GLOB_PATTERN_CHARS = 256;
+const MAX_GLOB_VALUE_CHARS = 16_384;
 
 /**
  * Static-evaluate the expression with empty scopes to surface syntactic /
@@ -39,7 +58,7 @@ const comparisonOperators = ["===", "!==", ">=", "<=", "==", "!=", ">", "<"] as 
  */
 export function validateExpression(expression: string): ExpressionValidationResult {
   try {
-    evaluateExpression(expression, { context: {}, inputs: {} });
+    evaluateExpressionInternal(expression, { context: {}, inputs: {} }, true);
     return { valid: true, message: null, code: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid expression";
@@ -68,24 +87,42 @@ export function validateExpression(expression: string): ExpressionValidationResu
  * either surface to the user (validate path) or treat as falsy with logging.
  */
 export function evaluateExpression(expression: string, scope: ExpressionScope) {
+  return evaluateExpressionInternal(expression, scope, false);
+}
+
+function evaluateExpressionInternal(expression: string, scope: ExpressionScope, validateOnly: boolean) {
   const trimmed = stripOuterParens(expression.trim());
 
   if (!trimmed) {
     throw new Error("Expression cannot be empty");
   }
 
-  return Boolean(evaluateBoolean(trimmed, scope));
+  return Boolean(evaluateBoolean(trimmed, scope, validateOnly));
 }
 
-function evaluateBoolean(expression: string, scope: ExpressionScope): unknown {
+function evaluateBoolean(expression: string, scope: ExpressionScope, validateOnly: boolean): unknown {
   const orParts = splitTopLevel(expression, "||");
-  if (orParts.length > 1) return orParts.some(part => Boolean(evaluateBoolean(part, scope)));
+  if (orParts.length > 1) {
+    // Static validation must visit every branch: runtime short-circuiting would
+    // otherwise hide an invalid contract behind `true || ...`.
+    if (validateOnly) {
+      return orParts.map((part) => Boolean(evaluateBoolean(part, scope, true))).some(Boolean);
+    }
+    return orParts.some((part) => Boolean(evaluateBoolean(part, scope, false)));
+  }
 
   const andParts = splitTopLevel(expression, "&&");
-  if (andParts.length > 1) return andParts.every(part => Boolean(evaluateBoolean(part, scope)));
+  if (andParts.length > 1) {
+    // Mirror the OR handling so `false && invalid` is still rejected by the
+    // authoring validator while runtime evaluation keeps normal short-circuiting.
+    if (validateOnly) {
+      return andParts.map((part) => Boolean(evaluateBoolean(part, scope, true))).every(Boolean);
+    }
+    return andParts.every((part) => Boolean(evaluateBoolean(part, scope, false)));
+  }
 
   const trimmed = stripOuterParens(expression.trim());
-  if (trimmed.startsWith("!")) return !evaluateBoolean(trimmed.slice(1), scope);
+  if (trimmed.startsWith("!")) return !evaluateBoolean(trimmed.slice(1), scope, validateOnly);
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
 
@@ -108,13 +145,21 @@ function evaluateBoolean(expression: string, scope: ExpressionScope): unknown {
         // oxlint-disable-next-line eqeqeq -- The workflow expression grammar intentionally exposes JavaScript loose inequality.
         return left != right;
       case ">":
-        return Number(left) > Number(right);
+        return compareOrdered(left, right, ">", validateOnly);
       case "<":
-        return Number(left) < Number(right);
+        return compareOrdered(left, right, "<", validateOnly);
       case ">=":
-        return Number(left) >= Number(right);
+        return compareOrdered(left, right, ">=", validateOnly);
       case "<=":
-        return Number(left) <= Number(right);
+        return compareOrdered(left, right, "<=", validateOnly);
+      case "contains":
+        return containsValue(left, right, validateOnly);
+      case "startsWith":
+        return startsWithValue(left, right, validateOnly);
+      case "matches":
+        return matchesValue(left, right, validateOnly);
+      case "in":
+        return isValueIn(left, right, validateOnly);
     }
   }
 
@@ -128,6 +173,12 @@ function readValue(token: string, scope: ExpressionScope): unknown {
   if (trimmed === "true") return true;
   if (trimmed === "false") return false;
   if (trimmed === "null") return null;
+
+  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+    const inner = trimmed.slice(1, -1).trim();
+    if (!inner) return [];
+    return splitTopLevel(inner, ",").map(readPrimitiveArrayItem);
+  }
 
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
 
@@ -145,32 +196,203 @@ function readValue(token: string, scope: ExpressionScope): unknown {
   throw new Error(`Unsupported expression token: ${trimmed}`);
 }
 
-function splitComparison(expression: string, operator: string) {
-  const parts = splitTopLevel(expression, operator);
+/** Parse one published primitive-array item; paths and nested arrays stay out. */
+function readPrimitiveArrayItem(token: string): string | number | boolean | null {
+  const trimmed = stripOuterParens(token.trim());
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed === "null") return null;
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  throw new Error(`Unsupported expression token: ${trimmed}`);
+}
+
+function compareOrdered(
+  left: unknown,
+  right: unknown,
+  operator: ">" | "<" | ">=" | "<=",
+  validateOnly: boolean,
+): boolean {
+  // Empty paths are expected while `validateExpression` checks syntax against
+  // empty scopes. A known boolean/null/array partner still proves the contract
+  // invalid; two unknown paths remain syntactically valid.
+  if (left === undefined || right === undefined) {
+    const known = left === undefined ? right : left;
+    if (validateOnly && known !== undefined && typeof known !== "number" && typeof known !== "string") {
+      throw new Error(`Ordered comparison ${operator} requires two numbers or two strings`);
+    }
+    return false;
+  }
+
+  let comparison: number;
+  if (typeof left === "number" && typeof right === "number") {
+    if (!Number.isFinite(left) || !Number.isFinite(right)) {
+      if (validateOnly) throw new Error(`Ordered comparison ${operator} requires finite numbers`);
+      return false;
+    }
+    comparison = left - right;
+  } else if (typeof left === "string" && typeof right === "string") {
+    // JavaScript's relational string comparison is deterministic UTF-16
+    // lexicographic order, which also makes equal-width ISO timestamps useful.
+    comparison = left === right ? 0 : left < right ? -1 : 1;
+  } else {
+    // Preserve the historical mixed numeric-string behavior while refusing
+    // booleans, objects, null, and non-numeric strings instead of silently
+    // comparing `NaN`.
+    const leftNumber = typeof left === "number" || typeof left === "string" ? Number(left) : Number.NaN;
+    const rightNumber = typeof right === "number" || typeof right === "string" ? Number(right) : Number.NaN;
+    if (!Number.isFinite(leftNumber) || !Number.isFinite(rightNumber)) {
+      if (validateOnly) throw new Error(`Ordered comparison ${operator} requires two numbers or two strings`);
+      return false;
+    }
+    comparison = leftNumber - rightNumber;
+  }
+
+  switch (operator) {
+    case ">": return comparison > 0;
+    case "<": return comparison < 0;
+    case ">=": return comparison >= 0;
+    case "<=": return comparison <= 0;
+  }
+}
+
+function containsValue(left: unknown, right: unknown, validateOnly: boolean): boolean {
+  if (left === undefined || right === undefined) return false;
+  if (typeof left === "string" && typeof right === "string") return left.includes(right);
+  if (Array.isArray(left)) return left.includes(right);
+  if (validateOnly) throw new Error("contains requires a string or array on the left");
+  return false;
+}
+
+function startsWithValue(left: unknown, right: unknown, validateOnly: boolean): boolean {
+  if (left === undefined || right === undefined) {
+    const known = left === undefined ? right : left;
+    if (validateOnly && known !== undefined && typeof known !== "string") {
+      throw new Error("startsWith requires two strings");
+    }
+    return false;
+  }
+  if (typeof left === "string" && typeof right === "string") return left.startsWith(right);
+  if (validateOnly) throw new Error("startsWith requires two strings");
+  return false;
+}
+
+function matchesValue(left: unknown, right: unknown, validateOnly: boolean): boolean {
+  if (validateOnly) {
+    if (typeof left === "string" && left.length > MAX_GLOB_VALUE_CHARS) {
+      throw new Error(`matches value exceeds ${MAX_GLOB_VALUE_CHARS} characters`);
+    }
+    if (typeof right === "string" && right.length > MAX_GLOB_PATTERN_CHARS) {
+      throw new Error(`matches pattern exceeds ${MAX_GLOB_PATTERN_CHARS} characters`);
+    }
+  }
+  if (left === undefined || right === undefined) {
+    const known = left === undefined ? right : left;
+    if (validateOnly && known !== undefined && typeof known !== "string") {
+      throw new Error("matches requires a string value and a glob pattern");
+    }
+    return false;
+  }
+  if (typeof left !== "string" || typeof right !== "string") {
+    if (validateOnly) throw new Error("matches requires a string value and a glob pattern");
+    return false;
+  }
+  return matchesGlob(left, right);
+}
+
+function isValueIn(left: unknown, right: unknown, validateOnly: boolean): boolean {
+  // The right operand owns the operator contract, so validate it even when the
+  // left path is unresolved in the empty static-validation scope.
+  if (right === undefined) return false;
+  if (!Array.isArray(right)) {
+    if (validateOnly) throw new Error("in requires an array on the right");
+    return false;
+  }
+  if (left === undefined) return false;
+  return right.includes(left);
+}
+
+/** Bounded whole-string glob matcher (`*` any run, `?` one character). */
+function matchesGlob(value: string, pattern: string): boolean {
+  if (pattern.length > MAX_GLOB_PATTERN_CHARS) {
+    throw new Error(`matches pattern exceeds ${MAX_GLOB_PATTERN_CHARS} characters`);
+  }
+  if (value.length > MAX_GLOB_VALUE_CHARS) {
+    throw new Error(`matches value exceeds ${MAX_GLOB_VALUE_CHARS} characters`);
+  }
+
+  let valueIndex = 0;
+  let patternIndex = 0;
+  let starIndex = -1;
+  let starValueIndex = 0;
+
+  while (valueIndex < value.length) {
+    const patternChar = pattern[patternIndex];
+    if (patternChar === "?" || patternChar === value[valueIndex]) {
+      patternIndex++;
+      valueIndex++;
+      continue;
+    }
+    if (patternChar === "*") {
+      starIndex = patternIndex++;
+      starValueIndex = valueIndex;
+      continue;
+    }
+    if (starIndex >= 0) {
+      patternIndex = starIndex + 1;
+      valueIndex = ++starValueIndex;
+      continue;
+    }
+    return false;
+  }
+
+  while (pattern[patternIndex] === "*") patternIndex++;
+  return patternIndex === pattern.length;
+}
+
+function splitComparison(expression: string, operator: ComparisonOperator) {
+  const parts = wordComparisonOperators.has(operator)
+    ? splitWordComparison(expression, operator)
+    : splitTopLevel(expression, operator);
   if (parts.length !== 2) return null;
   return { left: parts[0] ?? "", right: parts[1] ?? "" };
 }
 
-function splitTopLevel(expression: string, operator: string) {
+function splitWordComparison(expression: string, operator: ComparisonOperator): string[] {
   const parts: string[] = [];
-  let depth = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
   let quote: string | null = null;
   let start = 0;
 
   for (let i = 0; i < expression.length; i++) {
     const char = expression[i];
-    const previous = expression[i - 1];
-
-    if ((char === '"' || char === "'") && previous !== "\\") {
+    if ((char === '"' || char === "'") && !isEscaped(expression, i)) {
       quote = quote === char ? null : quote ?? char;
       continue;
     }
-
     if (quote) continue;
-    if (char === "(") depth++;
-    if (char === ")") depth--;
+    if (char === "(") parenDepth++;
+    else if (char === ")") parenDepth--;
+    else if (char === "[") bracketDepth++;
+    else if (char === "]") bracketDepth--;
 
-    if (depth === 0 && expression.slice(i, i + operator.length) === operator) {
+    const before = expression[i - 1];
+    const after = expression[i + operator.length];
+    if (
+      parenDepth === 0
+      && bracketDepth === 0
+      && expression.slice(i, i + operator.length) === operator
+      && before !== undefined
+      && after !== undefined
+      && /\s/.test(before)
+      && /\s/.test(after)
+    ) {
       parts.push(expression.slice(start, i).trim());
       start = i + operator.length;
       i += operator.length - 1;
@@ -180,6 +402,45 @@ function splitTopLevel(expression: string, operator: string) {
   if (!parts.length) return [expression.trim()];
   parts.push(expression.slice(start).trim());
   return parts;
+}
+
+function splitTopLevel(expression: string, operator: string) {
+  const parts: string[] = [];
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let quote: string | null = null;
+  let start = 0;
+
+  for (let i = 0; i < expression.length; i++) {
+    const char = expression[i];
+
+    if ((char === '"' || char === "'") && !isEscaped(expression, i)) {
+      quote = quote === char ? null : quote ?? char;
+      continue;
+    }
+
+    if (quote) continue;
+    if (char === "(") parenDepth++;
+    else if (char === ")") parenDepth--;
+    else if (char === "[") bracketDepth++;
+    else if (char === "]") bracketDepth--;
+
+    if (parenDepth === 0 && bracketDepth === 0 && expression.slice(i, i + operator.length) === operator) {
+      parts.push(expression.slice(start, i).trim());
+      start = i + operator.length;
+      i += operator.length - 1;
+    }
+  }
+
+  if (!parts.length) return [expression.trim()];
+  parts.push(expression.slice(start).trim());
+  return parts;
+}
+
+function isEscaped(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor--) backslashes++;
+  return backslashes % 2 === 1;
 }
 
 function stripOuterParens(expression: string) {
@@ -198,9 +459,8 @@ function wrapsWholeExpression(expression: string) {
 
   for (let i = 0; i < expression.length; i++) {
     const char = expression[i];
-    const previous = expression[i - 1];
 
-    if ((char === '"' || char === "'") && previous !== "\\") {
+    if ((char === '"' || char === "'") && !isEscaped(expression, i)) {
       quote = quote === char ? null : quote ?? char;
       continue;
     }

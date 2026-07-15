@@ -130,14 +130,32 @@ For true row-by-row CSV processing, use the `csv.fetch` tool instead of `http.re
 
 Evaluates a sandboxed boolean expression and emits `{ result: boolean }`. Combine with edge `condition` to branch the graph.
 
-Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `&&`, `||`, `!`, parentheses, string and numeric literals, and dotted paths under `context.*` and `inputs.*`. Anything else is rejected (no arbitrary JS).
+Supported operators: `===`, `!==`, `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `startsWith`, `matches`, `in`, `&&`, `||`, `!`, and parentheses. Values may be strings, numbers, booleans, `null`, primitive array literals, or dotted/indexed paths under `context.*` and `inputs.*`. Anything else is rejected (no arbitrary JavaScript or function calls).
+
+- `contains` is case-sensitive substring matching for strings and membership for arrays.
+- `startsWith` is a case-sensitive string-prefix check.
+- `matches` is a bounded whole-string glob match: `*` matches any run of characters and `?` matches one character. Patterns are capped at 256 characters and values at 16,384 characters; it is intentionally not a regular-expression engine.
+- `in` checks whether the left value is a member of an array path or literal, for example `'billing' in context.input.tags`.
+- Ordered comparisons are numeric for two numbers and lexicographic for two strings, so equal-width ISO 8601 timestamps compare naturally. A number paired with a numeric string preserves the legacy numeric coercion; incompatible runtime values remain non-fatal and evaluate `false`, while statically invalid literal/operator combinations are rejected during validation.
 
 ```jsonc
 {
-  "id": "is_ok",
+  "id": "is_example_domain",
   "type": "condition",
   "config": {
-    "expression": "context.fetch_user.output.statusCode === 200"
+    "expression": "context.fetch_user.output.email matches '*@example.com'"
+  }
+}
+```
+
+A string-and-collection expression can compose the new operators:
+
+```jsonc
+{
+  "id": "is_priority_customer",
+  "type": "condition",
+  "config": {
+    "expression": "context.fetch_user.output.email matches '*@example.com' && 'priority' in context.fetch_user.output.tags"
   }
 }
 ```

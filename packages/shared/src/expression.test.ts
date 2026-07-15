@@ -6,8 +6,16 @@ describe('evaluateExpression', () => {
     context: {
       http: { output: { statusCode: 200, ok: true } },
       approval: { output: { decision: 'approved' } },
+      customer: {
+        output: {
+          createdAt: '2026-07-14T12:30:00Z',
+          email: 'operator@example.com',
+          message: 'payment failed: card declined',
+          tags: ['priority', 'billing'],
+        },
+      },
     },
-    inputs: { threshold: 10 },
+    inputs: { threshold: 10, allowedTags: ['billing', 'support'] },
   }
 
   it('evaluates allowed comparisons and boolean operators', () => {
@@ -23,6 +31,55 @@ describe('evaluateExpression', () => {
       token: 'process.exit()',
     })
     expect(validateExpression('context.http.output.ok; process.exit()').valid).toBe(false)
+    expect(validateExpression('context.customer.output.message.includes("failed")').valid).toBe(false)
+    expect(validateExpression('context.customer.output.message matches /failed/').valid).toBe(false)
+  })
+
+  it('supports string and collection operators without function calls', () => {
+    expect(evaluateExpression("context.customer.output.message contains 'card declined'", scope)).toBe(true)
+    expect(evaluateExpression("context.customer.output.email startsWith 'operator@'", scope)).toBe(true)
+    expect(evaluateExpression("context.customer.output.message matches 'payment *: card ?eclined'", scope)).toBe(true)
+    expect(evaluateExpression("'billing' in context.customer.output.tags", scope)).toBe(true)
+    expect(evaluateExpression("context.approval.output.decision in ['approved', 'review']", scope)).toBe(true)
+    expect(evaluateExpression("'fraud' in inputs.allowedTags", scope)).toBe(false)
+    expect(evaluateExpression("context.customer.output.tags contains 'priority'", scope)).toBe(true)
+    expect(evaluateExpression('true in [false, true, null, 1]', scope)).toBe(true)
+  })
+
+  it('compares strings lexicographically while preserving numeric comparisons', () => {
+    expect(evaluateExpression("context.customer.output.createdAt >= '2026-07-01T00:00:00Z'", scope)).toBe(true)
+    expect(evaluateExpression("context.customer.output.createdAt < '2027-01-01T00:00:00Z'", scope)).toBe(true)
+    expect(evaluateExpression("'10' < '2'", scope)).toBe(true)
+    expect(evaluateExpression("inputs.threshold > 2", scope)).toBe(true)
+    expect(evaluateExpression("inputs.threshold > '2'", scope)).toBe(true)
+  })
+
+  it('validates operator contracts against empty scopes and keeps runtime type drift non-fatal', () => {
+    expect(validateExpression("context.customer.output.message contains 'failed'").valid).toBe(true)
+    expect(validateExpression("context.customer.output.email startsWith 'operator'").valid).toBe(true)
+    expect(validateExpression("context.customer.output.message matches '*failed*'").valid).toBe(true)
+    expect(validateExpression("context.approval.output.decision in ['approved', 'rejected']").valid).toBe(true)
+    expect(validateExpression("context.customer.output.createdAt >= '2026-01-01'").valid).toBe(true)
+    expect(validateExpression("context.value in 'not-an-array'").valid).toBe(false)
+    expect(validateExpression('context.value startsWith 123').valid).toBe(false)
+    expect(validateExpression('context.value matches 123').valid).toBe(false)
+    expect(validateExpression('context.value > true').valid).toBe(false)
+    expect(validateExpression("false && context.value in 'not-an-array'").valid).toBe(false)
+    expect(validateExpression('true || context.value startsWith 123').valid).toBe(false)
+    expect(validateExpression('context.value in [context.other]').valid).toBe(false)
+    expect(validateExpression("context.value in [['nested']]").valid).toBe(false)
+
+    expect(evaluateExpression('context.http.output.ok > 0', scope)).toBe(false)
+    expect(evaluateExpression("context.http.output.statusCode contains '20'", scope)).toBe(false)
+    expect(evaluateExpression("'approved' in context.approval.output.decision", scope)).toBe(false)
+  })
+
+  it('bounds glob matching and handles long wildcard inputs in linear time', () => {
+    const longScope = { context: { value: `${'a'.repeat(10_000)}z` }, inputs: {} }
+    expect(evaluateExpression("context.value matches 'a*z'", longScope)).toBe(true)
+    expect(validateExpression(`context.value matches '${'*'.repeat(257)}'`).valid).toBe(false)
+    expect(() => evaluateExpression(`'value' matches '${'*'.repeat(257)}'`, scope))
+      .toThrow(/pattern exceeds 256 characters/)
   })
 
   it('refuses to compare a ReadableStream-typed context value (clear error, no silent coercion)', () => {
