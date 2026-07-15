@@ -27,6 +27,107 @@ import {
   TextConfigField,
 } from './quick-config-fields'
 
+// Mirrors `@janusly/shared.workflowVersionMax` without importing the runtime
+// barrel into this lazy authoring chunk and perturbing the production split.
+const SUBWORKFLOW_VERSION_MAX = 2_147_483_647
+
+function isPositiveVersion(value: string): boolean {
+  if (!/^\d+$/.test(value)) return false
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= SUBWORKFLOW_VERSION_MAX
+}
+
+function SubworkflowVersionField({ nodeId, value, onChange }: {
+  nodeId: string
+  value: unknown
+  onChange: (version: number | string | undefined) => void
+}) {
+  const { t } = useT()
+  const renderedValue = value === undefined ? '' : String(value)
+  const [draft, setDraft] = useState(renderedValue)
+  const [invalid, setInvalid] = useState(Boolean(renderedValue) && !isPositiveVersion(renderedValue))
+  const id = fieldId(nodeId, 'subworkflow version')
+  const helperId = `${id}-helper`
+
+  useEffect(() => {
+    setDraft(renderedValue)
+    setInvalid(Boolean(renderedValue) && !isPositiveVersion(renderedValue))
+  }, [nodeId, renderedValue])
+
+  const commit = () => {
+    const normalized = draft.trim()
+    if (!normalized) {
+      setInvalid(false)
+      setDraft('')
+      if (value !== undefined) onChange(undefined)
+      return
+    }
+    if (!isPositiveVersion(normalized)) {
+      setInvalid(true)
+      if (value !== normalized) onChange(normalized)
+      return
+    }
+    const version = Number(normalized)
+    setInvalid(false)
+    setDraft(String(version))
+    if (value !== version) onChange(version)
+  }
+
+  return (
+    <div className="config-field-row" data-testid="subworkflow-version-field">
+      <label className="field-label" htmlFor={id}>{t('rightPanel.quickConfig.subworkflowVersion')}</label>
+      <input
+        id={id}
+        className={`text-field${invalid ? ' text-field--error' : ''}`}
+        type="number"
+        inputMode="numeric"
+        min="1"
+        max={SUBWORKFLOW_VERSION_MAX}
+        step="1"
+        value={draft}
+        placeholder={t('rightPanel.quickConfig.subworkflowVersionPlaceholder') as string}
+        aria-describedby={helperId}
+        aria-invalid={invalid || undefined}
+        aria-errormessage={invalid ? helperId : undefined}
+        onChange={event => {
+          const next = event.target.value
+          const normalized = next.trim()
+          const nextInvalid = Boolean(normalized) && !isPositiveVersion(normalized)
+          setDraft(next)
+          setInvalid(nextInvalid)
+          if (nextInvalid) {
+            // Keep malformed authoring in the canonical workflow draft so
+            // global validation blocks Cmd/Ctrl+S instead of saving the last
+            // valid version hidden behind this local input state.
+            if (value !== normalized) onChange(normalized)
+            return
+          }
+          if (!normalized) {
+            if (value !== undefined) onChange(undefined)
+            return
+          }
+          const version = Number(normalized)
+          if (value !== version) onChange(version)
+        }}
+        onBlur={commit}
+        onKeyDown={event => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            commit()
+          }
+        }}
+      />
+      <p id={helperId} className={invalid ? 'helper-text helper-text--error' : 'helper-text'}>
+        {invalid
+          ? t('rightPanel.quickConfig.subworkflowVersionInvalid')
+          : draft.trim()
+            ? t('rightPanel.quickConfig.subworkflowVersionPinnedHelper', { version: draft.trim() })
+            : t('rightPanel.quickConfig.subworkflowVersionLatestHelper')}
+      </p>
+    </div>
+  )
+}
+
 function ApprovalTimeoutField({ nodeId, valueMs, describedBy, onChange }: {
   nodeId: string
   valueMs: number
@@ -454,7 +555,7 @@ export function QuickConfigEditor({
             aria-describedby={workflowHelperId}
             aria-invalid={isSelfReference || undefined}
             aria-errormessage={isSelfReference ? workflowHelperId : undefined}
-            onChange={event => patch({ workflowId: event.target.value })}
+            onChange={event => replaceKeys(['workflowId', 'version'], { workflowId: event.target.value })}
           />
           <datalist id={workflowListId}>
             {choices.map(workflow => (
@@ -473,6 +574,14 @@ export function QuickConfigEditor({
                 : t('rightPanel.quickConfig.noSubworkflowChoices')}
           </p>
         </div>
+        <SubworkflowVersionField
+          nodeId={nodeId}
+          value={config.version}
+          onChange={version => {
+            if (version === undefined) replaceKeys(['version'], {})
+            else patch({ version })
+          }}
+        />
         <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.overrideInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )

@@ -163,6 +163,59 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
     fireEvent.change(picker, { target: { value: '' } })
     expect(onUpdate).toHaveBeenCalledWith({ workflowId: '' })
   })
+
+  it('pins an exact child version and clears back to latest without leaving a stale key', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="child-flow"
+        type="subworkflow"
+        config={{ workflowId: 'child', version: 2 }}
+        tools={[]}
+        workflows={[{ id: 'child', name: 'Child flow' }]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const version = screen.getByLabelText('Version pin')
+    expect(version).toHaveValue(2)
+    expect(screen.getByText('Pinned to exact version v2. Clear the field to follow latest.')).toBeInTheDocument()
+
+    fireEvent.change(version, { target: { value: '3' } })
+    // Valid drafts reach the workflow store immediately so Cmd/Ctrl+S while
+    // the field retains focus cannot persist the previous pin.
+    expect(onUpdate).toHaveBeenLastCalledWith({ workflowId: 'child', version: 3 })
+
+    fireEvent.change(version, { target: { value: '' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({ workflowId: 'child' })
+  })
+
+  it('rejects a malformed version locally and clears the pin when the child workflow changes', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="child-flow"
+        type="subworkflow"
+        config={{ workflowId: 'child-a', version: 4 }}
+        tools={[]}
+        workflows={[
+          { id: 'child-a', name: 'Child A' },
+          { id: 'child-b', name: 'Child B' },
+        ]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const version = screen.getByLabelText('Version pin')
+    fireEvent.change(version, { target: { value: '1.5' } })
+    fireEvent.blur(version)
+    expect(version).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByText('Enter a whole version number between 1 and 2,147,483,647.')).toBeInTheDocument()
+    expect(onUpdate).toHaveBeenLastCalledWith({ workflowId: 'child-a', version: '1.5' })
+
+    fireEvent.change(screen.getByLabelText('Workflow id'), { target: { value: 'child-b' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({ workflowId: 'child-b' })
+  })
 })
 
 describe('<QuickConfigEditor /> bounded waiting', () => {

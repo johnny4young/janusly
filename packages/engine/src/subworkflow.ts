@@ -13,29 +13,32 @@
  *   when the run flips to a terminal status and has a `parent_run_id`).
  *
  * Invariants:
- * - Multi-tenant: `loadLatestWorkflowVersion` filters on `orgId` so a child
- *   workflow id never resolves cross-tenant.
+ * - Multi-tenant: `loadWorkflowVersion` filters on `orgId` and joins an
+ *   active workflow parent so a child never resolves cross-tenant or through
+ *   a soft-delete tombstone.
  * - Recursion guard: tenant config `subworkflow.maxDepth` (env fallback
- *   `JANUSLY_MAX_SUBWORKFLOW_DEPTH`, default 5). Walks the `runs.parent_run_id`
- *   chain up; refuses to start when the chain already has `>= max` depth.
+ *   `JANUSLY_MAX_SUBWORKFLOW_DEPTH`, default 5). Walks only executable
+ *   `parent_link_kind='subworkflow'` edges; replay provenance is a boundary.
+ *   Refuses to start when the invocation chain already has `>= max` depth.
  *   Defense-in-depth bound at 100 to terminate even on a pathological cycle
  *   (which shouldn't be possible because runs are insert-only).
  * - Audit: child runs spawned by a subworkflow node skip an API audit row —
  *   the parent's subworkflow events provide the trail. Run-level audits remain
  *   user-initiated only.
  * - Notifier failures don't take down the child status flip. We log + emit a
- *   `parent.notify.failed` event on the child, but never throw out — the
- *   operator can reconcile via the existing webhook resume mechanism.
+ *   `parent.notify.failed` event on the child, keep its durable delivery
+ *   marker, and let the terminal-notification reconciler retry the handoff.
  */
 
-import { db, runs, workflowVersions } from "@janusly/db";
+import { db, runNodes, runs, workflows, workflowVersions } from "@janusly/db";
 import { getOrgConfigSnapshot } from "@janusly/data";
-import { eq, and, desc } from "drizzle-orm";
-import { WorkflowSchema, type Workflow } from "@janusly/shared";
+import { eq, and, asc, desc, isNull } from "drizzle-orm";
+import { WorkflowSchema, workflowVersionMax, type Workflow } from "@janusly/shared";
 import {
   appendEvent,
   completeWaitingSubworkflowNode,
   failWaitingSubworkflowNode,
+  reattachFailedSubworkflowNode,
   setSubworkflowNotifier,
   updateRunStatusFromNodes,
 } from "./persistence";
@@ -50,20 +53,38 @@ import { WorkflowRuntime } from "./core/runtime";
 const DEPTH_WALKER_MAX = 100;
 
 /**
- * Walk `runs.parent_run_id` upward from `runId` and count parent links.
- * Returns 0 for top-level runs.
+ * Walk executable subworkflow parent links upward from `runId`. Replay-lab
+ * lineage deliberately terminates the walk so validation doesn't inherit the
+ * production source run's nesting budget.
  */
 export async function computeSubworkflowDepth(runId: string): Promise<number> {
   let depth = 0;
   let current: string | null = runId;
   while (current) {
-    const row: Array<{ parentRunId: string | null }> = await db
-      .select({ parentRunId: runs.parentRunId })
+    const row: Array<{
+      parentRunId: string | null;
+      parentNodeId: string | null;
+      parentLinkKind: string | null;
+      replayMode: string | null;
+    }> = await db
+      .select({
+        parentRunId: runs.parentRunId,
+        parentNodeId: runs.parentNodeId,
+        parentLinkKind: runs.parentLinkKind,
+        replayMode: runs.replayMode,
+      })
       .from(runs)
       .where(eq(runs.id, current))
       .limit(1);
     const parent: string | null = row[0]?.parentRunId ?? null;
-    if (parent) depth += 1;
+    const executableLink = row[0]?.parentLinkKind === "subworkflow"
+      || (
+        row[0]?.parentLinkKind == null
+        && row[0]?.replayMode == null
+        && row[0]?.parentNodeId != null
+      );
+    if (!parent || !executableLink) break;
+    depth += 1;
     current = parent;
     if (depth > DEPTH_WALKER_MAX) {
       throw new Error(`Subworkflow depth walker bounded at ${DEPTH_WALKER_MAX} (cycle?)`);
@@ -110,18 +131,67 @@ export function sanitizeForwardedInput(input: unknown, redactedValues: string[])
 }
 
 /**
- * Look up the latest version of a saved workflow by id, scoped to `orgId`.
- * Returns `null` when no version exists for that (orgId, workflowId).
+ * Parse an optional exact version pin. Absent means "latest"; every authored
+ * value must fit PostgreSQL's positive integer range so the persisted DAG cannot silently
+ * select a different version than the operator intended.
  */
-export async function loadLatestWorkflowVersion(workflowId: string, orgId: string): Promise<Workflow | null> {
+export function resolveSubworkflowVersion(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > workflowVersionMax) {
+    throw new Error(`subworkflow.config.version must be an integer between 1 and ${workflowVersionMax}`);
+  }
+  return value;
+}
+
+/** Normalize the authored child id once so validation and lookup agree. */
+export function resolveSubworkflowId(value: unknown): string {
+  const workflowId = typeof value === "string" ? value.trim() : "";
+  if (!workflowId) throw new Error("subworkflow.config.workflowId is required");
+  return workflowId;
+}
+
+export type LoadedWorkflowVersion = {
+  workflow: Workflow;
+  version: number;
+  versionId: string;
+};
+
+/**
+ * Look up an exact or latest version of an active saved workflow, scoped to
+ * `orgId`. Returns `null` when the workflow, requested version, or active
+ * parent row does not exist.
+ */
+export async function loadWorkflowVersion(
+  workflowId: string,
+  orgId: string,
+  version?: number,
+): Promise<LoadedWorkflowVersion | null> {
+  const predicates = [
+    eq(workflowVersions.workflowId, workflowId),
+    eq(workflowVersions.orgId, orgId),
+    isNull(workflows.deletedAt),
+  ];
+  if (version !== undefined) predicates.push(eq(workflowVersions.version, version));
   const rows = await db
-    .select()
+    .select({
+      dagJson: workflowVersions.dagJson,
+      version: workflowVersions.version,
+      versionId: workflowVersions.id,
+    })
     .from(workflowVersions)
-    .where(and(eq(workflowVersions.workflowId, workflowId), eq(workflowVersions.orgId, orgId)))
+    .innerJoin(workflows, and(
+      eq(workflows.id, workflowVersions.workflowId),
+      eq(workflows.orgId, workflowVersions.orgId),
+    ))
+    .where(and(...predicates))
     .orderBy(desc(workflowVersions.version))
     .limit(1);
   if (!rows[0]) return null;
-  return WorkflowSchema.parse(rows[0].dagJson);
+  return {
+    workflow: WorkflowSchema.parse(rows[0].dagJson),
+    version: rows[0].version,
+    versionId: rows[0].versionId,
+  };
 }
 
 /** Read the captured `runs.inputJson` (workflow + run-start input) for a run. */
@@ -145,6 +215,8 @@ async function getRunRow(runId: string) {
       orgId: runs.orgId,
       parentRunId: runs.parentRunId,
       parentNodeId: runs.parentNodeId,
+      parentLinkKind: runs.parentLinkKind,
+      replayMode: runs.replayMode,
       outputJson: runs.outputJson,
       inputJson: runs.inputJson,
     })
@@ -154,15 +226,37 @@ async function getRunRow(runId: string) {
   return rows[0] ?? null;
 }
 
+async function getParentNodeRow(runId: string, nodeId: string) {
+  const rows = await db
+    .select({
+      status: runNodes.status,
+      stateJson: runNodes.stateJson,
+      errorJson: runNodes.errorJson,
+    })
+    .from(runNodes)
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Return the earliest persisted failed node so the parent retains the root diagnostic. */
+async function getFirstChildFailure(runId: string): Promise<{ nodeId: string; error: unknown } | null> {
+  const rows = await db
+    .select({ nodeId: runNodes.nodeId, error: runNodes.errorJson })
+    .from(runNodes)
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.status, "failed")))
+    .orderBy(asc(runNodes.finishedAt), asc(runNodes.nodeId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 /**
  * Subworkflow executor. Validates depth, loads the child workflow, kicks off
  * the child run, and pauses the parent's node until the child terminates.
  */
 export const subworkflowExecutor: NodeExecutor = async (ctx) => {
-  const workflowId = typeof ctx.config?.workflowId === "string" ? ctx.config.workflowId : "";
-  if (!workflowId) {
-    throw new Error("subworkflow.config.workflowId is required");
-  }
+  const workflowId = resolveSubworkflowId(ctx.config?.workflowId);
+  const requestedVersion = resolveSubworkflowVersion(ctx.config?.version);
 
   // 1. Recursion guard — fail fast before spawning anything.
   const depth = await computeSubworkflowDepth(ctx.runId);
@@ -172,9 +266,10 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
   }
 
   // 2. Load the child workflow (org-scoped).
-  const childWorkflow = await loadLatestWorkflowVersion(workflowId, ctx.orgId);
-  if (!childWorkflow) {
-    throw new Error(`Subworkflow not found: ${workflowId} (org: ${ctx.orgId})`);
+  const childVersion = await loadWorkflowVersion(workflowId, ctx.orgId, requestedVersion);
+  if (!childVersion) {
+    const versionSuffix = requestedVersion === undefined ? "" : ` version ${requestedVersion}`;
+    throw new Error(`Subworkflow not found: ${workflowId}${versionSuffix} (org: ${ctx.orgId})`);
   }
 
   // 3. Compute forwarded input. config.input wins; otherwise inherit parent's input.
@@ -193,40 +288,55 @@ export const subworkflowExecutor: NodeExecutor = async (ctx) => {
   //    doesn't satisfy them — the parent's executor surfaces that as a node
   //    failure (caller's runtime handles the throw).
   const child = await startRun({
-    ...childWorkflow,
+    ...childVersion.workflow,
     input: forwardedInput,
+    versionId: childVersion.versionId,
     orgId: ctx.orgId,
     parentRunId: ctx.runId,
     parentNodeId: ctx.nodeId,
+    replayMode: ctx.dryRun ? "validation" : null,
+    parentCheckpoint: {
+      waitingMetadata: {
+        kind: "subworkflow",
+        childWorkflowId: workflowId,
+        childWorkflowVersion: childVersion.version,
+        childWorkflowVersionId: childVersion.versionId,
+        traceId,
+      },
+      startedEventPayload: {
+        childWorkflowId: workflowId,
+        childWorkflowVersion: childVersion.version,
+        childWorkflowVersionId: childVersion.versionId,
+        traceId,
+        depth: depth + 1,
+      },
+      ...(ctx.recoveryClaimToken ? { recoveryClaimToken: ctx.recoveryClaimToken } : {}),
+    },
     traceId,
-  });
-
-  await appendEvent(ctx.runId, ctx.nodeId, "node.subworkflow.started", {
-    childRunId: child.runId,
-    childWorkflowId: workflowId,
-    traceId,
-    depth: depth + 1,
   });
 
   return {
     status: "waiting",
+    checkpointPersisted: true,
     reason: "Waiting for subworkflow",
-    metadata: {
-      kind: "subworkflow",
-      childRunId: child.runId,
-      childWorkflowId: workflowId,
-      traceId,
-    },
+    metadata: child.parentWaitingMetadata,
   };
 };
 
 /** Lazy `WorkflowRuntime` for the notifier's `enqueueReadyNodes` call. Mirrors `resume-run.ts`. */
 let runtime: WorkflowRuntime | null = null;
+let queueAdapter: BullMQQueueAdapter | null = null;
+
+function getQueueAdapter(): BullMQQueueAdapter {
+  if (queueAdapter) return queueAdapter;
+  queueAdapter = new BullMQQueueAdapter();
+  return queueAdapter;
+}
 function getRuntime(): WorkflowRuntime {
   if (runtime) return runtime;
   runtime = new WorkflowRuntime(
     new PostgresExecutionStore(),
-    new BullMQQueueAdapter(),
+    getQueueAdapter(),
     { execute: async () => ({}) },
   );
   return runtime;
@@ -243,47 +353,119 @@ function getRuntime(): WorkflowRuntime {
  * Errors are caught and emitted as a `parent.notify.failed` event on the
  * **child** so they're auditable; the child's status flip is never blocked.
  */
-export async function notifyParentOnTerminal(childRunId: string, childStatus: "succeeded" | "failed" | "cancelled"): Promise<void> {
+export async function notifyParentOnTerminal(
+  childRunId: string,
+  childStatus: "succeeded" | "failed" | "cancelled",
+): Promise<boolean> {
   let child: Awaited<ReturnType<typeof getRunRow>>;
   try {
     child = await getRunRow(childRunId);
   } catch (err) {
     await safeAppendChildEvent(childRunId, err);
-    return;
+    return false;
   }
-  if (!child?.parentRunId || !child?.parentNodeId) return; // Top-level run.
+  const executableLink = child?.parentLinkKind === "subworkflow"
+    || (child?.parentLinkKind == null && child?.replayMode == null);
+  if (!child?.parentRunId || !child?.parentNodeId || !executableLink) {
+    return true; // Top-level or trace-only replay lineage.
+  }
+  if (child.status !== childStatus) return false; // A replay superseded this leased terminal generation.
 
   try {
     const parent = await getRunRow(child.parentRunId);
-    if (!parent) return; // Parent gone.
-    if (isTerminalRunStatus(parent.status)) return; // Parent was cancelled/finished while child kept running.
+    if (!parent) return true; // Parent gone.
 
     if (childStatus === "succeeded") {
       const childOutput = (child.outputJson as Record<string, unknown> | null) ?? {};
+      if (parent.status === "failed" || parent.status === "running") {
+        const reattached = await reattachFailedSubworkflowNode(
+          parent.id,
+          child.parentNodeId,
+          childRunId,
+          childOutput,
+        );
+        if (reattached.completed) {
+          if (reattached.readyToContinue) await enqueueParentReadyNodes(parent);
+          return true;
+        }
+      }
+      if (parent.status !== "failed" && isTerminalRunStatus(parent.status)) return true;
       const completed = await completeWaitingSubworkflowNode(
         parent.id,
         child.parentNodeId,
         childRunId,
         childOutput,
       );
-      if (!completed) return;
+      if (completed) {
+        if (parent.status !== "failed") await enqueueParentReadyNodes(parent);
+        return true;
+      }
 
-      const parentInputJson = parent.inputJson as { workflow?: unknown } | null;
-      const parentWorkflow = WorkflowSchema.parse(parentInputJson?.workflow);
-      await getRuntime().enqueueReadyNodes({ runId: parent.id, workflow: parentWorkflow });
+      // A crash can land after the parent node CAS but before DAG readiness.
+      // Treat an already-succeeded exact checkpoint as replayable work and
+      // rerun readiness before acknowledging the child outbox marker.
+      const [latestParent, parentNode] = await Promise.all([
+        getRunRow(parent.id),
+        getParentNodeRow(parent.id, child.parentNodeId),
+      ]);
+      if (!latestParent || !parentNode) return true;
+      const state = parentNode.stateJson && typeof parentNode.stateJson === "object"
+        ? parentNode.stateJson as Record<string, unknown>
+        : null;
+      const completedSubworkflow = state?.subworkflow && typeof state.subworkflow === "object"
+        ? state.subworkflow as Record<string, unknown>
+        : null;
+      if (parentNode.status === "succeeded" && completedSubworkflow?.childRunId === childRunId) {
+        if (latestParent.status === "running") await enqueueParentReadyNodes(latestParent);
+        return true;
+      }
+      if (isTerminalRunStatus(latestParent.status)) return true;
+      return false;
     } else {
+      // A sibling may have failed the parent first. Its terminal status must
+      // not hide this exact waiting child generation, otherwise replaying the
+      // sibling could reopen a parent that still contains an unresolved wait.
+      if (parent.status !== "failed" && isTerminalRunStatus(parent.status)) return true;
+      const childFailure = childStatus === "failed" ? await getFirstChildFailure(childRunId) : null;
       const failed = await failWaitingSubworkflowNode(
         parent.id,
         child.parentNodeId,
         childRunId,
         childStatus,
+        childFailure,
       );
-      if (!failed) return;
-      await updateRunStatusFromNodes(parent.id);
+      if (failed) {
+        await updateRunStatusFromNodes(parent.id);
+        return true;
+      }
+
+      // The parent-node failure may have committed before a crash prevented
+      // the run rollup. Re-run that idempotent rollup before acknowledging.
+      const [latestParent, parentNode] = await Promise.all([
+        getRunRow(parent.id),
+        getParentNodeRow(parent.id, child.parentNodeId),
+      ]);
+      if (!latestParent || !parentNode) return true;
+      const error = parentNode.errorJson && typeof parentNode.errorJson === "object"
+        ? parentNode.errorJson as Record<string, unknown>
+        : null;
+      if (parentNode.status === "failed" && error?.childRunId === childRunId) {
+        await updateRunStatusFromNodes(parent.id);
+        return true;
+      }
+      if (isTerminalRunStatus(latestParent.status)) return true;
+      return false;
     }
   } catch (err) {
     await safeAppendChildEvent(childRunId, err);
+    return false;
   }
+}
+
+async function enqueueParentReadyNodes(parent: NonNullable<Awaited<ReturnType<typeof getRunRow>>>): Promise<void> {
+  const parentInputJson = parent.inputJson as { workflow?: unknown } | null;
+  const parentWorkflow = WorkflowSchema.parse(parentInputJson?.workflow);
+  await getRuntime().enqueueReadyNodes({ runId: parent.id, workflow: parentWorkflow });
 }
 
 function isTerminalRunStatus(status: string): boolean {

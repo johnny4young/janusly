@@ -14,12 +14,13 @@
 
 import {
   appendEvent,
+  claimNodeForExecution,
   getRunContext,
   getRunMetadata,
   getRunStatus,
   markExecutingNodeFailed,
   markExecutingNodeQueued,
-  markNodeRunning,
+  markQueuePublicationSucceeded,
   markNodeSkipped,
   markNodeSucceeded,
   markNodeSucceededWithEvent,
@@ -48,16 +49,38 @@ export class PostgresExecutionStore implements ExecutionStore {
     return getNodeStatus(runId, nodeId) as Promise<NodeStatus>;
   }
 
-  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string) {
-    return markExecutingNodeQueued(runId, nodeId, attempt, recoveryClaimToken);
+  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string, delayMs?: number) {
+    return markExecutingNodeQueued(runId, nodeId, attempt, recoveryClaimToken, delayMs);
   }
 
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number) {
     return tryClaimNodeForQueue(runId, nodeId, attempt);
   }
 
-  markNodeRunning(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean> {
-    return markNodeRunning(runId, nodeId, attempt, recoveryClaimToken);
+  claimNodeForExecution(
+    runId: string,
+    nodeId: string,
+    attempt?: number,
+    recoveryClaimToken?: string,
+    publicationGeneration?: number,
+  ) {
+    return claimNodeForExecution(runId, nodeId, attempt, recoveryClaimToken, publicationGeneration);
+  }
+
+  markQueuePublicationSucceeded(
+    runId: string,
+    nodeId: string,
+    attempt: number,
+    publicationGeneration: number,
+    recoveryClaimToken?: string,
+  ) {
+    return markQueuePublicationSucceeded(
+      runId,
+      nodeId,
+      attempt,
+      publicationGeneration,
+      recoveryClaimToken,
+    );
   }
 
   markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string) {

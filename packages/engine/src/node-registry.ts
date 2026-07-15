@@ -86,6 +86,8 @@ export type NodeContext = {
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
   redactedValues?: string[];
+  /** Active DLQ replay generation, used by executor-owned atomic checkpoints. */
+  recoveryClaimToken?: string;
   /** Immutable policy copied from the run's workflow snapshot. Executors use
    * it only for scopes that cannot be bound at dispatcher time. */
   templatePolicy?: "lenient" | "strict";
@@ -126,7 +128,13 @@ export function isWriteSideNode(node: { type: string; config?: { method?: unknow
 
 export type NodeExecutionResult =
   | { status: "completed"; output?: Record<string, unknown> }
-  | { status: "waiting"; reason?: string; metadata?: Record<string, unknown> };
+  | {
+      status: "waiting";
+      reason?: string;
+      metadata?: Record<string, unknown>;
+      /** The executor already committed this waiting checkpoint atomically with owned side effects. */
+      checkpointPersisted?: boolean;
+    };
 
 export type NodeExecutor = (ctx: NodeContext) => Promise<NodeExecutionResult>;
 

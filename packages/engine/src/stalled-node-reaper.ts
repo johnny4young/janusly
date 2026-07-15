@@ -4,10 +4,11 @@
  * (kill -9 / OOM / container eviction) while a node is executing.
  *
  * Why it's needed:
- *   `markNodeRunning` flips a node `queued → running` atomically, then the
+ *   `claimNodeForExecution` flips a node `queued → running` atomically while
+ *   holding the parent-run lock, then the
  *   executor runs. If the worker dies mid-execution the `run_nodes` row is
  *   left `running`. BullMQ redelivers the stalled job, but the redelivered
- *   `executeQueuedNode` calls `markNodeRunning` again — which only matches a
+ *   `executeQueuedNode` calls `claimNodeForExecution` again — which only matches a
  *   `queued` row — so the claim fails, a `node.skipped` event is emitted, and
  *   the job "completes". The node stays `running` forever, nothing ever calls
  *   `updateRunStatusFromNodes` for that run again, and the run is stuck in a

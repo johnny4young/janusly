@@ -1,5 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { decideForwardedInput, maxSubworkflowDepth, sanitizeForwardedInput } from './subworkflow'
+import { workflowVersionMax } from '@janusly/shared'
+import {
+  decideForwardedInput,
+  maxSubworkflowDepth,
+  resolveSubworkflowId,
+  resolveSubworkflowVersion,
+  sanitizeForwardedInput,
+} from './subworkflow'
+
+describe('resolveSubworkflowVersion', () => {
+  it('uses latest when the pin is absent', () => {
+    expect(resolveSubworkflowVersion(undefined)).toBeUndefined()
+  })
+
+  it('accepts positive pins through the PostgreSQL integer boundary', () => {
+    expect(resolveSubworkflowVersion(3)).toBe(3)
+    expect(resolveSubworkflowVersion(workflowVersionMax)).toBe(workflowVersionMax)
+  })
+
+  it.each([0, -1, 1.5, workflowVersionMax + 1, Number.MAX_SAFE_INTEGER + 1, '3', null])('rejects an invalid pin: %s', (value) => {
+    expect(() => resolveSubworkflowVersion(value)).toThrow('integer between')
+  })
+})
+
+describe('resolveSubworkflowId', () => {
+  it('normalizes surrounding whitespace before lookup', () => {
+    expect(resolveSubworkflowId('  child-flow  ')).toBe('child-flow')
+  })
+
+  it.each(['', '   ', null, 4])('rejects a missing child id: %s', value => {
+    expect(() => resolveSubworkflowId(value)).toThrow('workflowId is required')
+  })
+})
 
 describe('maxSubworkflowDepth', () => {
   const original = process.env.JANUSLY_MAX_SUBWORKFLOW_DEPTH

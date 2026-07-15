@@ -103,6 +103,16 @@ import {
   registerWaitingCheckpointReconciler,
   WAITING_CHECKPOINT_RECONCILER_JOB_NAME,
 } from "./waiting-checkpoint-reconciler";
+import {
+  handleQueuePublicationReconcilerTrigger,
+  QUEUE_PUBLICATION_RECONCILER_JOB_NAME,
+  registerQueuePublicationReconciler,
+} from "./queue-publication-reconciler";
+import {
+  handleSubworkflowTerminalReconcilerTrigger,
+  registerSubworkflowTerminalReconciler,
+  SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME,
+} from "./subworkflow-terminal-reconciler";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 import { withSpan } from "./observability/tracer";
@@ -241,6 +251,26 @@ try {
   console.error("[waiting-checkpoint-reconciler] scheduler registration failed", err);
 }
 
+// Once-per-minute repair for node generations whose deterministic BullMQ job
+// was not durably acknowledged after the Postgres queue transition. Covers a
+// process crash, Redis publication failure, and failed-parent job consumption.
+try {
+  const registered = await registerQueuePublicationReconciler();
+  if (registered) console.log("[queue-publication-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[queue-publication-reconciler] scheduler registration failed", err);
+}
+
+// Once-per-minute repair for terminal child runs whose exact parent-node
+// handoff was not durably acknowledged after the child status transition.
+// Covers crashes between status commit, parent-node CAS, and DAG readiness.
+try {
+  const registered = await registerSubworkflowTerminalReconciler();
+  if (registered) console.log("[subworkflow-terminal-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[subworkflow-terminal-reconciler] scheduler registration failed", err);
+}
+
 // Register the usage_events writer once at boot. Every LLM call
 // from the `ai` node and `agent` planner fires it fire-and-forget.
 setUsageRecorder(recordUsage);
@@ -333,8 +363,8 @@ const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),
   new BullMQQueueAdapter(),
   {
-    execute: async ({ runId, node }) => {
-      return executeNode({ runId, node });
+    execute: async ({ runId, node, recoveryClaimToken }) => {
+      return executeNode({ runId, node, recoveryClaimToken });
     },
   }
 );
@@ -347,6 +377,7 @@ type ResolvedJob =
       node: z.infer<typeof NodeSchema>;
       workflow: Workflow;
       attempt: number;
+      publicationGeneration: number;
       recoveryClaimToken?: string;
     };
 
@@ -382,9 +413,22 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   ) {
     throw new UnrecoverableError("Invalid job data: invalid recoveryClaimToken");
   }
+  if (
+    obj.publicationGeneration !== undefined
+    && (
+      typeof obj.publicationGeneration !== "number"
+      || !Number.isSafeInteger(obj.publicationGeneration)
+      || obj.publicationGeneration < 0
+    )
+  ) {
+    throw new UnrecoverableError("Invalid job data: invalid publicationGeneration");
+  }
   const attempt = typeof obj.attempt === "number" && Number.isSafeInteger(obj.attempt) && obj.attempt > 0
     ? obj.attempt
     : 1;
+  const publicationGeneration = typeof obj.publicationGeneration === "number"
+    ? obj.publicationGeneration
+    : 0;
 
   const { found, workflow: rawWorkflow } = await loadRunWorkflowRaw(obj.runId);
   if (!found) {
@@ -405,6 +449,7 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
     node,
     workflow: parsed.workflow,
     attempt,
+    publicationGeneration,
     ...(typeof obj.recoveryClaimToken === "string" ? { recoveryClaimToken: obj.recoveryClaimToken } : {}),
   };
 }
@@ -462,6 +507,14 @@ export const worker = new Worker(
       await handleWaitingCheckpointReconcilerTrigger();
       return;
     }
+    if (job.name === QUEUE_PUBLICATION_RECONCILER_JOB_NAME) {
+      await handleQueuePublicationReconcilerTrigger();
+      return;
+    }
+    if (job.name === SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME) {
+      await handleSubworkflowTerminalReconcilerTrigger();
+      return;
+    }
     // One-shot delayed job — scheduled on demand from the
     // `memory.consent.revoked` audit specialization in
     // `apps/api/src/routes/org-routes.ts`. No boot registration here:
@@ -473,10 +526,17 @@ export const worker = new Worker(
     }
     const resolved = await resolveJobData(job.data);
     if (resolved.skip) return;
-    const { runId, node, workflow, attempt, recoveryClaimToken } = resolved;
+    const { runId, node, workflow, attempt, recoveryClaimToken, publicationGeneration } = resolved;
     await withSpan(
       "workflow.node.execute",
-      () => runtime.executeQueuedNode({ runId, node, workflow, attempt, recoveryClaimToken }),
+      () => runtime.executeQueuedNode({
+        runId,
+        node,
+        workflow,
+        attempt,
+        publicationGeneration,
+        recoveryClaimToken,
+      }),
       { "run.id": runId, "node.id": node.id, "node.type": node.type },
     );
   },

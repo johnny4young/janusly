@@ -136,8 +136,10 @@ function renderNodeConfig(
  * secret/env tracking, dispatch to the executor, and redact resolved values
  * before returning or rethrowing.
  */
-export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node">): Promise<NodeExecutionResult> {
-  const { node, runId } = input;
+export async function executeNode(
+  input: Pick<ExecuteNodeInput, "runId" | "node" | "recoveryClaimToken">,
+): Promise<NodeExecutionResult> {
+  const { node, runId, recoveryClaimToken } = input;
 
   const executor = nodeRegistry[node.type];
 
@@ -235,6 +237,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
         config: parsedConfig,
         context,
         redactedValues,
+        recoveryClaimToken,
         dryRun,
         templatePolicy: meta.templatePolicy ?? "lenient",
       }),
@@ -257,6 +260,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     return {
       status: "waiting",
       metadata: redactValues(metadata, redactedValues),
+      ...(result.checkpointPersisted ? { checkpointPersisted: true } : {}),
     };
   }
 

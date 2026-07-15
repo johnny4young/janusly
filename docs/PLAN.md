@@ -286,7 +286,7 @@ Pre-packaged connections (GitHub / Slack / Filesystem) remain a follow-up.
 | `webhook` | Waits for external resume. | Add timeout-with-fallback, signed webhook payloads, replay protection. |
 | `approval` | Waits for human. | Add SLAs, reminder schedule, role-restricted approvers, mobile push. |
 | `human_form` | Waits for structured human input and resumes with validated form data. | Improve generated form ergonomics and role-targeted assignment. |
-| `subworkflow` | Calls another workflow by id with input mapping. | Add richer output contracts and version pinning. |
+| `subworkflow` | Calls an active same-tenant workflow by id, optionally pins an exact immutable version, maps input/output, preserves child diagnostics, and safely reattaches a recovered child. | Add richer statically typed output contracts. |
 | `wait_until` | Pauses by ISO duration. | Add natural-language authoring and calendar-aware waits. |
 | `parallel_fork` / `join` | Explicit fan-out/fan-in primitives. | Add stronger branch previews and partial-join UX. |
 | `schedule` | Cron trigger persisted through `schedule_entries` and BullMQ schedulers. | Add timezone presets, next-fire previews, and natural-language interval authoring. |

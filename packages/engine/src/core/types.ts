@@ -91,6 +91,8 @@ export type NodeExecutionResult =
       status: "waiting";
       output?: unknown;
       metadata?: unknown;
+      /** The executor atomically persisted this checkpoint before returning. */
+      checkpointPersisted?: boolean;
     };
 
 /** Input handed to the node executor — `node-registry.ts:NodeContext` extends with `orgId`. */
@@ -99,6 +101,8 @@ export type ExecuteNodeInput = {
   node: WorkflowNode;
   context: RunContext;
   attempt: number;
+  /** Present only for a DLQ replay; binds executor-owned checkpoints to the active generation. */
+  recoveryClaimToken?: string;
 };
 
 /** Job payload pulled off the BullMQ queue. */
@@ -107,6 +111,8 @@ export type ExecuteQueuedNodeInput = {
   workflow: Workflow;
   node: WorkflowNode;
   attempt?: number;
+  /** Physical BullMQ delivery generation; legacy jobs default to zero. */
+  publicationGeneration?: number;
   /** Present only for a DLQ replay; rejects stale workers from an older replay generation. */
   recoveryClaimToken?: string;
 };
@@ -114,8 +120,8 @@ export type ExecuteQueuedNodeInput = {
 /**
  * Input the runtime hands to `QueueAdapter.enqueueNode` to schedule a node.
  *
- * The payload is deliberately SLIM — identifiers plus an optional replay
- * generation token. The full
+ * The payload is deliberately SLIM — identifiers, logical attempt, physical
+ * publication generation, and an optional replay token. The full
  * workflow is NOT shipped in every BullMQ job: the worker reloads it once per
  * job from `runs.inputJson.workflow` (the authoritative snapshot, updated on
  * replay) and resolves the node by id. This keeps a 100-node run from writing
@@ -126,8 +132,17 @@ export type EnqueueNodeInput = {
   nodeId: string;
   delayMs?: number;
   attempt?: number;
+  /** Durable physical-publication generation; retries of one publish reuse it. */
+  publicationGeneration?: number;
   /** DLQ replay generation; retained across engine retries. */
   recoveryClaimToken?: string;
+};
+
+/** Persisted identity required to publish one physical queue delivery. */
+export type QueuePublicationClaim = {
+  attempt: number;
+  recoveryClaimToken: string | null;
+  publicationGeneration: number;
 };
 
 /** Payload the queue adapter writes when a node exhausts its retries. */
@@ -185,10 +200,32 @@ export interface ExecutionStore {
   /** Stable per-run metadata (orgId/workflow/createdBy) — `null` when the run row is absent. */
   getRunMetadata(runId: string): Promise<RunMetadata | null>;
   getNodeStatus(runId: string, nodeId: string): Promise<NodeStatus>;
-  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean>;
-  tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<boolean>;
-  /** Conditional `queued → running` transition. Returns `true` on a successful claim, `false` when the row had already advanced past `queued`. */
-  markNodeRunning(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string): Promise<boolean>;
+  markNodeQueued(
+    runId: string,
+    nodeId: string,
+    attempt?: number,
+    recoveryClaimToken?: string,
+    delayMs?: number,
+  ): Promise<QueuePublicationClaim | null>;
+  tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number): Promise<{
+    attempt: number;
+    recoveryClaimToken: string | null;
+    publicationGeneration: number;
+  } | null>;
+  claimNodeForExecution(
+    runId: string,
+    nodeId: string,
+    attempt?: number,
+    recoveryClaimToken?: string,
+    publicationGeneration?: number,
+  ): Promise<"claimed" | "not_claimed" | "run_failed" | "run_cancelled" | "run_terminal">;
+  markQueuePublicationSucceeded(
+    runId: string,
+    nodeId: string,
+    attempt: number,
+    publicationGeneration: number,
+    recoveryClaimToken?: string,
+  ): Promise<boolean>;
   markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string): Promise<boolean>;
   /** Combine the `succeeded` transition + its `node.succeeded` event in one transaction (the hot completion path). */
   markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number, recoveryClaimToken?: string): Promise<boolean>;

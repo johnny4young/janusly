@@ -4,7 +4,7 @@
  * that a stale worker is unable to credit a newer replay claim.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { queryOperatorRecoveryCount, queryRecoveryLedger } from "@janusly/data";
@@ -18,10 +18,12 @@ import {
   runNodes,
 } from "@janusly/db";
 import {
+  cancelRun,
+  claimNodeForExecution,
   claimReplayTransition,
   failStalledRunningNode,
+  markExecutingNodeQueued,
   markExecutingNodeFailed,
-  markNodeRunning,
   markNodeSucceededWithEvent,
   ReplayNotClaimableError,
 } from "../persistence";
@@ -34,11 +36,31 @@ const SEEDED_RUN_IDS = [
   "midretry",
   "running-node",
   "running",
+  "cancel-race",
+  "retry-cancel-race",
   "concurrent",
   "recovery-failed",
   "recovery-succeeded",
   "stale-generation",
 ].map((suffix) => `${RUN_TAG}-${suffix}`);
+
+async function waitForBlockedRunNodeUpdate(): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await db.execute(sql<{ waiting: boolean }>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_stat_activity
+        WHERE pid <> pg_backend_pid()
+          AND datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%update "run_nodes"%'
+      ) AS waiting
+    `);
+    if (rows[0]?.waiting) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error("Replay claim did not reach the blocked run_nodes update");
+}
 
 async function seedRun(runId: string, runStatus: string, nodeStatus: string): Promise<void> {
   await db.insert(runs).values({
@@ -112,12 +134,15 @@ describe("claimReplayTransition (real Postgres)", () => {
     const runId = `${RUN_TAG}-happy`;
     await seedRun(runId, "failed", "failed");
 
-    const token = await claimReplayTransition(runId, "n1");
+    const claim = await claimReplayTransition(runId, "n1");
 
-    expect(token).toMatch(/^[0-9a-f-]{36}$/);
+    expect(claim).toMatchObject({
+      recoveryClaimToken: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      publicationGeneration: 1,
+    });
     const state = await readState(runId);
     expect(state).toMatchObject({ run: "running", node: "queued", attempts: 1 });
-    expect(state.recoveryClaimToken).toBe(token);
+    expect(state.recoveryClaimToken).toBe(claim.recoveryClaimToken);
   });
 
   it("rejects a cancelled run and rolls back without touching the node", async () => {
@@ -149,8 +174,76 @@ describe("claimReplayTransition (real Postgres)", () => {
     const runId = `${RUN_TAG}-running`;
     await seedRun(runId, "running", "failed");
 
-    await expect(claimReplayTransition(runId, "n1")).resolves.toMatch(/^[0-9a-f-]{36}$/);
+    await expect(claimReplayTransition(runId, "n1")).resolves.toMatchObject({
+      recoveryClaimToken: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      publicationGeneration: 1,
+    });
     expect(await readState(runId)).toMatchObject({ run: "running", node: "queued" });
+  });
+
+  it("serializes an already-running sibling replay with cancellation", async () => {
+    const runId = `${RUN_TAG}-cancel-race`;
+    await seedRun(runId, "running", "failed");
+
+    let releaseNodeLock!: () => void;
+    let signalNodeLocked!: () => void;
+    const nodeLocked = new Promise<void>(resolve => { signalNodeLocked = resolve; });
+    const nodeLockReleased = new Promise<void>(resolve => { releaseNodeLock = resolve; });
+    const blocker = db.transaction(async tx => {
+      await tx
+        .select({ id: runNodes.id })
+        .from(runNodes)
+        .where(eq(runNodes.runId, runId))
+        .for("update");
+      signalNodeLocked();
+      await nodeLockReleased;
+    });
+    await nodeLocked;
+
+    const claim = claimReplayTransition(runId, "n1");
+    await waitForBlockedRunNodeUpdate();
+    const cancellation = cancelRun(runId, { reason: "operator_cancelled" });
+    releaseNodeLock();
+
+    await Promise.all([blocker, claim, cancellation]);
+    expect(await readState(runId)).toMatchObject({ run: "cancelled", node: "cancelled" });
+  });
+
+  it("serializes a running-to-retry transition with cancellation", async () => {
+    const runId = `${RUN_TAG}-retry-cancel-race`;
+    await seedRun(runId, "running", "running");
+
+    let releaseNodeLock!: () => void;
+    let signalNodeLocked!: () => void;
+    const nodeLocked = new Promise<void>((resolve) => {
+      signalNodeLocked = resolve;
+    });
+    const nodeLockReleased = new Promise<void>((resolve) => {
+      releaseNodeLock = resolve;
+    });
+    const blocker = db.transaction(async (tx) => {
+      await tx
+        .select({ id: runNodes.id })
+        .from(runNodes)
+        .where(eq(runNodes.runId, runId))
+        .for("update");
+      signalNodeLocked();
+      await nodeLockReleased;
+    });
+    await nodeLocked;
+
+    const retry = markExecutingNodeQueued(runId, "n1", 2, undefined, 1_000);
+    await waitForBlockedRunNodeUpdate();
+    const cancellation = cancelRun(runId, { reason: "operator_cancelled" });
+    releaseNodeLock();
+
+    const [, retryClaim] = await Promise.all([blocker, retry, cancellation]);
+    expect(retryClaim).toMatchObject({ attempt: 2, publicationGeneration: 1 });
+    expect(await readState(runId)).toMatchObject({
+      run: "cancelled",
+      node: "cancelled",
+      attempts: 2,
+    });
   });
 
   it("serializes concurrent claims so exactly one generation wins", async () => {
@@ -164,8 +257,11 @@ describe("claimReplayTransition (real Postgres)", () => {
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
-    const winner = results.find((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled");
-    expect((await readState(runId)).recoveryClaimToken).toBe(winner?.value);
+    const winner = results.find(
+      (result): result is PromiseFulfilledResult<{ recoveryClaimToken: string; publicationGeneration: number }> =>
+        result.status === "fulfilled",
+    );
+    expect((await readState(runId)).recoveryClaimToken).toBe(winner?.value.recoveryClaimToken);
   });
 
   it("records impact only after generation-matched terminal success", async () => {
@@ -177,15 +273,26 @@ describe("claimReplayTransition (real Postgres)", () => {
     const failedDlqId = await seedDlq(failedRunId, "dlq", 60_000);
     const successDlqId = await seedDlq(successRunId, "dlq", 120_000);
 
-    const failedToken = await claimReplayTransition(failedRunId, "n1", {
+    const failedClaim = await claimReplayTransition(failedRunId, "n1", {
       deadLetterId: failedDlqId,
       recoveryActorId: "operator-a",
     });
-    expect(await markNodeRunning(failedRunId, "n1", 1, failedToken)).toBe(true);
-    expect(await markExecutingNodeFailed(failedRunId, "n1", { message: "failed again" }, failedToken)).toBe(true);
+    expect(await claimNodeForExecution(
+      failedRunId,
+      "n1",
+      1,
+      failedClaim.recoveryClaimToken,
+      failedClaim.publicationGeneration,
+    )).toBe("claimed");
+    expect(await markExecutingNodeFailed(
+      failedRunId,
+      "n1",
+      { message: "failed again" },
+      failedClaim.recoveryClaimToken,
+    )).toBe(true);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered });
 
-    const successToken = await claimReplayTransition(successRunId, "n1", {
+    const successClaim = await claimReplayTransition(successRunId, "n1", {
       deadLetterId: successDlqId,
       recoveryActorId: "operator-a",
     });
@@ -197,15 +304,36 @@ describe("claimReplayTransition (real Postgres)", () => {
       })
       .from(deadLetters)
       .where(eq(deadLetters.id, successDlqId));
-    expect(claimedDlq).toMatchObject({ replayClaimToken: successToken, replayedAt: null });
+    expect(claimedDlq).toMatchObject({
+      replayClaimToken: successClaim.recoveryClaimToken,
+      replayedAt: null,
+    });
     expect(claimedDlq?.replayClaimedAt).toBeInstanceOf(Date);
-    expect(await markNodeRunning(successRunId, "n1", 1, successToken)).toBe(true);
-    expect(await markNodeSucceededWithEvent(successRunId, "n1", { ok: true }, 1, successToken)).toBe(true);
+    expect(await claimNodeForExecution(
+      successRunId,
+      "n1",
+      1,
+      successClaim.recoveryClaimToken,
+      successClaim.publicationGeneration,
+    )).toBe("claimed");
+    expect(await markNodeSucceededWithEvent(
+      successRunId,
+      "n1",
+      { ok: true },
+      1,
+      successClaim.recoveryClaimToken,
+    )).toBe(true);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered + 1 });
     await expect(queryOperatorRecoveryCount(ORG, "operator-a", new Date(Date.now() - 86_400_000)))
       .resolves.toBe(1);
 
-    expect(await markNodeSucceededWithEvent(successRunId, "n1", { ok: true }, 1, successToken)).toBe(false);
+    expect(await markNodeSucceededWithEvent(
+      successRunId,
+      "n1",
+      { ok: true },
+      1,
+      successClaim.recoveryClaimToken,
+    )).toBe(false);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered + 1 });
   });
 
@@ -216,25 +344,49 @@ describe("claimReplayTransition (real Postgres)", () => {
     const oldDlqId = await seedDlq(runId, "old-dlq", 180_000);
     const newDlqId = await seedDlq(runId, "new-dlq", 240_000);
 
-    const oldToken = await claimReplayTransition(runId, "n1", {
+    const oldClaim = await claimReplayTransition(runId, "n1", {
       deadLetterId: oldDlqId,
       recoveryActorId: "operator-old",
     });
-    expect(await markNodeRunning(runId, "n1", 1, oldToken)).toBe(true);
+    expect(await claimNodeForExecution(
+      runId,
+      "n1",
+      1,
+      oldClaim.recoveryClaimToken,
+      oldClaim.publicationGeneration,
+    )).toBe("claimed");
     expect(await failStalledRunningNode(runId, "n1", { message: "stalled" })).toBe(true);
 
-    const newToken = await claimReplayTransition(runId, "n1", {
+    const newClaim = await claimReplayTransition(runId, "n1", {
       deadLetterId: newDlqId,
       recoveryActorId: "operator-new",
     });
-    expect(await markNodeRunning(runId, "n1", 1, newToken)).toBe(true);
+    expect(await claimNodeForExecution(
+      runId,
+      "n1",
+      1,
+      newClaim.recoveryClaimToken,
+      newClaim.publicationGeneration,
+    )).toBe("claimed");
 
-    expect(await markNodeSucceededWithEvent(runId, "n1", { stale: true }, 1, oldToken)).toBe(false);
+    expect(await markNodeSucceededWithEvent(
+      runId,
+      "n1",
+      { stale: true },
+      1,
+      oldClaim.recoveryClaimToken,
+    )).toBe(false);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered });
     await expect(queryOperatorRecoveryCount(ORG, "operator-old", new Date(Date.now() - 86_400_000)))
       .resolves.toBe(0);
 
-    expect(await markNodeSucceededWithEvent(runId, "n1", { ok: true }, 1, newToken)).toBe(true);
+    expect(await markNodeSucceededWithEvent(
+      runId,
+      "n1",
+      { ok: true },
+      1,
+      newClaim.recoveryClaimToken,
+    )).toBe(true);
     await expect(queryRecoveryLedger(ORG)).resolves.toMatchObject({ totalRecovered: baseline.totalRecovered + 1 });
     await expect(queryOperatorRecoveryCount(ORG, "operator-new", new Date(Date.now() - 86_400_000)))
       .resolves.toBe(1);

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { workflowVersionMax } from '@janusly/shared'
 import { validateWorkflow } from './workflow-validation'
 
 describe('validateWorkflow', () => {
@@ -488,6 +489,42 @@ describe('validateWorkflow', () => {
       code: 'router_candidate_unknown_node_id',
       nodeId: 'pick',
     }))
+  })
+})
+
+describe('validateWorkflow — subworkflow composition', () => {
+  it('accepts an exact positive version pin', () => {
+    const result = validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config: { workflowId: 'child-flow', version: 2 } }],
+      edges: [],
+    })
+
+    expect(result).toEqual({ valid: true, issues: [] })
+    expect(validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config: { workflowId: 'child-flow', version: workflowVersionMax } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+  })
+
+  it.each([
+    [{}, 'subworkflow_missing_workflow'],
+    [{ workflowId: 'parent' }, 'subworkflow_self_reference'],
+    [{ workflowId: 'child-flow', version: 0 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: 1.5 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: workflowVersionMax + 1 }, 'subworkflow_invalid_version'],
+    [{ workflowId: 'child-flow', version: '2' }, 'subworkflow_invalid_version'],
+    [{ workflowId: ' parent ' }, 'subworkflow_self_reference'],
+  ] as const)('rejects malformed composition config %j', (config, expectedCode) => {
+    const result = validateWorkflow({
+      id: 'parent',
+      nodes: [{ id: 'child', type: 'subworkflow', config }],
+      edges: [],
+    })
+
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: expectedCode, nodeId: 'child' }))
   })
 })
 

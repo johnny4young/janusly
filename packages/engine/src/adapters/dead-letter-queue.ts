@@ -19,7 +19,7 @@ import {
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { safePersistPayload } from "../safe-persist";
-import { notifyCommittedRunTerminal } from "../persistence";
+import { notifyCommittedRunTerminal, terminalParentNotificationMarker } from "../persistence";
 import { publishRunEvent } from "../run-event-stream";
 import type {
   DeadLetterInput,
@@ -122,7 +122,10 @@ export class DeadLetterQueueAdapter implements Partial<QueueAdapter> {
         failedNodes = Number(countRows[0]?.count ?? 1);
         const [flipped] = await tx
           .update(runs)
-          .set({ status: "failed" })
+          .set({
+            status: "failed",
+            parentNotificationAfter: terminalParentNotificationMarker(),
+          })
           .where(and(eq(runs.id, input.runId), eq(runs.status, "running")))
           .returning({ id: runs.id });
         runFlipped = Boolean(flipped);

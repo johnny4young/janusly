@@ -18,13 +18,24 @@
  */
 
 import { db, runs, runNodes, runEvents } from "@janusly/db";
+import { and, eq, isNull } from "drizzle-orm";
 import { enqueueNode } from "./queue";
-import { markNodeQueued, appendEvent } from "./persistence";
+import { appendEvent, markQueuePublicationSucceeded } from "./persistence";
+import { publishRunEvent } from "./run-event-stream";
 import { safePersistPayload } from "./safe-persist";
 import type { Workflow } from "@janusly/shared";
 import { validateInputs, WorkflowInputValidationError } from "./inputs-validator";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
+
+export type ParentSubworkflowCheckpoint = {
+  /** Waiting metadata known before the child id and checkpoint clock are allocated. */
+  waitingMetadata: Record<string, unknown>;
+  /** Payload for `node.subworkflow.started`, excluding the generated child id. */
+  startedEventPayload: Record<string, unknown>;
+  /** Active replay generation for an exact parent-node CAS. */
+  recoveryClaimToken?: string;
+};
 
 export type StartableWorkflow = Workflow & {
   orgId?: string;
@@ -38,6 +49,10 @@ export type StartableWorkflow = Workflow & {
    */
   parentRunId?: string;
   parentNodeId?: string;
+  /** Atomically pauses the spawning parent before this child's roots can publish. */
+  parentCheckpoint?: ParentSubworkflowCheckpoint;
+  /** Inherited sandbox posture for subworkflows spawned by validation runs. */
+  replayMode?: "validation" | null;
   /** OTel trace id shared across a subworkflow chain. Inherited from the parent or generated lazily. */
   traceId?: string;
 };
@@ -53,32 +68,114 @@ export async function startRun(workflow: StartableWorkflow) {
 
   const runId = crypto.randomUUID();
   const workflowVersionId = workflow.versionId ?? workflow.id ?? runId;
+  const startNodeIds = new Set(
+    workflow.nodes
+      .filter((node) => !workflow.edges.some((edge) => edge.to === node.id))
+      .map((node) => node.id),
+  );
+  const publicationMarkedAt = new Date();
+  const parentCheckpointAt = new Date();
+  const parentStartedEventId = workflow.parentCheckpoint ? crypto.randomUUID() : null;
+  const parentWaitingEventId = workflow.parentCheckpoint ? crypto.randomUUID() : null;
+  const parentWaitingMetadata = workflow.parentCheckpoint
+    ? {
+        ...workflow.parentCheckpoint.waitingMetadata,
+        childRunId: runId,
+        waitingSince: parentCheckpointAt.toISOString(),
+      }
+    : undefined;
+  const parentStartedEventPayload = workflow.parentCheckpoint
+    ? safePersistPayload({
+        ...workflow.parentCheckpoint.startedEventPayload,
+        childRunId: runId,
+      })
+    : undefined;
+  const parentWaitingEventPayload = parentWaitingMetadata
+    ? safePersistPayload({
+        status: "waiting",
+        reason: "Waiting for subworkflow",
+        metadata: parentWaitingMetadata,
+      })
+    : undefined;
+  const {
+    parentCheckpoint: _parentCheckpoint,
+    replayMode: _replayMode,
+    ...workflowSnapshot
+  } = workflow;
 
   // Persist run + all nodes + the run.started event in one transaction so a
-  // crash mid-setup cannot leave a partially-initialized run.
+  // crash mid-setup cannot leave a partially-initialized run. Subworkflow
+  // callers also checkpoint the parent in this transaction, before any child
+  // root can reach BullMQ.
   await db.transaction(async (tx) => {
+    if (workflow.parentCheckpoint) {
+      if (!workflow.parentRunId || !workflow.parentNodeId) {
+        throw new Error("A parent subworkflow checkpoint requires parentRunId and parentNodeId");
+      }
+      const [parentRun] = await tx
+        .select({ status: runs.status })
+        .from(runs)
+        .where(eq(runs.id, workflow.parentRunId))
+        .limit(1)
+        .for("update");
+      if (parentRun?.status !== "running") {
+        throw new Error("Parent run is no longer active for subworkflow start");
+      }
+      const recoveryPredicate = workflow.parentCheckpoint.recoveryClaimToken
+        ? eq(runNodes.recoveryClaimToken, workflow.parentCheckpoint.recoveryClaimToken)
+        : isNull(runNodes.recoveryClaimToken);
+      const [checkpointed] = await tx
+        .update(runNodes)
+        .set({
+          status: "waiting",
+          stateJson: safePersistPayload(
+            { waiting: parentWaitingMetadata ?? {} },
+            { maxBytes: INITIAL_NODE_STATE_MAX_BYTES },
+          ),
+          waitingRepairAfter: null,
+        })
+        .where(and(
+          eq(runNodes.runId, workflow.parentRunId),
+          eq(runNodes.nodeId, workflow.parentNodeId),
+          eq(runNodes.status, "running"),
+          recoveryPredicate,
+        ))
+        .returning({ id: runNodes.id });
+      if (!checkpointed) {
+        throw new Error("Parent subworkflow node is no longer claimable");
+      }
+    }
+
     await tx.insert(runs).values({
       id: runId,
       orgId: workflow.orgId ?? "default",
       workflowVersionId,
       status: "running",
       createdBy: workflow.createdBy ?? null,
-      inputJson: { workflow, input: workflow.input ?? {} },
+      inputJson: { workflow: workflowSnapshot, input: workflow.input ?? {} },
       parentRunId: workflow.parentRunId ?? null,
       parentNodeId: workflow.parentNodeId ?? null,
+      parentLinkKind: workflow.parentCheckpoint ? "subworkflow" : null,
+      replayMode: workflow.replayMode ?? null,
       // Every root run gets a correlation id up front; subworkflows pass the
       // inherited value so the whole chain remains copyable as one trace.
       traceId: workflow.traceId ?? crypto.randomUUID(),
     });
 
     if (workflow.nodes.length > 0) {
-      await tx.insert(runNodes).values(workflow.nodes.map((node) => ({
-        id: crypto.randomUUID(),
-        runId,
-        nodeId: node.id,
-        status: "pending",
-        stateJson: safePersistPayload({}, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
-      })));
+      await tx.insert(runNodes).values(workflow.nodes.map((node) => {
+        const startsQueued = startNodeIds.has(node.id);
+        return {
+          id: crypto.randomUUID(),
+          runId,
+          nodeId: node.id,
+          status: startsQueued ? ("queued" as const) : ("pending" as const),
+          stateJson: safePersistPayload({}, { maxBytes: INITIAL_NODE_STATE_MAX_BYTES }),
+          attempts: startsQueued ? 1 : 0,
+          queuePublicationRepairAfter: startsQueued ? publicationMarkedAt : null,
+          queuePublicationGeneration: startsQueued ? 1 : 0,
+        };
+      }));
     }
 
     await tx.insert(runEvents).values({
@@ -88,20 +185,83 @@ export async function startRun(workflow: StartableWorkflow) {
       type: "run.started",
       payload: safePersistPayload({ workflowVersionId }),
     });
+
+    if (
+      workflow.parentCheckpoint
+      && workflow.parentRunId
+      && workflow.parentNodeId
+      && parentStartedEventId
+      && parentWaitingEventId
+      && parentStartedEventPayload
+      && parentWaitingEventPayload
+    ) {
+      await tx.insert(runEvents).values([
+        {
+          id: parentStartedEventId,
+          runId: workflow.parentRunId,
+          nodeId: workflow.parentNodeId,
+          type: "node.subworkflow.started",
+          payload: parentStartedEventPayload,
+          createdAt: parentCheckpointAt,
+        },
+        {
+          id: parentWaitingEventId,
+          runId: workflow.parentRunId,
+          nodeId: workflow.parentNodeId,
+          type: "node.waiting",
+          payload: parentWaitingEventPayload,
+          createdAt: new Date(parentCheckpointAt.getTime() + 1),
+        },
+      ]);
+    }
   });
+
+  if (
+    workflow.parentRunId
+    && workflow.parentNodeId
+    && parentStartedEventId
+    && parentWaitingEventId
+    && parentStartedEventPayload
+    && parentWaitingEventPayload
+  ) {
+    publishRunEvent(workflow.parentRunId, {
+      kind: "event",
+      id: parentStartedEventId,
+      nodeId: workflow.parentNodeId,
+      type: "node.subworkflow.started",
+      payload: parentStartedEventPayload,
+      createdAt: parentCheckpointAt.toISOString(),
+    });
+    publishRunEvent(workflow.parentRunId, {
+      kind: "event",
+      id: parentWaitingEventId,
+      nodeId: workflow.parentNodeId,
+      type: "node.waiting",
+      payload: parentWaitingEventPayload,
+      createdAt: new Date(parentCheckpointAt.getTime() + 1).toISOString(),
+    });
+  }
 
   // Root nodes are the only initial queue entries. Everything else reaches
   // the queue through `WorkflowRuntime.enqueueReadyNodes` after its
   // predecessors complete, preserving fan-in/fan-out semantics.
-  const startNodes = workflow.nodes.filter((node) => {
-    return !workflow.edges.some((edge) => edge.to === node.id);
-  });
+  const startNodes = workflow.nodes.filter((node) => startNodeIds.has(node.id));
 
   for (const node of startNodes) {
-    await markNodeQueued(runId, node.id);
-    await enqueueNode({ runId, nodeId: node.id });
+    await enqueueNode({
+      runId,
+      nodeId: node.id,
+      attempt: 1,
+      publicationGeneration: 1,
+    });
+    await markQueuePublicationSucceeded(
+      runId,
+      node.id,
+      1,
+      1,
+    );
     await appendEvent(runId, node.id, "node.queued", {});
   }
 
-  return { runId };
+  return { runId, ...(parentWaitingMetadata ? { parentWaitingMetadata } : {}) };
 }

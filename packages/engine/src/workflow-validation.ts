@@ -15,7 +15,7 @@
  *   breaks the UI without a TypeScript error.
  */
 
-import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues } from "@janusly/shared";
+import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues, workflowVersionMax } from "@janusly/shared";
 import { validateExpression } from "./expression";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
@@ -110,6 +110,27 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
       const validation = validateToolInput(node.config.tool, node.config.input ?? {});
       if (!validation.valid) {
         issues.push({ code: "tool_invalid_input", message: validation.issues.join(", "), nodeId: node.id });
+      }
+    }
+    if (node.type === "subworkflow") {
+      const workflowId = typeof node.config.workflowId === "string" ? node.config.workflowId.trim() : "";
+      if (!workflowId) {
+        issues.push({ code: "subworkflow_missing_workflow", message: "Subworkflow node requires config.workflowId", nodeId: node.id });
+      } else if (parsed.data.id && workflowId === parsed.data.id) {
+        issues.push({ code: "subworkflow_self_reference", message: "A workflow cannot call itself directly", nodeId: node.id });
+      }
+      const version = node.config.version;
+      if (version !== undefined && (
+        typeof version !== "number"
+        || !Number.isSafeInteger(version)
+        || version < 1
+        || version > workflowVersionMax
+      )) {
+        issues.push({
+          code: "subworkflow_invalid_version",
+          message: `Subworkflow config.version must be an integer between 1 and ${workflowVersionMax}`,
+          nodeId: node.id,
+        });
       }
     }
     if (node.type === "condition") {

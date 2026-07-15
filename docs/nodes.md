@@ -381,7 +381,7 @@ Pauses the run and asks an operator for structured input. The node config carrie
 
 ## `subworkflow`
 
-Starts another saved workflow as a child run and pauses until the child reaches a terminal status. The child workflow lookup is scoped to the same org, `config.input` is forwarded when present, otherwise the parent's run input is inherited, and subworkflow nesting is bounded by `runs.subworkflowMaxDepth`.
+Starts another active saved workflow as a child run and pauses until the child reaches a terminal status. The child workflow lookup is scoped to the same org and excludes soft-deleted workflows. Set the optional `config.version` integer from 1 through 2,147,483,647 to execute that exact immutable saved version; omit it to resolve the latest version when the node starts. `config.input` is forwarded when present, otherwise the parent's run input is inherited, and subworkflow nesting is bounded by `runs.subworkflowMaxDepth`.
 
 ```jsonc
 {
@@ -389,12 +389,13 @@ Starts another saved workflow as a child run and pauses until the child reaches 
   "type": "subworkflow",
   "config": {
     "workflowId": "customer-enrichment",
+    "version": 3,
     "input": { "customerId": "{{context.fetch_user.output.body.id}}" }
   }
 }
 ```
 
-**Output:** the child run's `outputJson` after the child succeeds. If the child fails or is cancelled, the parent node fails.
+**Output:** the child run's `outputJson` after the child succeeds. Child creation atomically checkpoints the parent before publishing child roots. Executable parent links are distinct from Replay Lab lineage, so replay provenance does not consume nesting depth; a validation parent passes its sandbox mode to every nested child and still receives the child's terminal handoff. If the child fails, the parent error retains the earliest failed child node and its persisted error; cancellation also fails the parent node, and every failed sibling is settled even when another child already made the parent terminal. If that exact child later succeeds after a recovery replay, the engine reattaches its output with a generation-bound compare-and-set and reopens the parent only when no sibling failures remain. Separate durable outboxes restore both a lost terminal executable child→parent handoff and any parent queue generation consumed during the failed→running transition without bypassing retry backoff.
 
 ## `wait_until`
 

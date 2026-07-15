@@ -20,6 +20,10 @@
 import type { JsonObject } from './types'
 import { t } from './i18n/runtime'
 
+// Mirrors the persisted workflow-version int4 bound. Keep this local so the
+// node-summary catalogue does not pull a shared runtime barrel into the web.
+const WORKFLOW_VERSION_MAX = 2_147_483_647
+
 /** Default `config` per node type — used by the "Add step" affordance. */
 export const nodePresets: Record<string, JsonObject> = {
   http: { url: 'https://api.github.com' },
@@ -164,7 +168,17 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
   if (type === 'router' || type === 'router_llm') return t('nodeSummary.router.text') as string
   if (type === 'webhook') return t('nodeSummary.webhook.text') as string
   if (type === 'noop') return t('nodeSummary.noop.text') as string
-  if (type === 'subworkflow') return readString(config.workflowId) ?? (t('nodeSummary.subworkflow.empty') as string)
+  if (type === 'subworkflow') {
+    const workflowId = readString(config.workflowId)
+    if (!workflowId) return t('nodeSummary.subworkflow.empty') as string
+    const version = config.version
+    return typeof version === 'number'
+      && Number.isSafeInteger(version)
+      && version > 0
+      && version <= WORKFLOW_VERSION_MAX
+      ? (t('nodeSummary.subworkflow.pinned', { workflowId, version }) as string)
+      : workflowId
+  }
   if (type === 'wait_until') return readString(config.duration) ?? readString(config.until) ?? (t('nodeSummary.wait_until.empty') as string)
   if (type === 'parallel_fork') {
     const branches = Array.isArray(config.branches) ? config.branches.length : 0

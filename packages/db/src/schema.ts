@@ -179,14 +179,17 @@ export const runs = pgTable(
      * reached `succeeded` yet (failed/cancelled runs never populate this).
      */
     outputJson: jsonb("output_json"),
-    /**
-     * Subworkflow linkage. Non-null = this run was spawned by a `subworkflow`
-     * node in a parent run. Used by `notifyParentOnTerminal` to flip the
-     * parent's subworkflow node when the child reaches a terminal status.
-     */
+    /** Parent execution/provenance link; interpret it through `parentLinkKind`. */
     parentRunId: text("parent_run_id"),
-    /** Node id within the parent that spawned this child run. Pairs with `parentRunId`. */
+    /** Parent node for an invocation or replay fork; whole-run replay lineage may leave it NULL. */
     parentNodeId: text("parent_node_id"),
+    /**
+     * Meaning of the parent link: `subworkflow` is an executable invocation;
+     * `replay` is trace-only lineage. NULL for top-level and legacy rows.
+     */
+    parentLinkKind: text("parent_link_kind").$type<"subworkflow" | "replay">(),
+    /** Durable lease/outbox marker for terminal child→parent delivery. */
+    parentNotificationAfter: timestamp("parent_notification_after", { withTimezone: true }),
     /**
      * OTel trace id shared across a subworkflow chain. Inherited from the
      * parent on `subworkflow` calls; generated lazily when the chain starts.
@@ -214,6 +217,9 @@ export const runs = pgTable(
   (table) => [
     index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
     index("runs_parent_idx").on(table.parentRunId),
+    index("runs_parent_notification_idx")
+      .on(table.parentNotificationAfter, table.id)
+      .where(sql`"parent_notification_after" IS NOT NULL`),
     index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
   ],
 );
@@ -228,6 +234,14 @@ export const runNodes = pgTable(
     stateJson: jsonb("state_json"),
     /** Durable lease for the bounded-wait Redis repair sweep. */
     waitingRepairAfter: timestamp("waiting_repair_after", { withTimezone: true }),
+    /**
+     * Durable Postgres→BullMQ publication outbox/lease. Non-null means the
+     * exact queued generation still needs publication confirmation (or a
+     * failed-run guard consumed its job and restored it to `pending`).
+     */
+    queuePublicationRepairAfter: timestamp("queue_publication_repair_after", { withTimezone: true }),
+    /** Rotates only when a new physical BullMQ delivery is required. */
+    queuePublicationGeneration: integer("queue_publication_generation").notNull().default(0),
     attempts: integer("attempts").default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -263,6 +277,12 @@ export const runNodes = pgTable(
         table.nodeId,
       )
       .where(sql`"status" = 'waiting'`),
+    // Backs the once-per-minute Postgres→BullMQ publication reconciler.
+    // Healthy rows clear the marker immediately after Queue.add succeeds, so
+    // the partial index contains only crash/failure recovery work.
+    index("run_nodes_queue_publication_repair_idx")
+      .on(table.queuePublicationRepairAfter, table.runId, table.nodeId)
+      .where(sql`"queue_publication_repair_after" IS NOT NULL AND "status" IN ('pending', 'queued')`),
   ],
 );
 

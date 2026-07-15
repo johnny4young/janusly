@@ -35,6 +35,9 @@ import { z } from "zod";
  */
 export const workflowDslVersion = "1.0" as const;
 
+/** Highest workflow version representable by PostgreSQL's `integer` column. */
+export const workflowVersionMax = 2_147_483_647;
+
 /**
  * Closed set of node-type discriminators. Adding a new value here is a
  * one-step compile-time check across the runtime — every consumer that

@@ -18,7 +18,7 @@
 
 import { db, deadLetters, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
 import { recordRecoveryImpactTx } from "@janusly/data";
-import { eq, ne, and, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { eq, ne, and, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
@@ -34,6 +34,25 @@ import type { ApprovalTimeoutPolicy } from "./waiting-time";
 // `__truncated` sentinel via `safePersistPayload`.
 const STATE_JSON_MAX_BYTES = 1_000_000;
 const ERROR_JSON_MAX_BYTES = 64_000;
+const CHILD_ERROR_MAX_BYTES = 40_000;
+const CHILD_MESSAGE_MAX_CHARS = 4_000;
+
+/** Mark only executable subworkflow children for durable delivery to their exact parent node. */
+export function terminalParentNotificationMarker() {
+  return sql<Date | null>`CASE
+    WHEN ${runs.parentRunId} IS NOT NULL
+      AND ${runs.parentNodeId} IS NOT NULL
+      AND (
+        ${runs.parentLinkKind} = 'subworkflow'
+        OR (
+          ${runs.parentLinkKind} IS NULL
+          AND ${runs.replayMode} IS NULL
+        )
+      )
+    THEN date_trunc('milliseconds', CURRENT_TIMESTAMP)
+    ELSE NULL
+  END`;
+}
 
 function asPlainObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -51,8 +70,8 @@ export async function getRunStatus(runId: string) {
  * Load the raw workflow snapshot a run executes against, from
  * `runs.inputJson.workflow`. This is the AUTHORITATIVE per-run workflow:
  * `startRun` writes it, the sandbox / replay-lab / validation creators write
- * it, and `replayDeadLetter` updates it (via `setRunWorkflowSnapshot`) so a
- * patched replay's downstream cascade runs against the patched DAG. The
+ * it, and `claimReplayTransition` atomically updates it with the replay claim
+ * so a patched replay's downstream cascade runs against the patched DAG. The
  * worker reloads it per node job instead of shipping the full workflow in
  * every Redis job payload.
  *
@@ -66,26 +85,6 @@ export async function loadRunWorkflowRaw(runId: string): Promise<{ found: boolea
   if (!rows[0]) return { found: false, workflow: undefined };
   const inputJson = rows[0].inputJson as { workflow?: unknown } | null;
   return { found: true, workflow: inputJson && typeof inputJson === "object" ? inputJson.workflow : undefined };
-}
-
-/**
- * Replace the workflow snapshot in `runs.inputJson.workflow` while preserving
- * the sibling keys (`input`, `fork`, `failingNodeId`, …). Called by
- * `replayDeadLetter` so a production DLQ replay — including an auto-healing /
- * recovery replay against a PATCHED workflow — makes the run's authoritative
- * workflow the one being replayed. Downstream nodes then reload the patched
- * DAG through `loadRunWorkflowRaw`, matching the pre-slim behaviour where the
- * replayed workflow flowed into `enqueueReadyNodes` in-memory. A no-op when
- * the run row is absent. Read-modify-write is safe here: `inputJson.input` is
- * immutable after run start and a DLQ row has a single replay actor.
- */
-export async function setRunWorkflowSnapshot(runId: string, workflow: Workflow): Promise<void> {
-  const rows = await db.select({ inputJson: runs.inputJson }).from(runs).where(eq(runs.id, runId)).limit(1);
-  if (!rows[0]) return;
-  const current = rows[0].inputJson && typeof rows[0].inputJson === "object"
-    ? (rows[0].inputJson as Record<string, unknown>)
-    : {};
-  await db.update(runs).set({ inputJson: { ...current, workflow } }).where(eq(runs.id, runId));
 }
 
 /**
@@ -207,6 +206,141 @@ export async function claimDueWaitingCheckpoints(
   return due;
 }
 
+export type DueQueuePublicationRepair = {
+  runId: string;
+  nodeId: string;
+  status: "pending" | "queued";
+  attempt: number;
+  recoveryClaimToken: string | null;
+  publicationGeneration: number;
+};
+
+export type DueParentNotification = {
+  runId: string;
+  status: "succeeded" | "failed" | "cancelled";
+  leaseUntil: Date;
+};
+
+/** Failed queue-publication deliveries become eligible again after this lease. */
+export const QUEUE_PUBLICATION_REPAIR_LEASE_MS = 2 * 60 * 1_000;
+/** Failed terminal child→parent deliveries become eligible again after this lease. */
+export const PARENT_NOTIFICATION_LEASE_MS = 2 * 60 * 1_000;
+
+/** Claim a bounded, fairly leased batch from the terminal child→parent outbox. */
+export async function claimDueParentNotifications(
+  now = new Date(),
+  limit = 500,
+  leaseMs = PARENT_NOTIFICATION_LEASE_MS,
+): Promise<DueParentNotification[]> {
+  const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const boundedLeaseMs = Math.max(1_000, Math.trunc(leaseMs));
+  const repairAfter = new Date(now.getTime() + boundedLeaseMs);
+  const claimed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({ id: runs.id, status: runs.status })
+      .from(runs)
+      .where(and(
+        isNotNull(runs.parentRunId),
+        isNotNull(runs.parentNodeId),
+        or(
+          eq(runs.parentLinkKind, "subworkflow"),
+          and(isNull(runs.parentLinkKind), isNull(runs.replayMode)),
+        ),
+        inArray(runs.status, ["succeeded", "failed", "cancelled"]),
+        lte(runs.parentNotificationAfter, now),
+      ))
+      .orderBy(runs.parentNotificationAfter, runs.id)
+      .limit(boundedLimit)
+      .for("update", { skipLocked: true });
+    if (rows.length === 0) return rows;
+    await tx
+      .update(runs)
+      .set({ parentNotificationAfter: repairAfter })
+      .where(inArray(runs.id, rows.map(row => row.id)));
+    return rows;
+  });
+
+  return claimed.flatMap(row => (
+    row.status === "succeeded" || row.status === "failed" || row.status === "cancelled"
+      ? [{ runId: row.id, status: row.status, leaseUntil: repairAfter }]
+      : []
+  ));
+}
+
+/** Acknowledge one exact terminal child generation after its parent handoff settles. */
+export async function markParentNotificationSucceeded(
+  runId: string,
+  status: DueParentNotification["status"],
+  expectedMarker: Date,
+): Promise<boolean> {
+  const cleared = await db
+    .update(runs)
+    .set({ parentNotificationAfter: null })
+    .where(and(
+      eq(runs.id, runId),
+      eq(runs.status, status),
+      eq(runs.parentNotificationAfter, expectedMarker),
+    ))
+    .returning({ id: runs.id });
+  return cleared.length > 0;
+}
+
+/**
+ * Claim a bounded batch from the Postgres→BullMQ outbox. The marker is set
+ * before any Queue.add and cleared only after Redis accepts the deterministic
+ * job id. SKIP LOCKED plus a durable lease makes multi-worker sweeps safe and
+ * prevents a poisoned first batch from starving later generations.
+ */
+export async function claimDueQueuePublicationRepairs(
+  now = new Date(),
+  limit = 500,
+  leaseMs = QUEUE_PUBLICATION_REPAIR_LEASE_MS,
+): Promise<DueQueuePublicationRepair[]> {
+  const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const boundedLeaseMs = Math.max(1_000, Math.trunc(leaseMs));
+  const repairAfter = new Date(now.getTime() + boundedLeaseMs);
+  const claimed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        id: runNodes.id,
+        runId: runNodes.runId,
+        nodeId: runNodes.nodeId,
+        status: runNodes.status,
+        attempts: runNodes.attempts,
+        recoveryClaimToken: runNodes.recoveryClaimToken,
+        publicationGeneration: runNodes.queuePublicationGeneration,
+      })
+      .from(runNodes)
+      .innerJoin(runs, eq(runs.id, runNodes.runId))
+      .where(and(
+        eq(runs.status, "running"),
+        inArray(runNodes.status, ["pending", "queued"]),
+        lte(runNodes.queuePublicationRepairAfter, now),
+      ))
+      .orderBy(runNodes.queuePublicationRepairAfter, runNodes.runId, runNodes.nodeId)
+      .limit(boundedLimit)
+      .for("update", { of: runNodes, skipLocked: true });
+    if (rows.length === 0) return rows;
+    await tx
+      .update(runNodes)
+      .set({ queuePublicationRepairAfter: repairAfter })
+      .where(inArray(runNodes.id, rows.map(row => row.id)));
+    return rows;
+  });
+
+  return claimed.flatMap(row => {
+    if (row.status !== "pending" && row.status !== "queued") return [];
+    return [{
+      runId: row.runId,
+      nodeId: row.nodeId,
+      status: row.status,
+      attempt: typeof row.attempts === "number" && row.attempts > 0 ? row.attempts : 1,
+      recoveryClaimToken: row.recoveryClaimToken,
+      publicationGeneration: row.publicationGeneration,
+    }];
+  });
+}
+
 /**
  * Resolve the multi-tenant `orgId` for a run. Used by `executeNode` to thread
  * the scope into `NodeContext` so executors (notably the LLM-calling `ai`
@@ -314,7 +448,10 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
 /** Cancel a run + every still-open node, append a `run.cancelled` event. */
 export async function cancelRun(runId: string, reason?: any) {
   await db.update(runs)
-    .set({ status: "cancelled" })
+    .set({
+      status: "cancelled",
+      parentNotificationAfter: terminalParentNotificationMarker(),
+    })
     .where(eq(runs.id, runId));
 
   await db.update(runNodes)
@@ -330,57 +467,110 @@ export async function cancelRun(runId: string, reason?: any) {
   publishRunEvent(runId, { kind: "run.status", status: "cancelled" });
 }
 
-/**
- * Conditional `queued → running` transition. Returns `true` when the row
- * was successfully claimed, `false` when the row had already advanced past
- * `queued` (e.g. cancelled by a sibling cancellation, swept past by another
- * worker, etc.).
- *
- * The conditional WHERE makes this an atomic claim — same shape as
- * `tryClaimNodeForQueue`'s `pending → queued` invariant. The runtime's
- * `executeQueuedNode` checks the boolean and emits a `node.skipped` event
- * when the claim fails, so a cancellation that lands while a queued job is
- * being pulled never re-flips the cancelled row back to running.
- */
 function recoveryClaimPredicate(recoveryClaimToken?: string) {
   return recoveryClaimToken
     ? eq(runNodes.recoveryClaimToken, recoveryClaimToken)
     : isNull(runNodes.recoveryClaimToken);
 }
 
-export async function markNodeRunning(
+export type NodeExecutionClaim = "claimed" | "not_claimed" | "run_failed" | "run_cancelled" | "run_terminal";
+
+/**
+ * Serialize a queued job's execution claim with parent-run recovery. The run
+ * row lock closes the stale-status window: either a failed-run consumer moves
+ * the exact queue generation back to durable `pending` before reattachment,
+ * or reattachment reopens the run first and this same job proceeds normally.
+ */
+export async function claimNodeForExecution(
   runId: string,
   nodeId: string,
   attempt = 1,
   recoveryClaimToken?: string,
-): Promise<boolean> {
-  const claimed = await db.update(runNodes)
-    .set({ status: "running", attempts: attempt, startedAt: new Date() })
-    .where(and(
-      eq(runNodes.runId, runId),
-      eq(runNodes.nodeId, nodeId),
-      eq(runNodes.status, "queued"),
-      recoveryClaimPredicate(recoveryClaimToken),
-    ))
-    .returning({ id: runNodes.id });
-  return claimed.length > 0;
-}
+  publicationGeneration = 0,
+): Promise<NodeExecutionClaim> {
+  const createdAt = new Date();
+  const eventId = crypto.randomUUID();
+  const result = await db.transaction(async (tx): Promise<{ claim: NodeExecutionClaim; eventPayload?: unknown }> => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
+    if (!run) return { claim: "run_terminal" };
 
-/** Queue a non-executing node and clear any prior DLQ replay attribution. */
-export async function markNodeQueued(runId: string, nodeId: string, attempt = 1) {
-  const queued = await db.update(runNodes)
-    .set({
-      status: "queued",
-      attempts: attempt,
-      recoveryDeadLetterId: null,
-      recoveryRequestedBy: null,
-      recoveryClaimToken: null,
-      recoveryPlaybookId: null,
-      recoveryValidationRunId: null,
-    })
-    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
-    .returning({ id: runNodes.id });
-  return queued.length > 0;
+    if (run.status !== "running") {
+      const claim = run.status === "failed"
+        ? "run_failed"
+        : run.status === "cancelled"
+          ? "run_cancelled"
+          : "run_terminal";
+      let restoredForRecovery = false;
+      if (run.status === "failed") {
+        const restored = await tx
+          .update(runNodes)
+          .set({
+            status: "pending",
+            queuePublicationRepairAfter: createdAt,
+          })
+          .where(and(
+            eq(runNodes.runId, runId),
+            eq(runNodes.nodeId, nodeId),
+            eq(runNodes.status, "queued"),
+            sql`coalesce(${runNodes.attempts}, 1) = ${attempt}`,
+            recoveryClaimPredicate(recoveryClaimToken),
+            eq(runNodes.queuePublicationGeneration, publicationGeneration),
+          ))
+          .returning({ id: runNodes.id });
+        restoredForRecovery = restored.length > 0;
+      }
+      const eventPayload = safePersistPayload({
+        reason: `Run ${run.status}`,
+        attempt,
+        ...(restoredForRecovery ? { restoredForRecovery: true } : {}),
+      });
+      await tx.insert(runEvents).values({
+        id: eventId,
+        runId,
+        nodeId,
+        type: "node.skipped",
+        payload: eventPayload,
+        createdAt,
+      });
+      return { claim, eventPayload };
+    }
+
+    const [claimed] = await tx
+      .update(runNodes)
+      .set({
+        status: "running",
+        attempts: attempt,
+        startedAt: createdAt,
+        queuePublicationRepairAfter: null,
+      })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "queued"),
+        sql`coalesce(${runNodes.attempts}, 1) = ${attempt}`,
+        recoveryClaimPredicate(recoveryClaimToken),
+        eq(runNodes.queuePublicationGeneration, publicationGeneration),
+      ))
+      .returning({ id: runNodes.id });
+    return { claim: claimed ? "claimed" : "not_claimed" };
+  });
+
+  if (result.eventPayload !== undefined) {
+    publishRunEvent(runId, {
+      kind: "event",
+      id: eventId,
+      nodeId,
+      type: "node.skipped",
+      payload: result.eventPayload,
+      createdAt: createdAt.toISOString(),
+    });
+  }
+  return result.claim;
 }
 
 /** Retry transition owned by the currently executing replay generation. */
@@ -389,17 +579,43 @@ export async function markExecutingNodeQueued(
   nodeId: string,
   attempt = 1,
   recoveryClaimToken?: string,
-): Promise<boolean> {
-  const queued = await db.update(runNodes)
-    .set({ status: "queued", attempts: attempt })
-    .where(and(
-      eq(runNodes.runId, runId),
-      eq(runNodes.nodeId, nodeId),
-      eq(runNodes.status, "running"),
-      recoveryClaimPredicate(recoveryClaimToken),
-    ))
-    .returning({ id: runNodes.id });
-  return queued.length > 0;
+  delayMs = 0,
+): Promise<QueuePublicationClaim | null> {
+  const repairAfter = new Date(Date.now() + Math.max(0, Math.trunc(delayMs)));
+  return db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
+    if (run?.status !== "running") return null;
+
+    const queued = await tx.update(runNodes)
+      .set({
+        status: "queued",
+        attempts: attempt,
+        queuePublicationRepairAfter: repairAfter,
+        queuePublicationGeneration: sql`${runNodes.queuePublicationGeneration} + 1`,
+      })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "running"),
+        recoveryClaimPredicate(recoveryClaimToken),
+      ))
+      .returning({
+        attempt: runNodes.attempts,
+        recoveryClaimToken: runNodes.recoveryClaimToken,
+        publicationGeneration: runNodes.queuePublicationGeneration,
+      });
+    if (!queued[0]) return null;
+    return {
+      attempt: queued[0].attempt ?? attempt,
+      recoveryClaimToken: queued[0].recoveryClaimToken,
+      publicationGeneration: queued[0].publicationGeneration,
+    };
+  });
 }
 
 /**
@@ -416,8 +632,9 @@ export class ReplayNotClaimableError extends Error {
 }
 
 /**
- * Atomically un-terminate a failed run AND reset its failed node to `queued`,
- * in ONE transaction. Replaces the former pair of separate awaits
+ * Atomically un-terminate a failed run, replace its authoritative workflow
+ * snapshot, and reset its failed node to the queue outbox in ONE transaction.
+ * Replaces the former pair of separate awaits
  * (`resetRunForReplay` + `markNodeQueued`) whose gap let a
  * cancellation land between them — leaving a `queued` node on a `cancelled`
  * run that the runtime guard skips forever while the operator believes the
@@ -437,9 +654,15 @@ export class ReplayNotClaimableError extends Error {
  *   BullMQ job) → `node_mid_retry`, so a manual replay can't stomp the
  *   snapshot the in-flight retry reads or double-fire its side effect.
  *
- * The caller writes the workflow snapshot + enqueues AFTER a successful claim,
- * so a rejected claim mutates nothing (no snapshot write, no job).
+ * The caller only publishes the deterministic BullMQ job AFTER a successful
+ * claim; a rejected claim mutates neither the snapshot nor the queue, while a
+ * crash before publication leaves the durable repair marker behind.
  */
+export type ReplayTransitionClaim = {
+  recoveryClaimToken: string;
+  publicationGeneration: number;
+};
+
 export async function claimReplayTransition(
   runId: string,
   nodeId: string,
@@ -449,16 +672,32 @@ export async function claimReplayTransition(
     recoveryPlaybookId?: string | null;
     recoveryValidationRunId?: string | null;
   } = {},
-): Promise<string> {
+  workflow?: Workflow,
+): Promise<ReplayTransitionClaim> {
   const recoveryClaimToken = crypto.randomUUID();
   const replayClaimedAt = new Date();
-  await db.transaction(async (tx) => {
+  const publicationGeneration = await db.transaction(async (tx) => {
     await tx.update(runs)
-      .set({ status: "running" })
+      .set({ status: "running", parentNotificationAfter: null })
       .where(and(eq(runs.id, runId), eq(runs.status, "failed")));
 
-    const runRows = await tx.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).limit(1);
+    const runRows = await tx
+      .select({ status: runs.status, inputJson: runs.inputJson })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
     if (runRows[0]?.status !== "running") throw new ReplayNotClaimableError("run_not_replayable");
+
+    if (workflow) {
+      const currentInput = runRows[0].inputJson && typeof runRows[0].inputJson === "object"
+        ? runRows[0].inputJson as Record<string, unknown>
+        : {};
+      await tx
+        .update(runs)
+        .set({ inputJson: { ...currentInput, workflow } })
+        .where(eq(runs.id, runId));
+    }
 
     const nodeRows = await tx
       .select({ status: runNodes.status })
@@ -490,38 +729,95 @@ export async function claimReplayTransition(
         recoveryClaimToken,
         recoveryPlaybookId: recovery.recoveryPlaybookId ?? null,
         recoveryValidationRunId: recovery.recoveryValidationRunId ?? null,
+        queuePublicationRepairAfter: replayClaimedAt,
+        queuePublicationGeneration: sql`${runNodes.queuePublicationGeneration} + 1`,
       })
       .where(and(
         eq(runNodes.runId, runId),
         eq(runNodes.nodeId, nodeId),
         eq(runNodes.status, "failed"),
       ))
-      .returning({ id: runNodes.id });
+      .returning({ publicationGeneration: runNodes.queuePublicationGeneration });
     if (claimed.length === 0) throw new ReplayNotClaimableError("node_mid_retry");
+    return claimed[0]!.publicationGeneration;
   });
-  return recoveryClaimToken;
+  return { recoveryClaimToken, publicationGeneration };
 }
 
 /**
  * Atomic claim — flip `pending → queued` only when the row is still
- * `pending`. Returns `true` on success, `false` when another worker
+ * `pending`, persist the publication marker, and return the exact attempt /
+ * replay token that Redis must receive. Returns `null` when another worker
  * already claimed. This invariant must not be replaced with a non-atomic
  * read-then-write.
  *
  * Invariant (AGENTS.md "Concurrency"): this conditional UPDATE is the
- * only multi-worker double-claim guard; racing workers get true/false
+ * only multi-worker double-claim guard; racing workers get claim/null
  * from the same atomic write. No read-then-write refactors.
  */
-export async function tryClaimNodeForQueue(runId: string, nodeId: string, attempt = 1): Promise<boolean> {
+export type QueuePublicationClaim = {
+  attempt: number;
+  recoveryClaimToken: string | null;
+  publicationGeneration: number;
+};
+
+export async function tryClaimNodeForQueue(
+  runId: string,
+  nodeId: string,
+  attempt = 1,
+): Promise<QueuePublicationClaim | null> {
+  const claimedAt = new Date();
   const claimed = await db.update(runNodes)
-    .set({ status: "queued", attempts: attempt })
+    .set({
+      status: "queued",
+      attempts: sql`CASE
+        WHEN ${runNodes.queuePublicationRepairAfter} IS NOT NULL
+          AND coalesce(${runNodes.attempts}, 0) > 0
+        THEN ${runNodes.attempts}
+        ELSE ${attempt}
+      END`,
+      queuePublicationRepairAfter: claimedAt,
+      queuePublicationGeneration: sql`${runNodes.queuePublicationGeneration} + 1`,
+    })
     .where(and(
       eq(runNodes.runId, runId),
       eq(runNodes.nodeId, nodeId),
       eq(runNodes.status, "pending"),
     ))
+    .returning({
+      attempt: runNodes.attempts,
+      recoveryClaimToken: runNodes.recoveryClaimToken,
+      publicationGeneration: runNodes.queuePublicationGeneration,
+    });
+  if (!claimed[0]) return null;
+  return {
+    attempt: claimed[0].attempt ?? attempt,
+    recoveryClaimToken: claimed[0].recoveryClaimToken,
+    publicationGeneration: claimed[0].publicationGeneration,
+  };
+}
+
+/** Confirm that Redis accepted one exact queued generation. */
+export async function markQueuePublicationSucceeded(
+  runId: string,
+  nodeId: string,
+  attempt: number,
+  publicationGeneration: number,
+  recoveryClaimToken?: string,
+): Promise<boolean> {
+  const published = await db
+    .update(runNodes)
+    .set({ queuePublicationRepairAfter: null })
+    .where(and(
+      eq(runNodes.runId, runId),
+      eq(runNodes.nodeId, nodeId),
+      eq(runNodes.status, "queued"),
+      sql`coalesce(${runNodes.attempts}, 1) = ${attempt}`,
+      eq(runNodes.queuePublicationGeneration, publicationGeneration),
+      recoveryClaimPredicate(recoveryClaimToken),
+    ))
     .returning({ id: runNodes.id });
-  return claimed.length > 0;
+  return published.length > 0;
 }
 
 /** Transition a node to `waiting` (webhook / approval pause). Metadata stored under `state_json.waiting`. */
@@ -602,7 +898,10 @@ export async function failWaitingApprovalNode(
     const failedNodes = Number(countRows[0]?.count ?? 1);
     const [flipped] = await tx
       .update(runs)
-      .set({ status: "failed" })
+      .set({
+        status: "failed",
+        parentNotificationAfter: terminalParentNotificationMarker(),
+      })
       .where(and(eq(runs.id, runId), eq(runs.status, "running")))
       .returning({ id: runs.id });
     if (!flipped) throw new Error("Approval timeout lost the locked run transition");
@@ -921,7 +1220,10 @@ export async function completeWaitingSubworkflowNode(
       .update(runNodes)
       .set({
         status: "succeeded",
-        stateJson: safePersistPayload({ output: output ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }),
+        stateJson: safePersistPayload({
+          output: output ?? {},
+          subworkflow: { childRunId: expectedChildRunId },
+        }, { maxBytes: STATE_JSON_MAX_BYTES }),
         finishedAt,
       })
       .where(and(
@@ -929,6 +1231,11 @@ export async function completeWaitingSubworkflowNode(
         eq(runNodes.nodeId, nodeId),
         eq(runNodes.status, "waiting"),
         sql`${runNodes.stateJson} #>> '{waiting,childRunId}' = ${expectedChildRunId}`,
+        sql`EXISTS (
+          SELECT 1 FROM ${runs}
+          WHERE ${runs.id} = ${expectedChildRunId}
+            AND ${runs.status} = 'succeeded'
+        )`,
       ))
       .returning({
         deadLetterId: runNodes.recoveryDeadLetterId,
@@ -974,14 +1281,34 @@ export async function failWaitingSubworkflowNode(
   nodeId: string,
   expectedChildRunId: string,
   childStatus: "failed" | "cancelled",
+  childFailure?: { nodeId: string; error: unknown } | null,
 ): Promise<boolean> {
   const finishedAt = new Date();
   const eventId = crypto.randomUUID();
+  const persistedChildError = childFailure
+    ? safePersistPayload(childFailure.error, { maxBytes: CHILD_ERROR_MAX_BYTES })
+    : undefined;
+  const originalChildError = asPlainObject(childFailure?.error);
+  const rawChildMessage = typeof originalChildError?.message === "string"
+    ? originalChildError.message
+    : typeof originalChildError?.reason === "string"
+      ? originalChildError.reason
+      : undefined;
+  const childMessage = rawChildMessage?.slice(0, CHILD_MESSAGE_MAX_CHARS);
   const error = safePersistPayload({
     reason: `Subworkflow ${childStatus}`,
+    message: childMessage ?? `Subworkflow ${childStatus}`,
     childRunId: expectedChildRunId,
+    ...(childFailure ? {
+      childNodeId: childFailure.nodeId,
+      childError: persistedChildError,
+    } : {}),
   }, { maxBytes: ERROR_JSON_MAX_BYTES });
-  const eventPayload = safePersistPayload({ childRunId: expectedChildRunId, childStatus });
+  const eventPayload = safePersistPayload({
+    childRunId: expectedChildRunId,
+    childStatus,
+    ...(childFailure ? { childNodeId: childFailure.nodeId } : {}),
+  });
   const failed = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(runNodes)
@@ -991,6 +1318,11 @@ export async function failWaitingSubworkflowNode(
         eq(runNodes.nodeId, nodeId),
         eq(runNodes.status, "waiting"),
         sql`${runNodes.stateJson} #>> '{waiting,childRunId}' = ${expectedChildRunId}`,
+        sql`EXISTS (
+          SELECT 1 FROM ${runs}
+          WHERE ${runs.id} = ${expectedChildRunId}
+            AND ${runs.status} = ${childStatus}
+        )`,
       ))
       .returning({ id: runNodes.id });
     if (!row) return false;
@@ -1014,6 +1346,180 @@ export async function failWaitingSubworkflowNode(
     createdAt: finishedAt.toISOString(),
   });
   return true;
+}
+
+export type ReattachSubworkflowResult = {
+  completed: boolean;
+  reopened: boolean;
+  readyToContinue: boolean;
+  remainingFailedNodes: number;
+};
+
+/**
+ * Reattach a successfully replayed child to the exact failed parent-node
+ * generation that still references it. The parent row lock serializes this
+ * recovery against cancellation and sibling replays. A failed parent reopens
+ * only when the repaired subworkflow node was its last failure; an already
+ * running parent can retain the repair after another replay won first.
+ *
+ * This is intentionally NOT a recovery-impact writer. The child's replay
+ * already owns the impact claim; crediting the parent would double-count one
+ * operator action as two recovered nodes.
+ */
+export async function reattachFailedSubworkflowNode(
+  runId: string,
+  nodeId: string,
+  expectedChildRunId: string,
+  output: unknown,
+): Promise<ReattachSubworkflowResult> {
+  const completedAt = new Date();
+  const nodeEventId = crypto.randomUUID();
+  const runEventId = crypto.randomUUID();
+  const result = await db.transaction(async (tx): Promise<ReattachSubworkflowResult> => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
+    if (!run || (run.status !== "failed" && run.status !== "running")) {
+      return { completed: false, reopened: false, readyToContinue: false, remainingFailedNodes: 0 };
+    }
+
+    const [completed] = await tx
+      .update(runNodes)
+      .set({
+        status: "succeeded",
+        stateJson: safePersistPayload({
+          output: output ?? {},
+          subworkflow: { childRunId: expectedChildRunId },
+        }, { maxBytes: STATE_JSON_MAX_BYTES }),
+        errorJson: null,
+        finishedAt: completedAt,
+      })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "failed"),
+        sql`${runNodes.errorJson} #>> '{childRunId}' = ${expectedChildRunId}`,
+        sql`EXISTS (
+          SELECT 1 FROM ${runs}
+          WHERE ${runs.id} = ${expectedChildRunId}
+            AND ${runs.status} = 'succeeded'
+        )`,
+      ))
+      .returning({ id: runNodes.id });
+    if (!completed) {
+      return { completed: false, reopened: false, readyToContinue: false, remainingFailedNodes: 0 };
+    }
+
+    // A sibling child may already be terminally failed while its durable
+    // handoff still has the parent node in `waiting`. Count that exact pending
+    // failure too, otherwise repairing this node could reopen the parent and
+    // publish successors before the sibling handoff makes it failed again.
+    // Both states share one statement snapshot so a concurrent
+    // `waiting → failed` handoff cannot move between separate counts.
+    const blockingRows = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(runNodes)
+      .where(and(
+        eq(runNodes.runId, runId),
+        or(
+          eq(runNodes.status, "failed"),
+          and(
+            eq(runNodes.status, "waiting"),
+            sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'subworkflow'`,
+            sql`EXISTS (
+              SELECT 1 FROM ${runs} AS child_run
+              WHERE child_run.id = ${runNodes.stateJson} #>> '{waiting,childRunId}'
+                AND child_run.status IN ('failed', 'cancelled')
+            )`,
+          ),
+        ),
+      ));
+    const remainingFailedNodes = Number(blockingRows[0]?.count ?? 0);
+    const readyToContinue = remainingFailedNodes === 0;
+    const reopened = run.status === "failed" && readyToContinue;
+    if (reopened) {
+      const [runReopened] = await tx
+        .update(runs)
+        .set({ status: "running", parentNotificationAfter: null })
+        .where(and(eq(runs.id, runId), eq(runs.status, "failed")))
+        .returning({ id: runs.id });
+      if (!runReopened) throw new Error("Subworkflow reattachment lost the locked parent transition");
+    }
+
+    if (readyToContinue) {
+      // Reopening changes DAG readiness inside this transaction. Mark every
+      // still-pending row before commit so a crash before the notifier's
+      // immediate readiness scan remains recoverable. Scanning the whole DAG
+      // is intentional: when several failed sibling subworkflows recover, the
+      // last repair can unblock successors of any earlier sibling, not only
+      // nodes directly downstream of this one.
+      await tx
+        .update(runNodes)
+        .set({ queuePublicationRepairAfter: completedAt })
+        .where(and(
+          eq(runNodes.runId, runId),
+          eq(runNodes.status, "pending"),
+          isNull(runNodes.queuePublicationRepairAfter),
+        ));
+    }
+
+    const nodeEventPayload = safePersistPayload({
+      childRunId: expectedChildRunId,
+      childOutput: output ?? {},
+      reopened,
+      remainingFailedNodes,
+    });
+    await tx.insert(runEvents).values({
+      id: nodeEventId,
+      runId,
+      nodeId,
+      type: "node.subworkflow.reattached",
+      payload: nodeEventPayload,
+      createdAt: completedAt,
+    });
+    if (reopened) {
+      await tx.insert(runEvents).values({
+        id: runEventId,
+        runId,
+        nodeId: null,
+        type: "run.reopened",
+        payload: safePersistPayload({ reason: "subworkflow_recovered", childRunId: expectedChildRunId }),
+        createdAt: completedAt,
+      });
+    }
+
+    return { completed: true, reopened, readyToContinue, remainingFailedNodes };
+  });
+
+  if (!result.completed) return result;
+  publishRunEvent(runId, {
+    kind: "event",
+    id: nodeEventId,
+    nodeId,
+    type: "node.subworkflow.reattached",
+    payload: safePersistPayload({
+      childRunId: expectedChildRunId,
+      childOutput: output ?? {},
+      reopened: result.reopened,
+      remainingFailedNodes: result.remainingFailedNodes,
+    }),
+    createdAt: completedAt.toISOString(),
+  });
+  if (result.reopened) {
+    publishRunEvent(runId, {
+      kind: "event",
+      id: runEventId,
+      nodeId: null,
+      type: "run.reopened",
+      payload: safePersistPayload({ reason: "subworkflow_recovered", childRunId: expectedChildRunId }),
+      createdAt: completedAt.toISOString(),
+    });
+    publishRunEvent(runId, { kind: "run.status", status: "running" });
+  }
+  return result;
 }
 
 /** Mark a node failed with the serialized error in `error_json`. Terminal. */
@@ -1049,7 +1555,7 @@ export async function markExecutingNodeFailed(
  * reaper: the conditional WHERE is the claim, so a node that legitimately
  * finished between the reaper's scan and its write is never clobbered, and two
  * worker replicas sweeping concurrently can't both fail the same node. Same
- * atomic-claim shape as `markWaitingNodeSucceeded` / `markNodeRunning`.
+ * atomic-claim shape as `markWaitingNodeSucceeded` / `claimNodeForExecution`.
  */
 export async function failStalledRunningNode(runId: string, nodeId: string, error: any): Promise<boolean> {
   const failed = await db.update(runNodes)
@@ -1065,7 +1571,10 @@ export async function failStalledRunningNode(runId: string, nodeId: string, erro
  * — `persistence.ts` then calls it after a terminal status flip, without
  * importing `subworkflow.ts` directly (which would create an import cycle).
  */
-type SubworkflowNotifier = (runId: string, status: "succeeded" | "failed" | "cancelled") => Promise<void>;
+type SubworkflowNotifier = (
+  runId: string,
+  status: "succeeded" | "failed" | "cancelled",
+) => Promise<boolean>;
 let subworkflowNotifier: SubworkflowNotifier | null = null;
 
 /** Wire the subworkflow notifier. Called from `subworkflow.ts` once at module load. */
@@ -1076,14 +1585,35 @@ export function setSubworkflowNotifier(notifier: SubworkflowNotifier | null): vo
 export async function notifyCommittedRunTerminal(
   runId: string,
   status: "succeeded" | "failed" | "cancelled",
-): Promise<void> {
-  if (!subworkflowNotifier) return;
+  expectedMarker?: Date,
+): Promise<boolean> {
   try {
-    await subworkflowNotifier(runId, status);
+    let marker = expectedMarker;
+    if (!marker) {
+      const [run] = await db
+        .select({
+          status: runs.status,
+          parentRunId: runs.parentRunId,
+          parentNodeId: runs.parentNodeId,
+          parentNotificationAfter: runs.parentNotificationAfter,
+        })
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      if (!run || run.status !== status) return false;
+      if (!run.parentRunId || !run.parentNodeId) return true;
+      if (!run.parentNotificationAfter) return false;
+      marker = run.parentNotificationAfter;
+    }
+    if (!subworkflowNotifier) return false;
+    const delivered = await subworkflowNotifier(runId, status);
+    if (!delivered) return false;
+    return await markParentNotificationSucceeded(runId, status, marker);
   } catch {
     // Notifier failures are isolated by `subworkflow.ts` itself; this is a
     // defense-in-depth catch so a runaway throw can't take down the
     // status-flip caller.
+    return false;
   }
 }
 
@@ -1108,7 +1638,10 @@ export async function updateRunStatusFromNodes(runId: string) {
     // workers two node-completions can race into this branch; the `ne(status)`
     // guard means the loser's UPDATE affects 0 rows and it skips the append.
     const flipped = await db.update(runs)
-      .set({ status: "failed" })
+      .set({
+        status: "failed",
+        parentNotificationAfter: terminalParentNotificationMarker(),
+      })
       .where(and(eq(runs.id, runId), ne(runs.status, "failed")))
       .returning({ id: runs.id });
     if (flipped.length > 0) {
@@ -1128,7 +1661,11 @@ export async function updateRunStatusFromNodes(runId: string) {
     // worker appends the persisted `run.succeeded` row.
     const outputJson = await computeRunOutputs(runId);
     const flipped = await db.update(runs)
-      .set({ status: "succeeded", outputJson })
+      .set({
+        status: "succeeded",
+        outputJson,
+        parentNotificationAfter: terminalParentNotificationMarker(),
+      })
       .where(and(eq(runs.id, runId), ne(runs.status, "succeeded")))
       .returning({ id: runs.id });
     if (flipped.length > 0) {

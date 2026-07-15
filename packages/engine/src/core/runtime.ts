@@ -100,29 +100,22 @@ export class WorkflowRuntime {
   async executeQueuedNode(input: ExecuteQueuedNodeInput): Promise<void> {
     const { runId, node, recoveryClaimToken } = input;
     const attempt = input.attempt ?? 1;
+    const publicationGeneration = input.publicationGeneration ?? 0;
     const start = Date.now();
 
-    // Pre-execution cancellation guard: a run that has already reached a
-    // terminal status (cancelled / failed) must NOT have its queued jobs
-    // executed. Without this, a worker pulling a job from the BullMQ queue
-    // for a cancelled run would re-flip the cancelled node back to running
-    // and execute its body — defeating the cancellation.
-    const preStatus = await this.store.getRunStatus(runId);
-    if (preStatus === "cancelled" || preStatus === "failed") {
-      await this.store.appendEvent(workflowEvent({
-        runId, nodeId: node.id,
-        type: "node.skipped",
-        payload: { reason: `Run ${preStatus}`, attempt },
-      }));
-      return;
-    }
-
-    // Atomic `queued → running` claim. Defends against the race window
-    // between the run-status read above and this UPDATE: if cancellation
-    // lands in between, the conditional WHERE clause won't match the
-    // now-cancelled row, the claim fails, and we emit a skip event.
-    const claimed = await this.store.markNodeRunning(runId, node.id, attempt, recoveryClaimToken);
-    if (!claimed) {
+    // The production store serializes this queued-generation claim with the
+    // run row. A failed-run consumer durably restores the exact generation
+    // to `pending`; a concurrent subworkflow reattachment that reopens first
+    // lets this same job proceed. This removes the stale status-read window.
+    const executionClaim = await this.store.claimNodeForExecution(
+      runId,
+      node.id,
+      attempt,
+      recoveryClaimToken,
+      publicationGeneration,
+    );
+    if (executionClaim !== "claimed") {
+      if (executionClaim !== "not_claimed") return;
       if (recoveryClaimToken) return;
       await this.store.appendEvent(workflowEvent({
         runId, nodeId: node.id,
@@ -140,7 +133,7 @@ export class WorkflowRuntime {
       // to `decide`) and the improvement-evaluation branch
       // (workflow-version-scoped improvement ledger). Loaded post-claim so a
       // cancellation landing while a job sits queued doesn't burn an extra
-      // DB round-trip — `markNodeRunning` already short-circuits when the
+      // DB round-trip — `claimNodeForExecution` already short-circuits when the
       // row has advanced past `queued`. Returns `null` if the run row was
       // deleted between scheduling and execution; metadata-dependent
       // branches no-op gracefully and the executor still runs so node-status
@@ -230,10 +223,14 @@ export class WorkflowRuntime {
         }
       }
 
-      const result = await this.executors.execute({ runId, node, context, attempt });
+      const result = await this.executors.execute({ runId, node, context, attempt, recoveryClaimToken });
       const durationMs = Date.now() - start;
 
       if (result?.status === "waiting") {
+        if (result.checkpointPersisted) {
+          logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
+          return;
+        }
         const checkpointAt = new Date();
         const metadata = {
           ...materializeWaitingCheckpointMetadata(result.metadata, checkpointAt.getTime()),
@@ -290,7 +287,13 @@ export class WorkflowRuntime {
         const retryRunStatus = await this.store.getRunStatus(runId);
         if (retryRunStatus === "cancelled" || retryRunStatus === "failed") return;
 
-        const queued = await this.store.markNodeQueued(runId, node.id, nextAttempt, recoveryClaimToken);
+        const queued = await this.store.markNodeQueued(
+          runId,
+          node.id,
+          nextAttempt,
+          recoveryClaimToken,
+          delayMs,
+        );
         if (!queued) return;
         await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
@@ -300,9 +303,19 @@ export class WorkflowRuntime {
           runId,
           nodeId: node.id,
           delayMs,
-          attempt: nextAttempt,
-          recoveryClaimToken,
+          attempt: queued.attempt,
+          publicationGeneration: queued.publicationGeneration,
+          ...(queued.recoveryClaimToken
+            ? { recoveryClaimToken: queued.recoveryClaimToken }
+            : {}),
         });
+        await this.store.markQueuePublicationSucceeded(
+          runId,
+          node.id,
+          queued.attempt,
+          queued.publicationGeneration,
+          queued.recoveryClaimToken ?? undefined,
+        );
         return;
       }
 
@@ -423,7 +436,11 @@ export class WorkflowRuntime {
 
       if (!ready || currentStatus !== "pending") continue;
 
-      let shouldRun = false;
+      // Roots have no incoming edges and are unconditionally runnable. This
+      // matters when the durable publication reconciler restores a consumed
+      // root generation to `pending`: routing it through the ordinary DAG
+      // scan must republish the root, not reinterpret it as a condition miss.
+      let shouldRun = incomingEdges.length === 0;
       for (const edge of incomingEdges) {
         if (!edge.condition) { shouldRun = true; break; }
         const result = evaluateExpression(edge.condition, { context, inputs: {} });
@@ -441,9 +458,22 @@ export class WorkflowRuntime {
       const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
       if (!claimed) continue;
       statuses.set(node.id, "queued");
-      await this.queue.enqueueNode({ runId, nodeId: node.id, attempt: 1 });
+      await this.queue.enqueueNode({
+        runId,
+        nodeId: node.id,
+        attempt: claimed.attempt,
+        publicationGeneration: claimed.publicationGeneration,
+        ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
+      });
+      await this.store.markQueuePublicationSucceeded(
+        runId,
+        node.id,
+        claimed.attempt,
+        claimed.publicationGeneration,
+        claimed.recoveryClaimToken ?? undefined,
+      );
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
-      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });
+      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
       queued++;
     }
 

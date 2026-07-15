@@ -33,12 +33,20 @@ afterAll(async () => {
 
 describe("completeWaitingSubworkflowNode child generation CAS", () => {
   it("rejects a stale child and credits only the current child", async () => {
-    await db.insert(runs).values({
-      id: RUN,
-      orgId: ORG,
-      workflowVersionId: `${RUN}-version`,
-      status: "running",
-    });
+    await db.insert(runs).values([
+      {
+        id: RUN,
+        orgId: ORG,
+        workflowVersionId: `${RUN}-version`,
+        status: "running",
+      },
+      {
+        id: CURRENT_CHILD,
+        orgId: ORG,
+        workflowVersionId: `${CURRENT_CHILD}-version`,
+        status: "succeeded",
+      },
+    ]);
     await db.insert(deadLetters).values({
       id: DLQ,
       orgId: ORG,

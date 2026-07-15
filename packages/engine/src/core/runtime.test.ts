@@ -36,9 +36,20 @@ function makeStore(overrides: Partial<ExecutionStore> = {}): ExecutionStore {
       createdBy: null,
     }),
     getNodeStatus: vi.fn().mockResolvedValue('pending'),
-    markNodeQueued: vi.fn().mockResolvedValue(true),
-    tryClaimNodeForQueue: vi.fn().mockResolvedValue(true),
-    markNodeRunning: vi.fn().mockResolvedValue(true),
+    markNodeQueued: vi.fn().mockImplementation(
+      async (_runId, _nodeId, attempt = 1, recoveryClaimToken) => ({
+        attempt,
+        recoveryClaimToken: recoveryClaimToken ?? null,
+        publicationGeneration: 1,
+      }),
+    ),
+    tryClaimNodeForQueue: vi.fn().mockResolvedValue({
+      attempt: 1,
+      recoveryClaimToken: null,
+      publicationGeneration: 1,
+    }),
+    claimNodeForExecution: vi.fn().mockResolvedValue('claimed'),
+    markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceeded: vi.fn().mockResolvedValue(true),
     markNodeSucceededWithEvent: vi.fn().mockResolvedValue(true),
     markNodeFailed: vi.fn().mockResolvedValue(true),
@@ -78,38 +89,30 @@ describe('executeQueuedNode — cancellation guards', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('skips a queued job when the run is already cancelled', async () => {
-    const store = makeStore({ getRunStatus: vi.fn().mockResolvedValue('cancelled') })
+    const store = makeStore({ claimNodeForExecution: vi.fn().mockResolvedValue('run_cancelled') })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
 
     await runtime.executeQueuedNode(input)
 
-    expect(store.markNodeRunning).not.toHaveBeenCalled()
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.skipped',
-      payload: expect.objectContaining({ reason: 'Run cancelled' }),
-    }))
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
   })
 
   it('skips a queued job when the run has already failed', async () => {
-    const store = makeStore({ getRunStatus: vi.fn().mockResolvedValue('failed') })
+    const store = makeStore({ claimNodeForExecution: vi.fn().mockResolvedValue('run_failed') })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
 
     await runtime.executeQueuedNode(input)
 
     expect(executors.execute).not.toHaveBeenCalled()
-    expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'node.skipped',
-      payload: expect.objectContaining({ reason: 'Run failed' }),
-    }))
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
   })
 
-  it('skips when markNodeRunning fails to claim the node (already advanced past queued)', async () => {
+  it('skips when the execution claim finds the node already advanced past queued', async () => {
     const store = makeStore({
-      getRunStatus: vi.fn().mockResolvedValue('running'),
-      markNodeRunning: vi.fn().mockResolvedValue(false),
+      claimNodeForExecution: vi.fn().mockResolvedValue('not_claimed'),
     })
     const executors = makeExecutors()
     const runtime = new WorkflowRuntime(store, makeQueue(), executors)
@@ -130,7 +133,7 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode(input)
 
-    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1, undefined)
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, undefined, 0)
     expect(executors.execute).toHaveBeenCalled()
     // The succeeded transition + its node.succeeded event commit together via
     // markNodeSucceededWithEvent (not markNodeSucceeded + a separate appendEvent).
@@ -149,7 +152,7 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode({ ...input, recoveryClaimToken: 'claim-old' })
 
-    expect(store.markNodeRunning).toHaveBeenCalledWith('r1', 'n1', 1, 'claim-old')
+    expect(store.claimNodeForExecution).toHaveBeenCalledWith('r1', 'n1', 1, 'claim-old', 0)
     expect(store.markNodeSucceededWithEvent).toHaveBeenCalledWith(
       'r1',
       'n1',
@@ -233,9 +236,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
     const retryWorkflow = { ...workflow, nodes: [retryNode] }
     const store = makeStore({
-      getRunStatus: vi.fn()
-        .mockResolvedValueOnce('running') // pre-execution check
-        .mockResolvedValueOnce('running'), // retry scheduling check
+      getRunStatus: vi.fn().mockResolvedValue('running'),
     })
     const queue = makeQueue()
     const executors = makeFailingExecutors()
@@ -243,7 +244,7 @@ describe('executeQueuedNode — cancellation guards', () => {
 
     await runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow })
 
-    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2, undefined)
+    expect(store.markNodeQueued).toHaveBeenCalledWith('r1', 'n1', 2, undefined, expect.any(Number))
     expect(store.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'node.retry',
       payload: expect.objectContaining({ attempt: 2 }),
@@ -253,6 +254,7 @@ describe('executeQueuedNode — cancellation guards', () => {
       nodeId: 'n1',
       attempt: 2,
     }))
+    expect(store.markQueuePublicationSucceeded).toHaveBeenCalledWith('r1', 'n1', 2, 1, undefined)
     expect(store.markNodeFailed).not.toHaveBeenCalled()
   })
 
@@ -260,9 +262,7 @@ describe('executeQueuedNode — cancellation guards', () => {
     const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
     const retryWorkflow = { ...workflow, nodes: [retryNode] }
     const store = makeStore({
-      getRunStatus: vi.fn()
-        .mockResolvedValueOnce('running') // pre-execution check
-        .mockResolvedValueOnce('cancelled'), // retry scheduling check
+      getRunStatus: vi.fn().mockResolvedValue('cancelled'),
     })
     const queue = makeQueue()
     const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors())
@@ -592,6 +592,23 @@ describe('enqueueReadyNodes — cancellation head guard', () => {
 
     expect(await runtime.enqueueReadyNodes({ runId: 'r1', workflow })).toBe(0)
     expect(store.tryClaimNodeForQueue).not.toHaveBeenCalled()
+  })
+
+  it('requeues a pending root restored by the publication reconciler', async () => {
+    const store = makeStore({
+      getRunContext: vi.fn().mockResolvedValue({ n1: { status: 'pending' } }),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors())
+
+    await expect(runtime.enqueueReadyNodes({ runId: 'r1', workflow })).resolves.toBe(1)
+    expect(store.markNodeSkipped).not.toHaveBeenCalled()
+    expect(store.tryClaimNodeForQueue).toHaveBeenCalledWith('r1', 'n1', 1)
+    expect(queue.enqueueNode).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'r1',
+      nodeId: 'n1',
+      publicationGeneration: 1,
+    }))
   })
 })
 

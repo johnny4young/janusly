@@ -24,7 +24,7 @@
  *   failed jobs forever, so a poisoned producer or schema drift would grow
  *   Redis unboundedly.
  * - `execute-node` job payloads are SLIM (`{ runId, nodeId, attempt,
- *   recoveryClaimToken? }`) — the
+ *   publicationGeneration, recoveryClaimToken? }`) — the
  *   worker reloads the workflow from `runs.inputJson` per job rather than
  *   carrying the full workflow JSON in every Redis message.
  */
@@ -33,6 +33,7 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
 import type { EnqueueNodeInput } from "./core/types";
+import { buildExecuteNodeJobId } from "./queue-job-id";
 
 loadRootEnv();
 
@@ -60,11 +61,13 @@ export async function enqueueNode(payload: EnqueueNodeInput) {
       runId: payload.runId,
       nodeId: payload.nodeId,
       attempt: payload.attempt,
+      publicationGeneration: payload.publicationGeneration ?? 0,
       ...(payload.recoveryClaimToken ? { recoveryClaimToken: payload.recoveryClaimToken } : {}),
     },
     {
       attempts: 1,
       delay: payload.delayMs ?? 0,
+      jobId: buildExecuteNodeJobId(payload),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,
     },

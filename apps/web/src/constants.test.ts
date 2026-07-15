@@ -33,6 +33,19 @@ describe('node-type catalogue', () => {
   })
 
   describe('getNodeConfigSummary', () => {
+    it('surfaces an exact subworkflow version pin', () => {
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 3 }))
+        .toBe('child-flow · v3')
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 2_147_483_647 }))
+        .toBe('child-flow · v2147483647')
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow' })).toBe('child-flow')
+    })
+
+    it('does not present an out-of-range subworkflow version as an active pin', () => {
+      expect(getNodeConfigSummary('subworkflow', { workflowId: 'child-flow', version: 2_147_483_648 }))
+        .toBe('child-flow')
+    })
+
     it('summarises parallel_fork by branch count', () => {
       expect(getNodeConfigSummary('parallel_fork', { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] }))
         .toBe('3 branches')
