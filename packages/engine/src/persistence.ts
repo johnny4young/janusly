@@ -131,6 +131,9 @@ export type RunMetadata = {
    *  with sandbox validation, which also receives the run input.
    *  Optional so existing mocks that omit it stay valid. */
   input?: Record<string, unknown>;
+  /** Unresolved-template policy from the immutable workflow snapshot stored
+   *  in `runs.inputJson.workflow`. Missing legacy values are lenient. */
+  templatePolicy?: "lenient" | "strict";
 };
 
 /**
@@ -172,11 +175,19 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
   // `inputJson` is `{ workflow, input }` for production runs (`startRun`) and
   // `{ workflow, failingNodeId }` for sandbox validation runs — read `input`
   // defensively and normalise anything non-object to `{}`.
-  const rawInput = (row.inputJson as { input?: unknown } | null)?.input;
+  const inputJson = row.inputJson as { input?: unknown; workflow?: unknown } | null;
+  const rawInput = inputJson?.input;
   const input =
     rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
       ? (rawInput as Record<string, unknown>)
       : {};
+  const rawWorkflow = inputJson?.workflow;
+  const rawTemplatePolicy = rawWorkflow && typeof rawWorkflow === "object" && !Array.isArray(rawWorkflow)
+    ? (rawWorkflow as Record<string, unknown>).templatePolicy
+    : undefined;
+  const templatePolicy = rawTemplatePolicy === "strict" || rawTemplatePolicy === "lenient"
+    ? rawTemplatePolicy
+    : undefined;
   return {
     orgId: row.orgId,
     workflowVersionId: row.workflowVersionId,
@@ -184,6 +195,7 @@ export async function getRunMetadata(runId: string): Promise<RunMetadata | null>
     createdBy: row.createdBy ?? null,
     replayMode: row.replayMode ?? null,
     input,
+    templatePolicy,
   };
 }
 

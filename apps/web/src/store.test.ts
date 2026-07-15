@@ -119,6 +119,22 @@ describe('useWorkflowStore', () => {
     })
   })
 
+  it('round-trips the opt-in strict template policy and resets it for a new workflow', () => {
+    useWorkflowStore.getState().hydrateWorkflow({
+      id: 'wf-strict',
+      templatePolicy: 'strict',
+      nodes: [{ id: 'n1', type: 'noop', config: {} }],
+      edges: [],
+    })
+
+    expect(useWorkflowStore.getState().currentWorkflowTemplatePolicy).toBe('strict')
+    expect(useWorkflowStore.getState().getWorkflowJson()).toMatchObject({ templatePolicy: 'strict' })
+
+    useWorkflowStore.getState().newWorkflow()
+    expect(useWorkflowStore.getState().currentWorkflowTemplatePolicy).toBeUndefined()
+    expect(useWorkflowStore.getState().getWorkflowJson()).not.toHaveProperty('templatePolicy')
+  })
+
   it('serializes trimmed custom labels and editor positions', () => {
     useWorkflowStore.getState().hydrateWorkflow({
       id: 'wf-layout',

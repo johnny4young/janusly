@@ -56,6 +56,37 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
       retry: { maxAttempts: 3 },
     })
   })
+
+  it('explains the buffered JSON output contract and localizes tool descriptions', () => {
+    const view = render(
+      <QuickConfigEditor
+        nodeId="fetch"
+        type="http"
+        config={{ url: 'https://api.example.com' }}
+        tools={[]}
+        onUpdate={vi.fn()}
+      />,
+    )
+    expect(screen.getByText(/Declared JSON responses up to 64 KiB/)).toHaveTextContent('output.jsonParseSkipped')
+    expect(screen.getByTestId('http-json-contract-helper')).toBeVisible()
+
+    initI18n('es')
+    view.rerender(
+      <QuickConfigEditor
+        nodeId="parse"
+        type="tool"
+        config={{ tool: 'json.parse', input: { value: '{}' } }}
+        tools={[{
+          name: 'json.parse',
+          description: 'Parse a JSON string into its native object, array, or primitive value.',
+          descriptionCode: 'json-parse',
+          required: ['value'],
+        }]}
+        onUpdate={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('Interpreta una cadena JSON como su objeto, arreglo o valor primitivo nativo.')).toBeInTheDocument()
+  })
 })
 
 describe('<QuickConfigEditor /> guided workflow choices', () => {

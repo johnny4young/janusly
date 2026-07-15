@@ -62,6 +62,11 @@ const jsonPickOutput = z.object({
   value: z.unknown(),
 });
 
+const jsonParseInput = z.object({
+  value: z.string(),
+});
+const jsonParseOutput = z.object({ value: z.unknown() });
+
 const jsonSetInput = z.object({
   source: z.unknown().optional(),
   path: z.string().min(1),
@@ -92,6 +97,21 @@ const jsonJqInput = z.object({
 const jsonJqOutput = z.object({ value: z.unknown() });
 
 export const jsonTools = {
+  "json.parse": defineTool({
+    name: "json.parse",
+    description: "Parse a JSON string into its native object, array, or primitive value.",
+    inputSchema: jsonParseInput,
+    outputSchema: jsonParseOutput,
+    inputExample: { value: '{"customer":{"id":42}}' },
+    async execute(input) {
+      try {
+        return { value: JSON.parse(input.value) as unknown };
+      } catch {
+        throw new Error("json.parse received invalid JSON");
+      }
+    },
+  }),
+
   "json.pick": defineTool({
     name: "json.pick",
     description: "Pick a value from workflow context using a dot path.",

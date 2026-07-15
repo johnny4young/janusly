@@ -158,6 +158,8 @@ type WorkflowStore = {
   currentWorkflowInputs: WorkflowDefinition['inputs']
   /** Declared output projection map — engine renders templates at terminal status. */
   currentWorkflowOutputs: WorkflowDefinition['outputs']
+  /** Opt-in strict handling for unresolved node-config templates. */
+  currentWorkflowTemplatePolicy: WorkflowDefinition['templatePolicy']
   nodes: WorkflowGraphNode[]
   edges: WorkflowGraphEdge[]
   selectedNodeId: string | null
@@ -219,6 +221,7 @@ type WorkflowStore = {
   updateNodeLabel: (nodeId: string, label: string) => void
   updateWorkflowInputs: (inputs: WorkflowDefinition['inputs']) => void
   updateWorkflowOutputs: (outputs: WorkflowDefinition['outputs']) => void
+  updateWorkflowTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
   updateEdgeCondition: (id: string, condition: string | null) => void
 
   setRunId: (id: string | null) => void
@@ -317,6 +320,7 @@ function graphToWorkflow(
   edges: WorkflowGraphEdge[],
   inputs: WorkflowDefinition['inputs'],
   outputs: WorkflowDefinition['outputs'],
+  templatePolicy: WorkflowDefinition['templatePolicy'],
 ): WorkflowDefinition {
   return {
     id,
@@ -334,6 +338,7 @@ function graphToWorkflow(
     })),
     ...(inputs ? { inputs } : {}),
     ...(outputs ? { outputs } : {}),
+    ...(templatePolicy ? { templatePolicy } : {}),
     ui: {
       positions: Object.fromEntries(nodes
         .filter(node => Number.isFinite(node.position.x) && Number.isFinite(node.position.y))
@@ -356,6 +361,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   workflowRevision: 0,
   currentWorkflowInputs: undefined,
   currentWorkflowOutputs: undefined,
+  currentWorkflowTemplatePolicy: undefined,
   nodes: initialNodes,
   edges: initialEdges,
   selectedNodeId: null,
@@ -454,6 +460,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowDirty: dirty,
       currentWorkflowInputs: workflow.inputs,
       currentWorkflowOutputs: workflow.outputs,
+      currentWorkflowTemplatePolicy: workflow.templatePolicy,
       nodes: graph.nodes,
       edges: graph.edges,
       selectedNodeId: null,
@@ -475,6 +482,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       state.edges,
       state.currentWorkflowInputs,
       state.currentWorkflowOutputs,
+      state.currentWorkflowTemplatePolicy,
     )
   },
 
@@ -487,6 +495,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       workflowDirty: false,
       currentWorkflowInputs: undefined,
       currentWorkflowOutputs: undefined,
+      currentWorkflowTemplatePolicy: undefined,
       nodes: [],
       edges: [],
       selectedNodeId: null,
@@ -579,6 +588,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
   updateWorkflowOutputs: (currentWorkflowOutputs) => set((state) => ({
     currentWorkflowOutputs,
+    workflowDirty: true,
+    workflowRevision: state.workflowRevision + 1,
+  })),
+
+  updateWorkflowTemplatePolicy: (currentWorkflowTemplatePolicy) => set((state) => ({
+    currentWorkflowTemplatePolicy,
     workflowDirty: true,
     workflowRevision: state.workflowRevision + 1,
   })),

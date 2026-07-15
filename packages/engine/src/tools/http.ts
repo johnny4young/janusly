@@ -7,6 +7,7 @@
 
 import { z } from "zod";
 import { consumeStreamToPreview, fetchHttpTarget } from "../http-policy";
+import { projectHttpJson } from "../http-json";
 import { defineTool, envPositiveInt } from "./tool-types";
 
 const httpRequestInput = z.object({
@@ -39,6 +40,12 @@ const httpRequestOutput = z.object({
   statusCode: z.number(),
   ok: z.boolean(),
   body: z.string(),
+  /** Parsed body when the buffered upstream declares application/json or application/*+json. */
+  json: z.unknown().optional(),
+  /** True when the upstream declared JSON but returned an invalid JSON body. */
+  jsonParseError: z.literal(true).optional(),
+  /** Why an otherwise valid automatic projection was intentionally skipped. */
+  jsonParseSkipped: z.literal("body_too_large").optional(),
   /** True iff the call ran with `bodyMode: "stream"`; `body` is then a preview, not the full response. */
   streamed: z.boolean().optional(),
   /** Total bytes consumed from the upstream stream (capped by `maxResponseBytes`). */
@@ -95,7 +102,12 @@ export const httpTools = {
         maxResponseBytes: input.maxResponseBytes,
         maxRedirects: input.maxRedirects,
       });
-      return { statusCode: result.statusCode, ok: result.ok, body: result.body };
+      return {
+        statusCode: result.statusCode,
+        ok: result.ok,
+        body: result.body,
+        ...projectHttpJson(result.body, result.headers),
+      };
     },
   }),
 };

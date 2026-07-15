@@ -49,6 +49,7 @@ export type DiffableWorkflow = {
   metadata?: unknown;
   inputs?: unknown;
   outputs?: unknown;
+  templatePolicy?: unknown;
   nodes?: DiffableNode[];
   edges?: DiffableEdge[];
 };
@@ -110,7 +111,7 @@ export type DiffSummary = {
 
 /** Full structural diff between two workflows. */
 export type WorkflowDiff = {
-  /** Top-level workflow fields (`name`, `metadata.*`, `inputs`, `outputs`, `dslVersion`). */
+  /** Top-level workflow fields (`name`, `metadata.*`, `inputs`, `outputs`, `templatePolicy`, `dslVersion`). */
   workflow: FieldChange[];
   nodes: NodeChange[];
   edges: EdgeChange[];
@@ -146,7 +147,7 @@ export function computeWorkflowDiff(before: DiffableWorkflow, after: DiffableWor
 
 /* ----------------------------- Workflow-level ----------------------------- */
 
-const WORKFLOW_LEVEL_FIELDS = ["dslVersion", "name", "metadata", "inputs", "outputs"] as const;
+const WORKFLOW_LEVEL_FIELDS = ["dslVersion", "name", "metadata", "inputs", "outputs", "templatePolicy"] as const;
 
 function diffWorkflowLevel(before: DiffableWorkflow, after: DiffableWorkflow): FieldChange[] {
   const changes: FieldChange[] = [];

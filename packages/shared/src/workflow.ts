@@ -192,6 +192,14 @@ export const WorkflowUiSchema = z.object({
 });
 
 /**
+ * Runtime handling for a node-config template whose path cannot be resolved.
+ * `lenient` preserves the historical empty-string substitution while emitting
+ * timeline evidence; `strict` fails the node before its executor can perform a
+ * side effect. Optional on the wire so legacy snapshots remain byte-compatible.
+ */
+export const TemplatePolicySchema = z.enum(["lenient", "strict"]);
+
+/**
  * Top-level workflow definition. Persisted as JSON in
  * `workflow_versions.dag_json` and consumed by the engine.
  */
@@ -202,6 +210,7 @@ export const WorkflowSchema = z.object({
   metadata: WorkflowJsonMetadataSchema.optional(),
   inputs: WorkflowInputSchema.optional(),
   outputs: WorkflowOutputsSchema.optional(),
+  templatePolicy: TemplatePolicySchema.optional(),
   ui: WorkflowUiSchema.optional(),
   nodes: z.array(NodeSchema),
   edges: z.array(EdgeSchema),
@@ -232,6 +241,8 @@ export type WorkflowJsonMetadata = z.infer<typeof WorkflowJsonMetadataSchema>;
 export type WorkflowInputType = z.infer<typeof WorkflowInputTypeSchema>;
 /** Output-projection map (output-name → template string). */
 export type WorkflowOutputs = z.infer<typeof WorkflowOutputsSchema>;
+/** Runtime policy for unresolved node-config template paths. */
+export type TemplatePolicy = z.infer<typeof TemplatePolicySchema>;
 /** Persisted editor coordinates keyed by node id. */
 export type WorkflowUi = z.infer<typeof WorkflowUiSchema>;
 /** Top-level parsed workflow. */

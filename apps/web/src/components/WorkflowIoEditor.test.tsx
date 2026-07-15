@@ -4,22 +4,26 @@ import { describe, expect, it, vi } from 'vitest'
 import type { WorkflowDefinition } from '../types'
 import { WorkflowIoEditor } from './WorkflowIoEditor'
 
-function Harness({ initialInputs, initialOutputs }: {
+function Harness({ initialInputs, initialOutputs, initialTemplatePolicy }: {
   initialInputs?: WorkflowDefinition['inputs']
   initialOutputs?: WorkflowDefinition['outputs']
+  initialTemplatePolicy?: WorkflowDefinition['templatePolicy']
 }) {
   const [inputs, setInputs] = useState(initialInputs)
   const [outputs, setOutputs] = useState(initialOutputs)
+  const [templatePolicy, setTemplatePolicy] = useState(initialTemplatePolicy)
   return (
     <>
       <WorkflowIoEditor
         workflowId="workflow-a"
         inputs={inputs}
         outputs={outputs}
+        templatePolicy={templatePolicy}
         onChangeInputs={setInputs}
         onChangeOutputs={setOutputs}
+        onChangeTemplatePolicy={setTemplatePolicy}
       />
-      <output data-testid="io-state">{JSON.stringify({ inputs, outputs })}</output>
+      <output data-testid="io-state">{JSON.stringify({ inputs, outputs, templatePolicy })}</output>
     </>
   )
 }
@@ -53,6 +57,22 @@ describe('<WorkflowIoEditor />', () => {
       },
       outputs: { approvedInvoice: '{{context.review.output}}' },
     })
+  })
+
+  it('authors strict template handling and can return to the compatible default', () => {
+    render(<Harness />)
+
+    const strict = screen.getByRole('checkbox', { name: 'Fail on a missing value' })
+    const policy = screen.getByTestId('workflow-template-policy')
+    expect(strict).not.toBeChecked()
+    expect(policy.getElementsByTagName('p')[1]).toHaveTextContent('Continue with an empty value')
+
+    fireEvent.click(strict)
+    expect(JSON.parse(screen.getByTestId('io-state').textContent ?? '{}')).toEqual({ templatePolicy: 'strict' })
+    expect(policy.getElementsByTagName('p')[1]).toHaveTextContent('Stop before using a missing value')
+
+    fireEvent.click(strict)
+    expect(JSON.parse(screen.getByTestId('io-state').textContent ?? '{}')).toEqual({})
   })
 
   it('rejects duplicate input and output names without mutating the contract', () => {
@@ -153,12 +173,14 @@ describe('<WorkflowIoEditor />', () => {
     }
     const onChangeInputs = vi.fn()
     const onChangeOutputs = vi.fn()
+    const onChangeTemplatePolicy = vi.fn()
     const { rerender } = render(
       <WorkflowIoEditor
         workflowId="workflow-a"
         inputs={inputs}
         onChangeInputs={onChangeInputs}
         onChangeOutputs={onChangeOutputs}
+        onChangeTemplatePolicy={onChangeTemplatePolicy}
       />,
     )
     const firstName = screen.getByLabelText('Input name: first')
@@ -173,6 +195,7 @@ describe('<WorkflowIoEditor />', () => {
         inputs={inputs}
         onChangeInputs={onChangeInputs}
         onChangeOutputs={onChangeOutputs}
+        onChangeTemplatePolicy={onChangeTemplatePolicy}
       />,
     )
 

@@ -161,6 +161,67 @@ describe('http node — dryRun gating', () => {
     expect(result.output).toMatchObject({ statusCode: 201, ok: true })
   })
 
+  it('projects valid declared JSON while preserving the original HTTP body', async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{"customer":{"id":42}}',
+      headers: { 'content-type': 'application/problem+json; charset=utf-8' },
+    } as never)
+
+    const result = await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/customer' },
+    })
+
+    expect(result).toEqual({
+      status: 'completed',
+      output: {
+        statusCode: 200,
+        ok: true,
+        body: '{"customer":{"id":42}}',
+        json: { customer: { id: 42 } },
+      },
+    })
+  })
+
+  it('marks invalid declared JSON and never parses a streamed preview', async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{broken',
+      headers: { 'content-type': 'application/json' },
+    } as never)
+    expect(await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/broken' },
+    })).toEqual({
+      status: 'completed',
+      output: { statusCode: 200, ok: true, body: '{broken', jsonParseError: true },
+    })
+
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.close() } })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: { 'content-type': 'application/json' },
+    } as never)
+    consumeStreamToPreviewMock.mockResolvedValueOnce({
+      preview: '{"partial":true}',
+      originalBytes: 16,
+      truncated: false,
+    })
+    const streamed = await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/stream', bodyMode: 'stream' },
+    })
+    expect(streamed.status).toBe('completed')
+    if (streamed.status !== 'completed') return
+    expect(streamed.output).not.toHaveProperty('json')
+    expect(streamed.output).not.toHaveProperty('jsonParseError')
+  })
+
   it('consumes streaming responses into a JSON-safe preview envelope', async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -558,6 +619,88 @@ describe('agent node — dryRun gating', () => {
   })
 })
 
+describe('multi-agent deferred template scopes', () => {
+  it('binds previousAgents after each sequential agent completes under strict policy', async () => {
+    const result = await nodeRegistry.multi_agent({
+      ...baseCtx,
+      nodeId: 'crew',
+      dryRun: true,
+      templatePolicy: 'strict',
+      config: {
+        mode: 'sequential',
+        agents: [
+          {
+            name: 'analyzer',
+            goal: 'uppercase the seed',
+            tool: 'text.uppercase',
+            input: { value: 'seed' },
+            maxSteps: 1,
+          },
+          {
+            name: 'reviewer',
+            goal: 'Review {{previousAgents.0.result.finalResult.value}}',
+            tool: 'text.uppercase',
+            input: { value: 'done' },
+            maxSteps: 1,
+          },
+        ],
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'multi_agent.agent.started',
+      expect.objectContaining({ index: 1, goal: 'Review SEED' }),
+    )
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'template.unresolved_path',
+      expect.anything(),
+    )
+  })
+
+  it('records and rejects a missing previousAgents path at its binding point in strict mode', async () => {
+    const error = await nodeRegistry.multi_agent({
+      ...baseCtx,
+      nodeId: 'crew',
+      dryRun: true,
+      templatePolicy: 'strict',
+      config: {
+        mode: 'sequential',
+        agents: [
+          {
+            name: 'reviewer',
+            goal: 'Review {{previousAgents.0.result.finalAnswer}}',
+            tool: 'text.uppercase',
+            input: { value: 'never runs' },
+            maxSteps: 1,
+          },
+        ],
+      },
+    }).catch((value) => value)
+
+    expect(error).toMatchObject({
+      code: 'UNRESOLVED_TEMPLATE_PATH',
+      paths: ['previousAgents.0.result.finalAnswer'],
+    })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'crew', 'template.unresolved_path', {
+      count: 1,
+      paths: ['previousAgents.0.result.finalAnswer'],
+      truncated: false,
+      policy: 'strict',
+    })
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'multi_agent.agent.started',
+      expect.anything(),
+    )
+  })
+})
+
 describe('loop node — array reference resolution', () => {
   it('preserves an array reference from context (single-template-reference shape)', async () => {
     const result = await nodeRegistry.loop({
@@ -621,5 +764,55 @@ describe('loop node — array reference resolution', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toEqual({ count: 0, items: [] })
+  })
+
+  it('records one deduplicated event for missing per-item paths in lenient mode', async () => {
+    const result = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      templatePolicy: 'lenient',
+      config: {
+        items: [{ name: 'a' }, { name: 'b' }],
+        mapping: '{{item.id}}',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toEqual({ count: 2, items: ['', ''] })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'normalize', 'template.unresolved_path', {
+      count: 1,
+      paths: ['item.id'],
+      truncated: false,
+      policy: 'lenient',
+    })
+  })
+
+  it('records and rejects a missing per-item path before loop completion in strict mode', async () => {
+    const error = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      templatePolicy: 'strict',
+      config: {
+        items: [{ name: 'a' }],
+        mapping: '{{item.id}}',
+      },
+    }).catch((value) => value)
+
+    expect(error).toMatchObject({ code: 'UNRESOLVED_TEMPLATE_PATH', paths: ['item.id'] })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'normalize', 'template.unresolved_path', {
+      count: 1,
+      paths: ['item.id'],
+      truncated: false,
+      policy: 'strict',
+    })
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'normalize',
+      'loop.completed',
+      expect.anything(),
+    )
   })
 })

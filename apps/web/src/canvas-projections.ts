@@ -104,6 +104,9 @@ export function getRunWorkflowSnapshot(inputJson: RunSummary['inputJson']): Work
     const outputs = asObject(workflow.outputs)
     if (!outputs || !Object.values(outputs).every(output => typeof output === 'string')) return null
   }
+  if (workflow.templatePolicy !== undefined
+    && workflow.templatePolicy !== 'lenient'
+    && workflow.templatePolicy !== 'strict') return null
   if (workflow.ui !== undefined) {
     const ui = asObject(workflow.ui)
     if (!ui) return null

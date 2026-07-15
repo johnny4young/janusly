@@ -23,6 +23,8 @@ describe('expression graph context', () => {
     expect(collectReachableUpstreamNodeIds({ nodes, edges, targetNodeId: 'gate' })).toEqual(['fetch', 'shape'])
     const tokens = buildExpressionSuggestions({ nodes, edges, targetNodeId: 'gate', mode: 'node' }).map((item) => item.token)
     expect(tokens).toContain('context.fetch.output.statusCode')
+    expect(tokens).toContain('context.fetch.output.json')
+    expect(tokens).toContain('context.fetch.output.jsonParseSkipped')
     expect(tokens).toContain('context.shape.output.total')
     expect(tokens).not.toContain('context.gate.output')
     expect(tokens).not.toContain('context.isolated.output')

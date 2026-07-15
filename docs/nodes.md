@@ -51,6 +51,28 @@ The default `http` node buffers the entire response into `output.body` before an
 
 Set `bodyMode: "stream"` on the node config to opt into the streaming primitive. The executor reads the response chunk-by-chunk and captures the first N bytes into a bounded preview that gets persisted to `run_nodes.state_json.output.body`; the full body still flows through the byte cap (the stream aborts mid-flight if the cap is exceeded). The preview size is controlled per-org by `http.streamPreviewBytes` (default 64 KB, range 1 KB..1 MB) or per-call via the `streamPreviewBytes` config field.
 
+Buffered HTTP nodes and the `http.request` tool preserve the decoded text in
+`output.body`. When the final response declares `application/json` or an
+`application/*+json` media type and parsing succeeds, the same output also
+contains the native value at `output.json`. A lying upstream that declares JSON
+but returns invalid text leaves `output.json` absent and sets
+`output.jsonParseError: true`; non-JSON media types are never guessed from body
+content. Automatic projection is capped at 64 KiB so storing both forms does not
+exhaust the node-state persistence budget; a larger declared JSON body remains
+at `output.body` and sets `output.jsonParseSkipped: "body_too_large"`. Streaming
+previews are not parsed because they may be truncated. Use the read-side
+`json.parse` tool when the operator explicitly wants to parse a larger buffered
+body or a string whose response did not declare JSON.
+
+Node-config templates remain backward compatible: an absent `context.*` or
+`inputs.*` path renders as an empty value and writes one bounded
+`template.unresolved_path` event for that resolution phase. Set the workflow's
+top-level `templatePolicy` to `"strict"` to fail instead of consuming an
+accidental empty value. Ordinary config paths fail before the executor runs;
+loop `item`/`index` and sequential-agent `previousAgents` paths fail at their
+later binding point. Missing `{{secret.*}}` references retain their existing
+immediate hard failure.
+
 ```jsonc
 {
   "id": "ingest_invoices_csv",
@@ -217,7 +239,7 @@ Aggregation strategies for the final answer: `last` (default), `first`, `all`, `
     "continueOnError": false,
     "agents": [
       { "name": "analyzer", "role": "Data analyst", "goal": "uppercase the input" },
-      { "name": "validator", "role": "QA reviewer", "goal": "uppercase the previous output" }
+      { "name": "validator", "role": "QA reviewer", "goal": "review {{previousAgents.0.result.finalAnswer}}" }
     ]
   }
 }

@@ -18,6 +18,7 @@ const executorMock = vi.fn().mockResolvedValue({ status: "succeeded", output: { 
 const getRunContextMock = vi.fn();
 const getRunMetadataMock = vi.fn();
 const isWriteSideNodeMock = vi.fn().mockReturnValue(false);
+const appendEventMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("./node-registry", () => ({
   nodeRegistry: {
@@ -25,6 +26,8 @@ vi.mock("./node-registry", () => ({
     // through to the loose post-template config — letting the tests assert
     // the RENDERED config without a schema stripping unknown keys.
     test_probe: (ctx: unknown) => executorMock(ctx),
+    loop: (ctx: unknown) => executorMock(ctx),
+    multi_agent: (ctx: unknown) => executorMock(ctx),
   },
   isWriteSideNode: (...args: unknown[]) => isWriteSideNodeMock(...args),
 }));
@@ -32,6 +35,7 @@ vi.mock("./node-registry", () => ({
 vi.mock("./persistence", () => ({
   getRunContext: (...args: unknown[]) => getRunContextMock(...args),
   getRunMetadata: (...args: unknown[]) => getRunMetadataMock(...args),
+  appendEvent: (...args: unknown[]) => appendEventMock(...args),
 }));
 
 import { executeNode } from "./execute-node";
@@ -49,6 +53,7 @@ describe("executeNode run-input plumbing (B-01)", () => {
     executorMock.mockClear();
     getRunContextMock.mockReset();
     getRunMetadataMock.mockReset();
+    appendEventMock.mockClear();
   });
 
   it("merges the run input as context.input so trigger executors can read it", async () => {
@@ -103,6 +108,183 @@ describe("executeNode run-input plumbing (B-01)", () => {
 
     const ctx = executorMock.mock.calls[0][0] as { context: Record<string, unknown> };
     expect(ctx.context.input).toEqual({});
+  });
+});
+
+describe("executeNode unresolved-template policy", () => {
+  beforeEach(() => {
+    executorMock.mockReset().mockResolvedValue({ status: "succeeded", output: { ok: true } });
+    getRunContextMock.mockReset().mockResolvedValue({ upstream: { output: {} } });
+    getRunMetadataMock.mockReset().mockResolvedValue({ ...BASE_META, input: {} });
+    appendEventMock.mockClear();
+  });
+
+  it("keeps lenient empty-string behavior and emits one deduplicated event", async () => {
+    const result = await executeNode({
+      runId: "run-1",
+      node: {
+        id: "notify",
+        type: "test_probe",
+        config: {
+          subject: "{{context.upstream.output.missing}} / {{ context.upstream.output.missing }}",
+          body: "{{inputs.unknown}}",
+        },
+      } as never,
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(executorMock).toHaveBeenCalledWith(expect.objectContaining({
+      config: { subject: " / ", body: "" },
+    }));
+    expect(appendEventMock).toHaveBeenCalledTimes(1);
+    expect(appendEventMock).toHaveBeenCalledWith("run-1", "notify", "template.unresolved_path", {
+      count: 2,
+      paths: ["context.upstream.output.missing", "inputs.unknown"],
+      truncated: false,
+      policy: "lenient",
+    });
+  });
+
+  it("fails strict mode before invoking the executor", async () => {
+    getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: {}, templatePolicy: "strict" });
+
+    const error = await executeNode({
+      runId: "run-1",
+      node: { id: "charge", type: "test_probe", config: { amount: "{{context.invoice.output.amount}}" } } as never,
+    }).catch((value) => value);
+
+    expect(error).toMatchObject({ code: "UNRESOLVED_TEMPLATE_PATH", paths: ["context.invoice.output.amount"] });
+    expect(executorMock).not.toHaveBeenCalled();
+    expect(appendEventMock).toHaveBeenCalledWith("run-1", "charge", "template.unresolved_path", expect.objectContaining({
+      count: 1,
+      policy: "strict",
+    }));
+  });
+
+  it("normalizes a missing env name before persistence", async () => {
+    await executeNode({
+      runId: "run-1",
+      node: {
+        id: "notify",
+        type: "test_probe",
+        config: { endpoint: "{{env.private_endpoint}}" },
+      } as never,
+    });
+
+    expect(appendEventMock).toHaveBeenCalledWith("run-1", "notify", "template.unresolved_path", expect.objectContaining({
+      paths: ["env.*"],
+    }));
+    expect(JSON.stringify(appendEventMock.mock.calls)).not.toContain("PRIVATE_ENDPOINT");
+  });
+
+  it("preserves loop item and index templates until the loop executor binds them", async () => {
+    getRunContextMock.mockResolvedValue({
+      upstream: { output: { items: [{ id: "a" }, { id: "b" }], prefix: "customer" } },
+    });
+    getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: {}, templatePolicy: "strict" });
+
+    await executeNode({
+      runId: "run-1",
+      node: {
+        id: "normalize",
+        type: "loop",
+        config: {
+          items: "{{context.upstream.output.items}}",
+          mapping: {
+            line: "{{context.upstream.output.prefix}}-{{item.id}}-{{index}}",
+          },
+        },
+      } as never,
+    });
+
+    expect(executorMock).toHaveBeenCalledWith(expect.objectContaining({
+      config: {
+        items: [{ id: "a" }, { id: "b" }],
+        mapping: { line: "customer-{{item.id}}-{{index}}" },
+      },
+    }));
+    expect(appendEventMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves previous-agent goal templates until the multi-agent executor binds them", async () => {
+    getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: {}, templatePolicy: "strict" });
+
+    await executeNode({
+      runId: "run-1",
+      node: {
+        id: "crew",
+        type: "multi_agent",
+        config: {
+          mode: "sequential",
+          agents: [
+            { name: "analyzer", goal: "Inspect the input" },
+            { name: "reviewer", goal: "Review {{previousAgents.0.result.finalAnswer}}" },
+          ],
+        },
+      } as never,
+    });
+
+    expect(executorMock).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({
+        agents: [
+          { name: "analyzer", goal: "Inspect the input" },
+          { name: "reviewer", goal: "Review {{previousAgents.0.result.finalAnswer}}" },
+        ],
+      }),
+      templatePolicy: "strict",
+    }));
+    expect(appendEventMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects previous-agent templates before parallel multi-agent execution", async () => {
+    getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: {}, templatePolicy: "strict" });
+
+    const error = await executeNode({
+      runId: "run-1",
+      node: {
+        id: "crew",
+        type: "multi_agent",
+        config: {
+          mode: "parallel",
+          continueOnError: true,
+          agents: [
+            { name: "reviewer", goal: "Review {{previousAgents.0.result.finalAnswer}}" },
+          ],
+        },
+      } as never,
+    }).catch((value) => value);
+
+    expect(error).toMatchObject({
+      code: "UNRESOLVED_TEMPLATE_PATH",
+      paths: ["previousAgents.0.result.finalAnswer"],
+    });
+    expect(executorMock).not.toHaveBeenCalled();
+    expect(appendEventMock).toHaveBeenCalledWith("run-1", "crew", "template.unresolved_path", {
+      count: 1,
+      paths: ["previousAgents.0.result.finalAnswer"],
+      truncated: false,
+      policy: "strict",
+    });
+  });
+
+  it("bounds strict errors to the same persisted path budget as the event", async () => {
+    getRunMetadataMock.mockResolvedValue({ ...BASE_META, input: {}, templatePolicy: "strict" });
+    const config = Object.fromEntries(
+      Array.from({ length: 25 }, (_, index) => [`field${index}`, `{{context.missing.output.field${index}}}`]),
+    );
+
+    const error = await executeNode({
+      runId: "run-1",
+      node: { id: "bounded", type: "test_probe", config } as never,
+    }).catch((value) => value);
+
+    expect(error).toMatchObject({
+      code: "UNRESOLVED_TEMPLATE_PATH",
+      count: 25,
+      truncated: true,
+    });
+    expect(error.paths).toHaveLength(20);
+    expect(executorMock).not.toHaveBeenCalled();
   });
 });
 

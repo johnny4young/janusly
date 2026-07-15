@@ -18,10 +18,118 @@
 import { nodeRegistry, isWriteSideNode } from "./node-registry";
 import { NODE_CONFIG_SCHEMAS } from "./node-configs";
 import { getNodeTimeoutMs, NodeTimeoutError, withTimeout } from "./core/timeout";
-import { getRunContext, getRunMetadata } from "./persistence";
-import { redactError, redactValues, renderTemplateWithRedactions } from "./template";
+import { appendEvent, getRunContext, getRunMetadata } from "./persistence";
+import {
+  MAX_RECORDED_UNRESOLVED_PATHS,
+  UnresolvedTemplatePathError,
+  redactError,
+  redactValues,
+  renderTemplateWithRedactions,
+} from "./template";
 import type { ExecuteNodeInput, NodeExecutionResult } from "./core/types";
 import type { NodeType } from "@janusly/shared/src/workflow";
+
+type RenderedConfig = ReturnType<typeof renderTemplateWithRedactions>;
+
+function isConfigRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Multi-agent goals may bind `previousAgents` only after an earlier agent has
+ * completed. Resolve every immediately available field now, but preserve that
+ * one executor-owned scope inside goals until `buildAgentConfig` binds it.
+ */
+function renderMultiAgentConfig(
+  config: Record<string, unknown>,
+  scope: Record<string, unknown>,
+): RenderedConfig {
+  const redactedValues = new Set<string>();
+  const unresolvedPaths = new Set<string>();
+  const collect = (part: RenderedConfig): unknown => {
+    for (const value of part.redactedValues) redactedValues.add(value);
+    for (const path of part.unresolvedPaths) unresolvedPaths.add(path);
+    return part.rendered;
+  };
+
+  const { agents, goal, ...immediateConfig } = config;
+  const rendered = collect(renderTemplateWithRedactions(immediateConfig, scope)) as Record<string, unknown>;
+  const deferredGoalRoots = rendered.mode === undefined || rendered.mode === "sequential"
+    ? ["previousAgents"]
+    : [];
+
+  if (Object.prototype.hasOwnProperty.call(config, "goal")) {
+    rendered.goal = collect(renderTemplateWithRedactions(goal, scope, {
+      deferredRoots: deferredGoalRoots,
+    }));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config, "agents")) {
+    rendered.agents = Array.isArray(agents)
+      ? agents.map((agent) => {
+          if (!isConfigRecord(agent)) {
+            return collect(renderTemplateWithRedactions(agent, scope));
+          }
+          const { goal: agentGoal, ...immediateAgent } = agent;
+          const renderedAgent = collect(
+            renderTemplateWithRedactions(immediateAgent, scope),
+          ) as Record<string, unknown>;
+          if (Object.prototype.hasOwnProperty.call(agent, "goal")) {
+            renderedAgent.goal = collect(renderTemplateWithRedactions(agentGoal, scope, {
+              deferredRoots: deferredGoalRoots,
+            }));
+          }
+          return renderedAgent;
+        })
+      : collect(renderTemplateWithRedactions(agents, scope));
+  }
+
+  return {
+    rendered,
+    redactedValues: Array.from(redactedValues),
+    unresolvedPaths: Array.from(unresolvedPaths),
+  };
+}
+
+/**
+ * Loop mappings bind `item` and `index` inside the loop executor. Resolve the
+ * rest of the config now, but keep those two mapping roots intact until each
+ * iteration has supplied them. Secret/env/context references in the mapping
+ * still resolve here so their redaction and strict-policy behavior is unchanged.
+ */
+function renderNodeConfig(
+  nodeType: string,
+  config: Record<string, unknown>,
+  scope: Record<string, unknown>,
+): RenderedConfig {
+  if (nodeType === "multi_agent") {
+    return renderMultiAgentConfig(config, scope);
+  }
+
+  if (nodeType !== "loop" || !Object.prototype.hasOwnProperty.call(config, "mapping")) {
+    return renderTemplateWithRedactions(config, scope);
+  }
+
+  const { mapping, ...immediateConfig } = config;
+  const immediate = renderTemplateWithRedactions(immediateConfig, scope);
+  const deferredMapping = renderTemplateWithRedactions(mapping, scope, {
+    deferredRoots: ["item", "index"],
+  });
+  return {
+    rendered: {
+      ...(immediate.rendered as Record<string, unknown>),
+      mapping: deferredMapping.rendered,
+    },
+    redactedValues: Array.from(new Set([
+      ...immediate.redactedValues,
+      ...deferredMapping.redactedValues,
+    ])),
+    unresolvedPaths: Array.from(new Set([
+      ...immediate.unresolvedPaths,
+      ...deferredMapping.unresolvedPaths,
+    ])),
+  };
+}
 
 /**
  * Run one node end-to-end: look up org/context, render templates with
@@ -77,7 +185,25 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
     inputs: node.config
   };
 
-  const { rendered: resolvedConfig, redactedValues } = renderTemplateWithRedactions(node.config, scope);
+  const { rendered: resolvedConfig, redactedValues, unresolvedPaths } = renderNodeConfig(
+    node.type,
+    node.config,
+    scope,
+  );
+
+  if (unresolvedPaths.length > 0) {
+    const recordedPaths = unresolvedPaths.slice(0, MAX_RECORDED_UNRESOLVED_PATHS);
+    const templatePolicy = meta.templatePolicy ?? "lenient";
+    await appendEvent(runId, node.id, "template.unresolved_path", {
+      count: unresolvedPaths.length,
+      paths: recordedPaths,
+      truncated: unresolvedPaths.length > recordedPaths.length,
+      policy: templatePolicy,
+    });
+    if (templatePolicy === "strict") {
+      throw new UnresolvedTemplatePathError(unresolvedPaths);
+    }
+  }
 
   let result: Awaited<ReturnType<typeof executor>>;
   try {
@@ -110,6 +236,7 @@ export async function executeNode(input: Pick<ExecuteNodeInput, "runId" | "node"
         context,
         redactedValues,
         dryRun,
+        templatePolicy: meta.templatePolicy ?? "lenient",
       }),
       getNodeTimeoutMs(node),
       { label: node.type },

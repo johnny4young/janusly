@@ -53,6 +53,7 @@ export function getRunEventPresentation(event: RunEvent): RunEventPresentation {
   if (type.includes('waiting') || type.includes('retry') || type.includes('cancelled') || type.includes('rollback.triggered')) {
     return { tone: 'warning', noise: false }
   }
+  if (type === 'template.unresolved_path') return { tone: 'warning', noise: false }
   if (NOISE_EVENT_TYPES.has(type)) return { tone: 'neutral', noise: true }
   if (type.includes('started') || type.includes('running') || type.includes('decision')) {
     return { tone: 'info', noise: false }

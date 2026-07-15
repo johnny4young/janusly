@@ -236,6 +236,18 @@ describe("computeWorkflowDiff — workflow-level fields", () => {
     expect(result.workflow[0]).toMatchObject({ path: "name", tag: "rationale" });
     expect(result.summary.totalChanges).toBe(1);
   });
+
+  it("captures an unresolved-template policy change", () => {
+    const before = makeWorkflow({});
+    const after = makeWorkflow({ templatePolicy: "strict" });
+    const result = computeWorkflowDiff(before, after);
+    expect(result.workflow).toContainEqual({
+      path: "templatePolicy",
+      before: undefined,
+      after: "strict",
+      tag: null,
+    });
+  });
 });
 
 describe("computeWorkflowDiff — determinism", () => {

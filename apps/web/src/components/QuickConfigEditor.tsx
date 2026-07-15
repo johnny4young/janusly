@@ -10,7 +10,7 @@
 
 import { useCallback, useState } from 'react'
 import type { JsonObject, SavedWorkflow, ToolSchema, WorkflowGraphEdge, WorkflowGraphNode, WorkflowInputSchemaShape } from '../types'
-import { Trans, useT } from '../i18n'
+import { Trans, tToolDescription, useT } from '../i18n'
 import { McpToolConfigField } from './McpToolConfigField'
 import { ResilienceFieldset } from './ResilienceFieldset'
 import { ExpressionAssistant } from './ExpressionAssistant'
@@ -117,6 +117,9 @@ export function QuickConfigEditor({
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.requestUrl') as string} value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+        <p className="helper-text" data-testid="http-json-contract-helper">
+          <Trans i18nKey="rightPanel.quickConfig.httpJsonHelper" components={{ code: <code /> }} />
+        </p>
         <ResilienceFieldset nodeId={nodeId} nodeType="http" config={config} onPatch={patch} />
       </section>
     )
@@ -162,7 +165,7 @@ export function QuickConfigEditor({
               <option key={tool.name} value={tool.name}>{tool.name}</option>
             ))}
           </select>
-          {matchedTool?.description && <p className="helper-text">{matchedTool.description}</p>}
+          {matchedTool?.description && <p className="helper-text">{tToolDescription(matchedTool)}</p>}
           {matchedTool?.required && matchedTool.required.length > 0 && (
             <p className="helper-text">{t('rightPanel.quickConfig.requiredInput', { required: matchedTool.required.join(', ') })}{matchedTool.optional?.length ? t('rightPanel.quickConfig.optionalSuffix', { optional: matchedTool.optional.join(', ') }) : ''}</p>
           )}

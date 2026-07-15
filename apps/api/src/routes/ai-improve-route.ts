@@ -59,13 +59,15 @@ export const aiImproveRoutes: Route[] = [
       }
 
       const workflow = parsed.data;
-      // Display identity and layout are operator-authored metadata, not part of
-      // an LLM's semantic improvement remit. Keep them out of the prompt and
-      // restore the original metadata after validating each full replacement.
+      // Display identity, layout, and template failure policy are operator-
+      // authored controls, not part of an LLM's semantic improvement remit.
+      // Keep them out of the prompt and restore the originals after validating
+      // each full replacement.
       const workflowForImprovement: Workflow = {
         ...workflow,
         nodes: workflow.nodes.map(({ label: _label, ...node }) => node),
         ui: undefined,
+        templatePolicy: undefined,
       };
       const helperResult: SuggestImprovementResult = await suggestWorkflowImprovement({
         llm,
@@ -205,8 +207,9 @@ export const aiImproveRoutes: Route[] = [
     } },
 ];
 
-/** Keep operator-authored labels/layout stable across full-workflow AI replacements. */
+/** Keep operator-authored labels, layout, and failure policy stable across AI replacements. */
 function preserveAuthoringMetadata(original: Workflow, suggestion: Workflow): Workflow {
+  const { templatePolicy: _suggestedTemplatePolicy, ...suggestionWithoutPolicy } = suggestion
   const originalNodes = new Map(original.nodes.map(node => [node.id, node]))
   const nodes = suggestion.nodes.map(({ label: _suggestedLabel, ...node }) => {
     const label = originalNodes.get(node.id)?.label
@@ -217,8 +220,9 @@ function preserveAuthoringMetadata(original: Workflow, suggestion: Workflow): Wo
     return position ? [[node.id, position] as const] : []
   }))
   return {
-    ...suggestion,
+    ...suggestionWithoutPolicy,
     nodes,
     ...(Object.keys(positions).length > 0 ? { ui: { positions } } : { ui: undefined }),
+    ...(original.templatePolicy ? { templatePolicy: original.templatePolicy } : {}),
   }
 }

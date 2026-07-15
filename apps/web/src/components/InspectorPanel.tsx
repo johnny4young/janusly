@@ -74,6 +74,8 @@ export function InspectorPanel({
   const duplicateNode = useWorkflowStore(state => state.duplicateNode)
   const updateWorkflowInputs = useWorkflowStore(state => state.updateWorkflowInputs)
   const updateWorkflowOutputs = useWorkflowStore(state => state.updateWorkflowOutputs)
+  const currentWorkflowTemplatePolicy = useWorkflowStore(state => state.currentWorkflowTemplatePolicy)
+  const updateWorkflowTemplatePolicy = useWorkflowStore(state => state.updateWorkflowTemplatePolicy)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [jsonDraft, setJsonDraft] = useState(() => selectedNode ? JSON.stringify(selectedNode.data.config, null, 2) : '')
   const [typeChangePending, setTypeChangePending] = useState(false)
@@ -320,8 +322,10 @@ export function InspectorPanel({
           workflowId={currentWorkflowId ?? 'unsaved-workflow'}
           inputs={currentWorkflowInputs}
           outputs={currentWorkflowOutputs}
+          templatePolicy={currentWorkflowTemplatePolicy}
           onChangeInputs={updateWorkflowInputs}
           onChangeOutputs={updateWorkflowOutputs}
+          onChangeTemplatePolicy={updateWorkflowTemplatePolicy}
         />
       </React.Suspense>
       <section className="panel-card">

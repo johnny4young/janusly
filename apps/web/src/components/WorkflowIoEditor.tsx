@@ -16,8 +16,10 @@ type WorkflowIoEditorProps = {
   workflowId: string
   inputs?: WorkflowDefinition['inputs']
   outputs?: WorkflowDefinition['outputs']
+  templatePolicy?: WorkflowDefinition['templatePolicy']
   onChangeInputs: (inputs: WorkflowDefinition['inputs']) => void
   onChangeOutputs: (outputs: WorkflowDefinition['outputs']) => void
+  onChangeTemplatePolicy: (policy: WorkflowDefinition['templatePolicy']) => void
 }
 
 const INPUT_TYPES: WorkflowInputSchemaShape['type'][] = ['string', 'number', 'boolean', 'object', 'array']
@@ -37,7 +39,15 @@ function shapeForType(type: WorkflowInputSchemaShape['type'], description?: stri
   return base
 }
 
-export function WorkflowIoEditor({ workflowId, inputs, outputs, onChangeInputs, onChangeOutputs }: WorkflowIoEditorProps) {
+export function WorkflowIoEditor({
+  workflowId,
+  inputs,
+  outputs,
+  templatePolicy,
+  onChangeInputs,
+  onChangeOutputs,
+  onChangeTemplatePolicy,
+}: WorkflowIoEditorProps) {
   const { t } = useT()
   const editableInputs = !inputs || inputs.type === 'object'
   const properties = editableInputs ? inputs?.properties ?? {} : {}
@@ -117,6 +127,28 @@ export function WorkflowIoEditor({ workflowId, inputs, outputs, onChangeInputs, 
       <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
       <h3>{t('rightPanel.inspector.ioTitle')}</h3>
       <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>
+
+      <div className="we-workflow-io__section" data-testid="workflow-template-policy">
+        <div className="we-workflow-io__heading">
+          <div>
+            <strong>{t('rightPanel.inspector.templatePolicyLabel')}</strong>
+            <p>{t('rightPanel.inspector.templatePolicyHelper')}</p>
+          </div>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={templatePolicy === 'strict'}
+              onChange={(event) => onChangeTemplatePolicy(event.target.checked ? 'strict' : undefined)}
+            />
+            {t('rightPanel.inspector.templatePolicyStrict')}
+          </label>
+        </div>
+        <p className="we-workflow-io__empty" role="status">
+          {t(templatePolicy === 'strict'
+            ? 'rightPanel.inspector.templatePolicyStrictStatus'
+            : 'rightPanel.inspector.templatePolicyLenientStatus')}
+        </p>
+      </div>
 
       <div className="we-workflow-io__section" data-testid="workflow-inputs-editor">
         <div className="we-workflow-io__heading">

@@ -3078,6 +3078,13 @@
                                     "type": "string"
                                   }
                                 },
+                                "templatePolicy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "lenient",
+                                    "strict"
+                                  ]
+                                },
                                 "ui": {
                                   "type": "object",
                                   "properties": {
@@ -3686,6 +3693,13 @@
                                 "additionalProperties": {
                                   "type": "string"
                                 }
+                              },
+                              "templatePolicy": {
+                                "type": "string",
+                                "enum": [
+                                  "lenient",
+                                  "strict"
+                                ]
                               },
                               "ui": {
                                 "type": "object",

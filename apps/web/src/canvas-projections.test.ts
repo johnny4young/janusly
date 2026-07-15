@@ -36,6 +36,12 @@ describe('getRunWorkflowSnapshot', () => {
     expect(getRunWorkflowSnapshot({ workflow: validWorkflow })).toBe(validWorkflow)
   })
 
+  it('accepts the closed template policy and rejects malformed historical values', () => {
+    const strict = { ...validWorkflow, templatePolicy: 'strict' }
+    expect(getRunWorkflowSnapshot({ workflow: strict })).toBe(strict)
+    expect(getRunWorkflowSnapshot({ workflow: { ...validWorkflow, templatePolicy: 'warn' } })).toBeNull()
+  })
+
   it.each([
     { ...validWorkflow, id: '' },
     { ...validWorkflow, name: 42 },

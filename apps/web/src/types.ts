@@ -240,6 +240,8 @@ export type WorkflowDefinition = {
   inputs?: WorkflowInputSchemaShape
   /** Output projection map; engine renders each template at terminal `succeeded`. */
   outputs?: Record<string, string>
+  /** Missing template paths stay empty by default; strict fails before node execution. */
+  templatePolicy?: 'lenient' | 'strict'
   /** Editor-only layout metadata; runtime consumers ignore it. */
   ui?: { positions?: Record<string, { x: number; y: number }> }
 }

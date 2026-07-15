@@ -45,8 +45,14 @@ import { appendEvent } from "./persistence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
-import { mapInput } from "./template";
+import {
+  MAX_RECORDED_UNRESOLVED_PATHS,
+  UnresolvedTemplatePathError,
+  mapInput,
+  renderTemplateWithRedactions,
+} from "./template";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
+import { projectHttpJson } from "./http-json";
 import { hasFailureSignal } from "./failure-signal";
 import { checkBudget } from "./budget";
 import { subworkflowExecutor } from "./subworkflow";
@@ -79,6 +85,9 @@ export type NodeContext = {
   context: Record<string, any>;
   /** Resolved secret values that must never be persisted by executors. */
   redactedValues?: string[];
+  /** Immutable policy copied from the run's workflow snapshot. Executors use
+   * it only for scopes that cannot be bound at dispatcher time. */
+  templatePolicy?: "lenient" | "strict";
   /**
    * True when this node is executing inside a sandbox/validation run
    * (`runs.replayMode === "validation"`). Plumbed by `executeNode` from
@@ -382,7 +391,42 @@ function safeOutcome(value: unknown): string {
   }
 }
 
-function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {
+function mergeLateBoundRedactions(ctx: NodeContext, redactedValues: string[]): void {
+  if (ctx.redactedValues) {
+    for (const value of redactedValues) {
+      if (!ctx.redactedValues.includes(value)) ctx.redactedValues.push(value);
+    }
+  }
+}
+
+async function enforceLateBoundTemplatePolicy(ctx: NodeContext, unresolvedPaths: string[]): Promise<void> {
+  if (unresolvedPaths.length > 0) {
+    const recordedPaths = unresolvedPaths.slice(0, MAX_RECORDED_UNRESOLVED_PATHS);
+    const templatePolicy = ctx.templatePolicy ?? "lenient";
+    await appendEvent(ctx.runId, ctx.nodeId, "template.unresolved_path", {
+      count: unresolvedPaths.length,
+      paths: recordedPaths,
+      truncated: unresolvedPaths.length > recordedPaths.length,
+      policy: templatePolicy,
+    });
+    if (templatePolicy === "strict") {
+      throw new UnresolvedTemplatePathError(unresolvedPaths);
+    }
+  }
+}
+
+async function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedContext: any, results: any[]) {
+  const goal = renderTemplateWithRedactions(
+    agent.goal ?? ctx.config.goal ?? "Complete the task",
+    {
+      context: sharedContext,
+      previousAgents: results,
+    },
+  );
+
+  mergeLateBoundRedactions(ctx, goal.redactedValues);
+  await enforceLateBoundTemplatePolicy(ctx, goal.unresolvedPaths);
+
   return {
     ...agent,
     name: agent.name ?? `agent_${index + 1}`,
@@ -390,10 +434,7 @@ function buildAgentConfig(ctx: NodeContext, agent: any, index: number, sharedCon
     maxSteps: agent.maxSteps ?? ctx.config.maxSteps ?? 2,
     timeoutMs: agent.timeoutMs ?? ctx.config.timeoutMs,
     reflection: agent.reflection ?? ctx.config.reflection ?? true,
-    goal: mapInput(agent.goal ?? ctx.config.goal ?? "Complete the task", {
-      context: sharedContext,
-      previousAgents: results,
-    }),
+    goal: goal.rendered,
   };
 }
 
@@ -482,7 +523,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     });
 
     if (!result.ok) throw new Error(`HTTP failed: ${result.statusCode}`);
-    return { status: "completed", output: { statusCode: result.statusCode, ok: result.ok, body: result.body } };
+    return {
+      status: "completed",
+      output: {
+        statusCode: result.statusCode,
+        ok: result.ok,
+        body: result.body,
+        ...projectHttpJson(result.body, result.headers),
+      },
+    };
   },
 
   condition: async (ctx) => {
@@ -499,7 +548,19 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
   loop: async (ctx) => {
     const rawItems = mapInput(ctx.config.items, { context: ctx.context, inputs: ctx.config });
     const items = Array.isArray(rawItems) ? rawItems : typeof rawItems === "string" ? rawItems.split(",").map(item => item.trim()).filter(Boolean) : [];
-    const results = items.map((item, index) => mapInput(ctx.config.mapping ?? { item: "{{item}}", index: "{{index}}" }, { context: ctx.context, inputs: ctx.config, item, index }));
+    const unresolvedPaths = new Set<string>();
+    const lateBoundRedactions = new Set<string>();
+    const results = items.map((item, index) => {
+      const mapped = renderTemplateWithRedactions(
+        ctx.config.mapping ?? { item: "{{item}}", index: "{{index}}" },
+        { context: ctx.context, inputs: ctx.config, item, index },
+      );
+      for (const path of mapped.unresolvedPaths) unresolvedPaths.add(path);
+      for (const value of mapped.redactedValues) lateBoundRedactions.add(value);
+      return mapped.rendered;
+    });
+    mergeLateBoundRedactions(ctx, Array.from(lateBoundRedactions));
+    await enforceLateBoundTemplatePolicy(ctx, Array.from(unresolvedPaths));
     await appendEvent(ctx.runId, ctx.nodeId, "loop.completed", { count: results.length, items: results });
     return { status: "completed", output: { count: results.length, items: results } };
   },
@@ -558,7 +619,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     if (mode === "parallel") {
       const parallelResults = await Promise.allSettled(
         agents.map(async (agent: any, index: number) => {
-          const agentConfig = buildAgentConfig(ctx, agent, index, sharedContext, results);
+          const agentConfig = await buildAgentConfig(ctx, agent, index, sharedContext, results);
 
           await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
             index,
@@ -592,7 +653,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
       }
     } else {
       for (const [index, agent] of agents.entries()) {
-        const agentConfig = buildAgentConfig(ctx, agent, index, sharedContext, results);
+        const agentConfig = await buildAgentConfig(ctx, agent, index, sharedContext, results);
 
         await appendEvent(ctx.runId, ctx.nodeId, "multi_agent.agent.started", {
           index,

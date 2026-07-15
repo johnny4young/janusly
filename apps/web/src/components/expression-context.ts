@@ -11,7 +11,7 @@ export type ExpressionSuggestion = {
 }
 
 const knownOutputFields: Record<string, string[]> = {
-  http: ['statusCode', 'ok', 'body'],
+  http: ['statusCode', 'ok', 'body', 'json', 'jsonParseError', 'jsonParseSkipped'],
   condition: ['result'],
   loop: ['count', 'items'],
   ai: ['mode', 'response'],

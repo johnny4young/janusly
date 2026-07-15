@@ -27,6 +27,28 @@ import { getSecret } from "./secrets";
 
 export type TemplateScope = Record<string, unknown>;
 
+export const MAX_RECORDED_UNRESOLVED_PATHS = 20;
+
+/**
+ * Stable failure envelope for strict template policy. Both the dispatcher and
+ * executors with late-bound scopes use this class so callers see one contract
+ * regardless of when a template can first be resolved.
+ */
+export class UnresolvedTemplatePathError extends Error {
+  readonly code = "UNRESOLVED_TEMPLATE_PATH";
+  readonly count: number;
+  readonly paths: string[];
+  readonly truncated: boolean;
+
+  constructor(paths: string[]) {
+    super(`Node config contains ${paths.length} unresolved template path${paths.length === 1 ? "" : "s"}`);
+    this.name = "UnresolvedTemplatePathError";
+    this.count = paths.length;
+    this.paths = paths.slice(0, MAX_RECORDED_UNRESOLVED_PATHS);
+    this.truncated = paths.length > this.paths.length;
+  }
+}
+
 function isTemplateRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -71,19 +93,48 @@ export class StreamValueInTemplateError extends Error {
   }
 }
 
-/** Walk a dotted path through `source`. Returns `undefined` on any null link. Throws `StreamValueInTemplateError` if the terminal value is a `ReadableStream`. */
-export function getByPath(source: unknown, path: string): unknown {
-  const resolved = path.split('.').reduce<unknown>((acc, key) => {
-    if (!isPathContainer(acc)) return undefined;
-    return acc[key];
-  }, source);
+type PathResolution = { found: boolean; value: unknown };
+
+function resolveByPath(source: unknown, path: string): PathResolution {
+  let resolved = source;
+  for (const key of path.split('.')) {
+    if (!isPathContainer(resolved) || !Object.prototype.hasOwnProperty.call(resolved, key)) {
+      return { found: false, value: undefined };
+    }
+    resolved = resolved[key];
+  }
   if (isReadableStreamLike(resolved)) {
     throw new StreamValueInTemplateError(path);
   }
-  return resolved;
+  return { found: true, value: resolved };
 }
 
-function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionList: Set<string>): unknown {
+/** Walk a dotted path through `source`. Returns `undefined` on any absent link. Throws `StreamValueInTemplateError` if the terminal value is a `ReadableStream`. */
+export function getByPath(source: unknown, path: string): unknown {
+  return resolveByPath(source, path).value;
+}
+
+function safeUnresolvedPath(path: string): string {
+  if (path.startsWith('secret.')) return 'secret.*';
+  if (path.startsWith('env.')) return 'env.*';
+  return path.slice(0, 160);
+}
+
+function trackUnresolved(unresolvedPaths: Set<string>, path: string): void {
+  unresolvedPaths.add(safeUnresolvedPath(path));
+}
+
+function isDeferredPath(path: string, deferredRoots: ReadonlySet<string>): boolean {
+  return deferredRoots.has(path.split('.', 1)[0] ?? '');
+}
+
+function renderTemplateInternal(
+  value: unknown,
+  scope: TemplateScope,
+  redactionList: Set<string>,
+  unresolvedPaths: Set<string>,
+  deferredRoots: ReadonlySet<string>,
+): unknown {
   if (typeof value === 'string') {
     // Single-template-reference shape (entire string is one `{{...}}`):
     // return the resolved value as-is so arrays/objects/numbers/booleans
@@ -94,47 +145,64 @@ function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionL
     const singleRef = value.match(/^\s*\{\{\s*([^}]+)\s*\}\}\s*$/);
     if (singleRef) {
       const expr = singleRef[1].trim();
+      if (isDeferredPath(expr, deferredRoots)) return value;
       if (expr.startsWith('secret.')) {
         const secretName = expr.replace('secret.', '').toUpperCase();
         const resolved = getSecret(secretName);
         if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        if (!resolved) trackUnresolved(unresolvedPaths, expr);
         return resolved;
       }
       if (expr.startsWith('env.')) {
         const envName = expr.replace('env.', '').toUpperCase();
-        const resolved = process.env[envName] ?? '';
+        const envValue = process.env[envName];
+        const resolved = envValue ?? '';
         if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        if (envValue === undefined) trackUnresolved(unresolvedPaths, expr);
         return resolved;
       }
-      const resolved = getByPath(scope, expr);
-      if (resolved == null) return '';
-      return resolved;
+      const resolution = resolveByPath(scope, expr);
+      if (!resolution.found) {
+        trackUnresolved(unresolvedPaths, expr);
+        return '';
+      }
+      return resolution.value ?? '';
     }
 
-    return value.replace(/{{\s*([^}]+)\s*}}/g, (_, rawPath) => {
+    return value.replace(/{{\s*([^}]+)\s*}}/g, (match, rawPath) => {
       const expr = String(rawPath).trim();
+
+      if (isDeferredPath(expr, deferredRoots)) return match;
 
       if (expr.startsWith('secret.')) {
         const secretName = expr.replace('secret.', '').toUpperCase();
         const resolved = getSecret(secretName);
         if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        if (!resolved) trackUnresolved(unresolvedPaths, expr);
         return resolved;
       }
 
       if (expr.startsWith('env.')) {
         const envName = expr.replace('env.', '').toUpperCase();
-        const resolved = process.env[envName] ?? '';
+        const envValue = process.env[envName];
+        const resolved = envValue ?? '';
         // Treat env values like secrets: any sufficiently long resolved value
         // is added to the redaction list so it gets scrubbed from outputs
         // before persistence. The 4-char floor avoids over-redacting toy
         // values like "0", "1", "dev", or "prod" — short non-secrets render
         // verbatim. Same length floor as the secret branch above.
         if (resolved && resolved.length >= 4) redactionList.add(resolved);
+        if (envValue === undefined) trackUnresolved(unresolvedPaths, expr);
         return resolved;
       }
 
-      const resolved = getByPath(scope, expr);
+      const resolution = resolveByPath(scope, expr);
 
+      if (!resolution.found) {
+        trackUnresolved(unresolvedPaths, expr);
+        return '';
+      }
+      const resolved = resolution.value;
       if (resolved == null) return '';
       if (typeof resolved === 'object') return JSON.stringify(resolved);
       return String(resolved);
@@ -142,11 +210,11 @@ function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionL
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => renderTemplateInternal(item, scope, redactionList));
+    return value.map((item) => renderTemplateInternal(item, scope, redactionList, unresolvedPaths, deferredRoots));
   }
 
   if (isTemplateRecord(value)) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplateInternal(item, scope, redactionList)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, renderTemplateInternal(item, scope, redactionList, unresolvedPaths, deferredRoots)]));
   }
 
   return value;
@@ -166,7 +234,7 @@ function renderTemplateInternal(value: unknown, scope: TemplateScope, redactionL
 export function renderTemplate(value: string, scope: TemplateScope): unknown;
 export function renderTemplate<T>(value: T, scope: TemplateScope): T;
 export function renderTemplate<T>(value: T, scope: TemplateScope): T | unknown {
-  return renderTemplateInternal(value, scope, new Set()) as T;
+  return renderTemplateInternal(value, scope, new Set(), new Set(), new Set()) as T;
 }
 
 /**
@@ -178,10 +246,18 @@ export function renderTemplate<T>(value: T, scope: TemplateScope): T | unknown {
 export function renderTemplateWithRedactions(
   value: unknown,
   scope: TemplateScope,
-): { rendered: unknown; redactedValues: string[] } {
+  options: { deferredRoots?: readonly string[] } = {},
+): { rendered: unknown; redactedValues: string[]; unresolvedPaths: string[] } {
   const list = new Set<string>();
-  const rendered = renderTemplateInternal(value, scope, list);
-  return { rendered, redactedValues: Array.from(list) };
+  const unresolvedPaths = new Set<string>();
+  const rendered = renderTemplateInternal(
+    value,
+    scope,
+    list,
+    unresolvedPaths,
+    new Set(options.deferredRoots ?? []),
+  );
+  return { rendered, redactedValues: Array.from(list), unresolvedPaths: Array.from(unresolvedPaths) };
 }
 
 /**

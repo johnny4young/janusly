@@ -106,17 +106,19 @@ describe("POST /ai/suggest-improvement — auth gate", () => {
 });
 
 describe("POST /ai/suggest-improvement — AI mode", () => {
-  it("keeps operator-authored labels and layout out of the prompt and restores them after replacement", async () => {
+  it("keeps operator-authored labels, layout, and template policy out of the prompt and restores them", async () => {
     readJsonMock.mockResolvedValue({ workflow: {
       ...VALID_WORKFLOW,
       nodes: [{ ...VALID_WORKFLOW.nodes[0], label: "Billing API" }],
       ui: { positions: { n1: { x: 320, y: 180 } } },
+      templatePolicy: "strict",
     } } as never);
     suggestMock.mockResolvedValue({
       mode: "ai",
       suggestions: [{
         patchedWorkflowJson: JSON.stringify({
           ...VALID_WORKFLOW,
+          templatePolicy: "lenient",
           nodes: [{ ...VALID_WORKFLOW.nodes[0], config: { url: "https://example.com", timeoutMs: 30_000 } }],
         }),
         rationale: "bound the request",
@@ -130,12 +132,14 @@ describe("POST /ai/suggest-improvement — AI mode", () => {
     const res = await callImprove();
 
     const helperInput = suggestMock.mock.calls[0]?.[0] as {
-      workflow: { ui?: unknown; nodes: Array<{ label?: string }> };
+      workflow: { ui?: unknown; templatePolicy?: string; nodes: Array<{ label?: string }> };
     } | undefined;
     expect(helperInput?.workflow.ui).toBeUndefined();
+    expect(helperInput?.workflow.templatePolicy).toBeUndefined();
     expect(helperInput?.workflow.nodes[0]?.label).toBeUndefined();
     expect(res.payload.suggestedWorkflow.nodes[0].label).toBe("Billing API");
     expect(res.payload.suggestedWorkflow.ui).toEqual({ positions: { n1: { x: 320, y: 180 } } });
+    expect(res.payload.suggestedWorkflow.templatePolicy).toBe("strict");
   });
 
   it("validates each suggestion and returns mode:ai + audits mode:ai", async () => {
@@ -164,6 +168,24 @@ describe("POST /ai/suggest-improvement — AI mode", () => {
     const meta = (auditMock.mock.calls[0]?.[2]?.metadata ?? {}) as Record<string, unknown>;
     expect(meta.mode).toBe("ai");
     expect(meta.suggestionsCount).toBe(1);
+  });
+
+  it("does not let a full-workflow suggestion invent template failure policy", async () => {
+    suggestMock.mockResolvedValue({
+      mode: "ai",
+      suggestions: [{
+        patchedWorkflowJson: JSON.stringify({ ...VALID_WORKFLOW, templatePolicy: "strict" }),
+        rationale: "tighten failure handling",
+        approachLabel: "resilience",
+        confidence: 75,
+      }],
+      model: "claude-haiku-4-5-20251001",
+      provider: "anthropic",
+    } as never);
+
+    const res = await callImprove();
+
+    expect(res.payload.suggestedWorkflow).not.toHaveProperty("templatePolicy");
   });
 
   it("degrades to fallback when no AI suggestion survives validation", async () => {

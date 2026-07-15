@@ -64,6 +64,14 @@ describe('WorkflowSchema', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts only the closed unresolved-template policies without defaulting legacy workflows', () => {
+    const base = { nodes: [], edges: [] }
+    expect(WorkflowSchema.parse(base)).not.toHaveProperty('templatePolicy')
+    expect(WorkflowSchema.parse({ ...base, templatePolicy: 'lenient' }).templatePolicy).toBe('lenient')
+    expect(WorkflowSchema.parse({ ...base, templatePolicy: 'strict' }).templatePolicy).toBe('strict')
+    expect(WorkflowSchema.safeParse({ ...base, templatePolicy: 'warn' }).success).toBe(false)
+  })
+
   it('accepts finite editor positions and rejects non-finite coordinates', () => {
     const workflow = {
       nodes: [{ id: 'start', type: 'noop', config: {} }],
