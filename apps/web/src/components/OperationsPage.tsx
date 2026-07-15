@@ -6,7 +6,7 @@
  * mount their own cards on demand — inactive sub-tabs literally don't
  * render, so their `useEffect` fetches never fire. This drops the
  * per-refresh API call count from ~9 (every card self-fetched on mount)
- * to ~2-3 (header `/recovery/metrics` + `/health`, plus whichever cards
+ * to ~3-4 (header metrics + public/admin infra health, plus whichever cards
  * the active sub-tab carries).
  *
  * Active sub-tab is persisted to localStorage under
@@ -36,6 +36,13 @@ import { RecentAlertsCard } from './RecentAlertsCard'
 import { McpConnectionsPanel } from './McpConnectionsPanel'
 import { VitalSignsStrip } from './VitalSignsStrip'
 import { RunStreamChip } from './RunStreamChip'
+import {
+  parseQueueHealth,
+  QueueLagChip,
+  queueNeedsAttention,
+  type QueueHealth,
+  type QueueUnavailableReason,
+} from './QueueLagChip'
 import { buildOperationsTiles } from './operations-tiles'
 import {
   OPERATIONS_SECTION_REQUEST_EVENT as SECTION_REQUEST_EVENT,
@@ -144,11 +151,25 @@ export type { OpsSection } from './operations-section-bus'
 type SignalSummary = {
   /** `/health` rate-limiter snapshot. Drives the chip and Reliability dot. */
   rateLimiter: RateLimiterHealth | null
+  /** Admin queue snapshot; null means unavailable, undefined means not checked yet. */
+  queue: QueueHealth | null | undefined
   /** Most recent 402 envelope captured by the API wrapper. Drives Reliability dot. */
   budgetBlocked: unknown
   /** True when at least one `/recovery/metrics` value is in the "unhealthy" band.
    *  Drives Overview dot — a proxy for "operator should look at this tab". */
   overviewUnhealthy: boolean
+}
+
+type QueueSignalState = {
+  health: QueueHealth | null
+  unavailableReason: QueueUnavailableReason
+}
+
+function isForbiddenApiError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'statusCode' in error
+    && (error as { statusCode?: unknown }).statusCode === 403
 }
 
 export function OperationsPage() {
@@ -164,6 +185,8 @@ export function OperationsPage() {
   // When the last /health snapshot landed — shown as an "as of" on the chip so a
   // stalled poll (the snapshot frozen) reads as stale rather than current.
   const [rateLimiterCheckedAt, setRateLimiterCheckedAt] = useState<number | null>(null)
+  const [queueSignal, setQueueSignal] = useState<QueueSignalState | undefined>(undefined)
+  const [queueCheckedAt, setQueueCheckedAt] = useState<number | null>(null)
   const [section, setSection] = useState<OpsSection>(() => loadStoredSection())
 
   // Persist on every section change. Tiny write — no debounce needed.
@@ -200,6 +223,7 @@ export function OperationsPage() {
 
   useEffect(() => {
     let cancelled = false
+    let queueForbidden = false
     const loadHealth = () => {
       api('/health')
         .then((payload) => {
@@ -213,10 +237,37 @@ export function OperationsPage() {
           // Keep the last successful snapshot visible. The checked-at timestamp
           // freezing is the staleness signal when a later /health poll fails.
         })
+      // Live queue numbers intentionally stay off unauthenticated `/health`.
+      // Poll the admin projection on the same cadence and preserve the last
+      // successful snapshot if a later request fails.
+      if (queueForbidden) return
+      api('/system/queue')
+        .then((payload) => {
+          if (cancelled) return
+          const health = parseQueueHealth(payload)
+          setQueueSignal({
+            health,
+            unavailableReason: payload === null ? 'redis' : 'transport',
+          })
+          setQueueCheckedAt(Date.now())
+        })
+        .catch((error) => {
+          if (cancelled) return
+          if (isForbiddenApiError(error)) {
+            queueForbidden = true
+            setQueueSignal(undefined)
+            setQueueCheckedAt(null)
+            return
+          }
+          setQueueSignal(current => current ?? {
+            health: null,
+            unavailableReason: 'transport',
+          })
+        })
     }
     loadHealth()
-    // `/health` is infra state (the rate limiter), independent of workflow
-    // saves — poll it on a fixed cadence instead of refiring on every
+    // Infrastructure health is independent of workflow saves — poll both
+    // projections on a fixed cadence instead of refiring on every
     // platformVersion bump. A save no longer refetches it, and a Redis
     // degradation is still caught within the interval even while idle.
     const id = window.setInterval(loadHealth, 20_000)
@@ -235,9 +286,11 @@ export function OperationsPage() {
     ? [displayMetrics.successRate, displayMetrics.mttr, displayMetrics.p95Latency, displayMetrics.replayRate, displayMetrics.costThisWindow]
         .some((m) => m.severity === 'unhealthy')
     : false
+  const queueHealth = queueSignal === undefined ? undefined : queueSignal.health
 
   const signals: SignalSummary = {
     rateLimiter: rateLimiterHealth,
+    queue: queueHealth,
     budgetBlocked,
     overviewUnhealthy,
   }
@@ -250,6 +303,9 @@ export function OperationsPage() {
         error={error}
         rateLimiterHealth={rateLimiterHealth}
         rateLimiterCheckedAt={rateLimiterCheckedAt}
+        queueHealth={queueHealth}
+        queueCheckedAt={queueCheckedAt}
+        queueUnavailableReason={queueSignal?.unavailableReason}
       />
       <div className="we-operations-page__body">
         <OperationsRail section={section} onChange={setSection} signals={signals} />
@@ -272,12 +328,18 @@ function OperationsHeader({
   error,
   rateLimiterHealth,
   rateLimiterCheckedAt,
+  queueHealth,
+  queueCheckedAt,
+  queueUnavailableReason,
 }: {
   metrics: RecoveryMetrics | null
   loading: boolean
   error: string | null
   rateLimiterHealth: RateLimiterHealth | null
   rateLimiterCheckedAt: number | null
+  queueHealth: QueueHealth | null | undefined
+  queueCheckedAt: number | null
+  queueUnavailableReason?: QueueUnavailableReason
 }) {
   const { t } = useT()
   return (
@@ -291,8 +353,17 @@ function OperationsHeader({
         <span className="panel-heading-icon"><Gauge size={18} aria-hidden="true" /></span>
       </div>
 
-      <RunStreamChip />
-      {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
+      <div className="we-operations-header__signals">
+        <RunStreamChip />
+        {rateLimiterHealth && <RateLimiterStatusChip health={rateLimiterHealth} checkedAt={rateLimiterCheckedAt} />}
+        {queueHealth !== undefined && (
+          <QueueLagChip
+            health={queueHealth}
+            checkedAt={queueCheckedAt}
+            unavailableReason={queueUnavailableReason}
+          />
+        )}
+      </div>
 
       {error && (
         <section className="panel-card">
@@ -341,6 +412,8 @@ function OperationsRail({
         ? 'danger'
         : signals.rateLimiter && !signals.rateLimiter.healthy
           ? 'warning'
+          : signals.queue !== undefined && queueNeedsAttention(signals.queue)
+            ? 'warning'
           : null,
     access: null,
     integrations: null,

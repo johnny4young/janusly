@@ -293,7 +293,9 @@ registration failures log and do not block process boot.
 
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
-| `OTEL_METRICS_PORT` | `9464` | `packages/engine/src/observability/prometheus.ts` | Prometheus exporter port. |
+| `OTEL_METRICS_HOST` | `127.0.0.1` | `apps/api`, `packages/engine/src/worker.ts` | Process-local Prometheus bind host. Set a reachable interface such as `0.0.0.0` only when a remote scraper requires it and network policy protects the endpoint. |
+| `OTEL_METRICS_PORT` | API `9464`; worker `9465` | `apps/api`, `packages/engine/src/worker.ts` | Per-process Prometheus exporter port. Override per service when multiple replicas share a host. Bind conflicts fail process startup instead of silently dropping telemetry. |
+| `JANUSLY_QUEUE_LAG_WARN_SECONDS` | `60` | `apps/api/src/queue-health.ts` | Oldest-waiting-job age that marks queue pressure degraded. Integer range 1..86400; invalid values use the default. |
 | `OTEL_SERVICE_INSTANCE_ID` | `HOSTNAME`, then `os.hostname()` | `packages/engine/src/observability/resource.ts` | Stable OpenTelemetry `service.instance.id`. |
 | `HOSTNAME` | system-provided | `packages/engine/src/observability/resource.ts` | Fallback instance id in containerized environments. |
 | `OTEL_EXPORTER` | `console` when unset | `packages/engine/src/observability/trace-exporter.ts` | Trace delivery mode: `console` for local development or `otlp` for batched OTLP/HTTP export. Any other value fails startup. |

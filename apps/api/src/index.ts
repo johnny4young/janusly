@@ -42,6 +42,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  getRateLimiterAdminHealth,
   invalidateOrgConfigCache,
   setMemoryUsageRecorder,
   productionBudgetChecker,
@@ -54,10 +55,17 @@ import { setMcpUsageRecorder } from "@janusly/engine/src/mcp-usage";
 import { setPdfUsageRecorder } from "@janusly/engine/src/pdf-usage";
 import { setEngineRateLimiter } from "@janusly/engine/src/rate-limit";
 import { setBudgetChecker } from "@janusly/engine/src/budget";
+import { registerRateLimiterObservables } from "@janusly/engine/src/observability/metrics";
+import {
+  API_METRICS_DEFAULT_PORT,
+  shutdownPrometheusMetrics,
+  startPrometheusMetrics,
+} from "@janusly/engine/src/observability/prometheus";
 import { closeRunStreamHub, getRunStreamSubscriber, registerRunEventPublisher } from "./run-stream";
 import { configureCacheInvalidationBus, startCacheInvalidationSubscriber } from "./cache-invalidation-bus";
 import { invalidateRecoveryMetricsCache } from "./metrics-cache";
 import { redis } from "./redis";
+import { closeQueueHealth } from "./queue-health";
 // Side-effect import — registers the `subworkflow` node type with the
 // engine's node registry. Without this, workflows that include a
 // `subworkflow` node throw "Unknown node type" at execute time.
@@ -93,6 +101,11 @@ const server = createApiServer({
 });
 
 await assertMigrationsApplied();
+
+await startPrometheusMetrics({ defaultPort: API_METRICS_DEFAULT_PORT, processName: "api" });
+const unregisterRateLimiterMetrics = registerRateLimiterObservables(
+  () => getRateLimiterAdminHealth().degradedBuckets.length,
+);
 
 // Register the usage_events writer once at boot. Every LLM client call fires
 // it fire-and-forget through the provider-neutral AI package.
@@ -169,7 +182,10 @@ async function shutdownApi(signal: NodeJS.Signals): Promise<void> {
     });
     await shutdownAutoHealing();
     await shutdownAlerts();
+    await closeQueueHealth();
     await closeRunStreamHub();
+    unregisterRateLimiterMetrics();
+    await shutdownPrometheusMetrics();
     clearTimeout(forceCloseTimer);
     console.log("[api] HTTP server stopped");
     process.exit(0);

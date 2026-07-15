@@ -303,14 +303,26 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
 
   // A heatmap cell click on Home dispatches the focus event; adopt the day when
   // the queue is already mounted (the mount-time `consume` covers the not-yet-
-  // mounted case). `consume` clears the stash so a later remount won't re-apply.
+  // mounted case). Keep the stash through the current task: navigation can
+  // unmount an already-listening queue immediately after the event, and its
+  // replacement must still be able to consume the requested day.
   useEffect(() => {
-    const onFocus = () => {
-      const day = consumeRecoveryFocusDay()
-      if (day) setDayFilter(day)
+    let consumeTimer: ReturnType<typeof setTimeout> | null = null
+    const onFocus = (event: Event) => {
+      const day = (event as CustomEvent<unknown>).detail
+      if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return
+      setDayFilter(day)
+      if (consumeTimer) clearTimeout(consumeTimer)
+      consumeTimer = setTimeout(() => {
+        consumeRecoveryFocusDay()
+        consumeTimer = null
+      }, 0)
     }
     window.addEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
-    return () => window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
+    return () => {
+      window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
+      if (consumeTimer) clearTimeout(consumeTimer)
+    }
   }, [])
 
   // Server-side filter + sort, cap-correct: the query narrows + orders before

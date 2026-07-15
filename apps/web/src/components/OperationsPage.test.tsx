@@ -42,6 +42,7 @@ vi.mock('./McpConnectionsPanel', () => ({
 
 const initialState = useWorkflowStore.getState()
 const STORAGE_KEY = 'janusly:operations:section'
+const clearQueue = { waiting: 0, active: 1, oldestWaitingSeconds: null, warnSeconds: 60 }
 
 const healthyMetrics = {
   windowDays: 30,
@@ -70,6 +71,7 @@ function stubApiByPath(handlers: Record<string, unknown>) {
         return value as unknown
       }
     }
+    if (path === '/system/queue') return clearQueue
     return null
   })
 }
@@ -269,6 +271,79 @@ describe('<OperationsPage />', () => {
     expect(screen.queryByTestId('operations-rail-dot-integrations')).toBeNull()
   })
 
+  it('shows admin queue pressure and lights Reliability only above the threshold', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: { degraded: true } },
+      '/system/queue': { waiting: 3, active: 2, oldestWaitingSeconds: 91, warnSeconds: 60 },
+    })
+
+    render(<OperationsPage />)
+
+    const chip = await screen.findByTestId('queue-lag-chip')
+    expect(chip).toHaveAttribute('data-state', 'delayed')
+    expect(chip).toHaveTextContent('Queue delayed')
+    expect(chip).toHaveTextContent('Jobs are still processing')
+    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+  })
+
+  it('treats an unavailable admin queue snapshot as unknown, not empty', async () => {
+    stubApiByPath({
+      '/recovery/metrics': healthyMetrics,
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] }, queue: null },
+      '/system/queue': null,
+    })
+
+    render(<OperationsPage />)
+
+    const chip = await screen.findByTestId('queue-lag-chip')
+    expect(chip).toHaveAttribute('data-state', 'unavailable')
+    expect(chip).toHaveTextContent('Queue status unavailable — Redis could not be read')
+    expect(screen.getByTestId('operations-rail-dot-reliability')).toHaveAttribute('data-severity', 'warning')
+  })
+
+  it('does not diagnose an initial queue request failure as a Redis failure', async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return healthyMetrics
+      if (path === '/health') return { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
+      if (path === '/system/queue') throw new Error('network offline')
+      return null
+    })
+
+    render(<OperationsPage />)
+
+    const chip = await screen.findByTestId('queue-lag-chip')
+    expect(chip).toHaveTextContent('Queue status unavailable — request failed')
+    expect(chip).not.toHaveTextContent('Redis could not be read')
+  })
+
+  it('hides admin queue telemetry and stops denied polling after a 403', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let queueCalls = 0
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === '/recovery/metrics') return healthyMetrics
+      if (path === '/health') return { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } }
+      if (path === '/system/queue') {
+        queueCalls += 1
+        throw Object.assign(new Error('forbidden'), { statusCode: 403 })
+      }
+      return null
+    })
+
+    render(<OperationsPage />)
+
+    await screen.findByTestId('stub-FailureClustersCard')
+    await waitFor(() => expect(queueCalls).toBe(1))
+    expect(screen.queryByTestId('queue-lag-chip')).toBeNull()
+    expect(screen.queryByTestId('operations-rail-dot-reliability')).toBeNull()
+
+    await act(async () => {
+      vi.advanceTimersByTime(40_000)
+      await Promise.resolve()
+    })
+    expect(queueCalls).toBe(1)
+  })
+
   it('keeps the last rate-limiter snapshot visible when a later health poll fails', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const healthResponses: Array<unknown> = [
@@ -288,16 +363,17 @@ describe('<OperationsPage />', () => {
     render(<OperationsPage />)
 
     await screen.findByTestId('stub-FailureClustersCard')
-    await screen.findByText(/Rate limiter healthy/i)
-    expect(screen.getByText(/Checked/i)).toBeInTheDocument()
+    const rateChip = (await screen.findByText(/Rate limiter healthy/i)).closest('[role="status"]')
+    expect(rateChip).not.toBeNull()
+    expect(within(rateChip as HTMLElement).getByText(/Checked/i)).toBeInTheDocument()
 
     await act(async () => {
       vi.advanceTimersByTime(20_000)
       await Promise.resolve()
     })
 
-    expect(screen.getByText(/Rate limiter healthy/i)).toBeInTheDocument()
-    expect(screen.getByText(/Checked/i)).toBeInTheDocument()
+    expect(within(rateChip as HTMLElement).getByText(/Rate limiter healthy/i)).toBeInTheDocument()
+    expect(within(rateChip as HTMLElement).getByText(/Checked/i)).toBeInTheDocument()
   })
 
   it('escalates the Reliability dot to danger when a budget block is in store', async () => {

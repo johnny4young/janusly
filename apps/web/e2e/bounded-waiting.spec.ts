@@ -208,7 +208,7 @@ test('approval deadlines and absolute waits are safe, observable, and authorable
       await waitConfig.getByLabel(locales.en.waitMode).selectOption('until')
       const localUntil = await page.evaluate(() => {
         const instant = new Date(Date.now() + 24 * 60 * 60_000)
-        return new Date(instant.getTime() - instant.getTimezoneOffset() * 60_000).toISOString().slice(0, 23)
+        return new Date(instant.getTime() - instant.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
       })
       await waitConfig.getByLabel('Resume at').fill(localUntil)
       await waitConfig.getByLabel('Resume at').blur()

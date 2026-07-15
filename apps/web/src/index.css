@@ -8021,7 +8021,8 @@ button.we-ops-metric-card--button {
  * raising it to a top-level banner. Operator copy explicitly says
  * "Traffic still allowed" so it never gets confused with the budget
  * blocked banner ("AI workflow budget exceeded — blocked"). */
-.we-ops-rate-limiter-chip {
+.we-ops-rate-limiter-chip,
+.we-ops-queue-lag-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -8047,15 +8048,23 @@ button.we-ops-metric-card--button {
   color: var(--we-text-1);
 }
 
-.we-ops-rate-limiter-chip__dot {
+.we-ops-rate-limiter-chip__dot,
+.we-ops-queue-lag-chip__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
 }
 
+.we-ops-queue-lag-chip__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* "Checked HH:MM" freshness, muted so it sits behind the health state. */
-.we-ops-rate-limiter-chip__age {
+.we-ops-rate-limiter-chip__age,
+.we-ops-queue-lag-chip__age {
   color: var(--we-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -8066,6 +8075,44 @@ button.we-ops-metric-card--button {
 
 .we-ops-rate-limiter-chip--degraded .we-ops-rate-limiter-chip__dot {
   background: var(--we-warning);
+}
+
+/* Queue pressure has four truthful states: clear, processing below the
+ * threshold, delayed above it, and unavailable when Redis cannot be read. */
+.we-ops-queue-lag-chip--clear {
+  border-color: var(--we-success);
+  color: var(--we-success-text);
+}
+
+.we-ops-queue-lag-chip--processing {
+  border-color: var(--we-info);
+  background: var(--we-info-soft);
+}
+
+.we-ops-queue-lag-chip--delayed {
+  border-color: var(--we-warning);
+  background: var(--we-warning-soft);
+}
+
+.we-ops-queue-lag-chip--unavailable {
+  border-color: var(--we-line-strong);
+  color: var(--we-muted);
+}
+
+.we-ops-queue-lag-chip--clear .we-ops-queue-lag-chip__dot {
+  background: var(--we-success);
+}
+
+.we-ops-queue-lag-chip--processing .we-ops-queue-lag-chip__dot {
+  background: var(--we-info);
+}
+
+.we-ops-queue-lag-chip--delayed .we-ops-queue-lag-chip__dot {
+  background: var(--we-warning);
+}
+
+.we-ops-queue-lag-chip--unavailable .we-ops-queue-lag-chip__dot {
+  background: var(--we-muted);
 }
 
 /* Live-run stream status pill — green when the SSE stream is connected,
@@ -8145,6 +8192,13 @@ button.we-ops-metric-card--button {
 .we-operations-header {
   display: grid;
   gap: 12px;
+}
+
+.we-operations-header__signals {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .we-operations-page__body {

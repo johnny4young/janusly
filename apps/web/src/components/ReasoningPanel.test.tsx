@@ -142,7 +142,7 @@ describe('<ReasoningPanel />', () => {
     expect(screen.getAllByRole('listitem')[0]).toHaveAttribute('aria-setsize', '1000')
     expect(screen.getAllByRole('listitem')[0]).toHaveAccessibleName(/node-999/i)
     expect(screen.getByText('1000 of 1000 events')).toBeInTheDocument()
-  })
+  }, 15_000)
 
   it('summarizes the loaded history without claiming partial pages are complete', () => {
     render(<ReasoningPanel

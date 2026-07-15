@@ -34,14 +34,22 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { acquireProcessLock } from "./process-lock.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_API_PORT = 3001;
 const webBaseUrl = "http://127.0.0.1:5173";
+const checkoutLockId = createHash("sha256").update(rootDir).digest("hex").slice(0, 12);
+const harnessLockPath = join(tmpdir(), `janusly-e2e-${checkoutLockId}.lock`);
 const children = new Set();
 let shuttingDown = false;
+let composeStarted = false;
+let releaseHarnessLock = null;
 const webTestArgs = process.argv.slice(2).filter((arg, index) => !(index === 0 && arg === "--"));
 
 function sleep(ms) {
@@ -108,6 +116,17 @@ async function allocateEphemeralPort() {
       });
     });
   });
+}
+
+async function allocateUniqueEphemeralPort(excludedPorts) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const port = await allocateEphemeralPort();
+    if (!excludedPorts.has(port)) {
+      excludedPorts.add(port);
+      return port;
+    }
+  }
+  throw new Error("failed to allocate a collision-free service port");
 }
 
 async function resolveApiPort(preferredPort) {
@@ -195,7 +214,10 @@ async function waitForPostgres(timeoutMs = 60_000) {
   while (Date.now() - startedAt < timeoutMs) {
     try {
       await new Promise((resolve, reject) => {
-        const child = spawn("docker", ["compose", "exec", "-T", "postgres", "pg_isready", "-U", "postgres"], {
+        const child = spawn("docker", [
+          "compose", "exec", "-T", "postgres", "pg_isready",
+          "-h", "127.0.0.1", "-U", "postgres", "-d", "workflow",
+        ], {
           cwd: rootDir,
           stdio: "ignore",
         });
@@ -245,8 +267,17 @@ async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  await Promise.all([...children].map(stopService));
-  await run("docker", ["compose", "down"]);
+  try {
+    await Promise.all([...children].map(stopService));
+    if (composeStarted) {
+      composeStarted = false;
+      await run("docker", ["compose", "down"]);
+    }
+  } finally {
+    const release = releaseHarnessLock;
+    releaseHarnessLock = null;
+    if (release) await release();
+  }
 }
 
 async function dumpComposeLogs() {
@@ -266,9 +297,16 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
+  releaseHarnessLock = await acquireProcessLock(harnessLockPath);
   const apiPort = await resolveApiPort(DEFAULT_API_PORT);
   const apiUrl = `http://127.0.0.1:${apiPort}`;
+  const allocatedServicePorts = new Set([apiPort, Number(new URL(webBaseUrl).port)]);
+  const apiMetricsPort = await allocateUniqueEphemeralPort(allocatedServicePorts);
+  const workerMetricsPort = await allocateUniqueEphemeralPort(allocatedServicePorts);
+  const apiMetricsUrl = `http://127.0.0.1:${apiMetricsPort}/metrics`;
+  const workerMetricsUrl = `http://127.0.0.1:${workerMetricsPort}/metrics`;
 
+  composeStarted = true;
   await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "redis", "postgres"]);
 
   await waitForPostgres();
@@ -287,13 +325,14 @@ try {
   const e2eApiBootstrap = [
     'import("@janusly/db").then(() => {',
     'process.env.JANUSLY_MEMORY_ENABLED = "true";',
+    `process.env.OTEL_METRICS_PORT = "${apiMetricsPort}";`,
     'return import("./src/index.ts");',
     "});",
   ].join("");
   const api = startService("api", "pnpm", [
     "--filter", "@janusly/api", "exec", "tsx", "--eval", e2eApiBootstrap,
   ], {
-    env: { PORT: String(apiPort) },
+    env: { PORT: String(apiPort), OTEL_METRICS_PORT: String(apiMetricsPort) },
   });
   // `@janusly/db` intentionally lets the root `.env` override inherited
   // process variables. Load it first, then enable private targets only in this
@@ -304,6 +343,7 @@ try {
     'import("@janusly/db").then(() => {',
     'process.env.ALLOW_PRIVATE_HTTP_TARGETS = "true";',
     'process.env.JANUSLY_MEMORY_ENABLED = "true";',
+    `process.env.OTEL_METRICS_PORT = "${workerMetricsPort}";`,
     'return import("./src/worker.ts");',
     "});",
   ].join("");
@@ -314,7 +354,9 @@ try {
     "tsx",
     "--eval",
     e2eWorkerBootstrap,
-  ]);
+  ], {
+    env: { OTEL_METRICS_PORT: String(workerMetricsPort) },
+  });
 
   await waitForHttp(`${apiUrl}/tools`, {
     headers: { "x-org-id": "default", "x-user-id": "dev-user" },
@@ -325,6 +367,8 @@ try {
   // it to survive the API startup window plus a short stabilization period so
   // bootstrap/import failures fail here instead of surfacing as Playwright timeouts.
   await waitForServiceStability(worker);
+  await waitForHttp(apiMetricsUrl, { service: api });
+  await waitForHttp(workerMetricsUrl, { service: worker });
 
   await run("pnpm", [
     "--filter",
@@ -335,6 +379,8 @@ try {
     env: {
       PLAYWRIGHT_BASE_URL: webBaseUrl,
       E2E_API_URL: apiUrl,
+      E2E_API_METRICS_URL: apiMetricsUrl,
+      E2E_WORKER_METRICS_URL: workerMetricsUrl,
       VITE_API_URL: apiUrl,
     },
   });

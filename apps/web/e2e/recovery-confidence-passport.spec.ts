@@ -1,9 +1,12 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page, type Response } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
 const API_URL = process.env.E2E_API_URL ?? 'http://localhost:3001'
-const AUTH_HEADERS = { 'x-org-id': 'default', 'x-user-id': 'dev-user' }
 const EVIDENCE_DIR = process.env.JANUSLY_EVIDENCE_DIR
+
+function authHeaders(orgId: string): Record<string, string> {
+  return { 'x-org-id': orgId, 'x-user-id': 'dev-user' }
+}
 
 async function captureEvidence(page: Page, name: string) {
   if (!EVIDENCE_DIR) return
@@ -47,13 +50,41 @@ async function waitForNewSelectedFailure(page: Page, previousTestId: string | nu
   return selected
 }
 
+function recordPlaybookMatches(page: Page): Map<string, Response> {
+  const responses = new Map<string, Response>()
+  page.on('response', (response) => {
+    const url = new URL(response.url())
+    const deadLetterId = url.pathname === '/recovery/playbooks/match'
+      ? url.searchParams.get('deadLetterId')
+      : null
+    if (deadLetterId) responses.set(deadLetterId, response)
+  })
+  return responses
+}
+
+async function waitForPlaybookMatch(
+  responses: Map<string, Response>,
+  deadLetterId: string,
+): Promise<Response> {
+  await expect.poll(() => responses.has(deadLetterId), { timeout: 30_000 }).toBe(true)
+  const response = responses.get(deadLetterId)
+  if (!response) throw new Error(`Missing recorded playbook match for ${deadLetterId}`)
+  return response
+}
+
 test('recovery passport requires sandbox success and a separate apply decision', async ({ page, request }) => {
   const browserErrors = installConsoleErrorGuards(page)
+  const playbookMatches = recordPlaybookMatches(page)
+  const orgId = `recovery-passport-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const headers = authHeaders(orgId)
   let saveRequests = 0
   page.on('request', (outgoing) => {
     if (new URL(outgoing.url()).pathname === '/workflows/save') saveRequests += 1
   })
 
+  await page.addInitScript(({ activeOrg }) => {
+    window.localStorage.setItem('janusly:activeOrg', activeOrg)
+  }, { activeOrg: orgId })
   await page.goto('/')
   const onboarding = page.getByTestId('onboarding-banner')
   await expect(onboarding).toBeVisible()
@@ -76,7 +107,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const deadLetterId = rowTestId?.replace('dlq-row-', '')
   expect(deadLetterId).toBeTruthy()
 
-  const detailResponse = await request.get(`${API_URL}/dlq?id=${encodeURIComponent(deadLetterId!)}`, { headers: AUTH_HEADERS })
+  const detailResponse = await request.get(`${API_URL}/dlq?id=${encodeURIComponent(deadLetterId!)}`, { headers })
   expect(detailResponse.ok()).toBe(true)
   const detail = await detailResponse.json() as {
     nodeId: string
@@ -159,7 +190,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   expect(repeatedDeadLetterId).toBeTruthy()
   const repeatedDetailResponse = await request.get(
     `${API_URL}/dlq?id=${encodeURIComponent(repeatedDeadLetterId!)}`,
-    { headers: AUTH_HEADERS },
+    { headers },
   )
   expect(repeatedDetailResponse.ok()).toBe(true)
   const repeatedDetail = await repeatedDetailResponse.json() as { runId: string }
@@ -191,7 +222,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await expect.poll(async () => {
     const response = await request.get(
       `${API_URL}/run?runId=${encodeURIComponent(repeatedDetail.runId)}`,
-      { headers: AUTH_HEADERS },
+      { headers },
     )
     if (!response.ok()) return 'missing'
     return ((await response.json()) as { run?: { status?: string } }).run?.status ?? 'missing'
@@ -199,14 +230,14 @@ test('recovery passport requires sandbox success and a separate apply decision',
 
   const matchResponse = await request.get(
     `${API_URL}/recovery/playbooks/match?deadLetterId=${encodeURIComponent(repeatedDeadLetterId!)}`,
-    { headers: AUTH_HEADERS },
+    { headers },
   )
   expect(matchResponse.ok()).toBe(true)
   const matched = await matchResponse.json() as { playbook: { id: string } }
   const outcomeResponse = await request.post(
     `${API_URL}/recovery/playbooks/${encodeURIComponent(matched.playbook.id)}/outcome`,
     {
-      headers: AUTH_HEADERS,
+      headers,
       data: {
         deadLetterId: repeatedDeadLetterId,
         validationRunId: validation.runId,
@@ -228,10 +259,19 @@ test('recovery passport requires sandbox success and a separate apply decision',
   const spanishPlaybookPack = page.locator('.list-card').filter({ hasText: 'Triage de incidentes' }).first()
   const selectedBeforeSpanishFailure = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Romper un nodo', exact: true }).click()
-  await waitForNewSelectedFailure(page, selectedBeforeSpanishFailure, 'page_oncall')
+  const spanishPlaybookFailure = await waitForNewSelectedFailure(page, selectedBeforeSpanishFailure, 'page_oncall')
+  const spanishFailureTestId = await spanishPlaybookFailure.getAttribute('data-testid')
+  const spanishFailureId = spanishFailureTestId?.replace('dlq-row-', '')
+  expect(spanishFailureId).toBeTruthy()
+  const spanishMatchResponsePromise = waitForPlaybookMatch(playbookMatches, spanishFailureId!)
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
+  const spanishMatchResponse = await spanishMatchResponsePromise
+  expect(spanishMatchResponse.ok()).toBe(true)
+  await expect(spanishMatchResponse.json()).resolves.toMatchObject({
+    playbook: { status: 'active' },
+  })
   const spanishPlaybookMatch = page.getByTestId('recovery-playbook-match')
-  await expect(spanishPlaybookMatch).toContainText('nunca se ejecuta automáticamente')
+  await expect(spanishPlaybookMatch).toContainText('nunca se ejecuta automáticamente', { timeout: 30_000 })
   await captureElement(spanishPlaybookMatch, 'web-es-recovery-playbook-match')
   await page.getByRole('button', { name: 'Retirar', exact: true }).click()
   const retireConfirm = page.getByTestId('recovery-playbook-retire-confirm')
@@ -257,9 +297,22 @@ test('recovery passport requires sandbox success and a separate apply decision',
   await page.getByRole('button', { name: 'Packs', exact: true }).click()
   const selectedBeforeSpanishRegression = await selectedDeadLetterTestId(page)
   await spanishPlaybookPack.getByRole('button', { name: 'Romper un nodo', exact: true }).click()
-  await waitForNewSelectedFailure(page, selectedBeforeSpanishRegression, 'page_oncall')
+  const spanishRegressionFailure = await waitForNewSelectedFailure(
+    page,
+    selectedBeforeSpanishRegression,
+    'page_oncall',
+  )
+  const spanishRegressionTestId = await spanishRegressionFailure.getAttribute('data-testid')
+  const spanishRegressionId = spanishRegressionTestId?.replace('dlq-row-', '')
+  expect(spanishRegressionId).toBeTruthy()
+  const spanishRegressionMatchPromise = waitForPlaybookMatch(playbookMatches, spanishRegressionId!)
   await page.getByRole('button', { name: /Sugerir corrección/i }).click()
-  await expect(page.getByTestId('recovery-playbook-match')).toBeVisible()
+  const spanishRegressionMatch = await spanishRegressionMatchPromise
+  expect(spanishRegressionMatch.ok()).toBe(true)
+  await expect(spanishRegressionMatch.json()).resolves.toMatchObject({
+    playbook: { status: 'active' },
+  })
+  await expect(page.getByTestId('recovery-playbook-match')).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: 'Usar y volver a validar', exact: true }).click()
   await expect(page.getByTestId('recovery-playbook-revalidation')).toBeVisible()
 
@@ -310,7 +363,7 @@ test('recovery passport requires sandbox success and a separate apply decision',
   expect(spanishDeadLetterId).toBeTruthy()
   const spanishDetailResponse = await request.get(
     `${API_URL}/dlq?id=${encodeURIComponent(spanishDeadLetterId!)}`,
-    { headers: AUTH_HEADERS },
+    { headers },
   )
   expect(spanishDetailResponse.ok()).toBe(true)
   const spanishWorkflow = (await spanishDetailResponse.json() as { workflowJson: unknown }).workflowJson

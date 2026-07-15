@@ -38,6 +38,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  getRateLimiterAdminHealth,
   setMemoryUsageRecorder,
   productionBudgetChecker,
 } from "@janusly/data";
@@ -106,8 +107,25 @@ import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 import { withSpan } from "./observability/tracer";
 import { shutdownTracing } from "./observability/otel";
+import {
+  registerQueueObservables,
+  registerRateLimiterObservables,
+} from "./observability/metrics";
+import {
+  shutdownPrometheusMetrics,
+  startPrometheusMetrics,
+  WORKER_METRICS_DEFAULT_PORT,
+} from "./observability/prometheus";
+import { createWorkflowQueueCountReader } from "./observability/queue-reader";
 
 await assertMigrationsApplied();
+
+await startPrometheusMetrics({ defaultPort: WORKER_METRICS_DEFAULT_PORT, processName: "worker" });
+const queueMetricsReader = createWorkflowQueueCountReader();
+const unregisterQueueMetrics = registerQueueObservables(queueMetricsReader.getCounts);
+const unregisterRateLimiterMetrics = registerRateLimiterObservables(
+  () => getRateLimiterAdminHealth().degradedBuckets.length,
+);
 
 // Subscribe before scheduler registration or job execution can populate an
 // org-config snapshot. Redis faults degrade to the cache TTL rather than
@@ -478,6 +496,12 @@ async function shutdown(signal: NodeJS.Signals) {
     await closeWorkerCacheInvalidationSubscriber();
     await closeWorkerRateLimitRedis();
     await closeWorkerRunEventRedis();
+    unregisterQueueMetrics();
+    unregisterRateLimiterMetrics();
+    await queueMetricsReader.close();
+    await shutdownPrometheusMetrics().catch((error) => {
+      console.warn("[otel] metrics shutdown failed; worker resources still drained", error);
+    });
     await shutdownTracing().catch((error) => {
       console.warn("[otel] trace shutdown failed; worker resources still drained", error);
     });
