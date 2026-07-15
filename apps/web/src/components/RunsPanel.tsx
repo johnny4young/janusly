@@ -371,8 +371,18 @@ export function RunsPanel({
             const waiting = getRunWaitingInfo(node)
             const waitingSinceMs = waiting.waitingSince ? Date.parse(waiting.waitingSince) : Number.NaN
             const wakeAtMs = waiting.wakeAt ? Date.parse(waiting.wakeAt) : Number.NaN
+            const deadlineAtMs = waiting.deadlineAt ? Date.parse(waiting.deadlineAt) : Number.NaN
             const waitDuration = Number.isFinite(waitingSinceMs) ? formatCompactDuration(Math.max(0, clockNow - waitingSinceMs)) : null
             const wakeDuration = Number.isFinite(wakeAtMs) ? formatCompactDuration(Math.max(0, wakeAtMs - clockNow)) : null
+            const deadlineDuration = Number.isFinite(deadlineAtMs) ? formatCompactDuration(Math.max(0, deadlineAtMs - clockNow)) : null
+            const approvalOwnerCopy = waiting.assignee
+              ? waiting.timeoutState === 'escalated'
+                ? t('rightPanel.runs.approvalEscalated', {
+                  previous: waiting.escalatedFrom ?? t('rightPanel.runs.unassigned'),
+                  assignee: waiting.assignee,
+                })
+                : t('rightPanel.runs.approvalAssignee', { assignee: waiting.assignee })
+              : null
             return (
               <article key={node.nodeId} className="we-wait-card" data-wait-kind={waiting.kind} data-testid={`waiting-step-${node.nodeId}`}>
                 <div className="split-row">
@@ -383,13 +393,35 @@ export function RunsPanel({
                   <strong>{waiting.title ?? t('rightPanel.runs.waitingStep', { nodeId: node.nodeId })}</strong>
                   {waiting.description && <p className="helper-text">{waiting.description}</p>}
                 </div>
-                {(waitDuration || wakeDuration) && (
+                {(waitDuration || wakeDuration || deadlineDuration || waiting.assignee || waiting.kind === 'approval') && (
                   <div className="we-wait-card__timing">
                     {waitDuration && <span>{t('rightPanel.runs.waitingFor', { duration: waitDuration })}</span>}
                     {wakeDuration && (
                       <span>{wakeAtMs <= clockNow
                         ? t('rightPanel.runs.wakeDue')
                         : t('rightPanel.runs.wakesIn', { duration: wakeDuration })}</span>
+                    )}
+                    {approvalOwnerCopy && (
+                      <span data-testid={`waiting-owner-${node.nodeId}`}>{approvalOwnerCopy}</span>
+                    )}
+                    {waiting.kind === 'approval' && (
+                      <span
+                        className="we-sr-only"
+                        data-testid={`waiting-owner-announcement-${node.nodeId}`}
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                      >
+                        {waiting.timeoutState === 'escalated' ? approvalOwnerCopy : ''}
+                      </span>
+                    )}
+                    {deadlineDuration && waiting.timeoutState !== 'escalated' && (
+                      <span>{deadlineAtMs <= clockNow
+                        ? t('rightPanel.runs.approvalDeadlineDue')
+                        : t('rightPanel.runs.approvalDeadlineIn', { duration: deadlineDuration })}</span>
+                    )}
+                    {waiting.onTimeout === 'escalate' && waiting.escalateTo && waiting.timeoutState !== 'escalated' && (
+                      <span>{t('rightPanel.runs.approvalEscalatesTo', { assignee: waiting.escalateTo })}</span>
                     )}
                   </div>
                 )}

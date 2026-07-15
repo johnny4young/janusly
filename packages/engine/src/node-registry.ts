@@ -57,6 +57,7 @@ import { hasFailureSignal } from "./failure-signal";
 import { checkBudget } from "./budget";
 import { subworkflowExecutor } from "./subworkflow";
 import { waitUntilExecutor } from "./wait-until";
+import { approvalExecutor } from "./approval-timeout";
 import { joinExecutor, parallelForkExecutor } from "./parallel-fork";
 import { scheduleExecutor } from "./schedule";
 import { emailReceivedExecutor, fileDroppedExecutor, mcpServerEventExecutor } from "./triggers";
@@ -872,26 +873,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     reason: "Waiting for external webhook resume",
     metadata: { kind: "webhook", resumeToken: `${ctx.runId}:${ctx.nodeId}` },
   }),
-  approval: async (ctx) => {
-    const title = typeof ctx.config.title === "string" && ctx.config.title.trim()
-      ? ctx.config.title.trim()
-      : typeof ctx.config.message === "string" && ctx.config.message.trim()
-        ? ctx.config.message.trim()
-        : undefined;
-    const description = typeof ctx.config.description === "string" && ctx.config.description.trim()
-      ? ctx.config.description.trim()
-      : undefined;
-    return {
-      status: "waiting",
-      reason: "Waiting for human approval",
-      metadata: {
-        kind: "approval",
-        title,
-        description,
-        resumeToken: `${ctx.runId}:${ctx.nodeId}`,
-      },
-    };
-  },
+  approval: approvalExecutor,
   human_form: async (ctx) => {
     const schema = WorkflowInputSchema.parse(ctx.config.schema);
     const orgConfig = await getOrgConfigSnapshot(ctx.orgId);

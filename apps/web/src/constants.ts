@@ -165,7 +165,7 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
   if (type === 'webhook') return t('nodeSummary.webhook.text') as string
   if (type === 'noop') return t('nodeSummary.noop.text') as string
   if (type === 'subworkflow') return readString(config.workflowId) ?? (t('nodeSummary.subworkflow.empty') as string)
-  if (type === 'wait_until') return readString(config.duration) ?? (t('nodeSummary.wait_until.empty') as string)
+  if (type === 'wait_until') return readString(config.duration) ?? readString(config.until) ?? (t('nodeSummary.wait_until.empty') as string)
   if (type === 'parallel_fork') {
     const branches = Array.isArray(config.branches) ? config.branches.length : 0
     if (branches === 0) return t('nodeSummary.parallel_fork.empty') as string

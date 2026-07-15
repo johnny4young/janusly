@@ -64,13 +64,32 @@ describe('run observability projections', () => {
       nodeId: 'approve',
       status: 'waiting',
       startedAt: '2026-07-12T10:00:00.000Z',
-      stateJson: { waiting: { kind: 'approval', title: 'Approve refund', description: 'Check the evidence', waitingSince: '2026-07-12T10:01:00.000Z' } },
+      stateJson: {
+        waiting: {
+          kind: 'approval',
+          title: 'Approve refund',
+          description: 'Check the evidence',
+          waitingSince: '2026-07-12T10:01:00.000Z',
+          deadlineAt: '2026-07-12T10:10:00.000Z',
+          assignee: 'operator-2',
+          onTimeout: 'escalate',
+          escalateTo: 'operator-2',
+          timeoutState: 'escalated',
+          escalatedFrom: 'operator-1',
+        },
+      },
     })).toEqual({
       kind: 'approval',
       title: 'Approve refund',
       description: 'Check the evidence',
       waitingSince: '2026-07-12T10:01:00.000Z',
       wakeAt: null,
+      deadlineAt: '2026-07-12T10:10:00.000Z',
+      assignee: 'operator-2',
+      onTimeout: 'escalate',
+      escalateTo: 'operator-2',
+      timeoutState: 'escalated',
+      escalatedFrom: 'operator-1',
     })
     expect(getRunWaitingInfo({
       nodeId: 'pause',

@@ -82,12 +82,51 @@ export async function enqueueNode(payload: EnqueueNodeInput) {
  * is a no-op. This guards the (rare) double-resume race when a user calls
  * `POST /resume` while the delayed job is already in flight.
  */
-export async function enqueueWaitUntilResume(runId: string, nodeId: string, delayMs: number, statusCheckAttempts = 0) {
+export async function enqueueWaitUntilResume(runId: string, nodeId: string, delayMs: number) {
   return workflowQueue.add(
     "wait-resume",
-    { runId, nodeId, statusCheckAttempts },
+    { runId, nodeId },
     {
-      attempts: 1,
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/** Install the pre-checkpoint watcher that arms an approval's exact deadline. */
+export async function enqueueApprovalDeadlineArm(runId: string, nodeId: string, delayMs: number) {
+  return workflowQueue.add(
+    "approval-deadline-arm",
+    { runId, nodeId },
+    {
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/** Schedule a policy decision for one exact approval-deadline generation. */
+export async function enqueueApprovalTimeout(
+  runId: string,
+  nodeId: string,
+  deadlineAt: string,
+  delayMs: number,
+) {
+  return workflowQueue.add(
+    "approval-timeout",
+    { runId, nodeId, deadlineAt },
+    {
+      // Handler failures are infrastructure failures, not policy outcomes.
+      // Exponential retry keeps the persisted Redis job durable through a
+      // prolonged Postgres/Redis recovery window without hot-looping.
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
       delay: Math.max(0, delayMs),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,

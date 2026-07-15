@@ -145,7 +145,17 @@ describe('<RunsPanel /> observability', () => {
             nodeId: 'approve_refund',
             status: 'waiting',
             startedAt: new Date(Date.now() - 5_000).toISOString(),
-            stateJson: { waiting: { kind: 'approval', title: 'Approve refund', description: 'Check the evidence' } },
+            stateJson: {
+              waiting: {
+                kind: 'approval',
+                title: 'Approve refund',
+                description: 'Check the evidence',
+                assignee: 'operator-1',
+                deadlineAt: new Date(Date.now() + 120_000).toISOString(),
+                onTimeout: 'escalate',
+                escalateTo: 'operator-2',
+              },
+            },
           },
           {
             nodeId: 'cooldown',
@@ -167,11 +177,68 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Approval')
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Approve refund')
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Check the evidence')
+    expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Responsible: operator-1')
+    expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Decision due in')
+    expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Escalates to operator-2 if unanswered')
     expect(screen.getByRole('button', { name: 'Approve and resume' })).toBeInTheDocument()
     expect(screen.getByTestId('waiting-step-cooldown')).toHaveTextContent('Timer')
     expect(screen.getByTestId('waiting-step-cooldown')).toHaveTextContent('Wakes in')
     expect(screen.getByRole('button', { name: 'Resume now' })).toBeInTheDocument()
     expect(screen.getByTestId('waiting-step-child_flow')).toHaveTextContent('Resumes automatically when the subworkflow finishes')
     expect(screen.getByTestId('waiting-step-child_flow').querySelector('button')).not.toBeInTheDocument()
+  })
+
+  it('mounts the owner live region before announcing an SSE escalation update', () => {
+    const assigned: RunNode = {
+      nodeId: 'gate',
+      status: 'waiting',
+      stateJson: { waiting: { kind: 'approval', assignee: 'operator-1' } },
+    }
+    const { rerender, props } = renderPanel([assigned])
+    const announcement = screen.getByTestId('waiting-owner-announcement-gate')
+    expect(announcement).toBeEmptyDOMElement()
+    expect(announcement).toHaveAttribute('role', 'status')
+    expect(announcement).toHaveAttribute('aria-live', 'polite')
+    expect(announcement).toHaveAttribute('aria-atomic', 'true')
+
+    rerender(<RunsPanel {...props} runNodes={[{
+      ...assigned,
+      stateJson: {
+        waiting: {
+          kind: 'approval',
+          assignee: 'operator-2',
+          escalatedFrom: 'operator-1',
+          timeoutState: 'escalated',
+        },
+      },
+    }]} />)
+
+    expect(screen.getByTestId('waiting-owner-gate')).toHaveTextContent('Escalated from operator-1 to operator-2')
+    expect(announcement).toHaveTextContent('Escalated from operator-1 to operator-2')
+  })
+
+  it('pre-mounts the owner live region when an approval starts unassigned', () => {
+    const unassigned: RunNode = {
+      nodeId: 'gate',
+      status: 'waiting',
+      stateJson: { waiting: { kind: 'approval' } },
+    }
+    const { rerender, props } = renderPanel([unassigned])
+    const announcement = screen.getByTestId('waiting-owner-announcement-gate')
+    expect(announcement).toBeEmptyDOMElement()
+
+    rerender(<RunsPanel {...props} runNodes={[{
+      ...unassigned,
+      stateJson: {
+        waiting: {
+          kind: 'approval',
+          assignee: 'operator-2',
+          timeoutState: 'escalated',
+        },
+      },
+    }]} />)
+
+    expect(screen.getByTestId('waiting-owner-gate')).toHaveTextContent('Escalated from unassigned to operator-2')
+    expect(announcement).toHaveTextContent('Escalated from unassigned to operator-2')
   })
 })

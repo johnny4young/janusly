@@ -109,6 +109,39 @@ describe('useRunEventStream', () => {
     })
   })
 
+  it('patches a live approval escalation while healthy SSE has polling paused', async () => {
+    const createdAt = '2026-05-28T00:00:03.000Z'
+    const waiting = {
+      kind: 'approval',
+      assignee: 'tier-2',
+      escalatedFrom: 'tier-1',
+      timeoutState: 'escalated',
+      deadlineAt: '2026-05-28T00:00:02.000Z',
+    }
+    useWorkflowStore.getState().setRunNodes([{
+      nodeId: 'approval-gate',
+      status: 'waiting',
+      stateJson: { waiting: { ...waiting, assignee: 'tier-1', timeoutState: undefined } },
+    }])
+    openRunEventStreamMock.mockResolvedValue(
+      streamResponse([
+        ': connected\n\n',
+        `id: ${createdAt}|evt-escalated\nevent: run-event\ndata: ${JSON.stringify({ kind: 'event', id: 'evt-escalated', nodeId: 'approval-gate', type: 'approval.escalated', payload: { assignee: 'tier-2', waiting }, createdAt })}\n\n`,
+      ]),
+    )
+
+    render(<Harness runId="run-1" />)
+
+    await waitFor(() => expect(useWorkflowStore.getState().streamTransport).toBe('sse'))
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().runNodes[0]).toMatchObject({
+        nodeId: 'approval-gate',
+        status: 'waiting',
+        stateJson: { waiting },
+      })
+    })
+  })
+
   it('falls back to polling transport when the stream cannot open', async () => {
     openRunEventStreamMock.mockRejectedValue(new Error('blocked'))
 

@@ -331,7 +331,7 @@ const SECRET_TEMPLATE_PATTERN = /\{\{(?:secret|env)\.[^}]+\}\}/;
 export function classifyTag(path: string, before: unknown, after: unknown): ChangeTag | null {
   // 1. Retry / timeout / bounds — config-resilience knobs.
   if (path === "config.retry" || path.startsWith("config.retry.")) return "retry";
-  if (path === "config.timeoutMs") return "timeout";
+  if (path === "config.timeoutMs" || path === "config.decisionTimeoutMs") return "timeout";
   if (path === "config.maxResponseBytes" || path === "config.maxRedirects") return "bounds";
 
   // 2. Secret-ref — by key name (last segment matches the chokepoint

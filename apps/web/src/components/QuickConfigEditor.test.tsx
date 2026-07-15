@@ -165,6 +165,182 @@ describe('<QuickConfigEditor /> guided workflow choices', () => {
   })
 })
 
+describe('<QuickConfigEditor /> bounded waiting', () => {
+  it('renders approval ownership and deadline policy without duplicating the message field', () => {
+    render(
+      <QuickConfigEditor
+        nodeId="approval-step"
+        type="approval"
+        config={{
+          message: 'Approve the refund',
+          assignee: 'operator-1',
+          decisionTimeoutMs: 600_000,
+          onTimeout: 'escalate',
+          escalateTo: 'operator-2',
+        }}
+        tools={[]}
+        workflowNodes={[]}
+        workflowEdges={[]}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getAllByLabelText('Approval message')).toHaveLength(1)
+    expect(screen.getByLabelText('Responsible user ID')).toHaveValue('operator-1')
+    expect(screen.getByLabelText('Decision deadline')).toHaveValue('timeout')
+    expect(screen.getByLabelText('Timeout (seconds)')).toHaveValue(600)
+    expect(screen.getByLabelText('When the deadline passes')).toHaveValue('escalate')
+    expect(screen.getByLabelText('Escalate to user ID')).toHaveValue('operator-2')
+  })
+
+  it('clears deadline-only keys while preserving approval content', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="approval-step"
+        type="approval"
+        config={{ message: 'Approve', assignee: 'operator-1', decisionTimeoutMs: 60_000, onTimeout: 'auto_reject' }}
+        tools={[]}
+        workflowNodes={[]}
+        workflowEdges={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Decision deadline'), { target: { value: 'none' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({ message: 'Approve', assignee: 'operator-1' })
+  })
+
+  it('renders and edits non-minute approval deadlines without changing their precision', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="approval-step"
+        type="approval"
+        config={{ decisionTimeoutMs: 90_001 }}
+        tools={[]}
+        workflowNodes={[]}
+        workflowEdges={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    const timeout = screen.getByLabelText('Timeout (seconds)')
+    expect(timeout).toHaveValue(90.001)
+    fireEvent.change(timeout, { target: { value: '1.234' } })
+    fireEvent.blur(timeout)
+    expect(onUpdate).toHaveBeenLastCalledWith({ decisionTimeoutMs: 1_234 })
+  })
+
+  it('switches wait_until between mutually exclusive duration and absolute modes', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-14T12:00:00Z'))
+    const onUpdate = vi.fn()
+    const view = render(
+      <QuickConfigEditor
+        nodeId="wait-step"
+        type="wait_until"
+        config={{ duration: 'PT5M' }}
+        tools={[]}
+        workflowNodes={[]}
+        workflowEdges={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Wait mode'), { target: { value: 'until' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({ until: '2026-07-14T13:00:00.000Z' })
+
+    view.rerender(
+      <QuickConfigEditor
+        nodeId="wait-step"
+        type="wait_until"
+        config={{ until: '2026-07-14T13:00:00.000Z' }}
+        tools={[]}
+        workflowNodes={[]}
+        workflowEdges={[]}
+        onUpdate={onUpdate}
+      />,
+    )
+    expect(screen.getByLabelText('Wait mode')).toHaveValue('until')
+    expect(screen.getByLabelText('Resume at')).toHaveAttribute('type', 'datetime-local')
+    expect(screen.getByLabelText('Resume at')).toHaveAttribute('step', '0.001')
+    expect(screen.getByLabelText('Resume at')).toHaveAccessibleDescription(expect.stringContaining('timezone'))
+  })
+
+  it('rejects local wall times skipped by a daylight-saving transition', () => {
+    const previousTimeZone = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    const onUpdate = vi.fn()
+    try {
+      render(
+        <QuickConfigEditor
+          nodeId="wait-step"
+          type="wait_until"
+          config={{ until: '2026-03-08T06:30:00.000Z' }}
+          tools={[]}
+          workflowNodes={[]}
+          workflowEdges={[]}
+          onUpdate={onUpdate}
+        />,
+      )
+
+      const input = screen.getByLabelText('Resume at')
+      fireEvent.change(input, { target: { value: '2026-03-08T02:30:00.000' } })
+      fireEvent.blur(input)
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByRole('alert')).toHaveTextContent('daylight-saving transition')
+      expect(onUpdate).not.toHaveBeenCalled()
+    } finally {
+      if (previousTimeZone === undefined) delete process.env.TZ
+      else process.env.TZ = previousTimeZone
+    }
+  })
+
+  it('preserves an existing repeated wall time and rejects newly authored daylight-saving overlaps', () => {
+    const previousTimeZone = process.env.TZ
+    process.env.TZ = 'America/New_York'
+    const onUpdate = vi.fn()
+    try {
+      const view = render(
+        <QuickConfigEditor
+          nodeId="wait-step"
+          type="wait_until"
+          config={{ until: '2026-11-01T06:30:00.000Z' }}
+          tools={[]}
+          workflowNodes={[]}
+          workflowEdges={[]}
+          onUpdate={onUpdate}
+        />,
+      )
+
+      const input = screen.getByLabelText('Resume at')
+      expect(input).toHaveValue('2026-11-01T01:30')
+      fireEvent.blur(input)
+      expect(onUpdate).not.toHaveBeenCalled()
+
+      view.rerender(
+        <QuickConfigEditor
+          nodeId="wait-step"
+          type="wait_until"
+          config={{ until: '2026-11-01T04:30:00.000Z' }}
+          tools={[]}
+          workflowNodes={[]}
+          workflowEdges={[]}
+          onUpdate={onUpdate}
+        />,
+      )
+      fireEvent.change(input, { target: { value: '2026-11-01T01:30:00.000' } })
+      fireEvent.blur(input)
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByRole('alert')).toHaveTextContent('skipped or repeated')
+      expect(onUpdate).not.toHaveBeenCalled()
+    } finally {
+      if (previousTimeZone === undefined) delete process.env.TZ
+      else process.env.TZ = previousTimeZone
+    }
+  })
+})
+
 describe('<QuickConfigEditor /> schedule validation', () => {
   it('marks cron grammar failures invalid without treating transport errors as validation failures', async () => {
     vi.useFakeTimers()

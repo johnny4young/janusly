@@ -56,6 +56,7 @@ import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 import { handleWaitResume } from "./wait-until";
+import { handleApprovalDeadlineArm, handleApprovalTimeout } from "./approval-timeout";
 import { handleScheduleTrigger, replayAllScheduleEntries } from "./schedule-scheduler";
 import {
   handleMemoryRetentionTrigger,
@@ -96,6 +97,11 @@ import {
   registerStalledNodeReaperScheduler,
   STALLED_NODE_REAPER_JOB_NAME,
 } from "./stalled-node-reaper";
+import {
+  handleWaitingCheckpointReconcilerTrigger,
+  registerWaitingCheckpointReconciler,
+  WAITING_CHECKPOINT_RECONCILER_JOB_NAME,
+} from "./waiting-checkpoint-reconciler";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
 import { withSpan } from "./observability/tracer";
@@ -205,6 +211,16 @@ try {
   if (registered) console.log("[stalled-node-reaper] sweep scheduler registered");
 } catch (err) {
   console.error("[stalled-node-reaper] scheduler registration failed", err);
+}
+
+// Once-per-minute repair for persisted approval/timer checkpoints whose
+// delayed Redis job was lost or exhausted infrastructure retries. The final
+// handlers remain generation-CAS guarded, so duplicate repair is harmless.
+try {
+  const registered = await registerWaitingCheckpointReconciler();
+  if (registered) console.log("[waiting-checkpoint-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[waiting-checkpoint-reconciler] scheduler registration failed", err);
 }
 
 // Register the usage_events writer once at boot. Every LLM call
@@ -384,6 +400,14 @@ export const worker = new Worker(
       await handleWaitResume(job.data);
       return;
     }
+    if (job.name === "approval-timeout") {
+      await handleApprovalTimeout(job.data);
+      return;
+    }
+    if (job.name === "approval-deadline-arm") {
+      await handleApprovalDeadlineArm(job.data);
+      return;
+    }
     if (job.name === "schedule-trigger") {
       await handleScheduleTrigger(job.data, job.repeatJobKey);
       return;
@@ -414,6 +438,10 @@ export const worker = new Worker(
     }
     if (job.name === STALLED_NODE_REAPER_JOB_NAME) {
       await handleStalledNodeReaperTrigger();
+      return;
+    }
+    if (job.name === WAITING_CHECKPOINT_RECONCILER_JOB_NAME) {
+      await handleWaitingCheckpointReconcilerTrigger();
       return;
     }
     // One-shot delayed job — scheduled on demand from the

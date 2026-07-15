@@ -34,6 +34,7 @@
  */
 
 import { evaluateExpression } from "../expression";
+import { materializeWaitingCheckpointMetadata } from "../waiting-time";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
@@ -233,7 +234,11 @@ export class WorkflowRuntime {
       const durationMs = Date.now() - start;
 
       if (result?.status === "waiting") {
-        const metadata = { ...(result.metadata ?? {}), waitingSince: new Date().toISOString() };
+        const checkpointAt = new Date();
+        const metadata = {
+          ...materializeWaitingCheckpointMetadata(result.metadata, checkpointAt.getTime()),
+          waitingSince: checkpointAt.toISOString(),
+        };
         const waiting = await this.store.markNodeWaiting(runId, node.id, metadata, recoveryClaimToken);
         if (!waiting) return;
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: { ...result, metadata } }));

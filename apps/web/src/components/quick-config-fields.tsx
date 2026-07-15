@@ -31,12 +31,12 @@ export function asJsonObject(value: unknown) {
   return value && typeof value === 'object' ? value : {}
 }
 
-export function TextConfigField({ scope, label, value, onChange }: { scope: string; label: string; value: string; onChange: (value: string) => void }) {
+export function TextConfigField({ scope, label, value, onChange, describedBy }: { scope: string; label: string; value: string; onChange: (value: string) => void; describedBy?: string }) {
   const id = fieldId(scope, label)
   return (
     <div className="config-field-row">
       <label className="field-label" htmlFor={id}>{label}</label>
-      <input id={id} className="text-field" value={value} onChange={event => onChange(event.target.value)} />
+      <input id={id} className="text-field" value={value} aria-describedby={describedBy} onChange={event => onChange(event.target.value)} />
     </div>
   )
 }

@@ -331,15 +331,25 @@ Pauses the run and emits a `node.waiting` event with a resume token of the form 
 
 ## `approval`
 
-Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node. The resume token is the legacy `<runId>:<nodeId>` shape; the approval decision is represented by the timeline/audit trail, while node output stays `{}` for backward compatibility.
+Same wait/resume mechanic as `webhook`, intended for human-in-the-loop. The UI surfaces an Approve button under the Runs panel for each waiting node. The resume token is the legacy `<runId>:<nodeId>` shape; the approval decision is represented by the timeline/audit trail, while node output stays `{}` for backward compatibility. `assignee` is visible operational ownership, not an authorization boundary: any editor who can resume the run may still approve it.
 
 ```jsonc
 {
   "id": "human_approval",
   "type": "approval",
-  "config": { "message": "Please review the report and approve to publish." }
+  "config": {
+    "message": "Please review the report and approve to publish.",
+    "assignee": "tier-1-on-call",
+    "decisionTimeoutMs": 600000,
+    "onTimeout": "escalate",
+    "escalateTo": "tier-2-on-call"
+  }
 }
 ```
+
+The optional deadline is either a positive integer `decisionTimeoutMs` relative to when the node begins waiting, or an absolute ISO 8601 `until` instant with an explicit timezone; never set both. `decisionTimeoutMs` is deliberately separate from the universal executor `timeoutMs`. Without either deadline field the legacy indefinite wait remains unchanged. A deadline defaults to `onTimeout: "fail"`; the other policies are `"auto_reject"` (terminal failure without advancing downstream work) and `"escalate"` (atomically reassign to the non-empty `escalateTo` owner and remain waiting). A stale timeout delivery cannot overwrite a manual resume, cancellation, replay, or a newer deadline generation.
+
+**Waiting metadata:** `{ kind, assignee?, decisionTimeoutMs?, deadlineAt?, onTimeout?, escalateTo?, timeoutState? }`. Timeout outcomes emit `approval.timed_out`, `approval.auto_rejected`, or `approval.escalated` timeline events.
 
 **Output (on resume):** `{}`. The approval decision is recorded in events/audit, not node state.
 
@@ -388,7 +398,7 @@ Starts another saved workflow as a child run and pauses until the child reaches 
 
 ## `wait_until`
 
-Pauses the run for an ISO 8601 duration, then resumes automatically through a delayed BullMQ job. Manual `POST /resume` can short-circuit the wait, and the delayed wake-up is idempotent if the node has already advanced.
+Pauses the run until either a positive ISO 8601 duration elapses or an absolute ISO 8601 instant arrives, then resumes automatically through a delayed BullMQ job. Absolute instants require an explicit timezone. Set exactly one of `duration` and `until`. Manual `POST /resume` can short-circuit the wait, elapsed absolute instants resume immediately, and delayed wake-up is idempotent if the node has already advanced.
 
 ```jsonc
 {
@@ -398,7 +408,17 @@ Pauses the run for an ISO 8601 duration, then resumes automatically through a de
 }
 ```
 
-**Waiting metadata:** `{ wakeAt, durationMs }`. **Output on resume:** `{}`.
+Absolute example:
+
+```jsonc
+{
+  "id": "wait_for_window",
+  "type": "wait_until",
+  "config": { "until": "2026-07-15T21:00:00-05:00" }
+}
+```
+
+**Waiting metadata:** `{ kind: "timer", wakeAt, durationMs, source }`, where `source` is `"duration"` or `"until"`. **Output on resume:** `{}`.
 
 ## `parallel_fork` / `join`
 

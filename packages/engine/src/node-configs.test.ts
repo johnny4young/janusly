@@ -174,6 +174,25 @@ describe("ApprovalNodeConfigSchema", () => {
   it("accepts an empty config (message optional)", () => {
     expect(() => ApprovalNodeConfigSchema.parse({})).not.toThrow();
   });
+  it("accepts a bounded escalation policy", () => {
+    const parsed = ApprovalNodeConfigSchema.parse({
+      assignee: "operator-1",
+      decisionTimeoutMs: 60_000,
+      onTimeout: "escalate",
+      escalateTo: "operator-2",
+    });
+    expect(parsed.onTimeout).toBe("escalate");
+  });
+  it("rejects conflicting deadlines and incomplete escalation", () => {
+    expect(() => ApprovalNodeConfigSchema.parse({
+      decisionTimeoutMs: 60_000,
+      until: "2026-07-14T12:00:00Z",
+    })).toThrow(/either config.decisionTimeoutMs or config.until/);
+    expect(() => ApprovalNodeConfigSchema.parse({
+      decisionTimeoutMs: 60_000,
+      onTimeout: "escalate",
+    })).toThrow(/requires a non-empty config.escalateTo/);
+  });
 });
 
 describe("HumanFormNodeConfigSchema", () => {
@@ -200,12 +219,20 @@ describe("SubworkflowNodeConfigSchema", () => {
 });
 
 describe("WaitUntilNodeConfigSchema", () => {
-  it("rejects missing duration", () => {
+  it("rejects a missing schedule", () => {
     expect(() => WaitUntilNodeConfigSchema.parse({})).toThrow();
   });
-  it("accepts canonical shape", () => {
-    const parsed = WaitUntilNodeConfigSchema.parse({ duration: "5m" });
-    expect(parsed.duration).toBe("5m");
+  it("accepts canonical duration and absolute shapes", () => {
+    const duration = WaitUntilNodeConfigSchema.parse({ duration: "PT5M" });
+    const absolute = WaitUntilNodeConfigSchema.parse({ until: "2026-07-14T12:00:00Z" });
+    expect(duration.duration).toBe("PT5M");
+    expect(absolute.until).toBe("2026-07-14T12:00:00Z");
+  });
+  it("rejects both scheduling modes at once", () => {
+    expect(() => WaitUntilNodeConfigSchema.parse({
+      duration: "PT5M",
+      until: "2026-07-14T12:00:00Z",
+    })).toThrow(/either config.duration or config.until/);
   });
 });
 

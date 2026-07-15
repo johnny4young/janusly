@@ -353,7 +353,11 @@ Common issue codes:
 | `multi_agent_missing_agents` | `multi_agent.config.agents` is empty |
 | `human_form_invalid_schema` | `human_form.config.schema` is missing or outside the supported JSON-schema subset |
 | `human_form_empty_schema` | `human_form.config.schema.properties` is empty |
-| `wait_until_missing_duration` / `wait_until_invalid_duration` / `wait_until_non_positive_duration` | `wait_until.config.duration` is absent or not a positive ISO 8601 duration |
+| `approval_conflicting_deadline` / `approval_invalid_timeout` / `approval_invalid_until` | Approval `decisionTimeoutMs` / `until` fields conflict or do not resolve to a supported instant |
+| `approval_invalid_timeout_policy` / `approval_timeout_policy_without_deadline` | Approval timeout policy is unknown or has no deadline |
+| `approval_escalation_missing_assignee` / `approval_escalation_without_policy` | Approval escalation has no target or appears outside the `escalate` policy |
+| `wait_until_missing_duration` / `wait_until_invalid_duration` / `wait_until_non_positive_duration` | `wait_until` has no time or its duration is invalid/non-positive |
+| `wait_until_conflicting_time` / `wait_until_invalid_until` | `wait_until` sets both time forms or has an invalid absolute instant |
 | `parallel_fork_invalid_branches` | `parallel_fork.config.branches` is malformed |
 | `join_invalid_sources` | `join.config.sources` is malformed |
 | `schedule_invalid_cron` | `schedule.config.cronExpression` is malformed |

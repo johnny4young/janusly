@@ -1,7 +1,7 @@
 /**
- * `wait_until` node — pauses the run for a configurable ISO 8601 duration,
- * then resumes downstream automatically. A user-triggered `POST /resume`
- * short-circuits the wait; a cancelled run causes the wake-up to no-op.
+ * `wait_until` node — pauses the run for an ISO 8601 duration or absolute
+ * ISO date-time, then resumes downstream automatically. A user-triggered
+ * `POST /resume` short-circuits the wait; cancellation makes wake-up a no-op.
  *
  * Async pause-and-resume mirrors the existing `webhook` / `approval`
  * machinery: the executor schedules a delayed BullMQ wake-up and returns
@@ -19,22 +19,21 @@
  * - Wake-up jobs are idempotent. The status check inside `handleWaitResume`
  *   guarantees that manual-resume-before-firing or run-cancel-before-firing
  *   leave the node alone.
- * - The duration must resolve to a strictly positive number of milliseconds.
- *   Zero or negative durations throw rather than wake immediately — a "wait
- *   0" workflow should use `noop` instead.
+ * - Relative durations must resolve to a strictly positive number of
+ *   milliseconds. A past absolute instant resumes immediately instead of
+ *   making a previously valid saved workflow fail at run time.
  * - Long delays (e.g. days, weeks) survive worker restarts because BullMQ
  *   persists delayed jobs in Redis. The node stays `waiting` across the
  *   restart and BullMQ delivers the job at its scheduled time.
  */
 
 import type { NodeExecutor } from "./node-registry";
-import { parseIsoDuration } from "./iso-duration";
 import { enqueueWaitUntilResume } from "./queue";
 import { getRunNodeStatus } from "./persistence";
 import { resumeRun } from "./resume-run";
+import { resolveWaitUntilSchedule } from "./waiting-time";
 
 const WAIT_RESUME_STATUS_RETRY_DELAY_MS = 1_000;
-const WAIT_RESUME_MAX_STATUS_RETRIES = 60;
 
 /**
  * Translate a `wait_until` node's config into a strictly positive number of
@@ -42,30 +41,23 @@ const WAIT_RESUME_MAX_STATUS_RETRIES = 60;
  * runtime surfaces the failure on `node.failed` rather than silently
  * skipping the wait.
  */
-export function resolveWaitUntilDelay(config: unknown): number {
-  const duration = isPlainObject(config) && typeof config.duration === "string" ? config.duration : "";
-  if (!duration) {
-    throw new Error("wait_until.duration is required (ISO 8601 duration, e.g. \"P3D\")");
-  }
-  const delayMs = parseIsoDuration(duration);
-  if (delayMs === null) {
-    throw new Error(`wait_until.duration must be a valid ISO 8601 duration, got: ${duration}`);
-  }
-  if (delayMs <= 0) {
-    throw new Error(`wait_until.duration must resolve to a positive number of milliseconds, got: ${delayMs}`);
-  }
-  return delayMs;
+export function resolveWaitUntilDelay(config: unknown, nowMs = Date.now()): number {
+  return resolveWaitUntilSchedule(config, nowMs).delayMs;
 }
 
 /** Executor for the `wait_until` node — schedules the wake-up and returns the waiting checkpoint. */
 export const waitUntilExecutor: NodeExecutor = async (ctx) => {
-  const delayMs = resolveWaitUntilDelay(ctx.config);
-  const wakeAt = new Date(Date.now() + delayMs).toISOString();
-  await enqueueWaitUntilResume(ctx.runId, ctx.nodeId, delayMs);
+  const schedule = resolveWaitUntilSchedule(ctx.config);
+  await enqueueWaitUntilResume(ctx.runId, ctx.nodeId, schedule.delayMs);
   return {
     status: "waiting",
-    reason: "Waiting for absolute time",
-    metadata: { kind: "timer", wakeAt, durationMs: delayMs },
+    reason: "Waiting for scheduled time",
+    metadata: {
+      kind: "timer",
+      wakeAt: schedule.wakeAt,
+      durationMs: schedule.delayMs,
+      source: schedule.source,
+    },
   };
 };
 
@@ -80,13 +72,9 @@ export async function handleWaitResume(data: unknown): Promise<void> {
   const { runId, nodeId } = data;
   if (typeof runId !== "string" || typeof nodeId !== "string") return;
   if (runId.length === 0 || nodeId.length === 0) return;
-  const statusCheckAttempts = typeof data.statusCheckAttempts === "number" && Number.isFinite(data.statusCheckAttempts)
-    ? Math.max(0, Math.floor(data.statusCheckAttempts))
-    : 0;
-
   const status = await getRunNodeStatus(runId, nodeId);
-  if ((status === "queued" || status === "running") && statusCheckAttempts < WAIT_RESUME_MAX_STATUS_RETRIES) {
-    await enqueueWaitUntilResume(runId, nodeId, WAIT_RESUME_STATUS_RETRY_DELAY_MS, statusCheckAttempts + 1);
+  if (status === "queued" || status === "running") {
+    await enqueueWaitUntilResume(runId, nodeId, WAIT_RESUME_STATUS_RETRY_DELAY_MS);
     return;
   }
   if (status !== "waiting") return; // already advanced — manual resume, cancellation, etc.

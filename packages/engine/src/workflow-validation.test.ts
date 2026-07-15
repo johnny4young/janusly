@@ -243,12 +243,14 @@ describe('validateWorkflow', () => {
     }))
   })
 
-  it('rejects wait_until nodes with missing, malformed, or non-positive duration', () => {
+  it('rejects wait_until nodes with missing, malformed, conflicting, or non-positive timing', () => {
     const result = validateWorkflow({
       nodes: [
         { id: 'wait_missing', type: 'wait_until', config: {} },
         { id: 'wait_words', type: 'wait_until', config: { duration: '3 days' } },
         { id: 'wait_zero', type: 'wait_until', config: { duration: 'PT0S' } },
+        { id: 'wait_bad_until', type: 'wait_until', config: { until: 'tomorrow' } },
+        { id: 'wait_both', type: 'wait_until', config: { duration: 'PT1M', until: '2026-07-14T12:00:00Z' } },
       ],
       edges: [],
     })
@@ -266,18 +268,44 @@ describe('validateWorkflow', () => {
       code: 'wait_until_non_positive_duration',
       nodeId: 'wait_zero',
     }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_invalid_until',
+      nodeId: 'wait_bad_until',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'wait_until_conflicting_time',
+      nodeId: 'wait_both',
+    }))
   })
 
-  it('accepts wait_until nodes with a positive ISO 8601 duration', () => {
+  it('accepts wait_until nodes with a positive duration or absolute ISO instant', () => {
     const result = validateWorkflow({
       nodes: [
         { id: 'wait', type: 'wait_until', config: { duration: 'P3D' } },
+        { id: 'wait_absolute', type: 'wait_until', config: { until: '2026-07-14T12:00:00Z' } },
         { id: 'next', type: 'noop', config: {} },
       ],
-      edges: [{ from: 'wait', to: 'next' }],
+      edges: [{ from: 'wait', to: 'wait_absolute' }, { from: 'wait_absolute', to: 'next' }],
     })
 
     expect(result.issues.find(issue => issue.code.startsWith('wait_until_'))).toBeUndefined()
+  })
+
+  it('rejects malformed approval deadline policies without requiring a deadline for legacy approvals', () => {
+    const result = validateWorkflow({
+      nodes: [
+        { id: 'legacy', type: 'approval', config: { message: 'Approve' } },
+        { id: 'bad_timeout', type: 'approval', config: { decisionTimeoutMs: 0 } },
+        { id: 'bad_escalation', type: 'approval', config: { decisionTimeoutMs: 1000, onTimeout: 'escalate' } },
+        { id: 'orphan_policy', type: 'approval', config: { onTimeout: 'auto_reject' } },
+      ],
+      edges: [],
+    })
+
+    expect(result.issues.find(issue => issue.nodeId === 'legacy')).toBeUndefined()
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_invalid_timeout', nodeId: 'bad_timeout' }))
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_escalation_missing_assignee', nodeId: 'bad_escalation' }))
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: 'approval_timeout_policy_without_deadline', nodeId: 'orphan_policy' }))
   })
 
   it('accepts schedule nodes with a valid cron expression', () => {

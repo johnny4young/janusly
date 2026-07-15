@@ -183,6 +183,29 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.markNodeSucceededWithEvent).not.toHaveBeenCalled()
   })
 
+  it('starts a relative approval deadline from the persisted checkpoint clock', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-14T12:00:00.000Z'))
+    try {
+      const store = makeStore()
+      const executors = makeExecutors({
+        status: 'waiting',
+        metadata: { kind: 'approval', decisionTimeoutMs: 60_000, onTimeout: 'fail' },
+      })
+      const runtime = new WorkflowRuntime(store, makeQueue(), executors)
+
+      await runtime.executeQueuedNode(input)
+
+      expect(store.markNodeWaiting).toHaveBeenCalledWith('r1', 'n1', expect.objectContaining({
+        decisionTimeoutMs: 60_000,
+        deadlineAt: '2026-07-14T12:01:00.000Z',
+        waitingSince: '2026-07-14T12:00:00.000Z',
+      }), undefined)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('skips downstream scheduling when the run is cancelled while a node was running', async () => {
     // First getRunStatus call (pre-execution) returns "running"; the second
     // (post-success, just before enqueueReadyNodes) returns "cancelled".

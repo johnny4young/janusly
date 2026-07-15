@@ -69,6 +69,11 @@ function skippedStateJson(payload: unknown): JsonObject {
   return { skipped: record.reason ?? record }
 }
 
+function escalatedWaitingStateJson(payload: unknown): JsonObject {
+  const record = isJsonObject(payload) ? payload : {}
+  return { waiting: isJsonObject(record.waiting) ? record.waiting : {} }
+}
+
 function errorJson(payload: unknown): JsonObject {
   const record = isJsonObject(payload) ? payload : {}
   const error = record.error
@@ -85,6 +90,12 @@ function runNodeFromEvent(event: RunEvent): RunNode | null {
   if (event.type === 'node.succeeded') return { nodeId: event.nodeId, status: 'succeeded', stateJson: outputStateJson(event.payload) }
   if (event.type === 'node.resumed') return { nodeId: event.nodeId, status: 'succeeded', stateJson: outputStateJson(event.payload) }
   if (event.type === 'node.failed') return { nodeId: event.nodeId, status: 'failed', errorJson: errorJson(event.payload) }
+  if (event.type === 'approval.timed_out' || event.type === 'approval.auto_rejected') {
+    return { nodeId: event.nodeId, status: 'failed', errorJson: errorJson(event.payload) }
+  }
+  if (event.type === 'approval.escalated') {
+    return { nodeId: event.nodeId, status: 'waiting', stateJson: escalatedWaitingStateJson(event.payload) }
+  }
   if (event.type === 'node.skipped') return { nodeId: event.nodeId, status: 'skipped', stateJson: skippedStateJson(event.payload) }
   return null
 }

@@ -133,6 +133,19 @@ describe("computeWorkflowDiff — node config changes + tags", () => {
     expect(timeoutChange?.tag).toBe("timeout");
   });
 
+  it("tags approval decision deadline changes as timeout controls", () => {
+    const before = makeWorkflow({
+      nodes: [{ id: "gate", type: "approval", config: { decisionTimeoutMs: 60_000 } }],
+    });
+    const after = makeWorkflow({
+      nodes: [{ id: "gate", type: "approval", config: { decisionTimeoutMs: 120_000 } }],
+    });
+
+    const changed = computeWorkflowDiff(before, after).nodes[0];
+    if (changed.kind !== "changed") throw new Error("expected changed node");
+    expect(changed.fields.find((field) => field.path === "config.decisionTimeoutMs")?.tag).toBe("timeout");
+  });
+
   it("tags bounds config changes", () => {
     const before = makeWorkflow({
       nodes: [{ id: "fetch", type: "http", config: { url: "https://a" } }],

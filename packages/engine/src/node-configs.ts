@@ -38,6 +38,11 @@ import {
   FileDroppedConfigSchema,
   McpServerEventConfigSchema,
 } from "@janusly/shared/src/trigger-types";
+import {
+  approvalTimeoutPolicyValues,
+  resolveApprovalWaitingConfig,
+  resolveWaitUntilSchedule,
+} from "./waiting-time";
 
 export const HttpNodeConfigSchema = z
   .object({
@@ -160,8 +165,23 @@ export const ApprovalNodeConfigSchema = z
     message: z.string().optional(),
     title: z.string().optional(),
     description: z.string().optional(),
+    assignee: z.string().optional(),
+    decisionTimeoutMs: z.number().optional(),
+    until: z.string().optional(),
+    onTimeout: z.enum(approvalTimeoutPolicyValues).optional(),
+    escalateTo: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    try {
+      resolveApprovalWaitingConfig(value);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        message: err instanceof Error ? err.message : "Invalid approval deadline config",
+      });
+    }
+  });
 
 export const HumanFormNodeConfigSchema = z
   .object({
@@ -183,9 +203,20 @@ export const SubworkflowNodeConfigSchema = z
 
 export const WaitUntilNodeConfigSchema = z
   .object({
-    duration: z.string().min(1, "wait_until.duration is required"),
+    duration: z.string().optional(),
+    until: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    try {
+      resolveWaitUntilSchedule(value);
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        message: err instanceof Error ? err.message : "Invalid wait_until config",
+      });
+    }
+  });
 
 export const ScheduleNodeConfigSchema = z
   .object({

@@ -18,12 +18,13 @@
 
 import { db, deadLetters, runNodes, runEvents, runs, workflowVersions } from "@janusly/db";
 import { recordRecoveryImpactTx } from "@janusly/data";
-import { eq, ne, and, inArray, isNull, sql } from "drizzle-orm";
+import { eq, ne, and, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { WorkflowSchema, type Workflow } from "@janusly/shared";
 import { isOpenNodeStatus, nodeCancellableStatusValues } from "@janusly/shared/src/status";
 import { projectOutputs } from "./outputs-projector";
 import { publishRunEvent } from "./run-event-stream";
 import { safePersistPayload } from "./safe-persist";
+import type { ApprovalTimeoutPolicy } from "./waiting-time";
 
 // Per-surface size caps for jsonb writes. The chokepoint's default cap
 // (256 KB) is conservative for narrow surfaces (events, errors, audit) but
@@ -33,6 +34,12 @@ import { safePersistPayload } from "./safe-persist";
 // `__truncated` sentinel via `safePersistPayload`.
 const STATE_JSON_MAX_BYTES = 1_000_000;
 const ERROR_JSON_MAX_BYTES = 64_000;
+
+function asPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
 /** Return the current top-level run status, or `null` when the row is absent. */
 export async function getRunStatus(runId: string) {
@@ -93,6 +100,111 @@ export async function getRunNodeStatus(runId: string, nodeId: string): Promise<s
     .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
     .limit(1);
   return rows[0]?.status ?? null;
+}
+
+export type RunNodeWaitingSnapshot = {
+  status: string;
+  waiting: Record<string, unknown> | null;
+};
+
+/** Load the narrow status + waiting metadata projection used by delayed jobs. */
+export async function getRunNodeWaitingSnapshot(
+  runId: string,
+  nodeId: string,
+): Promise<RunNodeWaitingSnapshot | null> {
+  const rows = await db
+    .select({ status: runNodes.status, stateJson: runNodes.stateJson })
+    .from(runNodes)
+    .where(and(eq(runNodes.runId, runId), eq(runNodes.nodeId, nodeId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  const state = asPlainObject(row.stateJson);
+  return {
+    status: row.status,
+    waiting: asPlainObject(state?.waiting),
+  };
+}
+
+export type DueWaitingCheckpoint = {
+  runId: string;
+  nodeId: string;
+  kind: "approval" | "timer";
+  targetAt: string;
+};
+
+/** Failed repair deliveries become eligible again after this durable lease. */
+export const WAITING_CHECKPOINT_REPAIR_LEASE_MS = 2 * 60 * 1_000;
+
+/**
+ * Durably claim a bounded batch of overdue active checkpoints whose Redis
+ * wake-up can be safely recreated. The lease and NULLS-FIRST ordering ensure
+ * a repeatedly failing batch cannot starve later rows; SKIP LOCKED lets
+ * multiple workers sweep without claiming the same checkpoint generation.
+ * Exact node-generation CAS remains the execution gate.
+ */
+export async function claimDueWaitingCheckpoints(
+  now = new Date(),
+  limit = 500,
+  leaseMs = WAITING_CHECKPOINT_REPAIR_LEASE_MS,
+): Promise<DueWaitingCheckpoint[]> {
+  const nowIso = now.toISOString();
+  const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const boundedLeaseMs = Math.max(1_000, Math.trunc(leaseMs));
+  const repairAfter = new Date(now.getTime() + boundedLeaseMs);
+  const rows = await db.transaction(async (tx) => {
+    const claimed = await tx
+      .select({
+        id: runNodes.id,
+        runId: runNodes.runId,
+        nodeId: runNodes.nodeId,
+        stateJson: runNodes.stateJson,
+      })
+      .from(runNodes)
+      .innerJoin(runs, eq(runs.id, runNodes.runId))
+      .where(and(
+        eq(runNodes.status, "waiting"),
+        eq(runs.status, "running"),
+        or(isNull(runNodes.waitingRepairAfter), lte(runNodes.waitingRepairAfter, now)),
+        sql`COALESCE(${runNodes.stateJson} #>> '{waiting,deadlineAt}', ${runNodes.stateJson} #>> '{waiting,wakeAt}') <= ${nowIso}`,
+        or(
+          and(
+            sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'approval'`,
+            sql`${runNodes.stateJson} #>> '{waiting,timeoutState}' IS NULL`,
+          ),
+          and(
+            sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'timer'`,
+          ),
+        ),
+      ))
+      .orderBy(
+        sql`${runNodes.waitingRepairAfter} ASC NULLS FIRST`,
+        sql`COALESCE(${runNodes.stateJson} #>> '{waiting,deadlineAt}', ${runNodes.stateJson} #>> '{waiting,wakeAt}')`,
+        runNodes.runId,
+        runNodes.nodeId,
+      )
+      .limit(boundedLimit)
+      .for("update", { of: runNodes, skipLocked: true });
+    if (claimed.length === 0) return claimed;
+
+    await tx
+      .update(runNodes)
+      .set({ waitingRepairAfter: repairAfter })
+      .where(inArray(runNodes.id, claimed.map(row => row.id)));
+    return claimed;
+  });
+
+  const due: DueWaitingCheckpoint[] = [];
+  for (const row of rows) {
+    const waiting = asPlainObject(asPlainObject(row.stateJson)?.waiting);
+    const kind = waiting?.kind;
+    const targetAt = kind === "approval" ? waiting?.deadlineAt : waiting?.wakeAt;
+    if ((kind !== "approval" && kind !== "timer") || typeof targetAt !== "string") continue;
+    const targetMs = Date.parse(targetAt);
+    if (!Number.isFinite(targetMs) || targetMs > now.getTime()) continue;
+    due.push({ runId: row.runId, nodeId: row.nodeId, kind, targetAt });
+  }
+  return due;
 }
 
 /**
@@ -420,7 +532,11 @@ export async function markNodeWaiting(
   recoveryClaimToken?: string,
 ): Promise<boolean> {
   const waiting = await db.update(runNodes)
-    .set({ status: "waiting", stateJson: safePersistPayload({ waiting: metadata ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }) })
+    .set({
+      status: "waiting",
+      stateJson: safePersistPayload({ waiting: metadata ?? {} }, { maxBytes: STATE_JSON_MAX_BYTES }),
+      waitingRepairAfter: null,
+    })
     .where(and(
       eq(runNodes.runId, runId),
       eq(runNodes.nodeId, nodeId),
@@ -429,6 +545,190 @@ export async function markNodeWaiting(
     ))
     .returning({ id: runNodes.id });
   return waiting.length > 0;
+}
+
+/**
+ * Fail an approval only when it still waits on the exact deadline generation.
+ * The deadline + pending-state predicates make manual-resume, replay, and
+ * duplicate delayed-job races harmless.
+ */
+export async function failWaitingApprovalNode(
+  runId: string,
+  nodeId: string,
+  expectedDeadlineAt: string,
+  policy: Extract<ApprovalTimeoutPolicy, "fail" | "auto_reject">,
+): Promise<boolean> {
+  const finishedAt = new Date();
+  const runFailedAt = new Date(finishedAt.getTime() + 1);
+  const approvalEventId = crypto.randomUUID();
+  const runEventId = crypto.randomUUID();
+  const autoRejected = policy === "auto_reject";
+  const eventType = autoRejected ? "approval.auto_rejected" : "approval.timed_out";
+  const error = safePersistPayload({
+    code: autoRejected ? "approval_auto_rejected" : "approval_timed_out",
+    reason: autoRejected ? "Approval automatically rejected at deadline" : "Approval deadline expired",
+    deadlineAt: expectedDeadlineAt,
+    onTimeout: policy,
+  }, { maxBytes: ERROR_JSON_MAX_BYTES });
+  const eventPayload = safePersistPayload({ deadlineAt: expectedDeadlineAt, onTimeout: policy, error });
+
+  const result = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
+    if (!run || run.status !== "running") return { persisted: false, failedNodes: 0 };
+
+    const [row] = await tx
+      .update(runNodes)
+      .set({ status: "failed", errorJson: error, finishedAt })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "waiting"),
+        sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'approval'`,
+        sql`${runNodes.stateJson} #>> '{waiting,deadlineAt}' = ${expectedDeadlineAt}`,
+        sql`${runNodes.stateJson} #>> '{waiting,timeoutState}' IS NULL`,
+      ))
+      .returning({ id: runNodes.id });
+    if (!row) return { persisted: false, failedNodes: 0 };
+
+    const countRows = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(runNodes)
+      .where(and(eq(runNodes.runId, runId), eq(runNodes.status, "failed")));
+    const failedNodes = Number(countRows[0]?.count ?? 1);
+    const [flipped] = await tx
+      .update(runs)
+      .set({ status: "failed" })
+      .where(and(eq(runs.id, runId), eq(runs.status, "running")))
+      .returning({ id: runs.id });
+    if (!flipped) throw new Error("Approval timeout lost the locked run transition");
+
+    await tx.insert(runEvents).values({
+      id: approvalEventId,
+      runId,
+      nodeId,
+      type: eventType,
+      payload: eventPayload,
+      createdAt: finishedAt,
+    });
+    await tx.insert(runEvents).values({
+      id: runEventId,
+      runId,
+      nodeId: null,
+      type: "run.failed",
+      payload: safePersistPayload({ failedNodes }),
+      createdAt: runFailedAt,
+    });
+    return { persisted: true, failedNodes };
+  });
+  if (!result.persisted) return false;
+  publishRunEvent(runId, {
+    kind: "event",
+    id: approvalEventId,
+    nodeId,
+    type: eventType,
+    payload: eventPayload,
+    createdAt: finishedAt.toISOString(),
+  });
+  publishRunEvent(runId, {
+    kind: "event",
+    id: runEventId,
+    nodeId: null,
+    type: "run.failed",
+    payload: safePersistPayload({ failedNodes: result.failedNodes }),
+    createdAt: runFailedAt.toISOString(),
+  });
+  await notifyCommittedRunTerminal(runId, "failed");
+  publishRunEvent(runId, { kind: "run.status", status: "failed" });
+  return true;
+}
+
+/** Reassign a still-current approval checkpoint and record one escalation event. */
+export async function escalateWaitingApprovalNode(
+  runId: string,
+  nodeId: string,
+  expectedDeadlineAt: string,
+  escalateTo: string,
+): Promise<boolean> {
+  const escalatedAt = new Date();
+  const eventId = crypto.randomUUID();
+  const result = await db.transaction(async (tx) => {
+    const [run] = await tx
+      .select({ status: runs.status })
+      .from(runs)
+      .where(eq(runs.id, runId))
+      .limit(1)
+      .for("update");
+    if (!run || run.status !== "running") return null;
+
+    const rows = await tx
+      .select({ stateJson: runNodes.stateJson })
+      .from(runNodes)
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "waiting"),
+        sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'approval'`,
+        sql`${runNodes.stateJson} #>> '{waiting,deadlineAt}' = ${expectedDeadlineAt}`,
+        sql`${runNodes.stateJson} #>> '{waiting,timeoutState}' IS NULL`,
+      ))
+      .limit(1);
+    const state = asPlainObject(rows[0]?.stateJson);
+    const waiting = asPlainObject(state?.waiting);
+    if (!waiting) return null;
+    const previousAssignee = typeof waiting.assignee === "string" && waiting.assignee.trim()
+      ? waiting.assignee.trim()
+      : undefined;
+    const nextWaiting = {
+      ...waiting,
+      assignee: escalateTo,
+      timeoutState: "escalated",
+      escalatedAt: escalatedAt.toISOString(),
+      ...(previousAssignee ? { escalatedFrom: previousAssignee } : {}),
+    };
+    const [updated] = await tx
+      .update(runNodes)
+      .set({ stateJson: safePersistPayload({ ...state, waiting: nextWaiting }, { maxBytes: STATE_JSON_MAX_BYTES }) })
+      .where(and(
+        eq(runNodes.runId, runId),
+        eq(runNodes.nodeId, nodeId),
+        eq(runNodes.status, "waiting"),
+        sql`${runNodes.stateJson} #>> '{waiting,kind}' = 'approval'`,
+        sql`${runNodes.stateJson} #>> '{waiting,deadlineAt}' = ${expectedDeadlineAt}`,
+        sql`${runNodes.stateJson} #>> '{waiting,timeoutState}' IS NULL`,
+      ))
+      .returning({ id: runNodes.id });
+    if (!updated) return null;
+    const eventPayload = safePersistPayload({
+      deadlineAt: expectedDeadlineAt,
+      assignee: escalateTo,
+      ...(previousAssignee ? { previousAssignee } : {}),
+      waiting: nextWaiting,
+    });
+    await tx.insert(runEvents).values({
+      id: eventId,
+      runId,
+      nodeId,
+      type: "approval.escalated",
+      payload: eventPayload,
+      createdAt: escalatedAt,
+    });
+    return eventPayload;
+  });
+  if (!result) return false;
+  publishRunEvent(runId, {
+    kind: "event",
+    id: eventId,
+    nodeId,
+    type: "approval.escalated",
+    payload: result,
+    createdAt: escalatedAt.toISOString(),
+  });
+  return true;
 }
 
 /** Mark a node skipped (e.g. edge condition false). Terminal — `finishedAt` set. */

@@ -17,12 +17,16 @@
 
 import { WorkflowInputSchema, WorkflowSchema, nodeTypeValues } from "@janusly/shared";
 import { validateExpression } from "./expression";
-import { parseIsoDuration } from "./iso-duration";
 import { resolveJoinSources, resolveParallelForkBranches } from "./parallel-fork";
 import { resolveScheduleConfig } from "./schedule";
 import { resolveTriggerConfig } from "./triggers";
 import { isTriggerNodeType } from "@janusly/shared/src/trigger-types";
 import { isRegisteredTool, validateToolInput } from "./tool-registry";
+import {
+  resolveApprovalWaitingConfig,
+  resolveWaitUntilSchedule,
+  WaitingConfigError,
+} from "./waiting-time";
 
 const supportedNodeTypes = new Set<string>(nodeTypeValues);
 
@@ -145,17 +149,26 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
       }
     }
     if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+    if (node.type === "approval") {
+      try {
+        resolveApprovalWaitingConfig(node.config);
+      } catch (err) {
+        issues.push({
+          code: err instanceof WaitingConfigError ? err.code : "approval_invalid_deadline",
+          message: err instanceof Error ? err.message : "Approval node has an invalid deadline",
+          nodeId: node.id,
+        });
+      }
+    }
     if (node.type === "wait_until") {
-      const duration = typeof node.config.duration === "string" ? node.config.duration : "";
-      if (!duration) {
-        issues.push({ code: "wait_until_missing_duration", message: "Wait node requires config.duration", nodeId: node.id });
-      } else {
-        const delayMs = parseIsoDuration(duration);
-        if (delayMs === null) {
-          issues.push({ code: "wait_until_invalid_duration", message: "Wait node requires a valid ISO 8601 config.duration", nodeId: node.id });
-        } else if (delayMs <= 0) {
-          issues.push({ code: "wait_until_non_positive_duration", message: "Wait node duration must resolve to a positive number of milliseconds", nodeId: node.id });
-        }
+      try {
+        resolveWaitUntilSchedule(node.config);
+      } catch (err) {
+        issues.push({
+          code: err instanceof WaitingConfigError ? err.code : "wait_until_invalid_time",
+          message: err instanceof Error ? err.message : "Wait node has an invalid schedule",
+          nodeId: node.id,
+        });
       }
     }
     // Future AI generation strategies may produce looser node shapes,

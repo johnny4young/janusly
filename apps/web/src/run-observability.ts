@@ -21,6 +21,12 @@ export type RunWaitingInfo = {
   description: string | null
   waitingSince: string | null
   wakeAt: string | null
+  deadlineAt: string | null
+  assignee: string | null
+  onTimeout: string | null
+  escalateTo: string | null
+  timeoutState: string | null
+  escalatedFrom: string | null
 }
 
 function asObject(value: unknown): JsonObject | null {
@@ -95,5 +101,11 @@ export function getRunWaitingInfo(node: RunNode): RunWaitingInfo {
     description: readNonEmptyString(waiting.description),
     waitingSince: readNonEmptyString(waiting.waitingSince) ?? readNonEmptyString(node.startedAt),
     wakeAt: readNonEmptyString(waiting.wakeAt),
+    deadlineAt: readNonEmptyString(waiting.deadlineAt),
+    assignee: readNonEmptyString(waiting.assignee),
+    onTimeout: readNonEmptyString(waiting.onTimeout),
+    escalateTo: readNonEmptyString(waiting.escalateTo),
+    timeoutState: readNonEmptyString(waiting.timeoutState),
+    escalatedFrom: readNonEmptyString(waiting.escalatedFrom),
   }
 }

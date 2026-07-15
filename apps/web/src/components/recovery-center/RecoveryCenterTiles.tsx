@@ -377,7 +377,9 @@ export function PendingApprovalsTile({
       ) : (
         <ul className="we-recovery-signoff">
           {top.map((node) => {
-            const waiting = (node.stateJson as { waiting?: { kind?: string; title?: string } } | undefined)?.waiting
+            const waiting = (node.stateJson as {
+              waiting?: { kind?: string; title?: string; assignee?: string; timeoutState?: string }
+            } | undefined)?.waiting
             const kind = waiting?.kind ?? 'approval'
             const title = waiting?.title
               ?? (kind === 'human_form' ? t('recoveryCenter.tile.approvals.formTitle') : t('recoveryCenter.tile.approvals.approvalTitle'))
@@ -394,6 +396,13 @@ export function PendingApprovalsTile({
                     <code>{node.nodeId}</code>
                     <span> · {kind === 'human_form' ? t('recoveryCenter.tile.approvals.kindForm') : t('recoveryCenter.tile.approvals.kindApproval')} · {t('recoveryCenter.tile.approvals.waiting')}</span>
                   </p>
+                  {waiting?.assignee && (
+                    <p data-testid={`recovery-center-approval-owner-${node.nodeId}`}>
+                      {waiting.timeoutState === 'escalated'
+                        ? t('recoveryCenter.tile.approvals.escalatedOwner', { assignee: waiting.assignee })
+                        : t('recoveryCenter.tile.approvals.owner', { assignee: waiting.assignee })}
+                    </p>
+                  )}
                   <div className="we-recovery-signoff-row__acts">
                     {kind === 'approval' && (
                       <button

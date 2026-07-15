@@ -226,6 +226,8 @@ export const runNodes = pgTable(
     nodeId: text("node_id").notNull(),
     status: text("status").notNull(),
     stateJson: jsonb("state_json"),
+    /** Durable lease for the bounded-wait Redis repair sweep. */
+    waitingRepairAfter: timestamp("waiting_repair_after", { withTimezone: true }),
     attempts: integer("attempts").default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -250,6 +252,17 @@ export const runNodes = pgTable(
     index("run_nodes_running_started_idx")
       .on(table.startedAt)
       .where(sql`"status" = 'running'`),
+    // Backs the once-per-minute bounded-wait reconciler. Unclaimed rows sort
+    // first so a leased poison batch cannot starve later checkpoints; the
+    // target expression covers mutually exclusive approval/timer timestamps.
+    index("run_nodes_waiting_target_idx")
+      .on(
+        table.waitingRepairAfter.asc().nullsFirst(),
+        sql`(COALESCE("state_json" #>> '{waiting,deadlineAt}', "state_json" #>> '{waiting,wakeAt}'))`,
+        table.runId,
+        table.nodeId,
+      )
+      .where(sql`"status" = 'waiting'`),
   ],
 );
 
