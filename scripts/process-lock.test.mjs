@@ -1,159 +1,149 @@
-/** Concurrency and stale-owner coverage for the local process lock. */
+/** Serialization, fencing, and conservative crash coverage for process locks. */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { acquireProcessLock } from "./process-lock.mjs";
+import { acquireProcessLock, composeUpPullArgs } from "./process-lock.mjs";
 
-test("process lock serializes concurrent owners and releases idempotently", async () => {
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function waitForReady(child) {
+  return withTimeout(new Promise((resolve, reject) => {
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      if (output.includes("ready\n")) resolve();
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      reject(new Error(`lock owner exited before readiness (${code ?? signal})`));
+    });
+  }), 5_000, "timed out waiting for lock owner readiness");
+}
+
+function waitForExit(child) {
+  return withTimeout(new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => resolve({ code, signal }));
+  }), 5_000, "timed out waiting for lock owner exit");
+}
+
+test("process lock rejects a concurrent owner and releases idempotently", async () => {
   const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-"));
   const lockPath = join(sandbox, "e2e.lock");
   try {
-    const releaseFirst = await acquireProcessLock(lockPath, { pollMs: 10 });
-    let secondAcquired = false;
-    const second = acquireProcessLock(lockPath, { pollMs: 10 }).then((release) => {
-      secondAcquired = true;
-      return release;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal(secondAcquired, false);
-
-    await releaseFirst();
-    await releaseFirst();
-    const releaseSecond = await second;
-    assert.equal(secondAcquired, true);
-    await releaseSecond();
+    const release = await acquireProcessLock(lockPath);
+    await assert.rejects(acquireProcessLock(lockPath), /already running/);
+    await Promise.all([release(), release()]);
+    const releaseNext = await acquireProcessLock(lockPath);
+    await releaseNext();
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }
 });
 
-test("process lock reclaims a dead stale owner", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-stale-"));
-  const lockPath = join(sandbox, "e2e.lock");
-  try {
-    await mkdir(lockPath);
-    await writeFile(
-      join(lockPath, "owner.json"),
-      JSON.stringify({ pid: 2_147_483_647, startedAt: 0 }),
-      "utf8",
-    );
-    const release = await acquireProcessLock(lockPath, {
-      pollMs: 1,
-      staleGraceMs: 0,
-    });
-    await release();
-  } finally {
-    await rm(sandbox, { recursive: true, force: true });
-  }
+test("Compose pull override maps only supported policies to explicit CLI arguments", () => {
+  assert.deepEqual(composeUpPullArgs(""), []);
+  assert.deepEqual(composeUpPullArgs("always"), ["--pull", "always"]);
+  assert.deepEqual(composeUpPullArgs("never"), ["--pull", "never"]);
+  assert.deepEqual(composeUpPullArgs("missing"), ["--pull", "missing"]);
+  assert.throws(
+    () => composeUpPullArgs("sometimes"),
+    /must be one of always, missing, or never/,
+  );
 });
 
-test("process lock reclaims a dead stale atomic owner file", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-stale-file-"));
-  const lockPath = join(sandbox, "e2e.lock");
-  try {
-    await writeFile(
-      lockPath,
-      JSON.stringify({ pid: 2_147_483_647, startedAt: 0, token: "dead-file-owner" }),
-      "utf8",
-    );
-    const release = await acquireProcessLock(lockPath, {
-      pollMs: 1,
-      staleGraceMs: 0,
-    });
-    await release();
-  } finally {
-    await rm(sandbox, { recursive: true, force: true });
-  }
-});
-
-test("an old release cannot remove a newer lock generation from the same process", async () => {
+test("an old release cannot remove a newer generation", async () => {
   const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-generation-"));
   const lockPath = join(sandbox, "e2e.lock");
   try {
-    const releaseFirst = await acquireProcessLock(lockPath);
+    const releaseOld = await acquireProcessLock(lockPath);
+    await rm(lockPath, { force: true });
+    const releaseNew = await acquireProcessLock(lockPath);
+    const newOwner = await readFile(lockPath, "utf8");
+
+    await releaseOld();
+    assert.equal(await readFile(lockPath, "utf8"), newOwner);
+    await releaseNew();
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("an abrupt owner exit leaves a conservative manual-recovery lock", async () => {
+  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-crash-"));
+  const lockPath = join(sandbox, "e2e.lock");
+  const moduleUrl = new URL("./process-lock.mjs", import.meta.url).href;
+  let child;
+  try {
+    child = spawn(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      `import { acquireProcessLock } from ${JSON.stringify(moduleUrl)};`
+        + `await acquireProcessLock(${JSON.stringify(lockPath)});`
+        + `process.stdout.write("ready\\n");`
+        + `setInterval(() => {}, 1_000);`,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+    await waitForReady(child);
+    const exitPromise = waitForExit(child);
+    child.kill("SIGKILL");
+    const exit = await exitPromise;
+    assert.equal(exit.signal, "SIGKILL");
+    await assert.rejects(acquireProcessLock(lockPath), /Stale Janusly Compose lifecycle lock/);
+
     await rm(lockPath, { recursive: true, force: true });
-    const releaseSecond = await acquireProcessLock(lockPath);
-    const secondOwner = await readFile(lockPath, "utf8");
-
-    await releaseFirst();
-    assert.equal(await readFile(lockPath, "utf8"), secondOwner);
-    await releaseSecond();
-  } finally {
-    await rm(sandbox, { recursive: true, force: true });
-  }
-});
-
-test("a live stale-lock reclaimer backs off and times out", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-reclaim-"));
-  const lockPath = join(sandbox, "e2e.lock");
-  try {
-    await mkdir(lockPath);
-    await writeFile(
-      join(lockPath, "owner.json"),
-      JSON.stringify({ pid: 2_147_483_647, startedAt: 0, token: "dead-owner" }),
-      "utf8",
-    );
-    await rename(
-      join(lockPath, "owner.json"),
-      join(lockPath, `.reclaim-${process.pid}-busy.json`),
-    );
-
-    const startedAt = Date.now();
-    await assert.rejects(
-      acquireProcessLock(lockPath, { pollMs: 5, staleGraceMs: 0, timeoutMs: 30 }),
-      /timed out waiting for process lock/,
-    );
-    assert.ok(Date.now() - startedAt >= 20);
-  } finally {
-    await rm(sandbox, { recursive: true, force: true });
-  }
-});
-
-test("process lock takes over an abandoned stale reclaim generation", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-abandoned-"));
-  const lockPath = join(sandbox, "e2e.lock");
-  try {
-    await mkdir(lockPath);
-    await writeFile(
-      join(lockPath, "owner.json"),
-      JSON.stringify({ pid: 2_147_483_647, startedAt: 0, token: "dead-owner" }),
-      "utf8",
-    );
-    await rename(
-      join(lockPath, "owner.json"),
-      join(lockPath, ".reclaim-2147483646-abandoned.json"),
-    );
-
-    const release = await acquireProcessLock(lockPath, { pollMs: 1, staleGraceMs: 0 });
+    const release = await acquireProcessLock(lockPath);
     await release();
   } finally {
-    await rm(sandbox, { recursive: true, force: true });
+    try {
+      if (child?.exitCode === null && child?.signalCode === null) {
+        const forcedExit = waitForExit(child);
+        child.kill("SIGKILL");
+        await forcedExit;
+      }
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
   }
 });
 
-test("process lock recovers a legacy ownerless directory after the grace period", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-ownerless-"));
-  const lockPath = join(sandbox, "e2e.lock");
-  try {
-    await mkdir(lockPath);
-    const release = await acquireProcessLock(lockPath, { pollMs: 1, staleGraceMs: 0 });
-    await release();
-  } finally {
-    await rm(sandbox, { recursive: true, force: true });
-  }
-});
-
-test("process lock recovers a legacy malformed owner after the grace period", async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-malformed-"));
+test("an incomplete lock blocks instead of being reclaimed unsafely", async () => {
+  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-incomplete-"));
   const lockPath = join(sandbox, "e2e.lock");
   try {
     await mkdir(lockPath);
     await writeFile(join(lockPath, "owner.json"), "{", "utf8");
-    const release = await acquireProcessLock(lockPath, { pollMs: 1, staleGraceMs: 0 });
-    await release();
+    await assert.rejects(acquireProcessLock(lockPath), /Stale Janusly Compose lifecycle lock/);
+  } finally {
+    await rm(sandbox, { recursive: true, force: true });
+  }
+});
+
+test("a dangling lock symlink blocks instead of spinning acquisition", async () => {
+  const sandbox = await mkdtemp(join(tmpdir(), "janusly-process-lock-symlink-"));
+  const lockPath = join(sandbox, "e2e.lock");
+  try {
+    await symlink(join(sandbox, "missing-owner"), lockPath);
+    await assert.rejects(
+      withTimeout(
+        acquireProcessLock(lockPath),
+        1_000,
+        "dangling lock acquisition did not fail closed",
+      ),
+      /Stale Janusly Compose lifecycle lock/,
+    );
   } finally {
     await rm(sandbox, { recursive: true, force: true });
   }

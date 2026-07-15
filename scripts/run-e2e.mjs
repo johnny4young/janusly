@@ -5,16 +5,17 @@
  * so Playwright can drive the real web UI through real API + worker processes.
  *
  * Lifecycle:
- *   1. `docker compose up -d --renew-anon-volumes redis postgres`
- *   2. wait for Postgres to accept connections (`pg_isready`)
- *   3. `pnpm migrate` — applies the Drizzle migrations from packages/db
- *   4. spawn `apps/api` on a free local port (3001 when available) and
+ *   1. acquire the host-global Janusly Compose lifecycle lock
+ *   2. `docker compose up -d --renew-anon-volumes redis postgres`
+ *   3. wait for Postgres to accept connections (`pg_isready`)
+ *   4. `pnpm migrate` — applies the Drizzle migrations from packages/db
+ *   5. spawn `apps/api` on a free local port (3001 when available) and
  *      `packages/engine` worker (detached process groups)
- *   5. wait for the API to answer `GET /tools` with the JSON tools catalog
+ *   6. wait for the API to answer `GET /tools` with the JSON tools catalog
  *      and dev headers (not just any HTTP 200 on the port)
- *   6. delegate to `pnpm --filter @janusly/web test:e2e` (Playwright)
- *   7. on failure: dump `docker compose logs` for the postmortem
- *   8. always: shut down child services + `docker compose down`
+ *   7. delegate to `pnpm --filter @janusly/web test:e2e` (Playwright)
+ *   8. on failure: dump `docker compose logs` for the postmortem
+ *   9. always: drain process groups + Compose, then release the lock
  *
  * Used by:
  * - root `package.json` `test:e2e` script
@@ -34,45 +35,117 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import net from "node:net";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acquireProcessLock } from "./process-lock.mjs";
+import { acquireJanuslyComposeLock, composeUpPullArgs } from "./process-lock.mjs";
 
 const rootDir = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_API_PORT = 3001;
 const webBaseUrl = "http://127.0.0.1:5173";
-const checkoutLockId = createHash("sha256").update(rootDir).digest("hex").slice(0, 12);
-const harnessLockPath = join(tmpdir(), `janusly-e2e-${checkoutLockId}.lock`);
 const children = new Set();
-let shuttingDown = false;
+let shutdownPromise = null;
 let composeStarted = false;
 let releaseHarnessLock = null;
+let lockAcquisitionPromise = null;
 const webTestArgs = process.argv.slice(2).filter((arg, index) => !(index === 0 && arg === "--"));
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function processTreeIsAlive(child) {
+  if (!child?.pid) return false;
+  if (process.platform === "win32") return child.exitCode === null;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function waitForProcessTreeExit(child, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (processTreeIsAlive(child) && Date.now() < deadline) {
+    await sleep(25);
+  }
+  const exited = !processTreeIsAlive(child);
+  if (exited) children.delete(child);
+  return exited;
+}
+
+function trackChild(child) {
+  children.add(child);
+  child.once("exit", () => {
+    // The group can outlive its leader; keep observing until the final
+    // descendant exits so a stale entry cannot later target a reused PGID.
+    void waitForProcessTreeExit(child, Number.POSITIVE_INFINITY);
+  });
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    if (shutdownPromise && !options.allowDuringShutdown) {
+      reject(new Error(`refusing to start ${command} during E2E shutdown`));
+      return;
+    }
+    const detached = process.platform !== "win32";
     const child = spawn(command, args, {
       cwd: rootDir,
+      detached,
       env: { ...process.env, ...options.env },
-      stdio: "inherit",
+      stdio: options.stdio ?? "inherit",
     });
+    trackChild(child);
+    let timedOut = false;
+    const timeout = options.timeoutMs ? setTimeout(() => {
+      timedOut = true;
+      void (async () => {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          // Re-check below.
+        }
+        if (!await waitForProcessTreeExit(child, 2_000)) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch {
+            // Re-check below.
+          }
+          await waitForProcessTreeExit(child, 2_000);
+        }
+        reject(new Error(`${command} ${args.join(" ")} timed out after ${options.timeoutMs}ms`));
+      })();
+    }, options.timeoutMs) : null;
 
-    child.on("exit", code => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} ${args.join(" ")} exited with code ${code}`));
+    child.on("exit", (code, signal) => {
+      if (timeout) clearTimeout(timeout);
+      void waitForProcessTreeExit(child, 5_000).then((exited) => {
+        if (timedOut) return;
+        if (!exited) {
+          reject(new Error(`${command} ${args.join(" ")} left a live descendant process`));
+        } else if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(
+            `${command} ${args.join(" ")} exited with ${signal ? `signal ${signal}` : `code ${code}`}`,
+          ));
+        }
+      }, reject);
     });
-    child.on("error", reject);
+    child.on("error", error => {
+      if (timeout) clearTimeout(timeout);
+      if (timedOut) return;
+      if (!processTreeIsAlive(child)) children.delete(child);
+      reject(error);
+    });
   });
 }
 
 function startService(name, command, args, options = {}) {
+  if (shutdownPromise) {
+    throw new Error(`refusing to start ${name} during E2E shutdown`);
+  }
   const detached = process.platform !== "win32";
   const child = spawn(command, args, {
     cwd: rootDir,
@@ -82,9 +155,9 @@ function startService(name, command, args, options = {}) {
   });
 
   child.serviceName = name;
-  children.add(child);
-
-  child.on("exit", () => {
+  trackChild(child);
+  child.once("error", (error) => {
+    child.spawnError = error;
     children.delete(child);
   });
 
@@ -139,6 +212,7 @@ async function resolveApiPort(preferredPort) {
 
 function serviceExitReason(child) {
   if (!child) return null;
+  if (child.spawnError) return `spawn error ${child.spawnError.message}`;
   if (child.exitCode !== null) return `code ${child.exitCode}`;
   if (child.signalCode !== null) return `signal ${child.signalCode}`;
   return null;
@@ -213,17 +287,10 @@ async function waitForPostgres(timeoutMs = 60_000) {
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      await new Promise((resolve, reject) => {
-        const child = spawn("docker", [
-          "compose", "exec", "-T", "postgres", "pg_isready",
-          "-h", "127.0.0.1", "-U", "postgres", "-d", "workflow",
-        ], {
-          cwd: rootDir,
-          stdio: "ignore",
-        });
-        child.on("exit", code => (code === 0 ? resolve() : reject(new Error(`pg_isready exited ${code}`))));
-        child.on("error", reject);
-      });
+      await run("docker", [
+        "compose", "exec", "-T", "postgres", "pg_isready",
+        "-h", "127.0.0.1", "-U", "postgres", "-d", "workflow",
+      ], { stdio: "ignore" });
       return;
     } catch (error) {
       lastError = error;
@@ -235,69 +302,98 @@ async function waitForPostgres(timeoutMs = 60_000) {
 }
 
 async function stopService(child) {
-  if (!child || child.exitCode !== null || child.killed) return;
+  if (!child || !processTreeIsAlive(child)) {
+    children.delete(child);
+    return;
+  }
 
-  await new Promise(resolve => {
-    const timer = setTimeout(() => {
-      try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
-      } catch {
-        // Process already exited.
-      }
-      resolve();
-    }, 5_000);
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+    else child.kill("SIGTERM");
+  } catch {
+    // Re-check below; ESRCH is success, while an alive tree remains fenced.
+  }
+  if (await waitForProcessTreeExit(child, 5_000)) {
+    children.delete(child);
+    return;
+  }
 
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-
-    try {
-      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
-      else child.kill("SIGTERM");
-    } catch {
-      clearTimeout(timer);
-      resolve();
-    }
-  });
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+    else child.kill("SIGKILL");
+  } catch {
+    // Re-check below before deciding whether teardown is complete.
+  }
+  if (await waitForProcessTreeExit(child, 2_000)) {
+    children.delete(child);
+    return;
+  }
+  throw new Error(`failed to stop E2E process tree ${child.pid ?? "unknown"}`);
 }
 
 async function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-
-  try {
-    await Promise.all([...children].map(stopService));
-    if (composeStarted) {
-      composeStarted = false;
-      await run("docker", ["compose", "down"]);
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    let teardownComplete = false;
+    try {
+      if (lockAcquisitionPromise) await lockAcquisitionPromise.catch(() => {});
+      const stopResults = await Promise.allSettled([...children].map(stopService));
+      const teardownErrors = stopResults
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason);
+      if (composeStarted) {
+        try {
+          await run("docker", ["compose", "down"], {
+            allowDuringShutdown: true,
+            timeoutMs: 30_000,
+          });
+          composeStarted = false;
+        } catch (error) {
+          teardownErrors.push(error);
+        }
+      }
+      if (teardownErrors.length > 0) {
+        throw new AggregateError(teardownErrors, "E2E teardown did not fully drain");
+      }
+      teardownComplete = true;
+    } finally {
+      if (teardownComplete) {
+        const release = releaseHarnessLock;
+        releaseHarnessLock = null;
+        if (release) await release();
+      }
     }
-  } finally {
-    const release = releaseHarnessLock;
-    releaseHarnessLock = null;
-    if (release) await release();
-  }
+  })();
+  return shutdownPromise;
 }
 
 async function dumpComposeLogs() {
   try {
     console.error("[e2e] command failed; dumping Compose logs before shutdown");
-    await run("docker", ["compose", "logs", "--no-color"]);
+    await run("docker", ["compose", "logs", "--no-color"], { timeoutMs: 30_000 });
   } catch (error) {
     console.error("[e2e] failed to dump Compose logs", error);
   }
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, async () => {
-    await shutdown();
-    process.exit(130);
+  process.on(signal, () => {
+    void shutdown()
+      .catch((error) => console.error("[e2e] shutdown failed", error))
+      .finally(() => process.exit(130));
   });
 }
 
 try {
-  releaseHarnessLock = await acquireProcessLock(harnessLockPath);
+  lockAcquisitionPromise = acquireJanuslyComposeLock().then(async (release) => {
+    if (shutdownPromise) {
+      await release();
+      throw new Error("E2E shutdown began while acquiring the Compose lifecycle lock");
+    }
+    releaseHarnessLock = release;
+    return release;
+  });
+  await lockAcquisitionPromise;
   const apiPort = await resolveApiPort(DEFAULT_API_PORT);
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const allocatedServicePorts = new Set([apiPort, Number(new URL(webBaseUrl).port)]);
@@ -307,7 +403,19 @@ try {
   const workerMetricsUrl = `http://127.0.0.1:${workerMetricsPort}/metrics`;
 
   composeStarted = true;
-  await run("docker", ["compose", "up", "-d", "--renew-anon-volumes", "redis", "postgres"]);
+  await run(
+    "docker",
+    [
+      "compose",
+      "up",
+      ...composeUpPullArgs(),
+      "-d",
+      "--renew-anon-volumes",
+      "redis",
+      "postgres",
+    ],
+    { timeoutMs: 5 * 60_000 },
+  );
 
   await waitForPostgres();
   await run("pnpm", ["migrate"]);
@@ -332,7 +440,10 @@ try {
   const api = startService("api", "pnpm", [
     "--filter", "@janusly/api", "exec", "tsx", "--eval", e2eApiBootstrap,
   ], {
-    env: { PORT: String(apiPort), OTEL_METRICS_PORT: String(apiMetricsPort) },
+    env: {
+      PORT: String(apiPort),
+      OTEL_METRICS_PORT: String(apiMetricsPort),
+    },
   });
   // `@janusly/db` intentionally lets the root `.env` override inherited
   // process variables. Load it first, then enable private targets only in this
@@ -355,7 +466,9 @@ try {
     "--eval",
     e2eWorkerBootstrap,
   ], {
-    env: { OTEL_METRICS_PORT: String(workerMetricsPort) },
+    env: {
+      OTEL_METRICS_PORT: String(workerMetricsPort),
+    },
   });
 
   await waitForHttp(`${apiUrl}/tools`, {
@@ -385,7 +498,7 @@ try {
     },
   });
 } catch (error) {
-  await dumpComposeLogs();
+  if (composeStarted && !shutdownPromise) await dumpComposeLogs();
   throw error;
 } finally {
   await shutdown();
