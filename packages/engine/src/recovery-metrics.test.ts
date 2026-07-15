@@ -287,8 +287,26 @@ describe("composeRecoveryMetrics — cost rollup", () => {
     const result = composeRecoveryMetrics(
       baseSignals({
         costByProvider: [
-          { provider: "openai", model: "gpt-4o", usd: 5.5, tokens: 100_000, calls: 50 },
-          { provider: "anthropic", model: "claude-haiku-4-5", usd: 12.3, tokens: 200_000, calls: 80 },
+          {
+            provider: "openai",
+            model: "gpt-4o",
+            usd: 5.5,
+            tokens: 100_000,
+            inputTokens: 80_000,
+            cachedInputTokens: 20_000,
+            cacheCreationInputTokens: 5_000,
+            calls: 50,
+          },
+          {
+            provider: "anthropic",
+            model: "claude-haiku-4-5",
+            usd: 12.3,
+            tokens: 200_000,
+            inputTokens: 160_000,
+            cachedInputTokens: 80_000,
+            cacheCreationInputTokens: 12_000,
+            calls: 80,
+          },
           { provider: "openai", model: "gpt-4o-mini", usd: 1.2, tokens: 30_000, calls: 20 },
         ],
       }),
@@ -298,7 +316,43 @@ describe("composeRecoveryMetrics — cost rollup", () => {
     expect(result.costThisWindow.display).toBe("$19.00");
     expect(result.costThisWindow.providers[0]).toMatchObject({ provider: "Anthropic", usd: 12.3 });
     expect(result.costThisWindow.providers[1]).toMatchObject({ provider: "OpenAI", usd: 5.5 });
+    expect(result.costThisWindow.cache).toEqual({
+      inputTokens: 240_000,
+      readTokens: 100_000,
+      creationTokens: 17_000,
+      readSharePercent: 100_000 / 240_000 * 100,
+    });
+    expect(result.costThisWindow.providers[2]).toMatchObject({
+      inputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+    });
     expect(result.costThisWindow.severity).toBe("neutral");
+  });
+
+  it("preserves an explicit aggregated breakdown bucket", () => {
+    const result = composeRecoveryMetrics(
+      baseSignals({
+        costByProvider: [{
+          provider: "__other__",
+          model: "__other__",
+          usd: 2,
+          tokens: 10,
+          inputTokens: 8,
+          cachedInputTokens: 4,
+          cacheCreationInputTokens: 1,
+          calls: 3,
+          aggregated: true,
+        }],
+      }),
+      30,
+    );
+
+    expect(result.costThisWindow.providers[0]).toMatchObject({
+      aggregated: true,
+      usd: 2,
+      calls: 3,
+    });
   });
 });
 

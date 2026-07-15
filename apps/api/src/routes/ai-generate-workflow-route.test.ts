@@ -74,6 +74,7 @@ vi.mock("../http", async (importOriginal) => {
 import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
+import { gateBudget } from "../budget-gate";
 import { readJson } from "../http";
 import type { Route } from "../routes";
 import { aiRoutes } from "./ai-routes";
@@ -86,6 +87,7 @@ const exposedMcpMock = vi.mocked(listExposedMcpToolsForAi);
 const exemplarsMock = vi.mocked(composeGenerationExemplars);
 const recordExemplarMock = vi.mocked(recordGenerationExemplar);
 const auditMock = vi.mocked(auditAction);
+const gateBudgetMock = vi.mocked(gateBudget);
 const readJsonMock = vi.mocked(readJson);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
@@ -146,6 +148,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   auditMock.mockResolvedValue(undefined as never);
   readJsonMock.mockResolvedValue({ prompt: "make a flow" } as never);
+  gateBudgetMock.mockResolvedValue({
+    envelope: { allowed: true, warningThresholdCrossed: false },
+    blocked: false,
+  } as never);
   // Default: memory off → no exemplars (each test that wants few-shot opts in).
   exemplarsMock.mockResolvedValue({ block: "", ids: [], count: 0 });
   recordExemplarMock.mockResolvedValue(undefined);
@@ -228,6 +234,38 @@ describe("POST /ai/generate-workflow — generationMode dispatch", () => {
     expect(meta.mode).toBe("fallback");
     expect(meta.candidateCount).toBe(3);
     expect(meta.validCandidates).toBe(0);
+  });
+
+  it("free_json: reports and audits a budget-driven Best-of-N backoff", async () => {
+    gateBudgetMock.mockResolvedValueOnce({
+      envelope: { allowed: true, warningThresholdCrossed: true },
+      blocked: false,
+    } as never);
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm, 4);
+
+    const res = await callGenerate();
+
+    expect(llm.generateText).toHaveBeenCalledTimes(1);
+    expect(res.payload).toMatchObject({
+      mode: "ai",
+      candidateCount: 1,
+      bonBackoff: { from: 4, to: 1 },
+    });
+    expect(auditMock).toHaveBeenNthCalledWith(
+      1,
+      auth,
+      "ai.generation.candidates_backoff",
+      {
+        targetType: "ai",
+        metadata: { from: 4, to: 1, reason: "budget_warning_threshold" },
+      },
+    );
+    const generatedAudit = auditMock.mock.calls.find((call) => call[1] === "ai.workflow.generated");
+    expect(generatedAudit?.[2]?.metadata).toMatchObject({
+      candidateCount: 1,
+      bonBackoff: { from: 4, to: 1 },
+    });
   });
 
   it("free_json: retries then falls back when parsing never succeeds", async () => {

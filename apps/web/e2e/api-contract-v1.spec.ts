@@ -73,7 +73,7 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
   expect(openapi.ok()).toBe(true)
   const openapiBody = await openapi.json() as { openapi: string; paths: Record<string, unknown> }
   expect(openapiBody.openapi).toBe('3.1.0')
-  expect(Object.keys(openapiBody.paths)).toHaveLength(11)
+  expect(Object.keys(openapiBody.paths)).toHaveLength(12)
 
   const stablePaths = [
     '/memory/consent-status',
@@ -86,6 +86,7 @@ test('v1 contracts stay legacy-compatible and power the real web reads', async (
     `/workflows/schedule-preview?cron=${encodeURIComponent('0 9 * * *')}`,
     `/runs?workflowId=${encodeURIComponent(workflowId)}&limit=20`,
     `/run?runId=${encodeURIComponent(runId)}`,
+    `/run/usage?runId=${encodeURIComponent(runId)}`,
     `/status?runId=${encodeURIComponent(runId)}`,
   ]
 

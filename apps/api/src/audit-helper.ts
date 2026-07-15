@@ -47,6 +47,7 @@ import type { AuthContext } from "./auth";
  */
 export type AuditAction =
   // ai
+  | "ai.generation.candidates_backoff"
   | "ai.workflow.generated"
   | "ai.workflow.explained"
   | "ai.workflow.reviewed"

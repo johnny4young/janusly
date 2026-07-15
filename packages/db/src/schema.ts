@@ -406,10 +406,10 @@ export const usageEvents = pgTable(
   },
   (table) => [
     index("usage_events_org_metric_idx").on(table.orgId, table.metric),
-    // Composite for the billing + value-dashboard hot paths that
-    // filter (orgId, metric='llm.completion', createdAt >= since)
-    // LIMIT N. Without the createdAt column in the index, the plan
-    // degrades to scan-then-sort once the table crosses ~100k rows.
+    // Composite for the billing + value-dashboard hot paths that filter
+    // (orgId, metric='llm.completion', createdAt >= since). Without the
+    // createdAt column, the rolling-window scan degrades once the table
+    // crosses ~100k rows.
     // The generated migration must use CREATE INDEX CONCURRENTLY (hand-
     // patched — drizzle's index() builder emits the blocking variant).
     index("usage_events_org_metric_created_idx").on(
@@ -417,6 +417,11 @@ export const usageEvents = pgTable(
       table.metric,
       table.createdAt.desc(),
     ),
+    // Bounded per-run diagnostics scan. Partial because route-level AI calls
+    // without a run id remain valid usage rows but can never satisfy this read.
+    index("usage_events_org_run_created_idx")
+      .on(table.orgId, table.runId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.runId} IS NOT NULL`),
   ],
 );
 

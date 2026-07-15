@@ -95,6 +95,7 @@ vi.mock("../http", async (importOriginal) => {
 import { suggestWorkflowPatch } from "@janusly/ai";
 import { findLatestOutcomeBySignature, queryRecoveryFeedbackHealth } from "@janusly/data";
 import { orgLlmRuntime } from "../ai-runtime";
+import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
 import { auditAction } from "../audit-helper";
 import { getDeadLetter } from "../dlq";
 import { readJson, } from "../http";
@@ -108,6 +109,7 @@ const getDlqMock = vi.mocked(getDeadLetter);
 const patchMock = vi.mocked(suggestWorkflowPatch);
 const feedbackHealthMock = vi.mocked(queryRecoveryFeedbackHealth);
 const priorOutcomeMock = vi.mocked(findLatestOutcomeBySignature);
+const recoveryMemoryMock = vi.mocked(composeRecoveryMemoryHint);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -198,6 +200,11 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     });
     expect(priorOutcomeMock).toHaveBeenCalledWith("org-1", "HTTP 500 on http node", "dlq-1");
     expect(feedbackHealthMock).toHaveBeenCalledWith("org-1", "wf-patch");
+    expect(recoveryMemoryMock).toHaveBeenCalledWith(expect.objectContaining({
+      orgId: "org-1",
+      runId: "r1",
+      workflowId: "wf-patch",
+    }));
 
     expect(auditMock).toHaveBeenCalledTimes(1);
     expect(auditMock.mock.calls[0]?.[1]).toBe("ai.workflow.patch_suggested");

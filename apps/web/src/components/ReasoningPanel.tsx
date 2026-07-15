@@ -49,6 +49,93 @@ type CausalState =
 type CausalResponsePromise = Promise<unknown>
 type ReplayDecision = (eventId: string, nodeId: string, signal: AbortSignal) => CausalResponsePromise
 
+export type RunUsageSummary = {
+  loadedRows: number
+  truncated: boolean
+  rowCap: number
+  llm: {
+    calls: number
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cachedInputTokens: number
+    cacheCreationInputTokens: number
+    knownCostUsd: number
+    unknownCostCalls: number
+  }
+  memory: {
+    recalls: number
+    commits: number
+    failures: number
+    kinds: Array<{ kind: string; recalls: number; commits: number; failures: number }>
+  }
+}
+
+type RunUsageState =
+  | { status: 'idle' }
+  | { status: 'loading'; runId: string }
+  | { status: 'ready'; runId: string; usage: RunUsageSummary }
+  | { status: 'error'; runId: string; error: unknown; invalidResponse: boolean }
+
+type LoadRunUsage = (runId: string, signal: AbortSignal) => Promise<unknown>
+
+const RUN_USAGE_REFRESH_EVENTS = new Set([
+  'node.completed',
+  'node.failed',
+  'node.skipped',
+  'node.succeeded',
+  'run.cancelled',
+  'run.failed',
+  'run.succeeded',
+])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isMemoryUsageKind(value: unknown): value is RunUsageSummary['memory']['kinds'][number] {
+  return isRecord(value)
+    && typeof value.kind === 'string'
+    && value.kind.length > 0
+    && isNonNegativeInteger(value.recalls)
+    && isNonNegativeInteger(value.commits)
+    && isNonNegativeInteger(value.failures)
+}
+
+function parseRunUsageSummary(value: unknown): RunUsageSummary | null {
+  if (!isRecord(value) || !isRecord(value.llm) || !isRecord(value.memory)) return null
+  const { llm, memory } = value
+  if (
+    !isNonNegativeInteger(value.loadedRows)
+    || typeof value.truncated !== 'boolean'
+    || !isNonNegativeInteger(value.rowCap)
+    || value.rowCap === 0
+    || value.loadedRows > value.rowCap
+    || !isNonNegativeInteger(llm.calls)
+    || !isNonNegativeInteger(llm.inputTokens)
+    || !isNonNegativeInteger(llm.outputTokens)
+    || !isNonNegativeInteger(llm.totalTokens)
+    || !isNonNegativeInteger(llm.cachedInputTokens)
+    || !isNonNegativeInteger(llm.cacheCreationInputTokens)
+    || !isNonNegativeFiniteNumber(llm.knownCostUsd)
+    || !isNonNegativeInteger(llm.unknownCostCalls)
+    || !isNonNegativeInteger(memory.recalls)
+    || !isNonNegativeInteger(memory.commits)
+    || !isNonNegativeInteger(memory.failures)
+    || !Array.isArray(memory.kinds)
+    || !memory.kinds.every(isMemoryUsageKind)
+  ) return null
+  return value as RunUsageSummary
+}
+
 function eventKey(event: RunEvent): string {
   return event.id ?? `${event.type}:${event.nodeId ?? ''}:${event.createdAt ?? ''}`
 }
@@ -67,19 +154,23 @@ export function ReasoningPanel({
   onLoadOlderEvents,
   activeRunId,
   onReplayDecision,
+  onLoadRunUsage,
 }: {
   events: RunEvent[]
   eventsHasMore?: boolean
   onLoadOlderEvents?: () => void | Promise<void>
   activeRunId?: string | null
   onReplayDecision?: ReplayDecision
+  onLoadRunUsage?: LoadRunUsage
 }) {
   const { t, i18n } = useT()
   const [query, setQuery] = useState('')
   const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null)
   const [pendingFocusKey, setPendingFocusKey] = useState<string | null>(null)
   const [causalState, setCausalState] = useState<CausalState>({ status: 'idle' })
+  const [runUsageState, setRunUsageState] = useState<RunUsageState>({ status: 'idle' })
   const causalRequestRef = useRef<{ generation: number; controller: AbortController } | null>(null)
+  const usageRequestRef = useRef<{ generation: number; controller: AbortController } | null>(null)
   const causalTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const chronological = useMemo(() => sortRunEventsChronologically(events), [events])
@@ -91,6 +182,10 @@ export function ReasoningPanel({
     presentation: getRunEventPresentation(event),
   })).reverse(), [chronological])
   const firstFailure = useMemo(() => chronological.find(isFailureEvent) ?? null, [chronological])
+  const usageRefreshKey = useMemo(() => {
+    const checkpoint = [...chronological].reverse().find(event => RUN_USAGE_REFRESH_EVENTS.has(event.type))
+    return checkpoint ? eventKey(checkpoint) : activeRunId ?? ''
+  }, [activeRunId, chronological])
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language)
   const filteredItems = useMemo(() => {
     if (!normalizedQuery) return timelineItems
@@ -148,6 +243,37 @@ export function ReasoningPanel({
     return () => causalRequestRef.current?.controller.abort()
   }, [activeRunId])
 
+  useEffect(() => {
+    usageRequestRef.current?.controller.abort()
+    const previousGeneration = usageRequestRef.current?.generation ?? 0
+    usageRequestRef.current = null
+    if (!activeRunId || !onLoadRunUsage) {
+      setRunUsageState({ status: 'idle' })
+      return
+    }
+    const runId = activeRunId
+    const controller = new AbortController()
+    const generation = previousGeneration + 1
+    usageRequestRef.current = { generation, controller }
+    setRunUsageState({ status: 'loading', runId })
+    void onLoadRunUsage(runId, controller.signal).then(
+      payload => {
+        if (controller.signal.aborted || usageRequestRef.current?.generation !== generation) return
+        const usage = parseRunUsageSummary(payload)
+        if (!usage) {
+          setRunUsageState({ status: 'error', runId, error: null, invalidResponse: true })
+          return
+        }
+        setRunUsageState({ status: 'ready', runId, usage })
+      },
+      error => {
+        if (controller.signal.aborted || usageRequestRef.current?.generation !== generation) return
+        setRunUsageState({ status: 'error', runId, error, invalidResponse: false })
+      },
+    )
+    return () => controller.abort()
+  }, [activeRunId, onLoadRunUsage, usageRefreshKey])
+
   const inspectDecision = async (item: TimelineItem) => {
     const nodeId = item.event.nodeId
     const eventId = item.event.id
@@ -185,9 +311,13 @@ export function ReasoningPanel({
   const visibleCausalState = causalState.status !== 'idle' && causalState.runId === activeRunId
     ? causalState
     : null
+  const visibleRunUsageState = runUsageState.status !== 'idle' && runUsageState.runId === activeRunId
+    ? runUsageState
+    : null
 
   return (
     <div className="we-reasoning-panel" data-testid="run-event-timeline">
+      {visibleRunUsageState && <RunResourceUsageCard state={visibleRunUsageState} />}
       {!noEvents && (
         <RunDiagnosticsCard diagnostics={diagnostics} partial={Boolean(eventsHasMore)} />
       )}
@@ -329,6 +459,107 @@ export function ReasoningPanel({
       </div>
       {eventsHasMore && onLoadOlderEvents && <LoadOlderEventsButton onClick={onLoadOlderEvents} />}
     </div>
+  )
+}
+
+function RunResourceUsageCard({ state }: { state: Exclude<RunUsageState, { status: 'idle' }> }) {
+  const { t } = useT()
+  const locale = getResolvedLocale()
+  if (state.status === 'loading') {
+    return (
+      <section className="we-run-diagnostics we-run-resource-usage" role="status" aria-live="polite" data-state="loading" data-testid="run-resource-usage">
+        <div className="we-run-diagnostics__heading">
+          <div>
+            <strong>{t('rightPanel.reasoning.usage.title')}</strong>
+            <p><LoaderCircle className="we-spin" size={13} aria-hidden="true" /> {t('rightPanel.reasoning.usage.loading')}</p>
+          </div>
+        </div>
+      </section>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <section className="we-run-diagnostics we-run-resource-usage" role="alert" data-state="error" data-testid="run-resource-usage">
+        <div className="we-run-diagnostics__heading">
+          <div>
+            <strong>{t('rightPanel.reasoning.usage.errorTitle')}</strong>
+            <p>{state.invalidResponse
+              ? t('rightPanel.reasoning.usage.invalidResponse')
+              : tApiError(state.error)}</p>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  const { usage } = state
+  const noUsage = usage.loadedRows === 0
+  const currency = new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })
+  const values = [
+    { key: 'calls', label: t('rightPanel.reasoning.usage.calls'), value: usage.llm.calls.toLocaleString(locale) },
+    { key: 'input', label: t('rightPanel.reasoning.usage.inputTokens'), value: usage.llm.inputTokens.toLocaleString(locale) },
+    { key: 'output', label: t('rightPanel.reasoning.usage.outputTokens'), value: usage.llm.outputTokens.toLocaleString(locale) },
+    { key: 'total', label: t('rightPanel.reasoning.usage.totalTokens'), value: usage.llm.totalTokens.toLocaleString(locale) },
+    { key: 'cache-read', label: t('rightPanel.reasoning.usage.cacheRead'), value: usage.llm.cachedInputTokens.toLocaleString(locale) },
+    { key: 'cache-created', label: t('rightPanel.reasoning.usage.cacheCreated'), value: usage.llm.cacheCreationInputTokens.toLocaleString(locale) },
+    { key: 'cost', label: t('rightPanel.reasoning.usage.knownCost'), value: currency.format(usage.llm.knownCostUsd) },
+  ]
+  return (
+    <section className="we-run-diagnostics we-run-resource-usage" role="status" aria-live="polite" aria-label={t('rightPanel.reasoning.usage.aria') as string} data-state={noUsage ? 'empty' : 'ready'} data-testid="run-resource-usage">
+      <div className="we-run-diagnostics__heading">
+        <div>
+          <strong>{t('rightPanel.reasoning.usage.title')}</strong>
+          <p>{noUsage
+            ? t('rightPanel.reasoning.usage.empty')
+            : t('rightPanel.reasoning.usage.helper', { count: usage.loadedRows })}</p>
+        </div>
+        {usage.truncated && (
+          <span className="mode-pill mode-pill-neutral">
+            {t('rightPanel.reasoning.usage.truncated', { count: usage.rowCap.toLocaleString(locale) })}
+          </span>
+        )}
+      </div>
+      {!noUsage && (
+        <>
+          <dl className="we-run-diagnostics__grid">
+            {values.map(item => (
+              <div key={item.key}>
+                <dt>{item.label}</dt>
+                <dd>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+          {usage.llm.unknownCostCalls > 0 && (
+            <p className="we-run-resource-usage__note">
+              {t('rightPanel.reasoning.usage.unknownCost', { count: usage.llm.unknownCostCalls })}
+            </p>
+          )}
+          <div className="we-run-resource-usage__memory">
+            <strong>{t('rightPanel.reasoning.usage.memoryTitle')}</strong>
+            <span>{t('rightPanel.reasoning.usage.memorySummary', {
+              recalls: usage.memory.recalls,
+              commits: usage.memory.commits,
+              failures: usage.memory.failures,
+            })}</span>
+            {usage.memory.kinds.length > 0 && (
+              <ul aria-label={t('rightPanel.reasoning.usage.memoryKinds') as string}>
+                {usage.memory.kinds.map(kind => (
+                  <li key={kind.kind}>
+                    <code>{kind.kind}</code>
+                    <span>{t('rightPanel.reasoning.usage.memoryKindSummary', kind)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   )
 }
 

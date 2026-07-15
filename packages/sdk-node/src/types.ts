@@ -136,7 +136,20 @@ export type RecoveryCostProviderRow = {
   model: string;
   usd: number;
   tokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
   calls: number;
+  /** True when this row folds provider/model groups beyond the breakdown cap. */
+  aggregated?: boolean;
+};
+
+/** Aggregate prompt-cache efficiency for the selected recovery-metrics window. */
+export type RecoveryCacheEfficiency = {
+  inputTokens: number;
+  readTokens: number;
+  creationTokens: number;
+  readSharePercent: number | null;
 };
 
 /** SLA-attainment card inside the recovery metrics payload. */
@@ -176,7 +189,10 @@ export type RecoveryMetrics = {
   slaAttainment: RecoverySlaAttainmentMetric;
   timeToFirstAction: RecoveryMetric;
   recurrenceRate: RecoveryMetric;
-  costThisWindow: RecoveryMetric & { providers: RecoveryCostProviderRow[] };
+  costThisWindow: RecoveryMetric & {
+    providers: RecoveryCostProviderRow[];
+    cache: RecoveryCacheEfficiency;
+  };
   clustersResolved: RecoveryClustersResolvedMetric;
   valueEstimate: RecoveryValueEstimate;
   windowDays: number;

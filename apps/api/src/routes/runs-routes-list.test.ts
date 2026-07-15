@@ -38,6 +38,7 @@ vi.mock('@janusly/data', () => ({
   getOrgConfigSnapshot: vi.fn(),
   getRunComparison: vi.fn(),
   getWorkflowStatus: vi.fn(),
+  queryRunUsage: vi.fn(),
   WORKFLOW_STATUS_ACTIVE: 'active',
 }))
 
@@ -113,7 +114,10 @@ vi.mock('../readiness-helpers', () => ({
 }))
 vi.mock('../run-stream', () => ({ getRunStreamHub: vi.fn() }))
 
+import { queryRunUsage } from '@janusly/data'
 import { runsRoutes } from './runs-routes'
+
+const queryRunUsageMock = vi.mocked(queryRunUsage)
 
 const auth = {
   orgId: 'org-1',
@@ -140,9 +144,93 @@ beforeEach(() => {
   sendJsonMock.mockClear()
   replayDecisionMock.mockReset()
   replayDecisionMock.mockReturnValue({ chosen: {}, best: {}, ranking: [] })
+  queryRunUsageMock.mockReset()
 })
 
 describe('GET /runs history filters', () => {
+  it('returns a tenant-scoped bounded usage projection for one run', async () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/run/usage?runId=run-1'))
+    if (!route) throw new Error('GET /run/usage route not found')
+    directLimitMock.mockResolvedValueOnce([{ id: 'run-1' }])
+    queryRunUsageMock.mockResolvedValueOnce({ loadedRows: 0 } as never)
+
+    await route.handler({
+      req: { url: '/run/usage?runId=run-1' } as never,
+      res: {} as never,
+      auth,
+    })
+
+    expect(route.permission).toBe('runs.read')
+    expect(eqMock).toHaveBeenCalledWith('runs.id', 'run-1')
+    expect(eqMock).toHaveBeenCalledWith('runs.org_id', 'org-1')
+    expect(queryRunUsageMock).toHaveBeenCalledWith('org-1', 'run-1')
+    expect(sendJsonMock).toHaveBeenLastCalledWith({}, { loadedRows: 0 })
+  })
+
+  it('pins run usage response bounds at the v1 contract boundary', () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/run/usage?runId=run-1'))
+    if (!route?.contract) throw new Error('GET /run/usage contract not found')
+    const usage = {
+      loadedRows: 1,
+      truncated: false,
+      rowCap: 10_000,
+      llm: {
+        calls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        cachedInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        knownCostUsd: 0,
+        unknownCostCalls: 0,
+      },
+      memory: {
+        recalls: 0,
+        commits: 0,
+        failures: 0,
+        kinds: [{ kind: 'agent_episode', recalls: 0, commits: 0, failures: 0 }],
+      },
+    }
+
+    expect(route.contract.response.safeParse(usage).success).toBe(true)
+    expect(route.contract.response.safeParse({ ...usage, loadedRows: 10_001 }).success).toBe(false)
+    expect(route.contract.response.safeParse({
+      ...usage,
+      memory: { ...usage.memory, kinds: [{ ...usage.memory.kinds[0], kind: '' }] },
+    }).success).toBe(false)
+  })
+
+  it('rejects missing or foreign run usage reads without querying usage rows', async () => {
+    const route = runsRoutes.find(candidate => candidate.method === 'GET'
+      && typeof candidate.match === 'function'
+      && candidate.match('/run/usage?runId=foreign'))
+    if (!route) throw new Error('GET /run/usage route not found')
+
+    await route.handler({ req: { url: '/run/usage' } as never, res: {} as never, auth })
+    expect(sendJsonMock).toHaveBeenLastCalledWith(
+      {},
+      { error: 'runId is required', code: 'runs_run_id_required' },
+      400,
+    )
+
+    directLimitMock.mockResolvedValueOnce([])
+    await route.handler({
+      req: { url: '/run/usage?runId=foreign' } as never,
+      res: {} as never,
+      auth,
+    })
+    expect(queryRunUsageMock).not.toHaveBeenCalled()
+    expect(sendJsonMock).toHaveBeenLastCalledWith(
+      {},
+      { error: 'Forbidden', code: 'runs_forbidden' },
+      403,
+    )
+  })
+
   it('keeps causal replay behind the run-read permission', () => {
     const route = runsRoutes.find(candidate => candidate.method === 'GET'
       && typeof candidate.match === 'function'

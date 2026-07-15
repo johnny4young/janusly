@@ -39,7 +39,7 @@ describe('agent episodic memory', () => {
       ],
     } as never)
 
-    const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', goal: 'refund a customer' })
+    const result = await recallAgentEpisodes({ orgId: 'org-1', workflowId: 'wf-1', runId: 'run-9', goal: 'refund a customer' })
 
     expect(result.count).toBe(2)
     expect(result.fingerprints).toEqual([
@@ -54,7 +54,13 @@ describe('agent episodic memory', () => {
     expect(sameIdx).toBeGreaterThan(-1)
     expect(otherIdx).toBeGreaterThan(-1)
     expect(sameIdx).toBeLessThan(otherIdx)
-    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'agent_episode', query: 'refund a customer' })
+    expect(recallMemory).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      workflowId: 'wf-1',
+      runId: 'run-9',
+      kind: 'agent_episode',
+      query: 'refund a customer',
+    })
   })
 
   it('recall returns empty (no recall call) when memory is disabled', async () => {

@@ -77,6 +77,9 @@ export type FailingNodeForRecall = {
 export type ComposeRecoveryMemoryHintInput = {
   /** Multi-tenant scope. Sourced from the route's `auth.orgId`. */
   orgId: string;
+  /** Run that triggered the recovery request. Carries recall telemetry into
+   *  the per-run usage projection without changing memory search scope. */
+  runId?: string | null;
   /** Optional saved-workflow id from `dlq.workflowJson.id`. When supplied,
    *  same-workflow matches lead the rendered block; other-workflow matches
    *  fill remaining budget. When absent (ad-hoc runs), all entries appear
@@ -267,6 +270,8 @@ export async function composeRecoveryMemoryHint(
   const [recallSettled] = await Promise.allSettled([
     recallMemory({
       orgId: input.orgId,
+      runId: input.runId ?? undefined,
+      workflowId: input.workflowId ?? undefined,
       kinds: ["recovery_rationale", "patch_rationale"],
       query,
     }),

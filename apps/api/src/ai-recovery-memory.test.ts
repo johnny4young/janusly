@@ -246,13 +246,21 @@ describe("composeRecoveryMemoryHint — happy paths", () => {
     recallMemoryMock.mockResolvedValue({ entries: [] });
     await composeRecoveryMemoryHint({
       orgId: "org-a",
+      runId: "run-a",
+      workflowId: "wf-a",
       failingNode: { id: "n1", type: "http" },
       errorEnvelope: { message: "boom" },
     });
     expect(recallMemoryMock).toHaveBeenCalledTimes(1);
-    const kinds = (recallMemoryMock.mock.calls[0]![0] as { kinds: string[] }).kinds;
+    const recallInput = recallMemoryMock.mock.calls[0]![0] as {
+      kinds: string[];
+      runId?: string;
+      workflowId?: string;
+    };
+    const kinds = recallInput.kinds;
     expect(kinds).toContain("recovery_rationale");
     expect(kinds).toContain("patch_rationale");
+    expect(recallInput).toMatchObject({ runId: "run-a", workflowId: "wf-a" });
   });
 
   it("passes auth.orgId verbatim to the recall call (tenant isolation)", async () => {

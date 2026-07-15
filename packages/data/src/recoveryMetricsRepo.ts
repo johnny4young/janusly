@@ -13,9 +13,10 @@
  *   itself doesn't carry `orgId`.
  * - Window cap: matches the 30-day convention used elsewhere
  *   (`workflowHealthRepo`, `getUsageSummary`). Don't unbound the scan.
- * - Per-query caps: 1k MTTR samples, 10k usage rows, 5k events. Cluster
- *   computation degrades gracefully when an org's row counts grow; for
- *   true scale move to pre-aggregated tables.
+ * - Per-query bounds: 1k MTTR samples and 5k event rows; LLM cost/cache reads
+ *   aggregate the complete time-bounded predicate in Postgres, retain the top
+ *   100 provider/model groups, and fold the remainder into one explicit row.
+ *   For true scale move to pre-aggregated tables.
  *
  * Note on the cross-module type shape: `RecoveryMetricsSignals` lives in
  * `@janusly/engine/src/recovery-metrics.ts` (the engine is a higher
@@ -35,7 +36,6 @@ import {
   runEvents,
   runNodes,
   runs,
-  usageEvents,
 } from "@janusly/db";
 import { and, eq, gte, or, sql } from "drizzle-orm";
 import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
@@ -45,9 +45,10 @@ import { recordRecoveryPlaybookAppliedTx } from "./recoveryPlaybooksRepo";
 const DEFAULT_WINDOW_DAYS = 30;
 const RUN_STATUS_ROW_CAP = 10_000;
 const MTTR_SAMPLE_CAP = 1_000;
-const USAGE_ROW_CAP = 10_000;
 const EVENT_ROW_CAP = 5_000;
 const RESOLVED_CLUSTERS_ROW_CAP = 10_000;
+export const COST_BREAKDOWN_GROUP_CAP = 100;
+export const COST_BREAKDOWN_OTHER_KEY = "__other__";
 
 export type RunStatusCountsRepo = {
   succeeded: number;
@@ -63,7 +64,11 @@ export type CostProviderRowRepo = {
   model: string;
   usd: number;
   tokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
   calls: number;
+  aggregated: boolean;
 };
 
 export type ReplayOutcomeCountsRepo = {
@@ -786,39 +791,112 @@ async function queryApprovalsPending(orgId: string): Promise<number> {
 }
 
 async function queryCostByProvider(orgId: string, since: Date): Promise<CostProviderRowRepo[]> {
-  // Pull raw rows for `metric: "llm.completion"` (the chokepoint
-  // metric); group by (provider, model) in JS rather than via Postgres
-  // JSON ops — keeps the query plan identical to other repos and
-  // microsecond-cheap at the 10k cap.
-  const rows = await db
-    .select({
-      quantity: usageEvents.quantity,
-      metadata: usageEvents.metadata,
-    })
-    .from(usageEvents)
-    .where(and(
-      eq(usageEvents.orgId, orgId),
-      eq(usageEvents.metric, "llm.completion"),
-      gte(usageEvents.createdAt, since),
-    ))
-    .limit(USAGE_ROW_CAP);
+  // Aggregate the complete rolling-window predicate in Postgres. A raw-row
+  // cap would make totals arbitrary, while returning every distinct free-form
+  // model override would leave response cardinality unbounded. The CTE ranks
+  // complete groups by operator value and folds every group after the first
+  // 100 into one explicit `aggregated` bucket; totals remain exact.
+  const sinceIso = since.toISOString();
+  const rows = await db.execute<{
+    provider: string;
+    model: string;
+    usd: number;
+    tokens: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    calls: number;
+    aggregated: boolean;
+  }>(sql`
+    WITH grouped AS (
+      SELECT
+        CASE
+          WHEN jsonb_typeof("metadata"->'provider') = 'string'
+            THEN left(coalesce(nullif(trim("metadata"->>'provider'), ''), 'unknown'), 80)
+          ELSE 'unknown'
+        END AS "provider",
+        CASE
+          WHEN jsonb_typeof("metadata"->'model') = 'string'
+            THEN left(coalesce(nullif(trim("metadata"->>'model'), ''), 'unknown'), 160)
+          ELSE 'unknown'
+        END AS "model",
+        sum(CASE
+          WHEN jsonb_typeof("metadata"->'costUsd') = 'number'
+            THEN greatest(("metadata"->>'costUsd')::double precision, 0)
+          ELSE 0
+        END)::double precision AS "usd",
+        sum(greatest("quantity", 0))::double precision AS "tokens",
+        sum(CASE
+          WHEN jsonb_typeof("metadata"->'inputTokens') = 'number'
+            THEN greatest(("metadata"->>'inputTokens')::double precision, 0)
+          ELSE 0
+        END)::double precision AS "inputTokens",
+        sum(CASE
+          WHEN jsonb_typeof("metadata"->'cachedInputTokens') = 'number'
+            THEN greatest(("metadata"->>'cachedInputTokens')::double precision, 0)
+          ELSE 0
+        END)::double precision AS "cachedInputTokens",
+        sum(CASE
+          WHEN jsonb_typeof("metadata"->'cacheCreationInputTokens') = 'number'
+            THEN greatest(("metadata"->>'cacheCreationInputTokens')::double precision, 0)
+          ELSE 0
+        END)::double precision AS "cacheCreationInputTokens",
+        count(*)::double precision AS "calls"
+      FROM "usage_events"
+      WHERE "org_id" = ${orgId}
+        AND "metric" = 'llm.completion'
+        AND "created_at" >= ${sinceIso}::timestamptz
+      GROUP BY 1, 2
+    ), ranked AS (
+      SELECT
+        grouped.*,
+        row_number() OVER (
+          ORDER BY "usd" DESC, "tokens" DESC, "provider", "model"
+        ) AS "groupRank"
+      FROM grouped
+    ), bucketed AS (
+      SELECT
+        CASE WHEN "groupRank" <= ${COST_BREAKDOWN_GROUP_CAP}
+          THEN "provider" ELSE ${COST_BREAKDOWN_OTHER_KEY} END AS "provider",
+        CASE WHEN "groupRank" <= ${COST_BREAKDOWN_GROUP_CAP}
+          THEN "model" ELSE ${COST_BREAKDOWN_OTHER_KEY} END AS "model",
+        "groupRank" > ${COST_BREAKDOWN_GROUP_CAP} AS "aggregated",
+        "usd",
+        "tokens",
+        "inputTokens",
+        "cachedInputTokens",
+        "cacheCreationInputTokens",
+        "calls"
+      FROM ranked
+    )
+    SELECT
+      "provider",
+      "model",
+      sum("usd")::double precision AS "usd",
+      sum("tokens")::double precision AS "tokens",
+      sum("inputTokens")::double precision AS "inputTokens",
+      sum("cachedInputTokens")::double precision AS "cachedInputTokens",
+      sum("cacheCreationInputTokens")::double precision AS "cacheCreationInputTokens",
+      sum("calls")::double precision AS "calls",
+      "aggregated"
+    FROM bucketed
+    GROUP BY "aggregated", "provider", "model"
+    ORDER BY "aggregated", "usd" DESC, "tokens" DESC, "provider", "model"
+  `);
 
-  const byKey = new Map<string, CostProviderRowRepo>();
-  for (const row of rows) {
-    const metadata = (row.metadata ?? null) as Record<string, unknown> | null;
-    const provider = typeof metadata?.provider === "string" ? metadata.provider : "unknown";
-    const model = typeof metadata?.model === "string" ? metadata.model : "unknown";
-    const cost = typeof metadata?.costUsd === "number" && Number.isFinite(metadata.costUsd)
-      ? metadata.costUsd
-      : 0;
-    const key = `${provider}::${model}`;
-    const acc = byKey.get(key) ?? { provider, model, usd: 0, tokens: 0, calls: 0 };
-    acc.usd += cost;
-    acc.tokens += row.quantity ?? 0;
-    acc.calls += 1;
-    byKey.set(key, acc);
-  }
-  return Array.from(byKey.values());
+  const readNonNegativeNumber = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  return rows.map((row) => ({
+    provider: row.provider,
+    model: row.model,
+    usd: readNonNegativeNumber(row.usd),
+    tokens: readNonNegativeNumber(row.tokens),
+    inputTokens: readNonNegativeNumber(row.inputTokens),
+    cachedInputTokens: readNonNegativeNumber(row.cachedInputTokens),
+    cacheCreationInputTokens: readNonNegativeNumber(row.cacheCreationInputTokens),
+    calls: readNonNegativeNumber(row.calls),
+    aggregated: row.aggregated === true,
+  }));
 }
 
 async function queryP95Latency(orgId: string, since: Date): Promise<number | null> {

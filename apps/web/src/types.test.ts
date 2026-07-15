@@ -4,8 +4,21 @@ import {
   CANVAS_TABS,
   getCanvasVisibility,
   isCanvasTab,
+  parseAiCandidateBackoff,
   type ActiveTab,
 } from './types'
+
+describe('parseAiCandidateBackoff', () => {
+  it('accepts only a real positive candidate reduction', () => {
+    expect(parseAiCandidateBackoff({ from: 4, to: 1 })).toEqual({ from: 4, to: 1 })
+    expect(parseAiCandidateBackoff({ from: 1, to: 1 })).toBeUndefined()
+    expect(parseAiCandidateBackoff({ from: 1, to: 2 })).toBeUndefined()
+    expect(parseAiCandidateBackoff({ from: 4.5, to: 1 })).toBeUndefined()
+    expect(parseAiCandidateBackoff({ from: Number.POSITIVE_INFINITY, to: 1 })).toBeUndefined()
+    expect(parseAiCandidateBackoff({ from: '4', to: 1 })).toBeUndefined()
+    expect(parseAiCandidateBackoff(null)).toBeUndefined()
+  })
+})
 
 const ALL_TABS: ActiveTab[] = [
   'home',

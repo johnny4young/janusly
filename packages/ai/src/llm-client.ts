@@ -207,6 +207,11 @@ export type LlmGenerateTextResult = {
   costUsd?: number | null;
 };
 
+type CacheTokenUsage = {
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
+};
+
 /**
  * Input accepted by `LlmClient.generateObject`. Mirrors
  * `LlmGenerateTextInput` but locks the model output to a typed object that
@@ -449,6 +454,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
               (aiResult.usage.inputTokens ?? 0) + (aiResult.usage.outputTokens ?? 0) || undefined,
           }
         : undefined;
+      const cacheUsage = readCacheTokenUsage(aiResult);
       const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
 
       void fireUsageRecorder({
@@ -458,6 +464,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
         totalTokens: usage?.totalTokens,
+        ...cacheUsage,
         latencyMs,
         costUsd,
         mode: "ai",
@@ -526,6 +533,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
               (aiResult.usage.inputTokens ?? 0) + (aiResult.usage.outputTokens ?? 0) || undefined,
           }
         : undefined;
+      const cacheUsage = readCacheTokenUsage(aiResult);
       const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
 
       // The AI SDK exposes the typed payload at `experimental_output` (and
@@ -544,6 +552,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           inputTokens: usage?.inputTokens,
           outputTokens: usage?.outputTokens,
           totalTokens: usage?.totalTokens,
+          ...cacheUsage,
           latencyMs,
           costUsd,
           mode: "fallback",
@@ -559,6 +568,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
         inputTokens: usage?.inputTokens,
         outputTokens: usage?.outputTokens,
         totalTokens: usage?.totalTokens,
+        ...cacheUsage,
         latencyMs,
         costUsd,
         mode: "ai",
@@ -589,6 +599,8 @@ async function fireUsageRecorder(input: {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
   latencyMs: number;
   costUsd?: number | null;
   mode: "ai" | "fallback";
@@ -609,6 +621,8 @@ async function fireUsageRecorder(input: {
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
     totalTokens: input.totalTokens,
+    cachedInputTokens: input.cachedInputTokens,
+    cacheCreationInputTokens: input.cacheCreationInputTokens,
     latencyMs: input.latencyMs,
     costUsd: input.costUsd,
     mode: input.mode,
@@ -619,6 +633,44 @@ async function fireUsageRecorder(input: {
   } catch {
     // Telemetry failure must NEVER break an LLM call. Drop silently.
   }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function tokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/**
+ * Read prompt-cache usage defensively from the AI SDK's provider-neutral
+ * token details, with Anthropic metadata as a compatibility fallback. Older
+ * SDK mocks and providers that omit either shape simply produce no fields.
+ */
+function readCacheTokenUsage(result: unknown): CacheTokenUsage {
+  const root = recordValue(result);
+  const usage = recordValue(root?.usage);
+  const details = recordValue(usage?.inputTokenDetails);
+  const providerMetadata = recordValue(root?.providerMetadata);
+  const anthropic = recordValue(providerMetadata?.anthropic);
+  const rawAnthropicUsage = recordValue(anthropic?.usage);
+
+  const cachedInputTokens = tokenCount(details?.cacheReadTokens)
+    ?? tokenCount(anthropic?.cacheReadInputTokens)
+    ?? tokenCount(rawAnthropicUsage?.cache_read_input_tokens);
+  const cacheCreationInputTokens = tokenCount(details?.cacheWriteTokens)
+    ?? tokenCount(anthropic?.cacheCreationInputTokens)
+    ?? tokenCount(rawAnthropicUsage?.cache_creation_input_tokens);
+
+  return {
+    ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+    ...(cacheCreationInputTokens === undefined ? {} : { cacheCreationInputTokens }),
+  };
 }
 
 let cachedClient: LlmClient | null | undefined;

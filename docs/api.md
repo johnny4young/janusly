@@ -80,7 +80,7 @@ that permission is the authorization gate.
 | MCP client | `GET /mcp/connections`, `POST /mcp/connections`, `POST /mcp/connections/:alias`, `DELETE /mcp/connections/:alias`, `POST /mcp/connections/:alias/rediscover`, `GET /mcp/connections/:alias/tools`, `POST /mcp/connections/:alias/tools/:toolName` | viewer/admin + `mcp.connections.*` | External MCP server registry, descriptor discovery, tool enable/write/rate/expose flags. |
 | Workflow CRUD/readiness | `GET /workflows`, `POST /workflows/save`, `GET /workflows/versions`, `GET /workflows/latest`, `DELETE /workflows/:id`, `POST /validate`, `POST /workflows/readiness` | viewer/editor | Structural validation plus production-readiness checks. |
 | Workflow operations | `POST /workflows/rollback`, `POST /workflows/:id/slo`, `GET /workflows/:id/schedule-history`, `GET /workflows/health`, `GET /workflows/health/delta`, `GET /workflows/:id/metadata`, `POST /workflows/:id/metadata`, `GET /billing/budget`, `POST /workflows/:id/budget` | viewer/editor/admin by route | Rollback, SLO, schedule observability, health scoring, metadata, and cost-budget overrides. |
-| Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
+| Runs | `POST /start`, `GET /runs`, `GET /run`, `GET /run/usage`, `GET /status`, `GET /runs/:id/stream`, `POST /resume`, `POST /run/cancel`, `POST /runs/replay-lab`, `POST /runs/replay-lab/fork`, `GET /runs/compare`, `GET /causal` | viewer/editor + run perms | Start, poll, inspect bounded resource usage, stream, resume, cancel, sandbox replay, fork, compare, and router explainability. |
 | Credentials | `GET /credentials`, `GET /credentials/health`, `POST /credentials`, `POST /credentials/:name/bulk-update`, `POST /credentials/:name/expiry` | viewer/admin + credential perms | Operator-facing credential rows; health and rotation never echo `secretRef`. Optional operator-declared `expiresAt` powers the expiry-warning alert. |
 | AI helpers | `GET /ai/health`, `POST /ai/generate-workflow`, `POST /ai/explain-workflow`, `POST /ai/review-workflow`, `POST /ai/patch-workflow`, `POST /ai/suggest-improvement`, `POST /ai/explain-run` | authenticated; editor where mutating | Provider-neutral LLM surfaces with deterministic fallback/audit contracts. |
 | DLQ/recovery loop | `GET /dlq`, `GET /dlq/clusters`, `GET /dlq/cluster-members`, `POST /dlq/resolve`, `POST /dlq/validate-fix`, `POST /dlq/cluster-apply`, `POST /dlq/replay`, `GET /recovery/metrics`, `POST /recovery/feedback` | viewer/editor + DLQ perms | Dead-letter triage, validation sandbox, clustered replay, metrics, and feedback. |
@@ -445,6 +445,43 @@ returned in chronological order even though the DB query reads newest-first.
 
 Run statuses: `created`, `running`, `waiting`, `succeeded`, `failed`, `cancelled`, `timed_out`.
 Node statuses: `pending`, `queued`, `running`, `waiting`, `succeeded`, `failed`, `skipped`, `cancelled`.
+
+### `GET /run/usage?runId=<uuid>`
+
+Returns the tenant-scoped resource-usage projection for one run. The endpoint is
+also contracted at `GET /v1/run/usage`; the web uses the versioned alias and
+unwraps its stable envelope. It reads the newest 10,000 matching
+`usage_events` rows, reports `truncated: true` when older records exist, and
+never derives tokens, cost, or memory activity from the paginated event
+timeline. A missing or foreign run returns the same non-enumerating `403` used
+by run detail.
+
+**Response 200**
+```json
+{
+  "loadedRows": 6,
+  "truncated": false,
+  "rowCap": 10000,
+  "llm": {
+    "calls": 3,
+    "inputTokens": 12000,
+    "outputTokens": 2500,
+    "totalTokens": 14500,
+    "cachedInputTokens": 8000,
+    "cacheCreationInputTokens": 1000,
+    "knownCostUsd": 0.0425,
+    "unknownCostCalls": 1
+  },
+  "memory": {
+    "recalls": 2,
+    "commits": 1,
+    "failures": 0,
+    "kinds": [
+      { "kind": "agent_episode", "recalls": 2, "commits": 1, "failures": 0 }
+    ]
+  }
+}
+```
 
 ### `GET /status?runId=<uuid>`
 
@@ -844,7 +881,7 @@ Recovery before/after rollup. Splits the same time window by version cutoff: run
 
 ### `GET /recovery/metrics?windowDays=30`
 
-Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. Severity bands are tunable constants in the engine module.
+Org-level Operations dashboard payload — recovery metric cards (success rate, MTTR, p95 latency, approvals pending, replay rate, SLA attainment, cost) each with `value` / `display` / `severity` / `rationale`. `slaAttainment` additionally carries `resolvedInWindow` and `metSla`; when no items resolved in-window its `value` is `null`/neutral, not `0%`. The cost/cache projection aggregates every `llm.completion` in the requested rolling window in PostgreSQL, returns the highest-value 100 provider/model groups, and folds any remaining groups into one row with `aggregated: true`; totals and cache share still include that remainder. Severity bands are tunable constants in the engine module.
 
 ### `POST /recovery/feedback`
 

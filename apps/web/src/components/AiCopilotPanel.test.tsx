@@ -7,14 +7,14 @@ import { AiCopilotPanel } from './AiCopilotPanel'
 
 const initialState = useWorkflowStore.getState()
 
-function renderPanel() {
+function renderPanel(onGenerateWorkflow = vi.fn(async () => ({
+  mode: 'ai' as const,
+  workflow: { name: 'ZZGENERATED', nodes: [], edges: [] } as unknown as WorkflowDefinition,
+}))) {
   const props = {
     health: null,
     workflowName: 'My flow',
-    onGenerateWorkflow: vi.fn(async () => ({
-      mode: 'ai' as const,
-      workflow: { name: 'ZZGENERATED', nodes: [], edges: [] } as unknown as WorkflowDefinition,
-    })),
+    onGenerateWorkflow,
     onExplainWorkflow: vi.fn(async () => ({ mode: 'ai' as const, explanation: 'EXPLAIN_BODY_XYZ' })),
     onReviewWorkflow: vi.fn(async () => ({
       mode: 'ai' as const,
@@ -28,6 +28,7 @@ function renderPanel() {
 
 describe('<AiCopilotPanel />', () => {
   beforeEach(() => {
+    changeAppLanguage('en')
     useWorkflowStore.setState({ ...initialState, currentWorkflowId: 'wf_1' }, true)
   })
 
@@ -49,6 +50,35 @@ describe('<AiCopilotPanel />', () => {
     // Generating swaps the active workflow id (hydrateWorkflow) — the draft must survive.
     act(() => { useWorkflowStore.setState({ currentWorkflowId: 'wf_generated' }) })
     expect(screen.getByText(/ZZGENERATED/)).toBeInTheDocument()
+  })
+
+  it('explains when the AI budget warning reduces Best-of-N candidates', async () => {
+    renderPanel(vi.fn(async () => ({
+      mode: 'ai' as const,
+      workflow: { name: 'Budget-aware flow', nodes: [], edges: [] } as unknown as WorkflowDefinition,
+      bonBackoff: { from: 4, to: 1 },
+    })))
+
+    fireEvent.click(screen.getByRole('button', { name: /Draft flow/i }))
+
+    const notice = await screen.findByTestId('ai-candidate-backoff')
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(notice).toHaveTextContent('Budget-aware generation.')
+    expect(notice).toHaveTextContent('evaluated 1 of 4 candidates')
+  })
+
+  it('uses the supported Anthropic provider in degraded-mode guidance', async () => {
+    renderPanel(vi.fn(async () => ({
+      mode: 'fallback' as const,
+      workflow: { name: 'Fallback flow', nodes: [], edges: [] } as unknown as WorkflowDefinition,
+      aiError: 'insufficient_quota',
+    })))
+
+    fireEvent.click(screen.getByRole('button', { name: /Draft flow/i }))
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent('Anthropic account has no available credits')
+    expect(status).not.toHaveTextContent('OpenAI')
   })
 
   it('renders results inside a persistent aria-live region so they are announced', async () => {

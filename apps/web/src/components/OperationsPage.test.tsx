@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
@@ -57,6 +57,7 @@ const healthyMetrics = {
     severity: 'neutral',
     rationale: '',
     providers: [],
+    cache: { inputTokens: 0, readTokens: 0, creationTokens: 0, readSharePercent: null },
   },
 }
 
@@ -101,6 +102,61 @@ describe('<OperationsPage />', () => {
     // Reliability cards are NOT mounted — proves lazy-mount.
     expect(screen.queryByTestId('stub-BudgetSettingsPanel')).toBeNull()
     expect(screen.queryByTestId('stub-AlertPoliciesPanel')).toBeNull()
+  })
+
+  it('shows prompt-cache efficiency and per-provider cache tokens', async () => {
+    stubApiByPath({
+      '/recovery/metrics': {
+        ...healthyMetrics,
+        costThisWindow: {
+          ...healthyMetrics.costThisWindow,
+          providers: [
+            {
+              provider: 'Anthropic',
+              model: 'claude-haiku-4-5',
+              usd: 1.25,
+              tokens: 20_000,
+              inputTokens: 16_000,
+              cachedInputTokens: 8_000,
+              cacheCreationInputTokens: 2_000,
+              calls: 4,
+            },
+            {
+              provider: '__other__',
+              model: '__other__',
+              usd: 0.25,
+              tokens: 100,
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              calls: 3,
+              aggregated: true,
+            },
+          ],
+          cache: {
+            inputTokens: 16_000,
+            readTokens: 8_000,
+            creationTokens: 2_000,
+            readSharePercent: 50,
+          },
+        },
+      },
+      '/health': { ok: true, rateLimiter: { healthy: true, degradedBuckets: [] } },
+    })
+
+    render(<OperationsPage />)
+
+    const summary = await screen.findByLabelText('Prompt cache efficiency')
+    expect(summary).toHaveTextContent('Input served from cache50%')
+    expect(summary).toHaveTextContent('Cache-read tokens8,000')
+    expect(summary).toHaveTextContent('Cache-created tokens2,000')
+    expect(screen.getByRole('columnheader', { name: 'Cache read' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Cache created' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Cost breakdown table' })).toHaveAttribute('tabindex', '0')
+    expect(screen.getAllByText('8,000')).toHaveLength(2)
+    const aggregateRow = screen.getByText('Other providers and models').closest('tr')
+    expect(aggregateRow).not.toBeNull()
+    expect(within(aggregateRow as HTMLElement).getByText('—')).toBeInTheDocument()
   })
 
   it('mounts only the active sub-tab cards when the operator clicks Reliability', async () => {

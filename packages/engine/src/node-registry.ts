@@ -219,6 +219,7 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
     ? await recallAgentEpisodes({
         orgId: ctx.orgId,
         workflowId: ctx.workflowId ?? undefined,
+        runId: ctx.runId,
         goal: agentConfig.goal ?? "",
       })
     : { block: "", count: 0, fingerprints: [] };

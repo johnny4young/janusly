@@ -58,6 +58,8 @@ export async function recordUsage(record: UsageRecord): Promise<void> {
       model: record.model,
       inputTokens: record.inputTokens ?? null,
       outputTokens: record.outputTokens ?? null,
+      cachedInputTokens: record.cachedInputTokens ?? null,
+      cacheCreationInputTokens: record.cacheCreationInputTokens ?? null,
       latencyMs: record.latencyMs,
       costUsd: record.costUsd ?? null,
       nodeId: record.nodeId ?? null,

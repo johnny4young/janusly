@@ -55,7 +55,17 @@ const SAMPLE_METRICS: RecoveryMetrics = {
     severity: "healthy",
     rationale: "ok",
     rationaleCode: "cost_healthy",
-    providers: [{ provider: "Anthropic", model: "claude-haiku", usd: 12.5, tokens: 42_000, calls: 12 }],
+    providers: [{
+      provider: "Anthropic",
+      model: "claude-haiku",
+      usd: 12.5,
+      tokens: 42_000,
+      inputTokens: 30_000,
+      cachedInputTokens: 12_000,
+      cacheCreationInputTokens: 3_000,
+      calls: 12,
+    }],
+    cache: { inputTokens: 30_000, readTokens: 12_000, creationTokens: 3_000, readSharePercent: 40 },
   },
   clustersResolved: {
     value: 3,

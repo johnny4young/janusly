@@ -43,14 +43,28 @@ describe('vector tools', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
     })
     // The requested topK is passed through as the recall limit.
-    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'workflow_vector', query: 'who churned', limit: 2 })
+    expect(recallMemory).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      runId: 'run-1',
+      workflowId: undefined,
+      kind: 'workflow_vector',
+      query: 'who churned',
+      limit: 2,
+    })
   })
 
   it('vector.search passes the default topK as the recall limit when topK is omitted', async () => {
     vi.mocked(recallMemory).mockResolvedValue({ entries: [] } as never)
     await vectorSearchTool.execute({ query: 'anything' }, {}, { orgId: 'org-1' })
     // DEFAULT_TOP_K (8) is the limit when the caller omits topK.
-    expect(recallMemory).toHaveBeenCalledWith({ orgId: 'org-1', kind: 'workflow_vector', query: 'anything', limit: 8 })
+    expect(recallMemory).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      runId: undefined,
+      workflowId: undefined,
+      kind: 'workflow_vector',
+      query: 'anything',
+      limit: 8,
+    })
   })
 
   it('vector.search returns empty entries when workflow_vector is not allowed (no throw)', async () => {

@@ -11,6 +11,22 @@ describe('<ReasoningPanel /> (browser smoke)', () => {
       <div style={{ width: 720, padding: 16 }}>
         <ReasoningPanel
           activeRunId="run-browser"
+          onLoadRunUsage={vi.fn().mockResolvedValue({
+            loadedRows: 4,
+            truncated: false,
+            rowCap: 10_000,
+            llm: {
+              calls: 2,
+              inputTokens: 9_000,
+              outputTokens: 1_000,
+              totalTokens: 10_000,
+              cachedInputTokens: 6_000,
+              cacheCreationInputTokens: 500,
+              knownCostUsd: 0.02,
+              unknownCostCalls: 0,
+            },
+            memory: { recalls: 1, commits: 1, failures: 0, kinds: [] },
+          })}
           onReplayDecision={replayDecision}
           events={[
             { id: 'e1', type: 'run.started', createdAt: '2026-07-14T12:00:00.000Z' },
@@ -24,13 +40,21 @@ describe('<ReasoningPanel /> (browser smoke)', () => {
     const diagnostics = screen.getByTestId('run-diagnostics')
     expect(diagnostics.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(diagnostics.querySelectorAll('dd')).toHaveLength(6)
+    const resourceUsage = await screen.findByTestId('run-resource-usage')
+    await waitFor(() => expect(resourceUsage).toHaveAttribute('data-state', 'ready'))
+    expect(resourceUsage).toHaveAttribute('role', 'status')
+    expect(resourceUsage).toHaveAttribute('aria-live', 'polite')
+    expect(resourceUsage.getBoundingClientRect().height).toBeGreaterThan(0)
+    expect(resourceUsage.querySelectorAll('dd')).toHaveLength(7)
+    expect(resourceUsage).toHaveTextContent('Cache read6,000')
 
     const trigger = screen.getByRole('button', { name: 'What if?' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
     expect(getComputedStyle(trigger).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
-    const loading = screen.getByRole('status')
+    const loading = screen.getByTestId('causal-analysis')
+    expect(loading).toHaveAttribute('role', 'status')
     expect(loading).toHaveAttribute('data-state', 'loading')
     expect(loading.getBoundingClientRect().height).toBeGreaterThan(0)
 

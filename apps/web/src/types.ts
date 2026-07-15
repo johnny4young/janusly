@@ -160,6 +160,25 @@ export type McpToolDescriptor = {
 }
 
 export type AiMode = 'ai' | 'fallback' | 'error'
+
+/** Budget-driven reduction of Best-of-N candidates for one AI generation. */
+export type AiCandidateBackoff = { from: number; to: number }
+
+/** Validate optional Best-of-N metadata before user-facing interpolation. */
+export function parseAiCandidateBackoff(value: unknown): AiCandidateBackoff | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const { from, to } = value as Record<string, unknown>
+  if (
+    typeof from !== 'number'
+    || typeof to !== 'number'
+    || !Number.isSafeInteger(from)
+    || !Number.isSafeInteger(to)
+    || from <= 0
+    || to <= 0
+    || to >= from
+  ) return undefined
+  return { from, to }
+}
 export type AiHealth = { enabled: boolean; provider?: string; model: string; timeoutMs: number; maxRetries: number }
 export type ActiveTab = 'home' | 'workflows' | 'members' | 'copilot' | 'experiments' | 'marketplace' | 'templates' | 'packs' | 'credentials' | 'inspector' | 'runs' | 'reasoning' | 'multiAgent' | 'operations'
 

@@ -55,7 +55,7 @@ import { useConfirm } from './components/ConfirmDialog'
 import { formatStatusLabel } from './constants'
 import { projectVisibleEdges, projectVisibleNodes } from './canvas-projections'
 import type { ActiveTab, AiMode, AiReviewIssue, ReadinessResult, RunEvent, RunNode, RunSummary, ValidationIssue, WorkflowDefinition, WorkflowGraphEdge, WorkflowGraphNode } from './types'
-import { getCanvasVisibility, isCanvasTab } from './types'
+import { getCanvasVisibility, isCanvasTab, parseAiCandidateBackoff } from './types'
 import { isTerminalRunStatus } from '@janusly/shared/src/status'
 import { getResolvedLocale, useT } from './i18n'
 import { requestRecoveryQueueFocus } from './components/recovery-queue-focus-bus'
@@ -82,6 +82,7 @@ type GenerateWorkflowResponse = WorkflowDefinition & {
   mode?: AiMode
   error?: string
   aiError?: string
+  bonBackoff?: unknown
 }
 
 type ExplainWorkflowResponse = {
@@ -830,7 +831,12 @@ export default function App() {
         ? t('toasts.aiFallbackStarter')
         : t('toasts.starterLoaded')
     addToast(message, tone)
-    return { mode, workflow: result as WorkflowDefinition, aiError: result.aiError }
+    return {
+      mode,
+      workflow: result as WorkflowDefinition,
+      aiError: result.aiError,
+      bonBackoff: parseAiCandidateBackoff(result.bonBackoff),
+    }
   }, [addToast, confirmReplaceCanvas, hydrateWorkflow, t])
 
   const explainWorkflow = useCallback(async () => {

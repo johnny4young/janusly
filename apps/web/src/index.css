@@ -2203,6 +2203,63 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
   margin: 3px 0 0;
 }
 
+.we-run-resource-usage[data-state="error"] {
+  background: var(--we-danger-soft);
+  border-color: color-mix(in srgb, var(--we-danger) 45%, var(--we-line));
+}
+
+.we-run-resource-usage[data-state="loading"] .we-run-diagnostics__heading p {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.we-run-resource-usage__note {
+  color: var(--we-warning-text);
+  font-size: 11px;
+  margin: 9px 0 0;
+}
+
+.we-run-resource-usage__memory {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--we-line);
+  color: var(--we-muted);
+  font-size: 11px;
+}
+
+.we-run-resource-usage__memory > strong {
+  color: var(--we-ink);
+  font-size: 12px;
+}
+
+.we-run-resource-usage__memory ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 3px 0 0;
+  padding: 0;
+}
+
+.we-run-resource-usage__memory li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--we-line);
+  border-radius: 7px;
+  background: var(--we-surface);
+}
+
+.we-run-resource-usage__memory code {
+  color: var(--we-ink);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 .we-causal-analysis {
   border-color: color-mix(in srgb, var(--we-primary) 34%, var(--we-line));
 }
@@ -7891,6 +7948,52 @@ button.we-ops-metric-card--button {
   border-collapse: collapse;
   font-size: 12px;
   margin-top: 8px;
+}
+
+.we-ops-cost-table-wrap {
+  overflow-x: auto;
+}
+
+.we-ops-cost-table-wrap:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--we-primary);
+  outline-offset: 2px;
+}
+
+.we-ops-cache-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+
+.we-ops-cache-summary > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--we-line);
+  border-radius: 8px;
+  background: var(--we-surface-muted);
+}
+
+.we-ops-cache-summary dt {
+  color: var(--we-text-2);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.we-ops-cache-summary dd {
+  margin: 4px 0 0;
+  color: var(--we-text-1);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .we-ops-cache-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 .we-ops-cost-table th,

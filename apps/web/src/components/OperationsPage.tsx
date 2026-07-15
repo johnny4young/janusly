@@ -81,7 +81,18 @@ type CostProviderRow = {
   model: string
   usd: number
   tokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  cacheCreationInputTokens: number
   calls: number
+  aggregated?: boolean
+}
+
+type CacheEfficiency = {
+  inputTokens: number
+  readTokens: number
+  creationTokens: number
+  readSharePercent: number | null
 }
 
 type RecoveryMetrics = {
@@ -91,7 +102,7 @@ type RecoveryMetrics = {
   approvalsPending: RecoveryMetric
   replayRate: RecoveryMetric
   slaAttainment?: RecoveryMetric
-  costThisWindow: RecoveryMetric & { providers: CostProviderRow[] }
+  costThisWindow: RecoveryMetric & { providers: CostProviderRow[]; cache: CacheEfficiency }
   windowDays: number
   terminalRuns: number
 }
@@ -115,7 +126,11 @@ function neutralizeSandboxZeros(metrics: RecoveryMetrics | null): RecoveryMetric
     mttr: neutral(metrics.mttr),
     p95Latency: neutral(metrics.p95Latency),
     replayRate: neutral(metrics.replayRate),
-    costThisWindow: { ...neutral(metrics.costThisWindow), providers: metrics.costThisWindow.providers },
+    costThisWindow: {
+      ...neutral(metrics.costThisWindow),
+      providers: metrics.costThisWindow.providers,
+      cache: metrics.costThisWindow.cache,
+    },
   }
 }
 
@@ -375,33 +390,61 @@ function OperationsRail({
 
 function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
   const { t } = useT()
+  const locale = getResolvedLocale()
   return (
     <>
       {metrics && metrics.costThisWindow.providers.length > 0 && (
         <section className="panel-card">
           <div className="section-kicker">{t('operations.cost.heading')}</div>
-          <table className="we-ops-cost-table">
-            <thead>
-              <tr>
-                <th>{t('operations.cost.col.provider')}</th>
-                <th>{t('operations.cost.col.model')}</th>
-                <th>{t('operations.cost.col.usd')}</th>
-                <th>{t('operations.cost.col.tokens')}</th>
-                <th>{t('operations.cost.col.calls')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.costThisWindow.providers.map((row) => (
-                <tr key={`${row.provider}::${row.model}`}>
-                  <td>{row.provider}</td>
-                  <td><code>{row.model}</code></td>
-                  <td>${row.usd.toFixed(4)}</td>
-                  <td>{row.tokens.toLocaleString(getResolvedLocale())}</td>
-                  <td>{row.calls.toLocaleString(getResolvedLocale())}</td>
+          <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel') as string}>
+            <div>
+              <dt>{t('operations.cost.cache.readShare')}</dt>
+              <dd>{metrics.costThisWindow.cache.readSharePercent == null
+                ? '—'
+                : `${metrics.costThisWindow.cache.readSharePercent.toLocaleString(locale, { maximumFractionDigits: 1 })}%`}</dd>
+            </div>
+            <div>
+              <dt>{t('operations.cost.cache.readTokens')}</dt>
+              <dd>{metrics.costThisWindow.cache.readTokens.toLocaleString(locale)}</dd>
+            </div>
+            <div>
+              <dt>{t('operations.cost.cache.creationTokens')}</dt>
+              <dd>{metrics.costThisWindow.cache.creationTokens.toLocaleString(locale)}</dd>
+            </div>
+          </dl>
+          <div
+            className="we-ops-cost-table-wrap"
+            role="region"
+            aria-label={t('operations.cost.tableAria') as string}
+            tabIndex={0}
+          >
+            <table className="we-ops-cost-table">
+              <thead>
+                <tr>
+                  <th>{t('operations.cost.col.provider')}</th>
+                  <th>{t('operations.cost.col.model')}</th>
+                  <th>{t('operations.cost.col.usd')}</th>
+                  <th>{t('operations.cost.col.tokens')}</th>
+                  <th>{t('operations.cost.col.cacheRead')}</th>
+                  <th>{t('operations.cost.col.cacheCreated')}</th>
+                  <th>{t('operations.cost.col.calls')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {metrics.costThisWindow.providers.map((row) => (
+                  <tr key={`${row.aggregated ? 'aggregate' : 'detail'}::${row.provider}::${row.model}`}>
+                    <td>{row.aggregated ? t('operations.cost.otherProviderModel') : row.provider}</td>
+                    <td>{row.aggregated ? '—' : <code>{row.model}</code>}</td>
+                    <td>${row.usd.toFixed(4)}</td>
+                    <td>{row.tokens.toLocaleString(locale)}</td>
+                    <td>{row.cachedInputTokens.toLocaleString(locale)}</td>
+                    <td>{row.cacheCreationInputTokens.toLocaleString(locale)}</td>
+                    <td>{row.calls.toLocaleString(locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
       <FailureClustersCard />

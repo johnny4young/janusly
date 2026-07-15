@@ -17,6 +17,7 @@ import { and, asc, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import {
   getOrgConfigSnapshot,
   getRunComparison,
+  queryRunUsage,
   getWorkflowStatus,
   WORKFLOW_STATUS_ACTIVE,
 } from "@janusly/data";
@@ -49,7 +50,7 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
-import { getRunContract, getRunStatusContract, listRunsContract } from "../api-contracts";
+import { getRunContract, getRunStatusContract, getRunUsageContract, listRunsContract } from "../api-contracts";
 
 // SSE heartbeat cadence. The server destroys idle sockets after 60s
 // (`server.setTimeout`); a comment well under that keeps an idle run's
@@ -363,6 +364,24 @@ export const runsRoutes: Route[] = [
         // dispatcher; close the SSE response and release every stream resource.
         teardown(true);
       }
+    } },
+
+  // Resource-backed run diagnostics. This exact read must precede the broad
+  // `/runs` list matcher below. The run lookup preserves the legacy
+  // non-enumerating forbidden response for missing and cross-tenant ids.
+  { method: "GET", match: (url) => url === "/run/usage" || url.startsWith("/run/usage?"), permission: "runs.read",
+    contract: getRunUsageContract,
+    handler: async ({ req, res, auth }) => {
+      const url = new URL(req.url ?? "", "http://localhost");
+      const runId = url.searchParams.get("runId");
+      if (!runId) return sendError(res, "runs_run_id_required", "runId is required", 400);
+      const run = await db
+        .select({ id: runs.id })
+        .from(runs)
+        .where(and(eq(runs.id, runId), eq(runs.orgId, auth.orgId)))
+        .limit(1);
+      if (!run[0]) return sendError(res, "runs_forbidden", "Forbidden", 403);
+      return sendJson(res, await queryRunUsage(auth.orgId, runId));
     } },
 
   // Runs — list + reads

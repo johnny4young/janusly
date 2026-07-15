@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, BrainCircuit, CheckCircle2, GitBranch, KeyRound, MessageSquareText, RefreshCw, Route, ShieldCheck, Sparkles, Workflow } from 'lucide-react'
 import { formatAiModeLabel } from '../constants'
-import type { AiHealth, AiMode, WorkflowDefinition } from '../types'
+import type { AiCandidateBackoff, AiHealth, AiMode, WorkflowDefinition } from '../types'
 import { estimatePromptCostUsd, formatEstimateLabel } from '@janusly/shared/src/llm-pricing'
 import { tAiReviewIssue, useT } from '../i18n'
 import { useWorkflowStore } from '../store'
@@ -56,7 +56,12 @@ type AiCopilotPanelProps = {
   health: AiHealth | null
   workflowName: string
   /** Resolves `null` when the author declined the unsaved-canvas guard. */
-  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string } | null>
+  onGenerateWorkflow: (prompt: string) => Promise<{
+    mode: AiMode
+    workflow: WorkflowDefinition
+    aiError?: string
+    bonBackoff?: AiCandidateBackoff
+  } | null>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string; aiError?: string }>
   onReviewWorkflow: () => Promise<{ mode: AiMode; review: ReviewFindings; model?: string; aiError?: string }>
   onOpenRuns: () => void
@@ -64,7 +69,7 @@ type AiCopilotPanelProps = {
 }
 
 type ResultState =
-  | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string }
+  | { kind: 'workflow'; mode: AiMode; title: string; body: string; aiError?: string; bonBackoff?: AiCandidateBackoff }
   | { kind: 'explanation'; mode: AiMode; title: string; body: string; aiError?: string }
   | { kind: 'review'; mode: AiMode; title: string; review: ReviewFindings; aiError?: string }
 
@@ -194,6 +199,7 @@ export function AiCopilotPanel({
           name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow') as string),
         }) as string,
         aiError: response.aiError,
+        bonBackoff: response.bonBackoff,
       })
     } catch (error) {
       setResult({
@@ -346,6 +352,12 @@ export function AiCopilotPanel({
           )}
           <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never) as string}</p>
           <div className="result-body">{result.body}</div>
+          {result.kind === 'workflow' && result.bonBackoff && (
+            <div className="issue" role="status" data-testid="ai-candidate-backoff">
+              <strong>{t('aiCopilot.backoff.title')}</strong>{' '}
+              <span>{t('aiCopilot.backoff.body', result.bonBackoff)}</span>
+            </div>
+          )}
           {result.aiError && (
             <div className="issue issue-warn" role="status">
               <strong>{t('aiCopilot.aiFailedTitle')}</strong>{' '}

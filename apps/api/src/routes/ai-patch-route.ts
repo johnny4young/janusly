@@ -252,8 +252,9 @@ export const aiPatchRoutes: Route[] = [
       // the conditional spread below keeps the `extraContext` shape
       // byte-for-byte identical to the pre-enrichment case.
       const memoryHint = failingNode.success
-        ? await composeRecoveryMemoryHint({
+          ? await composeRecoveryMemoryHint({
             orgId: auth.orgId,
+            runId: dlq.runId,
             workflowId: failingWorkflowId,
             failingNode: { id: failingNode.data.id, type: failingNode.data.type },
             errorEnvelope: dlq.errorJson,

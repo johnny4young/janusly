@@ -51,6 +51,7 @@ export type AgentEpisodeRecall = {
 export type RecallAgentEpisodesInput = {
   orgId: string;
   workflowId?: string;
+  runId?: string;
   /** The agent goal — the semantic query for similar past episodes. */
   goal: string;
 };
@@ -74,7 +75,13 @@ export async function recallAgentEpisodes(input: RecallAgentEpisodesInput): Prom
       return emptyRecall();
     }
 
-    const { entries } = await recallMemory({ orgId: input.orgId, kind: AGENT_EPISODE_KIND, query: goal });
+    const { entries } = await recallMemory({
+      orgId: input.orgId,
+      workflowId: input.workflowId,
+      runId: input.runId,
+      kind: AGENT_EPISODE_KIND,
+      query: goal,
+    });
     if (entries.length === 0) return emptyRecall();
 
     // Same-workflow episodes are the most relevant prior context; fill the rest

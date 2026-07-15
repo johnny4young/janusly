@@ -98,7 +98,14 @@ export const vectorSearchTool = {
       // (clamped to the tenant's recallMaxEntries) instead of over-fetching the
       // ceiling. Keep a final slice as a defense-in-depth guard for the public
       // tool contract: `topK` is the maximum number of entries this tool emits.
-      const { entries } = await recallMemory({ orgId, kind: WORKFLOW_VECTOR_KIND, query: input.query, limit: topK });
+      const { entries } = await recallMemory({
+        orgId,
+        runId: executionContext.runId,
+        workflowId: executionContext.workflowId,
+        kind: WORKFLOW_VECTOR_KIND,
+        query: input.query,
+        limit: topK,
+      });
       const shaped = entries.slice(0, topK).map((entry) => ({
         content: entry.content,
         similarity: entry.similarity,

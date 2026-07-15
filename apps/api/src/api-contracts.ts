@@ -106,6 +106,39 @@ const RunDetailSchema = z.object({
   eventsHasMore: z.boolean(),
 });
 
+const NonNegativeSafeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const PositiveSafeIntegerSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+
+const RunUsageSchema = z.object({
+  loadedRows: NonNegativeSafeIntegerSchema,
+  truncated: z.boolean(),
+  rowCap: PositiveSafeIntegerSchema,
+  llm: z.object({
+    calls: NonNegativeSafeIntegerSchema,
+    inputTokens: NonNegativeSafeIntegerSchema,
+    outputTokens: NonNegativeSafeIntegerSchema,
+    totalTokens: NonNegativeSafeIntegerSchema,
+    cachedInputTokens: NonNegativeSafeIntegerSchema,
+    cacheCreationInputTokens: NonNegativeSafeIntegerSchema,
+    knownCostUsd: z.number().nonnegative(),
+    unknownCostCalls: NonNegativeSafeIntegerSchema,
+  }),
+  memory: z.object({
+    recalls: NonNegativeSafeIntegerSchema,
+    commits: NonNegativeSafeIntegerSchema,
+    failures: NonNegativeSafeIntegerSchema,
+    kinds: z.array(z.object({
+      kind: z.string().min(1),
+      recalls: NonNegativeSafeIntegerSchema,
+      commits: NonNegativeSafeIntegerSchema,
+      failures: NonNegativeSafeIntegerSchema,
+    })),
+  }),
+}).refine((usage) => usage.loadedRows <= usage.rowCap, {
+  message: "loadedRows must not exceed rowCap",
+  path: ["loadedRows"],
+});
+
 const RecoveryMetricSchema = z.object({
   value: z.number().nullable(),
   display: z.string(),
@@ -120,7 +153,11 @@ const CostProviderRowSchema = z.object({
   model: z.string(),
   usd: z.number(),
   tokens: z.number(),
+  inputTokens: z.number().nonnegative(),
+  cachedInputTokens: z.number().nonnegative(),
+  cacheCreationInputTokens: z.number().nonnegative(),
   calls: z.number(),
+  aggregated: z.boolean().optional(),
 });
 
 const RecoveryMetricsSchema = z.object({
@@ -129,7 +166,15 @@ const RecoveryMetricsSchema = z.object({
   p95Latency: RecoveryMetricSchema,
   approvalsPending: RecoveryMetricSchema,
   replayRate: RecoveryMetricSchema,
-  costThisWindow: RecoveryMetricSchema.extend({ providers: z.array(CostProviderRowSchema) }),
+  costThisWindow: RecoveryMetricSchema.extend({
+    providers: z.array(CostProviderRowSchema),
+    cache: z.object({
+      inputTokens: z.number().nonnegative(),
+      readTokens: z.number().nonnegative(),
+      creationTokens: z.number().nonnegative(),
+      readSharePercent: z.number().min(0).max(100).nullable(),
+    }),
+  }),
   clustersResolved: RecoveryMetricSchema.extend({
     totalEntries: z.number().int().nonnegative(),
     capped: z.boolean(),
@@ -335,6 +380,18 @@ export const getRunStatusContract = {
   errorCodes: ["invalid_input", "runs_run_id_required", "runs_forbidden"],
 } satisfies ApiRouteContract;
 
+export const getRunUsageContract = {
+  operationId: "getRunUsage",
+  path: V1_READ_PATHS.runUsage,
+  summary: "Get a bounded resource-usage projection for one run",
+  tags: ["Runs"],
+  request: {
+    query: z.object({ runId: z.string().trim().min(1) }).strict(),
+  },
+  response: RunUsageSchema,
+  errorCodes: ["invalid_input", "runs_run_id_required", "runs_forbidden"],
+} satisfies ApiRouteContract;
+
 /**
  * Side-effect-free contract manifest. The generator imports this instead of
  * the handler registry so contract checks never create Redis/DB clients.
@@ -351,5 +408,6 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", contract: getLatestWorkflowVersionContract },
   { method: "GET", contract: listRunsContract },
   { method: "GET", contract: getRunContract },
+  { method: "GET", permission: "runs.read", contract: getRunUsageContract },
   { method: "GET", contract: getRunStatusContract },
 ];

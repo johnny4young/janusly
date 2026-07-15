@@ -17,6 +17,7 @@ export const V1_READ_PATHS = {
   latestWorkflowVersion: "/workflows/latest",
   runs: "/runs",
   run: "/run",
+  runUsage: "/run/usage",
   runStatus: "/status",
 } as const;
 

@@ -4,6 +4,28 @@ import type { RunEvent } from '../types'
 import { ReasoningPanel } from './ReasoningPanel'
 
 describe('<ReasoningPanel />', () => {
+  const runUsage = {
+    loadedRows: 6,
+    truncated: true,
+    rowCap: 10_000,
+    llm: {
+      calls: 3,
+      inputTokens: 12_000,
+      outputTokens: 2_500,
+      totalTokens: 14_500,
+      cachedInputTokens: 8_000,
+      cacheCreationInputTokens: 1_000,
+      knownCostUsd: 0.0425,
+      unknownCostCalls: 1,
+    },
+    memory: {
+      recalls: 2,
+      commits: 1,
+      failures: 1,
+      kinds: [{ kind: 'agent_episode', recalls: 2, commits: 1, failures: 1 }],
+    },
+  }
+
   it('renders payload fields as labelled rows with a raw-JSON toggle, not a raw dump', () => {
     const events: RunEvent[] = [
       {
@@ -140,6 +162,90 @@ describe('<ReasoningPanel />', () => {
     expect(diagnostics).toHaveTextContent('Partial history')
     expect(diagnostics).toHaveTextContent('Episodes recalled2')
     expect(diagnostics).toHaveTextContent('Observed span4s')
+  })
+
+  it('loads persisted whole-run usage and refreshes only at terminal checkpoints', async () => {
+    const loadRunUsage = vi.fn().mockResolvedValue(runUsage)
+    const { rerender } = render(<ReasoningPanel
+      activeRunId="run-usage"
+      onLoadRunUsage={loadRunUsage}
+      events={[{ id: 'e1', type: 'node.running', nodeId: 'agent' }]}
+    />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading persisted usage')
+    const usage = await screen.findByTestId('run-resource-usage')
+    await waitFor(() => expect(usage).toHaveAttribute('data-state', 'ready'))
+    expect(usage).toHaveAttribute('role', 'status')
+    expect(usage).toHaveAttribute('aria-live', 'polite')
+    expect(usage).toHaveAccessibleName('Run resource usage')
+    expect(usage).toHaveTextContent('LLM calls3')
+    expect(usage).toHaveTextContent('Cache read8,000')
+    expect(usage).toHaveTextContent('Known cost$0.0425')
+    expect(usage).toHaveTextContent('Newest 10,000 records')
+    expect(usage).toHaveTextContent('1 LLM call has no known price')
+    expect(screen.getByRole('list', { name: 'Memory usage by kind' })).toHaveTextContent('agent_episode')
+    expect(loadRunUsage).toHaveBeenCalledTimes(1)
+
+    rerender(<ReasoningPanel
+      activeRunId="run-usage"
+      onLoadRunUsage={loadRunUsage}
+      events={[
+        { id: 'e1', type: 'node.running', nodeId: 'agent' },
+        { id: 'e2', type: 'node.started', nodeId: 'notify' },
+      ]}
+    />)
+    expect(loadRunUsage).toHaveBeenCalledTimes(1)
+
+    rerender(<ReasoningPanel
+      activeRunId="run-usage"
+      onLoadRunUsage={loadRunUsage}
+      events={[
+        { id: 'e1', type: 'node.running', nodeId: 'agent' },
+        { id: 'e2', type: 'node.started', nodeId: 'notify' },
+        { id: 'e3', type: 'node.succeeded', nodeId: 'notify' },
+      ]}
+    />)
+    await waitFor(() => expect(loadRunUsage).toHaveBeenCalledTimes(2))
+  })
+
+  it('renders explicit empty and error states for persisted run usage', async () => {
+    const emptyUsage = {
+      ...runUsage,
+      loadedRows: 0,
+      truncated: false,
+      llm: { ...runUsage.llm, calls: 0 },
+      memory: { recalls: 0, commits: 0, failures: 0, kinds: [] },
+    }
+    const loadRunUsage = vi.fn().mockResolvedValueOnce(emptyUsage)
+    const { rerender } = render(<ReasoningPanel
+      activeRunId="run-empty"
+      onLoadRunUsage={loadRunUsage}
+      events={[]}
+    />)
+
+    await waitFor(() => expect(screen.getByTestId('run-resource-usage')).toHaveAttribute('data-state', 'empty'))
+    expect(screen.getByTestId('run-resource-usage')).toHaveTextContent('No AI or memory usage has been recorded')
+
+    loadRunUsage.mockRejectedValueOnce(new Error('usage offline'))
+    rerender(<ReasoningPanel
+      activeRunId="run-error"
+      onLoadRunUsage={loadRunUsage}
+      events={[]}
+    />)
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('usage offline'))
+  })
+
+  it('fails closed with a localized error when the run-usage response is malformed', async () => {
+    const loadRunUsage = vi.fn().mockResolvedValue({ loadedRows: 1, llm: {}, memory: {} })
+    render(<ReasoningPanel
+      activeRunId="run-malformed"
+      onLoadRunUsage={loadRunUsage}
+      events={[]}
+    />)
+
+    const error = await screen.findByRole('alert')
+    expect(error).toHaveAttribute('data-state', 'error')
+    expect(error).toHaveTextContent("The server returned usage data Janusly couldn't validate.")
   })
 
   it('offers deterministic What-if replay only for recorded decisions and renders the ranking', async () => {

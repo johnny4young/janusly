@@ -52,7 +52,21 @@ export type CostProviderRow = {
   model: string;
   usd: number;
   tokens: number;
+  /** Optional at the repo boundary so older fixtures and callers remain source-compatible. */
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
   calls: number;
+  /** True when this row folds provider/model groups beyond the breakdown cap. */
+  aggregated?: boolean;
+};
+
+/** Cache-token efficiency across every LLM completion in the selected window. */
+export type CacheEfficiency = {
+  inputTokens: number;
+  readTokens: number;
+  creationTokens: number;
+  readSharePercent: number | null;
 };
 
 /** Run-status counts collected by the repo over the window. */
@@ -179,7 +193,12 @@ export type RecoveryMetrics = {
   p95Latency: RecoveryMetric;
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
-  costThisWindow: RecoveryMetric & { providers: CostProviderRow[] };
+  costThisWindow: RecoveryMetric & {
+    providers: Array<CostProviderRow & Required<Pick<CostProviderRow,
+      "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens"
+    >>>;
+    cache: CacheEfficiency;
+  };
   clustersResolved: RecoveryMetric & { totalEntries: number; capped: boolean };
   slaAttainment: RecoveryMetric & { resolvedInWindow: number; metSla: number };
   timeToFirstAction: RecoveryMetric;
@@ -584,11 +603,26 @@ function computeReplayRate(replay: ReplayOutcomeCounts): RecoveryMetric {
 function computeCost(
   rows: CostProviderRow[],
   windowDays: number,
-): RecoveryMetric & { providers: CostProviderRow[] } {
+): RecoveryMetrics["costThisWindow"] {
   const total = rows.reduce((sum, row) => sum + row.usd, 0);
   const providers = rows
-    .map((row) => ({ ...row, provider: displayProvider(row.provider) }))
+    .map((row) => ({
+      ...row,
+      provider: displayProvider(row.provider),
+      inputTokens: row.inputTokens ?? 0,
+      cachedInputTokens: row.cachedInputTokens ?? 0,
+      cacheCreationInputTokens: row.cacheCreationInputTokens ?? 0,
+    }))
     .sort((a, b) => b.usd - a.usd);
+  const cache = providers.reduce<CacheEfficiency>((summary, row) => ({
+    inputTokens: summary.inputTokens + row.inputTokens,
+    readTokens: summary.readTokens + row.cachedInputTokens,
+    creationTokens: summary.creationTokens + row.cacheCreationInputTokens,
+    readSharePercent: null,
+  }), { inputTokens: 0, readTokens: 0, creationTokens: 0, readSharePercent: null });
+  cache.readSharePercent = cache.inputTokens > 0
+    ? Math.min(100, (cache.readTokens / cache.inputTokens) * 100)
+    : null;
   return {
     value: total,
     display: `$${total.toFixed(2)}`,
@@ -597,6 +631,7 @@ function computeCost(
     rationaleCode: "cost.summary",
     rationaleMeta: { providerCount: providers.length, windowDays },
     providers,
+    cache,
   };
 }
 

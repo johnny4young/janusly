@@ -583,6 +583,12 @@ describe('agent node — dryRun gating', () => {
     })
 
     expect(result.status).toBe('completed')
+    expect(recallAgentEpisodesMock).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      workflowId: undefined,
+      runId: 'run-1',
+      goal: 'recover the failed invoice',
+    })
     expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.memory.recalled', {
       count: 2,
       fingerprints: ['a1b2c3d4e5f6', '0f1e2d3c4b5a'],

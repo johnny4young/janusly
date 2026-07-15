@@ -20,9 +20,9 @@
  *   radix / cva / clsx / tailwind-merge / shadcn here.
  */
 
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Activity, AlertCircle, Boxes, Database, FlaskConical, GitBranch, KeyRound, Layers3, LockKeyhole, Plug, Search, ShieldCheck, Users, Workflow } from 'lucide-react'
-import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
+import type { WorkflowGraphEdge, WorkflowGraphNode, ActiveTab, AiCandidateBackoff, AiHealth, AiMode, AiReviewIssue, Credential, ReadinessResult, RunEvent, RunNode, RunSummary, SavedWorkflow, SolutionPackPublic, Template, ToolSchema, ValidationIssue, WorkflowDefinition } from '../types'
 import { AiCopilotPanel } from './AiCopilotPanel'
 import { InspectorPanel } from './InspectorPanel'
 import { AuthoringProblemsPanel } from './AuthoringProblemsPanel'
@@ -104,7 +104,12 @@ export type RightPanelProps = {
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => void
   /** Resolves `null` when the author declined the unsaved-canvas guard. */
-  onGenerateWorkflow: (prompt: string) => Promise<{ mode: AiMode; workflow: WorkflowDefinition; aiError?: string } | null>
+  onGenerateWorkflow: (prompt: string) => Promise<{
+    mode: AiMode
+    workflow: WorkflowDefinition
+    aiError?: string
+    bonBackoff?: AiCandidateBackoff
+  } | null>
   onExplainWorkflow: () => Promise<{ mode: AiMode; explanation: string; model?: string }>
   onReviewWorkflow: () => Promise<{
     mode: AiMode
@@ -134,6 +139,8 @@ export function RightPanel(props: RightPanelProps) {
  *  estate); this dispatcher never receives it. */
 function RightPanelRouter(props: RightPanelProps) {
   const { t } = useT()
+  const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
+    api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
       health={props.aiHealth}
@@ -243,6 +250,7 @@ function RightPanelRouter(props: RightPanelProps) {
         eventsHasMore={props.eventsHasMore}
         onLoadOlderEvents={props.onLoadOlderEvents}
         activeRunId={props.activeRunId}
+        onLoadRunUsage={loadRunUsage}
         onReplayDecision={props.activeRunId
           ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(props.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
           : undefined}
