@@ -213,9 +213,10 @@ export const isCanvasTab = (tab: ActiveTab): tab is CanvasTab =>
  *   page never pay the React Flow runtime cost.
  * - Canvas tab (`copilot` / `inspector`): canvas mounted AND visible;
  *   contextual slot is NOT rendered (the right rail handles the panel).
- * - Any other tab: canvas mounted but HIDDEN via `display: none` so the
- *   root-level `<ReactFlowProvider>` retains viewport state across the
- *   navigation; the contextual main slot renders alongside.
+ * - Any other tab: the contextual main slot renders. The canvas stays
+ *   unmounted until a canvas tab has activated it in the current non-home
+ *   workspace session; after activation it remains mounted but HIDDEN via
+ *   `display: none` so `<ReactFlowProvider>` retains viewport state.
  *
  * Returning a small struct (vs three boolean call sites) keeps the dispatcher
  * inside `App.tsx` legible and lets a unit test cover every tab cheaply.
@@ -229,12 +230,12 @@ export type CanvasVisibility = {
   contextualSlot: boolean
 }
 
-export function getCanvasVisibility(activeTab: ActiveTab): CanvasVisibility {
+export function getCanvasVisibility(activeTab: ActiveTab, canvasActivated = false): CanvasVisibility {
   if (activeTab === 'home') {
     return { mounted: false, visible: false, contextualSlot: false }
   }
   const canvas = isCanvasTab(activeTab)
-  return { mounted: true, visible: canvas, contextualSlot: !canvas }
+  return { mounted: canvas || canvasActivated, visible: canvas, contextualSlot: !canvas }
 }
 /**
  * JSON-Schema-subset describing one input field on a workflow's declared

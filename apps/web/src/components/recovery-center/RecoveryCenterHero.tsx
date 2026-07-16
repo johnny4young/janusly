@@ -88,7 +88,7 @@ export function RecoveryCenterHero({
             {showStreak && (
               <p
                 className="we-recovery-center-hero__streak"
-                title={t('recoveryCenter.hero.streakLongest', { count: streak.longest }) as string}
+                title={t('recoveryCenter.hero.streakLongest', { count: streak.longest })}
                 data-testid="recovery-center-clean-streak"
               >
                 <Flame size={14} aria-hidden="true" />
@@ -126,7 +126,7 @@ export function RecoveryCenterHero({
             {showStreak && (
               <p
                 className="we-recovery-center-hero__streak"
-                title={t('recoveryCenter.hero.streakLongest', { count: streak.longest }) as string}
+                title={t('recoveryCenter.hero.streakLongest', { count: streak.longest })}
                 data-testid="recovery-center-clean-streak"
               >
                 <Flame size={14} aria-hidden="true" />

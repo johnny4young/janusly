@@ -47,8 +47,8 @@ export function RecoveryHeatmap({
 
   const totalFailures = cells.reduce((sum, c) => sum + c.failures, 0)
   const totalRecovered = cells.reduce((sum, c) => sum + c.recovered, 0)
-  const totalFailureLabel = t('recoveryCenter.heatmap.failureCount', { count: totalFailures }) as string
-  const totalRecoveredLabel = t('recoveryCenter.heatmap.recoveredCount', { count: totalRecovered }) as string
+  const totalFailureLabel = t('recoveryCenter.heatmap.failureCount', { count: totalFailures })
+  const totalRecoveredLabel = t('recoveryCenter.heatmap.recoveredCount', { count: totalRecovered })
   const rememberedFocusIndex = focusedDay === null
     ? -1
     : cells.findIndex((candidate) => candidate.day === focusedDay)
@@ -63,27 +63,27 @@ export function RecoveryHeatmap({
           days: windowDays,
           failures: totalFailureLabel,
           recovered: totalRecoveredLabel,
-        }) as string
+        })
       }
     >
       <div className="we-recovery-heatmap__head">
-        <span className="section-kicker">{t('recoveryCenter.heatmap.title') as string}</span>
+        <span className="section-kicker">{t('recoveryCenter.heatmap.title')}</span>
         <span className="we-recovery-heatmap__summary">
           {t('recoveryCenter.heatmap.summary', {
             failures: totalFailureLabel,
             recovered: totalRecoveredLabel,
-          }) as string}
+          })}
         </span>
       </div>
       <div className="we-recovery-heatmap__grid">
         {cells.map((cell, index) => {
-          const failureLabel = t('recoveryCenter.heatmap.failureCount', { count: cell.failures }) as string
-          const recoveredLabel = t('recoveryCenter.heatmap.recoveredCount', { count: cell.recovered }) as string
+          const failureLabel = t('recoveryCenter.heatmap.failureCount', { count: cell.failures })
+          const recoveredLabel = t('recoveryCenter.heatmap.recoveredCount', { count: cell.recovered })
           const cellTitle = t('recoveryCenter.heatmap.cell', {
             day: cell.day,
             failures: failureLabel,
             recovered: recoveredLabel,
-          }) as string
+          })
           if (onSelectDay) {
             const actionable = cell.failures > 0
             const moveFocus = (nextIndex: number) => {
@@ -136,12 +136,12 @@ export function RecoveryHeatmap({
         })}
       </div>
       <div className="we-recovery-heatmap__legend" aria-hidden="true">
-        <span className="we-recovery-heatmap__legend-label">{t('recoveryCenter.heatmap.legend.less') as string}</span>
+        <span className="we-recovery-heatmap__legend-label">{t('recoveryCenter.heatmap.legend.less')}</span>
         <span className="we-recovery-heatmap__cell" data-outcome="none" />
         <span className="we-recovery-heatmap__cell" data-outcome="recovered" />
         <span className="we-recovery-heatmap__cell" data-outcome="partial" />
         <span className="we-recovery-heatmap__cell" data-outcome="unrecovered" />
-        <span className="we-recovery-heatmap__legend-label">{t('recoveryCenter.heatmap.legend.more') as string}</span>
+        <span className="we-recovery-heatmap__legend-label">{t('recoveryCenter.heatmap.legend.more')}</span>
       </div>
     </section>
   )

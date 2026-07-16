@@ -183,8 +183,8 @@ export function RollbackConfirmDialog({
             <WorkflowDiffView
               before={current.dagJson}
               after={target.dagJson}
-              beforeLabel={t('rollback.beforeLabel', { version: current.version }) as string}
-              afterLabel={t('rollback.afterLabel', { version: target.version }) as string}
+              beforeLabel={t('rollback.beforeLabel', { version: current.version })}
+              afterLabel={t('rollback.afterLabel', { version: target.version })}
             />
           )}
         </div>

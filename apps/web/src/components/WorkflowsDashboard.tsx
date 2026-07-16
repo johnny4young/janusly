@@ -431,8 +431,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         })
         addToast(
           folder
-            ? (t('workflowsDashboard.movedToFolder', { folder }) as string)
-            : (t('workflowsDashboard.movedToUngrouped') as string),
+            ? (t('workflowsDashboard.movedToFolder', { folder }))
+            : (t('workflowsDashboard.movedToUngrouped')),
           'success',
         )
         bumpPlatformVersion()
@@ -440,7 +440,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (w.id === workflowId ? { ...w, folder: previousFolder } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.moveFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.moveFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -468,14 +468,14 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         })
         addToast(
           op === 'add'
-            ? (t('workflowsDashboard.rowTagAdded', { tag }) as string)
-            : (t('workflowsDashboard.rowTagRemoved', { tag }) as string),
+            ? (t('workflowsDashboard.rowTagAdded', { tag }))
+            : (t('workflowsDashboard.rowTagRemoved', { tag })),
           'success',
         )
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, tags: prior } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.rowTagFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -518,11 +518,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           method: 'POST',
           body: JSON.stringify({ from, to: trimmed }),
         })
-        addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }) as string, 'success')
+        addToast(t('workflowsDashboard.folderRenamed', { folder: trimmed }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder: from } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.renameFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.renameFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -543,11 +543,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           method: 'POST',
           body: JSON.stringify({ folder }),
         })
-        addToast(t('workflowsDashboard.folderDeleted') as string, 'success')
+        addToast(t('workflowsDashboard.folderDeleted'), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (affectedIds.has(w.id) ? { ...w, folder } : w)))
-        addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.folderDeleteFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -581,7 +581,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === from ? trimmed : tg)))])
       try {
         await api('/workflows/tags/rename', { method: 'POST', body: JSON.stringify({ from, to: trimmed }) })
-        addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }) as string, 'success')
+        addToast(t('workflowsDashboard.tagRenamed', { tag: trimmed }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
@@ -591,7 +591,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
           return next.sort((a, b) => a.localeCompare(b, getResolvedLocale()))
         })
         setTagFilters((prev) => [...new Set(prev.map((tg) => (tg === trimmed ? from : tg)))])
-        addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.renameTagFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -614,13 +614,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       setTagFilters((prev) => prev.filter((tg) => tg !== tag))
       try {
         await api('/workflows/tags/delete', { method: 'POST', body: JSON.stringify({ tag }) })
-        addToast(t('workflowsDashboard.tagDeleted') as string, 'success')
+        addToast(t('workflowsDashboard.tagDeleted'), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)))
         setTagOptions((prev) => (prev.includes(tag) ? prev : [...prev, tag].sort((a, b) => a.localeCompare(b, getResolvedLocale()))))
         setTagFilters((prev) => (prev.includes(tag) ? prev : [...prev, tag]))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteTagFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -687,8 +687,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         const count = typeof result?.count === 'number' ? result.count : ids.length
         addToast(
           folder
-            ? (t('workflowsDashboard.bulkMoved', { folder, count }) as string)
-            : (t('workflowsDashboard.bulkMovedUngrouped', { count }) as string),
+            ? (t('workflowsDashboard.bulkMoved', { folder, count }))
+            : (t('workflowsDashboard.bulkMovedUngrouped', { count })),
           'success',
         )
         bumpPlatformVersion()
@@ -696,7 +696,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (priorFolders.has(w.id) ? { ...w, folder: priorFolders.get(w.id) ?? null } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.bulkMoveFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkMoveFailed')), 'error')
       }
     },
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
@@ -739,8 +739,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         const count = typeof result?.count === 'number' ? result.count : ids.length
         addToast(
           op === 'add'
-            ? (t('workflowsDashboard.bulkTagAdded', { tag, count }) as string)
-            : (t('workflowsDashboard.bulkTagRemoved', { tag, count }) as string),
+            ? (t('workflowsDashboard.bulkTagAdded', { tag, count }))
+            : (t('workflowsDashboard.bulkTagRemoved', { tag, count })),
           'success',
         )
         bumpPlatformVersion()
@@ -748,7 +748,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         setWorkflows((prev) =>
           prev.map((w) => (priorTags.has(w.id) ? { ...w, tags: priorTags.get(w.id) ?? [] } : w)),
         )
-        addToast(tApiError(err) || (t('workflowsDashboard.bulkTagFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.bulkTagFailed')), 'error')
       }
     },
     [selectedIds, bulkTagDraft, workflows, addToast, bumpPlatformVersion, t],
@@ -775,11 +775,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}`, { method: 'DELETE' })
-        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }) as string, 'success')
+        addToast(t('workflowsDashboard.workflowDeleted', { name: current.name }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.deleteFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -801,11 +801,11 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       })
       try {
         await api(`/workflows/${encodeURIComponent(workflowId)}/restore`, { method: 'POST' })
-        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }) as string, 'success')
+        addToast(t('workflowsDashboard.workflowRestored', { name: current.name }), 'success')
         bumpPlatformVersion()
       } catch (err) {
         setWorkflows((prev) => (prev.some((w) => w.id === workflowId) ? prev : [current, ...prev]))
-        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed') as string), 'error')
+        addToast(tApiError(err) || (t('workflowsDashboard.restoreFailed')), 'error')
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -827,8 +827,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         ids.map((id) => api(`/workflows/${encodeURIComponent(id)}/restore`, { method: 'POST' })),
       )
       const ok = results.filter((r) => r.status === 'fulfilled').length
-      if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }) as string, 'success')
-      if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed') as string, 'error')
+      if (ok > 0) addToast(t('workflowsDashboard.bulkRestored', { count: ok }), 'success')
+      if (ok < ids.length) addToast(t('workflowsDashboard.bulkRestoreFailed'), 'error')
       bumpPlatformVersion()
     },
     [selectedIds, workflows, addToast, bumpPlatformVersion, t],
@@ -948,8 +948,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             value={bulkFolderDraft}
             maxLength={60}
             onChange={event => setBulkFolderDraft(event.target.value)}
-            placeholder={t('workflowsDashboard.bulkFolderPlaceholder') as string}
-            aria-label={t('workflowsDashboard.bulkFolderPlaceholder') as string}
+            placeholder={t('workflowsDashboard.bulkFolderPlaceholder')}
+            aria-label={t('workflowsDashboard.bulkFolderPlaceholder')}
             data-testid="workflows-bulk-folder-input"
           />
           <datalist id="we-bulk-folder-options">
@@ -984,8 +984,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             value={bulkTagDraft}
             maxLength={40}
             onChange={event => setBulkTagDraft(event.target.value)}
-            placeholder={t('workflowsDashboard.bulkTagPlaceholder') as string}
-            aria-label={t('workflowsDashboard.bulkTagPlaceholder') as string}
+            placeholder={t('workflowsDashboard.bulkTagPlaceholder')}
+            aria-label={t('workflowsDashboard.bulkTagPlaceholder')}
             data-testid="workflows-bulk-tag-input"
           />
           <datalist id="we-bulk-tag-options">
@@ -1020,7 +1020,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       {/* Initial load (active or trash) — skeleton rows instead of a blank gap
           until the first page arrives. */}
       {loading && workflows.length === 0 && (
-        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading') as string} />
+        <LoadingSkeleton rows={5} label={t('workflowsDashboard.loading')} />
       )}
 
       {/* Trash view — a flat, filter-free list of soft-deleted workflows (uses
@@ -1077,7 +1077,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       {!showTrashed && visible.length > 0 && hasFolders && (
         <div className="we-list-folders" data-testid="workflows-folder-groups">
           {groups.map(group => {
-            const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder') as string) : group.key
+            const label = group.key === UNGROUPED ? (t('workflowsDashboard.ungroupedFolder')) : group.key
             return (
               <details
                 key={group.key === UNGROUPED ? '__ungrouped__' : group.key}
@@ -1142,7 +1142,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                         value={renameDraft}
                         autoFocus
                         maxLength={60}
-                        aria-label={t('workflowsDashboard.renameFolderLabel') as string}
+                        aria-label={t('workflowsDashboard.renameFolderLabel')}
                         onChange={event => setRenameDraft(event.target.value)}
                         onClick={event => event.stopPropagation()}
                         onKeyDown={event => {
@@ -1181,8 +1181,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                           className="small-command we-list-folder__selectall"
                           aria-pressed={group.items.every((w) => selectedIds.has(w.id))}
                           onClick={event => { event.preventDefault(); event.stopPropagation(); toggleSelectFolder(group.items) }}
-                          title={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
-                          aria-label={t('workflowsDashboard.selectAllInFolderAria', { folder: label }) as string}
+                          title={t('workflowsDashboard.selectAllInFolderAria', { folder: label })}
+                          aria-label={t('workflowsDashboard.selectAllInFolderAria', { folder: label })}
                           data-testid={`workflows-select-folder-${group.key === UNGROUPED ? 'ungrouped' : group.key}`}
                         >
                           <ListChecks size={12} aria-hidden="true" />
@@ -1198,8 +1198,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                             type="button"
                             className="small-command"
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setConfirmDeleteFolder(null); setRenameDraft(group.key); setRenamingFolder(group.key) }}
-                            title={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
-                            aria-label={t('workflowsDashboard.renameFolder', { folder: group.key }) as string}
+                            title={t('workflowsDashboard.renameFolder', { folder: group.key })}
+                            aria-label={t('workflowsDashboard.renameFolder', { folder: group.key })}
                             data-testid={`workflows-renamefolder-${group.key}`}
                           >
                             <Pencil size={12} aria-hidden="true" />
@@ -1208,8 +1208,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                             type="button"
                             className="small-command danger"
                             onClick={event => { event.preventDefault(); event.stopPropagation(); setRenamingFolder(null); setConfirmDeleteFolder(group.key) }}
-                            title={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
-                            aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key }) as string}
+                            title={t('workflowsDashboard.deleteFolder', { folder: group.key })}
+                            aria-label={t('workflowsDashboard.deleteFolder', { folder: group.key })}
                             data-testid={`workflows-deletefolder-${group.key}`}
                           >
                             <Trash2 size={12} aria-hidden="true" />
@@ -1237,8 +1237,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                 value={newFolderDraft}
                 autoFocus
                 maxLength={60}
-                placeholder={t('workflowsDashboard.newFolderPlaceholder') as string}
-                aria-label={t('workflowsDashboard.newFolderLabel') as string}
+                placeholder={t('workflowsDashboard.newFolderPlaceholder')}
+                aria-label={t('workflowsDashboard.newFolderLabel')}
                 onChange={event => setNewFolderDraft(event.target.value)}
                 onKeyDown={event => {
                   if (event.key === 'Enter') { event.preventDefault(); commitNewFolder() }

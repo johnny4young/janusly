@@ -41,7 +41,7 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
         : { kind: 'draft', playbook: result.playbook })
       bumpPlatformVersion()
     } catch (error) {
-      setState({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.createFailed') as string) })
+      setState({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.createFailed')) })
     }
   }
 
@@ -55,7 +55,7 @@ export function PlaybookPromotionCard({ source }: { source: RecoveryPlaybookProm
       setState({ kind: 'active', playbook: result.playbook })
       bumpPlatformVersion()
     } catch (error) {
-      setState({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.activateFailed') as string) })
+      setState({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.activateFailed')) })
     }
   }
 

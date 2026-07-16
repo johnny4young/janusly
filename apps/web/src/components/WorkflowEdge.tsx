@@ -42,7 +42,7 @@ export function WorkflowEdge(props: EdgeProps<EdgeData>) {
   const connectionLabel = t('canvas.edge.connection', {
     from: endpointLabel(getNode(source), source),
     to: endpointLabel(getNode(target), target),
-  }) as string
+  })
   return (
     <>
       <BaseEdge

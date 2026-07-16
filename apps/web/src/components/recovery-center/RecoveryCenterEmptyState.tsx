@@ -51,7 +51,7 @@ export function RecoveryFlowDemo({
           type="button"
           className="we-flow-demo__dismiss"
           onClick={onDismiss}
-          aria-label={t('recoveryCenter.flowDemo.dismiss') as string}
+          aria-label={t('recoveryCenter.flowDemo.dismiss')}
           data-testid="recovery-flow-demo-dismiss"
         >
           <X size={14} aria-hidden="true" />

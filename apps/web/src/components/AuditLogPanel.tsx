@@ -83,7 +83,7 @@ export function AuditLogPanel() {
         setHasMore(Boolean(page.hasMore));
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("audit.error") as string));
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("audit.error")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -103,7 +103,7 @@ export function AuditLogPanel() {
       setCursor(page.nextCursor ?? null);
       setHasMore(Boolean(page.hasMore));
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("audit.error") as string));
+      setError(err instanceof Error ? err.message : (t("audit.error")));
     } finally {
       setLoadingMore(false);
     }
@@ -132,7 +132,7 @@ export function AuditLogPanel() {
       </header>
       <p className="we-field__hint">{t("audit.intro")}</p>
 
-      <div className="we-audit-presets" role="group" aria-label={t("audit.presets.aria") as string}>
+      <div className="we-audit-presets" role="group" aria-label={t("audit.presets.aria")}>
         <span>{t("audit.presets.label")}</span>
         <button
           type="button"
@@ -150,7 +150,7 @@ export function AuditLogPanel() {
           <input
             type="text"
             className="we-field__input"
-            placeholder={t("audit.filter.placeholder") as string}
+            placeholder={t("audit.filter.placeholder")}
             value={filterInput}
             onChange={(e) => setFilterInput(e.target.value)}
           />
@@ -172,7 +172,7 @@ export function AuditLogPanel() {
       )}
 
       {loading ? (
-        <LoadingSkeleton rows={4} label={t("audit.loading") as string} />
+        <LoadingSkeleton rows={4} label={t("audit.loading")} />
       ) : rows.length === 0 ? (
         <p className="we-budget-settings__status">{t("audit.empty")}</p>
       ) : (

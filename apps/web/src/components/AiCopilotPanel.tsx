@@ -92,9 +92,9 @@ export function AiCopilotPanel({
   const { t } = useT()
 
   const starterPrompts = [
-    t('aiCopilot.starter1') as string,
-    t('aiCopilot.starter2') as string,
-    t('aiCopilot.starter3') as string,
+    t('aiCopilot.starter1'),
+    t('aiCopilot.starter2'),
+    t('aiCopilot.starter3'),
   ]
 
   const [prompt, setPrompt] = useState(starterPrompts[0])
@@ -115,64 +115,64 @@ export function AiCopilotPanel({
     : t('aiCopilot.healthDetailOff')
 
   function describeAiError(message: string): string {
-    if (/quota|billing|insufficient_quota/i.test(message)) return t('aiCopilot.aiError.quota') as string
-    if (/rate limit/i.test(message)) return t('aiCopilot.aiError.rate') as string
-    if (/invalid api key|incorrect api key|unauthorized/i.test(message)) return t('aiCopilot.aiError.auth') as string
+    if (/quota|billing|insufficient_quota/i.test(message)) return t('aiCopilot.aiError.quota')
+    if (/rate limit/i.test(message)) return t('aiCopilot.aiError.rate')
+    if (/invalid api key|incorrect api key|unauthorized/i.test(message)) return t('aiCopilot.aiError.auth')
     return message
   }
 
   const useCases = useMemo(() => [
     {
       icon: <Workflow size={16} />,
-      title: t('aiCopilot.useCase.prompt.title') as string,
-      body: t('aiCopilot.useCase.prompt.body') as string,
-      state: (health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.prompt.stateOff')) as string,
+      title: t('aiCopilot.useCase.prompt.title'),
+      body: t('aiCopilot.useCase.prompt.body'),
+      state: health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.prompt.stateOff'),
     },
     {
       icon: <MessageSquareText size={16} />,
-      title: t('aiCopilot.useCase.explain.title') as string,
-      body: t('aiCopilot.useCase.explain.body') as string,
-      state: (health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.explain.stateOff')) as string,
+      title: t('aiCopilot.useCase.explain.title'),
+      body: t('aiCopilot.useCase.explain.body'),
+      state: health?.enabled ? t('aiCopilot.useCase.prompt.stateOn') : t('aiCopilot.useCase.explain.stateOff'),
     },
     {
       icon: <Bot size={16} />,
-      title: t('aiCopilot.useCase.explainRun.title') as string,
-      body: t('aiCopilot.useCase.explainRun.body') as string,
-      state: (health?.enabled ? t('aiCopilot.useCase.explainRun.stateOn') : t('aiCopilot.useCase.explainRun.stateOff')) as string,
+      title: t('aiCopilot.useCase.explainRun.title'),
+      body: t('aiCopilot.useCase.explainRun.body'),
+      state: health?.enabled ? t('aiCopilot.useCase.explainRun.stateOn') : t('aiCopilot.useCase.explainRun.stateOff'),
     },
     {
       icon: <BrainCircuit size={16} />,
-      title: t('aiCopilot.useCase.agent.title') as string,
-      body: t('aiCopilot.useCase.agent.body') as string,
-      state: (health?.enabled ? t('aiCopilot.useCase.agent.stateOn') : t('aiCopilot.useCase.agent.stateOff')) as string,
+      title: t('aiCopilot.useCase.agent.title'),
+      body: t('aiCopilot.useCase.agent.body'),
+      state: health?.enabled ? t('aiCopilot.useCase.agent.stateOn') : t('aiCopilot.useCase.agent.stateOff'),
     },
     {
       icon: <Route size={16} />,
-      title: t('aiCopilot.useCase.causal.title') as string,
-      body: t('aiCopilot.useCase.causal.body') as string,
-      state: t('aiCopilot.useCase.causal.alwaysOn') as string,
+      title: t('aiCopilot.useCase.causal.title'),
+      body: t('aiCopilot.useCase.causal.body'),
+      state: t('aiCopilot.useCase.causal.alwaysOn'),
     },
   ], [health?.enabled, t])
 
   const readinessSteps = useMemo(() => [
     {
       icon: <KeyRound size={15} />,
-      title: t('aiCopilot.readiness.envTitle') as string,
-      body: t('aiCopilot.readiness.envBody') as string,
+      title: t('aiCopilot.readiness.envTitle'),
+      body: t('aiCopilot.readiness.envBody'),
       ready: Boolean(health?.enabled),
     },
     {
       icon: <RefreshCw size={15} />,
-      title: t('aiCopilot.readiness.restartTitle') as string,
-      body: t('aiCopilot.readiness.restartBody') as string,
+      title: t('aiCopilot.readiness.restartTitle'),
+      body: t('aiCopilot.readiness.restartBody'),
       ready: Boolean(health),
     },
     {
       icon: <CheckCircle2 size={15} />,
-      title: t('aiCopilot.readiness.healthTitle') as string,
-      body: (health?.enabled
+      title: t('aiCopilot.readiness.healthTitle'),
+      body: health?.enabled
         ? t('aiCopilot.readiness.healthBodyOn', { model: health.model })
-        : t('aiCopilot.readiness.healthBodyOff')) as string,
+        : t('aiCopilot.readiness.healthBodyOff'),
       ready: Boolean(health?.enabled),
     },
   ], [health, t])
@@ -194,10 +194,10 @@ export function AiCopilotPanel({
       setResult({
         kind: 'workflow',
         mode: response.mode,
-        title: t(titleKey as never) as string,
+        title: t(titleKey as never),
         body: t('aiCopilot.draftedBody', {
-          name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow') as string),
-        }) as string,
+          name: response.workflow.name ?? response.workflow.id ?? (t('aiCopilot.untitledWorkflow')),
+        }),
         aiError: response.aiError,
         bonBackoff: response.bonBackoff,
       })
@@ -205,8 +205,8 @@ export function AiCopilotPanel({
       setResult({
         kind: 'workflow',
         mode: 'error',
-        title: t('aiCopilot.draftFailed') as string,
-        body: error instanceof Error ? error.message : (t('aiCopilot.draftFailedBody') as string),
+        title: t('aiCopilot.draftFailed'),
+        body: error instanceof Error ? error.message : (t('aiCopilot.draftFailedBody')),
       })
     } finally {
       setLoading(null)
@@ -221,8 +221,8 @@ export function AiCopilotPanel({
         kind: 'explanation',
         mode: response.mode,
         title: response.aiError
-          ? (t('aiCopilot.explanationLocal', { name: workflowName }) as string)
-          : (t('aiCopilot.explanationOk', { name: workflowName }) as string),
+          ? (t('aiCopilot.explanationLocal', { name: workflowName }))
+          : (t('aiCopilot.explanationOk', { name: workflowName })),
         body: response.explanation,
         aiError: response.aiError,
       })
@@ -230,8 +230,8 @@ export function AiCopilotPanel({
       setResult({
         kind: 'explanation',
         mode: 'error',
-        title: t('aiCopilot.explanationFailed') as string,
-        body: error instanceof Error ? error.message : (t('aiCopilot.explanationFailedBody') as string),
+        title: t('aiCopilot.explanationFailed'),
+        body: error instanceof Error ? error.message : (t('aiCopilot.explanationFailedBody')),
       })
     } finally {
       setLoading(null)
@@ -246,8 +246,8 @@ export function AiCopilotPanel({
         kind: 'review',
         mode: response.mode,
         title: response.aiError
-          ? (t('aiCopilot.reviewLocal', { name: workflowName }) as string)
-          : (t('aiCopilot.reviewOk', { name: workflowName }) as string),
+          ? (t('aiCopilot.reviewLocal', { name: workflowName }))
+          : (t('aiCopilot.reviewOk', { name: workflowName })),
         review: response.review,
         aiError: response.aiError,
       })
@@ -255,9 +255,9 @@ export function AiCopilotPanel({
       setResult({
         kind: 'review',
         mode: 'error',
-        title: t('aiCopilot.reviewFailed') as string,
+        title: t('aiCopilot.reviewFailed'),
         review: { status: 'fail', issues: [] },
-        aiError: error instanceof Error ? error.message : (t('aiCopilot.reviewFailedBody') as string),
+        aiError: error instanceof Error ? error.message : (t('aiCopilot.reviewFailedBody')),
       })
     } finally {
       setLoading(null)
@@ -265,11 +265,11 @@ export function AiCopilotPanel({
   }
 
   const reviewSummary = (review: ReviewFindings, mode: AiMode): string => {
-    if (mode === 'error') return t('aiCopilot.reviewError') as string
-    if (review.status === 'pass') return t('aiCopilot.reviewPass') as string
-    if (review.status === 'warn') return t('aiCopilot.reviewWarn', { count: review.issues.length }) as string
+    if (mode === 'error') return t('aiCopilot.reviewError')
+    if (review.status === 'pass') return t('aiCopilot.reviewPass')
+    if (review.status === 'warn') return t('aiCopilot.reviewWarn', { count: review.issues.length })
     const blockerCount = review.issues.filter((i) => i.severity === 'fail').length
-    return t('aiCopilot.reviewFail', { count: blockerCount }) as string
+    return t('aiCopilot.reviewFail', { count: blockerCount })
   }
 
   return (
@@ -301,10 +301,10 @@ export function AiCopilotPanel({
           value={prompt}
           disabled={loading === 'generate'}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder={t('aiCopilot.placeholder') as string}
+          placeholder={t('aiCopilot.placeholder')}
         />
 
-        <div className="suggestion-row" aria-label={t('aiCopilot.examplesAria') as string}>
+        <div className="suggestion-row" aria-label={t('aiCopilot.examplesAria')}>
           {starterPrompts.map((starter) => (
             <button key={starter} className="small-command" onClick={() => setPrompt(starter)} type="button">
               {starter.slice(0, 34)}…
@@ -350,7 +350,7 @@ export function AiCopilotPanel({
               <span>{t('aiCopilot.fallbackBannerBody')}</span>
             </div>
           )}
-          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never) as string}</p>
+          <p className="helper-text">{t(MODE_COPY_KEYS[result.mode] as never)}</p>
           <div className="result-body">{result.body}</div>
           {result.kind === 'workflow' && result.bonBackoff && (
             <div className="issue" role="status" data-testid="ai-candidate-backoff">

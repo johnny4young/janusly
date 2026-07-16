@@ -99,7 +99,7 @@ export function ResilienceFieldset({
       <div className="we-resilience-fieldset__grid">
         <OptionalNumberConfigField
           scope={nodeId}
-          label={t('rightPanel.resilience.retryAttempts') as string}
+          label={t('rightPanel.resilience.retryAttempts')}
           value={retryAttempts}
           min={2}
           placeholder="3"
@@ -107,7 +107,7 @@ export function ResilienceFieldset({
         />
         <OptionalNumberConfigField
           scope={nodeId}
-          label={t('rightPanel.resilience.initialDelayMs') as string}
+          label={t('rightPanel.resilience.initialDelayMs')}
           value={retryDelay}
           min={1}
           placeholder="1000"
@@ -115,7 +115,7 @@ export function ResilienceFieldset({
         />
         <OptionalNumberConfigField
           scope={nodeId}
-          label={t('rightPanel.resilience.maxDelayMs') as string}
+          label={t('rightPanel.resilience.maxDelayMs')}
           value={retryMaxDelay}
           min={1}
           placeholder="30000"
@@ -160,14 +160,14 @@ export function ResilienceFieldset({
           </div>
           <JsonConfigField
             scope={nodeId}
-            label={t('rightPanel.resilience.headers') as string}
+            label={t('rightPanel.resilience.headers')}
             value={asRecord(config.headers)}
             onChange={(headers) => onPatch({ headers })}
           />
           <div className="we-resilience-fieldset__grid">
             <OptionalNumberConfigField
               scope={nodeId}
-              label={t('rightPanel.resilience.timeoutMs') as string}
+              label={t('rightPanel.resilience.timeoutMs')}
               value={readNumber(config.timeoutMs)}
               min={1}
               placeholder="30000"
@@ -175,7 +175,7 @@ export function ResilienceFieldset({
             />
             <OptionalNumberConfigField
               scope={nodeId}
-              label={t('rightPanel.resilience.maxResponseBytes') as string}
+              label={t('rightPanel.resilience.maxResponseBytes')}
               value={readNumber(config.maxResponseBytes)}
               min={1}
               placeholder="1000000"
@@ -183,7 +183,7 @@ export function ResilienceFieldset({
             />
             <OptionalNumberConfigField
               scope={nodeId}
-              label={t('rightPanel.resilience.maxRedirects') as string}
+              label={t('rightPanel.resilience.maxRedirects')}
               value={readNumber(config.maxRedirects)}
               min={0}
               placeholder="5"
@@ -198,7 +198,7 @@ export function ResilienceFieldset({
         <>
           <OptionalNumberConfigField
             scope={nodeId}
-            label={t('rightPanel.resilience.timeoutMs') as string}
+            label={t('rightPanel.resilience.timeoutMs')}
             value={readNumber(config.timeoutMs)}
             min={1}
             max={timeoutMax}

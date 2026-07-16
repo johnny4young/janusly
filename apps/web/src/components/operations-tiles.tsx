@@ -10,7 +10,7 @@
 
 import { CheckCircle2, Clock, DollarSign, RefreshCw, Users, Zap } from 'lucide-react'
 import { withSeverityLabels, type VitalSignsTile, type VitalSignsTileSeverity } from './VitalSignsStrip'
-import { tRecoveryMetricRationale } from '../i18n'
+import { tRecoveryMetricRationale, type useT } from '../i18n'
 
 /** Closed enum of metric severity values that the API echoes back. Mirrored
  *  byte-for-byte from the engine's `MetricSeverity` so the tile builder
@@ -42,12 +42,12 @@ export type OperationsMetrics = {
  *  by the time they reach the strip. */
 export function buildOperationsTiles(
   metrics: OperationsMetrics,
-  t: (key: string, vars?: Record<string, unknown>) => unknown,
+  t: ReturnType<typeof useT>['t'],
 ): VitalSignsTile[] {
   return withSeverityLabels([
     {
       icon: <CheckCircle2 size={14} aria-hidden="true" />,
-      label: t('operations.metric.successRate') as string,
+      label: t('operations.metric.successRate'),
       display: metrics.successRate.display,
       severity: metrics.successRate.severity,
       rationale: tRecoveryMetricRationale(metrics.successRate),
@@ -55,35 +55,35 @@ export function buildOperationsTiles(
     },
     {
       icon: <RefreshCw size={14} aria-hidden="true" />,
-      label: t('operations.metric.mttr') as string,
+      label: t('operations.metric.mttr'),
       display: metrics.mttr.display,
       severity: metrics.mttr.severity,
       rationale: tRecoveryMetricRationale(metrics.mttr),
     },
     {
       icon: <Zap size={14} aria-hidden="true" />,
-      label: t('operations.metric.p95') as string,
+      label: t('operations.metric.p95'),
       display: metrics.p95Latency.display,
       severity: metrics.p95Latency.severity,
       rationale: tRecoveryMetricRationale(metrics.p95Latency),
     },
     {
       icon: <Users size={14} aria-hidden="true" />,
-      label: t('operations.metric.approvals') as string,
+      label: t('operations.metric.approvals'),
       display: metrics.approvalsPending.display,
       severity: metrics.approvalsPending.severity,
       rationale: tRecoveryMetricRationale(metrics.approvalsPending),
     },
     {
       icon: <Clock size={14} aria-hidden="true" />,
-      label: t('operations.metric.replayRate') as string,
+      label: t('operations.metric.replayRate'),
       display: metrics.replayRate.display,
       severity: metrics.replayRate.severity,
       rationale: tRecoveryMetricRationale(metrics.replayRate),
     },
     {
       icon: <DollarSign size={14} aria-hidden="true" />,
-      label: t('operations.metric.cost') as string,
+      label: t('operations.metric.cost'),
       display: metrics.costThisWindow.display,
       severity: metrics.costThisWindow.severity,
       rationale: tRecoveryMetricRationale(metrics.costThisWindow),

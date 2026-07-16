@@ -327,8 +327,8 @@ export function BuilderSidebar({
     return NAV_GROUPS.map(group => ({
       ...group,
       items: group.items.filter(item => {
-        const label = (t(item.labelKey as never) as string).toLowerCase()
-        const helper = (t(item.helperKey as never) as string).toLowerCase()
+        const label = (t(item.labelKey as never)).toLowerCase()
+        const helper = (t(item.helperKey as never)).toLowerCase()
         return label.includes(normalisedQuery) || helper.includes(normalisedQuery)
       }),
     })).filter(group => group.items.length > 0)
@@ -432,7 +432,7 @@ export function BuilderSidebar({
         type="button"
         onClick={() => onOpenTab('copilot')}
         data-mobile-nav-close="true"
-        title={(aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')) as string}
+        title={aiHealth?.enabled ? t('sidebar.aiMode.liveHint') : t('sidebar.aiMode.localHint')}
       >
         <span className="sb-ai-strip__ic" aria-hidden="true"><Sparkles size={12} /></span>
         <span className="sb-ai-strip__body">
@@ -474,8 +474,8 @@ export function BuilderSidebar({
               {isOpen && (
                 <ul className="sb-group__list">
                   {group.items.map(item => {
-                    const label = t(item.labelKey as never) as string
-                    const helper = t(item.helperKey as never) as string
+                    const label = t(item.labelKey as never)
+                    const helper = t(item.helperKey as never)
                     const active = activeTab === item.tab
                     return (
                       <li key={item.tab}>

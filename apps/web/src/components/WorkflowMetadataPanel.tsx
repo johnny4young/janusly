@@ -139,10 +139,10 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
         method: 'POST',
         body: JSON.stringify({ metadata }),
       })
-      addToast(t('workflowMetadata.toast.saved') as string, 'success')
+      addToast(t('workflowMetadata.toast.saved'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('workflowMetadata.toast.saveFailed') as string), 'error')
+      addToast(tApiError(err) || (t('workflowMetadata.toast.saveFailed')), 'error')
     } finally {
       setSaving(false)
     }
@@ -154,25 +154,25 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
   return (
     <section className="panel-card we-workflow-metadata-panel" aria-labelledby="we-workflow-metadata-title">
       <h3 id="we-workflow-metadata-title" className="section-title">
-        {t('workflowMetadata.panel.title') as string}
+        {t('workflowMetadata.panel.title')}
       </h3>
-      <p className="helper-text">{t('workflowMetadata.panel.description') as string}</p>
+      <p className="helper-text">{t('workflowMetadata.panel.description')}</p>
       <form className="we-workflow-metadata-panel__form" onSubmit={onSave}>
         <label className="we-field">
-          <span>{t('workflowMetadata.field.owners') as string}</span>
+          <span>{t('workflowMetadata.field.owners')}</span>
           <input
             type="text"
             value={ownersRaw}
             onChange={(e) => setOwnersRaw(e.target.value)}
-            placeholder={t('workflowMetadata.field.ownersPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.ownersPlaceholder')}
             disabled={loading || saving}
             data-testid="workflow-metadata-owners"
           />
-          <span className="helper-text">{t('workflowMetadata.field.ownersHelp') as string}</span>
+          <span className="helper-text">{t('workflowMetadata.field.ownersHelp')}</span>
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.description') as string}</span>
+          <span>{t('workflowMetadata.field.description')}</span>
           <input
             type="text"
             value={form.description}
@@ -183,55 +183,55 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.tags') as string}</span>
+          <span>{t('workflowMetadata.field.tags')}</span>
           <input
             type="text"
             value={tagsRaw}
             onChange={(e) => setTagsRaw(e.target.value)}
-            placeholder={t('workflowMetadata.field.tagsPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.tagsPlaceholder')}
             disabled={loading || saving}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.folder') as string}</span>
+          <span>{t('workflowMetadata.field.folder')}</span>
           <input
             type="text"
             value={form.folder}
             maxLength={WORKFLOW_METADATA_FOLDER_MAX_LENGTH}
             onChange={(e) => setForm({ ...form, folder: e.target.value })}
-            placeholder={t('workflowMetadata.field.folderPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.folderPlaceholder')}
             disabled={loading || saving}
             data-testid="workflow-metadata-folder"
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.slackChannel') as string}</span>
+          <span>{t('workflowMetadata.field.slackChannel')}</span>
           <input
             type="text"
             value={form.slackChannel}
             maxLength={80}
             onChange={(e) => setForm({ ...form, slackChannel: e.target.value })}
-            placeholder={t('workflowMetadata.field.slackChannelPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.slackChannelPlaceholder')}
             disabled={loading || saving}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.linearProject') as string}</span>
+          <span>{t('workflowMetadata.field.linearProject')}</span>
           <input
             type="text"
             value={form.linearProject}
             maxLength={200}
             onChange={(e) => setForm({ ...form, linearProject: e.target.value })}
-            placeholder={t('workflowMetadata.field.linearProjectPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.linearProjectPlaceholder')}
             disabled={loading || saving}
           />
         </label>
 
         <label className="we-field">
-          <span>{t('workflowMetadata.field.severityDefault') as string}</span>
+          <span>{t('workflowMetadata.field.severityDefault')}</span>
           <select
             value={form.severityDefault}
             onChange={(e) =>
@@ -243,7 +243,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             disabled={loading || saving}
             data-testid="workflow-metadata-severity"
           >
-            <option value="">{t('workflowMetadata.field.severityDefaultNone') as string}</option>
+            <option value="">{t('workflowMetadata.field.severityDefaultNone')}</option>
             {RECOVERY_ITEM_SEVERITIES.map((s) => (
               <option key={s} value={s}>
                 {s.toUpperCase()}
@@ -254,24 +254,24 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
 
         <label className="we-field">
           <span>
-            {t('workflowMetadata.field.runbook') as string}
+            {t('workflowMetadata.field.runbook')}
             <span className="helper-text">
               {' '}
               ({runbookByteLength.toLocaleString(getResolvedLocale())}/{WORKFLOW_METADATA_RUNBOOK_MAX_BYTES.toLocaleString(getResolvedLocale())}{' '}
-              {t('workflowMetadata.field.runbookUnit') as string})
+              {t('workflowMetadata.field.runbookUnit')})
             </span>
           </span>
           <textarea
             rows={10}
             value={form.runbookMarkdown}
             onChange={(e) => setForm({ ...form, runbookMarkdown: e.target.value })}
-            placeholder={t('workflowMetadata.field.runbookPlaceholder') as string}
+            placeholder={t('workflowMetadata.field.runbookPlaceholder')}
             disabled={loading || saving}
             data-testid="workflow-metadata-runbook"
           />
           {runbookOverCap && (
             <span className="helper-text we-helper-text--error">
-              {t('workflowMetadata.field.runbookOverCap') as string}
+              {t('workflowMetadata.field.runbookOverCap')}
             </span>
           )}
         </label>
@@ -283,8 +283,8 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
             disabled={loading || saving || runbookOverCap}
           >
             {saving
-              ? (t('workflowMetadata.action.saving') as string)
-              : (t('workflowMetadata.action.save') as string)}
+              ? (t('workflowMetadata.action.saving'))
+              : (t('workflowMetadata.action.save'))}
           </button>
         </div>
       </form>

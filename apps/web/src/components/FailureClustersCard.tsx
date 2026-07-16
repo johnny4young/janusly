@@ -155,7 +155,7 @@ export function FailureClustersCard() {
         // patch against that row instead.
         const fallback = membersResp.deadLetterIds[0]
         if (!fallback) {
-          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') as string })
+          setRecovery({ kind: 'error', signature: cluster.signature, message: t('clusters.noOpenMembers') })
           return
         }
         selectedDlq = await api(`/dlq?id=${encodeURIComponent(fallback)}`) as DeadLetter
@@ -172,7 +172,7 @@ export function FailureClustersCard() {
       setRecovery({
         kind: 'error',
         signature: cluster.signature,
-        message: err instanceof Error ? err.message : (t('clusters.errorMembers') as string),
+        message: err instanceof Error ? err.message : (t('clusters.errorMembers')),
       })
     }
   }
@@ -189,7 +189,7 @@ export function FailureClustersCard() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' }) as string))
+        setError(err instanceof Error ? err.message : (t('clusters.unavailable', { detail: '' })))
         setLoading(false)
       })
     return () => { cancelled = true }
@@ -240,8 +240,8 @@ export function FailureClustersCard() {
           <div className="section-kicker">{t('clusters.heading')}</div>
           <EmptyState
             icon={<CheckCircle2 />}
-            kicker={t('emptyState.clusters.kicker') as string}
-            body={t('emptyState.clusters.body') as string}
+            kicker={t('emptyState.clusters.kicker')}
+            body={t('emptyState.clusters.body')}
             testId="clusters-empty"
           />
         </section>
@@ -295,11 +295,11 @@ export function FailureClustersCard() {
                 onClick={() => setExpanded((prev) => ({ ...prev, [cluster.signature]: !isOpen }))}
                 aria-expanded={isOpen}
                 aria-label={t('clusters.rowAria', {
-                  category: t(CATEGORY_KEYS[cluster.category] as never) as string,
+                  category: t(CATEGORY_KEYS[cluster.category] as never),
                   signature: cluster.signature,
                   occurrences: t('clusters.occurrences', { count: cluster.frequency }),
                   workflows: t('clusters.workflows', { count: cluster.affectedWorkflows.length }),
-                }) as string}
+                })}
               >
                 <span className="we-cluster-row__icon" aria-hidden="true">
                   {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -310,14 +310,14 @@ export function FailureClustersCard() {
                     <strong>{cluster.signature}</strong>
                   </span>
                   <span className="we-cluster-row__meta">
-                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never) as string}</span>
+                    <span className={`mode-pill we-cluster-pill--${cluster.category}`}>{t(CATEGORY_KEYS[cluster.category] as never)}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.occurrences', { count: cluster.frequency })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.workflows', { count: cluster.affectedWorkflows.length })}</span>
                     <span className="we-cluster-meta-sep">{t('clusters.lastSeen', { rel: lastSeenLabel })}</span>
                   </span>
                 </span>
-                <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner') as string}>
-                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never) as string}
+                <span className="we-cluster-row__owner" title={t('clusters.suggestedOwner')}>
+                  <Users size={12} aria-hidden="true" /> {t(OWNER_KEYS[cluster.suggestedOwner] as never)}
                 </span>
               </button>
 

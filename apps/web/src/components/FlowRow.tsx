@@ -86,7 +86,7 @@ export const FlowRow = memo(function FlowRow({
             checked={selectedIds.has(workflow.id)}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => { event.stopPropagation(); toggleSelected(workflow.id) }}
-            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
+            aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
             data-testid={`workflows-select-row-${workflow.id}`}
           />
         )}
@@ -107,8 +107,8 @@ export const FlowRow = memo(function FlowRow({
               setDropTarget(null)
             }}
             onClick={(event) => event.stopPropagation()}
-            title={t('workflowsDashboard.dragHandleTitle') as string}
-            aria-label={t('workflowsDashboard.dragHandleTitle') as string}
+            title={t('workflowsDashboard.dragHandleTitle')}
+            aria-label={t('workflowsDashboard.dragHandleTitle')}
             data-testid={`workflows-drag-${workflow.id}`}
           >
             <GripVertical size={14} aria-hidden="true" />
@@ -131,8 +131,8 @@ export const FlowRow = memo(function FlowRow({
                   <button
                     type="button"
                     className="we-list-row__tag-remove"
-                    aria-label={t('workflowsDashboard.removeTagAria', { tag }) as string}
-                    title={t('workflowsDashboard.removeTagAria', { tag }) as string}
+                    aria-label={t('workflowsDashboard.removeTagAria', { tag })}
+                    title={t('workflowsDashboard.removeTagAria', { tag })}
                     onClick={(event) => { event.stopPropagation(); void setRowTag(workflow.id, tag, 'remove') }}
                     data-testid={`workflows-row-tag-remove-${workflow.id}-${tag}`}
                   >
@@ -144,7 +144,7 @@ export const FlowRow = memo(function FlowRow({
                 <select
                   className="we-list-row__tag-add"
                   value=""
-                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name }) as string}
+                  aria-label={t('workflowsDashboard.addTagAria', { name: workflow.name })}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) => { event.stopPropagation(); if (event.target.value) void setRowTag(workflow.id, event.target.value, 'add') }}
                   data-testid={`workflows-row-tag-add-${workflow.id}`}
@@ -159,7 +159,7 @@ export const FlowRow = memo(function FlowRow({
           )}
           {workflow.folder && (
             <span className="we-list-row__folder">
-              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder }) as string}>
+              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
                 <Folder size={12} aria-hidden="true" /> {workflow.folder}
               </span>
             </span>
@@ -170,7 +170,7 @@ export const FlowRow = memo(function FlowRow({
             <span className="status-pill" data-status={workflow.lastRunStatus}>{formatStatusLabel(workflow.lastRunStatus)}</span>
           )}
           {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
+            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}>{workflow.runCount}</span>
           )}
           <WorkflowHealthBadge workflowId={workflow.id} showLabel={false} />
           {/* Keyboard / screen-reader equivalent of drag-to-folder: a native
@@ -181,7 +181,7 @@ export const FlowRow = memo(function FlowRow({
             <select
               className="we-list-row__folder-select"
               value={workflow.folder ?? ''}
-              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name }) as string}
+              aria-label={t('workflowsDashboard.moveToFolderAria', { name: workflow.name })}
               onClick={(event) => event.stopPropagation()}
               onChange={(event) => { event.stopPropagation(); void moveToFolder(workflow.id, event.target.value) }}
               data-testid={`workflows-move-folder-${workflow.id}`}
@@ -220,8 +220,8 @@ export const FlowRow = memo(function FlowRow({
               type="button"
               className="small-command danger we-list-row__delete"
               onClick={(event) => { event.stopPropagation(); setConfirmDeleteId(workflow.id) }}
-              title={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
-              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name }) as string}
+              title={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
+              aria-label={t('workflowsDashboard.deleteFlow', { name: workflow.name })}
               data-testid={`workflows-delete-${workflow.id}`}
             >
               <Trash2 size={14} aria-hidden="true" />

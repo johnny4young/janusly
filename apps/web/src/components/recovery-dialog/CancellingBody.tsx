@@ -64,7 +64,7 @@ export function CancellingBody({
   const { t } = useT()
   const [comment, setComment] = useState('')
   const selected = suggestion.suggestions[selectedIndex]
-  const approachLabel = selected ? approachLabelDisplay(selected.approachLabel) : (t('recoveryDialog.cancelling.thisApproach') as string)
+  const approachLabel = selected ? approachLabelDisplay(selected.approachLabel) : (t('recoveryDialog.cancelling.thisApproach'))
 
   return (
     <div className="we-recovery-cancelling">
@@ -72,7 +72,7 @@ export function CancellingBody({
         {t('recoveryDialog.cancelling.questionPrefix')} <strong>{approachLabel}</strong> {t('recoveryDialog.cancelling.questionSuffix')}{' '}
         <code>{dlq.nodeId}</code>{t('recoveryDialog.cancelling.questionTail')}
       </p>
-      <div className="we-recovery-cancelling__chips" role="group" aria-label={t('recoveryDialog.cancelling.chipsAriaLabel') as string}>
+      <div className="we-recovery-cancelling__chips" role="group" aria-label={t('recoveryDialog.cancelling.chipsAriaLabel')}>
         {CANCEL_REASON_CHIPS.map((chip) => (
           <button
             key={chip.id}
@@ -94,7 +94,7 @@ export function CancellingBody({
         maxLength={2000}
         onChange={(event) => setComment(event.target.value)}
         rows={3}
-        placeholder={t('recoveryDialog.cancelling.commentPlaceholder') as string}
+        placeholder={t('recoveryDialog.cancelling.commentPlaceholder')}
       />
       <div className="we-recovery-cancelling__actions">
         <button

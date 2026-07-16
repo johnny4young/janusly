@@ -142,28 +142,28 @@ export function UpstreamHealthPanel(): React.ReactElement {
       }
       if (editingId) {
         await api(`/upstream/sources/${editingId}`, { method: 'POST', body: JSON.stringify(body) })
-        addToast(t('upstreamHealth.toast.updated') as string, 'success')
+        addToast(t('upstreamHealth.toast.updated'), 'success')
       } else {
         await api('/upstream/sources', { method: 'POST', body: JSON.stringify(body) })
-        addToast(t('upstreamHealth.toast.created') as string, 'success')
+        addToast(t('upstreamHealth.toast.created'), 'success')
       }
       cancelForm()
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('upstreamHealth.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     } finally {
       setSubmitting(false)
     }
   }
 
   async function deleteSource(s: UpstreamHealthSource): Promise<void> {
-    if (!(await confirmDialog({ body: t('upstreamHealth.confirm.delete', { name: s.name }) as string, tone: 'danger' }))) return
+    if (!(await confirmDialog({ body: t('upstreamHealth.confirm.delete', { name: s.name }), tone: 'danger' }))) return
     try {
       await api(`/upstream/sources/${s.id}`, { method: 'DELETE' })
-      addToast(t('upstreamHealth.toast.deleted') as string, 'success')
+      addToast(t('upstreamHealth.toast.deleted'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('upstreamHealth.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     }
   }
 
@@ -171,10 +171,10 @@ export function UpstreamHealthPanel(): React.ReactElement {
     setCheckingId(s.id)
     try {
       await api(`/upstream/sources/${s.id}/check`, { method: 'POST', body: '{}' })
-      addToast(t('upstreamHealth.toast.checked') as string, 'success')
+      addToast(t('upstreamHealth.toast.checked'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('upstreamHealth.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('upstreamHealth.toast.error')), 'error')
     } finally {
       setCheckingId(null)
     }
@@ -206,7 +206,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               maxLength={80}
-              placeholder={t('upstreamHealth.form.placeholder.name') as string}
+              placeholder={t('upstreamHealth.form.placeholder.name')}
             />
           </label>
           <label>
@@ -229,7 +229,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
               maxLength={2048}
-              placeholder={t('upstreamHealth.form.placeholder.url') as string}
+              placeholder={t('upstreamHealth.form.placeholder.url')}
             />
           </label>
           {(form.kind === 'statuspage_io' || form.kind === 'atlassian_statuspage') && (
@@ -239,7 +239,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                 type="text"
                 value={form.expectedComponents}
                 onChange={(e) => setForm({ ...form, expectedComponents: e.target.value })}
-                placeholder={t('upstreamHealth.form.placeholder.expectedComponents') as string}
+                placeholder={t('upstreamHealth.form.placeholder.expectedComponents')}
               />
               <small className="we-field-hint">{t('upstreamHealth.form.hint.expectedComponents')}</small>
             </label>
@@ -280,12 +280,12 @@ export function UpstreamHealthPanel(): React.ReactElement {
       )}
 
       {loading ? (
-        <LoadingSkeleton rows={3} label={t('common.loading') as string} />
+        <LoadingSkeleton rows={3} label={t('common.loading')} />
       ) : sources.length === 0 ? (
         <EmptyState
           icon={<Activity size={20} aria-hidden />}
-          kicker={t('upstreamHealth.empty.title') as string}
-          body={t('upstreamHealth.empty.description') as string}
+          kicker={t('upstreamHealth.empty.title')}
+          body={t('upstreamHealth.empty.description')}
           testId="upstream-health-empty"
         />
       ) : (
@@ -314,7 +314,7 @@ export function UpstreamHealthPanel(): React.ReactElement {
                   <span className="we-muted">{t('upstreamHealth.neverChecked')}</span>
                 )}
                 {s.lastErrorReason && (
-                  <span className="we-chip we-chip--warn" title={t('upstreamHealth.failOpen') as string}>
+                  <span className="we-chip we-chip--warn" title={t('upstreamHealth.failOpen')}>
                     {t(`upstreamHealth.errorReason.${s.lastErrorReason}`)}
                   </span>
                 )}
@@ -323,8 +323,8 @@ export function UpstreamHealthPanel(): React.ReactElement {
                 <button
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
-                  title={t('upstreamHealth.action.checkNow') as string}
-                  aria-label={t('upstreamHealth.action.checkNow') as string}
+                  title={t('upstreamHealth.action.checkNow')}
+                  aria-label={t('upstreamHealth.action.checkNow')}
                   onClick={() => void checkNow(s)}
                   disabled={checkingId === s.id}
                 >
@@ -333,8 +333,8 @@ export function UpstreamHealthPanel(): React.ReactElement {
                 <button
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
-                  title={t('common.edit') as string}
-                  aria-label={t('common.edit') as string}
+                  title={t('common.edit')}
+                  aria-label={t('common.edit')}
                   onClick={() => startEdit(s)}
                 >
                   <Pencil size={14} aria-hidden />
@@ -342,8 +342,8 @@ export function UpstreamHealthPanel(): React.ReactElement {
                 <button
                   type="button"
                   className="we-btn we-btn--ghost we-btn--icon"
-                  title={t('common.delete') as string}
-                  aria-label={t('common.delete') as string}
+                  title={t('common.delete')}
+                  aria-label={t('common.delete')}
                   onClick={() => void deleteSource(s)}
                 >
                   <Trash2 size={14} aria-hidden />

@@ -47,17 +47,17 @@ export function ExpressionAssistant({
   const unresolved = findUnresolvedExpressionReferences(value, suggestions, mode)
   const parserError = parserResult && !parserResult.valid
     ? parserResult.code === 'unsupported_token'
-      ? t('expressionAssistant.unsupportedToken', { token: parserResult.token ?? '' }) as string
+      ? t('expressionAssistant.unsupportedToken', { token: parserResult.token ?? '' })
       : parserResult.code === 'empty_value'
-        ? t('expressionAssistant.emptyValue') as string
-        : t('expressionAssistant.invalidGrammar') as string
+        ? t('expressionAssistant.emptyValue')
+        : t('expressionAssistant.invalidGrammar')
     : null
   const error = parserError
     ? parserError
     : edgeInputsError
-      ? t('expressionAssistant.edgeInputsUnsupported') as string
+      ? t('expressionAssistant.edgeInputsUnsupported')
       : unresolved.length > 0
-        ? t('expressionAssistant.unresolved', { references: unresolved.join(', ') }) as string
+        ? t('expressionAssistant.unresolved', { references: unresolved.join(', ') })
       : null
   const statusId = `${id}-expression-status`
 

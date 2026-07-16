@@ -261,7 +261,7 @@ export function CommandPalette({
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never) as string)
+  const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never))
 
   const ordered = useMemo<Command[]>(() => {
     const byId = new Map(commands.map(cmd => [cmd.id, cmd]))
@@ -356,7 +356,7 @@ export function CommandPalette({
                 id={commandOptionId(idx)}
                 role="option"
                 aria-selected={idx === activeIndex}
-                title={cmd.hintKey ? (t(cmd.hintKey as never) as string) : labelFor(cmd)}
+                title={cmd.hintKey ? (t(cmd.hintKey as never)) : labelFor(cmd)}
                 className={idx === activeIndex ? 'we-cmdk-row we-cmdk-row--active' : 'we-cmdk-row'}
                 onMouseEnter={() => setActiveIndex(idx)}
                 onMouseDown={(event) => { event.preventDefault(); runCommand(cmd) }}

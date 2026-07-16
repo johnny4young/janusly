@@ -56,7 +56,7 @@ export function TrashPanel({
           className="we-list-row__select"
           checked={selectedIds.has(workflow.id)}
           onChange={() => toggleSelected(workflow.id)}
-          aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name }) as string}
+          aria-label={t('workflowsDashboard.selectRowAria', { name: workflow.name })}
           data-testid={`workflows-trash-select-${workflow.id}`}
         />
         <span className="we-list-row__avatar" aria-hidden="true">
@@ -66,13 +66,13 @@ export function TrashPanel({
           <strong>{workflow.name}</strong>
           <small className="mono" title={workflow.id}>
             {workflow.deletedAt
-              ? (t('workflowsDashboard.deletedAtLabel', { date: new Date(workflow.deletedAt).toLocaleString(getResolvedLocale()) }) as string)
+              ? (t('workflowsDashboard.deletedAtLabel', { date: new Date(workflow.deletedAt).toLocaleString(getResolvedLocale()) }))
               : workflow.id}
           </small>
         </div>
         <div className="we-list-row__meta">
           {typeof workflow.runCount === 'number' && (
-            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount }) as string}>{workflow.runCount}</span>
+            <span className="we-list-row__count" title={t('workflowsDashboard.runCountTitle', { count: workflow.runCount })}>{workflow.runCount}</span>
           )}
           {/* Retention countdown — only when the window is known (retentionDays
               non-null) and the row carries a tombstone date. A non-positive
@@ -82,8 +82,8 @@ export function TrashPanel({
             return (
               <span className="we-pill we-pill--ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
                 {daysLeft > 0
-                  ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }) as string)
-                  : (t('workflowsDashboard.expiresSoon') as string)}
+                  ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }))
+                  : (t('workflowsDashboard.expiresSoon'))}
               </span>
             )
           })()}

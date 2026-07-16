@@ -124,7 +124,7 @@ export function McpConnectionsPanel() {
         setConnections(Array.isArray(rows) ? rows : [])
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t('mcpConnections.errors.loadFailed') as string))
+        if (!cancelled) setError(err instanceof Error ? err.message : (t('mcpConnections.errors.loadFailed')))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -140,7 +140,7 @@ export function McpConnectionsPanel() {
       const tools = (data as { tools?: McpToolDescriptor[] })?.tools ?? []
       setToolsByConnection((prev) => ({ ...prev, [connection.id]: tools }))
     } catch (err) {
-      addToast(tApiError(err) || (t('mcpConnections.errors.loadToolsFailed') as string), 'error')
+      addToast(tApiError(err) || (t('mcpConnections.errors.loadToolsFailed')), 'error')
     }
   }
 
@@ -159,7 +159,7 @@ export function McpConnectionsPanel() {
     event.preventDefault()
     const alias = form.alias.trim().toLowerCase()
     if (!alias) {
-      setError(t('mcpConnections.errors.aliasRequired') as string)
+      setError(t('mcpConnections.errors.aliasRequired'))
       return
     }
     const envRefsParsed = parseEnvRefs(form.envRefsText)
@@ -189,15 +189,15 @@ export function McpConnectionsPanel() {
       const discovery = (response as { discovery?: { ok?: boolean; error?: string; tools?: number } })?.discovery
       if (discovery?.ok) {
         const count = discovery.tools ?? 0
-        addToast(t('mcpConnections.toasts.connectedDiscovered', { count }) as string, 'success')
+        addToast(t('mcpConnections.toasts.connectedDiscovered', { count }), 'success')
       } else {
-        const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason') as string)
-        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }) as string, 'warning')
+        const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason'))
+        addToast(t('mcpConnections.toasts.connectedNoDiscovery', { reason }), 'warning')
       }
       setForm(EMPTY_FORM)
       bumpPlatformVersion()
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t('mcpConnections.errors.createFailed') as string))
+      setError(err instanceof Error ? err.message : (t('mcpConnections.errors.createFailed')))
     } finally {
       setSaving(false)
     }
@@ -211,13 +211,13 @@ export function McpConnectionsPanel() {
       })
       addToast(
         nextEnabled
-          ? (t('mcpConnections.toasts.connectionEnabled') as string)
-          : (t('mcpConnections.toasts.connectionDisabled') as string),
+          ? (t('mcpConnections.toasts.connectionEnabled'))
+          : (t('mcpConnections.toasts.connectionDisabled')),
         'success',
       )
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('mcpConnections.errors.updateFailed') as string), 'error')
+      addToast(tApiError(err) || (t('mcpConnections.errors.updateFailed')), 'error')
     }
   }
 
@@ -229,26 +229,26 @@ export function McpConnectionsPanel() {
       })
       const discovery = (response as { discovery?: { ok?: boolean; error?: string } })?.discovery
       if (discovery?.ok) {
-        addToast(t('mcpConnections.toasts.rediscovered') as string, 'success')
+        addToast(t('mcpConnections.toasts.rediscovered'), 'success')
       } else {
-        const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason') as string)
-        addToast(t('mcpConnections.toasts.rediscoveryFailed', { reason }) as string, 'error')
+        const reason = discovery?.error ?? (t('mcpConnections.toasts.unknownReason'))
+        addToast(t('mcpConnections.toasts.rediscoveryFailed', { reason }), 'error')
       }
       bumpPlatformVersion()
       await loadToolsFor(connection)
     } catch (err) {
-      addToast(tApiError(err) || (t('mcpConnections.errors.rediscoverFailed') as string), 'error')
+      addToast(tApiError(err) || (t('mcpConnections.errors.rediscoverFailed')), 'error')
     }
   }
 
   const removeConnection = async (connection: ConnectionListEntry) => {
-    if (!(await confirmDialog({ body: t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }) as string, tone: 'danger' }))) return
+    if (!(await confirmDialog({ body: t('mcpConnections.actions.deleteConfirm', { alias: connection.alias }), tone: 'danger' }))) return
     try {
       await api(`/mcp/connections/${encodeURIComponent(connection.alias)}`, { method: 'DELETE' })
-      addToast(t('mcpConnections.toasts.deleted') as string, 'success')
+      addToast(t('mcpConnections.toasts.deleted'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('mcpConnections.errors.deleteFailed') as string), 'error')
+      addToast(tApiError(err) || (t('mcpConnections.errors.deleteFailed')), 'error')
     }
   }
 
@@ -262,7 +262,7 @@ export function McpConnectionsPanel() {
       await loadToolsFor(connection)
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('mcpConnections.errors.updateToolFailed') as string), 'error')
+      addToast(tApiError(err) || (t('mcpConnections.errors.updateToolFailed')), 'error')
     }
   }
 
@@ -304,7 +304,7 @@ export function McpConnectionsPanel() {
               className="text-field"
               value={form.alias}
               onChange={(event) => patchForm({ alias: event.target.value })}
-              placeholder={t('mcpConnections.form.aliasPlaceholder') as string}
+              placeholder={t('mcpConnections.form.aliasPlaceholder')}
               autoComplete="off"
             />
           </div>
@@ -330,7 +330,7 @@ export function McpConnectionsPanel() {
               className="text-field"
               value={form.command}
               onChange={(event) => patchForm({ command: event.target.value })}
-              placeholder={t('mcpConnections.form.commandPlaceholder') as string}
+              placeholder={t('mcpConnections.form.commandPlaceholder')}
             />
             <label className="field-label" htmlFor="mcp-args">{t('mcpConnections.form.args')}</label>
             <input
@@ -338,7 +338,7 @@ export function McpConnectionsPanel() {
               className="text-field"
               value={form.args}
               onChange={(event) => patchForm({ args: event.target.value })}
-              placeholder={t('mcpConnections.form.argsPlaceholder') as string}
+              placeholder={t('mcpConnections.form.argsPlaceholder')}
             />
           </>
         ) : (
@@ -349,7 +349,7 @@ export function McpConnectionsPanel() {
               className={`text-field${urlInvalid ? ' text-field--error' : ''}`}
               value={form.url}
               onChange={(event) => patchForm({ url: event.target.value })}
-              placeholder={t('mcpConnections.form.urlPlaceholder') as string}
+              placeholder={t('mcpConnections.form.urlPlaceholder')}
               aria-invalid={urlInvalid}
               aria-describedby={urlInvalid ? 'mcp-url-error' : undefined}
             />
@@ -367,7 +367,7 @@ export function McpConnectionsPanel() {
           rows={3}
           value={form.envRefsText}
           onChange={(event) => patchForm({ envRefsText: event.target.value })}
-          placeholder={t('mcpConnections.form.envRefsPlaceholder') as string}
+          placeholder={t('mcpConnections.form.envRefsPlaceholder')}
         />
         <button type="submit" className="command-button command-button-primary" disabled={!canSubmit}>
           <Plug size={15} aria-hidden="true" />
@@ -376,7 +376,7 @@ export function McpConnectionsPanel() {
       </form>
 
       {loading ? (
-        <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading') as string} />
+        <LoadingSkeleton rows={3} label={t('mcpConnections.list.loading')} />
       ) : connections.length === 0 ? (
         <p className="helper-text">{t('mcpConnections.list.empty')}</p>
       ) : (
@@ -420,13 +420,13 @@ export function McpConnectionsPanel() {
                   onClick={() => setEnabled(connection, !connection.enabled)}
                   aria-label={
                     connection.enabled
-                      ? (t('mcpConnections.actions.disableAria', { alias: connection.alias }) as string)
-                      : (t('mcpConnections.actions.enableAria', { alias: connection.alias }) as string)
+                      ? (t('mcpConnections.actions.disableAria', { alias: connection.alias }))
+                      : (t('mcpConnections.actions.enableAria', { alias: connection.alias }))
                   }
                   title={
                     connection.enabled
-                      ? (t('mcpConnections.actions.disableTitle') as string)
-                      : (t('mcpConnections.actions.enableTitle') as string)
+                      ? (t('mcpConnections.actions.disableTitle'))
+                      : (t('mcpConnections.actions.enableTitle'))
                   }
                 >
                   <Save size={14} aria-hidden="true" /> {connection.enabled ? t('mcpConnections.actions.disable') : t('mcpConnections.actions.enable')}
@@ -435,8 +435,8 @@ export function McpConnectionsPanel() {
                   type="button"
                   className="small-command"
                   onClick={() => rediscover(connection)}
-                  aria-label={t('mcpConnections.actions.rediscoverAria', { alias: connection.alias }) as string}
-                  title={t('mcpConnections.actions.rediscoverTitle') as string}
+                  aria-label={t('mcpConnections.actions.rediscoverAria', { alias: connection.alias })}
+                  title={t('mcpConnections.actions.rediscoverTitle')}
                 >
                   <RefreshCw size={14} aria-hidden="true" /> {t('mcpConnections.actions.rediscover')}
                 </button>
@@ -444,8 +444,8 @@ export function McpConnectionsPanel() {
                   type="button"
                   className="small-command danger"
                   onClick={() => removeConnection(connection)}
-                  aria-label={t('mcpConnections.actions.deleteAria', { alias: connection.alias }) as string}
-                  title={t('mcpConnections.actions.deleteTitle') as string}
+                  aria-label={t('mcpConnections.actions.deleteAria', { alias: connection.alias })}
+                  title={t('mcpConnections.actions.deleteTitle')}
                 >
                   <Trash2 size={14} aria-hidden="true" />
                 </button>
@@ -473,7 +473,7 @@ export function McpConnectionsPanel() {
                                 type="checkbox"
                                 checked={tool.enabled}
                                 onChange={(event) => setToolFlag(connection, tool, { enabled: event.target.checked })}
-                                aria-label={t('mcpConnections.tools.enabledAria', { name: tool.name }) as string}
+                                aria-label={t('mcpConnections.tools.enabledAria', { name: tool.name })}
                               />
                               <span>{t('mcpConnections.tools.enabledLabel')}</span>
                             </label>
@@ -482,7 +482,7 @@ export function McpConnectionsPanel() {
                                 type="checkbox"
                                 checked={tool.writeSide}
                                 onChange={(event) => setToolFlag(connection, tool, { writeSide: event.target.checked })}
-                                aria-label={t('mcpConnections.tools.writeSideAria', { name: tool.name }) as string}
+                                aria-label={t('mcpConnections.tools.writeSideAria', { name: tool.name })}
                               />
                               <span>{t('mcpConnections.tools.writeSideLabel')}</span>
                             </label>
@@ -491,7 +491,7 @@ export function McpConnectionsPanel() {
                                 type="checkbox"
                                 checked={tool.exposeToAi}
                                 onChange={(event) => setToolFlag(connection, tool, { exposeToAi: event.target.checked })}
-                                aria-label={t('mcpConnections.tools.exposeToAiAria', { name: tool.name }) as string}
+                                aria-label={t('mcpConnections.tools.exposeToAiAria', { name: tool.name })}
                               />
                               <span>{t('mcpConnections.tools.exposeToAiLabel')}</span>
                             </label>

@@ -273,7 +273,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-resolve', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
-      if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed') as string)
+      if (!isBulkResolveResult(result)) throw new Error(t('dlq.bulkResolveFailed'))
 
       if (result.resolved > 0) {
         await requestRecoveryAllClearIfQueueEmpty()
@@ -286,14 +286,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
         setBulkErrors(result.errors)
-        addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }) as string, 'error')
+        addToast(t('dlq.bulkResolvePartial', { resolved: result.resolved, failed: result.failed }), 'error')
         return
       }
 
-      addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }) as string, 'success')
+      addToast(t('dlq.bulkResolveSuccess', { count: result.resolved }), 'success')
       exitSelection()
     } catch (error) {
-      addToast(tApiError(error) || (t('dlq.bulkResolveFailed') as string), 'error')
+      addToast(tApiError(error) || (t('dlq.bulkResolveFailed')), 'error')
     }
   }
 
@@ -309,7 +309,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     setBulkErrors([])
     try {
       const result = await api('/dlq/bulk-replay', { method: 'POST', body: JSON.stringify({ deadLetterIds: ids }) })
-      if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed') as string)
+      if (!isBulkReplayResult(result)) throw new Error(t('dlq.bulkReplayFailed'))
 
       if (result.replayed > 0) {
         bumpPlatformVersion()
@@ -321,14 +321,14 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         const failedIds = result.errors.map((entry) => entry.deadLetterId).filter(Boolean)
         setSelectedIds(new Set(failedIds))
         setBulkErrors(result.errors)
-        addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }) as string, 'error')
+        addToast(t('dlq.bulkReplayPartial', { replayed: result.replayed, failed: result.failed }), 'error')
         return
       }
 
-      addToast(t('dlq.bulkReplaySuccess', { count: result.replayed }) as string, 'success')
+      addToast(t('dlq.bulkReplaySuccess', { count: result.replayed }), 'success')
       exitSelection()
     } catch (error) {
-      addToast(tApiError(error) || (t('dlq.bulkReplayFailed') as string), 'error')
+      addToast(tApiError(error) || (t('dlq.bulkReplayFailed')), 'error')
     }
   }
 
@@ -539,16 +539,16 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
     let copied = false
     try {
       copied = await copyText(buildRecoveryErrorSummary(item, {
-        workflow: t('dlq.copy.unknownWorkflow') as string,
-        nodeType: t('dlq.copy.unknownNodeType') as string,
-        error: t('dlq.copy.unknownError') as string,
-        timestamp: t('dlq.copy.unknownTimestamp') as string,
+        workflow: t('dlq.copy.unknownWorkflow'),
+        nodeType: t('dlq.copy.unknownNodeType'),
+        error: t('dlq.copy.unknownError'),
+        timestamp: t('dlq.copy.unknownTimestamp'),
       }))
     } catch {
       // A browser implementation can still throw outside the guarded APIs.
     }
     addToast(
-      copied ? (t('dlq.copy.success') as string) : (t('dlq.copy.failed') as string),
+      copied ? (t('dlq.copy.success')) : (t('dlq.copy.failed')),
       copied ? 'success' : 'error',
     )
   }
@@ -638,12 +638,12 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
       {dayFilter && (
         <div className="we-dlq-day-chip" data-testid="dlq-day-filter-chip">
-          <span>{t('dlq.dayFilter.label', { day: dayFilter }) as string}</span>
+          <span>{t('dlq.dayFilter.label', { day: dayFilter })}</span>
           <button
             type="button"
             className="we-dlq-day-chip__clear"
             onClick={clearDayFilter}
-            aria-label={t('dlq.dayFilter.clear') as string}
+            aria-label={t('dlq.dayFilter.clear')}
             data-testid="dlq-day-filter-clear"
           >
             <X size={12} aria-hidden="true" />
@@ -658,17 +658,17 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         className="text-field"
         value={searchInput}
         onChange={event => setSearchInput(event.target.value)}
-        placeholder={t('dlq.search.placeholder') as string}
+        placeholder={t('dlq.search.placeholder')}
         data-testid="dlq-search"
       />
 
       <label className="field-label" htmlFor="dlq-filter">{t('dlq.show')}</label>
       <select id="dlq-filter" className="text-field" value={status} onChange={event => setStatus(toStatusFilter(event.target.value))}>
-        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never) as string}</option>)}
+        {statuses.map(item => <option key={item} value={item}>{t(STATUS_FILTER_KEYS[item] as never)}</option>)}
       </select>
 
       <div className="field-label">{t('dlq.owner.label')}</div>
-      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria') as string}>
+      <div className="we-seg" role="group" aria-label={t('dlq.owner.aria')}>
         <button
           type="button"
           aria-pressed={ownerScope === 'all'}
@@ -697,7 +697,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       >
         <option value="all">{t('dlq.severity.all')}</option>
         {SEVERITIES.map(sev => (
-          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never) as string}</option>
+          <option key={sev} value={sev}>{t(`recoveryItems.severity.${sev}` as never)}</option>
         ))}
       </select>
 
@@ -710,7 +710,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
         data-testid="dlq-sort"
       >
         {SORT_KEYS.map(key => (
-          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never) as string}</option>
+          <option key={key} value={key}>{t(SORT_KEY_LABELS[key] as never)}</option>
         ))}
       </select>
 
@@ -808,7 +808,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
 
       <div className="panel-list">
         {recoveryFilterLoading && filtered.length === 0 && (
-          <LoadingSkeleton rows={4} label={t('common.loading') as string} />
+          <LoadingSkeleton rows={4} label={t('common.loading')} />
         )}
         {filtered.length === 0 && !recoveryFilterLoading && (
           <EmptyState
@@ -821,7 +821,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   : ownerScope === 'mine'
                     ? 'emptyState.dlq.mine.kicker'
                     : 'emptyState.dlq.kicker',
-            ) as string}
+            )}
             body={t(
               searchInput.trim() !== ''
                 ? 'emptyState.dlq.search.body'
@@ -830,7 +830,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   : ownerScope === 'mine'
                     ? 'emptyState.dlq.mine.body'
                     : 'emptyState.dlq.body',
-            ) as string}
+            )}
             testId={
               searchInput.trim() !== ''
                 ? 'dlq-empty-search'
@@ -888,7 +888,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                               disabled={isReplaying}
                               onClick={event => event.stopPropagation()}
                               onChange={event => { event.stopPropagation(); toggleSelect(item.id) }}
-                              aria-label={t('dlq.selectRowAria', { node: item.nodeId }) as string}
+                              aria-label={t('dlq.selectRowAria', { node: item.nodeId })}
                               data-testid={`dlq-select-row-${item.id}`}
                             />
                           </span>
@@ -908,7 +908,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                             <span
                               className="we-list-row__downtime"
                               data-severity={downtimeSeverity(item.createdAt, Date.now())}
-                              title={t('dlq.downtimeTitle') as string}
+                              title={t('dlq.downtimeTitle')}
                               data-testid={`dlq-downtime-${item.id}`}
                             >
                               {humanizeAge(item.createdAt, Date.now())}
@@ -1017,11 +1017,11 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                   await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(selected.runId)}`)
                   addToast(t('dlq.exportSuccess'), 'success')
                 } catch (err) {
-                  addToast(tApiError(err) || (t('dlq.exportFailed') as string), 'error')
+                  addToast(tApiError(err) || (t('dlq.exportFailed')), 'error')
                 }
               }}
               data-testid="dlq-export-run-explain"
-              aria-label={t('dlq.action.exportAria', { runId: selected.runId }) as string}
+              aria-label={t('dlq.action.exportAria', { runId: selected.runId })}
             >
               <Download size={12} aria-hidden="true" /> {t('dlq.action.export')}
             </button>
@@ -1050,16 +1050,16 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
                 <WorkflowDiffView
                   before={selectedFull.suspectVersion.previousDagJson}
                   after={selectedFull.suspectVersion.dagJson}
-                  beforeLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.previousVersion }) as string}
-                  afterLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.version }) as string}
+                  beforeLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.previousVersion })}
+                  afterLabel={t('dlq.suspectVersion.versionLabel', { version: selectedFull.suspectVersion.version })}
                 />
               )}
             </div>
           )}
 
-          <DetailBlock title={t('dlq.detail.error') as string} value={(selectedFull ?? selected).errorJson} />
-          <DetailBlock title={t('dlq.detail.node') as string} value={(selectedFull ?? selected).nodeJson ?? null} />
-          <DetailBlock title={t('dlq.detail.workflow') as string} value={(selectedFull ?? selected).workflowJson ?? null} />
+          <DetailBlock title={t('dlq.detail.error')} value={(selectedFull ?? selected).errorJson} />
+          <DetailBlock title={t('dlq.detail.node')} value={(selectedFull ?? selected).nodeJson ?? null} />
+          <DetailBlock title={t('dlq.detail.workflow')} value={(selectedFull ?? selected).workflowJson ?? null} />
         </section>
       )}
       </section>
@@ -1086,7 +1086,7 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
   const { t } = useT()
   // Default-open the error block. Compare against both locales' rendered
   // strings so the reset-to-en between tests doesn't break the UX.
-  const errorTitleEn = t('dlq.detail.error') as string
+  const errorTitleEn = t('dlq.detail.error')
   const [open, setOpen] = useState(title === errorTitleEn)
 
   return (

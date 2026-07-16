@@ -94,7 +94,7 @@ export function AuthPolicySettingsPanel() {
         setForm(next);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("authPolicy.errorLoad") as string));
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("authPolicy.errorLoad")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -107,17 +107,17 @@ export function AuthPolicySettingsPanel() {
   const validateForm = (): string | null => {
     const ttl = Number(form.sessionTtlSeconds);
     if (!Number.isFinite(ttl) || !Number.isInteger(ttl)) {
-      return t("authPolicy.errorTtlInteger") as string;
+      return t("authPolicy.errorTtlInteger");
     }
     if (ttl < SESSION_TTL_MIN || ttl > SESSION_TTL_MAX) {
-      return t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX }) as string;
+      return t("authPolicy.errorTtlRange", { min: SESSION_TTL_MIN, max: SESSION_TTL_MAX });
     }
     const resumeTtl = Number(form.humanFormResumeTtlSeconds);
     if (!Number.isFinite(resumeTtl) || !Number.isInteger(resumeTtl)) {
-      return t("authPolicy.errorResumeTtlInteger") as string;
+      return t("authPolicy.errorResumeTtlInteger");
     }
     if (resumeTtl < RESUME_TTL_MIN || resumeTtl > RESUME_TTL_MAX) {
-      return t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX }) as string;
+      return t("authPolicy.errorResumeTtlRange", { min: RESUME_TTL_MIN, max: RESUME_TTL_MAX });
     }
     // Lightweight domain-list validation: each entry shouldn't contain spaces
     // or `@`; the server normalizes case + trims further.
@@ -127,7 +127,7 @@ export function AuthPolicySettingsPanel() {
       .filter(Boolean);
     for (const domain of domains) {
       if (domain.includes("@") || domain.includes(" ")) {
-        return t("authPolicy.errorInvalidDomain", { domain }) as string;
+        return t("authPolicy.errorInvalidDomain", { domain });
       }
     }
     return null;
@@ -171,7 +171,7 @@ export function AuthPolicySettingsPanel() {
       addToast(t("authPolicy.toastSaved"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("authPolicy.errorSave") as string));
+      setError(err instanceof Error ? err.message : (t("authPolicy.errorSave")));
     } finally {
       setSaving(false);
     }
@@ -205,7 +205,7 @@ export function AuthPolicySettingsPanel() {
               <input
                 type="text"
                 className="we-field__input"
-                placeholder={t("authPolicy.allowedDomainsPlaceholder") as string}
+                placeholder={t("authPolicy.allowedDomainsPlaceholder")}
                 value={form.allowedEmailDomains}
                 onChange={(e) => setForm({ ...form, allowedEmailDomains: e.target.value })}
               />

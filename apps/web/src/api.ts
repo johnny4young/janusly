@@ -236,7 +236,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
   try {
     res = await fetch(`${API_URL}${wirePath}`, { ...options, headers })
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
   const rawPayload = await res.json().catch(() => ({}))
   const { payload, requestId: envelopeRequestId } = unwrapVersionedPayload(rawPayload, res.ok)
@@ -258,7 +258,7 @@ async function doApiFetch(path: string, options: RequestInit, requestScope: ApiR
         // Non-fatal — the throw below still surfaces the original 402.
       }
     }
-    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status }) as string
+    const message = typeof payload?.error === 'string' ? payload.error : t('api.error.requestFailed', { status: res.status })
     // Preserve the structured envelope on the thrown error so toast
     // call sites can translate via `tApiError(err)`. Plain string-message
     // consumers (`err.message`) keep working unchanged — the new fields
@@ -343,10 +343,10 @@ export async function openRunEventStream(
       signal: options.signal,
     })
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
   if (!res.ok || !res.body) {
-    throw new ApiError(t('api.error.requestFailed', { status: res.status }) as string, { statusCode: res.status })
+    throw new ApiError(t('api.error.requestFailed', { status: res.status }), { statusCode: res.status })
   }
   return res
 }
@@ -429,11 +429,11 @@ export async function downloadFromApi(
   try {
     res = await fetch(`${API_URL}${path}`, init)
   } catch {
-    throw new Error(t('api.error.offline') as string)
+    throw new Error(t('api.error.offline'))
   }
 
   if (!res.ok) {
-    let errorMessage = t('api.error.downloadFailed', { status: res.status }) as string
+    let errorMessage = t('api.error.downloadFailed', { status: res.status })
     try {
       const payload = await res.json()
       if (typeof payload?.error === 'string') errorMessage = payload.error

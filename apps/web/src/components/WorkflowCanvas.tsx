@@ -118,7 +118,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         ariaLabel: t(observing ? 'canvas.runNodeAria' : 'canvas.nodeAria', {
           label: node.data.label?.trim() || getNodeLabel(node.data.type),
           status: formatStatusLabel(node.data.status ?? 'pending'),
-        }) as string,
+        }),
       })),
     [nodes, observing, t],
   )
@@ -132,20 +132,20 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       ariaLabel: t('canvas.edgeAria', {
         source: nodeLabels.get(edge.source) ?? edge.source,
         target: nodeLabels.get(edge.target) ?? edge.target,
-      }) as string,
+      }),
     }))
   }, [edges, nodes, t])
   const ariaLabelConfig = useMemo<Partial<AriaLabelConfig>>(() => {
     if (!observing) return {}
-    const readOnlyInstructions = t('canvas.readOnly') as string
+    const readOnlyInstructions = t('canvas.readOnly')
     return {
       'node.a11yDescription.default': readOnlyInstructions,
       'node.a11yDescription.keyboardDisabled': readOnlyInstructions,
       'edge.a11yDescription.default': readOnlyInstructions,
-      'controls.ariaLabel': t('canvas.runMap') as string,
-      'controls.zoomIn.ariaLabel': t('canvas.a11y.zoomIn') as string,
-      'controls.zoomOut.ariaLabel': t('canvas.a11y.zoomOut') as string,
-      'controls.fitView.ariaLabel': t('canvas.a11y.fitView') as string,
+      'controls.ariaLabel': t('canvas.runMap'),
+      'controls.zoomIn.ariaLabel': t('canvas.a11y.zoomIn'),
+      'controls.zoomOut.ariaLabel': t('canvas.a11y.zoomOut'),
+      'controls.fitView.ariaLabel': t('canvas.a11y.fitView'),
     }
   }, [observing, t])
   // Confirm before a node is removed (Delete/Backspace or the toolbar) — a
@@ -156,7 +156,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
       if (!editing) return false
       if (nodesToDelete.length === 0) return true
       return confirmDialog({
-        body: t('canvas.deleteConfirm', { count: nodesToDelete.length }) as string,
+        body: t('canvas.deleteConfirm', { count: nodesToDelete.length }),
         tone: 'danger',
       })
     },
@@ -225,7 +225,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         </div>
       </div>
       {paletteNodeTypes && onAddNode && paletteNodeTypes.length > 0 && (
-        <div className="canvas-palette" role="toolbar" aria-label={t('canvas.palette') as string}>
+        <div className="canvas-palette" role="toolbar" aria-label={t('canvas.palette')}>
           {paletteNodeTypes.map((type) => (
             <button
               key={type}

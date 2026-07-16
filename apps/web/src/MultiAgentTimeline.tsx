@@ -186,9 +186,9 @@ export function MultiAgentTimeline({
       <div className="panel-card">
         <EmptyState
           icon={<Layers3 />}
-          kicker={t('multiAgent.empty') as string}
-          body={t('multiAgent.emptyHelper') as string}
-          cta={{ label: t('multiAgent.emptyCta') as string, onClick: () => setActiveTab('copilot') }}
+          kicker={t('multiAgent.empty')}
+          body={t('multiAgent.emptyHelper')}
+          cta={{ label: t('multiAgent.emptyCta'), onClick: () => setActiveTab('copilot') }}
           testId="multi-agent-empty"
         />
         <ul className="we-ghost-lanes" aria-hidden="true">
@@ -215,7 +215,7 @@ export function MultiAgentTimeline({
         <span className="mode-pill mode-pill-neutral">{t('multiAgent.eventCount', { count: items.length })}</span>
       </div>
 
-      <ul className="we-timeline-legend" aria-label={t('multiAgent.legend.label') as string}>
+      <ul className="we-timeline-legend" aria-label={t('multiAgent.legend.label')}>
         {LEGEND_TONES.map(tone => (
           <li key={tone} className="we-timeline-legend__item">
             <span className="we-timeline-legend__swatch" data-tone={tone} aria-hidden="true" />

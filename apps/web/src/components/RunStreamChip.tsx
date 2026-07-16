@@ -44,7 +44,7 @@ export function RunStreamChip() {
   if (!runId || streamTransport === 'idle') return null
 
   const isLive = streamTransport === 'sse'
-  const stateLabel = (isLive ? t('runStream.live') : t('runStream.polling')) as string
+  const stateLabel = isLive ? t('runStream.live') : t('runStream.polling')
   const age = humanizeAge(lastEventAt, nowMs)
   const ariaLabel = age ? `${t('runStream.label')}: ${stateLabel} · ${age}` : `${t('runStream.label')}: ${stateLabel}`
 

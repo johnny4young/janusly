@@ -57,7 +57,7 @@ export function RecoveryPassportCard({
         <div>
           <div className="section-kicker">{t('recoveryDialog.passport.kicker')}</div>
           <strong id="recovery-passport-title">
-            {t(`recoveryDialog.passport.verdict.${evaluation.verdict}` as never) as string}
+            {t(`recoveryDialog.passport.verdict.${evaluation.verdict}` as never)}
           </strong>
         </div>
       </header>
@@ -87,7 +87,7 @@ export function RecoveryPassportCard({
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.sandbox')}</dt>
-          <dd>{t(`recoveryDialog.passport.sandbox.${sandboxStatus}` as never) as string}</dd>
+          <dd>{t(`recoveryDialog.passport.sandbox.${sandboxStatus}` as never)}</dd>
         </div>
         <div>
           <dt>{t('recoveryDialog.passport.evidence')}</dt>
@@ -113,9 +113,9 @@ export function RecoveryPassportCard({
         </div>
       </dl>
 
-      <ul className="we-recovery-passport__reasons" aria-label={t('recoveryDialog.passport.reasonsAria') as string}>
+      <ul className="we-recovery-passport__reasons" aria-label={t('recoveryDialog.passport.reasonsAria')}>
         {evaluation.reasons.map((reason) => (
-          <li key={reason}>{t(`recoveryDialog.passport.reason.${reason}` as never) as string}</li>
+          <li key={reason}>{t(`recoveryDialog.passport.reason.${reason}` as never)}</li>
         ))}
       </ul>
     </section>

@@ -95,12 +95,12 @@ export function RecentAlertsCard(): React.ReactElement {
         </h3>
       </div>
       <div className="we-recent-alerts__list" data-testid="recent-alerts-list">
-        {loading && <LoadingSkeleton rows={3} label={t('common.loading') as string} />}
+        {loading && <LoadingSkeleton rows={3} label={t('common.loading')} />}
         {!loading && items.length === 0 && (
           <EmptyState
             icon={<BellOff />}
-            kicker={t('emptyState.alerts.kicker') as string}
-            body={t('emptyState.alerts.body') as string}
+            kicker={t('emptyState.alerts.kicker')}
+            body={t('emptyState.alerts.body')}
             testId="recent-alerts-empty"
           />
         )}

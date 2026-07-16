@@ -173,7 +173,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
       })) as OnboardingState
       setOnboarding(next)
     } catch (err) {
-      addToast(tApiError(err) || (t('userMenu.item.resumeOnboardingFailed') as string), 'error')
+      addToast(tApiError(err) || (t('userMenu.item.resumeOnboardingFailed')), 'error')
     }
   }
 
@@ -203,7 +203,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
               <strong>{name}</strong>
               <span>{email}</span>
             </div>
-            <span className="user-menu__id-role" aria-label={t(`userMenu.role.${role}` as never) as string}>
+            <span className="user-menu__id-role" aria-label={t(`userMenu.role.${role}` as never)}>
               {t(`userMenu.role.${role}` as never)}
             </span>
           </div>
@@ -298,7 +298,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
             <span className="user-menu__section-label">{t('userMenu.appearance.heading')}</span>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label" title={t('userMenu.appearance.themeHint') as string}>{t('userMenu.appearance.themeLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.themeHint')}>{t('userMenu.appearance.themeLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.themeLabel')}>
               <button
                 type="button"
@@ -333,7 +333,7 @@ export function UserMenu({ aiHealth = null, budgetGuardOn = null, docsUrl = null
             </div>
           </div>
           <div className="user-menu__row">
-            <span className="user-menu__row-label" title={t('userMenu.appearance.densityHint') as string}>{t('userMenu.appearance.densityLabel')}</span>
+            <span className="user-menu__row-label" title={t('userMenu.appearance.densityHint')}>{t('userMenu.appearance.densityLabel')}</span>
             <div className="user-menu__seg" role="radiogroup" aria-label={t('userMenu.appearance.densityLabel')}>
               <button
                 type="button"

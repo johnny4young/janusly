@@ -58,11 +58,11 @@ export function ValidationFailedBody({
       ) : null}
       {category ? (
         <p className="helper-text we-recovery-error-summary">
-          {t(`recoveryDialog.errorSummary.${category}` as never) as string}
+          {t(`recoveryDialog.errorSummary.${category}` as never)}
         </p>
       ) : null}
       {message ? (
-        <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria') as string}>
+        <pre className="we-recovery-error-detail" aria-label={t('recoveryDialog.validationFailed.errorDetailAria')}>
           {message}
         </pre>
       ) : null}
@@ -77,8 +77,8 @@ export function ValidationFailedBody({
       <WorkflowDiffView
         before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
         after={selected.workflow}
-        beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
-        afterLabel={t('recoveryDialog.validationFailed.suggestedRejected') as string}
+        beforeLabel={t('recoveryDialog.review.beforeLabel')}
+        afterLabel={t('recoveryDialog.validationFailed.suggestedRejected')}
         aiPatchRationale={selected.rationale}
       />
     </>

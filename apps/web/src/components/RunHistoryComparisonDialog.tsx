@@ -117,7 +117,7 @@ export function RunHistoryComparisonDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label={t('runHistoryComparison.close') as string}
+            aria-label={t('runHistoryComparison.close')}
           >
             <X size={16} aria-hidden="true" />
           </button>

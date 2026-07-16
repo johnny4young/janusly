@@ -54,11 +54,8 @@ import { expiryStatus } from '../credential-expiry'
 import { useWorkflowStore } from '../store'
 import { tTemplateCategory, tTemplateDescription, tTemplateName, tToolDescription, useT } from '../i18n'
 
-export type RightPanelProps = {
-  tab: ActiveTab
-  events: RunEvent[]
-  eventsHasMore?: boolean
-  onLoadOlderEvents?: () => void | Promise<void>
+export type RightPanelAuthoring = {
+  aiHealth: AiHealth | null
   runNodes: RunNode[]
   selectedNode: WorkflowGraphNode | null
   selectedEdge: WorkflowGraphEdge | null
@@ -68,41 +65,19 @@ export type RightPanelProps = {
   readinessResult: ReadinessResult | null
   aiReviewIssues: AiReviewIssue[]
   tools: ToolSchema[]
-  templates: Template[]
-  solutionPacks: SolutionPackPublic[]
-  credentials: Credential[]
-  runs: RunSummary[]
   workflows: SavedWorkflow[]
-  activeRunId?: string | null
-  usage: Record<string, number>
-  aiHealth: AiHealth | null
   currentWorkflowId: string
   currentWorkflowName: string
   /** Declared workflow input shape; rendered in the no-selection inspector card. */
   currentWorkflowInputs?: WorkflowDefinition['inputs']
   /** Declared workflow output projection; rendered alongside `currentWorkflowInputs`. */
   currentWorkflowOutputs?: WorkflowDefinition['outputs']
-  onOpenWorkflow: (id: string) => void
-  onUseTemplate: (workflow: WorkflowDefinition) => void
-  onInstallPlugin: (pluginId: string) => void
-  onInstallPack: (packId: string) => void
-  onSampleRunPack: (packId: string) => void
-  onInjectPackFailure: (packId: string) => void
-  onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
-  onOpenRun: (id: string) => void
-  onRefreshPlatform: () => void
   onUpdateNodeConfig: (config: Record<string, unknown>) => void
   onUpdateNodeType: (type: string) => void
   onUpdateEdgeCondition: (edgeId: string, condition: string) => void
   onValidateWorkflow(): Promise<boolean>
   /** Opens the "Insert snippet…" dialog (also bound to a Cmd+K palette entry). */
   onInsertSnippet: () => void
-  onApproveNode: (nodeId: string) => void
-  onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) => Promise<string[] | undefined> | string[] | undefined
-  onReplayNode: (nodeId: string) => void
-  onCancelActiveRun?: () => void | Promise<void>
-  onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
-  onResolveDeadLetter: (id: string) => void
   /** Resolves `null` when the author declined the unsaved-canvas guard. */
   onGenerateWorkflow: (prompt: string) => Promise<{
     mode: AiMode
@@ -117,7 +92,53 @@ export type RightPanelProps = {
     model?: string
     aiError?: string
   }>
+}
+
+export type RightPanelCatalog = {
+  tools: ToolSchema[]
+  templates: Template[]
+  solutionPacks: SolutionPackPublic[]
+  credentials: Credential[]
+  workflows: SavedWorkflow[]
+  onOpenWorkflow: (id: string) => void
+  onUseTemplate: (workflow: WorkflowDefinition) => void
+  onInstallPlugin: (pluginId: string) => void
+  onInstallPack: (packId: string) => void
+  onSampleRunPack: (packId: string) => void
+  onInjectPackFailure: (packId: string) => void
+  onCreateCredential: (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => void
+}
+
+export type RightPanelExecution = {
+  events: RunEvent[]
+  eventsHasMore?: boolean
+  onLoadOlderEvents?: () => void | Promise<void>
+  runNodes: RunNode[]
+  runs: RunSummary[]
+  workflows: SavedWorkflow[]
+  activeRunId?: string | null
+  usage: Record<string, number>
+  onOpenRun: (id: string) => void
+  onRefreshPlatform: () => void
+  onApproveNode: (nodeId: string) => void
+  onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
+    Promise<string[] | undefined> | string[] | undefined
+  onReplayNode: (nodeId: string) => void
+  onCancelActiveRun?: () => void | Promise<void>
+  onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
+  onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
+}
+
+export type RightPanelNavigation = {
   onOpenTab: (tab: ActiveTab) => void
+}
+
+export type RightPanelProps = {
+  tab: ActiveTab
+  authoring: RightPanelAuthoring
+  catalog: RightPanelCatalog
+  execution: RightPanelExecution
+  navigation: RightPanelNavigation
 }
 
 /** Tab-aware right-side panel — wraps the tab→panel router in a single
@@ -139,27 +160,28 @@ export function RightPanel(props: RightPanelProps) {
  *  estate); this dispatcher never receives it. */
 function RightPanelRouter(props: RightPanelProps) {
   const { t } = useT()
+  const { authoring, catalog, execution, navigation } = props
   const loadRunUsage = useCallback((runId: string, signal: AbortSignal) =>
     api(`/run/usage?runId=${encodeURIComponent(runId)}`, { signal }), [])
   if (props.tab === 'copilot') return (
     <AiCopilotPanel
-      health={props.aiHealth}
-      workflowName={props.currentWorkflowName}
-      onGenerateWorkflow={props.onGenerateWorkflow}
-      onExplainWorkflow={props.onExplainWorkflow}
-      onReviewWorkflow={props.onReviewWorkflow}
-      onOpenRuns={() => props.onOpenTab('runs')}
-      onOpenTemplates={() => props.onOpenTab('templates')}
+      health={authoring.aiHealth}
+      workflowName={authoring.currentWorkflowName}
+      onGenerateWorkflow={authoring.onGenerateWorkflow}
+      onExplainWorkflow={authoring.onExplainWorkflow}
+      onReviewWorkflow={authoring.onReviewWorkflow}
+      onOpenRuns={() => navigation.onOpenTab('runs')}
+      onOpenTemplates={() => navigation.onOpenTab('templates')}
     />
   )
   if (props.tab === 'multiAgent') return (
-    <PanelChrome title={t('rightPanel.multiAgent.title') as string} description={t('rightPanel.multiAgent.description') as string} icon={<Layers3 size={18} />}>
-      <MultiAgentTimeline events={props.events} eventsHasMore={props.eventsHasMore} onLoadOlderEvents={props.onLoadOlderEvents} />
+    <PanelChrome title={t('rightPanel.multiAgent.title')} description={t('rightPanel.multiAgent.description')} icon={<Layers3 size={18} />}>
+      <MultiAgentTimeline events={execution.events} eventsHasMore={execution.eventsHasMore} onLoadOlderEvents={execution.onLoadOlderEvents} />
     </PanelChrome>
   )
   if (props.tab === 'workflows') return (
-    <PanelChrome title={t('rightPanel.workflows.title') as string} description={t('rightPanel.workflows.description') as string} icon={<Database size={18} />}>
-      <WorkflowsDashboard onOpen={props.onOpenWorkflow} />
+    <PanelChrome title={t('rightPanel.workflows.title')} description={t('rightPanel.workflows.description')} icon={<Database size={18} />}>
+      <WorkflowsDashboard onOpen={catalog.onOpenWorkflow} />
     </PanelChrome>
   )
   if (props.tab === 'operations') return <OperationsPage />
@@ -169,36 +191,36 @@ function RightPanelRouter(props: RightPanelProps) {
     </PanelChrome>
   )
   if (props.tab === 'members') return (
-    <PanelChrome title={t('rightPanel.members.title') as string} description={t('rightPanel.members.description') as string} icon={<Users size={18} />}>
+    <PanelChrome title={t('rightPanel.members.title')} description={t('rightPanel.members.description')} icon={<Users size={18} />}>
       <MembersPanel />
     </PanelChrome>
   )
   if (props.tab === 'inspector') return (
-    <PanelChrome title={t('rightPanel.inspector.title') as string} description={t('rightPanel.inspector.description') as string} icon={<GitBranch size={18} />}>
+    <PanelChrome title={t('rightPanel.inspector.title')} description={t('rightPanel.inspector.description')} icon={<GitBranch size={18} />}>
       <AuthoringProblemsPanel
-        validationIssues={props.validationIssues}
-        readiness={props.readinessResult}
-        aiReviewIssues={props.aiReviewIssues}
-        workflowEdges={props.workflowEdges}
-        onValidate={props.onValidateWorkflow}
+        validationIssues={authoring.validationIssues}
+        readiness={authoring.readinessResult}
+        aiReviewIssues={authoring.aiReviewIssues}
+        workflowEdges={authoring.workflowEdges}
+        onValidate={authoring.onValidateWorkflow}
       />
       <InspectorPanel
-        selectedNode={props.selectedNode}
-        selectedEdge={props.selectedEdge}
-        runNodes={props.runNodes}
-        validationIssues={props.validationIssues}
-        tools={props.tools}
-        workflows={props.workflows}
-        workflowNodes={props.workflowNodes}
-        workflowEdges={props.workflowEdges}
-        currentWorkflowId={props.currentWorkflowId}
-        currentWorkflowName={props.currentWorkflowName}
-        currentWorkflowInputs={props.currentWorkflowInputs}
-        currentWorkflowOutputs={props.currentWorkflowOutputs}
-        onUpdateNodeConfig={props.onUpdateNodeConfig}
-        onUpdateNodeType={props.onUpdateNodeType}
-        onUpdateEdgeCondition={props.onUpdateEdgeCondition}
-        onInsertSnippet={props.onInsertSnippet}
+        selectedNode={authoring.selectedNode}
+        selectedEdge={authoring.selectedEdge}
+        runNodes={authoring.runNodes}
+        validationIssues={authoring.validationIssues}
+        tools={authoring.tools}
+        workflows={authoring.workflows}
+        workflowNodes={authoring.workflowNodes}
+        workflowEdges={authoring.workflowEdges}
+        currentWorkflowId={authoring.currentWorkflowId}
+        currentWorkflowName={authoring.currentWorkflowName}
+        currentWorkflowInputs={authoring.currentWorkflowInputs}
+        currentWorkflowOutputs={authoring.currentWorkflowOutputs}
+        onUpdateNodeConfig={authoring.onUpdateNodeConfig}
+        onUpdateNodeType={authoring.onUpdateNodeType}
+        onUpdateEdgeCondition={authoring.onUpdateEdgeCondition}
+        onInsertSnippet={authoring.onInsertSnippet}
       />
       {/* Auxiliary inspector panels are lazy — an inner <Suspense> (below the
           eager InspectorPanel) keeps the node config instant while these load on
@@ -213,53 +235,53 @@ function RightPanelRouter(props: RightPanelProps) {
       </Suspense>
     </PanelChrome>
   )
-  if (props.tab === 'templates') return <TemplatesPanel templates={props.templates} onUseTemplate={props.onUseTemplate} />
+  if (props.tab === 'templates') return <TemplatesPanel templates={catalog.templates} onUseTemplate={catalog.onUseTemplate} />
   if (props.tab === 'packs') return (
     <SolutionPacksPanel
-      packs={props.solutionPacks}
-      credentials={props.credentials}
-      onInstall={props.onInstallPack}
-      onSampleRun={props.onSampleRunPack}
-      onInjectFailure={props.onInjectPackFailure}
+      packs={catalog.solutionPacks}
+      credentials={catalog.credentials}
+      onInstall={catalog.onInstallPack}
+      onSampleRun={catalog.onSampleRunPack}
+      onInjectFailure={catalog.onInjectPackFailure}
     />
   )
-  if (props.tab === 'marketplace') return <ToolsPanel tools={props.tools} onInstallPlugin={props.onInstallPlugin} />
-  if (props.tab === 'credentials') return <CredentialsPanel credentials={props.credentials} onCreateCredential={props.onCreateCredential} />
+  if (props.tab === 'marketplace') return <ToolsPanel tools={catalog.tools} onInstallPlugin={catalog.onInstallPlugin} />
+  if (props.tab === 'credentials') return <CredentialsPanel credentials={catalog.credentials} onCreateCredential={catalog.onCreateCredential} />
   if (props.tab === 'runs') return (
     <RunsPanel
-      runs={props.runs}
-      workflows={props.workflows}
-      usage={props.usage}
-      runNodes={props.runNodes}
-      runEvents={props.events}
-      activeRunId={props.activeRunId}
-      onOpenRun={props.onOpenRun}
-      onRefreshPlatform={props.onRefreshPlatform}
-      onApproveNode={props.onApproveNode}
-      onSubmitHumanForm={props.onSubmitHumanForm}
-      onReplayNode={props.onReplayNode}
-      onCancelActiveRun={props.onCancelActiveRun}
-      onReplayDeadLetter={props.onReplayDeadLetter}
-      onResolveDeadLetter={props.onResolveDeadLetter}
+      runs={execution.runs}
+      workflows={execution.workflows}
+      usage={execution.usage}
+      runNodes={execution.runNodes}
+      runEvents={execution.events}
+      activeRunId={execution.activeRunId}
+      onOpenRun={execution.onOpenRun}
+      onRefreshPlatform={execution.onRefreshPlatform}
+      onApproveNode={execution.onApproveNode}
+      onSubmitHumanForm={execution.onSubmitHumanForm}
+      onReplayNode={execution.onReplayNode}
+      onCancelActiveRun={execution.onCancelActiveRun}
+      onReplayDeadLetter={execution.onReplayDeadLetter}
+      onResolveDeadLetter={execution.onResolveDeadLetter}
     />
   )
   return (
-    <PanelChrome title={t('rightPanel.reasoning.title') as string} description={t('rightPanel.reasoning.description') as string} icon={<Activity size={18} />}>
+    <PanelChrome title={t('rightPanel.reasoning.title')} description={t('rightPanel.reasoning.description')} icon={<Activity size={18} />}>
       <ReasoningPanel
-        events={props.events}
-        eventsHasMore={props.eventsHasMore}
-        onLoadOlderEvents={props.onLoadOlderEvents}
-        activeRunId={props.activeRunId}
+        events={execution.events}
+        eventsHasMore={execution.eventsHasMore}
+        onLoadOlderEvents={execution.onLoadOlderEvents}
+        activeRunId={execution.activeRunId}
         onLoadRunUsage={loadRunUsage}
-        onReplayDecision={props.activeRunId
-          ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(props.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
+        onReplayDecision={execution.activeRunId
+          ? (eventId, nodeId, signal) => api(`/causal?runId=${encodeURIComponent(execution.activeRunId!)}&eventId=${encodeURIComponent(eventId)}&nodeId=${encodeURIComponent(nodeId)}`, { signal })
           : undefined}
       />
     </PanelChrome>
   )
 }
 
-export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProps, 'templates' | 'onUseTemplate'>) {
+export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelCatalog, 'templates' | 'onUseTemplate'>) {
   const { t, i18n } = useT()
   const setActiveTab = useWorkflowStore(state => state.setActiveTab)
   const [query, setQuery] = useState('')
@@ -275,26 +297,26 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProp
   }, [templates, query, i18n.language])
 
   return (
-    <PanelChrome title={t('rightPanel.templates.title') as string} description={t('rightPanel.templates.description') as string} icon={<Workflow size={18} />}>
+    <PanelChrome title={t('rightPanel.templates.title')} description={t('rightPanel.templates.description')} icon={<Workflow size={18} />}>
       {templates.length === 0 ? (
         <div className="panel-list">
           <EmptyView
             icon={<Workflow size={22} />}
-            title={t('rightPanel.templates.empty.title') as string}
-            body={t('rightPanel.templates.empty.body') as string}
-            cta={{ label: t('rightPanel.templates.empty.cta') as string, onClick: () => setActiveTab('copilot') }}
+            title={t('rightPanel.templates.empty.title')}
+            body={t('rightPanel.templates.empty.body')}
+            cta={{ label: t('rightPanel.templates.empty.cta'), onClick: () => setActiveTab('copilot') }}
           />
         </div>
       ) : (
         <>
-          <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder') as string} />
+          <PanelSearch value={query} onChange={setQuery} placeholder={t('rightPanel.templates.searchPlaceholder')} />
           {filtered.length === 0 ? (
             <div className="panel-list">
               <EmptyView
                 icon={<Search size={22} />}
-                title={t('rightPanel.templates.noMatches.title') as string}
-                body={t('rightPanel.templates.noMatches.body') as string}
-                cta={{ label: t('common.clearFilter') as string, onClick: () => setQuery('') }}
+                title={t('rightPanel.templates.noMatches.title')}
+                body={t('rightPanel.templates.noMatches.body')}
+                cta={{ label: t('common.clearFilter'), onClick: () => setQuery('') }}
               />
             </div>
           ) : (
@@ -318,12 +340,12 @@ export function TemplatesPanel({ templates, onUseTemplate }: Pick<RightPanelProp
   )
 }
 
-function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelProps, 'tools' | 'onInstallPlugin'>) {
+function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' | 'onInstallPlugin'>) {
   const { t } = useT()
   return (
-    <PanelChrome title={t('rightPanel.tools.title') as string} description={t('rightPanel.tools.description') as string} icon={<Boxes size={18} />}>
+    <PanelChrome title={t('rightPanel.tools.title')} description={t('rightPanel.tools.description')} icon={<Boxes size={18} />}>
       <div className="panel-list">
-        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title={t('rightPanel.tools.empty.title') as string} body={t('rightPanel.tools.empty.body') as string} />}
+        {tools.length === 0 && <EmptyView icon={<Plug size={22} />} title={t('rightPanel.tools.empty.title')} body={t('rightPanel.tools.empty.body')} />}
         {tools.map(tool => (
           <div key={tool.name} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
@@ -359,7 +381,7 @@ const CREDENTIAL_ENV_VAR_NAME = /^[A-Z][A-Z0-9_]*$/
  *  server, but the select keeps operators on the known set. */
 const CREDENTIAL_KINDS = ['generic', 'github_token', 'slack_webhook', 'webhook_secret', 'postgres'] as const
 
-function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelProps, 'credentials' | 'onCreateCredential'>) {
+function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCatalog, 'credentials' | 'onCreateCredential'>) {
   const { t } = useT()
   const platformVersion = useWorkflowStore(state => state.platformVersion)
   const [name, setName] = useState('')
@@ -399,7 +421,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
   const canAdd = name.trim().length > 0 && CREDENTIAL_ENV_VAR_NAME.test(trimmedRef)
 
   return (
-    <PanelChrome title={t('rightPanel.credentials.title') as string} description={t('rightPanel.credentials.description') as string} icon={<KeyRound size={18} />}>
+    <PanelChrome title={t('rightPanel.credentials.title')} description={t('rightPanel.credentials.description')} icon={<KeyRound size={18} />}>
       <section className="panel-card connection-form">
         <div className="split-row">
           <div>
@@ -421,7 +443,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
             className={`text-field${refInvalid ? ' text-field--error' : ''}`}
             value={secretRef}
             onChange={event => setSecretRef(event.target.value)}
-            placeholder={t('rightPanel.credentials.envPlaceholder') as string}
+            placeholder={t('rightPanel.credentials.envPlaceholder')}
             aria-invalid={refInvalid}
             aria-describedby={refInvalid ? 'credential-secret-error' : undefined}
           />
@@ -462,7 +484,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
         </div>
       </section>
       <div className="panel-list">
-        {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title={t('rightPanel.credentials.empty.title') as string} body={t('rightPanel.credentials.empty.body') as string} />}
+        {credentials.length === 0 && <EmptyView icon={<ShieldCheck size={22} />} title={t('rightPanel.credentials.empty.title')} body={t('rightPanel.credentials.empty.body')} />}
         {credentials.map(credential => {
           const health = healthByName.get(credential.name)
           const linked = health?.secretRefPresent === true
@@ -478,7 +500,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelPr
                     resolves (neutral = status not yet known). */}
                 <span
                   className={`we-secret-pill we-secret-pill--${health ? (linked ? 'healthy' : 'unhealthy') : 'neutral'}`}
-                  title={t('rightPanel.credentials.secretRefHidden') as string}
+                  title={t('rightPanel.credentials.secretRefHidden')}
                 >
                   {health
                     ? (linked ? t('rightPanel.credentials.status.linked') : t('rightPanel.credentials.status.missing'))

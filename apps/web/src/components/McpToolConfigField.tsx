@@ -129,7 +129,7 @@ export function McpToolConfigField({ scope, config, onPatch }: { scope: string; 
           <p className="helper-text">{t('rightPanel.mcpInspector.noEnabledTools')}</p>
         )}
       </div>
-      <JsonConfigField scope={scope} label={t('rightPanel.mcpInspector.toolInput') as string} value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
+      <JsonConfigField scope={scope} label={t('rightPanel.mcpInspector.toolInput')} value={asJsonObject(config.input)} onChange={(value) => onPatch({ input: value })} />
     </section>
   )
 }

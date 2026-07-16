@@ -80,13 +80,13 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
       })) as PreviewResponse
       if (!aliveRef.current) return
       if (!res.updatedAt) {
-        setStep({ kind: 'error', message: t('credentialRotation.error.generic') as string })
+        setStep({ kind: 'error', message: t('credentialRotation.error.generic') })
         return
       }
       setStep({ kind: 'preview', affected: res.affected ?? [], ifMatch: res.updatedAt })
     } catch (error) {
       if (!aliveRef.current) return
-      setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic') as string) })
+      setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic')) })
     }
   }, [credentialName, t])
 
@@ -117,11 +117,11 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
       })) as { affectedCount?: number }
       if (!aliveRef.current) return
       bumpPlatformVersion()
-      addToast(t('credentialRotation.toast.success', { name: credentialName }) as string, 'success')
+      addToast(t('credentialRotation.toast.success', { name: credentialName }), 'success')
       setStep({ kind: 'done', count: res.affectedCount ?? affected.length })
     } catch (error) {
       if (!aliveRef.current) return
-      setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic') as string) })
+      setStep({ kind: 'error', message: tApiError(error) || (t('credentialRotation.error.generic')) })
     }
   }
 
@@ -153,7 +153,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label={t('common.close') as string}
+            aria-label={t('common.close')}
             disabled={step.kind === 'rotating'}
           >
             <X size={16} aria-hidden="true" />
@@ -194,7 +194,7 @@ export function CredentialRotateModal({ credentialName, onClose }: CredentialRot
                 className="text-field"
                 value={newSecretRef}
                 onChange={(event) => setNewSecretRef(event.target.value)}
-                placeholder={t('credentialRotation.field.newSecretRefPlaceholder') as string}
+                placeholder={t('credentialRotation.field.newSecretRefPlaceholder')}
                 disabled={step.kind === 'rotating'}
                 data-testid="credential-rotate-newref"
               />

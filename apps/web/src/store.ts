@@ -355,7 +355,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   authReady: false,
 
   currentWorkflowId: 'ui-test',
-  currentWorkflowName: t('workflow.sampleName') as string,
+  currentWorkflowName: t('workflow.sampleName'),
   currentWorkflowSaved: false,
   workflowDirty: false,
   workflowRevision: 0,
@@ -455,7 +455,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const graph = workflowToGraph(workflow)
     set((state) => ({
       currentWorkflowId: workflow.id ?? 'ui-test',
-      currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName') as string),
+      currentWorkflowName: workflow.name ?? workflow.id ?? (t('workflow.defaultName')),
       currentWorkflowSaved: saved,
       workflowDirty: dirty,
       currentWorkflowInputs: workflow.inputs,
@@ -490,7 +490,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
     const id = `workflow_${crypto.randomUUID().slice(0, 8)}`
     set((state) => ({
       currentWorkflowId: id,
-      currentWorkflowName: t('workflow.defaultName') as string,
+      currentWorkflowName: t('workflow.defaultName'),
       currentWorkflowSaved: false,
       workflowDirty: false,
       currentWorkflowInputs: undefined,

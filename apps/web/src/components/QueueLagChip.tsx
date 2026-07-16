@@ -101,13 +101,13 @@ export function QueueLagChip({
   const checkedLabel = typeof checkedAt === 'number'
     ? (t('operations.queueLag.checkedAt', {
         time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()),
-      }) as string)
+      }))
     : null
 
   if (health === null) {
     const message = t(unavailableReason === 'redis'
       ? 'operations.queueLag.unavailableRedis'
-      : 'operations.queueLag.unavailableTransport') as string
+      : 'operations.queueLag.unavailableTransport')
     return (
       <QueueLagFrame
         state="unavailable"
@@ -119,7 +119,7 @@ export function QueueLagChip({
   }
 
   if (health.waiting === 0) {
-    const message = t('operations.queueLag.clear') as string
+    const message = t('operations.queueLag.clear')
     return (
       <QueueLagFrame
         state="clear"
@@ -131,12 +131,12 @@ export function QueueLagChip({
   }
 
   const duration = health.oldestWaitingSeconds === null
-    ? t('operations.queueLag.agePending') as string
+    ? t('operations.queueLag.agePending')
     : health.oldestWaitingSeconds >= 3_600
-      ? t('operations.queueLag.hours', { count: Math.floor(health.oldestWaitingSeconds / 3_600) }) as string
+      ? t('operations.queueLag.hours', { count: Math.floor(health.oldestWaitingSeconds / 3_600) })
       : health.oldestWaitingSeconds >= 60
-        ? t('operations.queueLag.minutes', { count: Math.floor(health.oldestWaitingSeconds / 60) }) as string
-        : t('operations.queueLag.seconds', { count: health.oldestWaitingSeconds }) as string
+        ? t('operations.queueLag.minutes', { count: Math.floor(health.oldestWaitingSeconds / 60) })
+        : t('operations.queueLag.seconds', { count: health.oldestWaitingSeconds })
   const delayed = health.oldestWaitingSeconds !== null
     && health.oldestWaitingSeconds > health.warnSeconds
   const message = t(
@@ -146,7 +146,7 @@ export function QueueLagChip({
         : 'operations.queueLag.delayedIdle'
       : 'operations.queueLag.processing',
     { count: health.waiting, duration },
-  ) as string
+  )
   return (
     <QueueLagFrame
       state={delayed ? 'delayed' : 'processing'}
@@ -155,7 +155,7 @@ export function QueueLagChip({
         ? health.active > 0
           ? 'operations.queueLag.delayedActiveStatus'
           : 'operations.queueLag.delayedIdleStatus'
-        : 'operations.queueLag.processingStatus') as string}
+        : 'operations.queueLag.processingStatus')}
       checkedLabel={checkedLabel}
     />
   )

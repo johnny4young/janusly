@@ -341,7 +341,7 @@ export function ReasoningPanel({
               type="search"
               value={query}
               onChange={event => setQuery(event.target.value)}
-              placeholder={t('rightPanel.reasoning.filterPlaceholder') as string}
+              placeholder={t('rightPanel.reasoning.filterPlaceholder')}
               data-testid="run-event-filter"
             />
           </span>
@@ -359,7 +359,7 @@ export function ReasoningPanel({
             disabled={!firstFailure}
             onClick={jumpToFirstFailure}
             title={eventsHasMore && !firstFailure
-              ? t('rightPanel.reasoning.failureMayBeOlder') as string
+              ? t('rightPanel.reasoning.failureMayBeOlder')
               : undefined}
           >
             <AlertCircle size={14} aria-hidden="true" />
@@ -375,24 +375,24 @@ export function ReasoningPanel({
         className="we-virtual-list we-reasoning-list"
         data-testid="run-event-virtual-list"
         role="list"
-        aria-label={t('rightPanel.reasoning.timelineAria') as string}
+        aria-label={t('rightPanel.reasoning.timelineAria')}
       >
         {noEvents && (
           <EmptyView
             icon={<Activity size={22} />}
-            title={t('rightPanel.reasoning.empty.title') as string}
-            body={t('rightPanel.reasoning.empty.body') as string}
+            title={t('rightPanel.reasoning.empty.title')}
+            body={t('rightPanel.reasoning.empty.body')}
           />
         )}
         {noMatches && (
           <EmptyView
             icon={<Search size={22} />}
-            title={t('rightPanel.reasoning.noMatches.title') as string}
+            title={t('rightPanel.reasoning.noMatches.title')}
             body={t(eventsHasMore
               ? 'rightPanel.reasoning.noMatches.loadedBody'
-              : 'rightPanel.reasoning.noMatches.body') as string}
+              : 'rightPanel.reasoning.noMatches.body')}
             cta={{
-              label: t('rightPanel.reasoning.clearFilter') as string,
+              label: t('rightPanel.reasoning.clearFilter'),
               onClick: () => setQuery(''),
             }}
           />
@@ -405,7 +405,7 @@ export function ReasoningPanel({
                   key={item.key}
                   tabIndex={-1}
                   role="listitem"
-                  aria-label={`${tRunEvent(item.event)} — ${item.event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}`}
+                  aria-label={`${tRunEvent(item.event)} — ${item.event.nodeId ?? (t('rightPanel.reasoning.runLabel'))}`}
                   aria-posinset={index + 1}
                   aria-setsize={filteredItems.length}
                   className="list-card we-run-event"
@@ -424,10 +424,10 @@ export function ReasoningPanel({
                     )}
                   </div>
                   <div className="we-run-event__meta">
-                    <span>{item.event.nodeId ?? (t('rightPanel.reasoning.runLabel') as string)}</span>
+                    <span>{item.event.nodeId ?? (t('rightPanel.reasoning.runLabel'))}</span>
                     <span className="we-run-event__meta-actions">
                       {item.deltaMs !== null && (
-                        <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(item.deltaMs) }) as string}>
+                        <span aria-label={t('rightPanel.reasoning.deltaAria', { duration: formatCompactDuration(item.deltaMs) })}>
                           +{formatCompactDuration(item.deltaMs)}
                         </span>
                       )}
@@ -510,7 +510,7 @@ function RunResourceUsageCard({ state }: { state: Exclude<RunUsageState, { statu
     { key: 'cost', label: t('rightPanel.reasoning.usage.knownCost'), value: currency.format(usage.llm.knownCostUsd) },
   ]
   return (
-    <section className="we-run-diagnostics we-run-resource-usage" role="status" aria-live="polite" aria-label={t('rightPanel.reasoning.usage.aria') as string} data-state={noUsage ? 'empty' : 'ready'} data-testid="run-resource-usage">
+    <section className="we-run-diagnostics we-run-resource-usage" role="status" aria-live="polite" aria-label={t('rightPanel.reasoning.usage.aria')} data-state={noUsage ? 'empty' : 'ready'} data-testid="run-resource-usage">
       <div className="we-run-diagnostics__heading">
         <div>
           <strong>{t('rightPanel.reasoning.usage.title')}</strong>
@@ -547,7 +547,7 @@ function RunResourceUsageCard({ state }: { state: Exclude<RunUsageState, { statu
               failures: usage.memory.failures,
             })}</span>
             {usage.memory.kinds.length > 0 && (
-              <ul aria-label={t('rightPanel.reasoning.usage.memoryKinds') as string}>
+              <ul aria-label={t('rightPanel.reasoning.usage.memoryKinds')}>
                 {usage.memory.kinds.map(kind => (
                   <li key={kind.kind}>
                     <code>{kind.kind}</code>
@@ -575,7 +575,7 @@ function RunDiagnosticsCard({ diagnostics, partial }: { diagnostics: RunDiagnost
     { key: 'memory', label: t('rightPanel.reasoning.diagnostics.memory'), value: diagnostics.recalledEpisodeCount.toLocaleString(locale) },
   ]
   return (
-    <section className="we-run-diagnostics" aria-label={t('rightPanel.reasoning.diagnostics.aria') as string} data-testid="run-diagnostics">
+    <section className="we-run-diagnostics" aria-label={t('rightPanel.reasoning.diagnostics.aria')} data-testid="run-diagnostics">
       <div className="we-run-diagnostics__heading">
         <div>
           <strong>{t(partial ? 'rightPanel.reasoning.diagnostics.loadedTitle' : 'rightPanel.reasoning.diagnostics.title')}</strong>
@@ -598,7 +598,7 @@ function RunDiagnosticsCard({ diagnostics, partial }: { diagnostics: RunDiagnost
 function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { status: 'idle' }>; onClose: () => void }) {
   const { t } = useT()
   const closeButton = (
-    <button type="button" className="icon-button" onClick={onClose} aria-label={t('rightPanel.reasoning.causal.close') as string}>
+    <button type="button" className="icon-button" onClick={onClose} aria-label={t('rightPanel.reasoning.causal.close')}>
       <X size={14} aria-hidden="true" />
     </button>
   )
@@ -628,7 +628,7 @@ function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { 
   const bestId = state.replay.best.nodeId
   const unchanged = chosenId === bestId
   return (
-    <section id="run-causal-analysis" className="we-causal-analysis" data-state="ready" data-testid="causal-analysis" aria-label={t('rightPanel.reasoning.causal.resultAria', { nodeId: state.nodeId }) as string}>
+    <section id="run-causal-analysis" className="we-causal-analysis" data-state="ready" data-testid="causal-analysis" aria-label={t('rightPanel.reasoning.causal.resultAria', { nodeId: state.nodeId })}>
       <div className="we-causal-analysis__header">
         <span><GitCompareArrows size={16} aria-hidden="true" /> {t('rightPanel.reasoning.causal.title', { nodeId: state.nodeId })}</span>
         {closeButton}
@@ -636,7 +636,7 @@ function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { 
       <p>{unchanged
         ? t('rightPanel.reasoning.causal.unchanged', { nodeId: chosenId })
         : t('rightPanel.reasoning.causal.changed', { chosenNodeId: chosenId, bestNodeId: bestId })}</p>
-      <ol className="we-causal-ranking" aria-label={t('rightPanel.reasoning.causal.rankingAria') as string}>
+      <ol className="we-causal-ranking" aria-label={t('rightPanel.reasoning.causal.rankingAria')}>
         {state.replay.ranking.slice(0, 3).map((candidate, index) => (
           <li key={candidate.nodeId}>
             <span><strong>{index + 1}. {candidate.nodeId}</strong> · {t('rightPanel.reasoning.causal.score', { score: candidate.score.toFixed(3) })}</span>

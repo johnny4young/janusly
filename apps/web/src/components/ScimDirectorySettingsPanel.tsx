@@ -109,7 +109,7 @@ export function ScimDirectorySettingsPanel() {
         setGroups(Array.isArray(grps) ? (grps as ScimGroupRow[]) : []);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : (t("scim.errorLoad") as string));
+        if (!cancelled) setError(err instanceof Error ? err.message : (t("scim.errorLoad")));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -136,7 +136,7 @@ export function ScimDirectorySettingsPanel() {
     event.preventDefault();
     const providerDirectoryId = form.providerDirectoryId.trim();
     if (!providerDirectoryId) {
-      setError(t("scim.errorMissing") as string);
+      setError(t("scim.errorMissing"));
       return;
     }
     setSaving(true);
@@ -154,14 +154,14 @@ export function ScimDirectorySettingsPanel() {
       setForm(EMPTY_FORM);
       bumpPlatformVersion();
     } catch (err) {
-      setError(err instanceof Error ? err.message : (t("scim.errorAttach") as string));
+      setError(err instanceof Error ? err.message : (t("scim.errorAttach")));
     } finally {
       setSaving(false);
     }
   };
 
   const revoke = async (row: ScimDirectoryRow) => {
-    if (!(await confirmDialog({ body: t("scim.disconnectPrompt", { id: row.providerDirectoryId }) as string, tone: "danger" }))) {
+    if (!(await confirmDialog({ body: t("scim.disconnectPrompt", { id: row.providerDirectoryId }), tone: "danger" }))) {
       return;
     }
     try {
@@ -169,7 +169,7 @@ export function ScimDirectorySettingsPanel() {
       addToast(t("scim.toast.disconnected"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : (t("scim.errorDisconnect") as string), "error");
+      addToast(err instanceof Error ? err.message : (t("scim.errorDisconnect")), "error");
     }
   };
 
@@ -186,7 +186,7 @@ export function ScimDirectorySettingsPanel() {
       setMappingForm({ providerGroupId: "", role: "viewer" });
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorAdd") as string), "error");
+      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorAdd")), "error");
     } finally {
       setAddingMapping(false);
     }
@@ -208,12 +208,12 @@ export function ScimDirectorySettingsPanel() {
       bumpPlatformVersion();
     } catch (err) {
       setMappings((current) => current.map((m) => (m.id === row.id ? { ...m, role: previousRole } : m)));
-      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorUpdate") as string), "error");
+      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorUpdate")), "error");
     }
   };
 
   const removeMapping = async (row: ScimGroupRoleMappingRow) => {
-    if (!(await confirmDialog({ body: t("scim.mappings.removePrompt", { group: groupName(row.providerGroupId) }) as string, tone: "danger" }))) {
+    if (!(await confirmDialog({ body: t("scim.mappings.removePrompt", { group: groupName(row.providerGroupId) }), tone: "danger" }))) {
       return;
     }
     try {
@@ -221,7 +221,7 @@ export function ScimDirectorySettingsPanel() {
       addToast(t("scim.mappings.toast.removed"), "success");
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorRemove") as string), "error");
+      addToast(err instanceof Error ? err.message : (t("scim.mappings.errorRemove")), "error");
     }
   };
 
@@ -243,7 +243,7 @@ export function ScimDirectorySettingsPanel() {
       );
       bumpPlatformVersion();
     } catch (err) {
-      addToast(err instanceof Error ? err.message : (t("scim.mappings.resync.error") as string), "error");
+      addToast(err instanceof Error ? err.message : (t("scim.mappings.resync.error")), "error");
     } finally {
       setResyncing(false);
     }
@@ -286,7 +286,7 @@ export function ScimDirectorySettingsPanel() {
                           type="button"
                           className="we-button we-button--ghost"
                           onClick={() => revoke(row)}
-                          aria-label={t("scim.disconnectAria", { id: row.providerDirectoryId }) as string}
+                          aria-label={t("scim.disconnectAria", { id: row.providerDirectoryId })}
                         >
                           <Trash2 size={14} aria-hidden="true" /> {t("scim.disconnect")}
                         </button>
@@ -305,7 +305,7 @@ export function ScimDirectorySettingsPanel() {
                 <input
                   type="text"
                   className="we-field__input"
-                  placeholder={t("scim.field.directoryIdPlaceholder") as string}
+                  placeholder={t("scim.field.directoryIdPlaceholder")}
                   value={form.providerDirectoryId}
                   onChange={(e) => setForm({ ...form, providerDirectoryId: e.target.value })}
                 />
@@ -317,7 +317,7 @@ export function ScimDirectorySettingsPanel() {
                 <input
                   type="text"
                   className="we-field__input"
-                  placeholder={t("scim.field.typePlaceholder") as string}
+                  placeholder={t("scim.field.typePlaceholder")}
                   value={form.directoryType}
                   onChange={(e) => setForm({ ...form, directoryType: e.target.value })}
                 />
@@ -364,7 +364,7 @@ export function ScimDirectorySettingsPanel() {
                     className="we-button we-button--ghost"
                     onClick={resyncRoles}
                     disabled={resyncing}
-                    aria-label={t("scim.mappings.resync.aria") as string}
+                    aria-label={t("scim.mappings.resync.aria")}
                   >
                     <RefreshCw size={14} aria-hidden="true" />{" "}
                     {resyncing ? t("scim.mappings.resync.running") : t("scim.mappings.resync.button")}
@@ -393,7 +393,7 @@ export function ScimDirectorySettingsPanel() {
                           <select
                             className="we-field__input"
                             value={row.role}
-                            aria-label={t("scim.mappings.roleAria", { group: groupName(row.providerGroupId) }) as string}
+                            aria-label={t("scim.mappings.roleAria", { group: groupName(row.providerGroupId) })}
                             onChange={(e) => updateMappingRole(row, e.target.value as DefaultRole)}
                           >
                             {ROLES.map((r) => (
@@ -406,7 +406,7 @@ export function ScimDirectorySettingsPanel() {
                             type="button"
                             className="we-button we-button--ghost"
                             onClick={() => removeMapping(row)}
-                            aria-label={t("scim.mappings.removeAria", { group: groupName(row.providerGroupId) }) as string}
+                            aria-label={t("scim.mappings.removeAria", { group: groupName(row.providerGroupId) })}
                           >
                             <Trash2 size={14} aria-hidden="true" /> {t("scim.mappings.remove")}
                           </button>

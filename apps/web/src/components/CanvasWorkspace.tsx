@@ -8,12 +8,12 @@
  * mounts the canvas. Home-landing users download zero React Flow.
  *
  * `App.tsx` renders this via `lazy()` + `<Suspense>` inside the
- * `workspace-canvas-wrapper`, which `getCanvasVisibility` keeps mounted for
- * every non-home tab (visible on canvas tabs, `display: none` on the rest).
- * Because the wrapper never unmounts across non-home navigation, the
- * `<ReactFlow>` instance — and thus the viewport (zoom + pan) — survives
- * cycles such as `inspector → operations → inspector`. A round-trip through
- * home unmounts the canvas, so it re-fits on the next mount.
+ * `workspace-canvas-wrapper`. `getCanvasVisibility` defers the first mount
+ * until a canvas tab is actually visible (React Flow cannot measure a first
+ * mount under `display: none`), then keeps it mounted for the rest of that
+ * non-home workspace session. The `<ReactFlow>` instance — and thus viewport
+ * zoom/pan — survives cycles such as `inspector → operations → inspector`.
+ * A round-trip through home unmounts the canvas, so it re-fits on next use.
  */
 
 import { ReactFlowProvider, addEdge, applyEdgeChanges, applyNodeChanges } from '@xyflow/react'

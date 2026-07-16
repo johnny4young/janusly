@@ -265,12 +265,12 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
           <input
             type="checkbox"
             checked={required}
-            aria-label={t('rightPanel.inspector.requiredAria', { name }) as string}
+            aria-label={t('rightPanel.inspector.requiredAria', { name })}
             onChange={(event) => onRequiredChange(event.target.checked)}
           />
           {t('rightPanel.inspector.required')}
         </label>
-        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeInput', { name }) as string}>
+        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeInput', { name })}>
           <Trash2 size={14} aria-hidden="true" />
         </button>
       </div>
@@ -278,8 +278,8 @@ function InputRow({ name, shape, required, onRename, onTypeChange, onDescription
         className="text-field text-field--compact we-workflow-io__description"
         value={shape.description ?? ''}
         onChange={(event) => onDescriptionChange(event.target.value)}
-        placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder') as string}
-        aria-label={t('rightPanel.inspector.inputDescriptionAria', { name }) as string}
+        placeholder={t('rightPanel.inspector.inputDescriptionPlaceholder')}
+        aria-label={t('rightPanel.inspector.inputDescriptionAria', { name })}
       />
       {nameError && <p id={nameErrorId} className="we-workflow-io__error" role="alert">{t('rightPanel.inspector.nameConflict')}</p>}
     </div>
@@ -322,10 +322,10 @@ function OutputRow({ name, template, onRename, onTemplateChange, onRemove }: {
           className="text-field text-field--compact we-workflow-io__template"
           value={template}
           onChange={(event) => onTemplateChange(event.target.value)}
-          placeholder={t('rightPanel.inspector.outputTemplatePlaceholder') as string}
-          aria-label={t('rightPanel.inspector.outputTemplateAria', { name }) as string}
+          placeholder={t('rightPanel.inspector.outputTemplatePlaceholder')}
+          aria-label={t('rightPanel.inspector.outputTemplateAria', { name })}
         />
-        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeOutput', { name }) as string}>
+        <button type="button" className="icon-button" onClick={onRemove} aria-label={t('rightPanel.inspector.removeOutput', { name })}>
           <Trash2 size={14} aria-hidden="true" />
         </button>
       </div>

@@ -83,9 +83,9 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
     item.status === 'resolved' || Number.isNaN(slaTargetMs)
       ? null
       : Date.now() >= slaTargetMs
-        ? (t('recoveryItems.sla.overdue') as string)
+        ? (t('recoveryItems.sla.overdue'))
         : remaining
-  const ariaLabel = (
+  const ariaLabel =
     slaDescriptor
       ? t('recoveryItems.badge.openSla', {
           severity: t(`recoveryItems.severity.${item.severity}`),
@@ -96,7 +96,6 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
           severity: t(`recoveryItems.severity.${item.severity}`),
           status: t(`recoveryItems.status.${item.status}`),
         })
-  ) as string
 
   return (
     <button

@@ -204,51 +204,51 @@ export function RunsPanel({
   const runMetricTiles: VitalSignsTile[] = [
     {
       icon: <ListChecks size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.total') as string,
+      label: t('rightPanel.runs.metric.total'),
       display: String(runs.length),
       severity: 'neutral',
       numericValue: runs.length,
-      rationale: t('rightPanel.runs.metric.totalSub') as string,
+      rationale: t('rightPanel.runs.metric.totalSub'),
       testId: 'runs-metric-total',
     },
     {
       icon: <Activity size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.active') as string,
+      label: t('rightPanel.runs.metric.active'),
       display: String(activeRuns),
       severity: 'info',
       numericValue: activeRuns,
-      rationale: t('rightPanel.runs.metric.activeSub') as string,
+      rationale: t('rightPanel.runs.metric.activeSub'),
       testId: 'runs-metric-active',
     },
     {
       icon: <CheckCircle2 size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.done') as string,
+      label: t('rightPanel.runs.metric.done'),
       display: String(completedRuns),
       severity: 'healthy',
       numericValue: completedRuns,
-      rationale: t('rightPanel.runs.metric.doneSub') as string,
+      rationale: t('rightPanel.runs.metric.doneSub'),
       testId: 'runs-metric-done',
     },
     {
       icon: <CircleX size={15} aria-hidden="true" />,
-      label: t('rightPanel.runs.metric.failed') as string,
+      label: t('rightPanel.runs.metric.failed'),
       display: String(failedRuns),
       severity: failedRuns > 0 ? 'unhealthy' : 'healthy',
       numericValue: failedRuns,
       rationale: failedRuns > 0
-        ? (t('rightPanel.runs.metric.failedOpen') as string)
-        : (t('rightPanel.runs.metric.failedClear') as string),
+        ? (t('rightPanel.runs.metric.failedOpen'))
+        : (t('rightPanel.runs.metric.failedClear')),
       onClick: failedRuns > 0 ? () => setActiveTab('home') : undefined,
-      ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria') as string) : undefined,
+      ariaLabel: failedRuns > 0 ? (t('rightPanel.runs.metric.failedAria')) : undefined,
       testId: 'runs-metric-failed',
     },
   ]
 
   return (
-    <PanelChrome title={t('rightPanel.runs.title') as string} description={t('rightPanel.runs.description') as string} icon={<Activity size={18} />}>
+    <PanelChrome title={t('rightPanel.runs.title')} description={t('rightPanel.runs.description')} icon={<Activity size={18} />}>
       <VitalSignsStrip
         tiles={withSeverityLabels(runMetricTiles, t)}
-        ariaLabel={t('rightPanel.runs.summaryAria') as string}
+        ariaLabel={t('rightPanel.runs.summaryAria')}
         testId="runs-metric-strip"
       />
 
@@ -315,14 +315,14 @@ export function RunsPanel({
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label={t('rightPanel.runs.copyTrace') as string}
-                    title={t('rightPanel.runs.copyTrace') as string}
+                    aria-label={t('rightPanel.runs.copyTrace')}
+                    title={t('rightPanel.runs.copyTrace')}
                     onClick={async () => {
                       try {
                         await navigator.clipboard.writeText(activeRunTraceId)
-                        addToast(t('rightPanel.runs.traceCopied') as string, 'success')
+                        addToast(t('rightPanel.runs.traceCopied'), 'success')
                       } catch {
-                        addToast(t('rightPanel.runs.traceCopyFailed') as string, 'error')
+                        addToast(t('rightPanel.runs.traceCopyFailed'), 'error')
                       }
                     }}
                   >
@@ -487,7 +487,7 @@ export function RunsPanel({
             const duration = formatNodeDuration(node.startedAt, node.finishedAt)
             const meta: string[] = []
             if (typeof node.attempts === 'number' && node.attempts > 0) {
-              meta.push(t('rightPanel.runs.nodeAttempt', { count: node.attempts }) as string)
+              meta.push(t('rightPanel.runs.nodeAttempt', { count: node.attempts }))
             }
             if (duration) meta.push(duration)
             return (

@@ -215,7 +215,7 @@ export function OperationsPage() {
       })
       .catch((err) => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' }) as string))
+        setError(err instanceof Error ? err.message : (t('operations.metricsUnavailable', { detail: '' })))
         setLoading(false)
       })
     return () => { cancelled = true }
@@ -422,7 +422,7 @@ function OperationsRail({
   return (
     <nav
       className="we-operations-rail"
-      aria-label={t('operations.section.railLabel') as string}
+      aria-label={t('operations.section.railLabel')}
       data-testid="operations-rail"
     >
       <ul>
@@ -442,14 +442,14 @@ function OperationsRail({
               >
                 <span className="we-operations-rail__icon" aria-hidden="true">{item.icon}</span>
                 <span className="we-operations-rail__label">
-                  {t(`operations.section.${item.section}.label` as never) as string}
+                  {t(`operations.section.${item.section}.label` as never)}
                 </span>
                 {dot && (
                   <span
                     className="we-operations-rail__dot"
                     data-severity={dot}
                     data-testid={`operations-rail-dot-${item.section}`}
-                    aria-label={t('operations.section.attentionDot') as string}
+                    aria-label={t('operations.section.attentionDot')}
                   />
                 )}
               </button>
@@ -469,7 +469,7 @@ function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
       {metrics && metrics.costThisWindow.providers.length > 0 && (
         <section className="panel-card">
           <div className="section-kicker">{t('operations.cost.heading')}</div>
-          <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel') as string}>
+          <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
             <div>
               <dt>{t('operations.cost.cache.readShare')}</dt>
               <dd>{metrics.costThisWindow.cache.readSharePercent == null
@@ -488,7 +488,7 @@ function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
           <div
             className="we-ops-cost-table-wrap"
             role="region"
-            aria-label={t('operations.cost.tableAria') as string}
+            aria-label={t('operations.cost.tableAria')}
             tabIndex={0}
           >
             <table className="we-ops-cost-table">
@@ -567,7 +567,7 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
   // needed — the 20s poll re-renders with a fresh timestamp; a failed poll
   // leaves the last one frozen, which is the staleness signal.
   const checkedLabel = typeof checkedAt === 'number'
-    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }) as string)
+    ? (t('operations.rateLimiter.checkedAt', { time: new Date(checkedAt).toLocaleTimeString(getResolvedLocale()) }))
     : null
   const age = checkedLabel ? <span className="we-ops-rate-limiter-chip__age">· {checkedLabel}</span> : null
   if (health.healthy) {
@@ -575,7 +575,7 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
       <span
         className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--healthy"
         role="status"
-        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
+        aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
       >
         <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />
         <span>{t('operations.rateLimiter.healthy')}</span>
@@ -585,12 +585,12 @@ function RateLimiterStatusChip({ health, checkedAt }: { health: RateLimiterHealt
   }
   const bucketCount = health.degradedBuckets.length
   const bucketNames = health.degradedBuckets.map((b) => b.bucket).join(', ')
-  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames }) as string
+  const tooltip = t('operations.rateLimiter.degradedBucketsTooltip', { buckets: bucketNames })
   return (
     <span
       className="we-ops-rate-limiter-chip we-ops-rate-limiter-chip--degraded"
       role="status"
-      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label') as string)}
+      aria-label={checkedLabel ? `${t('operations.rateLimiter.label')} · ${checkedLabel}` : (t('operations.rateLimiter.label'))}
       title={tooltip}
     >
       <span className="we-ops-rate-limiter-chip__dot" aria-hidden="true" />

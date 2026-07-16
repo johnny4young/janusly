@@ -221,8 +221,8 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
                     void navigator.clipboard.writeText(metadata.slackChannel!)
                   }
                 }}
-                aria-label={t('workflowMetadata.action.copy') as string}
-                title={t('workflowMetadata.action.copy') as string}
+                aria-label={t('workflowMetadata.action.copy')}
+                title={t('workflowMetadata.action.copy')}
               >
                 <Copy size={12} aria-hidden />
               </button>
@@ -262,8 +262,8 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
             onClick={() => setRunbookExpanded((v) => !v)}
           >
             {runbookExpanded
-              ? (t('workflowMetadata.action.collapseRunbook') as string)
-              : (t('workflowMetadata.action.expandRunbook') as string)}
+              ? (t('workflowMetadata.action.collapseRunbook'))
+              : (t('workflowMetadata.action.expandRunbook'))}
           </button>
         </div>
       )}

@@ -146,7 +146,7 @@ export function RunHistoryList({
         </span>
       </div>
 
-      <div className="we-run-history-filters" role="group" aria-label={t('rightPanel.runs.filtersAria') as string}>
+      <div className="we-run-history-filters" role="group" aria-label={t('rightPanel.runs.filtersAria')}>
         <label>
           <span>{t('rightPanel.runs.workflowFilter')}</span>
           <select
@@ -195,10 +195,10 @@ export function RunHistoryList({
       {!loading && !failed && historyRuns.length === 0 && (
         <EmptyView
           icon={hasActiveFilters ? <FilterX size={22} /> : <Activity size={22} />}
-          title={t(hasActiveFilters ? 'rightPanel.runs.historyNoMatches.title' : 'rightPanel.runs.historyEmpty.title') as string}
-          body={t(hasActiveFilters ? 'rightPanel.runs.historyNoMatches.body' : 'rightPanel.runs.historyEmpty.body') as string}
+          title={t(hasActiveFilters ? 'rightPanel.runs.historyNoMatches.title' : 'rightPanel.runs.historyEmpty.title')}
+          body={t(hasActiveFilters ? 'rightPanel.runs.historyNoMatches.body' : 'rightPanel.runs.historyEmpty.body')}
           cta={hasActiveFilters ? {
-            label: t('rightPanel.runs.clearFilters') as string,
+            label: t('rightPanel.runs.clearFilters'),
             onClick: clearFilters,
           } : undefined}
         />
@@ -207,7 +207,7 @@ export function RunHistoryList({
         ref={containerRef}
         className="we-virtual-list"
         data-testid="runs-history-virtual-list"
-        aria-label={t('rightPanel.runs.historyListAria') as string}
+        aria-label={t('rightPanel.runs.historyListAria')}
         aria-busy={loading || undefined}
         hidden={loading || failed || historyRuns.length === 0}
       >
@@ -217,14 +217,14 @@ export function RunHistoryList({
                 const showLabAction = !run.replayMode && isTerminalRunStatus(run.status)
                 const workflowLabel = run.workflowId
                   ? workflowLabels.get(run.workflowId) ?? run.workflowName ?? run.workflowId
-                  : t('rightPanel.runs.unknownWorkflow') as string
+                  : t('rightPanel.runs.unknownWorkflow')
                 return (
-                  <article key={run.id} className="list-card we-run-history-card" aria-label={t('rightPanel.runs.historyRowAria', { id: run.id }) as string}>
+                  <article key={run.id} className="list-card we-run-history-card" aria-label={t('rightPanel.runs.historyRowAria', { id: run.id })}>
                     <button
                       type="button"
                       className="list-card-row"
                       onClick={() => onOpenRun(run.id)}
-                      aria-label={t('rightPanel.runs.openTimelineAria', { id: run.id }) as string}
+                      aria-label={t('rightPanel.runs.openTimelineAria', { id: run.id })}
                     >
                       <div className="split-row" style={{ width: '100%' }}>
                         <strong title={workflowLabel}>{workflowLabel}</strong>
@@ -232,7 +232,7 @@ export function RunHistoryList({
                       </div>
                       <span className="we-run-history-card__identity">
                         <code>{run.id.slice(0, 8)}…</code>
-                        <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback') as string)}</span>
+                        <span>{run.createdAt ? new Date(run.createdAt).toLocaleString(getResolvedLocale()) : (t('rightPanel.runs.runFallback'))}</span>
                       </span>
                       <span className="list-card-action">{t('rightPanel.runs.openTimeline')}</span>
                     </button>
@@ -243,7 +243,7 @@ export function RunHistoryList({
                           className="small-command small-command--primary"
                           onClick={() => setComparisonRun(run)}
                           data-testid={`history-compare-last-successful-${run.id}`}
-                          aria-label={t('rightPanel.runs.compareLastSuccessfulAria', { id: run.id }) as string}
+                          aria-label={t('rightPanel.runs.compareLastSuccessfulAria', { id: run.id })}
                         >
                           <GitCompareArrows size={12} aria-hidden="true" /> {t('rightPanel.runs.compareLastSuccessful')}
                         </button>
@@ -254,7 +254,7 @@ export function RunHistoryList({
                           className="small-command"
                           onClick={() => onOpenLab(run)}
                           data-testid={`history-replay-in-lab-${run.id}`}
-                          aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id }) as string}
+                          aria-label={t('rightPanel.runs.replayInLabAria', { id: run.id })}
                         >
                           <FlaskConical size={12} aria-hidden="true" /> {t('rightPanel.runs.lab')}
                         </button>
@@ -265,13 +265,13 @@ export function RunHistoryList({
                         onClick={async () => {
                           try {
                             await downloadFromApi(`/reports/run-explain?runId=${encodeURIComponent(run.id)}`)
-                            addToast(t('rightPanel.runs.exportSuccess') as string, 'success')
+                            addToast(t('rightPanel.runs.exportSuccess'), 'success')
                           } catch (error) {
-                            addToast(error instanceof Error ? error.message : t('rightPanel.runs.exportFailed') as string, 'error')
+                            addToast(error instanceof Error ? error.message : t('rightPanel.runs.exportFailed'), 'error')
                           }
                         }}
                         data-testid={`history-export-${run.id}`}
-                        aria-label={t('rightPanel.runs.exportAria', { id: run.id }) as string}
+                        aria-label={t('rightPanel.runs.exportAria', { id: run.id })}
                       >
                         <Download size={12} aria-hidden="true" /> {t('rightPanel.runs.export')}
                       </button>
@@ -280,7 +280,7 @@ export function RunHistoryList({
                         className="small-command"
                         onClick={() => onSend(run)}
                         data-testid={`history-send-${run.id}`}
-                        aria-label={t('rightPanel.runs.sendAria', { id: run.id }) as string}
+                        aria-label={t('rightPanel.runs.sendAria', { id: run.id })}
                       >
                         <Send size={12} aria-hidden="true" /> {t('rightPanel.runs.send')}
                       </button>

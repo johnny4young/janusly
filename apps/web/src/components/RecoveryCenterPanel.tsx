@@ -469,12 +469,12 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   }, [memoryConsentStatus, nowMs])
   const memoryPurgeCountdownLabel = memoryPurgeCountdown
     ? memoryPurgeCountdown.days > 0
-      ? t('recoveryCenter.hero.memoryPurgeDays', memoryPurgeCountdown) as string
+      ? t('recoveryCenter.hero.memoryPurgeDays', memoryPurgeCountdown)
       : memoryPurgeCountdown.hours > 0
-        ? t('recoveryCenter.hero.memoryPurgeHours', memoryPurgeCountdown) as string
+        ? t('recoveryCenter.hero.memoryPurgeHours', memoryPurgeCountdown)
         : memoryPurgeCountdown.minutes > 0
-          ? t('recoveryCenter.hero.memoryPurgeMinutes', memoryPurgeCountdown) as string
-          : t('recoveryCenter.hero.memoryPurgeDue') as string
+          ? t('recoveryCenter.hero.memoryPurgeMinutes', memoryPurgeCountdown)
+          : t('recoveryCenter.hero.memoryPurgeDue')
     : null
 
   const totalRuns = props.runs.length
@@ -518,11 +518,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     })
     && totalRuns === 0
 
-  const failuresLabel = t('recoveryCenter.metric.failures.label') as string
+  const failuresLabel = t('recoveryCenter.metric.failures.label')
   const failuresDisplay = openFailureCount === 0 ? '0' : String(openFailureCount)
   const failuresRationale = openFailureCount === 0
-    ? t('recoveryCenter.metric.failures.rationaleEmpty') as string
-    : t('recoveryCenter.metric.failures.rationale') as string
+    ? t('recoveryCenter.metric.failures.rationaleEmpty')
+    : t('recoveryCenter.metric.failures.rationale')
   const homeTiles: VitalSignsTile[] = [
     {
       icon: <AlertTriangle size={14} aria-hidden="true" />,
@@ -531,7 +531,7 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
       numericValue: openFailureCount,
       severity: openFailureCount === 0 ? 'healthy' : openFailureCount > 5 ? 'unhealthy' : 'warn',
       rationale: failuresRationale,
-      ariaLabel: t('recoveryCenter.metric.aria', { label: failuresLabel, display: failuresDisplay, rationale: failuresRationale }) as string,
+      ariaLabel: t('recoveryCenter.metric.aria', { label: failuresLabel, display: failuresDisplay, rationale: failuresRationale }),
       onClick: props.onOpenRecoveryQueue,
       testId: 'recovery-center-metric-failures',
     },
@@ -539,11 +539,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
   // Append the computed tiles. Each pushes a fully-formed VitalSignsTile;
   // the inline composition keeps the rich aria-label (label + display + rationale)
   // the legacy RecoveryCenterMetric provided to screen readers.
-  const mttrLabel = t('recoveryCenter.metric.mttr.label') as string
+  const mttrLabel = t('recoveryCenter.metric.mttr.label')
   const mttrDisplay = metrics?.mttr.display ?? '—'
   const mttrRationale = metrics?.mttr
     ? tRecoveryMetricRationale(metrics.mttr)
-    : t('recoveryCenter.metric.mttr.rationaleFallback') as string
+    : t('recoveryCenter.metric.mttr.rationaleFallback')
   // MTTR trend sparkline: needs ≥2 daily points to tell a story. The hover
   // title lists the exact per-day values the sparkline plots.
   const mttrTrend = metrics?.mttrTrend ?? []
@@ -559,9 +559,9 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     numericValue: metrics?.mttr.value ?? null,
     severity: metrics?.mttr.severity ?? 'neutral',
     rationale: mttrRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: mttrLabel, display: mttrDisplay, rationale: mttrRationale }),
     sparkline: mttrTrendSeconds.length >= 2 ? mttrTrendSeconds : undefined,
-    sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }) as string,
+    sparklineLabel: t('recoveryCenter.metric.mttr.trendAria', { count: mttrTrendSeconds.length }),
     sparklineTitle: mttrTrendSeconds.length >= 2 ? mttrTrendTitle : undefined,
     sparklinePointLabels: mttrTrendSeconds.length >= 2 ? mttrTrendPointLabels : undefined,
     onSelectSparklinePoint: mttrTrendSeconds.length >= 2
@@ -575,11 +575,11 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-mttr',
   })
-  const firstActionLabel = t('recoveryCenter.metric.firstAction.label') as string
+  const firstActionLabel = t('recoveryCenter.metric.firstAction.label')
   const firstActionDisplay = metrics?.timeToFirstAction?.display ?? '—'
   const firstActionRationale = metrics?.timeToFirstAction
     ? tRecoveryMetricRationale(metrics.timeToFirstAction)
-    : t('recoveryCenter.metric.firstAction.rationaleFallback') as string
+    : t('recoveryCenter.metric.firstAction.rationaleFallback')
   homeTiles.push({
     icon: <Hourglass size={14} aria-hidden="true" />,
     label: firstActionLabel,
@@ -587,15 +587,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     numericValue: metrics?.timeToFirstAction?.value ?? null,
     severity: metrics?.timeToFirstAction?.severity ?? 'neutral',
     rationale: firstActionRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: firstActionLabel, display: firstActionDisplay, rationale: firstActionRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: firstActionLabel, display: firstActionDisplay, rationale: firstActionRationale }),
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-first-action',
   })
-  const approvalsLabel = t('recoveryCenter.metric.approvals.label') as string
+  const approvalsLabel = t('recoveryCenter.metric.approvals.label')
   const approvalsDisplay = waitingNodes.length === 0 ? '0' : String(waitingNodes.length)
   const approvalsRationale = waitingNodes.length === 0
-    ? t('recoveryCenter.metric.approvals.rationaleEmpty') as string
-    : t('recoveryCenter.metric.approvals.rationale') as string
+    ? t('recoveryCenter.metric.approvals.rationaleEmpty')
+    : t('recoveryCenter.metric.approvals.rationale')
   homeTiles.push({
     icon: <Users size={14} aria-hidden="true" />,
     label: approvalsLabel,
@@ -603,15 +603,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     numericValue: waitingNodes.length,
     severity: waitingNodes.length === 0 ? 'healthy' : 'warn',
     rationale: approvalsRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: approvalsLabel, display: approvalsDisplay, rationale: approvalsRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: approvalsLabel, display: approvalsDisplay, rationale: approvalsRationale }),
     onClick: () => props.onOpenTab('runs'),
     testId: 'recovery-center-metric-approvals',
   })
-  const replayLabel = t('recoveryCenter.metric.replay.label') as string
+  const replayLabel = t('recoveryCenter.metric.replay.label')
   const replayDisplay = metrics?.replayRate.display ?? '—'
   const replayRationale = metrics?.replayRate
     ? tRecoveryMetricRationale(metrics.replayRate)
-    : t('recoveryCenter.metric.replay.rationaleFallback') as string
+    : t('recoveryCenter.metric.replay.rationaleFallback')
   homeTiles.push({
     icon: <Zap size={14} aria-hidden="true" />,
     label: replayLabel,
@@ -619,15 +619,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     numericValue: metrics?.replayRate.value ?? null,
     severity: metrics?.replayRate.severity ?? 'neutral',
     rationale: replayRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: replayLabel, display: replayDisplay, rationale: replayRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: replayLabel, display: replayDisplay, rationale: replayRationale }),
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-replay',
   })
-  const durabilityLabel = t('recoveryCenter.metric.durability.label') as string
+  const durabilityLabel = t('recoveryCenter.metric.durability.label')
   const durabilityDisplay = metrics?.recurrenceRate?.display ?? '—'
   const durabilityRationale = metrics?.recurrenceRate
     ? tRecoveryMetricRationale(metrics.recurrenceRate)
-    : t('recoveryCenter.metric.durability.rationaleFallback') as string
+    : t('recoveryCenter.metric.durability.rationaleFallback')
   homeTiles.push({
     icon: <ShieldCheck size={14} aria-hidden="true" />,
     label: durabilityLabel,
@@ -636,15 +636,15 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     progressValue: metrics?.recurrenceRate?.value ?? null,
     severity: metrics?.recurrenceRate?.severity ?? 'neutral',
     rationale: durabilityRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: durabilityLabel, display: durabilityDisplay, rationale: durabilityRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: durabilityLabel, display: durabilityDisplay, rationale: durabilityRationale }),
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-durability',
   })
-  const slaLabel = t('recoveryCenter.metric.sla.label') as string
+  const slaLabel = t('recoveryCenter.metric.sla.label')
   const slaDisplay = metrics?.slaAttainment?.display ?? '—'
   const slaRationale = metrics?.slaAttainment
     ? tRecoveryMetricRationale(metrics.slaAttainment)
-    : t('recoveryCenter.metric.sla.rationaleFallback') as string
+    : t('recoveryCenter.metric.sla.rationaleFallback')
   homeTiles.push({
     icon: <Target size={14} aria-hidden="true" />,
     label: slaLabel,
@@ -652,14 +652,14 @@ export function RecoveryCenterPanel(props: RecoveryCenterPanelProps) {
     numericValue: metrics?.slaAttainment?.value ?? null,
     severity: metrics?.slaAttainment?.severity ?? 'neutral',
     rationale: slaRationale,
-    ariaLabel: t('recoveryCenter.metric.aria', { label: slaLabel, display: slaDisplay, rationale: slaRationale }) as string,
+    ariaLabel: t('recoveryCenter.metric.aria', { label: slaLabel, display: slaDisplay, rationale: slaRationale }),
     onClick: () => props.onOpenTab('operations'),
     testId: 'recovery-center-metric-sla',
   })
   const metricStrip = (
     <VitalSignsStrip
       tiles={withSeverityLabels(homeTiles, t)}
-      ariaLabel={t('recoveryCenter.metricStripAria') as string}
+      ariaLabel={t('recoveryCenter.metricStripAria')}
       testId="recovery-center-metric-strip"
     />
   )

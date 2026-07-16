@@ -130,7 +130,7 @@ function SubworkflowVersionField({ nodeId, value, onChange }: {
         max={SUBWORKFLOW_VERSION_MAX}
         step="1"
         value={draft}
-        placeholder={t('rightPanel.quickConfig.subworkflowVersionPlaceholder') as string}
+        placeholder={t('rightPanel.quickConfig.subworkflowVersionPlaceholder')}
         aria-describedby={helperId}
         aria-invalid={invalid || undefined}
         aria-errormessage={invalid ? helperId : undefined}
@@ -362,7 +362,7 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.requestUrl') as string} value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.requestUrl')} value={readConfigString(config, 'url')} onChange={value => patch({ url: value })} />
         <p className="helper-text" data-testid="http-json-contract-helper">
           <Trans i18nKey="rightPanel.quickConfig.httpJsonHelper" components={{ code: <code /> }} />
         </p>
@@ -375,7 +375,7 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.prompt') as string} value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.prompt')} value={readConfigString(config, 'prompt')} onChange={value => patch({ prompt: value })} />
       </section>
     )
   }
@@ -392,7 +392,7 @@ export function QuickConfigEditor({
           tools={tools}
           onChange={(tool, input) => patch({ tool, input })}
         />
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput')} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
         <ResilienceFieldset nodeId={nodeId} nodeType="tool" config={config} onPatch={patch} />
       </section>
     )
@@ -404,7 +404,7 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? (t('rightPanel.quickConfig.teamGoal') as string) : (t('rightPanel.quickConfig.agentGoal') as string)} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
+        <TextareaConfigField scope={nodeId} label={type === 'multi_agent' ? (t('rightPanel.quickConfig.teamGoal')) : (t('rightPanel.quickConfig.agentGoal'))} value={readConfigString(config, 'goal')} onChange={value => patch({ goal: value })} />
         <div className="config-field-row">
           <label className="field-label" htmlFor={plannerId}>{t('rightPanel.quickConfig.planner')}</label>
           <select id={plannerId} className="text-field" value={readConfigString(config, 'planner') || 'rules'} onChange={event => patch({ planner: event.target.value })}>
@@ -421,8 +421,8 @@ export function QuickConfigEditor({
             </select>
           </div>
         )}
-        {type === 'agent' && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue') as string} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
-        <NumberConfigField scope={nodeId} label={t('rightPanel.quickConfig.maxSteps') as string} value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
+        {type === 'agent' && <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.inputValue')} value={readConfigString(config, 'value')} onChange={value => patch({ value })} />}
+        <NumberConfigField scope={nodeId} label={t('rightPanel.quickConfig.maxSteps')} value={readConfigNumber(config, 'maxSteps') ?? 3} onChange={value => patch({ maxSteps: value })} />
         {type === 'multi_agent' && (
           <label className="checkbox-row">
             <input type="checkbox" checked={config.reflection !== false} onChange={event => patch({ reflection: event.target.checked })} />
@@ -441,13 +441,13 @@ export function QuickConfigEditor({
     const onTimeout = readConfigString(config, 'onTimeout') || 'fail'
     const deadlineModeId = fieldId(nodeId, 'approval deadline mode')
     const timeoutPolicyId = fieldId(nodeId, 'approval timeout policy')
-    const assigneeHelperId = `${fieldId(nodeId, t('rightPanel.quickConfig.approvalAssignee') as string)}-helper`
+    const assigneeHelperId = `${fieldId(nodeId, t('rightPanel.quickConfig.approvalAssignee'))}-helper`
     const deadlineHelperId = `${deadlineModeId}-helper`
     return (
       <section className="quick-config" data-testid="approval-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalMessage') as string} value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
-        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalAssignee') as string} value={readConfigString(config, 'assignee')} describedBy={assigneeHelperId} onChange={value => patch({ assignee: value })} />
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalMessage')} value={readConfigString(config, 'message')} onChange={value => patch({ message: value })} />
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalAssignee')} value={readConfigString(config, 'assignee')} describedBy={assigneeHelperId} onChange={value => patch({ assignee: value })} />
         <p id={assigneeHelperId} className="helper-text">{t('rightPanel.quickConfig.approvalAssigneeHelper')}</p>
         <div className="config-field-row">
           <label className="field-label" htmlFor={deadlineModeId}>{t('rightPanel.quickConfig.approvalDeadlineMode')}</label>
@@ -486,7 +486,7 @@ export function QuickConfigEditor({
           <AbsoluteDateTimeField
             nodeId={nodeId}
             field="approval deadline"
-            label={t('rightPanel.quickConfig.approvalDeadline') as string}
+            label={t('rightPanel.quickConfig.approvalDeadline')}
             helper="rightPanel.quickConfig.absoluteDateTimeHelper"
             value={until}
             onChange={value => patch({ until: value })}
@@ -513,7 +513,7 @@ export function QuickConfigEditor({
               </select>
             </div>
             {onTimeout === 'escalate' && (
-              <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalEscalateTo') as string} value={readConfigString(config, 'escalateTo')} describedBy={deadlineHelperId} onChange={value => patch({ escalateTo: value })} />
+              <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.approvalEscalateTo')} value={readConfigString(config, 'escalateTo')} describedBy={deadlineHelperId} onChange={value => patch({ escalateTo: value })} />
             )}
             <p id={deadlineHelperId} className="helper-text">{t('rightPanel.quickConfig.approvalDeadlineHelper')}</p>
           </>
@@ -526,9 +526,9 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.formTitle') as string} value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
-        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.formInstructions') as string} value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldsSchema') as string} value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.formTitle')} value={readConfigString(config, 'title')} onChange={value => patch({ title: value })} />
+        <TextareaConfigField scope={nodeId} label={t('rightPanel.quickConfig.formInstructions')} value={readConfigString(config, 'description')} onChange={value => patch({ description: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldsSchema')} value={asJsonObject(config.schema)} onChange={value => patch({ schema: value })} />
         <p className="helper-text">{t('rightPanel.quickConfig.humanFormHelper')}</p>
       </section>
     )
@@ -540,7 +540,7 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <ExpressionAssistant
           id={`${nodeId}-branch-expression`}
-          label={t('rightPanel.quickConfig.branchExpression') as string}
+          label={t('rightPanel.quickConfig.branchExpression')}
           value={readConfigString(config, 'expression')}
           onChange={value => patch({ expression: value })}
           nodes={workflowNodes}
@@ -570,7 +570,7 @@ export function QuickConfigEditor({
             className="text-field"
             list={workflowListId}
             value={selectedWorkflowId}
-            placeholder={t('rightPanel.quickConfig.pickWorkflow') as string}
+            placeholder={t('rightPanel.quickConfig.pickWorkflow')}
             autoComplete="off"
             aria-describedby={workflowHelperId}
             aria-invalid={isSelfReference || undefined}
@@ -582,7 +582,7 @@ export function QuickConfigEditor({
               <option
                 key={workflow.id}
                 value={workflow.id}
-                label={t('rightPanel.quickConfig.workflowOption', { name: workflow.name, id: workflow.id }) as string}
+                label={t('rightPanel.quickConfig.workflowOption', { name: workflow.name, id: workflow.id })}
               />
             ))}
           </datalist>
@@ -602,7 +602,7 @@ export function QuickConfigEditor({
             else patch({ version })
           }}
         />
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.overrideInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.overrideInput')} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
       </section>
     )
   }
@@ -611,7 +611,7 @@ export function QuickConfigEditor({
     const until = readConfigString(config, 'until')
     const mode = until ? 'until' : 'duration'
     const modeId = fieldId(nodeId, 'wait mode')
-    const durationHelperId = `${fieldId(nodeId, t('rightPanel.quickConfig.duration') as string)}-helper`
+    const durationHelperId = `${fieldId(nodeId, t('rightPanel.quickConfig.duration'))}-helper`
     return (
       <section className="quick-config" data-testid="wait-until-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
@@ -635,7 +635,7 @@ export function QuickConfigEditor({
         </div>
         {mode === 'duration' ? (
           <>
-            <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.duration') as string} value={readConfigString(config, 'duration')} describedBy={durationHelperId} onChange={value => patch({ duration: value })} />
+            <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.duration')} value={readConfigString(config, 'duration')} describedBy={durationHelperId} onChange={value => patch({ duration: value })} />
             <p id={durationHelperId} className="helper-text">
               <Trans i18nKey="rightPanel.quickConfig.durationHelper" components={{ code: <code /> }} />
             </p>
@@ -644,7 +644,7 @@ export function QuickConfigEditor({
           <AbsoluteDateTimeField
             nodeId={nodeId}
             field="wait until"
-            label={t('rightPanel.quickConfig.waitUntil') as string}
+            label={t('rightPanel.quickConfig.waitUntil')}
             helper="rightPanel.quickConfig.waitUntilHelper"
             value={until}
             onChange={value => patch({ until: value })}
@@ -692,9 +692,9 @@ export function QuickConfigEditor({
             <option value="for_each">{t('rightPanel.quickConfig.loopModeForEach')}</option>
           </select>
         </div>
-        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.items') as string} value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
+        <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.items')} value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
         {mode === 'map' ? (
-          <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+          <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping')} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
         ) : (
           <div data-testid="loop-for-each-config">
             <ToolPicker
@@ -704,10 +704,10 @@ export function QuickConfigEditor({
               tools={tools}
               onChange={(tool, input) => patch({ tool, input })}
             />
-            <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.loopToolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+            <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.loopToolInput')} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
             <OptionalNumberConfigField
               scope={nodeId}
-              label={t('rightPanel.quickConfig.loopConcurrency') as string}
+              label={t('rightPanel.quickConfig.loopConcurrency')}
               value={readConfigNumber(config, 'concurrency')}
               min={1}
               max={LOOP_MAX_CONCURRENCY}
@@ -735,7 +735,7 @@ export function QuickConfigEditor({
             {failureBudgetMode === 'percentage' ? (
               <OptionalNumberConfigField
                 scope={nodeId}
-                label={t('rightPanel.quickConfig.loopFailurePercentage') as string}
+                label={t('rightPanel.quickConfig.loopFailurePercentage')}
                 value={readConfigNumber(config, 'toleratedFailurePercentage')}
                 min={0}
                 max={100}
@@ -746,7 +746,7 @@ export function QuickConfigEditor({
             ) : (
               <OptionalNumberConfigField
                 scope={nodeId}
-                label={t('rightPanel.quickConfig.loopFailureCount') as string}
+                label={t('rightPanel.quickConfig.loopFailureCount')}
                 value={readConfigNumber(config, 'toleratedFailureCount')}
                 min={0}
                 max={1000}
@@ -767,7 +767,7 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.fieldMapping')} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
       </section>
     )
   }
@@ -776,7 +776,7 @@ export function QuickConfigEditor({
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.candidates') as string} value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
+        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.candidates')} value={Array.isArray(config.candidates) ? config.candidates : []} onChange={value => patch({ candidates: value })} />
       </section>
     )
   }
@@ -787,7 +787,7 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <JsonConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.branches') as string}
+          label={t('rightPanel.quickConfig.branches')}
           value={Array.isArray(config.branches) ? config.branches : []}
           onChange={value => patch({ branches: value })}
         />
@@ -804,7 +804,7 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <JsonConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.branchSources') as string}
+          label={t('rightPanel.quickConfig.branchSources')}
           value={asJsonObject(config.sources)}
           onChange={value => patch({ sources: value })}
         />
@@ -839,7 +839,7 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.emailAliasKey') as string}
+          label={t('rightPanel.quickConfig.emailAliasKey')}
           value={readConfigString(config, 'aliasKey')}
           onChange={value => patch({ aliasKey: value })}
         />
@@ -863,13 +863,13 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.fileBucket') as string}
+          label={t('rightPanel.quickConfig.fileBucket')}
           value={readConfigString(config, 'bucket')}
           onChange={value => patch({ bucket: value })}
         />
         <TextConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.filePrefix') as string}
+          label={t('rightPanel.quickConfig.filePrefix')}
           value={readConfigString(config, 'prefix')}
           onChange={value => patch({ prefix: value })}
         />
@@ -884,13 +884,13 @@ export function QuickConfigEditor({
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
         <TextConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.mcpEventConnectionAlias') as string}
+          label={t('rightPanel.quickConfig.mcpEventConnectionAlias')}
           value={readConfigString(config, 'connectionAlias')}
           onChange={value => patch({ connectionAlias: value })}
         />
         <TextConfigField
           scope={nodeId}
-          label={t('rightPanel.quickConfig.mcpEventResourceUri') as string}
+          label={t('rightPanel.quickConfig.mcpEventResourceUri')}
           value={readConfigString(config, 'resourceUri')}
           onChange={value => patch({ resourceUri: value })}
         />

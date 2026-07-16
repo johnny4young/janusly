@@ -139,12 +139,12 @@ export function InspectorPanel({
     setTypeChangePending(true)
     try {
       const accepted = await confirm({
-        title: t('rightPanel.inspector.changeKindTitle') as string,
+        title: t('rightPanel.inspector.changeKindTitle'),
         body: t('rightPanel.inspector.changeKindBody', {
           from: getNodeLabel(selectedNode.data.type),
           to: getNodeLabel(nextType),
-        }) as string,
-        confirmLabel: t('rightPanel.inspector.changeKindConfirm') as string,
+        }),
+        confirmLabel: t('rightPanel.inspector.changeKindConfirm'),
       })
       if (accepted && selectedNodeIdRef.current === sourceNodeId) onUpdateNodeType(nextType)
     } finally {
@@ -160,7 +160,7 @@ export function InspectorPanel({
     const failureMeta: string[] = []
     if (status === 'failed') {
       if (typeof nodeStatus?.attempts === 'number' && nodeStatus.attempts > 0) {
-        failureMeta.push(t('rightPanel.runs.nodeAttempt', { count: nodeStatus.attempts }) as string)
+        failureMeta.push(t('rightPanel.runs.nodeAttempt', { count: nodeStatus.attempts }))
       }
       if (failureDuration) failureMeta.push(failureDuration)
     }
@@ -177,8 +177,8 @@ export function InspectorPanel({
                 type="button"
                 className="inspector-id-copy"
                 onClick={() => copyNodeId(selectedNode.id)}
-                aria-label={t('rightPanel.inspector.copyId') as string}
-                title={t('rightPanel.inspector.copyId') as string}
+                aria-label={t('rightPanel.inspector.copyId')}
+                title={t('rightPanel.inspector.copyId')}
               >
                 <Copy size={12} aria-hidden="true" />
               </button>
@@ -282,7 +282,7 @@ export function InspectorPanel({
                 onUpdateNodeConfig(parsed)
                 setJsonError(null)
               } catch (error) {
-                setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson') as string))
+                setJsonError(error instanceof Error ? error.message : (t('rightPanel.inspector.invalidJson')))
               }
             }}
           />
@@ -302,7 +302,7 @@ export function InspectorPanel({
         <ExpressionAssistant
           key={selectedEdge.id}
           id="edge-condition"
-          label={t('rightPanel.inspector.runOnlyWhen') as string}
+          label={t('rightPanel.inspector.runOnlyWhen')}
           value={selectedEdge.data?.condition ?? ''}
           onChange={(value) => onUpdateEdgeCondition(selectedEdge.id, value)}
           nodes={workflowNodes}

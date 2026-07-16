@@ -50,6 +50,7 @@ import { useRunEventStream } from './hooks/useRunEventStream'
 import { useBootstrapData } from './hooks/useBootstrapData'
 import { useRunPolling } from './hooks/useRunPolling'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { usePlatformMutation } from './hooks/usePlatformMutation'
 import { useDraftAutosave, readDraft, readLatestDraft, clearDraft } from './hooks/useDraftPersistence'
 import { useConfirm } from './components/ConfirmDialog'
 import { formatStatusLabel } from './constants'
@@ -253,6 +254,18 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [snippetMenuOpen, setSnippetMenuOpen] = useState(false)
+  // React Flow cannot establish a valid viewport when its first mount happens
+  // under display:none (for example, after reloading on Runs). Defer that first
+  // mount until a canvas tab is visible, then retain the instance across other
+  // non-home tabs so operator pan/zoom still survives ordinary navigation.
+  const [canvasActivated, setCanvasActivated] = useState(() => isCanvasTab(activeTab))
+  useEffect(() => {
+    if (activeTab === 'home') {
+      setCanvasActivated(false)
+    } else if (isCanvasTab(activeTab)) {
+      setCanvasActivated(true)
+    }
+  }, [activeTab])
   // Stable references for the overlay close callbacks. Inline arrows here
   // would create a fresh function ref on every App render — polling at 1.5s
   // plus every Zustand mutation would re-bind the Escape keydown listener
@@ -323,9 +336,9 @@ export default function App() {
   const confirmReplaceCanvas = useCallback(async (): Promise<boolean> => {
     if (!useWorkflowStore.getState().workflowDirty) return true
     return confirm({
-      title: t('unsavedGuard.title') as string,
-      body: t('unsavedGuard.body') as string,
-      confirmLabel: t('unsavedGuard.discard') as string,
+      title: t('unsavedGuard.title'),
+      body: t('unsavedGuard.body'),
+      confirmLabel: t('unsavedGuard.discard'),
       tone: 'danger',
     })
   }, [confirm, t])
@@ -353,10 +366,10 @@ export default function App() {
     const draft = readDraft(workflowId)
     if (!draft) return
     const restore = await confirm({
-      title: t('draftRestore.title') as string,
-      body: t('draftRestore.body', { time: new Date(draft.savedAt).toLocaleString(getResolvedLocale()) }) as string,
-      confirmLabel: t('draftRestore.restore') as string,
-      cancelLabel: t('draftRestore.discard') as string,
+      title: t('draftRestore.title'),
+      body: t('draftRestore.body', { time: new Date(draft.savedAt).toLocaleString(getResolvedLocale()) }),
+      confirmLabel: t('draftRestore.restore'),
+      cancelLabel: t('draftRestore.discard'),
     })
     if (restore) {
       // The draft content itself is not server-side. `savedBase` only means a
@@ -431,6 +444,7 @@ export default function App() {
   // Polling fallback (1.5s `/status`). Loads the initial timeline + stays as the
   // safety net behind SSE. `loadStatus` is reused by the run-action handlers.
   const { loadStatus } = useRunPolling(runId, onRunTerminal, patchRunSummary)
+  const runPlatformMutation = usePlatformMutation()
 
   const selectedNode = useMemo(() => nodes.find(node => node.id === selectedNodeId) ?? null, [nodes, selectedNodeId])
   const selectedEdge = useMemo(() => edges.find(edge => edge.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
@@ -650,52 +664,58 @@ export default function App() {
   }, [addEvents, addToast, eventsCursor, eventsHasMore, runId, setEventsPagination, t])
 
   const installPlugin = useCallback(async (pluginId: string) => {
-    try {
-      await api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) })
-      addToast(t('toasts.installSucceeded', { pluginId }), 'success')
-      await refreshPlatform()
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.installFailed'), 'error')
-    }
-  }, [addToast, refreshPlatform, t])
+    await runPlatformMutation({
+      request: () => api('/plugins/install', { method: 'POST', body: JSON.stringify({ pluginId, config: {} }) }),
+      failureMessage: t('toasts.installFailed'),
+      successToast: { message: t('toasts.installSucceeded', { pluginId }), tone: 'success' },
+      successToastTiming: 'before-effect',
+      onSuccess: refreshPlatform,
+    })
+  }, [refreshPlatform, runPlatformMutation, t])
 
   const createCredential = useCallback(async (credential: { name: string; kind: string; secretRef: string; expiresAt?: string }) => {
-    try {
-      await api('/credentials', { method: 'POST', body: JSON.stringify(credential) })
-      addToast(t('toasts.credentialAdded', { name: credential.name }), 'success')
-      await refreshPlatform()
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.credentialFailed'), 'error')
-    }
-  }, [addToast, refreshPlatform, t])
+    await runPlatformMutation({
+      request: () => api('/credentials', { method: 'POST', body: JSON.stringify(credential) }),
+      failureMessage: t('toasts.credentialFailed'),
+      successToast: { message: t('toasts.credentialAdded', { name: credential.name }), tone: 'success' },
+      successToastTiming: 'before-effect',
+      onSuccess: refreshPlatform,
+    })
+  }, [refreshPlatform, runPlatformMutation, t])
 
   const installPack = useCallback(async (packId: string) => {
-    try {
-      const res = await api('/workflows/import-pack', { method: 'POST', body: JSON.stringify({ packId }) }) as { workflowId?: string; missingCredentials?: unknown[] }
-      const missing = Array.isArray(res.missingCredentials) ? res.missingCredentials.length : 0
-      addToast(
-        missing > 0 ? t('packs.toast.installedWithMissing', { count: missing }) : t('packs.toast.installed'),
-        missing > 0 ? 'info' : 'success',
-      )
-      bumpPlatformVersion()
-      await refreshPlatform()
-      if (res.workflowId) await openWorkflow(res.workflowId)
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('packs.toast.installFailed'), 'error')
-    }
-  }, [addToast, bumpPlatformVersion, openWorkflow, refreshPlatform, t])
+    await runPlatformMutation<{ workflowId?: string; missingCredentials?: unknown[] }>({
+      request: () => api('/workflows/import-pack', { method: 'POST', body: JSON.stringify({ packId }) }) as Promise<{ workflowId?: string; missingCredentials?: unknown[] }>,
+      failureMessage: t('packs.toast.installFailed'),
+      successToast: (res) => {
+        const missing = Array.isArray(res.missingCredentials) ? res.missingCredentials.length : 0
+        return {
+          message: missing > 0 ? t('packs.toast.installedWithMissing', { count: missing }) : t('packs.toast.installed'),
+          tone: missing > 0 ? 'info' : 'success',
+        }
+      },
+      successToastTiming: 'before-effect',
+      onSuccess: async (res) => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+        if (res.workflowId) await openWorkflow(res.workflowId)
+      },
+    })
+  }, [bumpPlatformVersion, openWorkflow, refreshPlatform, runPlatformMutation, t])
 
   const sampleRunPack = useCallback(async (packId: string) => {
-    try {
-      const res = await api(`/solution-packs/${encodeURIComponent(packId)}/sample-run`, { method: 'POST', body: JSON.stringify({}) }) as { runId?: string }
-      addToast(t('packs.toast.sampleStarted'), 'success')
-      bumpPlatformVersion()
-      await refreshPlatform()
-      if (res.runId) await openRun(res.runId, 'runs')
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('packs.toast.sampleFailed'), 'error')
-    }
-  }, [addToast, bumpPlatformVersion, openRun, refreshPlatform, t])
+    await runPlatformMutation<{ runId?: string }>({
+      request: () => api(`/solution-packs/${encodeURIComponent(packId)}/sample-run`, { method: 'POST', body: JSON.stringify({}) }) as Promise<{ runId?: string }>,
+      failureMessage: t('packs.toast.sampleFailed'),
+      successToast: { message: t('packs.toast.sampleStarted'), tone: 'success' },
+      successToastTiming: 'before-effect',
+      onSuccess: async (res) => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+        if (res.runId) await openRun(res.runId, 'runs')
+      },
+    })
+  }, [bumpPlatformVersion, openRun, refreshPlatform, runPlatformMutation, t])
 
   const openRecoveryQueue = useCallback((deadLetterId?: string) => {
     requestRecoveryQueueFocus(deadLetterId)
@@ -703,31 +723,32 @@ export default function App() {
   }, [setActiveTab])
 
   const injectPackFailure = useCallback(async (packId: string) => {
-    try {
-      const result = await api(
+    await runPlatformMutation<{ deadLetterId?: string }>({
+      request: () => api(
         `/solution-packs/${encodeURIComponent(packId)}/inject-failure`,
         { method: 'POST', body: JSON.stringify({}) },
-      ) as { deadLetterId?: string }
-      addToast(t('packs.toast.failureInjected'), 'success')
-      bumpPlatformVersion()
-      await refreshPlatform()
-      openRecoveryQueue(result.deadLetterId)
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('packs.toast.injectFailed'), 'error')
-    }
-  }, [addToast, bumpPlatformVersion, openRecoveryQueue, refreshPlatform, t])
+      ) as Promise<{ deadLetterId?: string }>,
+      failureMessage: t('packs.toast.injectFailed'),
+      successToast: { message: t('packs.toast.failureInjected'), tone: 'success' },
+      successToastTiming: 'before-effect',
+      onSuccess: async (result) => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+        openRecoveryQueue(result.deadLetterId)
+      },
+    })
+  }, [bumpPlatformVersion, openRecoveryQueue, refreshPlatform, runPlatformMutation, t])
 
   const approveNode = useCallback(async (nodeId: string) => {
     if (!runId) return
 
-    try {
-      await api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) })
-      await loadStatus(runId)
-      addToast(t('toasts.stepApproved', { nodeId }), 'success')
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.resumeFailed'), 'error')
-    }
-  }, [addToast, loadStatus, runId, t])
+    await runPlatformMutation({
+      request: () => api('/resume', { method: 'POST', body: JSON.stringify({ runId, nodeId }) }),
+      failureMessage: t('toasts.resumeFailed'),
+      successToast: { message: t('toasts.stepApproved', { nodeId }), tone: 'success' },
+      onSuccess: () => loadStatus(runId),
+    })
+  }, [loadStatus, runId, runPlatformMutation, t])
 
   const submitHumanForm = useCallback(async (nodeId: string, input: unknown, resumeToken: string) => {
     if (!runId) return [t('toasts.formNoActiveRun')]
@@ -755,19 +776,20 @@ export default function App() {
   const replayNode = useCallback(async (nodeId: string) => {
     if (!runId) return
 
-    try {
-      await api('/dlq/replay', {
+    await runPlatformMutation({
+      request: () => api('/dlq/replay', {
         method: 'POST',
         body: JSON.stringify({ runId, nodeId }),
-      })
-      await loadStatus(runId)
-      bumpPlatformVersion()
-      await refreshPlatform()
-      addToast(t('toasts.stepRetried', { nodeId }), 'success')
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.replayFailed'), 'error')
-    }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
+      }),
+      failureMessage: t('toasts.replayFailed'),
+      successToast: { message: t('toasts.stepRetried', { nodeId }), tone: 'success' },
+      onSuccess: async () => {
+        await loadStatus(runId)
+        bumpPlatformVersion()
+        await refreshPlatform()
+      },
+    })
+  }, [bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, t])
 
   const cancelActiveRun = useCallback(async () => {
     if (!runId) return
@@ -776,36 +798,37 @@ export default function App() {
       addToast(t('toasts.runAlreadyTerminal', { status: formatStatusLabel(activeRun.status) }), 'info')
       return
     }
-    try {
-      await api('/run/cancel', {
+    await runPlatformMutation({
+      request: () => api('/run/cancel', {
         method: 'POST',
         body: JSON.stringify({ runId, reason: { source: 'ui' } }),
-      })
-      await loadStatus(runId)
-      bumpPlatformVersion()
-      await refreshPlatform()
-      addToast(t('toasts.runCancelled'), 'success')
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.runCancelFailed'), 'error')
-    }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runs, t])
+      }),
+      failureMessage: t('toasts.runCancelFailed'),
+      successToast: { message: t('toasts.runCancelled'), tone: 'success' },
+      onSuccess: async () => {
+        await loadStatus(runId)
+        bumpPlatformVersion()
+        await refreshPlatform()
+      },
+    })
+  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, runs, t])
 
   const replayDeadLetter = useCallback(async (deadLetterId: string, _createdAtIso?: string) => {
-    try {
-      await api('/dlq/replay', {
+    const result = await runPlatformMutation({
+      request: () => api('/dlq/replay', {
         method: 'POST',
         body: JSON.stringify({ deadLetterId }),
-      })
-      if (runId) await loadStatus(runId)
-      bumpPlatformVersion()
-      await refreshPlatform()
-      addToast(t('toasts.deadLetterReplayed'), 'success')
-      return true
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.deadLetterReplayFailed'), 'error')
-      return false
-    }
-  }, [addToast, bumpPlatformVersion, loadStatus, refreshPlatform, runId, t])
+      }),
+      failureMessage: t('toasts.deadLetterReplayFailed'),
+      successToast: { message: t('toasts.deadLetterReplayed'), tone: 'success' },
+      onSuccess: async () => {
+        if (runId) await loadStatus(runId)
+        bumpPlatformVersion()
+        await refreshPlatform()
+      },
+    })
+    return result.ok
+  }, [bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, t])
 
   const generateWorkflow = useCallback(async (prompt: string) => {
     // Guard BEFORE the LLM call: generation replaces the canvas, and a
@@ -878,27 +901,36 @@ export default function App() {
   }, [getWorkflowJson])
 
   const resolveDeadLetter = useCallback(async (deadLetterId: string) => {
-    try {
-      await api('/dlq/resolve', {
+    const result = await runPlatformMutation({
+      request: () => api('/dlq/resolve', {
         method: 'POST',
         body: JSON.stringify({ id: deadLetterId }),
-      })
-      bumpPlatformVersion()
-      await Promise.all([
-        refreshPlatform(),
-        requestRecoveryAllClearIfQueueEmpty(),
-      ])
-      addToast(t('toasts.deadLetterResolved'), 'success')
-      return true
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : t('toasts.deadLetterResolveFailed'), 'error')
-      return false
-    }
-  }, [addToast, bumpPlatformVersion, refreshPlatform, t])
+      }),
+      failureMessage: t('toasts.deadLetterResolveFailed'),
+      successToast: { message: t('toasts.deadLetterResolved'), tone: 'success' },
+      onSuccess: async () => {
+        bumpPlatformVersion()
+        await Promise.all([
+          refreshPlatform(),
+          requestRecoveryAllClearIfQueueEmpty(),
+        ])
+      },
+    })
+    return result.ok
+  }, [bumpPlatformVersion, refreshPlatform, runPlatformMutation, t])
 
   const updateEdgeCondition = useCallback((edgeId: string, condition: string) => {
     storeUpdateEdgeCondition(edgeId, condition || null)
   }, [storeUpdateEdgeCondition])
+
+  const useTemplate = useCallback((workflow: WorkflowDefinition) => {
+    void (async () => {
+      if (!await confirmReplaceCanvas()) return
+      hydrateWorkflow(workflow, { saved: false, dirty: true })
+      setValidationIssues([])
+      setActiveTab('inspector')
+    })()
+  }, [confirmReplaceCanvas, hydrateWorkflow, setActiveTab])
 
   if (!authReady) return (
     <div className="boot-screen" role="status" aria-live="polite">
@@ -935,61 +967,64 @@ export default function App() {
   const rightPanelElement = (
     <RightPanel
       tab={activeTab}
-      events={events}
-      eventsHasMore={eventsHasMore}
-      onLoadOlderEvents={loadOlderEvents}
-      runNodes={runNodes}
-      selectedNode={selectedNode}
-      selectedEdge={selectedEdge}
-      workflowNodes={nodes}
-      workflowEdges={edges}
-      validationIssues={validationIssues}
-      readinessResult={readinessResult}
-      aiReviewIssues={aiReviewIssues}
-      tools={tools}
-      templates={templates}
-      solutionPacks={solutionPacks}
-      credentials={credentials}
-      runs={runs}
-      workflows={savedWorkflows}
-      activeRunId={runId}
-      usage={usage}
-      aiHealth={aiHealth}
-      currentWorkflowId={currentWorkflowId}
-      currentWorkflowName={currentWorkflowName}
-      currentWorkflowInputs={currentWorkflowInputs}
-      currentWorkflowOutputs={currentWorkflowOutputs}
-      onOpenWorkflow={openWorkflow}
-      onUseTemplate={(workflow) => {
-        void (async () => {
-          if (!await confirmReplaceCanvas()) return
-          hydrateWorkflow(workflow, { saved: false, dirty: true })
-          setValidationIssues([])
-          setActiveTab('inspector')
-        })()
+      authoring={{
+        aiHealth,
+        runNodes,
+        selectedNode,
+        selectedEdge,
+        workflowNodes: nodes,
+        workflowEdges: edges,
+        validationIssues,
+        readinessResult,
+        aiReviewIssues,
+        tools,
+        workflows: savedWorkflows,
+        currentWorkflowId,
+        currentWorkflowName,
+        currentWorkflowInputs,
+        currentWorkflowOutputs,
+        onUpdateNodeConfig: updateSelectedNodeConfig,
+        onUpdateNodeType: updateSelectedNodeType,
+        onUpdateEdgeCondition: updateEdgeCondition,
+        onValidateWorkflow: validateWorkflow,
+        onInsertSnippet: () => setSnippetMenuOpen(true),
+        onGenerateWorkflow: generateWorkflow,
+        onExplainWorkflow: explainWorkflow,
+        onReviewWorkflow: reviewWorkflow,
       }}
-      onInstallPlugin={installPlugin}
-      onInstallPack={installPack}
-      onSampleRunPack={sampleRunPack}
-      onInjectPackFailure={injectPackFailure}
-      onCreateCredential={createCredential}
-      onOpenRun={openRun}
-      onRefreshPlatform={refreshPlatform}
-      onUpdateNodeConfig={updateSelectedNodeConfig}
-      onUpdateNodeType={updateSelectedNodeType}
-      onUpdateEdgeCondition={updateEdgeCondition}
-      onValidateWorkflow={validateWorkflow}
-      onInsertSnippet={() => setSnippetMenuOpen(true)}
-      onApproveNode={approveNode}
-      onSubmitHumanForm={submitHumanForm}
-      onReplayNode={replayNode}
-      onCancelActiveRun={cancelActiveRun}
-      onReplayDeadLetter={replayDeadLetter}
-      onResolveDeadLetter={resolveDeadLetter}
-      onGenerateWorkflow={generateWorkflow}
-      onExplainWorkflow={explainWorkflow}
-      onReviewWorkflow={reviewWorkflow}
-      onOpenTab={setActiveTab}
+      catalog={{
+        tools,
+        templates,
+        solutionPacks,
+        credentials,
+        workflows: savedWorkflows,
+        onOpenWorkflow: openWorkflow,
+        onUseTemplate: useTemplate,
+        onInstallPlugin: installPlugin,
+        onInstallPack: installPack,
+        onSampleRunPack: sampleRunPack,
+        onInjectPackFailure: injectPackFailure,
+        onCreateCredential: createCredential,
+      }}
+      execution={{
+        events,
+        eventsHasMore,
+        onLoadOlderEvents: loadOlderEvents,
+        runNodes,
+        runs,
+        workflows: savedWorkflows,
+        activeRunId: runId,
+        usage,
+        onOpenRun: openRun,
+        onRefreshPlatform: refreshPlatform,
+        onApproveNode: approveNode,
+        onSubmitHumanForm: submitHumanForm,
+        onReplayNode: replayNode,
+        onCancelActiveRun: cancelActiveRun,
+        onReplayDeadLetter: replayDeadLetter,
+        onResolveDeadLetter: resolveDeadLetter,
+      }}
+      navigation={{ onOpenTab: setActiveTab }}
     />
   )
 
@@ -1017,10 +1052,10 @@ export default function App() {
               onClick={() => (recoverState === 'clear' ? setActiveTab('home') : openRecoveryQueue())}
               aria-label={
                 recoverState === 'blocked'
-                  ? t('topbar.blockerAria', { count: blockerCount }) as string
+                  ? t('topbar.blockerAria', { count: blockerCount })
                   : recoverState === 'attention'
-                    ? t('topbar.recoverAria', { count: openDlqCount }) as string
-                    : t('topbar.allClearAria') as string
+                    ? t('topbar.recoverAria', { count: openDlqCount })
+                    : t('topbar.allClearAria')
               }
             >
               {recoverState === 'clear' ? (
@@ -1085,20 +1120,17 @@ export default function App() {
         />
       }
       main={(() => {
-        // Layout dispatch driven by `getCanvasVisibility(activeTab)`:
+        // Layout dispatch driven by `getCanvasVisibility(activeTab, canvasActivated)`:
         //  - `home` (mounted: false) owns the full main slot via
         //    `RecoveryCenterPanel` — no canvas in the DOM at all.
         //  - Canvas tabs (mounted: true, visible: true) mount the canvas
         //    wrapper visibly; the contextual rail does not render
         //    because the right panel takes its place.
-        //  - Every other tab (mounted: true, visible: false) keeps the
-        //    canvas mounted but hidden via `display: none`. The
-        //    `<ReactFlowProvider>` lives inside the lazy `CanvasWorkspace`,
-        //    so it stays mounted across non-home tabs and holds the React
-        //    Flow viewport state — destroying the wrapper would reset zoom +
-        //    pan on every navigation back to the editor.
-        const visibility = getCanvasVisibility(activeTab)
-        if (!visibility.mounted) {
+        //  - Every other tab renders its contextual slot. Before the first
+        //    canvas visit it leaves React Flow unmounted; afterwards it keeps
+        //    the existing instance hidden so zoom + pan survive navigation.
+        const visibility = getCanvasVisibility(activeTab, canvasActivated)
+        if (activeTab === 'home') {
           return (
             <RecoveryCenterPanel
               runs={runs}
@@ -1116,31 +1148,33 @@ export default function App() {
         }
         return (
           <>
-            <div
-              className="workspace-canvas-wrapper"
-              data-canvas-visible={visibility.visible ? 'true' : 'false'}
-              data-testid="workspace-canvas-wrapper"
-            >
-              <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
-                <CanvasWorkspace
-                  // React Flow only applies `defaultViewport` on mount. Remount
-                  // on workflow identity changes so opening a saved workflow
-                  // after a reload / Flows navigation can restore its viewport.
-                  key={currentWorkflowId ?? 'workflow-canvas'}
-                  nodes={visibleNodes}
-                  edges={visibleEdges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onConnect={connect}
-                  onNodeClick={handleNodeClick}
-                  onEdgeClick={handleEdgeClick}
-                  paletteNodeTypes={canvasPaletteTypes}
-                  onAddNode={addNode}
-                  viewportWorkflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined}
-                  active={visibility.visible}
-                />
-              </Suspense>
-            </div>
+            {visibility.mounted && (
+              <div
+                className="workspace-canvas-wrapper"
+                data-canvas-visible={visibility.visible ? 'true' : 'false'}
+                data-testid="workspace-canvas-wrapper"
+              >
+                <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>
+                  <CanvasWorkspace
+                    // React Flow only applies `defaultViewport` on mount. Remount
+                    // on workflow identity changes so opening a saved workflow
+                    // after a reload / Flows navigation can restore its viewport.
+                    key={currentWorkflowId ?? 'workflow-canvas'}
+                    nodes={visibleNodes}
+                    edges={visibleEdges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={connect}
+                    onNodeClick={handleNodeClick}
+                    onEdgeClick={handleEdgeClick}
+                    paletteNodeTypes={canvasPaletteTypes}
+                    onAddNode={addNode}
+                    viewportWorkflowId={currentWorkflowSaved ? (currentWorkflowId ?? undefined) : undefined}
+                    active={visibility.visible}
+                  />
+                </Suspense>
+              </div>
+            )}
             {visibility.contextualSlot && (
               (activeTab === 'runs' || activeTab === 'reasoning') && observedRun ? (
                 <Suspense fallback={<div className="panel-list"><p className="helper-text">{t('common.working')}</p></div>}>

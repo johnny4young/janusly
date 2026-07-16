@@ -99,7 +99,7 @@ export function ReviewBody({
         failureSignature={failureSignature}
       />
       {showTabs && (
-        <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel') as string}>
+        <div className="we-recovery-tabs" role="tablist" aria-label={t('recoveryDialog.review.tabsAriaLabel')}>
           {tabs.map((tab, index) => (
             <button
               key={suggestionTabKey(tab)}
@@ -116,8 +116,8 @@ export function ReviewBody({
               title={(() => {
                 const { primary, showSelfRated, selfRated } = resolveConfidenceDisplay(tab)
                 return showSelfRated
-                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated }) as string
-                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary }) as string
+                  ? t('recoveryDialog.review.tabCalibratedTitle', { confidence: primary, selfRated })
+                  : t('recoveryDialog.review.tabConfidenceTitle', { confidence: primary })
               })()}
             >
               <span className="we-recovery-tab__label">{approachLabelDisplay(tab.approachLabel)}</span>
@@ -150,10 +150,10 @@ export function ReviewBody({
         <WorkflowDiffView
           before={(dlq.workflowJson ?? {}) as WorkflowDefinition}
           after={selected.workflow}
-          beforeLabel={t('recoveryDialog.review.beforeLabel') as string}
+          beforeLabel={t('recoveryDialog.review.beforeLabel')}
           afterLabel={showTabs
-            ? (t('recoveryDialog.review.suggestedLabelWithApproach', { approach: approachLabelDisplay(selected.approachLabel) }) as string)
-            : (t('recoveryDialog.review.suggestedLabel') as string)}
+            ? (t('recoveryDialog.review.suggestedLabelWithApproach', { approach: approachLabelDisplay(selected.approachLabel) }))
+            : (t('recoveryDialog.review.suggestedLabel'))}
           aiPatchRationale={selected.rationale}
         />
         <EvidencePanel evidence={suggestion.evidence ?? []} />

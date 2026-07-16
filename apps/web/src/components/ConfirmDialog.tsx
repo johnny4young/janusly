@@ -119,13 +119,13 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 <AlertTriangle size={18} />
               </span>
               <div className="run-input-dialog__heading">
-                <h2 id="confirm-dialog-title">{options.title ?? (t('confirmDialog.title') as string)}</h2>
+                <h2 id="confirm-dialog-title">{options.title ?? (t('confirmDialog.title'))}</h2>
                 <p id="confirm-dialog-body" className="helper-text">{options.body}</p>
               </div>
             </header>
             <footer className="run-input-dialog__footer">
               <button type="button" className="command-button" onClick={() => close(false)} data-testid="confirm-dialog-cancel">
-                {options.cancelLabel ?? (t('common.cancel') as string)}
+                {options.cancelLabel ?? (t('common.cancel'))}
               </button>
               <button
                 ref={confirmButtonRef}
@@ -134,7 +134,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 onClick={() => close(true)}
                 data-testid="confirm-dialog-confirm"
               >
-                {options.confirmLabel ?? (t('confirmDialog.confirm') as string)}
+                {options.confirmLabel ?? (t('confirmDialog.confirm'))}
               </button>
             </footer>
           </div>

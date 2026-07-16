@@ -153,7 +153,7 @@ export function JsonConfigField({ scope, label, value, onChange }: { scope: stri
             onChange(JSON.parse(event.target.value))
             setError(null)
           } catch {
-            setError(t('rightPanel.jsonField.invalidJson') as string)
+            setError(t('rightPanel.jsonField.invalidJson'))
           }
         }}
       />

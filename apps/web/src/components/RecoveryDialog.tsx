@@ -331,7 +331,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.suggestionRequest')),
       })
     }
   }
@@ -347,7 +347,7 @@ export function RecoveryDialog({
       setSelectedSuggestionIndex(0)
       setStep({ kind: 'review', suggestion: normalisePatchSuggestion(result.suggestion) })
     } catch (error) {
-      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed') as string) })
+      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.useFailed')) })
     } finally {
       setPlaybookBusy(null)
     }
@@ -364,7 +364,7 @@ export function RecoveryDialog({
       setMatchingPlaybook(null)
       bumpPlatformVersion()
     } catch (error) {
-      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.retireFailed') as string) })
+      setStep({ kind: 'error', message: error instanceof Error ? error.message : (t('recoveryDialog.playbook.retireFailed')) })
     } finally {
       setPlaybookBusy(null)
     }
@@ -388,7 +388,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.validationRequest')),
       })
     }
   }
@@ -396,7 +396,7 @@ export function RecoveryDialog({
   const applyAfterValidation = async (suggestion: PatchSuggestion, selectedIndex: number, validationRunId: string) => {
     const selected = suggestion.suggestions[selectedIndex]
     if (!selected) {
-      setStep({ kind: 'error', message: t('recoveryDialog.errors.selectedSuggestionUnavailable') as string })
+      setStep({ kind: 'error', message: t('recoveryDialog.errors.selectedSuggestionUnavailable') })
       return
     }
     const mode: 'single' | 'cluster' = isClusterMode ? 'cluster' : 'single'
@@ -499,7 +499,7 @@ export function RecoveryDialog({
               deadLetterId: dlq.id,
               validationRunId,
               sourceWorkflowVersionId,
-              defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }) as string,
+              defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }),
               defaultInstructions: selected.rationale,
             },
           } : {}),
@@ -547,7 +547,7 @@ export function RecoveryDialog({
             deadLetterId: dlq.id,
             validationRunId,
             sourceWorkflowVersionId,
-            defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }) as string,
+            defaultTitle: t('recoveryDialog.playbook.defaultTitle', { nodeId: dlq.nodeId }),
             defaultInstructions: selected.rationale,
           },
         } : {}),
@@ -555,7 +555,7 @@ export function RecoveryDialog({
     } catch (error) {
       setStep({
         kind: 'error',
-        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed') as string),
+        message: error instanceof Error ? error.message : (t('recoveryDialog.errors.applyFailed')),
       })
     }
   }
@@ -596,7 +596,7 @@ export function RecoveryDialog({
             type="button"
             className="run-input-dialog__close"
             onClick={onClose}
-            aria-label={t('recoveryDialog.closeAria') as string}
+            aria-label={t('recoveryDialog.closeAria')}
             disabled={
               step.kind === 'loading'
               || step.kind === 'applying'
@@ -811,7 +811,7 @@ export function RecoveryDialog({
                 className="command-button command-button-primary"
                 onClick={validateSuggestion}
                 disabled={!canApplyPatch}
-                title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason') as string) : undefined}
+                title={!canApplyPatch ? (t('recoveryDialog.footer.applyDisabledReason')) : undefined}
               >
                 <Play size={14} aria-hidden="true" />
                 <span>

@@ -119,16 +119,16 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
   const nameFor = (snippet: SnippetDefinition): string =>
     snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never) as string)
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never))
       : snippet.name
 
   const descriptionFor = (snippet: SnippetDefinition): string =>
     snippet.builtin
-      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never) as string)
+      ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never))
       : snippet.description
 
   const categoryLabel = (category: SnippetCategory): string =>
-    t(`snippets.category.${category}` as never) as string
+    t(`snippets.category.${category}` as never)
 
   const filtered = useMemo<SnippetDefinition[]>(() => {
     const normalised = query.trim().toLowerCase()
@@ -192,7 +192,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       t('snippets.toast.inserted', {
         name: nameFor(snippet),
         count: result.insertedNodeIds.length,
-      }) as string,
+      }),
       'success',
     )
 
@@ -225,14 +225,14 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
             type="text"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder={t('snippets.menu.searchPlaceholder') as string}
-            aria-label={t('snippets.menu.searchPlaceholder') as string}
+            placeholder={t('snippets.menu.searchPlaceholder')}
+            aria-label={t('snippets.menu.searchPlaceholder')}
           />
           <button
             type="button"
             className="we-shortcuts-close"
             onClick={onClose}
-            aria-label={t('snippets.menu.cancel') as string}
+            aria-label={t('snippets.menu.cancel')}
           >
             <X size={16} aria-hidden="true" />
           </button>

@@ -104,12 +104,12 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
         method: 'POST',
         body: JSON.stringify({ slo: next }),
       })
-      addToast(t('workflowSlo.saved') as string, 'success')
+      addToast(t('workflowSlo.saved'), 'success')
       setSlo(next ?? DEFAULT_SLO)
       bumpPlatformVersion()
     } catch (err) {
       addToast(
-        tApiError(err) || (t('workflowSlo.error', { message: err instanceof Error ? err.message : 'unknown' }) as string),
+        tApiError(err) || (t('workflowSlo.error', { message: err instanceof Error ? err.message : 'unknown' })),
         'error',
       )
     } finally {
@@ -119,8 +119,8 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
 
   return (
     <section className="panel-card we-slo-panel" aria-labelledby="we-slo-panel-title">
-      <h3 id="we-slo-panel-title" className="section-title">{t('workflowSlo.title') as string}</h3>
-      <p className="helper-text">{t('workflowSlo.description') as string}</p>
+      <h3 id="we-slo-panel-title" className="section-title">{t('workflowSlo.title')}</h3>
+      <p className="helper-text">{t('workflowSlo.description')}</p>
       <form
         className="we-slo-panel__form"
         onSubmit={(e) => {
@@ -129,32 +129,32 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
         }}
       >
         <label className="we-field">
-          <span>{t('workflowSlo.field.successRatePercent') as string}</span>
+          <span>{t('workflowSlo.field.successRatePercent')}</span>
           <input
             type="number"
             min={0}
             max={100}
             step={0.1}
             value={slo.successRatePercent ?? ''}
-            placeholder={t('workflowSlo.field.placeholder') as string}
+            placeholder={t('workflowSlo.field.placeholder')}
             onChange={(e) => setSlo({ ...slo, successRatePercent: parseOptionalNumber(e.target.value) })}
             disabled={loading || saving}
           />
         </label>
         <label className="we-field">
-          <span>{t('workflowSlo.field.p95DurationMs') as string}</span>
+          <span>{t('workflowSlo.field.p95DurationMs')}</span>
           <input
             type="number"
             min={0}
             step={1}
             value={slo.p95DurationMs ?? ''}
-            placeholder={t('workflowSlo.field.placeholder') as string}
+            placeholder={t('workflowSlo.field.placeholder')}
             onChange={(e) => setSlo({ ...slo, p95DurationMs: parseOptionalNumber(e.target.value) })}
             disabled={loading || saving}
           />
         </label>
         <label className="we-field">
-          <span>{t('workflowSlo.field.windowDays') as string}</span>
+          <span>{t('workflowSlo.field.windowDays')}</span>
           <select
             value={slo.windowDays}
             onChange={(e) => setSlo({ ...slo, windowDays: Number(e.target.value) as WindowDays })}
@@ -162,15 +162,15 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
           >
             {[7, 14, 30].map((days) => (
               <option key={days} value={days}>
-                {t('workflowSlo.windowOption', { days }) as string}
+                {t('workflowSlo.windowOption', { days })}
               </option>
             ))}
           </select>
         </label>
-        <p className="helper-text">{t('workflowSlo.field.unsupportedV1') as string}</p>
+        <p className="helper-text">{t('workflowSlo.field.unsupportedV1')}</p>
         <div className="we-slo-panel__actions">
           <button type="submit" className="command-button command-button-primary" disabled={loading || saving}>
-            {saving ? (t('workflowSlo.saving') as string) : (t('workflowSlo.save') as string)}
+            {saving ? (t('workflowSlo.saving')) : (t('workflowSlo.save'))}
           </button>
           <button
             type="button"
@@ -178,7 +178,7 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
             onClick={() => void onSave(null)}
             disabled={loading || saving}
           >
-            {t('workflowSlo.clear') as string}
+            {t('workflowSlo.clear')}
           </button>
         </div>
       </form>

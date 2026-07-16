@@ -1235,12 +1235,12 @@ html[data-sidebar-collapsed="true"] .workspace-grid--no-panel {
 }
 .canvas-error strong { color: var(--we-ink); }
 
-/* Hidden-but-mounted canvas wrapper — used by the App dispatcher when the
-   active tab is not one of the canvas tabs (`copilot` / `inspector`). The
+/* Hidden-but-mounted canvas wrapper — after the first visible canvas visit,
+   the App dispatcher retains it when another non-home tab is active. The
    canvas DOM stays in the tree so React Flow's viewport state (zoom + pan)
-   survives the navigation; CSS hides it from the layout. The visible state
-   inherits the `.canvas-frame` layout for free because the inner
-   `WorkflowCanvas` keeps that class on its root. */
+   survives navigation; CSS hides it from the layout. Before first activation
+   the wrapper is not mounted at all, avoiding a zero-size React Flow viewport.
+   The visible state inherits `.canvas-frame` from `WorkflowCanvas`. */
 .workspace-canvas-wrapper {
   height: 100%;
 }

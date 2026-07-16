@@ -261,17 +261,17 @@ export function AlertPoliciesPanel(): React.ReactElement {
           method: 'POST',
           body: JSON.stringify(body),
         })
-        addToast(t('alerts.toast.updated') as string, 'success')
+        addToast(t('alerts.toast.updated'), 'success')
       } else {
         await api('/alerts/policies', { method: 'POST', body: JSON.stringify(body) })
-        addToast(t('alerts.toast.created') as string, 'success')
+        addToast(t('alerts.toast.created'), 'success')
       }
       setForm(EMPTY_FORM)
       setEditingId(null)
       setShowForm(false)
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('alerts.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     } finally {
       setSubmitting(false)
     }
@@ -283,21 +283,21 @@ export function AlertPoliciesPanel(): React.ReactElement {
         method: 'POST',
         body: JSON.stringify({ enabled: !policy.enabled }),
       })
-      addToast(t('alerts.toast.updated') as string, 'success')
+      addToast(t('alerts.toast.updated'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('alerts.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     }
   }
 
   async function deletePolicy(policy: AlertPolicy): Promise<void> {
-    if (!(await confirmDialog({ body: t('alerts.confirm.delete', { name: policy.name }) as string, tone: 'danger' }))) return
+    if (!(await confirmDialog({ body: t('alerts.confirm.delete', { name: policy.name }), tone: 'danger' }))) return
     try {
       await api(`/alerts/policies/${policy.id}`, { method: 'DELETE' })
-      addToast(t('alerts.toast.deleted') as string, 'success')
+      addToast(t('alerts.toast.deleted'), 'success')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('alerts.toast.error') as string), 'error')
+      addToast(tApiError(err) || (t('alerts.toast.error')), 'error')
     }
   }
 
@@ -363,7 +363,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="text"
                   value={form.errorSignaturePattern}
                   onChange={(e) => setForm({ ...form, errorSignaturePattern: e.target.value })}
-                  placeholder={t('alerts.form.placeholder.errorSignaturePattern') as string}
+                  placeholder={t('alerts.form.placeholder.errorSignaturePattern')}
                   maxLength={200}
                 />
               </label>
@@ -373,7 +373,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="text"
                   value={form.workflowIds}
                   onChange={(e) => setForm({ ...form, workflowIds: e.target.value })}
-                  placeholder={t('alerts.form.placeholder.workflowIds') as string}
+                  placeholder={t('alerts.form.placeholder.workflowIds')}
                 />
               </label>
             </>
@@ -436,7 +436,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                 type="text"
                 value={form.workflowIds}
                 onChange={(e) => setForm({ ...form, workflowIds: e.target.value })}
-                placeholder={t('alerts.form.placeholder.workflowIds') as string}
+                placeholder={t('alerts.form.placeholder.workflowIds')}
               />
             </label>
           )}
@@ -465,7 +465,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="text"
                   value={form.credentialKinds}
                   onChange={(e) => setForm({ ...form, credentialKinds: e.target.value })}
-                  placeholder={t('alerts.form.placeholder.credentialKinds') as string}
+                  placeholder={t('alerts.form.placeholder.credentialKinds')}
                 />
               </label>
               <label>
@@ -474,7 +474,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   type="text"
                   value={form.credentialNames}
                   onChange={(e) => setForm({ ...form, credentialNames: e.target.value })}
-                  placeholder={t('alerts.form.placeholder.credentialNames') as string}
+                  placeholder={t('alerts.form.placeholder.credentialNames')}
                 />
               </label>
             </>
@@ -529,7 +529,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   {dest === 'webhook' && (
                     <input
                       type="url"
-                      placeholder={t('alerts.form.placeholder.webhookUrl') as string}
+                      placeholder={t('alerts.form.placeholder.webhookUrl')}
                       aria-label={t('alerts.form.webhookUrl')}
                       value={(params as { url?: string }).url ?? ''}
                       onChange={(e) => {
@@ -545,7 +545,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                   {dest === 'email' && (
                     <input
                       type="email"
-                      placeholder={t('alerts.form.placeholder.emailTo') as string}
+                      placeholder={t('alerts.form.placeholder.emailTo')}
                       aria-label={t('alerts.form.emailTo')}
                       value={(params as { to?: string }).to ?? ''}
                       onChange={(e) => {
@@ -562,7 +562,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                     <>
                       <input
                         type="text"
-                        placeholder={t('alerts.form.placeholder.githubOwner') as string}
+                        placeholder={t('alerts.form.placeholder.githubOwner')}
                         aria-label={t('alerts.form.githubOwner')}
                         value={(params as { owner?: string }).owner ?? ''}
                         onChange={(e) => {
@@ -576,7 +576,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
                       />
                       <input
                         type="text"
-                        placeholder={t('alerts.form.placeholder.githubRepo') as string}
+                        placeholder={t('alerts.form.placeholder.githubRepo')}
                         aria-label={t('alerts.form.githubRepo')}
                         value={(params as { repo?: string }).repo ?? ''}
                         onChange={(e) => {
@@ -676,13 +676,13 @@ export function AlertPoliciesPanel(): React.ReactElement {
       )}
 
       <div className="we-alert-policies__list" data-testid="alert-policies-list">
-        {loading && <LoadingSkeleton rows={3} label={t('common.loading') as string} />}
+        {loading && <LoadingSkeleton rows={3} label={t('common.loading')} />}
         {!loading && policies.length === 0 && (
           <EmptyState
             icon={<BellOff />}
-            kicker={t('alerts.panel.emptyKicker') as string}
-            body={t('alerts.panel.empty') as string}
-            cta={showForm ? undefined : { label: t('alerts.panel.new') as string, onClick: () => setShowForm(true) }}
+            kicker={t('alerts.panel.emptyKicker')}
+            body={t('alerts.panel.empty')}
+            cta={showForm ? undefined : { label: t('alerts.panel.new'), onClick: () => setShowForm(true) }}
             testId="alert-policies-empty"
           />
         )}

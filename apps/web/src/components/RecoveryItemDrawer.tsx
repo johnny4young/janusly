@@ -180,11 +180,11 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
         method: 'POST',
         body: JSON.stringify(body),
       })
-      addToast(t('recoveryItems.toast.transitionOk') as string, 'success')
+      addToast(t('recoveryItems.toast.transitionOk'), 'success')
       bumpPlatformVersion()
       onClose()
     } catch (err) {
-      addToast(tApiError(err) || (t('recoveryItems.toast.transitionFailed') as string), 'error')
+      addToast(tApiError(err) || (t('recoveryItems.toast.transitionFailed')), 'error')
     } finally {
       setBusyTransition(null)
     }
@@ -211,9 +211,9 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       await downloadFromApi(`/recovery/items/${item.id}/evidence?format=${format}`, {
         method: 'POST',
       })
-      addToast(t('recoveryItems.evidence.toastOk') as string, 'success')
+      addToast(t('recoveryItems.evidence.toastOk'), 'success')
     } catch (err) {
-      addToast(tApiError(err) || (t('recoveryItems.evidence.toastFailed') as string), 'error')
+      addToast(tApiError(err) || (t('recoveryItems.evidence.toastFailed')), 'error')
     } finally {
       setEvidenceBusy(null)
     }
@@ -228,11 +228,11 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
         method: 'POST',
         body: JSON.stringify({ body }),
       })
-      addToast(t('recoveryItems.toast.commentAdded') as string, 'success')
+      addToast(t('recoveryItems.toast.commentAdded'), 'success')
       setCommentDraft('')
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('recoveryItems.toast.commentFailed') as string), 'error')
+      addToast(tApiError(err) || (t('recoveryItems.toast.commentFailed')), 'error')
     } finally {
       setBusyTransition(null)
     }
@@ -339,13 +339,13 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
         }
       }
       if (resp.skipped) {
-        addToast(t('recoveryHandoff.toast.skipped') as string, 'info')
+        addToast(t('recoveryHandoff.toast.skipped'), 'info')
       } else if (resp.alreadyDispatched) {
-        addToast(t('recoveryHandoff.toast.alreadyDispatched') as string, 'info')
+        addToast(t('recoveryHandoff.toast.alreadyDispatched'), 'info')
       } else if (resp.ok) {
-        addToast(t('recoveryHandoff.toast.delivered') as string, 'success')
+        addToast(t('recoveryHandoff.toast.delivered'), 'success')
       } else {
-        addToast(t('recoveryHandoff.toast.failed') as string, 'error')
+        addToast(t('recoveryHandoff.toast.failed'), 'error')
       }
       if (resp.handoff) {
         setExistingHandoffs((prev) => {
@@ -366,7 +366,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       }
       bumpPlatformVersion()
     } catch (err) {
-      addToast(tApiError(err) || (t('recoveryHandoff.toast.failed') as string), 'error')
+      addToast(tApiError(err) || (t('recoveryHandoff.toast.failed')), 'error')
     } finally {
       setBusyTransition(null)
     }
@@ -393,7 +393,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           type="button"
           className="we-btn we-btn--ghost we-btn--sm"
           onClick={onClose}
-          aria-label={t('common.close') as string}
+          aria-label={t('common.close')}
         >
           <X size={14} aria-hidden />
         </button>
@@ -499,7 +499,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
                         t('recoveryItems.occurrences.entryAria', {
                           id: c.deadLetterId,
                           when: formatRelativeTime(c.occurredAt),
-                        }) as string
+                        })
                       }
                     >
                       <code>{c.deadLetterId}</code>
@@ -719,7 +719,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
                   type="url"
                   value={handoffUrl}
                   onChange={(e) => setHandoffUrl(e.target.value)}
-                  placeholder={t('recoveryHandoff.form.urlPlaceholder') as string}
+                  placeholder={t('recoveryHandoff.form.urlPlaceholder')}
                   maxLength={2048}
                 />
               </label>
@@ -768,7 +768,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
           <textarea
             value={commentDraft}
             onChange={(e) => setCommentDraft(e.target.value)}
-            placeholder={t('recoveryItems.drawer.commentPlaceholder') as string}
+            placeholder={t('recoveryItems.drawer.commentPlaceholder')}
             maxLength={4_000}
             rows={2}
           />
