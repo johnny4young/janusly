@@ -38,7 +38,7 @@
  * Used by `App.tsx` for `activeTab === 'home'`.
  *
  * Design language: see the `Recovery Center` block in
- * `apps/web/src/index.css`. Tokens-only, no inline hex. Animations
+ * `apps/web/src/styles/platform.css`. Tokens-only, no inline hex. Animations
  * honour `prefers-reduced-motion`. Tab order: hero → metric strip →
  * tiles → recommended actions → empty-state CTAs.
  */

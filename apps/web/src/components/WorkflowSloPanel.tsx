@@ -118,7 +118,7 @@ export function WorkflowSloPanel({ workflowId: explicit }: WorkflowSloPanelProps
   }
 
   return (
-    <section className="panel-card we-slo-panel" aria-labelledby="we-slo-panel-title">
+    <section className="we-card we-slo-panel" aria-labelledby="we-slo-panel-title">
       <h3 id="we-slo-panel-title" className="section-title">{t('workflowSlo.title')}</h3>
       <p className="helper-text">{t('workflowSlo.description')}</p>
       <form

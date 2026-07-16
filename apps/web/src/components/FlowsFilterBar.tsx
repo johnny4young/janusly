@@ -96,7 +96,7 @@ export function FlowsFilterBar({
       {(tagOptions.length > 0 || tagFilters.length > 0) && (
         <span className="we-list-filter-tags" data-testid="workflows-tag-filter">
           {tagFilters.map(tag => (
-            <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+            <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
               {tag}
               <button
                 type="button"

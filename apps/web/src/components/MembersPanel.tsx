@@ -149,7 +149,7 @@ export function MembersPanel() {
 
   return (
     <div className="panel-list">
-      <section className="panel-card">
+      <section className="we-card">
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('members.kicker')}</div>

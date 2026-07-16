@@ -118,7 +118,7 @@ function VitalSignsTileCard({ tile }: { tile: VitalSignsTile }) {
   const isClickable = typeof tile.onClick === 'function'
   const hasInteractiveSparkline = Boolean(tile.sparkline && tile.onSelectSparklinePoint)
   const className = [
-    'panel-card',
+    'we-card',
     'we-ops-metric-card',
     `we-ops-metric-card--${tile.severity}`,
     isClickable && !hasInteractiveSparkline ? 'we-ops-metric-card--button' : '',

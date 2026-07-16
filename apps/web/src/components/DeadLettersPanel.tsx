@@ -600,7 +600,7 @@ export function DeadLettersPanel({ onRefresh, onReplay, onResolve }: DeadLetters
       <AutoHealingPendingCard />
       <section
         ref={queueSectionRef}
-        className="panel-card"
+        className="we-card"
         data-severity={cardSeverity}
         data-testid="recovery-queue"
         tabIndex={-1}

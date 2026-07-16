@@ -278,7 +278,7 @@ export function McpConnectionsPanel() {
     (urlNeeded ? trimmedUrl.length > 0 && !urlInvalid : form.command.trim().length > 0)
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('mcpConnections.kicker')}</div>

@@ -193,14 +193,14 @@ export function WorkflowAboutCard({ workflowId }: Props): React.ReactElement | n
       {metadata.folder && (
         <div className="we-workflow-about-card__folder" data-testid="workflow-about-card-folder">
           <span className="we-list-row__hint">{t('workflowMetadata.field.folder')}</span>
-          <span className="we-pill we-pill--cobalt">{metadata.folder}</span>
+          <span className="we-pill" data-tone="primary">{metadata.folder}</span>
         </div>
       )}
 
       {metadata.tags.length > 0 && (
         <div className="we-workflow-about-card__tags" data-testid="workflow-about-card-tags">
           {metadata.tags.map((tag) => (
-            <span key={tag} className="we-pill we-pill--ghost">
+            <span key={tag} className="we-pill" data-tone="ghost">
               {tag}
             </span>
           ))}

@@ -74,7 +74,7 @@ export function AuthoringProblemsPanel({
   }
 
   return (
-    <section className="panel-card we-authoring-problems" data-testid="authoring-problems" aria-labelledby="authoring-problems-heading">
+    <section className="we-card we-authoring-problems" data-testid="authoring-problems" aria-labelledby="authoring-problems-heading">
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('problems.kicker')}</div>

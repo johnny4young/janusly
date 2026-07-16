@@ -366,13 +366,13 @@ function OperationsHeader({
       </div>
 
       {error && (
-        <section className="panel-card">
+        <section className="we-card">
           <p className="helper-text">{t('operations.metricsUnavailable', { detail: error })}</p>
         </section>
       )}
 
       {!error && (loading || !metrics) && (
-        <section className="panel-card">
+        <section className="we-card">
           <p className="helper-text" aria-live="polite">{t('operations.computing')}</p>
         </section>
       )}
@@ -467,7 +467,7 @@ function OverviewSection({ metrics }: { metrics: RecoveryMetrics | null }) {
   return (
     <>
       {metrics && metrics.costThisWindow.providers.length > 0 && (
-        <section className="panel-card">
+        <section className="we-card">
           <div className="section-kicker">{t('operations.cost.heading')}</div>
           <dl className="we-ops-cache-summary" aria-label={t('operations.cost.cache.summaryLabel')}>
             <div>

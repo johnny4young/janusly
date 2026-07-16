@@ -221,7 +221,7 @@ export const WorkflowCanvas = React.memo(function WorkflowCanvas({ nodes, edges,
         </div>
         <div className="canvas-toolbar__meta">
           <span>{t('canvas.paths', { count: edges.length })}</span>
-          {observing && <span className="we-pill we-pill--info">{t('canvas.readOnly')}</span>}
+          {observing && <span className="we-pill" data-tone="info">{t('canvas.readOnly')}</span>}
         </div>
       </div>
       {paletteNodeTypes && onAddNode && paletteNodeTypes.length > 0 && (

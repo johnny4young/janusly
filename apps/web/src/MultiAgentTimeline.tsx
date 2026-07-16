@@ -183,7 +183,7 @@ export function MultiAgentTimeline({
 
   if (!items.length) {
     return (
-      <div className="panel-card">
+      <div className="we-card">
         <EmptyState
           icon={<Layers3 />}
           kicker={t('multiAgent.empty')}

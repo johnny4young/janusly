@@ -251,7 +251,7 @@ export function PermissionGrantsPanel() {
               <h4>
                 <code>{role.name}</code>
                 {role.isBuiltin ? <span> {t("permissions.builtin")}</span> : <span> {t("permissions.custom", { base: role.inheritsFrom })}</span>}
-                {role.isOverride && <span className="we-pill we-pill--info"> {t("permissions.override")}</span>}
+                {role.isOverride && <span className="we-pill" data-tone="info"> {t("permissions.override")}</span>}
               </h4>
               {role.description && <p>{role.description}</p>}
             </header>
@@ -272,7 +272,7 @@ export function PermissionGrantsPanel() {
                           aria-label={t("permissions.entryAria", { role: role.name, key: entry.key })}
                         />
                         <span title={entry.description}>{entry.key}</span>
-                        {isMandatory && <span className="we-pill we-pill--warn">{t("permissions.required")}</span>}
+                        {isMandatory && <span className="we-pill" data-tone="warning">{t("permissions.required")}</span>}
                       </label>
                     );
                   })}

@@ -253,7 +253,7 @@ export function RunsPanel({
       />
 
       {activeRunId && (
-        <section className="panel-card we-run-overview" data-testid="run-overview">
+        <section className="we-card we-run-overview" data-testid="run-overview">
           <div className="split-row we-run-overview__header">
             <span className="we-run-overview__title">
               <strong>{activeRunIdentity?.name ?? activeRunIdentity?.id ?? t('rightPanel.runs.activeRun')}</strong>
@@ -361,7 +361,7 @@ export function RunsPanel({
       <UsageSummaryCard usage={usage} onRefreshPlatform={onRefreshPlatform} />
 
       {waitingNodes.length > 0 && (
-        <section className="panel-card action-card" data-testid="waiting-steps">
+        <section className="we-card action-card" data-testid="waiting-steps">
           <div>
             <strong>{t('rightPanel.runs.pausedTitle')}</strong>
             <p className="helper-text">{t('rightPanel.runs.pausedDescription')}</p>
@@ -386,7 +386,7 @@ export function RunsPanel({
             return (
               <article key={node.nodeId} className="we-wait-card" data-wait-kind={waiting.kind} data-testid={`waiting-step-${node.nodeId}`}>
                 <div className="split-row">
-                  <span className="we-pill" data-tone={waiting.kind}>{t(waitKindLabelKey(waiting.kind))}</span>
+                  <span className="we-pill" data-tone="warning">{t(waitKindLabelKey(waiting.kind))}</span>
                   <code>{node.nodeId}</code>
                 </div>
                 <div>
@@ -477,7 +477,7 @@ export function RunsPanel({
       )}
 
       {failedNodes.length > 0 && (
-        <section className="panel-card action-card">
+        <section className="we-card action-card">
           <div>
             <strong>{t('rightPanel.runs.attentionTitle')}</strong>
             <p className="helper-text">{t('rightPanel.runs.attentionDescription')}</p>
@@ -511,7 +511,7 @@ export function RunsPanel({
       )}
 
       {forkableNodes.length > 0 && (
-        <section className="panel-card action-card">
+        <section className="we-card action-card">
           <div>
             <strong>{t('replayLab.fork.sectionKicker')}</strong>
             <p className="helper-text">{t('replayLab.fork.sectionDescription')}</p>

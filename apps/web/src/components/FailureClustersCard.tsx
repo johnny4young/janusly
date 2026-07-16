@@ -211,7 +211,7 @@ export function FailureClustersCard() {
   if (error && !data) {
     return (
       <>
-        <section className="panel-card">
+        <section className="we-card">
           <div className="section-kicker">{t('clusters.heading')}</div>
           <p className="helper-text">{t('clusters.unavailable', { detail: error })}</p>
         </section>
@@ -222,7 +222,7 @@ export function FailureClustersCard() {
   if (!data) {
     return (
       <>
-        <section className="panel-card" aria-busy={loading || undefined}>
+        <section className="we-card" aria-busy={loading || undefined}>
           <div className="section-kicker">{t('clusters.heading')}</div>
           <p className="helper-text" aria-live="polite">{t('clusters.scoring')}</p>
         </section>
@@ -236,7 +236,7 @@ export function FailureClustersCard() {
   if (clusters.length === 0) {
     return (
       <>
-        <section className="panel-card" aria-busy={loading || undefined}>
+        <section className="we-card" aria-busy={loading || undefined}>
           <div className="section-kicker">{t('clusters.heading')}</div>
           <EmptyState
             icon={<CheckCircle2 />}
@@ -259,7 +259,7 @@ export function FailureClustersCard() {
       : undefined
 
   const clusterCard = (
-    <section className="panel-card" data-severity={cardSeverity} aria-busy={loading || undefined}>
+    <section className="we-card" data-severity={cardSeverity} aria-busy={loading || undefined}>
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('clusters.heading')}</div>

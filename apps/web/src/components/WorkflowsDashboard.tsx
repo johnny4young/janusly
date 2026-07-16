@@ -1189,7 +1189,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
                         </button>
                       )}
                       <span className="we-list-folder__name">{label}</span>
-                      <span className="we-pill we-pill--ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
+                      <span className="we-pill" data-tone="ghost">{t('workflowsDashboard.folderCount', { count: group.items.length })}</span>
                       {/* Rename / delete only for NAMED folders — "Ungrouped" is a
                           synthetic bucket, not a real folder to manage. */}
                       {group.key !== UNGROUPED && (

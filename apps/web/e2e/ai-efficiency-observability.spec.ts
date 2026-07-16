@@ -284,7 +284,7 @@ test('AI and run efficiency are observable in English and Spanish', async ({ pag
     await hideUnrelatedOverlays(page)
 
     await page.getByRole('button', { name: copy[locale].operations, exact: true }).click()
-    const costCard = page.locator('.panel-card').filter({ hasText: copy[locale].costHeading }).first()
+    const costCard = page.locator('.we-card').filter({ hasText: copy[locale].costHeading }).first()
     const cacheSummary = costCard.getByLabel(copy[locale].cacheLabel)
     await expect(cacheSummary).toContainText('50%')
     await expect(cacheSummary).toContainText(copy[locale].cacheTokens)

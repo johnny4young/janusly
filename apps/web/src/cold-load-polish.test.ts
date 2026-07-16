@@ -8,18 +8,18 @@
  *     If they diverge, the browser issues two fetches instead of one and
  *     the preload becomes wasted bandwidth instead of a head-start.
  *
- * (2) `index.css` MUST contain a universal `@media (prefers-reduced-motion:
- *     reduce)` block with `!important` on both `animation-duration` and
- *     `transition-duration`. Without `!important` the universal selector
- *     `*` loses specificity battles against every class-scoped rule and
- *     the motion-off becomes a no-op for users who opted in.
+ * (2) The ordered CSS modules imported by `index.css` MUST contain a universal
+ *     `@media (prefers-reduced-motion: reduce)` block with `!important` on
+ *     both `animation-duration` and `transition-duration`. Without
+ *     `!important` the universal selector `*` loses specificity battles
+ *     against every class-scoped rule and the motion-off becomes a no-op.
  *
  * Both tests use `readFileSync` with URLs resolved against `import.meta.url`
  * so they survive any vitest cwd posture.
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // pnpm runs the package's `test` script with cwd = apps/web, which is also
@@ -28,7 +28,23 @@ import { describe, expect, it } from "vitest";
 // and resolves to a non-file URL under vitest, so file-URL helpers throw.
 const PACKAGE_ROOT = process.cwd();
 const indexHtml = readFileSync(resolve(PACKAGE_ROOT, "index.html"), "utf8");
-const indexCss = readFileSync(resolve(PACKAGE_ROOT, "src/index.css"), "utf8");
+const indexCssPath = resolve(PACKAGE_ROOT, "src/index.css");
+const indexCss = readFileSync(indexCssPath, "utf8");
+const expectedLocalCssImports = [
+  "./styles/foundations.css",
+  "./styles/control-plane.css",
+  "./styles/workflow.css",
+  "./styles/platform.css",
+  "./styles/accessibility.css",
+];
+const localCssImports = [...indexCss.matchAll(/@import\s+"([^"]+\.css)"/g)]
+  .map((match) => match[1]);
+const cssBundleSource = [
+  indexCss,
+  ...localCssImports.map((importPath) =>
+    readFileSync(resolve(dirname(indexCssPath), importPath), "utf8"),
+  ),
+].join("\n");
 
 function listSourceFiles(dir: string): string[] {
   return readdirSync(dir)
@@ -59,14 +75,33 @@ describe("font preload link", () => {
   });
 });
 
+describe("CSS module graph", () => {
+  it("pins the complete load-bearing import order", () => {
+    expect(localCssImports).toEqual(expectedLocalCssImports);
+  });
+
+  it("imports every local CSS module exactly once with no nested module imports", () => {
+    const styleModulePaths = readdirSync(resolve(PACKAGE_ROOT, "src/styles"))
+      .filter((name) => name.endsWith(".css"))
+      .map((name) => `./styles/${name}`)
+      .sort();
+    expect([...localCssImports].sort()).toEqual(styleModulePaths);
+    expect(new Set(localCssImports).size).toBe(localCssImports.length);
+    for (const importPath of localCssImports) {
+      const source = readFileSync(resolve(dirname(indexCssPath), importPath), "utf8");
+      expect(source, `${importPath} must not hide nested CSS imports`).not.toMatch(/@import\s+/);
+    }
+  });
+});
+
 describe("universal reduced-motion rule", () => {
   it("CSS contains the universal @media block with !important on durations", () => {
     // Match the section 24 universal block specifically — three-comma selector
     // `*, *::before, *::after` inside `@media (prefers-reduced-motion: reduce)`.
-    const block = indexCss.match(
+    const block = cssBundleSource.match(
       /@media\s+\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\*,\s*\*::before,\s*\*::after\s*\{([^}]+)\}/,
     );
-    expect(block, "expected universal reduced-motion block in index.css").not.toBeNull();
+    expect(block, "expected universal reduced-motion block in the ordered CSS modules").not.toBeNull();
     const body = block![1];
     expect(body).toMatch(/animation-duration:\s*0\.01ms\s*!important/);
     expect(body).toMatch(/transition-duration:\s*0\.01ms\s*!important/);
@@ -75,7 +110,7 @@ describe("universal reduced-motion rule", () => {
   it("preserves at least one scoped @media (prefers-reduced-motion) block", () => {
     // Defensive: ensures the universal block is additive, not a replacement
     // for the component-scoped blocks that override with `animation: none`.
-    const matches = indexCss.match(/@media\s+\(prefers-reduced-motion:\s*reduce\)/g);
+    const matches = cssBundleSource.match(/@media\s+\(prefers-reduced-motion:\s*reduce\)/g);
     expect(matches?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });
@@ -83,7 +118,7 @@ describe("universal reduced-motion rule", () => {
 describe("design token aliases", () => {
   it("defines every Janusly CSS custom property used by web source files", () => {
     const defined = new Set(
-      [...indexCss.matchAll(/--([A-Za-z0-9_-]+)\s*:/g)].map((match) => `--${match[1]}`),
+      [...cssBundleSource.matchAll(/--([A-Za-z0-9_-]+)\s*:/g)].map((match) => `--${match[1]}`),
     );
     const missing = new Map<string, Set<string>>();
 

@@ -46,7 +46,7 @@ export function ExperimentSummaryDetail({
           <div className="section-kicker">{t('experiments.detail.kicker')}</div>
           <h3 id="experiment-detail-title">{experiment.name}</h3>
         </div>
-        <span className="we-pill we-pill--info">{t(`experiments.status.${experiment.status}` as never)}</span>
+        <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}` as never)}</span>
       </div>
       {loading ? <p className="helper-text">{t('common.loading')}</p> : summary ? (
         <>

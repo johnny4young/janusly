@@ -126,7 +126,7 @@ export const FlowRow = memo(function FlowRow({
           {(rowTags.length > 0 || addableTags.length > 0) && (
             <span className="we-list-row__tags">
               {rowTags.map(tag => (
-                <span key={tag} className="we-pill we-pill--ghost we-list-row__tag">
+                <span key={tag} className="we-pill we-list-row__tag" data-tone="ghost">
                   {tag}
                   <button
                     type="button"
@@ -159,7 +159,7 @@ export const FlowRow = memo(function FlowRow({
           )}
           {workflow.folder && (
             <span className="we-list-row__folder">
-              <span className="we-pill we-pill--ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
+              <span className="we-pill" data-tone="ghost" title={t('workflowsDashboard.inFolder', { folder: workflow.folder })}>
                 <Folder size={12} aria-hidden="true" /> {workflow.folder}
               </span>
             </span>

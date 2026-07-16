@@ -320,7 +320,7 @@ export function VersionHistoryPanel() {
     improvement.kind !== 'fallback'
 
   return (
-    <div className="panel-card">
+    <div className="we-card">
       <div className="version-history__head">
         <div className="section-kicker">
           <History size={11} aria-hidden="true" style={{ marginRight: 4, verticalAlign: '-1px' }} />

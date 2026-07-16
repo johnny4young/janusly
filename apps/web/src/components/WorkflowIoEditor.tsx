@@ -123,7 +123,7 @@ export function WorkflowIoEditor({
   }
 
   return (
-    <section className="panel-card we-workflow-io" data-testid="workflow-io-card">
+    <section className="we-card we-workflow-io" data-testid="workflow-io-card">
       <div className="section-kicker">{t('rightPanel.inspector.ioKicker')}</div>
       <h3>{t('rightPanel.inspector.ioTitle')}</h3>
       <p className="helper-text">{t('rightPanel.inspector.ioHelper')}</p>

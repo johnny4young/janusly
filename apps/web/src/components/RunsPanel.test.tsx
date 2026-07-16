@@ -175,6 +175,8 @@ describe('<RunsPanel /> observability', () => {
     )
 
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Approval')
+    expect(screen.getByTestId('waiting-step-approve_refund')).toHaveAttribute('data-wait-kind', 'approval')
+    expect(screen.getByTestId('waiting-step-approve_refund').querySelector('.we-pill')).toHaveAttribute('data-tone', 'warning')
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Approve refund')
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Check the evidence')
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Responsible: operator-1')
@@ -182,6 +184,8 @@ describe('<RunsPanel /> observability', () => {
     expect(screen.getByTestId('waiting-step-approve_refund')).toHaveTextContent('Escalates to operator-2 if unanswered')
     expect(screen.getByRole('button', { name: 'Approve and resume' })).toBeInTheDocument()
     expect(screen.getByTestId('waiting-step-cooldown')).toHaveTextContent('Timer')
+    expect(screen.getByTestId('waiting-step-cooldown')).toHaveAttribute('data-wait-kind', 'timer')
+    expect(screen.getByTestId('waiting-step-cooldown').querySelector('.we-pill')).toHaveAttribute('data-tone', 'warning')
     expect(screen.getByTestId('waiting-step-cooldown')).toHaveTextContent('Wakes in')
     expect(screen.getByRole('button', { name: 'Resume now' })).toBeInTheDocument()
     expect(screen.getByTestId('waiting-step-child_flow')).toHaveTextContent('Resumes automatically when the subworkflow finishes')

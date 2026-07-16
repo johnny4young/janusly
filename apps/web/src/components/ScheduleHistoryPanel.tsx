@@ -161,7 +161,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
   const fires = data?.heatmap.totalFires ?? 0
 
   return (
-    <section className="panel-card we-schedule-panel" aria-labelledby="we-schedule-panel-title">
+    <section className="we-card we-schedule-panel" aria-labelledby="we-schedule-panel-title">
       <div className="split-row">
         <div>
           <div className="section-kicker">{t('scheduleHistory.kicker')}</div>
@@ -177,19 +177,19 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
       {!loading && !errored && data && (
         <>
           <div className="we-schedule-summary">
-            <span className="we-pill we-pill--neutral">
+            <span className="we-pill" data-tone="neutral">
               {t('scheduleHistory.summary.window', { days: data.windowDays })}
             </span>
-            <span className="we-pill we-pill--neutral">
+            <span className="we-pill" data-tone="neutral">
               {t('scheduleHistory.summary.fires', { count: fires })}
             </span>
-            <span className="we-pill we-pill--green">
+            <span className="we-pill" data-tone="success">
               {t('scheduleHistory.summary.success', { count: data.heatmap.totalSuccess })}
             </span>
-            <span className="we-pill we-pill--amber">
+            <span className="we-pill" data-tone="warning">
               {t('scheduleHistory.summary.fail', { count: data.heatmap.totalFail })}
             </span>
-            <span className="we-pill we-pill--neutral" title={t('scheduleHistory.timezoneHint')}>
+            <span className="we-pill" data-tone="neutral" title={t('scheduleHistory.timezoneHint')}>
               {t('scheduleHistory.summary.timezone', { zone: data.heatmap.timezone })}
             </span>
           </div>
@@ -315,7 +315,7 @@ export function ScheduleHistoryPanel({ workflowId: explicit }: ScheduleHistoryPa
                 <div key={schedule.nodeId} className="we-schedule-entry list-card">
                   <div className="split-row" style={{ width: '100%' }}>
                     <strong className="mono">{schedule.nodeId}</strong>
-                    <span className={`we-pill ${schedule.enabled ? 'we-pill--green' : 'we-pill--neutral'}`}>
+                    <span className="we-pill" data-tone={schedule.enabled ? 'success' : 'neutral'}>
                       {schedule.enabled
                         ? (t('scheduleHistory.entry.enabled'))
                         : (t('scheduleHistory.entry.disabled'))}

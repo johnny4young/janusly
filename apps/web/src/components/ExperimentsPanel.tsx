@@ -245,7 +245,7 @@ export function ExperimentsPanel(): React.ReactElement {
                       <strong>{experiment.name}</strong>
                       <small>{date ?? t('common.unknown')}</small>
                     </span>
-                    <span className="we-pill we-pill--info">{t(`experiments.status.${experiment.status}` as never)}</span>
+                    <span className="we-pill" data-tone="info">{t(`experiments.status.${experiment.status}` as never)}</span>
                   </button>
                 </li>
               )

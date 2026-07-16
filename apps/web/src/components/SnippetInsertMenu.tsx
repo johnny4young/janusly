@@ -276,7 +276,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
                 <span className="we-snippet-row__desc">{descriptionFor(snippet)}</span>
               </span>
               <span className="we-cmdk-row__group">{categoryLabel(snippet.category)}</span>
-              <span className={`we-pill ${snippet.builtin ? 'we-pill--cobalt' : 'we-pill--neutral'}`}>
+              <span className="we-pill" data-tone={snippet.builtin ? 'primary' : 'neutral'}>
                 {isBuiltinSnippetId(snippet.id)
                   ? t('snippets.menu.builtinBadge')
                   : t('snippets.menu.customBadge')}

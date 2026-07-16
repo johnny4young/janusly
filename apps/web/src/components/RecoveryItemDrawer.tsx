@@ -385,7 +385,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       <div className="we-recovery-item-drawer__header">
         <h3>
           {t('recoveryItems.drawer.title')} ·{' '}
-          <span className={`we-pill we-pill--${item.status === 'resolved' ? 'green' : 'cobalt'}`}>
+          <span className="we-pill" data-tone={item.status === 'resolved' ? 'success' : 'primary'}>
             {t(`recoveryItems.status.${item.status}`)}
           </span>
         </h3>
@@ -460,7 +460,7 @@ export function RecoveryItemDrawer({ item, onClose }: Props): React.ReactElement
       {item.occurrenceCount > 1 && (
         <div className="we-recovery-occurrences" data-testid="recovery-item-occurrences-section">
           <div className="we-recovery-occurrences__summary">
-            <span className="we-pill we-pill--amber" data-testid="recovery-item-occurrences-badge">
+            <span className="we-pill" data-tone="warning" data-testid="recovery-item-occurrences-badge">
               {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}
             </span>
             <span className="we-recovery-occurrences__lastseen">

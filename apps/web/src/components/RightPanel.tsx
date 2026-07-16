@@ -350,7 +350,7 @@ function ToolsPanel({ tools, onInstallPlugin }: Pick<RightPanelCatalog, 'tools' 
           <div key={tool.name} className="list-card">
             <div className="split-row" style={{ width: '100%' }}>
               <strong>{tool.name}</strong>
-              <span className="we-pill we-pill--amber">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
+              <span className="we-pill" data-tone="warning">{t('rightPanel.tools.requiredCount', { count: tool.required?.length ?? 0 })}</span>
             </div>
             <span>{tToolDescription(tool)}</span>
             {(tool.required?.length || tool.optional?.length) ? (
@@ -422,7 +422,7 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
 
   return (
     <PanelChrome title={t('rightPanel.credentials.title')} description={t('rightPanel.credentials.description')} icon={<KeyRound size={18} />}>
-      <section className="panel-card connection-form">
+      <section className="we-card connection-form">
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('rightPanel.credentials.formKicker')}</div>
@@ -518,14 +518,14 @@ function CredentialsPanel({ credentials, onCreateCredential }: Pick<RightPanelCa
                   const expiry = expiryStatus(health?.expiresAt, expiryNowMs)
                   if (expiry.kind === 'expired') {
                     return (
-                      <span className="we-pill we-pill--red" data-testid="credential-expiry-badge">
+                      <span className="we-pill" data-tone="danger" data-testid="credential-expiry-badge">
                         {t('rightPanel.credentials.expiry.expired')}
                       </span>
                     )
                   }
                   if (expiry.kind === 'soon') {
                     return (
-                      <span className="we-pill we-pill--amber" data-testid="credential-expiry-badge">
+                      <span className="we-pill" data-tone="warning" data-testid="credential-expiry-badge">
                         {t('rightPanel.credentials.expiry.expiresInDays', { count: expiry.days })}
                       </span>
                     )

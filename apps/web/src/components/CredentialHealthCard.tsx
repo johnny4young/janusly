@@ -131,7 +131,7 @@ export function CredentialHealthCard() {
 
   if (error) {
     return (
-      <section className="panel-card we-ops-credential-card" aria-label={t('operations.credentialHealth.title')}>
+      <section className="we-card we-ops-credential-card" aria-label={t('operations.credentialHealth.title')}>
         <div className="we-ops-credential-card__section">
           <div className="section-kicker">{t('operations.credentialHealth.kicker')}</div>
           <h3 style={{ margin: 0 }}>{t('operations.credentialHealth.title')}</h3>
@@ -158,7 +158,7 @@ export function CredentialHealthCard() {
 
   return (
     <section
-      className="panel-card we-ops-credential-card"
+      className="we-card we-ops-credential-card"
       data-severity={cardSeverity}
       aria-label={t('operations.credentialHealth.title')}
     >

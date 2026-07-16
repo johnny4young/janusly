@@ -11,7 +11,7 @@
  * - Do NOT emit React-Flow style objects. Visual selection state is
  *   encoded via the `selected` field that the custom edge component
  *   projects onto a `data-selected` DOM attribute; the stroke + width
- *   changes live in `apps/web/src/index.css` keyed on
+ *   changes live in `apps/web/src/styles/workflow.css` keyed on
  *   `.we-edge[data-selected="true"]`. The one marker object is a
  *   module-scoped constant so arrowheads stay visible without
  *   per-render allocation.

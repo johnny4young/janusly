@@ -259,7 +259,7 @@ export function BudgetSettingsPanel() {
   const wfWarnInvalid = isWarnInvalid(wfWarnPercent);
 
   return (
-    <section className="panel-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
+    <section className="we-card we-budget-settings" aria-labelledby="budget-settings-heading" data-testid="budget-settings-panel">
       <div className="we-budget-settings__head">
         <span className="we-budget-settings__icon" aria-hidden="true"><Coins size={18} /></span>
         <div>

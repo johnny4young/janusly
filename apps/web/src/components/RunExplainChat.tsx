@@ -94,7 +94,7 @@ export function RunExplainChat({ runId }: { runId?: string | null }) {
   }
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="split-row">
         <div>
           <strong>{t('runExplain.title')}</strong>

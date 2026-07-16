@@ -115,11 +115,11 @@ export function RecentAlertsCard(): React.ReactElement {
               <div className="we-list-row__main">
                 <strong>{item.policyName ?? t('alerts.recent.unknownPolicy')}</strong>
                 {item.trigger && (
-                  <span className="we-pill we-pill--neutral">
+                  <span className="we-pill" data-tone="neutral">
                     {t(`alerts.triggers.${item.trigger}`)}
                   </span>
                 )}
-                <span className="we-pill we-pill--neutral">
+                <span className="we-pill" data-tone="neutral">
                   {t(`alerts.outcomes.${item.outcome}`)}
                 </span>
                 <span className="we-list-row__hint">{relativeTime(item.dispatchedAt, locale)}</span>

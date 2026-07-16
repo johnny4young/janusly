@@ -152,7 +152,7 @@ export function WorkflowMetadataPanel({ workflowId: explicit }: WorkflowMetadata
   const runbookOverCap = runbookByteLength > WORKFLOW_METADATA_RUNBOOK_MAX_BYTES
 
   return (
-    <section className="panel-card we-workflow-metadata-panel" aria-labelledby="we-workflow-metadata-title">
+    <section className="we-card we-workflow-metadata-panel" aria-labelledby="we-workflow-metadata-title">
       <h3 id="we-workflow-metadata-title" className="section-title">
         {t('workflowMetadata.panel.title')}
       </h3>

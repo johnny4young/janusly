@@ -80,7 +80,7 @@ export function TrashPanel({
           {retentionDays != null && trashNowMs != null && workflow.deletedAt && (() => {
             const daysLeft = daysUntilPurge(workflow.deletedAt, retentionDays, trashNowMs)
             return (
-              <span className="we-pill we-pill--ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
+              <span className="we-pill" data-tone="ghost" data-testid={`workflows-trash-expiry-${workflow.id}`}>
                 {daysLeft > 0
                   ? (t('workflowsDashboard.expiresInDays', { count: daysLeft }))
                   : (t('workflowsDashboard.expiresSoon'))}

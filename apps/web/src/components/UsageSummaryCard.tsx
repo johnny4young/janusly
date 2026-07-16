@@ -189,7 +189,7 @@ export function UsageSummaryCard({
   const hiddenCount = sortedBreakdown ? Math.max(0, sortedBreakdown.length - TOP_BUCKETS) : 0
 
   return (
-    <section className="panel-card">
+    <section className="we-card">
       <div className="split-row">
         <strong>{t('rightPanel.usage.title')}</strong>
         <button className="small-command" onClick={refreshUsage}>{t('rightPanel.usage.refresh')}</button>

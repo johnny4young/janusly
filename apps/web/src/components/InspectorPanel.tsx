@@ -166,7 +166,7 @@ export function InspectorPanel({
     }
 
     return (
-      <section ref={entityRef} className="panel-card" tabIndex={-1} data-testid={`inspector-node-${selectedNode.id}`}>
+      <section ref={entityRef} className="we-card" tabIndex={-1} data-testid={`inspector-node-${selectedNode.id}`}>
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('rightPanel.inspector.stepKicker')}</div>
@@ -188,7 +188,8 @@ export function InspectorPanel({
           <div className="inspector-header-pills">
             <span className="status-pill" data-status={status}>{formatStatusLabel(status)}</span>
             <span
-              className={`we-pill ${nodeIssues.length ? 'we-pill--red' : 'we-pill--green'}`}
+              className="we-pill"
+              data-tone={nodeIssues.length ? 'danger' : 'success'}
               data-testid="inspector-validation-pill"
             >
               {nodeIssues.length ? t('rightPanel.inspector.issueCount', { count: nodeIssues.length }) : t('rightPanel.inspector.ready')}
@@ -296,7 +297,7 @@ export function InspectorPanel({
 
   if (selectedEdge) {
     return (
-      <section ref={entityRef} className="panel-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
+      <section ref={entityRef} className="we-card" tabIndex={-1} data-testid={`inspector-edge-${selectedEdge.id}`}>
         <div className="section-kicker">{t('rightPanel.inspector.pathKicker')}</div>
         <h3>{t('rightPanel.inspector.pathTitle', { source: selectedEdge.source, target: selectedEdge.target })}</h3>
         <ExpressionAssistant
@@ -317,7 +318,7 @@ export function InspectorPanel({
 
   return (
     <>
-      <React.Suspense fallback={<section className="panel-card"><p className="helper-text">{t('common.working')}</p></section>}>
+      <React.Suspense fallback={<section className="we-card"><p className="helper-text">{t('common.working')}</p></section>}>
         <WorkflowIoEditor
           workflowId={currentWorkflowId ?? 'unsaved-workflow'}
           inputs={currentWorkflowInputs}
@@ -328,7 +329,7 @@ export function InspectorPanel({
           onChangeTemplatePolicy={updateWorkflowTemplatePolicy}
         />
       </React.Suspense>
-      <section className="panel-card">
+      <section className="we-card">
         <div className="empty-panel">
           <GitBranch size={24} aria-hidden="true" />
           <strong>{t('rightPanel.inspector.emptyTitle')}</strong>

@@ -21,7 +21,7 @@ Heavy feature areas live in `docs/architecture/*.md`, kept out of this file to k
 ## Operational core
 
 - **Stack baselines:** Node.js **24**, TypeScript 6, React 19, Vite 8 (Rolldown), Tailwind 4 (CSS-first via `@theme` + `@tailwindcss/vite`), Vitest 4, Zod 4, Drizzle 1.0 RC, Postgres 18, Redis 8, Vercel AI SDK 6 (`ai` + `@ai-sdk/anthropic` / `@ai-sdk/openai`; the standalone `openai` SDK is not a dependency).
-- **Design system:** Workflow palette (Cobalt `#245BFF` + Cyan `#06B6D4` + green/amber/red status). Tokens in `apps/web/src/index.css` (`@theme { --color-we-* }` + `:root` aliases). No inline hex.
+- **Design system:** Workflow palette (Cobalt `#245BFF` + Cyan `#06B6D4` + green/amber/red status). `apps/web/src/index.css` is the ordered import-only entrypoint; tokens live in `apps/web/src/styles/foundations.css` (`@theme { --color-we-* }` + `:root` aliases). `.we-card` is the single card base and `.we-pill[data-tone]` the single pill-tone contract. `pnpm lint` enforces zero unowned CSS class selectors. No inline hex.
 - **Tailwind 4 is CSS-first.** No `tailwind.config.ts` or `postcss.config.js`. The plugin runs through `@tailwindcss/vite()` in `apps/web/vite.config.ts`.
 - **Vite 8 / Rolldown:** `build.rollupOptions.output.manualChunks` must be a function, not an object literal.
 - **Zod 4:** `z.record(z.string(), z.unknown())` — two-arg form.

@@ -285,7 +285,7 @@ export function AiCopilotPanel({
         <BrandMark size={44} />
       </section>
 
-      <section className="panel-card">
+      <section className="we-card">
         <div className="split-row">
           <div>
             <div className="section-kicker">{t('aiCopilot.create')}</div>
@@ -337,7 +337,7 @@ export function AiCopilotPanel({
           keep their own role="alert" / role="status". */}
       <div className="ai-copilot__results" aria-live="polite">
       {result && result.kind !== 'review' && (
-        <section className="panel-card result-panel">
+        <section className="we-card result-panel">
           <div className="split-row">
             <strong>{result.title}</strong>
             <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
@@ -368,7 +368,7 @@ export function AiCopilotPanel({
       )}
 
       {result && result.kind === 'review' && (
-        <section className="panel-card result-panel">
+        <section className="we-card result-panel">
           <div className="split-row">
             <strong>{result.title}</strong>
             <span className={`mode-pill mode-pill-${result.mode}`}>{formatAiModeLabel(result.mode)}</span>
@@ -404,7 +404,7 @@ export function AiCopilotPanel({
       )}
       </div>
 
-      <section className="panel-card">
+      <section className="we-card">
         <div className="section-kicker">{t('aiCopilot.useCases')}</div>
         <div className="usecase-list">
           {useCases.map((useCase) => (
@@ -420,7 +420,7 @@ export function AiCopilotPanel({
         </div>
       </section>
 
-      <section className="panel-card">
+      <section className="we-card">
         <div className="section-kicker">{t('aiCopilot.readiness.heading')}</div>
         <div className="usecase-list">
           {readinessSteps.map((step) => (

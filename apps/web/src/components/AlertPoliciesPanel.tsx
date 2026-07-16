@@ -691,7 +691,7 @@ export function AlertPoliciesPanel(): React.ReactElement {
             <div key={policy.id} className="we-list-row" data-testid="alert-policy-row">
               <div className="we-list-row__main">
                 <strong>{policy.name}</strong>
-                <span className="we-pill we-pill--neutral">
+                <span className="we-pill" data-tone="neutral">
                   {t(`alerts.triggers.${policy.trigger}`)}
                 </span>
                 <span className="we-list-row__hint">

@@ -49,7 +49,7 @@ Janusly already has the core shape of that vision:
 
 See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis, or [`docs/marketing/narrative.md`](docs/marketing/narrative.md) for the brand-voice version — same anchors, written for a slide or a sales conversation.
 
-> Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
+> Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. [`apps/web/src/index.css`](apps/web/src/index.css) imports the ordered hand-written modules; tokens are declared CSS-first via `@theme {}` in [`apps/web/src/styles/foundations.css`](apps/web/src/styles/foundations.css).
 
 ---
 
@@ -367,7 +367,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **API** | Application Programming Interface | The HTTP control plane in `apps/api` (plain Node `http`, no framework). |
 | **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in auto-healing `recordDecision` so concurrent operator-click vs auto-apply can't double-apply (loser returns 409). |
 | **CRUD** | Create / Read / Update / Delete | Basic record-level operations against a resource (e.g. workflows, members, credentials). |
-| **CSS** | Cascading Style Sheets | The design system is hand-written CSS in `apps/web/src/index.css` (Tailwind 4 CSS-first via `@theme {}`). |
+| **CSS** | Cascading Style Sheets | The design system is hand-written CSS behind the ordered `apps/web/src/index.css` entrypoint; Tailwind 4 CSS-first tokens live in `apps/web/src/styles/foundations.css`. |
 | **DAG** | Directed Acyclic Graph | The workflow shape: nodes + edges, no cycles. The engine executes nodes in topological order. |
 | **DI** | Dependency Injection | The "seam" pattern used to keep `@janusly/engine` DB-agnostic — `setBudgetChecker`, `setUsageRecorder`, `setEngineRateLimiter`, `setIntegrationUsageRecorder`, `setEmailUsageRecorder`, `setPdfUsageRecorder`, `setMcpUsageRecorder`. Wired to the real implementations from `@janusly/data` at API + worker boot. |
 | **DLQ** | Dead Letter Queue | Where a node lands after exhausting its `retryPolicy.maxAttempts`. Surfaced in the Recovery Center for triage / replay. |

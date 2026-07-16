@@ -31,10 +31,10 @@ type Props = {
   onOpen?: () => void
 }
 
-const SEVERITY_TONE: Record<RecoveryItemSeverity, string> = {
-  p1: 'red',
-  p2: 'amber',
-  p3: 'cobalt',
+const SEVERITY_TONE: Record<RecoveryItemSeverity, 'danger' | 'warning' | 'primary' | 'neutral'> = {
+  p1: 'danger',
+  p2: 'warning',
+  p3: 'primary',
   p4: 'neutral',
 }
 
@@ -111,20 +111,21 @@ export function RecoveryItemBadge({ item, onOpen }: Props): React.ReactElement |
       aria-label={ariaLabel}
     >
       <span
-        className={`we-pill we-pill--${severityTone}`}
+        className="we-pill"
+        data-tone={severityTone}
         data-testid="recovery-item-severity"
       >
         {t(`recoveryItems.severity.${item.severity}`)}
       </span>
       <span
-        className="we-pill we-pill--neutral"
+        className="we-pill" data-tone="neutral"
         data-testid="recovery-item-status"
       >
         {t(`recoveryItems.status.${item.status}`)}
       </span>
       {item.occurrenceCount > 1 && (
         <span
-          className="we-pill we-pill--amber"
+          className="we-pill" data-tone="warning"
           data-testid="recovery-item-occurrences"
         >
           {t('recoveryItems.occurrences.badge', { count: item.occurrenceCount })}

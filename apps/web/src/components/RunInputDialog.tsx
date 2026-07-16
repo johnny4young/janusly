@@ -12,7 +12,7 @@
  * `.` to map each error to the field it targets. Errors whose path
  * doesn't match any field render in the top-of-form banner.
  *
- * Visual posture: a lifted-up `panel-card` with the workflow name in the
+ * Visual posture: a lifted-up `we-card` with the workflow name in the
  * header, the same `section-kicker` + `<h2>` grammar the inspector uses,
  * cobalt primary on the Run button, and a soft fade-in. ESC closes.
  *
