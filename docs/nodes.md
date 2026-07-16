@@ -184,7 +184,7 @@ Runs `mapInput` over `config.mapping`, expanding all `{{...}}` placeholders agai
 
 ## `loop`
 
-Iterates over `config.items` (array, comma-separated string, or template that resolves to one). For each item, expands `mapping` with `item` and `index` in scope.
+Iterates over `config.items` (array, comma-separated string, or template that resolves to one). The omitted/default `mode: "map"` preserves the original projection contract: for each item, it expands `mapping` with `item` and `index` in scope.
 
 ```jsonc
 {
@@ -198,6 +198,27 @@ Iterates over `config.items` (array, comma-separated string, or template that re
 ```
 
 **Output:** `{ count: 3, items: [{key:"alpha",position:"0"}, {key:"beta",position:"1"}, {key:"gamma",position:"2"}] }`
+
+`mode: "for_each"` invokes one registered tool per item with bounded in-node concurrency. The per-item `input` can reference `item` and `index`; all inputs are rendered before the first tool call so a strict unresolved-template failure cannot partially process the batch.
+
+```jsonc
+{
+  "id": "parse_batch",
+  "type": "loop",
+  "config": {
+    "items": "1,invalid,2",
+    "mode": "for_each",
+    "tool": "json.parse",
+    "input": { "value": "{{item}}" },
+    "concurrency": 2,
+    "toleratedFailureCount": 1
+  }
+}
+```
+
+The node accepts at most 1,000 items. `concurrency` defaults to 4 and is limited to 1..20. A failure is either a thrown tool error or a registered-tool envelope with `ok: false`. With no configured budget, any failure fails the node; exactly one of `toleratedFailureCount` (0..1,000) or `toleratedFailurePercentage` (0..100) can permit failures up to and including the threshold. Crossing it fails the node with `LOOP_FAILURE_BUDGET_EXCEEDED`, preserving structured counts, all failed indices, and a bounded failure sample for retries and DLQ inspection. Validation/sandbox runs skip write-side tools through the same registry gate as ordinary `tool` nodes.
+
+**Output:** `{ mode: "for_each", tool, count, succeededCount, skippedCount, failedCount, failedPercentage, failedIndices, failures, failureDetailsTruncated, resultTruncatedCount, toleratedFailureCount?, toleratedFailurePercentage?, items }`. Per-item results preserve input order, are capped at 64 KB, and the aggregate item list is capped at 700 KB with explicit truncation sentinels. Failed-items-only redrive remains separate recovery work. Read-side failures may retry the whole node under its retry policy; possibly committed write-side failures do not retry automatically and require operator-gated DLQ replay.
 
 ## `tool`
 

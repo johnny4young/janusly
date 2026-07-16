@@ -309,6 +309,8 @@ describe("executeNode timeout enforcement (Q-01)", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as { code?: string }).code).toBe("NODE_TIMEOUT");
     expect((err as Error).message).toContain("test_probe timed out after 40ms");
+    const ctx = executorMock.mock.calls[0]?.[0] as { signal?: AbortSignal };
+    expect(ctx.signal?.aborted).toBe(true);
   });
 
   it("flags writeSide on a write-side node's timeout so a blind replay can be gated", async () => {
@@ -345,7 +347,39 @@ describe("executeNode timeout enforcement (Q-01)", () => {
     });
 
     expect(result.status).toBe("succeeded");
-    expect(isWriteSideNodeMock).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("writeSideExecuted");
+    expect(isWriteSideNodeMock).toHaveBeenCalled();
+  });
+
+  it("marks a successful write-side result so later persistence failures cannot retry it", async () => {
+    executorMock.mockResolvedValue({ status: "succeeded", output: { ok: true } });
+    isWriteSideNodeMock.mockReturnValue(true);
+
+    const result = await executeNode({
+      runId: "run-1",
+      node: { id: "n1", type: "test_probe", config: {} } as never,
+    });
+
+    expect(result).toMatchObject({ status: "succeeded", writeSideExecuted: true });
+  });
+
+  it("marks non-timeout executor errors when the rendered invocation is write-side", async () => {
+    executorMock.mockRejectedValue(new Error("completion event persistence failed"));
+    isWriteSideNodeMock.mockReturnValue(true);
+
+    const error = await executeNode({
+      runId: "run-1",
+      node: {
+        id: "n1",
+        type: "loop",
+        config: { mode: "for_each", items: ["a"], tool: "email.send" },
+      } as never,
+    }).catch((value) => value);
+
+    expect(error).toMatchObject({
+      message: "completion event persistence failed",
+      writeSide: true,
+    });
   });
 
   it("swallows the abandoned executor's late rejection (no unhandled rejection) after the timeout won", async () => {

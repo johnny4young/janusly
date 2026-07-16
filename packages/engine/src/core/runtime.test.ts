@@ -258,6 +258,50 @@ describe('executeQueuedNode — cancellation guards', () => {
     expect(store.markNodeFailed).not.toHaveBeenCalled()
   })
 
+  it('never retries a possibly committed write-side failure as a whole node', async () => {
+    const retryNode = { ...node, config: { retry: { maxAttempts: 3 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const error = Object.assign(new Error('partial batch failure'), {
+      code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+      writeSide: true,
+    })
+    const store = makeStore()
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeFailingExecutors(error))
+
+    await expect(runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow }))
+      .rejects.toThrow('partial batch failure')
+
+    expect(store.markNodeQueued).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ writeSide: true }),
+    }))
+  })
+
+  it('preserves write-side risk when success persistence fails after the effect', async () => {
+    const retryNode = { ...node, config: { retry: { maxAttempts: 3 } } }
+    const retryWorkflow = { ...workflow, nodes: [retryNode] }
+    const store = makeStore({
+      markNodeSucceededWithEvent: vi.fn().mockRejectedValue(new Error('database unavailable')),
+    })
+    const queue = makeQueue()
+    const runtime = new WorkflowRuntime(store, queue, makeExecutors({
+      status: 'completed',
+      output: { ok: true },
+      writeSideExecuted: true,
+    }))
+
+    await expect(runtime.executeQueuedNode({ runId: 'r1', node: retryNode, workflow: retryWorkflow }))
+      .rejects.toThrow('database unavailable')
+
+    expect(store.markNodeQueued).not.toHaveBeenCalled()
+    expect(queue.enqueueNode).not.toHaveBeenCalled()
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ writeSide: true }),
+    }))
+  })
+
   it('does not schedule a retry when cancellation lands during the failed attempt', async () => {
     const retryNode = { ...node, config: { retry: { maxAttempts: 2 } } }
     const retryWorkflow = { ...workflow, nodes: [retryNode] }
@@ -286,6 +330,23 @@ describe('executeQueuedNode — cancellation guards', () => {
       workflowId: 'wf-1',
       node,
       attempt: 1,
+    }))
+  })
+
+  it('persists bounded structured executor diagnostics with a terminal failure', async () => {
+    const queue = makeQueue()
+    const error = Object.assign(new Error('batch failed'), {
+      code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+      details: { failedCount: 2, failedIndices: [1, 3] },
+    })
+    const runtime = new WorkflowRuntime(makeStore(), queue, makeFailingExecutors(error))
+
+    await expect(runtime.executeQueuedNode(input)).rejects.toThrow('batch failed')
+    expect(queue.persistTerminalFailure).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({
+        code: 'LOOP_FAILURE_BUDGET_EXCEEDED',
+        details: { failedCount: 2, failedIndices: [1, 3] },
+      }),
     }))
   })
 

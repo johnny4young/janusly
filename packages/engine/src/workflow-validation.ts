@@ -169,7 +169,34 @@ export function validateWorkflow(workflow: unknown, options: ValidateWorkflowOpt
         }
       }
     }
-    if (node.type === "loop" && !node.config.items) issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+    if (node.type === "loop") {
+      if (!node.config.items) {
+        issues.push({ code: "loop_missing_items", message: "Loop node requires config.items", nodeId: node.id });
+      }
+      if (node.config.mode !== undefined && node.config.mode !== "map" && node.config.mode !== "for_each") {
+        issues.push({ code: "loop_invalid_mode", message: "Loop mode must be map or for_each", nodeId: node.id });
+      }
+      if (node.config.mode === "for_each" && (typeof node.config.tool !== "string" || !node.config.tool.trim())) {
+        issues.push({ code: "loop_for_each_missing_tool", message: "For-each loop requires config.tool", nodeId: node.id });
+      } else if (node.config.mode === "for_each" && typeof node.config.tool === "string" && !isRegisteredTool(node.config.tool)) {
+        issues.push({ code: "loop_for_each_unknown_tool", message: `Unknown tool: ${node.config.tool}`, nodeId: node.id });
+      }
+      const concurrency = node.config.concurrency;
+      if (concurrency !== undefined && (!Number.isInteger(concurrency) || Number(concurrency) < 1 || Number(concurrency) > 20)) {
+        issues.push({ code: "loop_invalid_concurrency", message: "Loop concurrency must be an integer from 1 to 20", nodeId: node.id });
+      }
+      const failureCount = node.config.toleratedFailureCount;
+      if (failureCount !== undefined && (!Number.isInteger(failureCount) || Number(failureCount) < 0 || Number(failureCount) > 1_000)) {
+        issues.push({ code: "loop_invalid_failure_count", message: "Loop tolerated failure count must be an integer from 0 to 1000", nodeId: node.id });
+      }
+      const failurePercentage = node.config.toleratedFailurePercentage;
+      if (failurePercentage !== undefined && (typeof failurePercentage !== "number" || !Number.isFinite(failurePercentage) || failurePercentage < 0 || failurePercentage > 100)) {
+        issues.push({ code: "loop_invalid_failure_percentage", message: "Loop tolerated failure percentage must be from 0 to 100", nodeId: node.id });
+      }
+      if (failureCount !== undefined && failurePercentage !== undefined) {
+        issues.push({ code: "loop_conflicting_failure_budgets", message: "Loop failure budget must use either count or percentage, not both", nodeId: node.id });
+      }
+    }
     if (node.type === "approval") {
       try {
         resolveApprovalWaitingConfig(node.config);

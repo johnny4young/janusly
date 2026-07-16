@@ -44,12 +44,13 @@ export type SerializedError = {
   cause?: unknown;
   code?: string;
   statusCode?: number;
+  /** Bounded structured diagnostics for failures such as per-item loop errors. */
+  details?: unknown;
   /**
-   * Set for a `NODE_TIMEOUT` failure whose node could have already committed
-   * an external side effect (write-side HTTP method / `writeSide` tool). The
-   * abandoned executor keeps running after the node-level timeout race, so a
-   * blind replay might duplicate the effect — operators/auto-healing use this
-   * to gate replay. Absent for read-side timeouts and all non-timeout errors.
+   * Set when a node could already have committed an external side effect:
+   * write-side timeout, partial batch failure, or persistence failure after a
+   * write-side executor returned. Operators/auto-healing use it to gate replay
+   * and the runtime suppresses unsafe whole-node retries.
    */
   writeSide?: boolean;
 };
@@ -86,6 +87,8 @@ export type NodeExecutionResult =
       status?: "succeeded";
       output?: unknown;
       metadata?: unknown;
+      /** External writes may have committed; any later persistence failure must not whole-node retry. */
+      writeSideExecuted?: boolean;
     }
   | {
       status: "waiting";

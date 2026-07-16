@@ -89,6 +89,109 @@ describe('<QuickConfigEditor /> resilience wiring', () => {
   })
 })
 
+describe('<QuickConfigEditor /> bounded per-item processing', () => {
+  const tools = [{
+    name: 'text.uppercase',
+    description: 'Convert text to uppercase.',
+    descriptionCode: 'text-uppercase',
+    required: ['value'],
+    inputExample: { value: 'hello' },
+  }]
+
+  it('keeps the legacy mapping editor as the default loop mode', () => {
+    render(
+      <QuickConfigEditor
+        nodeId="batch"
+        type="loop"
+        config={{ items: 'a,b', mapping: { value: '{{item}}' } }}
+        tools={tools}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText('Processing mode')).toHaveValue('map')
+    expect(screen.getByLabelText('Item mapping')).toBeInTheDocument()
+    expect(screen.queryByTestId('loop-for-each-config')).not.toBeInTheDocument()
+  })
+
+  it('switches to for-each with safe defaults while preserving the map config', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="batch"
+        type="loop"
+        config={{ items: 'a,b', mapping: { value: '{{item}}' } }}
+        tools={tools}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Processing mode'), { target: { value: 'for_each' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      items: 'a,b',
+      mapping: { value: '{{item}}' },
+      mode: 'for_each',
+      tool: 'text.uppercase',
+      input: { value: '{{item}}' },
+      concurrency: 4,
+      toleratedFailureCount: 0,
+    })
+  })
+
+  it('authors tool, concurrency, and one mutually exclusive failure budget', () => {
+    const onUpdate = vi.fn()
+    render(
+      <QuickConfigEditor
+        nodeId="batch"
+        type="loop"
+        config={{
+          mode: 'for_each',
+          items: '{{context.input.customers}}',
+          tool: 'text.uppercase',
+          input: { value: '{{item.name}}' },
+          concurrency: 4,
+          toleratedFailureCount: 2,
+        }}
+        tools={tools}
+        onUpdate={onUpdate}
+      />,
+    )
+
+    expect(screen.getByTestId('loop-for-each-config')).toBeVisible()
+    expect(screen.getByLabelText('Tool')).toHaveValue('text.uppercase')
+    expect(screen.getByLabelText('Concurrency')).toHaveValue(4)
+    expect(screen.getByLabelText('Failed items allowed')).toHaveValue(2)
+    expect(screen.getByText(/Processes at most 1,000 items/)).toBeVisible()
+
+    fireEvent.change(screen.getByLabelText('Failure budget'), { target: { value: 'percentage' } })
+    expect(onUpdate).toHaveBeenLastCalledWith({
+      mode: 'for_each',
+      items: '{{context.input.customers}}',
+      tool: 'text.uppercase',
+      input: { value: '{{item.name}}' },
+      concurrency: 4,
+      toleratedFailurePercentage: 0,
+    })
+  })
+
+  it('renders the complete authoring contract in Spanish', () => {
+    initI18n('es')
+    render(
+      <QuickConfigEditor
+        nodeId="batch"
+        type="loop"
+        config={{ mode: 'for_each', items: 'a,b', tool: 'text.uppercase', input: { value: '{{item}}' }, concurrency: 4, toleratedFailureCount: 0 }}
+        tools={tools}
+        onUpdate={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText('Modo de procesamiento')).toHaveValue('for_each')
+    expect(screen.getByLabelText('Concurrencia')).toHaveValue(4)
+    expect(screen.getByText(/Procesa hasta 1.000 elementos/)).toBeVisible()
+  })
+})
+
 describe('<QuickConfigEditor /> guided workflow choices', () => {
   it('selects another active workflow by name while excluding the current flow', () => {
     const onUpdate = vi.fn()

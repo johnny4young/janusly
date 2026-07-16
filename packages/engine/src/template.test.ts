@@ -201,18 +201,22 @@ describe('renderTemplateWithRedactions — env values are tracked alongside secr
   it('redactError scrubs error messages, stacks, codes, and causes before DLQ serialization', () => {
     const error = new Error('upstream rejected sk-error-key-123456')
     error.stack = 'Error: upstream rejected sk-error-key-123456\n    at run'
-    const errorWithFields = error as Error & { code?: string; cause?: unknown }
+    const errorWithFields = error as Error & { code?: string; cause?: unknown; details?: unknown }
     errorWithFields.code = 'TOKEN_sk-error-key-123456'
     errorWithFields.cause = {
       details: 'nested sk-error-key-123456',
     }
+    errorWithFields.details = {
+      failures: [{ index: 2, error: 'sk-error-key-123456' }],
+    }
 
-    const redacted = redactError(error, ['sk-error-key-123456']) as Error & { code?: string; cause?: unknown }
+    const redacted = redactError(error, ['sk-error-key-123456']) as Error & { code?: string; cause?: unknown; details?: unknown }
 
     expect(redacted.message).toBe('upstream rejected [redacted]')
     expect(redacted.stack).not.toContain('sk-error-key-123456')
     expect(redacted.code).toBe('TOKEN_[redacted]')
     expect(redacted.cause).toEqual({ details: 'nested [redacted]' })
+    expect(redacted.details).toEqual({ failures: [{ index: 2, error: '[redacted]' }] })
   })
 })
 

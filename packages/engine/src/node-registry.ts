@@ -38,19 +38,25 @@ import {
 } from "@janusly/data";
 import { evaluateExpression } from "./expression";
 import { withTimeout } from "./core/timeout";
-import { executeTool, isToolWriteSide } from "./tool-registry";
 import { planAgentTool, planAgentToolWithLLM, type AgentPlanResult } from "./agent-planner";
 import type { AgentNodeConfig } from "./node-configs";
 import { appendEvent } from "./persistence";
 import { resolvePromptRef } from "./prompt-resolver";
 import { getRunMemory, summarizeMemory } from "./memory";
 import { recallAgentEpisodes, recordAgentEpisode } from "./agent-memory";
+import { mapInput, renderTemplateWithRedactions } from "./template";
 import {
-  MAX_RECORDED_UNRESOLVED_PATHS,
-  UnresolvedTemplatePathError,
-  mapInput,
-  renderTemplateWithRedactions,
-} from "./template";
+  enforceLateBoundTemplatePolicy,
+  mergeLateBoundRedactions,
+} from "./late-bound-template";
+import { executeLoop, isForEachLoopWriteSide } from "./loop-executor";
+import {
+  dryRunToolSkipPayload,
+  executeToolForRun,
+  isToolInvocationWriteSide,
+  SAFE_HTTP_METHODS,
+  withHttpToolDefaults,
+} from "./tool-execution";
 import { consumeStreamToPreview, fetchHttpTarget } from "./http-policy";
 import { projectHttpJson } from "./http-json";
 import { hasFailureSignal } from "./failure-signal";
@@ -88,6 +94,8 @@ export type NodeContext = {
   redactedValues?: string[];
   /** Active DLQ replay generation, used by executor-owned atomic checkpoints. */
   recoveryClaimToken?: string;
+  /** Cooperative cancellation for executors that can stop starting bounded work after a node timeout. */
+  signal?: AbortSignal;
   /** Immutable policy copied from the run's workflow snapshot. Executors use
    * it only for scopes that cannot be bound at dispatcher time. */
   templatePolicy?: "lenient" | "strict";
@@ -104,9 +112,6 @@ export type NodeContext = {
   dryRun?: boolean;
 };
 
-/** HTTP methods that read state without mutating it; safe to execute in dryRun mode. */
-const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
 /**
  * True when a node could commit an external side effect — a non-safe HTTP
  * method or a `writeSide` tool. Same taxonomy the sandbox uses to dry-run-skip
@@ -115,13 +120,18 @@ const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * node types whose write-side-ness isn't statically known (agent tool calls,
  * subworkflows) return `false` here — those loops carry their own timeouts.
  */
-export function isWriteSideNode(node: { type: string; config?: { method?: unknown; tool?: unknown } }): boolean {
+export function isWriteSideNode(node: {
+  type: string;
+  config?: Record<string, unknown>;
+}): boolean {
   if (node.type === "http") {
     return !SAFE_HTTP_METHODS.has(String(node.config?.method ?? "GET").toUpperCase());
   }
   if (node.type === "tool") {
-    const tool = node.config?.tool;
-    return typeof tool === "string" && isToolWriteSide(tool);
+    return isToolInvocationWriteSide(node.config?.tool, node.config?.input);
+  }
+  if (node.type === "loop") {
+    return isForEachLoopWriteSide(node.config ?? {});
   }
   return false;
 }
@@ -159,38 +169,6 @@ function createTenantLlmClient(orgConfig: OrgConfigSnapshot): LlmClient | null {
 
 async function getTenantLlmClient(orgId: string): Promise<LlmClient | null> {
   return createTenantLlmClient(await getOrgConfigSnapshot(orgId));
-}
-
-function withHttpToolDefaults(
-  tool: string,
-  input: unknown,
-  orgConfig: OrgConfigSnapshot,
-): unknown {
-  if (tool !== "http.request" || typeof input !== "object" || input === null || Array.isArray(input)) return input;
-  const next = { ...(input as Record<string, unknown>) };
-  next.timeoutMs ??= orgConfig.http.timeoutMs;
-  next.maxResponseBytes ??= orgConfig.http.maxResponseBytes;
-  next.maxRedirects ??= orgConfig.http.maxRedirects;
-  // When the operator opted into streaming and didn't pass a per-call
-  // preview cap, fall back to the tenant default so a low per-org cap
-  // applies without the operator having to set it on every node.
-  if (next.bodyMode === "stream") {
-    next.streamPreviewBytes ??= orgConfig.http.streamPreviewBytes;
-  }
-  return next;
-}
-
-function dryRunToolSkipPayload(tool: string, input: unknown): Record<string, unknown> | null {
-  if (!isToolWriteSide(tool)) return null;
-  const inputObj = (input ?? {}) as Record<string, unknown>;
-  const method = typeof inputObj.method === "string" ? inputObj.method.toUpperCase() : "GET";
-  const isHttpRead = tool === "http.request" && SAFE_HTTP_METHODS.has(method);
-  if (isHttpRead) return null;
-  return {
-    reason: "write-side tool skipped in validation mode",
-    tool,
-    method: tool === "http.request" ? method : undefined,
-  };
 }
 
 /** One recorded agent-loop step: the plan, the tool result, and the reflection (when enabled). */
@@ -325,20 +303,16 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
     });
 
     const result = await withTimeout(
-      executeTool(
-        plan.tool,
+      executeToolForRun({
+        tool: plan.tool,
         toolInput,
-        ctx.context,
-        {
-          orgId: ctx.orgId,
-          runId: ctx.runId,
-          nodeId: ctx.nodeId,
-          workflowId: ctx.workflowId ?? undefined,
-          email: orgConfig.email,
-          integrations: orgConfig.integrations,
-          objectstore: orgConfig.objectstore,
-        },
-      ),
+        context: ctx.context,
+        orgConfig,
+        orgId: ctx.orgId,
+        runId: ctx.runId,
+        nodeId: ctx.nodeId,
+        workflowId: ctx.workflowId ?? undefined,
+      }),
       agentConfig.timeoutMs,
       { label: `${agentConfig.name ?? "agent"}.${plan.tool}` }
     );
@@ -398,30 +372,6 @@ function safeOutcome(value: unknown): string {
     return JSON.stringify(value).slice(0, 500);
   } catch {
     return String(value).slice(0, 500);
-  }
-}
-
-function mergeLateBoundRedactions(ctx: NodeContext, redactedValues: string[]): void {
-  if (ctx.redactedValues) {
-    for (const value of redactedValues) {
-      if (!ctx.redactedValues.includes(value)) ctx.redactedValues.push(value);
-    }
-  }
-}
-
-async function enforceLateBoundTemplatePolicy(ctx: NodeContext, unresolvedPaths: string[]): Promise<void> {
-  if (unresolvedPaths.length > 0) {
-    const recordedPaths = unresolvedPaths.slice(0, MAX_RECORDED_UNRESOLVED_PATHS);
-    const templatePolicy = ctx.templatePolicy ?? "lenient";
-    await appendEvent(ctx.runId, ctx.nodeId, "template.unresolved_path", {
-      count: unresolvedPaths.length,
-      paths: recordedPaths,
-      truncated: unresolvedPaths.length > recordedPaths.length,
-      policy: templatePolicy,
-    });
-    if (templatePolicy === "strict") {
-      throw new UnresolvedTemplatePathError(unresolvedPaths);
-    }
   }
 }
 
@@ -555,25 +505,7 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     return { status: "completed", output };
   },
 
-  loop: async (ctx) => {
-    const rawItems = mapInput(ctx.config.items, { context: ctx.context, inputs: ctx.config });
-    const items = Array.isArray(rawItems) ? rawItems : typeof rawItems === "string" ? rawItems.split(",").map(item => item.trim()).filter(Boolean) : [];
-    const unresolvedPaths = new Set<string>();
-    const lateBoundRedactions = new Set<string>();
-    const results = items.map((item, index) => {
-      const mapped = renderTemplateWithRedactions(
-        ctx.config.mapping ?? { item: "{{item}}", index: "{{index}}" },
-        { context: ctx.context, inputs: ctx.config, item, index },
-      );
-      for (const path of mapped.unresolvedPaths) unresolvedPaths.add(path);
-      for (const value of mapped.redactedValues) lateBoundRedactions.add(value);
-      return mapped.rendered;
-    });
-    mergeLateBoundRedactions(ctx, Array.from(lateBoundRedactions));
-    await enforceLateBoundTemplatePolicy(ctx, Array.from(unresolvedPaths));
-    await appendEvent(ctx.runId, ctx.nodeId, "loop.completed", { count: results.length, items: results });
-    return { status: "completed", output: { count: results.length, items: results } };
-  },
+  loop: executeLoop,
 
   tool: async (ctx) => {
     const { tool, input } = ctx.config;
@@ -598,14 +530,15 @@ export const nodeRegistry: Record<string, NodeExecutor> = {
     }
 
     await appendEvent(ctx.runId, ctx.nodeId, "tool.started", { tool, input: toolInput });
-    const result = await executeTool(tool, toolInput, ctx.context, {
+    const result = await executeToolForRun({
+      tool,
+      toolInput,
+      context: ctx.context,
+      orgConfig,
       orgId: ctx.orgId,
       runId: ctx.runId,
       nodeId: ctx.nodeId,
       workflowId: ctx.workflowId ?? undefined,
-      email: orgConfig?.email,
-      integrations: orgConfig?.integrations,
-      objectstore: orgConfig?.objectstore,
     });
     await appendEvent(ctx.runId, ctx.nodeId, "tool.completed", { tool, result });
     return { status: "completed", output: { tool, result } };

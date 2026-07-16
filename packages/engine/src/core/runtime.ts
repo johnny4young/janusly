@@ -127,6 +127,7 @@ export class WorkflowRuntime {
     await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } }));
 
     let metadata: RunMetadata | null = null;
+    let writeSideExecuted = false;
     try {
       // Stable per-run metadata loaded once after the claim wins. Used by
       // the router branch (org-scoped routing-stats writes + RL bandit input
@@ -224,6 +225,7 @@ export class WorkflowRuntime {
       }
 
       const result = await this.executors.execute({ runId, node, context, attempt, recoveryClaimToken });
+      writeSideExecuted = result?.status !== "waiting" && result?.writeSideExecuted === true;
       const durationMs = Date.now() - start;
 
       if (result?.status === "waiting") {
@@ -273,7 +275,14 @@ export class WorkflowRuntime {
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
       const durationMs = Date.now() - start;
-      const error: SerializedError = { message: err.message, name: err.name, code: err.code, statusCode: err.statusCode };
+      const error: SerializedError = {
+        message: err.message,
+        name: err.name,
+        code: err.code,
+        statusCode: err.statusCode,
+        details: err.details,
+      };
+      if (writeSideExecuted) error.writeSide = true;
       // Carry the write-side-timeout flag into error_json / the DLQ so a
       // blind replay of a possibly-committed side effect can be gated.
       if (err?.writeSide === true) error.writeSide = true;
@@ -281,7 +290,10 @@ export class WorkflowRuntime {
       const retryPolicy = node.config?.retry as RetryPolicy | undefined;
       const maxAttempts = retryPolicy?.maxAttempts ?? 1;
 
-      if (attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
+      // A timed-out or partially failed write-side execution may already have
+      // committed effects. Never retry it as a whole node: replay requires an
+      // operator decision rather than risking duplicate external writes.
+      if (error.writeSide !== true && attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
         const nextAttempt = attempt + 1;
         const delayMs = computeRetryDelay(nextAttempt, retryPolicy);
         const retryRunStatus = await this.store.getRunStatus(runId);

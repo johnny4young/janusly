@@ -58,7 +58,7 @@ export function getNodeTimeoutMs(node: WorkflowNode): number | undefined {
 export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs?: number,
-  opts: { label?: string } = {},
+  opts: { label?: string; onTimeout?: () => void } = {},
 ): Promise<T> {
   if (!timeoutMs) return promise;
 
@@ -69,7 +69,17 @@ export async function withTimeout<T>(
 
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new NodeTimeoutError(timeoutMs, opts.label)), timeoutMs);
+    timer = setTimeout(() => {
+      // Settle the timeout promise first so an executor that reacts
+      // synchronously to cancellation cannot replace NODE_TIMEOUT with its
+      // own abort error at the boundary.
+      reject(new NodeTimeoutError(timeoutMs, opts.label));
+      try {
+        opts.onTimeout?.();
+      } catch {
+        // Cancellation is best-effort; it must never hide the timeout.
+      }
+    }, timeoutMs);
   });
 
   try {

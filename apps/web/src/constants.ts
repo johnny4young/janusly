@@ -163,7 +163,16 @@ export function getNodeConfigSummary(type: string, config: JsonObject): string {
   if (type === 'approval') return compact(readString(config.message) ?? (t('nodeSummary.approval.empty') as string))
   if (type === 'human_form') return compact(readString(config.title) ?? (t('nodeSummary.human_form.empty') as string))
   if (type === 'condition') return compact(readString(config.expression) ?? (t('nodeSummary.condition.empty') as string))
-  if (type === 'loop') return compact(readString(config.items) ?? (t('nodeSummary.loop.empty') as string))
+  if (type === 'loop') {
+    if (config.mode === 'for_each') {
+      const concurrency = typeof config.concurrency === 'number' ? config.concurrency : 4
+      return t('nodeSummary.loop.forEach', {
+        tool: readString(config.tool) ?? t('nodeSummary.tool.empty'),
+        count: concurrency,
+      }) as string
+    }
+    return compact(readString(config.items) ?? (t('nodeSummary.loop.empty') as string))
+  }
   if (type === 'transform') return t('nodeSummary.transform.text') as string
   if (type === 'router' || type === 'router_llm') return t('nodeSummary.router.text') as string
   if (type === 'webhook') return t('nodeSummary.webhook.text') as string

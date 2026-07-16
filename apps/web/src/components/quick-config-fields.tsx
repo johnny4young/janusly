@@ -59,6 +59,7 @@ export function OptionalNumberConfigField({
   onChange,
   min = 1,
   max,
+  step = 1,
   placeholder,
 }: {
   scope: string
@@ -67,6 +68,7 @@ export function OptionalNumberConfigField({
   onChange: (value: number | undefined) => void
   min?: number
   max?: number
+  step?: number | 'any'
   placeholder?: string
 }) {
   const id = fieldId(scope, label)
@@ -87,7 +89,7 @@ export function OptionalNumberConfigField({
         type="number"
         min={min}
         max={max}
-        step={1}
+        step={step}
         value={draft}
         placeholder={placeholder}
         onChange={(event) => setDraft(event.target.value)}
@@ -101,7 +103,8 @@ export function OptionalNumberConfigField({
             setDraft(value === null ? '' : String(value))
             return
           }
-          const bounded = Math.max(min, Math.min(max ?? Number.POSITIVE_INFINITY, Math.round(parsed)))
+          const normalized = step === 'any' ? parsed : Math.round(parsed / step) * step
+          const bounded = Math.max(min, Math.min(max ?? Number.POSITIVE_INFINITY, normalized))
           setDraft(String(bounded))
           if (bounded !== value) onChange(bounded)
         }}

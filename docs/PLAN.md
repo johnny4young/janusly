@@ -277,7 +277,7 @@ Pre-packaged connections (GitHub / Slack / Filesystem) remain a follow-up.
 | `http` | Healthy. SSRF policy is correct. | Add OAuth token auto-refresh, circuit breaker, response size cap. |
 | `condition` | Works, expression grammar is intentionally narrow. | Add a "natural language" mode that compiles to the safe expression via LLM. |
 | `transform` | Mapping only. | Add jq-style operations (with a safe interpreter, not eval). |
-| `loop` | Basic for-each. | Add parallelism cap, accumulate-vs-stream, early-exit predicate. |
+| `loop` | Legacy map projection plus bounded registered-tool `for_each` (1..20 concurrent calls, 1,000 items, count-or-percentage failure budget). | Add accumulate-vs-stream, early-exit predicate, and failed-items-only redrive. |
 | `tool` | Static native registry. | Keep native tools small and audited; external vendor breadth goes through `mcp_tool`. |
 | `agent` | Rules planner + provider-neutral LLM planner (legacy config value `"openai"` resolves through `ai.provider`). | Add tool-result-aware re-planning and memory injection (§7). |
 | `multi_agent` | Sequential / parallel. | Add a "team lead" coordinator pattern, role-based delegation, conflict-resolution voting. |

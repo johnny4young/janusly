@@ -46,6 +46,23 @@ describe('node-type catalogue', () => {
         .toBe('child-flow')
     })
 
+    it('summarises the executable loop mode by tool and bounded concurrency', () => {
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'json.parse',
+        concurrency: 8,
+      })).toBe('json.parse for each item · 8 concurrent calls')
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'text.uppercase',
+      })).toBe('text.uppercase for each item · 4 concurrent calls')
+      expect(getNodeConfigSummary('loop', {
+        mode: 'for_each',
+        tool: 'json.parse',
+        concurrency: 1,
+      })).toBe('json.parse for each item · 1 concurrent call')
+    })
+
     it('summarises parallel_fork by branch count', () => {
       expect(getNodeConfigSummary('parallel_fork', { branches: [{ label: 'a' }, { label: 'b' }, { label: 'c' }] }))
         .toBe('3 branches')

@@ -132,6 +132,27 @@ describe("LoopNodeConfigSchema", () => {
     const parsed = LoopNodeConfigSchema.parse({ items: [1, 2, 3] });
     expect(Array.isArray(parsed.items)).toBe(true);
   });
+  it("accepts a bounded for_each tool contract", () => {
+    const parsed = LoopNodeConfigSchema.parse({
+      mode: "for_each",
+      items: ["a", "b"],
+      tool: "text.uppercase",
+      input: { value: "{{item}}" },
+      concurrency: 20,
+      toleratedFailurePercentage: 25,
+    });
+    expect(parsed.mode).toBe("for_each");
+  });
+  it.each([
+    { mode: "for_each" },
+    { mode: "for_each", tool: "text.uppercase", concurrency: 0 },
+    { mode: "for_each", tool: "text.uppercase", concurrency: 21 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailureCount: -1 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailurePercentage: 101 },
+    { mode: "for_each", tool: "text.uppercase", toleratedFailureCount: 1, toleratedFailurePercentage: 10 },
+  ])("rejects malformed for_each config %j", (config) => {
+    expect(() => LoopNodeConfigSchema.parse(config)).toThrow();
+  });
 });
 
 describe("RouterNodeConfigSchema", () => {

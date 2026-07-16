@@ -123,9 +123,32 @@ export const LoopNodeConfigSchema = z
     // Executor handles undefined items gracefully (falls back to empty
     // iteration) so the field is optional at this layer.
     items: z.unknown().optional(),
+    mode: z.enum(["map", "for_each"]).optional(),
     mapping: z.unknown().optional(),
+    tool: z.string().trim().optional(),
+    input: z.unknown().optional(),
+    concurrency: z.number().int().min(1).max(20).optional(),
+    toleratedFailureCount: z.number().int().min(0).max(1_000).optional(),
+    toleratedFailurePercentage: z.number().min(0).max(100).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (value.mode === "for_each" && !value.tool) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tool"],
+        message: "loop.tool is required in for_each mode",
+      });
+    }
+    if (value.toleratedFailureCount !== undefined
+      && value.toleratedFailurePercentage !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["toleratedFailurePercentage"],
+        message: "loop failure budget must use either count or percentage, not both",
+      });
+    }
+  });
 
 export const RouterNodeConfigSchema = z
   .object({

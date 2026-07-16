@@ -21,6 +21,7 @@ import {
   fieldId,
   JsonConfigField,
   NumberConfigField,
+  OptionalNumberConfigField,
   readConfigNumber,
   readConfigString,
   TextareaConfigField,
@@ -30,11 +31,55 @@ import {
 // Mirrors `@janusly/shared.workflowVersionMax` without importing the runtime
 // barrel into this lazy authoring chunk and perturbing the production split.
 const SUBWORKFLOW_VERSION_MAX = 2_147_483_647
+const LOOP_DEFAULT_CONCURRENCY = 4
+const LOOP_MAX_CONCURRENCY = 20
 
 function isPositiveVersion(value: string): boolean {
   if (!/^\d+$/.test(value)) return false
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= SUBWORKFLOW_VERSION_MAX
+}
+
+function ToolPicker({ nodeId, selectedTool, input, tools, onChange }: {
+  nodeId: string
+  selectedTool: string
+  input: unknown
+  tools: ToolSchema[]
+  onChange: (tool: string, input: unknown) => void
+}) {
+  const { t } = useT()
+  const matchedTool = tools.find(tool => tool.name === selectedTool) ?? null
+  const showCurrentToolOption = Boolean(selectedTool) && !matchedTool
+  const isUnknown = showCurrentToolOption && tools.length > 0
+  const toolNameId = fieldId(nodeId, 'tool name')
+  const onSelectTool = (next: string) => {
+    const inputIsEmpty = !input || (typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 0)
+    const newTool = tools.find(tool => tool.name === next)
+    const seedInput = inputIsEmpty && newTool?.inputExample ? newTool.inputExample : input
+    onChange(next, seedInput)
+  }
+  return (
+    <div className="form-grid" data-testid="tool-picker">
+      <label className="field-label" htmlFor={toolNameId}>{t('rightPanel.quickConfig.tool')}</label>
+      <select
+        id={toolNameId}
+        className="text-field"
+        value={selectedTool}
+        onChange={event => onSelectTool(event.target.value)}
+      >
+        {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
+        {showCurrentToolOption && <option value={selectedTool}>{tools.length > 0 ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool }) : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}</option>}
+        {tools.map(tool => (
+          <option key={tool.name} value={tool.name}>{tool.name}</option>
+        ))}
+      </select>
+      {matchedTool?.description && <p className="helper-text">{tToolDescription(matchedTool)}</p>}
+      {matchedTool?.required && matchedTool.required.length > 0 && (
+        <p className="helper-text">{t('rightPanel.quickConfig.requiredInput', { required: matchedTool.required.join(', ') })}{matchedTool.optional?.length ? t('rightPanel.quickConfig.optionalSuffix', { optional: matchedTool.optional.join(', ') }) : ''}</p>
+      )}
+      {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">{t('rightPanel.quickConfig.unknownToolWarning')}</p>}
+    </div>
+  )
 }
 
 function SubworkflowVersionField({ nodeId, value, onChange }: {
@@ -337,41 +382,16 @@ export function QuickConfigEditor({
 
   if (type === 'tool') {
     const selectedTool = readConfigString(config, 'tool')
-    const matchedTool = tools.find(tool => tool.name === selectedTool) ?? null
-    const showCurrentToolOption = Boolean(selectedTool) && !matchedTool
-    const isUnknown = showCurrentToolOption && tools.length > 0
-    const toolNameId = fieldId(nodeId, 'tool name')
-    const onSelectTool = (next: string) => {
-      // Switching tools clobbers the input only when it's empty — preserves
-      // any edits the author already made on the previous tool's payload.
-      const inputIsEmpty = !config.input || (typeof config.input === 'object' && config.input !== null && !Array.isArray(config.input) && Object.keys(config.input).length === 0)
-      const newTool = tools.find(tool => tool.name === next)
-      const seedInput = inputIsEmpty && newTool?.inputExample ? newTool.inputExample : config.input
-      patch({ tool: next, input: seedInput })
-    }
     return (
       <section className="quick-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
-        <div className="form-grid">
-          <label className="field-label" htmlFor={toolNameId}>{t('rightPanel.quickConfig.tool')}</label>
-          <select
-            id={toolNameId}
-            className="text-field"
-            value={selectedTool}
-            onChange={event => onSelectTool(event.target.value)}
-          >
-            {!selectedTool && <option value="">{t('rightPanel.quickConfig.pickTool')}</option>}
-            {showCurrentToolOption && <option value={selectedTool}>{tools.length > 0 ? t('rightPanel.quickConfig.toolNotRegistered', { name: selectedTool }) : t('rightPanel.quickConfig.toolLoading', { name: selectedTool })}</option>}
-            {tools.map(tool => (
-              <option key={tool.name} value={tool.name}>{tool.name}</option>
-            ))}
-          </select>
-          {matchedTool?.description && <p className="helper-text">{tToolDescription(matchedTool)}</p>}
-          {matchedTool?.required && matchedTool.required.length > 0 && (
-            <p className="helper-text">{t('rightPanel.quickConfig.requiredInput', { required: matchedTool.required.join(', ') })}{matchedTool.optional?.length ? t('rightPanel.quickConfig.optionalSuffix', { optional: matchedTool.optional.join(', ') }) : ''}</p>
-          )}
-          {isUnknown && <p className="helper-text" data-testid="unknown-tool-warning">{t('rightPanel.quickConfig.unknownToolWarning')}</p>}
-        </div>
+        <ToolPicker
+          nodeId={nodeId}
+          selectedTool={selectedTool}
+          input={config.input}
+          tools={tools}
+          onChange={(tool, input) => patch({ tool, input })}
+        />
         <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.toolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
         <ResilienceFieldset nodeId={nodeId} nodeType="tool" config={config} onPatch={patch} />
       </section>
@@ -635,11 +655,110 @@ export function QuickConfigEditor({
   }
 
   if (type === 'loop') {
+    const mode = config.mode === 'for_each' ? 'for_each' : 'map'
+    const modeId = fieldId(nodeId, 'loop mode')
+    const failureBudgetMode = typeof config.toleratedFailurePercentage === 'number' ? 'percentage' : 'count'
+    const failureBudgetModeId = fieldId(nodeId, 'loop failure budget mode')
     return (
-      <section className="quick-config">
+      <section className="quick-config" data-testid="loop-config">
         <div className="section-kicker">{t('rightPanel.quickConfig.kicker')}</div>
+        <div className="config-field-row">
+          <label className="field-label" htmlFor={modeId}>{t('rightPanel.quickConfig.loopMode')}</label>
+          <select
+            id={modeId}
+            className="text-field"
+            value={mode}
+            onChange={event => {
+              if (event.target.value === 'for_each') {
+                patch({
+                  mode: 'for_each',
+                  tool: readConfigString(config, 'tool') || 'text.uppercase',
+                  input: config.input ?? { value: '{{item}}' },
+                  concurrency: readConfigNumber(config, 'concurrency') ?? LOOP_DEFAULT_CONCURRENCY,
+                  ...(readConfigNumber(config, 'toleratedFailureCount') === null
+                    && readConfigNumber(config, 'toleratedFailurePercentage') === null
+                    ? { toleratedFailureCount: 0 }
+                    : {}),
+                })
+              } else {
+                patch({
+                  mode: 'map',
+                  mapping: config.mapping ?? { value: '{{item}}', index: '{{index}}' },
+                })
+              }
+            }}
+          >
+            <option value="map">{t('rightPanel.quickConfig.loopModeMap')}</option>
+            <option value="for_each">{t('rightPanel.quickConfig.loopModeForEach')}</option>
+          </select>
+        </div>
         <TextConfigField scope={nodeId} label={t('rightPanel.quickConfig.items') as string} value={readConfigString(config, 'items')} onChange={value => patch({ items: value })} />
-        <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        {mode === 'map' ? (
+          <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.itemMapping') as string} value={asJsonObject(config.mapping)} onChange={value => patch({ mapping: value })} />
+        ) : (
+          <div data-testid="loop-for-each-config">
+            <ToolPicker
+              nodeId={`${nodeId}-loop`}
+              selectedTool={readConfigString(config, 'tool')}
+              input={config.input}
+              tools={tools}
+              onChange={(tool, input) => patch({ tool, input })}
+            />
+            <JsonConfigField scope={nodeId} label={t('rightPanel.quickConfig.loopToolInput') as string} value={asJsonObject(config.input)} onChange={value => patch({ input: value })} />
+            <OptionalNumberConfigField
+              scope={nodeId}
+              label={t('rightPanel.quickConfig.loopConcurrency') as string}
+              value={readConfigNumber(config, 'concurrency')}
+              min={1}
+              max={LOOP_MAX_CONCURRENCY}
+              placeholder={String(LOOP_DEFAULT_CONCURRENCY)}
+              onChange={value => patch({ concurrency: value ?? LOOP_DEFAULT_CONCURRENCY })}
+            />
+            <div className="config-field-row">
+              <label className="field-label" htmlFor={failureBudgetModeId}>{t('rightPanel.quickConfig.loopFailureBudget')}</label>
+              <select
+                id={failureBudgetModeId}
+                className="text-field"
+                value={failureBudgetMode}
+                onChange={event => {
+                  if (event.target.value === 'percentage') {
+                    replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailurePercentage: 0 })
+                  } else {
+                    replaceKeys(['toleratedFailureCount', 'toleratedFailurePercentage'], { toleratedFailureCount: 0 })
+                  }
+                }}
+              >
+                <option value="count">{t('rightPanel.quickConfig.loopFailureBudgetCount')}</option>
+                <option value="percentage">{t('rightPanel.quickConfig.loopFailureBudgetPercentage')}</option>
+              </select>
+            </div>
+            {failureBudgetMode === 'percentage' ? (
+              <OptionalNumberConfigField
+                scope={nodeId}
+                label={t('rightPanel.quickConfig.loopFailurePercentage') as string}
+                value={readConfigNumber(config, 'toleratedFailurePercentage')}
+                min={0}
+                max={100}
+                step="any"
+                placeholder="0"
+                onChange={value => patch({ toleratedFailurePercentage: value ?? 0 })}
+              />
+            ) : (
+              <OptionalNumberConfigField
+                scope={nodeId}
+                label={t('rightPanel.quickConfig.loopFailureCount') as string}
+                value={readConfigNumber(config, 'toleratedFailureCount')}
+                min={0}
+                max={1000}
+                placeholder="0"
+                onChange={value => patch({ toleratedFailureCount: value ?? 0 })}
+              />
+            )}
+            <p className="helper-text" data-testid="loop-for-each-helper">
+              <Trans i18nKey="rightPanel.quickConfig.loopForEachHelper" components={{ code: <code /> }} />
+            </p>
+          </div>
+        )}
       </section>
     )
   }

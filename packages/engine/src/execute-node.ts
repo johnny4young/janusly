@@ -92,10 +92,11 @@ function renderMultiAgentConfig(
 }
 
 /**
- * Loop mappings bind `item` and `index` inside the loop executor. Resolve the
- * rest of the config now, but keep those two mapping roots intact until each
- * iteration has supplied them. Secret/env/context references in the mapping
- * still resolve here so their redaction and strict-policy behavior is unchanged.
+ * Loop mappings and per-item tool inputs bind `item` and `index` inside the
+ * loop executor. Resolve the rest of the config now, but keep those two roots
+ * intact until each iteration has supplied them. Secret/env/context references
+ * in either field still resolve here so redaction and strict-policy behavior
+ * stay unchanged.
  */
 function renderNodeConfig(
   nodeType: string,
@@ -106,27 +107,33 @@ function renderNodeConfig(
     return renderMultiAgentConfig(config, scope);
   }
 
-  if (nodeType !== "loop" || !Object.prototype.hasOwnProperty.call(config, "mapping")) {
+  if (nodeType !== "loop") {
     return renderTemplateWithRedactions(config, scope);
   }
 
-  const { mapping, ...immediateConfig } = config;
+  const { mapping, input, ...immediateConfig } = config;
   const immediate = renderTemplateWithRedactions(immediateConfig, scope);
-  const deferredMapping = renderTemplateWithRedactions(mapping, scope, {
-    deferredRoots: ["item", "index"],
-  });
+  const deferredFields = [
+    ["mapping", mapping],
+    ["input", input],
+  ] as const;
+  const renderedDeferred = deferredFields
+    .filter(([key]) => Object.prototype.hasOwnProperty.call(config, key))
+    .map(([key, value]) => [key, renderTemplateWithRedactions(value, scope, {
+      deferredRoots: ["item", "index"],
+    })] as const);
   return {
     rendered: {
       ...(immediate.rendered as Record<string, unknown>),
-      mapping: deferredMapping.rendered,
+      ...Object.fromEntries(renderedDeferred.map(([key, value]) => [key, value.rendered])),
     },
     redactedValues: Array.from(new Set([
       ...immediate.redactedValues,
-      ...deferredMapping.redactedValues,
+      ...renderedDeferred.flatMap(([, value]) => value.redactedValues),
     ])),
     unresolvedPaths: Array.from(new Set([
       ...immediate.unresolvedPaths,
-      ...deferredMapping.unresolvedPaths,
+      ...renderedDeferred.flatMap(([, value]) => value.unresolvedPaths),
     ])),
   };
 }
@@ -208,6 +215,7 @@ export async function executeNode(
   }
 
   let result: Awaited<ReturnType<typeof executor>>;
+  let renderedWriteSide = false;
   try {
     // Inner refinement: validate the (post-template) config against the
     // per-node-type schema before invoking the executor. Catches typos /
@@ -220,6 +228,10 @@ export async function executeNode(
     // dispatcher errored above if no executor matched).
     const configSchema = NODE_CONFIG_SCHEMAS[node.type as NodeType];
     const parsedConfig = configSchema ? configSchema.parse(resolvedConfig) : resolvedConfig;
+    renderedWriteSide = !dryRun && isWriteSideNode({
+      type: node.type,
+      config: parsedConfig as Record<string, unknown>,
+    });
     // Enforce the node's declared `config.timeoutMs` at THE single executor
     // chokepoint (Q-01) — before this, only the http fetch + the agent
     // tool-loop honored it, so a hung `tool` / `subworkflow` / `ai` /
@@ -228,6 +240,8 @@ export async function executeNode(
     // `NodeTimeoutError` → normal failure path → retry / DLQ) and swallows the
     // abandoned executor's late rejection. No timeout declared → the promise
     // passes through unchanged (behavior-preserving).
+    const timeoutMs = getNodeTimeoutMs(node);
+    const timeoutController = timeoutMs ? new AbortController() : undefined;
     result = await withTimeout(
       executor({
         runId,
@@ -238,18 +252,23 @@ export async function executeNode(
         context,
         redactedValues,
         recoveryClaimToken,
+        signal: timeoutController?.signal,
         dryRun,
         templatePolicy: meta.templatePolicy ?? "lenient",
       }),
-      getNodeTimeoutMs(node),
-      { label: node.type },
+      timeoutMs,
+      { label: node.type, onTimeout: () => timeoutController?.abort() },
     );
   } catch (err) {
-    // A write-side node that timed out may have already committed its effect
-    // (the race abandons, but doesn't cancel, the executor). Flag it so a
-    // blind replay can be gated — the flag rides through `redactError` (which
-    // returns the same error object) into `error_json` / the DLQ.
-    if (err instanceof NodeTimeoutError) err.writeSide = isWriteSideNode(node);
+    // A write-side timeout, or any error after a write-side loop starts, may
+    // follow a committed external effect (including loop completion-event
+    // persistence). Preserve that risk so the runtime suppresses whole-node
+    // retries and blind replay can be gated. Timeout also aborts cooperative
+    // executors. Other successful write nodes carry writeSideExecuted below.
+    if (err instanceof NodeTimeoutError) err.writeSide = renderedWriteSide;
+    else if (node.type === "loop" && renderedWriteSide && err instanceof Error) {
+      (err as Error & { writeSide?: boolean }).writeSide = true;
+    }
     throw redactError(err, redactedValues);
   }
 
@@ -271,5 +290,6 @@ export async function executeNode(
   return {
     status: "succeeded",
     output: redactValues(result.output ?? {}, redactedValues),
+    ...(renderedWriteSide ? { writeSideExecuted: true } : {}),
   };
 }

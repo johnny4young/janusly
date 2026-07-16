@@ -287,9 +287,11 @@ export function redactError(error: unknown, redactedValues: string[]): unknown {
       cause?: unknown;
       code?: unknown;
       statusCode?: unknown;
+      details?: unknown;
     };
     if (errorRecord.cause !== undefined) errorRecord.cause = redactValues(errorRecord.cause, redactedValues);
     if (errorRecord.code !== undefined) errorRecord.code = redactValues(errorRecord.code, redactedValues);
+    if (errorRecord.details !== undefined) errorRecord.details = redactValues(errorRecord.details, redactedValues);
     return error;
   }
   return redactValues(error, redactedValues);

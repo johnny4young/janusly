@@ -528,6 +528,45 @@ describe('validateWorkflow — subworkflow composition', () => {
   })
 })
 
+describe('validateWorkflow — bounded loop execution', () => {
+  it('accepts the legacy map shape and a bounded per-item tool shape', () => {
+    expect(validateWorkflow({
+      nodes: [{ id: 'map', type: 'loop', config: { items: 'a,b', mapping: { value: '{{item}}' } } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+
+    expect(validateWorkflow({
+      nodes: [{ id: 'batch', type: 'loop', config: {
+        mode: 'for_each',
+        items: 'a,b',
+        tool: 'text.uppercase',
+        input: { value: '{{item}}' },
+        concurrency: 4,
+        toleratedFailurePercentage: 10,
+      } }],
+      edges: [],
+    })).toEqual({ valid: true, issues: [] })
+  })
+
+  it.each([
+    [{ mode: 'parallel', items: 'a' }, 'loop_invalid_mode'],
+    [{ mode: 'for_each', items: 'a' }, 'loop_for_each_missing_tool'],
+    [{ mode: 'for_each', items: 'a', tool: 'missing.tool' }, 'loop_for_each_unknown_tool'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', concurrency: 0 }, 'loop_invalid_concurrency'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', concurrency: 21 }, 'loop_invalid_concurrency'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailureCount: 1.5 }, 'loop_invalid_failure_count'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailurePercentage: 101 }, 'loop_invalid_failure_percentage'],
+    [{ mode: 'for_each', items: 'a', tool: 'text.uppercase', toleratedFailureCount: 1, toleratedFailurePercentage: 10 }, 'loop_conflicting_failure_budgets'],
+  ] as const)('rejects malformed loop config %j', (config, expectedCode) => {
+    const result = validateWorkflow({
+      nodes: [{ id: 'batch', type: 'loop', config }],
+      edges: [],
+    })
+    expect(result.valid).toBe(false)
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: expectedCode, nodeId: 'batch' }))
+  })
+})
+
 describe('validateWorkflow — reserved ids + edge scopes (fourth-wave B-01/B-04)', () => {
   it('rejects the reserved node id "input" (collides with the run-input context slot)', () => {
     const result = validateWorkflow({

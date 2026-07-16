@@ -75,6 +75,15 @@ read-then-write.
    holding the parent-run lock, executes the node type's
    executor, then marks `succeeded` / `waiting` (approval, human form, wait
    timer) / retries with the node's `retryPolicy` backoff.
+   A `loop` with `mode='for_each'` remains one node execution rather than a new
+   queue primitive: it resolves every per-item input before the first effect,
+   then runs up to 1,000 registered-tool invocations through an ordered 1..20
+   worker pool (default 4). Tool throws and `{ ok: false }` envelopes consume
+   the configured count or percentage failure budget. Crossing the budget
+   fails the whole node with bounded structured diagnostics; read-side batches
+   may follow the authored retry policy, while a possibly committed write-side
+   batch suppresses whole-node retry and requires operator-gated replay.
+   Accepted failures remain visible in the successful output.
 4. **Failure** — when attempts are exhausted, the node is marked `failed`,
    the exact failed job payload (workflow + node JSON, key-redacted, never
    truncated) lands in `dead_letters`, and the run rolls up to `failed`.
