@@ -87,6 +87,7 @@ type RunsPanelProps = {
   onApproveNode: (nodeId: string) => void
   onSubmitHumanForm: SubmitHumanFormHandler
   onReplayNode: (nodeId: string) => void
+  onRedriveNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
@@ -131,6 +132,7 @@ export function RunsPanel({
   onApproveNode,
   onSubmitHumanForm,
   onReplayNode,
+  onRedriveNode,
   onCancelActiveRun,
   onReplayDeadLetter,
   onResolveDeadLetter,
@@ -501,9 +503,19 @@ export function RunsPanel({
                 {errorMessage && (
                   <p className="we-failed-node__error" title={errorMessage}>{errorMessage}</p>
                 )}
-                <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
-                  {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
-                </button>
+                <div className="split-row">
+                  <button className="small-command" onClick={() => onReplayNode(node.nodeId)}>
+                    {t('rightPanel.runs.retry', { nodeId: node.nodeId })}
+                  </button>
+                  <button
+                    className="small-command small-command--primary"
+                    onClick={() => onRedriveNode(node.nodeId)}
+                    title={t('rightPanel.runs.redriveTitle')}
+                    data-testid={`redrive-node-${node.nodeId}`}
+                  >
+                    {t('rightPanel.runs.redrive')}
+                  </button>
+                </div>
               </div>
             )
           })}

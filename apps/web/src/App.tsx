@@ -791,6 +791,27 @@ export default function App() {
     })
   }, [bumpPlatformVersion, loadStatus, refreshPlatform, runId, runPlatformMutation, t])
 
+  // Production redrive (the wedge's last mile): continue THIS failed run from
+  // its failed node on the latest saved version — completed upstream work is
+  // reused, not re-executed. Opens the continuation run on success.
+  const redriveNode = useCallback(async (nodeId: string) => {
+    if (!runId) return
+    await runPlatformMutation({
+      request: () => api('/runs/redrive', {
+        method: 'POST',
+        body: JSON.stringify({ runId, nodeId }),
+      }),
+      failureMessage: t('toasts.redriveFailed'),
+      successToast: { message: t('toasts.redriveStarted', { nodeId }), tone: 'success' },
+      onSuccess: async (result) => {
+        bumpPlatformVersion()
+        await refreshPlatform()
+        const continuation = (result as { runId?: string } | undefined)?.runId
+        if (continuation) await openRun(continuation, 'runs')
+      },
+    })
+  }, [bumpPlatformVersion, openRun, refreshPlatform, runId, runPlatformMutation, t])
+
   const cancelActiveRun = useCallback(async () => {
     if (!runId) return
     const activeRun = runs.find(r => r.id === runId)
@@ -1020,6 +1041,7 @@ export default function App() {
         onApproveNode: approveNode,
         onSubmitHumanForm: submitHumanForm,
         onReplayNode: replayNode,
+        onRedriveNode: redriveNode,
         onCancelActiveRun: cancelActiveRun,
         onReplayDeadLetter: replayDeadLetter,
         onResolveDeadLetter: resolveDeadLetter,

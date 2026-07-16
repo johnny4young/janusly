@@ -155,6 +155,7 @@ export type AuditAction =
   | "run.started.adhoc"
   | "run.resumed"
   | "run.cancelled"
+  | "run.redrive"
   | "replay_lab.started"
   | "replay_lab.fork_started"
   // scim directory admin (authenticated routes; webhook receiver stays on audit())

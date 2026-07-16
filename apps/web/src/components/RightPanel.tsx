@@ -124,6 +124,7 @@ export type RightPanelExecution = {
   onSubmitHumanForm: (nodeId: string, input: unknown, resumeToken: string) =>
     Promise<string[] | undefined> | string[] | undefined
   onReplayNode: (nodeId: string) => void
+  onRedriveNode: (nodeId: string) => void
   onCancelActiveRun?: () => void | Promise<void>
   onReplayDeadLetter: (id: string, createdAtIso?: string) => boolean | Promise<boolean> | undefined
   onResolveDeadLetter: (id: string) => boolean | Promise<boolean> | undefined
@@ -260,6 +261,7 @@ function RightPanelRouter(props: RightPanelProps) {
       onApproveNode={execution.onApproveNode}
       onSubmitHumanForm={execution.onSubmitHumanForm}
       onReplayNode={execution.onReplayNode}
+      onRedriveNode={execution.onRedriveNode}
       onCancelActiveRun={execution.onCancelActiveRun}
       onReplayDeadLetter={execution.onReplayDeadLetter}
       onResolveDeadLetter={execution.onResolveDeadLetter}

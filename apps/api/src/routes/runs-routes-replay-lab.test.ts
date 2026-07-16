@@ -66,6 +66,7 @@ vi.mock("@janusly/domain", () => ({
   replayDecision: vi.fn(),
 }));
 
+vi.mock("@janusly/engine/src/adapters/redrive", () => ({ redriveRun: vi.fn() }));
 vi.mock("@janusly/engine/src/adapters/replay-lab", () => ({
   replayRunAsValidation: replayRunAsValidationMock,
 }));
