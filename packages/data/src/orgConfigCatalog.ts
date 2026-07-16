@@ -13,7 +13,12 @@
  * - Importing this module runs the boot-time self-check over every definition.
  */
 
-import { RECOVERY_ITEM_SEVERITIES } from "@janusly/shared";
+import {
+  AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES,
+  containsOperatorGuidanceSecret,
+  RECOVERY_ITEM_SEVERITIES,
+  utf8ByteLength,
+} from "@janusly/shared";
 
 import { MEMORY_KINDS, isMemoryKind } from "./memory-kinds";
 
@@ -189,6 +194,17 @@ function validateAiSurfaceModels(value: string | number | boolean): void {
   }
 }
 
+/** Keep tenant guidance bounded before it enters the hot config snapshot. */
+function validateAiOperatorGuidance(value: string | number | boolean): void {
+  if (typeof value !== "string") throw new Error("ai.operatorGuidance must be a string");
+  if (utf8ByteLength(value) > AI_OPERATOR_GUIDANCE_SCOPE_MAX_BYTES) {
+    throw new Error("ai.operatorGuidance exceeds 8 KiB cap");
+  }
+  if (containsOperatorGuidanceSecret(value)) {
+    throw new Error("ai.operatorGuidance must not contain secret-like values");
+  }
+}
+
 /**
  * Validate the JSON-encoded `recovery.slaPolicies` map: a JSON object whose
  * keys are recovery severities (`p1`..`p4`) and whose values are positive
@@ -289,6 +305,16 @@ export const ORG_CONFIG_DEFINITIONS = [
     defaultValue: "",
     allowEmpty: true,
     validate: validateAiSurfaceModels,
+  },
+  {
+    key: "ai.operatorGuidance",
+    category: "ai",
+    description:
+      "Bounded Janusly operator guidance for AI generation and recovery. Preferences only: cannot override security, workflow contracts, or system policy. Do not store secrets.",
+    valueType: "string",
+    defaultValue: "",
+    allowEmpty: true,
+    validate: validateAiOperatorGuidance,
   },
   {
     key: "ai.timeoutMs",

@@ -1,10 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { Suspense, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { useRecoveryQueueFilters } from './useRecoveryQueueFilters'
 import type { DeadLetter, DeadLetterRecovery } from '../components/DeadLettersPanel'
-import { requestRecoveryDayFocus } from '../components/recovery-day-focus-bus'
+import { consumeRecoveryFocusDay, requestRecoveryDayFocus } from '../components/recovery-day-focus-bus'
 
 // The hook fetches `/dlq/queue?…` itself (server filters + sorts before the page
 // cap and returns a { items, nextCursor, hasMore } keyset envelope). The stub
@@ -114,6 +115,29 @@ function Harness() {
   )
 }
 
+function RemountingHarness() {
+  const [generation, setGeneration] = useState(0)
+  return (
+    <div>
+      <button
+        data-testid="focus-and-remount"
+        onClick={() => {
+          requestRecoveryDayFocus('2026-07-12')
+          setGeneration((value) => value + 1)
+        }}
+      />
+      <Harness key={generation} />
+    </div>
+  )
+}
+
+const NEVER_SETTLES = new Promise<never>(() => {})
+
+function SuspendedHarness(): never {
+  useRecoveryQueueFilters()
+  throw NEVER_SETTLES
+}
+
 describe('useRecoveryQueueFilters', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -140,18 +164,36 @@ describe('useRecoveryQueueFilters', () => {
     expect(params?.get('severity')).toBeNull()
   })
 
-  it('preserves a live day-focus handoff across an immediate queue remount', async () => {
-    const first = render(<Harness />)
+  it('preserves a live day-focus handoff when navigation remounts the queue in the same batch', async () => {
+    render(<RemountingHarness />)
     await waitFor(() => expect(lastQueueParams()).not.toBeNull())
-    act(() => requestRecoveryDayFocus('2026-07-12'))
-    expect(screen.getByTestId('day')).toHaveTextContent('2026-07-12')
-
-    first.unmount()
-    render(<Harness />)
+    fireEvent.click(screen.getByTestId('focus-and-remount'))
     await waitFor(() => {
       expect(screen.getByTestId('day')).toHaveTextContent('2026-07-12')
       expect(lastQueueParams()?.get('day')).toBe('2026-07-12')
     })
+  })
+
+  it('adopts a focus handoff queued before the recovery queue mounts', async () => {
+    requestRecoveryDayFocus('2026-07-11')
+    render(<Harness />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('day')).toHaveTextContent('2026-07-11')
+      expect(lastQueueParams()?.get('day')).toBe('2026-07-11')
+    })
+  })
+
+  it('does not consume a queued handoff from a render React discards', () => {
+    requestRecoveryDayFocus('2026-07-10')
+    render(
+      <Suspense fallback={<span data-testid="suspended-queue" />}>
+        <SuspendedHarness />
+      </Suspense>,
+    )
+
+    expect(screen.getByTestId('suspended-queue')).toBeInTheDocument()
+    expect(consumeRecoveryFocusDay()).toBe('2026-07-10')
   })
 
   it('renders the server page verbatim (the server already filtered + ordered)', async () => {

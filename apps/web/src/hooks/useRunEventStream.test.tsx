@@ -72,6 +72,27 @@ describe('useRunEventStream', () => {
     })
   })
 
+  it('forwards the stable agent reasoning event and payload without special transport handling', async () => {
+    const createdAt = '2026-05-28T00:00:02.000Z'
+    const payload = {
+      agent: 'recovery-agent', iteration: 0, planner: 'rules', mode: 'rules', scope: 'agent', replacesEventId: 'evt-planned',
+      decision: 'use_tool', tool: 'db.query.read', reason: 'Inspect the invoice before recovery.',
+    }
+    openRunEventStreamMock.mockResolvedValue(streamResponse([
+      `id: ${createdAt}|evt-reasoning\nevent: run-event\ndata: ${JSON.stringify({ kind: 'event', id: 'evt-reasoning', nodeId: 'agent', type: 'agent.reasoning', payload, createdAt })}\n\n`,
+    ]))
+
+    render(<Harness runId="run-1" />)
+
+    await waitFor(() => {
+      expect(useWorkflowStore.getState().events).toContainEqual(expect.objectContaining({
+        id: 'evt-reasoning',
+        type: 'agent.reasoning',
+        payload,
+      }))
+    })
+  })
+
   it('materializes streamed waiting-node metadata while polling is paused', async () => {
     const createdAt = '2026-05-28T00:00:02.000Z'
     const payload = {

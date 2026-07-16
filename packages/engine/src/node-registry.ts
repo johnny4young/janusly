@@ -30,7 +30,15 @@
 
 import { loadRootEnv } from "@janusly/db";
 import { createLlmClient, resolveLlmConfig, type LlmClient } from "@janusly/ai";
-import { WorkflowInputSchema } from "@janusly/shared";
+import {
+  AGENT_REASONING_AGENT_MAX_CHARS,
+  AGENT_REASONING_REASON_MAX_CHARS,
+  AGENT_REASONING_SCOPE_MAX_CHARS,
+  AGENT_REASONING_TOOL_MAX_CHARS,
+  scrubOperatorGuidanceSecrets,
+  WorkflowInputSchema,
+  type AgentReasoningEventPayload,
+} from "@janusly/shared";
 import {
   applyOrgConfigToEnv,
   getOrgConfigSnapshot,
@@ -187,6 +195,20 @@ type AgentReflection = {
   reason: string;
 };
 
+/**
+ * Produce one bounded field written to `agent.reasoning`.
+ * This is an operational summary, never hidden chain-of-thought: inputs,
+ * workflow context, recalled episodes, tool output, and provider errors stay
+ * out of the event entirely.
+ */
+function sanitizeAgentReasoningText(value: string, maxChars: number): string {
+  return scrubOperatorGuidanceSecrets(value)
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxChars);
+}
+
 async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, eventPrefix = "agent") {
   const planner = agentConfig.planner ?? "rules";
   const maxSteps = agentConfig.maxSteps ?? 3;
@@ -247,7 +269,25 @@ async function runAgentLoop(ctx: NodeContext, agentConfig: AgentNodeConfig, even
       memoryInfluenceEmitted = true;
     }
 
-    await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
+    const plannedEventId = await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.step.planned`, { agent: agentConfig.name, iteration: i, plan });
+    const reasoningEvent: AgentReasoningEventPayload = {
+      agent: sanitizeAgentReasoningText(
+        agentConfig.name ?? "agent",
+        AGENT_REASONING_AGENT_MAX_CHARS,
+      ) || "agent",
+      iteration: i,
+      planner,
+      mode: planner === "rules" ? "rules" : (plan.mode ?? "fallback"),
+      scope: sanitizeAgentReasoningText(eventPrefix, AGENT_REASONING_SCOPE_MAX_CHARS) || "agent",
+      replacesEventId: plannedEventId,
+      decision: plan.done ? "finish" : "use_tool",
+      tool: plan.done
+        ? null
+        : sanitizeAgentReasoningText(plan.tool, AGENT_REASONING_TOOL_MAX_CHARS) || "unknown",
+      reason: sanitizeAgentReasoningText(plan.reason, AGENT_REASONING_REASON_MAX_CHARS)
+        || "Planner did not provide an operational rationale.",
+    };
+    await appendEvent(ctx.runId, ctx.nodeId, "agent.reasoning", reasoningEvent);
 
     if (plan.done) {
       await appendEvent(ctx.runId, ctx.nodeId, `${eventPrefix}.completed`, {

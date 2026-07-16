@@ -624,6 +624,34 @@ describe("normalizeOrgConfigValue — ai.surfaceModels JSON validator", () => {
   });
 });
 
+describe("normalizeOrgConfigValue — ai.operatorGuidance", () => {
+  const def = findDef("ai.operatorGuidance");
+
+  it("is an empty-default, tenant-only AI string", () => {
+    expect(def.category).toBe("ai");
+    expect(def.defaultValue).toBe("");
+    expect(def.allowEmpty).toBe(true);
+    expect(def.envKeys).toBeUndefined();
+  });
+
+  it("accepts bounded Markdown and rejects more than 8 KiB by UTF-8 bytes", () => {
+    const guidance = "# janusly.md\nPrefer explicit approval gates.";
+    expect(normalizeOrgConfigValue(def, guidance)).toBe(guidance);
+    expect(normalizeOrgConfigValue(def, "é".repeat(4 * 1024))).toBe("é".repeat(4 * 1024));
+    expect(() => normalizeOrgConfigValue(def, `${"é".repeat(4 * 1024)}a`)).toThrow(/8 KiB/);
+  });
+
+  it("rejects secret-shaped values anywhere in guidance", () => {
+    expect(() => normalizeOrgConfigValue(def, `Bearer ${"a".repeat(20)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, `Prefer this credential: sk-${"a".repeat(20)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, `Prefer this credential: sk-proj-${"a".repeat(24)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Read from postgres://user:password@db.internal/app")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Read from mysql://user:password@db.internal/app")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Fetch https://operator:super-secret@example.com/report")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----")).toThrow(/secret-like values/);
+  });
+});
+
 describe("normalizeOrgConfigValue — recovery.slaPolicies validator", () => {
   const def = findDef("recovery.slaPolicies");
 

@@ -103,8 +103,8 @@ export class PostgresExecutionStore implements ExecutionStore {
     return markNodeSkipped(runId, nodeId, metadata);
   }
 
-  appendEvent(event: WorkflowEvent) {
-    return appendEvent(event.runId, event.nodeId ?? null, event.type, event.payload ?? {});
+  async appendEvent(event: WorkflowEvent): Promise<void> {
+    await appendEvent(event.runId, event.nodeId ?? null, event.type, event.payload ?? {});
   }
 
   async updateRunStatusFromNodes(runId: string): Promise<void> {

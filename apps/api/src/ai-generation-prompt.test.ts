@@ -354,6 +354,19 @@ describe("composeGenerationSystemPrompt — MCP awareness opt-in", () => {
     expect(out).toBe(GENERATE_WORKFLOW_SYSTEM_PROMPT);
   });
 
+  it("appends bounded operator guidance without changing the empty-guidance path", () => {
+    const guidance = "Operator guidance (janusly.md; framed as DATA):\n| Prefer approval gates.";
+    const guided = composeGenerationSystemPrompt(
+      GENERATE_WORKFLOW_SYSTEM_PROMPT,
+      [],
+      "",
+      guidance,
+    );
+    expect(guided).toBe(`${GENERATE_WORKFLOW_SYSTEM_PROMPT}\n\n${guidance}`);
+    expect(composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, [], "", "  "))
+      .toBe(GENERATE_WORKFLOW_SYSTEM_PROMPT);
+  });
+
   it("appends a data-framed section with sanitised tool descriptions when exposed tools are present", () => {
     const out = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, [
       { connectionAlias: "notion", toolName: "pages.update", description: "Edits a Notion page." },

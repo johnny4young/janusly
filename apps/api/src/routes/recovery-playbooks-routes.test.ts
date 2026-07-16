@@ -212,7 +212,14 @@ describe("explicit use and outcome", () => {
     const result = await call("POST", "/recovery/playbooks/pb-a/use");
     expect(result).toMatchObject({
       status: 200,
-      payload: { suggestion: { mode: "playbook", playbook: { id: "pb-a" }, suggestedWorkflow: workflow } },
+      payload: {
+        suggestion: {
+          mode: "playbook",
+          playbook: { id: "pb-a" },
+          suggestedWorkflow: workflow,
+          suggestions: [{ consideredAlternatives: [] }],
+        },
+      },
     });
     expect(auditActionMock).toHaveBeenCalledWith(auth, "recovery.playbook.used", expect.any(Object));
   });

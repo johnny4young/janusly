@@ -14,14 +14,41 @@
 
 import { computeWorkflowDiff } from '@janusly/shared/src/workflow-diff'
 import type { EvidenceKind } from '@janusly/shared/src/ai-evidence'
+import { scrubOperatorGuidanceSecrets } from '@janusly/shared/src/operator-guidance'
 import { t as runtimeT } from '../../i18n/runtime'
 import type { WorkflowDefinition } from '../../types'
 import type {
   PatchApproachLabel,
+  ConsideredAlternative,
   PatchSuggestion,
   RunStatusPayload,
   SuggestionTab,
 } from './types'
+
+function oneLineAlternative(value: unknown, maxChars: number): string {
+  if (typeof value !== 'string') return ''
+  return scrubOperatorGuidanceSecrets(value)
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars)
+}
+
+/** Fail-closed projection for model-authored alternative summaries. */
+export function normalizeConsideredAlternatives(value: unknown): ConsideredAlternative[] {
+  if (!Array.isArray(value)) return []
+  const rows: ConsideredAlternative[] = []
+  for (const item of value) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    const approach = oneLineAlternative(record.approach, 120)
+    const rejectedBecause = oneLineAlternative(record.rejectedBecause, 280)
+    if (!approach || !rejectedBecause) continue
+    rows.push({ approach, rejectedBecause })
+    if (rows.length === 2) break
+  }
+  return rows
+}
 
 /**
  * Minimum gap (in confidence points) between the calibrated and raw

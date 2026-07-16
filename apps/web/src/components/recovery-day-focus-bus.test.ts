@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  acknowledgeRecoveryFocusDay,
   consumeRecoveryFocusDay,
   RECOVERY_DAY_FOCUS_EVENT,
   requestRecoveryDayFocus,
@@ -25,6 +26,16 @@ describe('recovery day focus bus', () => {
     requestRecoveryDayFocus('2026-07-06')
     expect(handler).toHaveBeenCalledOnce()
     window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, handler)
+  })
+
+  it('acknowledges only the handoff adopted by the mounted queue', () => {
+    requestRecoveryDayFocus('2026-07-06')
+    acknowledgeRecoveryFocusDay('2026-07-05')
+    expect(consumeRecoveryFocusDay()).toBe('2026-07-06')
+
+    requestRecoveryDayFocus('2026-07-07')
+    acknowledgeRecoveryFocusDay('2026-07-07')
+    expect(consumeRecoveryFocusDay()).toBeNull()
   })
 
   it('ignores malformed day strings', () => {

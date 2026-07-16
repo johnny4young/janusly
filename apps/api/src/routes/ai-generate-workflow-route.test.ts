@@ -53,6 +53,9 @@ vi.mock("../ai-generation-memory", () => ({
   composeGenerationExemplars: vi.fn(async () => ({ block: "", ids: [], count: 0 })),
   recordGenerationExemplar: vi.fn(async () => {}),
 }));
+vi.mock("../ai-operator-guidance", () => ({
+  loadOperatorGuidance: vi.fn(async () => ""),
+}));
 
 vi.mock("../audit-helper", () => ({ auditAction: vi.fn() }));
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
@@ -72,6 +75,7 @@ vi.mock("../http", async (importOriginal) => {
 });
 
 import { composeGenerationExemplars, recordGenerationExemplar } from "../ai-generation-memory";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { orgLlmRuntime } from "../ai-runtime";
 import { auditAction } from "../audit-helper";
 import { gateBudget } from "../budget-gate";
@@ -86,6 +90,7 @@ const promoteMock = vi.mocked(promoteNoopPlaceholders);
 const exposedMcpMock = vi.mocked(listExposedMcpToolsForAi);
 const exemplarsMock = vi.mocked(composeGenerationExemplars);
 const recordExemplarMock = vi.mocked(recordGenerationExemplar);
+const operatorGuidanceMock = vi.mocked(loadOperatorGuidance);
 const auditMock = vi.mocked(auditAction);
 const gateBudgetMock = vi.mocked(gateBudget);
 const readJsonMock = vi.mocked(readJson);
@@ -127,7 +132,7 @@ function setRuntime(
   surfaceModels: Record<string, string> = {},
 ) {
   orgLlmMock.mockResolvedValue({
-    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels } } as never,
+    orgConfig: { ai: { generationMode, generationCandidates, promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels, operatorGuidance: "Prefer approval gates." } } as never,
     llm: llm as never,
     llmConfig: {} as never,
   });
@@ -325,6 +330,20 @@ describe("POST /ai/generate-workflow — system-prompt caching + per-surface mod
     await callGenerate();
 
     expect(firstCall(llm.generateObject).cacheSystemPrompt).toBe(true);
+  });
+
+  it("threads organization guidance into every generation mode's system prompt", async () => {
+    operatorGuidanceMock.mockResolvedValueOnce("Organization guidance:\n| Prefer approval gates.");
+    const llm = makeLlm({ text: [VALID_JSON] });
+    setRuntime("free_json", llm);
+
+    await callGenerate();
+
+    expect(operatorGuidanceMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      orgGuidance: "Prefer approval gates.",
+    });
+    expect(firstCall(llm.generateText).system).toContain("Organization guidance:\n| Prefer approval gates.");
   });
 
   it("threads the per-surface model as the modelHint when no request override", async () => {

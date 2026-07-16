@@ -4,6 +4,15 @@
  * the operator timeline into their shared dependency chunk.
  */
 
+import {
+  AGENT_REASONING_AGENT_MAX_CHARS,
+  AGENT_REASONING_REASON_MAX_CHARS,
+  AGENT_REASONING_SCOPE_MAX_CHARS,
+  AGENT_REASONING_TOOL_MAX_CHARS,
+  type AgentReasoningEventPayload,
+} from '@janusly/shared/src/run-events'
+import { scrubOperatorGuidanceSecrets } from '@janusly/shared/src/operator-guidance'
+
 import type { RunEvent } from './types'
 
 export type RunEventTone = 'neutral' | 'info' | 'success' | 'warning' | 'error'
@@ -41,9 +50,88 @@ export type CausalReplay = {
 
 const NOISE_EVENT_TYPES = new Set(['node.queued', 'run.status_checked'])
 
+function singleLine(value: string, maxChars: number): string {
+  return scrubOperatorGuidanceSecrets(value)
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars)
+}
+
+/** Fail-closed browser parser for the stable cross-process event contract. */
+export function parseAgentReasoning(event: RunEvent): AgentReasoningEventPayload | null {
+  if (event.type !== 'agent.reasoning') return null
+  const payload = record(event.payload)
+  if (!payload) return null
+  const { agent, iteration, planner, mode, scope, replacesEventId, decision, tool, reason } = payload
+  if (
+    typeof agent !== 'string'
+    || !Number.isSafeInteger(iteration)
+    || (iteration as number) < 0
+    || (planner !== 'rules' && planner !== 'openai')
+    || (mode !== 'rules' && mode !== 'ai' && mode !== 'fallback')
+    || typeof scope !== 'string'
+    || typeof replacesEventId !== 'string'
+    || (decision !== 'finish' && decision !== 'use_tool')
+    || (tool !== null && typeof tool !== 'string')
+    || typeof reason !== 'string'
+  ) return null
+  const safeAgent = singleLine(agent, AGENT_REASONING_AGENT_MAX_CHARS)
+  const safeScope = singleLine(scope, AGENT_REASONING_SCOPE_MAX_CHARS)
+  const safeReplacesEventId = singleLine(replacesEventId, 160)
+  const safeTool = tool === null ? null : singleLine(tool, AGENT_REASONING_TOOL_MAX_CHARS)
+  const safeReason = singleLine(reason, AGENT_REASONING_REASON_MAX_CHARS)
+  if (!safeAgent || !safeScope || !safeReplacesEventId || !safeReason) return null
+  if ((decision === 'finish' && safeTool !== null) || (decision === 'use_tool' && !safeTool)) return null
+  return {
+    agent: safeAgent,
+    iteration: iteration as number,
+    planner,
+    mode,
+    scope: safeScope,
+    replacesEventId: safeReplacesEventId,
+    decision,
+    tool: safeTool,
+    reason: safeReason,
+  }
+}
+
+function agentReasoningKey(event: RunEvent, payload: Pick<AgentReasoningEventPayload, 'agent' | 'iteration' | 'scope'>): string {
+  return `${event.nodeId ?? ''}\u0000${payload.agent}\u0000${payload.iteration}\u0000${payload.scope}`
+}
+
+function legacyAgentPlanKey(event: RunEvent): string | null {
+  const suffix = '.step.planned'
+  if (!event.type.endsWith(suffix)) return null
+  const payload = record(event.payload)
+  if (!payload || !Number.isSafeInteger(payload.iteration) || (payload.iteration as number) < 0) return null
+  const agent = typeof payload.agent === 'string'
+    ? singleLine(payload.agent, AGENT_REASONING_AGENT_MAX_CHARS) || 'agent'
+    : 'agent'
+  const scope = singleLine(event.type.slice(0, -suffix.length), AGENT_REASONING_SCOPE_MAX_CHARS)
+  if (!scope) return null
+  return agentReasoningKey(event, { agent, iteration: payload.iteration as number, scope })
+}
+
+/** Hide only the exact legacy row named by a valid matching canonical event. */
+export function dedupeAgentReasoningEvents(chronological: RunEvent[]): RunEvent[] {
+  const replacements = new Map<string, { event: RunEvent; payload: AgentReasoningEventPayload }>()
+  for (const event of chronological) {
+    const canonical = parseAgentReasoning(event)
+    if (canonical) replacements.set(canonical.replacesEventId, { event, payload: canonical })
+  }
+  return chronological.filter((event) => {
+    const replacement = replacements.get(event.id)
+    if (!replacement) return true
+    const legacyKey = legacyAgentPlanKey(event)
+    return legacyKey !== agentReasoningKey(replacement.event, replacement.payload)
+  })
+}
+
 /** Classify a low-level event without hiding any of it from the operator. */
 export function getRunEventPresentation(event: RunEvent): RunEventPresentation {
   const type = event.type.toLowerCase()
+  if (type === 'agent.reasoning') return { tone: 'info', noise: false }
   if (type.includes('failed') || type.includes('error') || type.includes('dead_letter')) {
     return { tone: 'error', noise: false }
   }

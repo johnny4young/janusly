@@ -57,6 +57,68 @@ describe('<ReasoningPanel />', () => {
     expect(screen.queryByText('Show raw event')).not.toBeInTheDocument()
   })
 
+  it('renders only the closed scrubbed projection for the stable agent reasoning event', () => {
+    const secret = `sk-proj-${'a'.repeat(24)}`
+    render(<ReasoningPanel events={[
+      {
+        id: 'reason-legacy',
+        type: 'agent.step.planned',
+        nodeId: 'triage',
+        createdAt: '2026-07-15T10:00:00.000Z',
+        payload: { agent: 'invoice-agent', iteration: 0, plan: { tool: 'db.query.read' } },
+      },
+      {
+        id: 'reason-1',
+        type: 'agent.reasoning',
+        nodeId: 'triage',
+        createdAt: '2026-07-15T10:00:00.001Z',
+        payload: {
+          agent: 'invoice-agent',
+          iteration: 0,
+          planner: 'openai',
+          mode: 'ai',
+          scope: 'agent',
+          replacesEventId: 'reason-legacy',
+          decision: 'use_tool',
+          tool: 'db.query.read',
+          reason: `Inspect\nBearer ${'a'.repeat(24)} and ${secret} before choosing a recovery path.`,
+          untrustedExtra: secret,
+        },
+      },
+    ]} />)
+
+    const summary = screen.getByTestId('agent-reasoning-summary')
+    expect(summary).toHaveAccessibleName('Agent operational rationale')
+    expect(summary).toHaveTextContent('Why this step?')
+    expect(summary).toHaveTextContent('Inspect [redacted] and [redacted] before choosing a recovery path.')
+    expect(summary).toHaveTextContent('Agent invoice-agent')
+    expect(summary).toHaveTextContent('Tool db.query.read')
+    expect(summary).toHaveTextContent('Step 1')
+    expect(screen.getByTestId('run-event-reason-1')).toHaveAttribute('data-tone', 'info')
+    expect(screen.queryByTestId('run-event-reason-legacy')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Show raw event'))
+    const eventCard = screen.getByTestId('run-event-reason-1')
+    expect(eventCard).not.toHaveTextContent(secret)
+    expect(eventCard).not.toHaveTextContent('untrustedExtra')
+    expect(eventCard).toHaveTextContent('[redacted]')
+  })
+
+  it('fails closed without raw fields when an agent reasoning payload is malformed', () => {
+    const secret = `sk-proj-${'b'.repeat(24)}`
+    render(<ReasoningPanel events={[{
+      id: 'reason-bad',
+      type: 'agent.reasoning',
+      nodeId: 'triage',
+      payload: { decision: 'use_tool', reason: secret },
+    }]} />)
+
+    expect(screen.queryByTestId('agent-reasoning-summary')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-reasoning-invalid')).toHaveTextContent('This reasoning event could not be displayed safely.')
+    expect(screen.getByTestId('run-event-reason-bad')).not.toHaveTextContent(secret)
+    expect(screen.queryByText('decision')).not.toBeInTheDocument()
+    expect(screen.queryByText('Show raw event')).not.toBeInTheDocument()
+  })
+
   it('shows exact timestamps and inter-event deltas while de-emphasizing noise', () => {
     const events: RunEvent[] = [
       { id: 'e3', type: 'node.failed', nodeId: 'fetch', createdAt: '2026-07-12T10:00:03.500Z' },

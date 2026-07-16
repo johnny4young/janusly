@@ -22,6 +22,7 @@ import { composeGenerationExemplars, recordGenerationExemplar, type GenerationEx
 import { generateWorkflowFreeJson } from "../ai-generate-freejson";
 import { MAX_REPAIR_ATTEMPTS, repairGeneratedWorkflow } from "../ai-repair-workflow";
 import { composeGenerationSystemPrompt, GENERATE_WORKFLOW_SYSTEM_PROMPT } from "../ai-prompts";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { fallbackWorkflowForPrompt, orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiGenerationWorkflowSchema } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
@@ -96,7 +97,16 @@ export const aiGenerateRoutes: Route[] = [
         // when memory is off) and frame them as DATA in the system prompt so
         // they steer every generation mode + Best-of-N candidate.
         exemplars = await composeGenerationExemplars(auth.orgId, promptText);
-        const systemPrompt = composeGenerationSystemPrompt(GENERATE_WORKFLOW_SYSTEM_PROMPT, exposedMcpTools, exemplars.block);
+        const operatorGuidance = await loadOperatorGuidance({
+          orgId: auth.orgId,
+          orgGuidance: orgConfig.ai.operatorGuidance,
+        });
+        const systemPrompt = composeGenerationSystemPrompt(
+          GENERATE_WORKFLOW_SYSTEM_PROMPT,
+          exposedMcpTools,
+          exemplars.block,
+          operatorGuidance,
+        );
         const generationMode = orgConfig.ai.generationMode;
         let pass1Workflow: Workflow;
         let genModel: string;

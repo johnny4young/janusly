@@ -260,6 +260,8 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.system).toContain("filters `null` before shallow-merging");
     expect(callArg.system).toContain("approachLabel");
     expect(callArg.system).toContain("confidence");
+    expect(callArg.system).toContain("consideredAlternatives");
+    expect(callArg.system).toContain("Do not repeat another emitted suggestion");
     // Headers + tool input array-of-pairs patch shape: the prompt names
     // both surfaces, the {{secret.NAME}} template guidance, and the
     // `swap_secret_ref` clarification.
@@ -344,6 +346,37 @@ describe("suggestWorkflowPatch — prompt content", () => {
     expect(callArg.prompt).toContain("timeout still fires under load");
     // System prompt teaches the model how to use the field.
     expect(callArg.system).toContain("extraContext.pastFeedbackSummary");
+  });
+
+  it("adds operator-guidance instructions only when the bounded block is present", async () => {
+    const result = {
+      object: { suggestions: [{ patchedConfig: {}, rationale: "noop", approachLabel: "other", confidence: 0 }] },
+      model: "x",
+      provider: "y",
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      latencyMs: 10,
+    };
+    const withoutGuidance = vi.fn(async () => result);
+    await suggestWorkflowPatch({
+      llm: { generateText: vi.fn(), generateObject: withoutGuidance } as unknown as LlmClient,
+      envelopeSchema,
+      ...baseInput,
+      extraContext: { pastFeedbackSummary: "Prefer retries." },
+    });
+    const baselineSystem = ((withoutGuidance.mock.calls[0] as unknown[])[0] as { system: string }).system;
+    expect(baselineSystem).not.toContain("OPERATOR GUIDANCE");
+
+    const withGuidance = vi.fn(async () => result);
+    await suggestWorkflowPatch({
+      llm: { generateText: vi.fn(), generateObject: withGuidance } as unknown as LlmClient,
+      envelopeSchema,
+      ...baseInput,
+      extraContext: { operatorGuidance: "Organization guidance:\n| Prefer bounded retries." },
+    });
+    const guidedSystem = ((withGuidance.mock.calls[0] as unknown[])[0] as { system: string }).system;
+    expect(guidedSystem).toContain("OPERATOR GUIDANCE");
+    expect(guidedSystem).toContain("DATA-framed");
+    expect(guidedSystem.startsWith(baselineSystem)).toBe(true);
   });
 
   it("scrubs secret-shaped string values before sending the prompt", async () => {

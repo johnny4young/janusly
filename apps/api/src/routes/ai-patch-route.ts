@@ -36,7 +36,9 @@ import { normalizeErrorSignature } from "@janusly/shared/src/error-signature";
 import { RATE_LIMIT_WINDOW_MS } from "../constants";
 import { assembleRecoveryEvidence } from "../ai-evidence";
 import { composeFeedbackHint } from "../ai-patch-feedback";
+import { sanitizeConsideredAlternatives, type ConsideredAlternative } from "../ai-patch-alternatives";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { orgLlmRuntime, resolveSurfaceModel, sanitizeAiWorkflow } from "../ai-runtime";
 import { AiPatchStructuralEnvelope, patchEnvelopeForNodeType, type AiPatchStructuralSuggestion } from "../ai-schemas";
 import { auditAction } from "../audit-helper";
@@ -261,10 +263,17 @@ export const aiPatchRoutes: Route[] = [
           })
         : { snippets: "", hitCount: 0, recallOk: true, entries: [] };
 
+      const operatorGuidance = await loadOperatorGuidance({
+        orgId: auth.orgId,
+        orgGuidance: orgConfig.ai.operatorGuidance,
+        workflowId: failingWorkflowId,
+      });
+
       const extraContext: Record<string, unknown> = {
         ...(toolInputContract ? { toolInputContract } : {}),
         ...(pastFeedbackSummary ? { pastFeedbackSummary } : {}),
         ...(memoryHint.snippets ? { memorySnippets: memoryHint.snippets } : {}),
+        ...(operatorGuidance ? { operatorGuidance } : {}),
       };
 
       // Cast: the structural envelope's `suggestions` items have a
@@ -339,6 +348,8 @@ export const aiPatchRoutes: Route[] = [
         calibratedConfidence: number;
         /** Deterministic write-side + approval posture for this candidate. */
         safety: RecoverySuggestionSafety;
+        /** Bounded operator-facing alternatives, separate from deterministic evidence. */
+        consideredAlternatives: ConsideredAlternative[];
       };
       // Resolve raw + calibrated confidence for one approach. Calibration
       // is monotonic in `raw` (the fit only ever returns positive-slope
@@ -405,6 +416,7 @@ export const aiPatchRoutes: Route[] = [
                 confidence: rawItem.confidence,
                 calibratedConfidence: calibrate(rawItem.approachLabel, rawItem.confidence),
                 safety: recoverySuggestionSafety(sanitized, dlq.nodeId),
+                consideredAlternatives: sanitizeConsideredAlternatives(rawItem.consideredAlternatives),
               });
             } catch {
               // Drop this suggestion; keep going. If none survive, the
@@ -445,6 +457,7 @@ export const aiPatchRoutes: Route[] = [
               confidence: 0,
               calibratedConfidence: 0,
               safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
+              consideredAlternatives: [],
             }],
             evidence: [],
             recoveryPassport: { failureSignature, priorSameSignatureOutcome },
@@ -466,6 +479,7 @@ export const aiPatchRoutes: Route[] = [
             confidence: fallbackItem.confidence,
             calibratedConfidence: calibrate(fallbackItem.approachLabel, fallbackItem.confidence),
             safety: recoverySuggestionSafety(dlq.workflowJson, dlq.nodeId),
+            consideredAlternatives: sanitizeConsideredAlternatives(fallbackItem.consideredAlternatives),
           }],
           evidence: [],
           recoveryPassport: { failureSignature, priorSameSignatureOutcome },

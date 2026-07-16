@@ -42,6 +42,8 @@
 
 import { z } from "zod";
 
+export { utf8ByteLength } from "./utf8";
+
 /**
  * Closed set of event-driven trigger node-type discriminators. A strict
  * subset of `nodeTypeValues` — every entry here must ALSO appear in
@@ -249,14 +251,6 @@ export const triggerEventStatusValues = ["received", "started", "skipped", "fail
 export const TriggerEventStatusSchema = z.enum(triggerEventStatusValues);
 /** One structured trigger-event status. */
 export type TriggerEventStatus = (typeof triggerEventStatusValues)[number];
-
-/**
- * Compute the byte length of a string under UTF-8. Shared so the schema cap,
- * the ingestion guard, and tests all measure bytes the same way.
- */
-export function utf8ByteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
 
 /**
  * Resolve the effective per-trigger rate limit from a node config's optional

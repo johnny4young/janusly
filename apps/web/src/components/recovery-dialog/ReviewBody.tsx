@@ -16,6 +16,7 @@ import type { WorkflowDefinition } from '../../types'
 import { WorkflowDiffView } from '../WorkflowDiffView'
 import type { DeadLetter } from '../DeadLettersPanel'
 import { EvidencePanel } from './EvidencePanel'
+import { AlternativeHypothesesPanel } from './AlternativeHypothesesPanel'
 import { LearningHealthBadge } from './LearningHealthBadge'
 import { RecoveryPassportCard } from './RecoveryPassportCard'
 import type { RecoverySandboxStatus } from './recovery-passport'
@@ -156,6 +157,7 @@ export function ReviewBody({
             : (t('recoveryDialog.review.suggestedLabel'))}
           aiPatchRationale={selected.rationale}
         />
+        <AlternativeHypothesesPanel alternatives={selected.consideredAlternatives ?? []} />
         <EvidencePanel evidence={suggestion.evidence ?? []} />
       </div>
     </>

@@ -56,7 +56,7 @@
     "recovery-all-clear-coordinator.js": 1.63,
     "recovery-item.js": 0.61,
     "recovery-queue-focus-bus.js": 0.71,
-    "ReasoningPanel.js": 5.07,
+    "ReasoningPanel.js": 6.03,
     "RecoveryDialog.js": 13.42,
     "PlaybookPromotionCard.js": 1.6,
     "PlaybookMatchCard.js": 1.08,
@@ -86,8 +86,9 @@
     "WorkflowDiffView.js": 2.08,
     "WorkflowHealthBadge.js": 1.51,
     "WorkflowIoEditor.js": 1.97,
-    "WorkflowMetadataPanel.js": 1.91,
+    "WorkflowMetadataPanel.js": 2.74,
     "WorkflowsDashboard.js": 8.97,
-    "WorkflowSloPanel.js": 1.43
+    "WorkflowSloPanel.js": 1.43,
+    "operator-guidance.js": 2.14
   }
 }

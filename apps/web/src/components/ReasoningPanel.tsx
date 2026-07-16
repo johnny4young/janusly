@@ -16,11 +16,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Activity, AlertCircle, GitCompareArrows, LoaderCircle, Search, X } from 'lucide-react'
 
+import type { AgentReasoningEventPayload } from '@janusly/shared/src/run-events'
+
 import { formatCompactDuration } from '../constants'
 import { getResolvedLocale, tApiError, tRunEvent, useT } from '../i18n'
 import {
   getInterEventDeltaMs,
   getRunEventPresentation,
+  dedupeAgentReasoningEvents,
+  parseAgentReasoning,
   parseCausalReplay,
   sortRunEventsChronologically,
   summarizeRunDiagnostics,
@@ -173,7 +177,10 @@ export function ReasoningPanel({
   const usageRequestRef = useRef<{ generation: number; controller: AbortController } | null>(null)
   const causalTriggerRef = useRef<HTMLButtonElement | null>(null)
 
-  const chronological = useMemo(() => sortRunEventsChronologically(events), [events])
+  const chronological = useMemo(
+    () => dedupeAgentReasoningEvents(sortRunEventsChronologically(events)),
+    [events],
+  )
   const diagnostics = useMemo(() => summarizeRunDiagnostics(events), [events])
   const timelineItems = useMemo<TimelineItem[]>(() => chronological.map((event, index) => ({
     key: eventKey(event),
@@ -449,7 +456,7 @@ export function ReasoningPanel({
                     </span>
                   </div>
                   <div className="we-run-event__body">
-                    <ReasoningPayload payload={item.event.payload} />
+                    <ReasoningPayload event={item.event} />
                   </div>
                 </article>
               ))}
@@ -652,9 +659,49 @@ function CausalAnalysisCard({ state, onClose }: { state: Exclude<CausalState, { 
   )
 }
 
-/** Render an event payload as labelled key/value rows with raw JSON on demand. */
-function ReasoningPayload({ payload }: { payload?: RunEvent['payload'] }) {
+function AgentReasoningSummary({ payload }: { payload: AgentReasoningEventPayload }) {
   const { t } = useT()
+  return (
+    <section className="we-agent-reasoning" aria-label={t('rightPanel.reasoning.agent.aria')} data-testid="agent-reasoning-summary">
+      <div className="we-agent-reasoning__heading">
+        <strong>{t('rightPanel.reasoning.agent.why')}</strong>
+        <span className="we-pill" data-tone="neutral">{t(`rightPanel.reasoning.agent.mode.${payload.mode}`)}</span>
+      </div>
+      <p>{payload.reason}</p>
+      <div className="we-agent-reasoning__meta">
+        <span>{t('rightPanel.reasoning.agent.agent', { agent: payload.agent })}</span>
+        <span>{payload.decision === 'finish'
+          ? t('rightPanel.reasoning.agent.finished')
+          : t('rightPanel.reasoning.agent.tool', { tool: payload.tool })}</span>
+        <span>{t('rightPanel.reasoning.agent.iteration', { iteration: payload.iteration + 1 })}</span>
+      </div>
+    </section>
+  )
+}
+
+/** Render specialized stable events, falling back to labelled key/value rows. */
+function ReasoningPayload({ event }: { event: RunEvent }) {
+  const { t } = useT()
+  const agentReasoning = parseAgentReasoning(event)
+  if (agentReasoning) {
+    return (
+      <>
+        <AgentReasoningSummary payload={agentReasoning} />
+        <details className="we-reasoning-raw">
+          <summary>{t('rightPanel.reasoning.rawJson')}</summary>
+          <pre className="mini-pre">{JSON.stringify(agentReasoning, null, 2)}</pre>
+        </details>
+      </>
+    )
+  }
+  if (event.type === 'agent.reasoning') {
+    return (
+      <p className="helper-text" data-testid="agent-reasoning-invalid">
+        {t('rightPanel.reasoning.agent.invalid')}
+      </p>
+    )
+  }
+  const payload = event.payload
   const entries = payload && typeof payload === 'object' && !Array.isArray(payload)
     ? Object.entries(payload as Record<string, unknown>)
     : []

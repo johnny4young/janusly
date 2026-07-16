@@ -16,6 +16,7 @@ import {
   cancelPendingMemoryPurge,
   schedulePendingMemoryPurge,
 } from "@janusly/engine/src/memory-purge-scheduler";
+import { summarizeOperatorGuidance } from "@janusly/shared";
 
 import { auditAction } from "../audit-helper";
 import { publishCacheInvalidation } from "../cache-invalidation-bus";
@@ -59,7 +60,10 @@ export const orgRoutes: Route[] = [
       try {
         const entry = await upsertOrgConfig({ orgId: auth.orgId, key, value: body.value, userId: auth.userId });
         publishCacheInvalidation({ kind: "org-config", orgId: auth.orgId });
-        await auditAction(auth, "org.config.updated", { targetType: "org_config", targetId: key, metadata: { key, value: entry.value } });
+        const configAuditMetadata = key === "ai.operatorGuidance"
+          ? { key, ...summarizeOperatorGuidance(entry.value) }
+          : { key, value: entry.value };
+        await auditAction(auth, "org.config.updated", { targetType: "org_config", targetId: key, metadata: configAuditMetadata });
         if (AI_BUDGET_CONFIG_KEYS.has(key)) {
           try {
             await auditAction(auth, "billing.budget.configured", { targetType: "org_config", targetId: key, metadata: {

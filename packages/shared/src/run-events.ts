@@ -41,6 +41,7 @@ export const WORKFLOW_EVENT_TYPES = [
   "parent.notify.failed",
   "decision.made",
   "agent.memory.recalled",
+  "agent.reasoning",
   "improvement.evaluated",
   "rollback.triggered",
   "rollback.completed",
@@ -49,3 +50,28 @@ export const WORKFLOW_EVENT_TYPES = [
 
 /** Union of the lifecycle event-type strings. */
 export type WorkflowEventType = (typeof WORKFLOW_EVENT_TYPES)[number];
+
+/** Per-field caps for the stable operator-facing agent rationale contract. */
+export const AGENT_REASONING_AGENT_MAX_CHARS = 120;
+export const AGENT_REASONING_SCOPE_MAX_CHARS = 160;
+export const AGENT_REASONING_TOOL_MAX_CHARS = 160;
+export const AGENT_REASONING_REASON_MAX_CHARS = 500;
+
+/**
+ * Stable operator-facing projection of an agent planning decision. It is an
+ * operational rationale, not hidden chain-of-thought: no prompt context,
+ * tool input/output, memory content, final answer, or provider error belongs
+ * in this payload.
+ */
+export type AgentReasoningEventPayload = {
+  agent: string;
+  iteration: number;
+  planner: "rules" | "openai";
+  mode: "rules" | "ai" | "fallback";
+  scope: string;
+  /** Exact legacy `*.step.planned` event replaced by this safe projection. */
+  replacesEventId: string;
+  decision: "finish" | "use_tool";
+  tool: string | null;
+  reason: string;
+};

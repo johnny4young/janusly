@@ -158,3 +158,19 @@ describe("POST /org/config memory consent", () => {
     expect(schedulePendingMemoryPurgeMock).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /org/config AI operator guidance", () => {
+  it("audits only presence and byte size, never the Markdown", async () => {
+    const guidance = "Prefer bounded retries. 🧭";
+
+    await callConfig({ key: "ai.operatorGuidance", value: guidance });
+
+    const configAudit = auditMock.mock.calls.find((call) => call[2] === "org.config.updated");
+    expect(configAudit?.[5]).toEqual(expect.objectContaining({
+      key: "ai.operatorGuidance",
+      configured: true,
+      bytes: new TextEncoder().encode(guidance).byteLength,
+    }));
+    expect(JSON.stringify(configAudit)).not.toContain(guidance);
+  });
+});

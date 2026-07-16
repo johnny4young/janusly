@@ -1706,8 +1706,8 @@ async function computeRunOutputs(runId: string): Promise<Record<string, unknown>
   return projectOutputs(workflowParsed.data.outputs, context, inputs);
 }
 
-/** Insert one row into `run_events`. The web's run timeline reads these. */
-export async function appendEvent(runId: string, nodeId: string | null, type: string, payload: any) {
+/** Insert one row into `run_events` and return its id for additive event correlation. */
+export async function appendEvent(runId: string, nodeId: string | null, type: string, payload: any): Promise<string> {
   const id = crypto.randomUUID();
   const createdAt = new Date();
   // Redact ONCE, then both persist and publish the same object — a streamed
@@ -1729,6 +1729,7 @@ export async function appendEvent(runId: string, nodeId: string | null, type: st
     payload: redacted,
     createdAt: createdAt.toISOString(),
   });
+  return id;
 }
 
 /**

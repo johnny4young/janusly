@@ -82,6 +82,9 @@ beforeEach(() => {
   fetchHttpTargetMock.mockReset()
   consumeStreamToPreviewMock.mockReset()
   appendEventMock.mockReset()
+  appendEventMock.mockImplementation(async (_runId, _nodeId, type) => (
+    type.endsWith('.step.planned') ? 'planned-event-id' : `event-${type}`
+  ))
   // mockClear (not mockReset) so the default resolved values from the mock
   // factory survive across cases.
   recallAgentEpisodesMock.mockClear()
@@ -508,6 +511,17 @@ describe('agent node — dryRun gating', () => {
       'tool.dry_run.skipped',
       expect.objectContaining({ tool: 'email.send' }),
     )
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.reasoning', {
+      agent: 'agent',
+      iteration: 0,
+      planner: 'rules',
+      mode: 'rules',
+      scope: 'agent',
+      replacesEventId: 'planned-event-id',
+      decision: 'use_tool',
+      tool: 'email.send',
+      reason: 'Explicit tool selected by node config',
+    })
     // Write-back is gated off in dryRun so sandbox runs don't pollute memory.
     expect(recordAgentEpisodeMock).not.toHaveBeenCalled()
   })
@@ -596,6 +610,56 @@ describe('agent node — dryRun gating', () => {
     expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
     expect(planAgentToolWithLLMMock.mock.calls[0]?.[5]).toContain('prior outcome')
     expect(planAgentToolWithLLMMock.mock.calls[0]?.[6]).toEqual({ dryRun: false })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.reasoning', {
+      agent: 'agent',
+      iteration: 0,
+      planner: 'openai',
+      mode: 'ai',
+      scope: 'agent',
+      replacesEventId: 'planned-event-id',
+      decision: 'finish',
+      tool: null,
+      reason: 'The prior episode already proves the outcome.',
+    })
+  })
+
+  it('bounds and scrubs the operational rationale without persisting hidden inputs or output', async () => {
+    const unsafeAgent = `recovery\npostgres://operator:password@db.internal/acme ${'a'.repeat(180)}`
+    const privateKey = '-----BEGIN PRIVATE KEY-----\nvery-secret-material\n-----END PRIVATE KEY-----'
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Sensitive final answer',
+      tool: 'done',
+      input: { hidden: 'context' },
+      reason: `Use\nBearer ${'a'.repeat(24)}\u202e ${privateKey} then finish ${'x'.repeat(600)}`,
+      mode: 'ai',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: true,
+      config: { name: unsafeAgent, planner: 'openai', maxSteps: 1, goal: 'validate the workflow' },
+    })
+
+    const reasoningCall = appendEventMock.mock.calls.find(call => call[2] === 'agent.reasoning')
+    expect(reasoningCall?.[3]).toEqual(expect.objectContaining({
+      decision: 'finish',
+      tool: null,
+      mode: 'ai',
+    }))
+    const payload = reasoningCall?.[3] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('input')
+    expect(payload).not.toHaveProperty('finalAnswer')
+    expect(payload).not.toHaveProperty('aiError')
+    expect(String(payload.agent)).not.toContain('postgres://')
+    expect(String(payload.agent)).not.toContain('\n')
+    expect(String(payload.agent).length).toBeLessThanOrEqual(120)
+    expect(String(payload.reason)).toContain('[redacted]')
+    expect(String(payload.reason)).not.toContain('Bearer')
+    expect(String(payload.reason)).not.toContain('PRIVATE KEY')
+    expect(String(payload.reason)).not.toContain('\u202e')
+    expect(String(payload.reason).length).toBeLessThanOrEqual(500)
   })
 
   it('does not claim memory influence when the LLM planner falls back', async () => {
@@ -682,6 +746,17 @@ describe('multi-agent deferred template scopes', () => {
       'crew',
       'multi_agent.agent.started',
       expect.objectContaining({ index: 1, goal: 'Review SEED' }),
+    )
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'agent.reasoning',
+      expect.objectContaining({
+        agent: 'analyzer',
+        planner: 'rules',
+        mode: 'rules',
+        scope: 'multi_agent.agent.0',
+      }),
     )
     expect(appendEventMock).not.toHaveBeenCalledWith(
       'run-1',

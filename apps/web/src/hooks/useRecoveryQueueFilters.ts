@@ -13,7 +13,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api'
 import { useWorkflowStore } from '../store'
-import { consumeRecoveryFocusDay, RECOVERY_DAY_FOCUS_EVENT } from '../components/recovery-day-focus-bus'
+import {
+  acknowledgeRecoveryFocusDay,
+  consumeRecoveryFocusDay,
+  RECOVERY_DAY_FOCUS_EVENT,
+} from '../components/recovery-day-focus-bus'
 import type { RecoveryItemBadgeData } from '../components/RecoveryItemBadge'
 import type { RecoveryItemDrawerData } from '../components/RecoveryItemDrawer'
 import type { DeadLetter } from '../components/DeadLettersPanel'
@@ -282,9 +286,10 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const [searchInput, setSearchInput] = useState<string>(initialFilters.search)
   const [search, setSearch] = useState<string>(initialFilters.search)
   // Heatmap drill-in: a `YYYY-MM-DD` restricting the queue to one UTC day. Not
-  // persisted (a transient, click-scoped focus); seeds from a pending focus-day
-  // handoff on mount and updates live via the focus event.
-  const [dayFilter, setDayFilter] = useState<string | null>(() => consumeRecoveryFocusDay())
+  // persisted (a transient, click-scoped focus). A committed mount adopts the
+  // pending handoff below; never consume sessionStorage during render because
+  // React may discard a speculative render before the queue reaches the DOM.
+  const [dayFilter, setDayFilter] = useState<string | null>(null)
   const [rows, setRows] = useState<DeadLetter[]>([])
   const [loading, setLoading] = useState(true)
   const [cursor, setCursor] = useState<string | null>(null)
@@ -302,28 +307,24 @@ export function useRecoveryQueueFilters(): RecoveryQueueFilters {
   const clearDayFilter = useCallback(() => setDayFilter(null), [])
 
   // A heatmap cell click on Home dispatches the focus event; adopt the day when
-  // the queue is already mounted (the mount-time `consume` covers the not-yet-
-  // mounted case). Keep the stash through the current task: navigation can
-  // unmount an already-listening queue immediately after the event, and its
-  // replacement must still be able to consume the requested day.
+  // the queue is already mounted and consume the stashed handoff only after a
+  // real mount. Register first so a request cannot fall into a gap between the
+  // storage read and listener setup.
   useEffect(() => {
-    let consumeTimer: ReturnType<typeof setTimeout> | null = null
     const onFocus = (event: Event) => {
       const day = (event as CustomEvent<unknown>).detail
       if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return
       setDayFilter(day)
-      if (consumeTimer) clearTimeout(consumeTimer)
-      consumeTimer = setTimeout(() => {
-        consumeRecoveryFocusDay()
-        consumeTimer = null
-      }, 0)
     }
     window.addEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
-    return () => {
-      window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
-      if (consumeTimer) clearTimeout(consumeTimer)
-    }
+    const pendingDay = consumeRecoveryFocusDay()
+    if (pendingDay) setDayFilter(pendingDay)
+    return () => window.removeEventListener(RECOVERY_DAY_FOCUS_EVENT, onFocus)
   }, [])
+
+  useEffect(() => {
+    if (dayFilter) acknowledgeRecoveryFocusDay(dayFilter)
+  }, [dayFilter])
 
   // Server-side filter + sort, cap-correct: the query narrows + orders before
   // the page cap. `owner=me` is resolved to `auth.userId` server-side. Re-runs

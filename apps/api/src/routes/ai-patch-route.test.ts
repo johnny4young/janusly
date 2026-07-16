@@ -61,6 +61,9 @@ vi.mock("../ai-patch-feedback", () => ({ composeFeedbackHint: vi.fn(() => "") })
 vi.mock("../ai-recovery-memory", () => ({
   composeRecoveryMemoryHint: vi.fn(async () => ({ snippets: "", hitCount: 0, recallOk: true, entries: [] })),
 }));
+vi.mock("../ai-operator-guidance", () => ({
+  loadOperatorGuidance: vi.fn(async () => ""),
+}));
 
 vi.mock("../ai-runtime", () => ({
   orgLlmRuntime: vi.fn(),
@@ -96,6 +99,7 @@ import { suggestWorkflowPatch } from "@janusly/ai";
 import { findLatestOutcomeBySignature, queryRecoveryFeedbackHealth } from "@janusly/data";
 import { orgLlmRuntime } from "../ai-runtime";
 import { composeRecoveryMemoryHint } from "../ai-recovery-memory";
+import { loadOperatorGuidance } from "../ai-operator-guidance";
 import { auditAction } from "../audit-helper";
 import { getDeadLetter } from "../dlq";
 import { readJson, } from "../http";
@@ -110,6 +114,7 @@ const patchMock = vi.mocked(suggestWorkflowPatch);
 const feedbackHealthMock = vi.mocked(queryRecoveryFeedbackHealth);
 const priorOutcomeMock = vi.mocked(findLatestOutcomeBySignature);
 const recoveryMemoryMock = vi.mocked(composeRecoveryMemoryHint);
+const operatorGuidanceMock = vi.mocked(loadOperatorGuidance);
 
 const auth = { orgId: "org-1", userId: "user-1", mode: "dev-headers", source: "dev" } as const;
 
@@ -123,7 +128,7 @@ const NODE = { id: "n1", type: "http", config: { url: "https://old.example.com" 
 
 function setRuntime(calibration = false) {
   orgLlmMock.mockResolvedValue({
-    orgConfig: { ai: { promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels: {}, confidenceCalibrationEnabled: calibration } } as never,
+    orgConfig: { ai: { promptMaxChars: 4000, rateLimitPerMin: 60, surfaceModels: {}, confidenceCalibrationEnabled: calibration, operatorGuidance: "Prefer bounded retries." } } as never,
     llm: {} as never,
     llmConfig: {} as never,
   });
@@ -168,6 +173,7 @@ describe("POST /ai/patch-workflow — auth gate", () => {
 
 describe("POST /ai/patch-workflow — AI mode", () => {
   it("merges a config suggestion, returns mode:ai, and audits mode:ai", async () => {
+    operatorGuidanceMock.mockResolvedValueOnce("Organization guidance:\n| Prefer bounded retries.");
     patchMock.mockResolvedValue({
       mode: "ai",
       suggestions: [{
@@ -175,6 +181,10 @@ describe("POST /ai/patch-workflow — AI mode", () => {
         rationale: "point at the new endpoint",
         approachLabel: "config",
         confidence: 72,
+        consideredAlternatives: [{
+          approach: `Use a credential sk-${"a".repeat(20)}`,
+          rejectedBecause: "The endpoint is public.",
+        }],
       }],
       model: "claude-haiku-4-5-20251001",
       provider: "anthropic",
@@ -185,6 +195,10 @@ describe("POST /ai/patch-workflow — AI mode", () => {
     expect(res.payload.mode).toBe("ai");
     expect(res.payload.suggestions).toHaveLength(1);
     expect(res.payload.suggestions[0].confidence).toBe(72);
+    expect(res.payload.suggestions[0].consideredAlternatives).toEqual([{
+      approach: "Use a credential [redacted]",
+      rejectedBecause: "The endpoint is public.",
+    }]);
     // The merged workflow carries the patched url on the failing node.
     expect(res.payload.suggestedWorkflow.nodes[0].config.url).toBe("https://new.example.com");
     expect(res.payload.evidence).toEqual([]);
@@ -204,6 +218,16 @@ describe("POST /ai/patch-workflow — AI mode", () => {
       orgId: "org-1",
       runId: "r1",
       workflowId: "wf-patch",
+    }));
+    expect(operatorGuidanceMock).toHaveBeenCalledWith({
+      orgId: "org-1",
+      orgGuidance: "Prefer bounded retries.",
+      workflowId: "wf-patch",
+    });
+    expect(patchMock).toHaveBeenCalledWith(expect.objectContaining({
+      extraContext: expect.objectContaining({
+        operatorGuidance: "Organization guidance:\n| Prefer bounded retries.",
+      }),
     }));
 
     expect(auditMock).toHaveBeenCalledTimes(1);

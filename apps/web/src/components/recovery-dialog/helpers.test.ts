@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   classifyRecoveryError,
   isActionableSuggestion,
+  normalizeConsideredAlternatives,
   normalisePatchSuggestion,
   pickErrorMessage,
   pickFailedNodeErrorJson,
@@ -15,6 +16,36 @@ const baseWorkflow = {
   nodes: [{ id: 'fetch', type: 'http', config: { url: 'https://x' } }],
   edges: [],
 }
+
+describe('normalizeConsideredAlternatives', () => {
+  it('rejects malformed runtime values and returns at most two scrubbed bounded rows', () => {
+    const secret = `sk-${'a'.repeat(20)}`
+    expect(normalizeConsideredAlternatives('bad')).toEqual([])
+    expect(normalizeConsideredAlternatives([null, [], { approach: 'missing reason' }])).toEqual([])
+
+    const rows = normalizeConsideredAlternatives([
+      { approach: `Raise\ntimeout ${secret}`, rejectedBecause: `Could hide\u202ean auth issue. ${'x'.repeat(400)}` },
+      { approach: 'Swap provider', rejectedBecause: 'No approved provider is configured.' },
+      { approach: 'Ignored third', rejectedBecause: 'Only two rows are allowed.' },
+    ])
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.approach).toBe('Raise timeout [redacted]')
+    expect(rows[0]?.rejectedBecause).not.toContain('\u202e')
+    expect(rows[0]?.rejectedBecause.length).toBe(280)
+    expect(rows[1]?.approach).toBe('Swap provider')
+  })
+
+  it('scrubs extended secret families before rendering model-authored alternatives', () => {
+    const privateKey = '-----BEGIN PRIVATE KEY-----\nvery-secret-material\n-----END PRIVATE KEY-----'
+    expect(normalizeConsideredAlternatives([{
+      approach: `Query redis://operator:password@cache.internal/0 with sk-ant-${'a'.repeat(24)}`,
+      rejectedBecause: `Would expose ${privateKey}`,
+    }])).toEqual([{
+      approach: 'Query [redacted] with [redacted]',
+      rejectedBecause: 'Would expose [redacted]',
+    }])
+  })
+})
 
 function suggestion(overrides: Partial<PatchSuggestion> = {}): PatchSuggestion {
   return {

@@ -24,6 +24,7 @@ import { api } from '../api'
 import { useWorkflowStore } from '../store'
 import { FailureClustersCard } from './FailureClustersCard'
 import { BudgetSettingsPanel } from './BudgetSettingsPanel'
+import { AiGuidanceSettingsPanel } from './AiGuidanceSettingsPanel'
 import { AuthPolicySettingsPanel } from './AuthPolicySettingsPanel'
 import { ScimDirectorySettingsPanel } from './ScimDirectorySettingsPanel'
 import { AuditLogPanel } from './AuditLogPanel'
@@ -532,6 +533,7 @@ function ReliabilitySection() {
       <RecentAlertsCard />
       <UpstreamHealthPanel />
       <BudgetSettingsPanel />
+      <AiGuidanceSettingsPanel />
     </>
   )
 }

@@ -308,6 +308,7 @@ export const recoveryPlaybooksRoutes: Route[] = [
             confidence: 100,
             calibratedConfidence: 100,
             safety: recoverySuggestionSafety(sourceWorkflow.data, match.deadLetter.nodeId),
+            consideredAlternatives: [],
           }],
           evidence: [{
             kind: "recovery_playbook" as const,

@@ -18,6 +18,9 @@ vi.mock('./FailureClustersCard', () => ({
 vi.mock('./BudgetSettingsPanel', () => ({
   BudgetSettingsPanel: () => <section data-testid="stub-BudgetSettingsPanel">Budget</section>,
 }))
+vi.mock('./AiGuidanceSettingsPanel', () => ({
+  AiGuidanceSettingsPanel: () => <section data-testid="stub-AiGuidanceSettingsPanel">Guidance</section>,
+}))
 vi.mock('./AuthPolicySettingsPanel', () => ({
   AuthPolicySettingsPanel: () => <section data-testid="stub-AuthPolicySettingsPanel">AuthPolicy</section>,
 }))
@@ -175,6 +178,7 @@ describe('<OperationsPage />', () => {
     expect(screen.getByTestId('stub-AlertPoliciesPanel')).toBeInTheDocument()
     expect(screen.getByTestId('stub-RecentAlertsCard')).toBeInTheDocument()
     expect(screen.getByTestId('stub-BudgetSettingsPanel')).toBeInTheDocument()
+    expect(screen.getByTestId('stub-AiGuidanceSettingsPanel')).toBeInTheDocument()
     // Overview cards are gone.
     expect(screen.queryByTestId('stub-FailureClustersCard')).toBeNull()
     // Access / Integrations cards are not mounted either.

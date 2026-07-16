@@ -1175,6 +1175,45 @@
   color: var(--we-ink);
 }
 
+.we-agent-reasoning {
+  background: color-mix(in srgb, var(--we-primary) 7%, var(--we-surface));
+  border: 1px solid color-mix(in srgb, var(--we-primary) 24%, var(--we-line));
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  padding: 7px 9px;
+}
+
+.we-agent-reasoning__heading,
+.we-agent-reasoning__meta {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.we-agent-reasoning__heading {
+  justify-content: space-between;
+}
+
+.we-agent-reasoning p {
+  color: var(--we-ink);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.we-agent-reasoning__meta {
+  color: var(--we-muted);
+  flex-wrap: wrap;
+  font-size: 10px;
+}
+
+.we-agent-reasoning__meta span:not(:last-child)::after {
+  content: "·";
+  margin-left: 8px;
+}
+
 @media (max-width: 760px) {
   .we-run-diagnostics__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

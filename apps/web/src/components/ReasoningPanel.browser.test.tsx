@@ -32,6 +32,23 @@ describe('<ReasoningPanel /> (browser smoke)', () => {
             { id: 'e1', type: 'run.started', createdAt: '2026-07-14T12:00:00.000Z' },
             { id: 'e2', type: 'decision.made', nodeId: 'route', createdAt: '2026-07-14T12:00:01.000Z' },
             { id: 'e3', type: 'agent.memory.recalled', nodeId: 'agent', payload: { count: 2 }, createdAt: '2026-07-14T12:00:02.000Z' },
+            {
+              id: 'e4',
+              type: 'agent.reasoning',
+              nodeId: 'agent',
+              createdAt: '2026-07-14T12:00:03.000Z',
+              payload: {
+                agent: 'recovery-agent',
+                iteration: 1,
+                planner: 'openai',
+                mode: 'ai',
+                scope: 'agent',
+                replacesEventId: 'e-planned',
+                decision: 'use_tool',
+                tool: 'db.query.read',
+                reason: 'The read-only query verifies the invoice state before recovery.',
+              },
+            },
           ]}
         />
       </div>,
@@ -47,6 +64,11 @@ describe('<ReasoningPanel /> (browser smoke)', () => {
     expect(resourceUsage.getBoundingClientRect().height).toBeGreaterThan(0)
     expect(resourceUsage.querySelectorAll('dd')).toHaveLength(7)
     expect(resourceUsage).toHaveTextContent('Cache read6,000')
+    const agentReasoning = screen.getByTestId('agent-reasoning-summary')
+    expect(agentReasoning).toBeVisible()
+    expect(agentReasoning).toHaveAccessibleName('Agent operational rationale')
+    expect(agentReasoning).toHaveTextContent('The read-only query verifies the invoice state before recovery.')
+    expect(agentReasoning).toHaveTextContent('Tool db.query.read')
 
     const trigger = screen.getByRole('button', { name: 'What if?' })
     expect(trigger).toHaveAttribute('aria-expanded', 'false')

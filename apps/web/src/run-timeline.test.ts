@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { RunEvent } from './types'
 import {
+  dedupeAgentReasoningEvents,
   getInterEventDeltaMs,
   getRunEventPresentation,
   parseCausalReplay,
+  parseAgentReasoning,
   sortRunEventsChronologically,
   summarizeRunDiagnostics,
 } from './run-timeline'
@@ -14,12 +16,137 @@ describe('run event timeline projection', () => {
     expect(getRunEventPresentation({ id: '2', type: 'node.succeeded' }).tone).toBe('success')
     expect(getRunEventPresentation({ id: '3', type: 'node.waiting' }).tone).toBe('warning')
     expect(getRunEventPresentation({ id: '4', type: 'node.running' }).tone).toBe('info')
+    expect(getRunEventPresentation({ id: '5', type: 'agent.reasoning' })).toEqual({ tone: 'info', noise: false })
   })
 
   it('keeps queue and status-check noise visible but marks it for de-emphasis', () => {
     expect(getRunEventPresentation({ id: '1', type: 'node.queued' })).toEqual({ tone: 'neutral', noise: true })
     expect(getRunEventPresentation({ id: '2', type: 'run.status_checked' })).toEqual({ tone: 'neutral', noise: true })
     expect(getRunEventPresentation({ id: '3', type: 'custom.signal' })).toEqual({ tone: 'neutral', noise: false })
+  })
+
+  it('parses, bounds, and comprehensively scrubs the stable agent rationale', () => {
+    const secret = `sk-ant-${'a'.repeat(24)}`
+    const parsed = parseAgentReasoning({
+      id: 'reasoning',
+      type: 'agent.reasoning',
+      nodeId: 'agent',
+      payload: {
+        agent: `recovery\npostgres://operator:password@db.internal/acme ${'a'.repeat(180)}`,
+        iteration: 0,
+        planner: 'openai',
+        mode: 'ai',
+        scope: 'agent',
+        replacesEventId: 'planned-1',
+        decision: 'use_tool',
+        tool: 'db.query.read',
+        reason: `Inspect\n${secret} before recovery.`,
+      },
+    })
+    expect(parsed).toMatchObject({
+      iteration: 0,
+      planner: 'openai',
+      mode: 'ai',
+      scope: 'agent',
+      replacesEventId: 'planned-1',
+      decision: 'use_tool',
+      tool: 'db.query.read',
+      reason: 'Inspect [redacted] before recovery.',
+    })
+    expect(parsed?.agent).not.toContain('postgres://')
+    expect(parsed?.agent).not.toContain('\n')
+    expect(parsed?.agent.length).toBeLessThanOrEqual(120)
+  })
+
+  it('rejects malformed agent reasoning shapes', () => {
+    expect(parseAgentReasoning({
+      id: 'bad',
+      type: 'agent.reasoning',
+      payload: { decision: 'finish', tool: 'must-be-null' },
+    })).toBeNull()
+  })
+
+  it('deduplicates only the exact legacy planned row named by a valid canonical event', () => {
+    const oldLegacy: RunEvent = {
+      id: 'old',
+      type: 'agent.step.planned',
+      nodeId: 'agent',
+      payload: { agent: 'agent', iteration: 0, plan: { tool: 'legacy' } },
+    }
+    const newLegacy: RunEvent = {
+      id: 'new',
+      type: 'agent.step.planned',
+      nodeId: 'agent',
+      payload: { agent: 'agent', iteration: 0, plan: { tool: 'current' } },
+    }
+    const canonical: RunEvent = {
+      id: 'canonical',
+      type: 'agent.reasoning',
+      nodeId: 'agent',
+      payload: {
+        agent: 'agent', iteration: 0, planner: 'rules', mode: 'rules', scope: 'agent',
+        replacesEventId: 'new',
+        decision: 'use_tool', tool: 'current', reason: 'Current operational rationale.',
+      },
+    }
+    expect(dedupeAgentReasoningEvents([oldLegacy, newLegacy, canonical]).map(event => event.id))
+      .toEqual(['old', 'canonical'])
+
+    const malformed: RunEvent = { id: 'malformed', type: 'agent.reasoning', nodeId: 'agent', payload: { reason: 'partial' } }
+    expect(dedupeAgentReasoningEvents([newLegacy, malformed]).map(event => event.id))
+      .toEqual(['new', 'malformed'])
+  })
+
+  it('deduplicates deterministically when equal timestamps sort the canonical event first', () => {
+    const legacy: RunEvent = {
+      id: 'z-planned',
+      type: 'agent.step.planned',
+      nodeId: 'agent',
+      createdAt: '2026-07-15T10:00:00.000Z',
+      payload: { agent: 'agent', iteration: 0 },
+    }
+    const canonical: RunEvent = {
+      id: 'a-reasoning',
+      type: 'agent.reasoning',
+      nodeId: 'agent',
+      createdAt: '2026-07-15T10:00:00.000Z',
+      payload: {
+        agent: 'agent', iteration: 0, planner: 'rules', mode: 'rules', scope: 'agent',
+        replacesEventId: 'z-planned', decision: 'finish', tool: null, reason: 'Done.',
+      },
+    }
+    const sorted = sortRunEventsChronologically([legacy, canonical])
+    expect(sorted.map(event => event.id)).toEqual(['a-reasoning', 'z-planned'])
+    expect(dedupeAgentReasoningEvents(sorted).map(event => event.id)).toEqual(['a-reasoning'])
+  })
+
+  it('deduplicates legacy rows after applying canonical label normalization', () => {
+    const unsafeAgent = `recovery\npostgres://operator:password@db.internal/acme ${'a'.repeat(180)}`
+    const legacy: RunEvent = {
+      id: 'planned-long-label',
+      type: 'agent.step.planned',
+      nodeId: 'agent',
+      payload: { agent: unsafeAgent, iteration: 0 },
+    }
+    const canonical: RunEvent = {
+      id: 'reasoning-long-label',
+      type: 'agent.reasoning',
+      nodeId: 'agent',
+      payload: {
+        agent: unsafeAgent,
+        iteration: 0,
+        planner: 'rules',
+        mode: 'rules',
+        scope: 'agent',
+        replacesEventId: 'planned-long-label',
+        decision: 'finish',
+        tool: null,
+        reason: 'Done.',
+      },
+    }
+
+    expect(dedupeAgentReasoningEvents([legacy, canonical]).map(event => event.id))
+      .toEqual(['reasoning-long-label'])
   })
 
   it('computes chronological deltas and rejects malformed or reversed timestamps', () => {

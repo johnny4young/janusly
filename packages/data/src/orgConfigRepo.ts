@@ -85,6 +85,8 @@ export type OrgConfigSnapshot = {
      * Keys are validated against the closed `AI_SURFACES` enum at write time.
      */
     surfaceModels: Record<string, string>;
+    /** Bounded organization-wide operator preferences for AI surfaces. */
+    operatorGuidance: string;
   };
   http: {
     timeoutMs: number;
@@ -300,6 +302,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       generationMode: readString(values, "ai.generationMode"),
       generationCandidates: readNumber(values, "ai.generationCandidates"),
       surfaceModels: parseSurfaceModels(readString(values, "ai.surfaceModels")),
+      operatorGuidance: readString(values, "ai.operatorGuidance"),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),

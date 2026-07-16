@@ -41,6 +41,11 @@ export type RecoveryFeedbackHealthSnapshot = {
   approaches: FeedbackApproachHealth[]
 }
 
+export type ConsideredAlternative = {
+  approach: string
+  rejectedBecause: string
+}
+
 export type SuggestionTab = {
   workflow: WorkflowDefinition
   rationale: string
@@ -62,6 +67,8 @@ export type SuggestionTab = {
     approvalRequired: boolean
     approvalPresent: boolean
   }
+  /** Model-authored trade-off summaries; never hidden chain-of-thought. */
+  consideredAlternatives?: ConsideredAlternative[]
 }
 
 export type PriorSameSignatureOutcome = {

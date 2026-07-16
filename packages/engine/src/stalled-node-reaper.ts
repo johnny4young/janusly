@@ -361,7 +361,7 @@ export async function handleStalledNodeReaperTrigger(
         findStalled: (input) => findStalledRunningNodes(input),
         failNode: (runId, nodeId, error) => failStalledRunningNode(runId, nodeId, error),
         enqueueDeadLetter: (input) => deadLetterAdapter.enqueueDeadLetter(input),
-        appendNodeFailedEvent: (runId, nodeId, payload) => appendEvent(runId, nodeId, "node.failed", payload),
+        appendNodeFailedEvent: (runId, nodeId, payload) => appendEvent(runId, nodeId, "node.failed", payload).then(() => undefined),
         rollupRunStatus: (runId) => updateRunStatusFromNodes(runId).then(() => undefined),
         now: () => new Date(),
       },

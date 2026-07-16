@@ -1702,8 +1702,9 @@ export const recoveryItemHandoffs = pgTable(
  * subsystem consults when a row is created from a DLQ entry or reassigned.
  *
  * Multi-tenant scope on every read via `eq(workflowMetadata.orgId, orgId)`.
- * Operator-supplied content (runbookMarkdown, description) flows through
- * the safe Markdown subset before display.
+ * Operator-supplied content (runbookMarkdown, aiGuidanceMarkdown,
+ * description) flows through the safe Markdown subset before display or is
+ * scrubbed + DATA-framed before reaching an AI prompt.
  */
 export const workflowMetadata = pgTable(
   "workflow_metadata",
@@ -1715,6 +1716,8 @@ export const workflowMetadata = pgTable(
     owners: jsonb("owners").$type<string[]>().notNull().default([]),
     /** Operator-supplied free-form Markdown (closed subset; 32 KiB cap enforced at write). */
     runbookMarkdown: text("runbook_markdown"),
+    /** Bounded operator preferences for AI generation/recovery; never a secret or system-policy store. */
+    aiGuidanceMarkdown: text("ai_guidance_markdown"),
     /** Short human-readable description. */
     description: text("description"),
     /** Operator-chosen labels (closed bounded array). */

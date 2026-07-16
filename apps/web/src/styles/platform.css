@@ -2277,6 +2277,53 @@ button.we-ops-metric-card--button {
   background: color-mix(in srgb, var(--we-surface-2) 60%, transparent);
 }
 
+.we-recovery-hypotheses {
+  margin-top: 12px;
+  border: 1px solid var(--we-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--we-primary) 4%, var(--we-surface));
+  overflow: hidden;
+}
+
+.we-recovery-hypotheses__summary {
+  padding: 12px;
+  cursor: pointer;
+  color: var(--we-text-1);
+  font-weight: 700;
+}
+
+.we-recovery-hypotheses__summary:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--we-primary);
+  outline: 0;
+}
+
+.we-recovery-hypotheses > .helper-text {
+  margin: 0;
+  padding: 0 12px 8px;
+}
+
+.we-recovery-hypotheses__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px 12px;
+  list-style: none;
+}
+
+.we-recovery-hypotheses__row {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-left: 3px solid var(--we-primary);
+  border-radius: 6px;
+  background: var(--we-surface);
+}
+
+.we-recovery-hypotheses__row span {
+  color: var(--we-text-secondary);
+  line-height: 1.45;
+}
+
 .we-recovery-evidence__summary {
   cursor: pointer;
   padding: 8px 12px;
@@ -5802,6 +5849,33 @@ button.we-recovery-heatmap__cell:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.we-ai-guidance-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.we-ai-guidance-settings .we-field {
+  color: var(--we-muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+}
+
+.we-ai-guidance-settings .we-field textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+.we-ai-guidance-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .we-workflow-metadata-panel__form {
