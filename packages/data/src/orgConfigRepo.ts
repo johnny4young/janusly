@@ -85,6 +85,8 @@ export type OrgConfigSnapshot = {
      * Keys are validated against the closed `AI_SURFACES` enum at write time.
      */
     surfaceModels: Record<string, string>;
+    /** Bounded organization-wide operator preferences for AI surfaces. */
+    operatorGuidance: string;
   };
   http: {
     timeoutMs: number;
@@ -101,6 +103,9 @@ export type OrgConfigSnapshot = {
     requireSavedWorkflow: boolean;
     subworkflowMaxDepth: number;
     streamMaxSubscriptions: number;
+    humanFormResumeTtlSeconds: number;
+    /** Consecutive failed ordinary runs that trip a workflow's circuit breaker. */
+    circuitBreakerThreshold: number;
   };
   mcp: {
     writeConsent: boolean;
@@ -299,6 +304,7 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       generationMode: readString(values, "ai.generationMode"),
       generationCandidates: readNumber(values, "ai.generationCandidates"),
       surfaceModels: parseSurfaceModels(readString(values, "ai.surfaceModels")),
+      operatorGuidance: readString(values, "ai.operatorGuidance"),
     },
     http: {
       timeoutMs: readNumber(values, "http.timeoutMs"),
@@ -315,6 +321,8 @@ export async function getOrgConfigSnapshot(orgId: string, env: NodeJS.ProcessEnv
       requireSavedWorkflow: readBoolean(values, "runs.requireSavedWorkflow"),
       subworkflowMaxDepth: readNumber(values, "subworkflow.maxDepth"),
       streamMaxSubscriptions: readNumber(values, "runs.streamMaxSubscriptions"),
+      humanFormResumeTtlSeconds: readNumber(values, "runs.humanFormResumeTtlSeconds"),
+      circuitBreakerThreshold: readNumber(values, "runs.circuitBreakerThreshold"),
     },
     mcp: {
       writeConsent: readBoolean(values, "mcp.writeConsent"),
@@ -515,7 +523,6 @@ export async function getAuthPolicyConfig(orgId: string): Promise<AuthPolicyConf
       if (typeof stored === "number" && Number.isFinite(stored)) {
         policy.sessionTtlSeconds = stored;
       }
-      continue;
     }
   }
   return policy;

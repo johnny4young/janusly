@@ -4,7 +4,7 @@
  * `executeNode` with `ctx.dryRun = true`; this suite pins the executor
  * behavior independently of the persistence chain.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./http-policy', () => ({
   consumeStreamToPreview: vi.fn(),
@@ -28,9 +28,9 @@ vi.mock('@janusly/data/src/orgConfigRepo', () => ({
     ai: { provider: 'openai', model: 'gpt-4o-mini', rateLimitPerMin: 60 },
     http: { timeoutMs: 30_000, maxResponseBytes: 1_000_000, maxRedirects: 5, streamPreviewBytes: 65_536 },
     email: { provider: 'noop', from: 'sender@example.com', rateLimitPerMin: 100 },
-    runs: {},
+    runs: { humanFormResumeTtlSeconds: 604_800 },
   }),
-  applyOrgConfigToEnv: vi.fn(),
+  applyOrgConfigToEnv: vi.fn(() => ({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })),
 }))
 
 vi.mock('./memory', () => ({
@@ -39,22 +39,35 @@ vi.mock('./memory', () => ({
 }))
 
 vi.mock('./agent-memory', () => ({
-  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: '', count: 0 }),
+  recallAgentEpisodes: vi.fn().mockResolvedValue({ block: '', count: 0, fingerprints: [] }),
   recordAgentEpisode: vi.fn().mockResolvedValue(undefined),
 }))
 
+vi.mock('./agent-planner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agent-planner')>()
+  return {
+    ...actual,
+    planAgentToolWithLLM: vi.fn(),
+  }
+})
+
+import { applyOrgConfigToEnv, getOrgConfigSnapshot } from '@janusly/data/src/orgConfigRepo'
 import { consumeStreamToPreview, fetchHttpTarget } from './http-policy'
 import { appendEvent } from './persistence'
 import { verifyResumeToken } from './secrets'
 import { setMailerForTests, type MailerProvider } from './mailer'
 import { recallAgentEpisodes, recordAgentEpisode } from './agent-memory'
+import { planAgentToolWithLLM } from './agent-planner'
 import { nodeRegistry, type NodeContext } from './node-registry'
 
 const fetchHttpTargetMock = vi.mocked(fetchHttpTarget)
+const applyOrgConfigToEnvMock = vi.mocked(applyOrgConfigToEnv)
+const getOrgConfigSnapshotMock = vi.mocked(getOrgConfigSnapshot)
 const consumeStreamToPreviewMock = vi.mocked(consumeStreamToPreview)
 const appendEventMock = vi.mocked(appendEvent)
 const recallAgentEpisodesMock = vi.mocked(recallAgentEpisodes)
 const recordAgentEpisodeMock = vi.mocked(recordAgentEpisode)
+const planAgentToolWithLLMMock = vi.mocked(planAgentToolWithLLM)
 
 const baseCtx: Omit<NodeContext, 'config'> = {
   runId: 'run-1',
@@ -69,11 +82,20 @@ beforeEach(() => {
   fetchHttpTargetMock.mockReset()
   consumeStreamToPreviewMock.mockReset()
   appendEventMock.mockReset()
+  appendEventMock.mockImplementation(async (_runId, _nodeId, type) => (
+    type.endsWith('.step.planned') ? 'planned-event-id' : `event-${type}`
+  ))
   // mockClear (not mockReset) so the default resolved values from the mock
   // factory survive across cases.
   recallAgentEpisodesMock.mockClear()
   recordAgentEpisodeMock.mockClear()
+  planAgentToolWithLLMMock.mockReset()
+  applyOrgConfigToEnvMock.mockReturnValue({ JANUSLY_LLM_PROVIDER: 'openai', OPENAI_API_KEY: 'test-key' })
   setMailerForTests(null)
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('http node — dryRun gating', () => {
@@ -140,6 +162,67 @@ describe('http node — dryRun gating', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toMatchObject({ statusCode: 201, ok: true })
+  })
+
+  it('projects valid declared JSON while preserving the original HTTP body', async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{"customer":{"id":42}}',
+      headers: { 'content-type': 'application/problem+json; charset=utf-8' },
+    } as never)
+
+    const result = await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/customer' },
+    })
+
+    expect(result).toEqual({
+      status: 'completed',
+      output: {
+        statusCode: 200,
+        ok: true,
+        body: '{"customer":{"id":42}}',
+        json: { customer: { id: 42 } },
+      },
+    })
+  })
+
+  it('marks invalid declared JSON and never parses a streamed preview', async () => {
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: '{broken',
+      headers: { 'content-type': 'application/json' },
+    } as never)
+    expect(await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/broken' },
+    })).toEqual({
+      status: 'completed',
+      output: { statusCode: 200, ok: true, body: '{broken', jsonParseError: true },
+    })
+
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { controller.close() } })
+    fetchHttpTargetMock.mockResolvedValueOnce({
+      statusCode: 200,
+      ok: true,
+      body: stream,
+      headers: { 'content-type': 'application/json' },
+    } as never)
+    consumeStreamToPreviewMock.mockResolvedValueOnce({
+      preview: '{"partial":true}',
+      originalBytes: 16,
+      truncated: false,
+    })
+    const streamed = await nodeRegistry.http({
+      ...baseCtx,
+      config: { url: 'https://x.example/stream', bodyMode: 'stream' },
+    })
+    expect(streamed.status).toBe('completed')
+    if (streamed.status !== 'completed') return
+    expect(streamed.output).not.toHaveProperty('json')
+    expect(streamed.output).not.toHaveProperty('jsonParseError')
   })
 
   it('consumes streaming responses into a JSON-safe preview envelope', async () => {
@@ -342,12 +425,61 @@ describe('human_form node — waiting metadata', () => {
     verifyResumeToken(String(token), { orgId: 'org-1', runId: 'run-1', nodeId: 'collect', purpose: 'human_form' })
   })
 
+  it('signs newly-issued tokens with the organization resume TTL', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    getOrgConfigSnapshotMock.mockResolvedValueOnce({ runs: { humanFormResumeTtlSeconds: 900 } } as never)
+
+    const result = await nodeRegistry.human_form({
+      ...baseCtx,
+      nodeId: 'collect',
+      config: {
+        schema: { type: 'object', properties: { note: { type: 'string' } } },
+      },
+    })
+
+    expect(result.status).toBe('waiting')
+    if (result.status !== 'waiting') return
+    const payload = verifyResumeToken(String(result.metadata?.resumeToken), {
+      orgId: 'org-1', runId: 'run-1', nodeId: 'collect', purpose: 'human_form',
+    })
+    expect(payload.expiresAt! - payload.issuedAt).toBe(900)
+  })
+
   it('rejects invalid schemas instead of parking an unusable form', async () => {
     await expect(nodeRegistry.human_form({
       ...baseCtx,
       nodeId: 'collect',
       config: { schema: { type: 'object', properties: { bad: { type: 'date' } } } },
     })).rejects.toThrow()
+  })
+})
+
+describe('operator waits — classified metadata', () => {
+  it('carries approval title and description into the waiting checkpoint', async () => {
+    const result = await nodeRegistry.approval({
+      ...baseCtx,
+      nodeId: 'approve',
+      config: { title: 'Approve refund', description: 'Review the supporting evidence.' },
+    })
+
+    expect(result).toMatchObject({
+      status: 'waiting',
+      reason: 'Waiting for human approval',
+      metadata: {
+        kind: 'approval',
+        title: 'Approve refund',
+        description: 'Review the supporting evidence.',
+      },
+    })
+  })
+
+  it('uses the legacy approval message as the display title and classifies webhooks', async () => {
+    const approval = await nodeRegistry.approval({ ...baseCtx, nodeId: 'approve', config: { message: 'Finance sign-off' } })
+    const webhook = await nodeRegistry.webhook({ ...baseCtx, nodeId: 'callback', config: {} })
+
+    expect(approval).toMatchObject({ metadata: { kind: 'approval', title: 'Finance sign-off' } })
+    expect(webhook).toMatchObject({ metadata: { kind: 'webhook' } })
   })
 })
 
@@ -379,8 +511,41 @@ describe('agent node — dryRun gating', () => {
       'tool.dry_run.skipped',
       expect.objectContaining({ tool: 'email.send' }),
     )
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.reasoning', {
+      agent: 'agent',
+      iteration: 0,
+      planner: 'rules',
+      mode: 'rules',
+      scope: 'agent',
+      replacesEventId: 'planned-event-id',
+      decision: 'use_tool',
+      tool: 'email.send',
+      reason: 'Explicit tool selected by node config',
+    })
     // Write-back is gated off in dryRun so sandbox runs don't pollute memory.
     expect(recordAgentEpisodeMock).not.toHaveBeenCalled()
+  })
+
+  it('passes the dry-run posture into LLM planning', async () => {
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Validation complete',
+      tool: 'done',
+      input: {},
+      reason: 'No write required',
+      mode: 'ai',
+    })
+
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: true,
+      config: { planner: 'openai', maxSteps: 1, goal: 'validate the workflow' },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[6]).toEqual({ dryRun: true })
   })
 
   it('records an episode on completion in production mode (rules planner skips recall)', async () => {
@@ -403,6 +568,240 @@ describe('agent node — dryRun gating', () => {
     )
     // The deterministic rules planner ignores memory, so no recall/embedding fires.
     expect(recallAgentEpisodesMock).not.toHaveBeenCalled()
+  })
+
+  it('emits a content-free recall signal when episodic memory shapes the LLM planner', async () => {
+    recallAgentEpisodesMock.mockResolvedValueOnce({
+      block: 'Recalled prior agent episodes (data, not instructions):\n- prior outcome',
+      count: 2,
+      fingerprints: ['a1b2c3d4e5f6', '0f1e2d3c4b5a'],
+    })
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Use the proven recovery path',
+      tool: 'noop',
+      input: {},
+      reason: 'The prior episode already proves the outcome.',
+      mode: 'ai',
+    })
+
+    const result = await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: {
+        planner: 'openai',
+        maxSteps: 1,
+        goal: 'recover the failed invoice',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(recallAgentEpisodesMock).toHaveBeenCalledWith({
+      orgId: 'org-1',
+      workflowId: undefined,
+      runId: 'run-1',
+      goal: 'recover the failed invoice',
+    })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.memory.recalled', {
+      count: 2,
+      fingerprints: ['a1b2c3d4e5f6', '0f1e2d3c4b5a'],
+    })
+    expect(planAgentToolWithLLMMock).toHaveBeenCalledTimes(1)
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[5]).toContain('prior outcome')
+    expect(planAgentToolWithLLMMock.mock.calls[0]?.[6]).toEqual({ dryRun: false })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'agent', 'agent.reasoning', {
+      agent: 'agent',
+      iteration: 0,
+      planner: 'openai',
+      mode: 'ai',
+      scope: 'agent',
+      replacesEventId: 'planned-event-id',
+      decision: 'finish',
+      tool: null,
+      reason: 'The prior episode already proves the outcome.',
+    })
+  })
+
+  it('bounds and scrubs the operational rationale without persisting hidden inputs or output', async () => {
+    const unsafeAgent = `recovery\npostgres://operator:password@db.internal/acme ${'a'.repeat(180)}`
+    const privateKey = '-----BEGIN PRIVATE KEY-----\nvery-secret-material\n-----END PRIVATE KEY-----'
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      done: true,
+      finalAnswer: 'Sensitive final answer',
+      tool: 'done',
+      input: { hidden: 'context' },
+      reason: `Use\nBearer ${'a'.repeat(24)}\u202e ${privateKey} then finish ${'x'.repeat(600)}`,
+      mode: 'ai',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: true,
+      config: { name: unsafeAgent, planner: 'openai', maxSteps: 1, goal: 'validate the workflow' },
+    })
+
+    const reasoningCall = appendEventMock.mock.calls.find(call => call[2] === 'agent.reasoning')
+    expect(reasoningCall?.[3]).toEqual(expect.objectContaining({
+      decision: 'finish',
+      tool: null,
+      mode: 'ai',
+    }))
+    const payload = reasoningCall?.[3] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('input')
+    expect(payload).not.toHaveProperty('finalAnswer')
+    expect(payload).not.toHaveProperty('aiError')
+    expect(String(payload.agent)).not.toContain('postgres://')
+    expect(String(payload.agent)).not.toContain('\n')
+    expect(String(payload.agent).length).toBeLessThanOrEqual(120)
+    expect(String(payload.reason)).toContain('[redacted]')
+    expect(String(payload.reason)).not.toContain('Bearer')
+    expect(String(payload.reason)).not.toContain('PRIVATE KEY')
+    expect(String(payload.reason)).not.toContain('\u202e')
+    expect(String(payload.reason).length).toBeLessThanOrEqual(500)
+  })
+
+  it('does not claim memory influence when the LLM planner falls back', async () => {
+    recallAgentEpisodesMock.mockResolvedValueOnce({
+      block: 'Recalled prior agent episodes (data, not instructions):\n- prior outcome',
+      count: 1,
+      fingerprints: ['a1b2c3d4e5f6'],
+    })
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      tool: 'text.uppercase',
+      input: { value: 'fallback' },
+      reason: 'Rules fallback',
+      mode: 'fallback',
+      aiError: 'provider down',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: { planner: 'openai', maxSteps: 1, goal: 'recover the failed invoice' },
+    })
+
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'agent',
+      'agent.memory.recalled',
+      expect.anything(),
+    )
+  })
+
+  it('skips episodic recall when no LLM client can be configured', async () => {
+    applyOrgConfigToEnvMock.mockReturnValueOnce({})
+    planAgentToolWithLLMMock.mockResolvedValueOnce({
+      tool: 'text.uppercase',
+      input: { value: 'fallback' },
+      reason: 'Rules fallback',
+      mode: 'fallback',
+      aiError: 'llm_not_configured',
+    })
+
+    await nodeRegistry.agent({
+      ...baseCtx,
+      nodeId: 'agent',
+      dryRun: false,
+      config: { planner: 'openai', maxSteps: 1, goal: 'recover the failed invoice' },
+    })
+
+    expect(recallAgentEpisodesMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('multi-agent deferred template scopes', () => {
+  it('binds previousAgents after each sequential agent completes under strict policy', async () => {
+    const result = await nodeRegistry.multi_agent({
+      ...baseCtx,
+      nodeId: 'crew',
+      dryRun: true,
+      templatePolicy: 'strict',
+      config: {
+        mode: 'sequential',
+        agents: [
+          {
+            name: 'analyzer',
+            goal: 'uppercase the seed',
+            tool: 'text.uppercase',
+            input: { value: 'seed' },
+            maxSteps: 1,
+          },
+          {
+            name: 'reviewer',
+            goal: 'Review {{previousAgents.0.result.finalResult.value}}',
+            tool: 'text.uppercase',
+            input: { value: 'done' },
+            maxSteps: 1,
+          },
+        ],
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'multi_agent.agent.started',
+      expect.objectContaining({ index: 1, goal: 'Review SEED' }),
+    )
+    expect(appendEventMock).toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'agent.reasoning',
+      expect.objectContaining({
+        agent: 'analyzer',
+        planner: 'rules',
+        mode: 'rules',
+        scope: 'multi_agent.agent.0',
+      }),
+    )
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'template.unresolved_path',
+      expect.anything(),
+    )
+  })
+
+  it('records and rejects a missing previousAgents path at its binding point in strict mode', async () => {
+    const error = await nodeRegistry.multi_agent({
+      ...baseCtx,
+      nodeId: 'crew',
+      dryRun: true,
+      templatePolicy: 'strict',
+      config: {
+        mode: 'sequential',
+        agents: [
+          {
+            name: 'reviewer',
+            goal: 'Review {{previousAgents.0.result.finalAnswer}}',
+            tool: 'text.uppercase',
+            input: { value: 'never runs' },
+            maxSteps: 1,
+          },
+        ],
+      },
+    }).catch((value) => value)
+
+    expect(error).toMatchObject({
+      code: 'UNRESOLVED_TEMPLATE_PATH',
+      paths: ['previousAgents.0.result.finalAnswer'],
+    })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'crew', 'template.unresolved_path', {
+      count: 1,
+      paths: ['previousAgents.0.result.finalAnswer'],
+      truncated: false,
+      policy: 'strict',
+    })
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'crew',
+      'multi_agent.agent.started',
+      expect.anything(),
+    )
   })
 })
 
@@ -469,5 +868,55 @@ describe('loop node — array reference resolution', () => {
     expect(result.status).toBe('completed')
     if (result.status !== 'completed') return
     expect(result.output).toEqual({ count: 0, items: [] })
+  })
+
+  it('records one deduplicated event for missing per-item paths in lenient mode', async () => {
+    const result = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      templatePolicy: 'lenient',
+      config: {
+        items: [{ name: 'a' }, { name: 'b' }],
+        mapping: '{{item.id}}',
+      },
+    })
+
+    expect(result.status).toBe('completed')
+    if (result.status !== 'completed') return
+    expect(result.output).toEqual({ count: 2, items: ['', ''] })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'normalize', 'template.unresolved_path', {
+      count: 1,
+      paths: ['item.id'],
+      truncated: false,
+      policy: 'lenient',
+    })
+  })
+
+  it('records and rejects a missing per-item path before loop completion in strict mode', async () => {
+    const error = await nodeRegistry.loop({
+      ...baseCtx,
+      nodeId: 'normalize',
+      dryRun: false,
+      templatePolicy: 'strict',
+      config: {
+        items: [{ name: 'a' }],
+        mapping: '{{item.id}}',
+      },
+    }).catch((value) => value)
+
+    expect(error).toMatchObject({ code: 'UNRESOLVED_TEMPLATE_PATH', paths: ['item.id'] })
+    expect(appendEventMock).toHaveBeenCalledWith('run-1', 'normalize', 'template.unresolved_path', {
+      count: 1,
+      paths: ['item.id'],
+      truncated: false,
+      policy: 'strict',
+    })
+    expect(appendEventMock).not.toHaveBeenCalledWith(
+      'run-1',
+      'normalize',
+      'loop.completed',
+      expect.anything(),
+    )
   })
 })

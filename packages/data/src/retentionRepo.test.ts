@@ -78,6 +78,17 @@ describe("legal-hold bypass + tenant scope on every per-table DELETE", () => {
     expect(first.sql.toLowerCase()).toContain("<= now()");
   });
 
+  it.each([
+    ["run_events", deleteExpiredRunEventsForOrg],
+    ["audit_logs", deleteExpiredAuditLogsForOrg],
+    ["usage_events", deleteExpiredUsageEventsForOrg],
+  ] as const)("%s keeps future holds eligible only after hold_until passes", async (_label, purge) => {
+    executeMock.mockResolvedValueOnce([]);
+    await purge({ orgId: "org_a", retentionDays: 90 });
+    const [first] = renderedCalls();
+    expect(first.sql).toMatch(/\(.*hold_until.*is null.*or.*hold_until.*<= now\(\).*\)/is);
+  });
+
   it.each(purgers)("%s DELETE binds the orgId param (cross-org scope)", async (_label, purge) => {
     executeMock.mockResolvedValueOnce([]);
     await purge({ orgId: "org_specific", retentionDays: 90 });

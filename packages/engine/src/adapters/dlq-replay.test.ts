@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   appendEventMock,
   enqueueNodeMock,
-  markNodeQueuedMock,
-  resetRunForReplayMock,
-  setRunWorkflowSnapshotMock,
+  markQueuePublicationSucceededMock,
+  claimReplayTransitionMock,
+  ReplayNotClaimableError,
   originalRunNodeRowsRef,
   runEventsTable,
   runNodesTable,
@@ -13,20 +13,34 @@ const {
   safePersistPayloadMock,
   selectWhereMock,
   txInsertMock,
-} = vi.hoisted(() => ({
-  appendEventMock: vi.fn().mockResolvedValue(undefined),
-  enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
-  markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
-  resetRunForReplayMock: vi.fn().mockResolvedValue(undefined),
-  setRunWorkflowSnapshotMock: vi.fn().mockResolvedValue(undefined),
-  originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
-  runEventsTable: { name: 'runEvents' },
-  runNodesTable: { name: 'runNodes' },
-  runsTable: { name: 'runs' },
-  safePersistPayloadMock: vi.fn((payload: unknown) => payload),
-  selectWhereMock: vi.fn(),
-  txInsertMock: vi.fn(),
-}))
+} = vi.hoisted(() => {
+  // The real error's shape so the adapter's throw + the test's `instanceof`
+  // check agree. Declared in-hoist so the (also-hoisted) persistence mock
+  // factory can reference it without a TDZ error.
+  class ReplayNotClaimableError extends Error {
+    constructor(readonly reason: 'run_not_replayable' | 'node_mid_retry') {
+      super(`Replay not claimable: ${reason}`)
+      this.name = 'ReplayNotClaimableError'
+    }
+  }
+  return {
+    appendEventMock: vi.fn().mockResolvedValue(undefined),
+    enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
+    markQueuePublicationSucceededMock: vi.fn().mockResolvedValue(true),
+    claimReplayTransitionMock: vi.fn().mockResolvedValue({
+      recoveryClaimToken: 'claim-token-1',
+      publicationGeneration: 1,
+    }),
+    ReplayNotClaimableError,
+    originalRunNodeRowsRef: { current: [] as Array<Record<string, unknown>> },
+    runEventsTable: { name: 'runEvents' },
+    runNodesTable: { name: 'runNodes' },
+    runsTable: { name: 'runs' },
+    safePersistPayloadMock: vi.fn((payload: unknown) => payload),
+    selectWhereMock: vi.fn(),
+    txInsertMock: vi.fn(),
+  }
+})
 
 vi.mock('@janusly/db', () => ({
   db: {
@@ -61,10 +75,10 @@ vi.mock('../queue', () => ({
 }))
 
 vi.mock('../persistence', () => ({
-  markNodeQueued: markNodeQueuedMock,
-  resetRunForReplay: resetRunForReplayMock,
+  markQueuePublicationSucceeded: markQueuePublicationSucceededMock,
+  claimReplayTransition: claimReplayTransitionMock,
   appendEvent: appendEventMock,
-  setRunWorkflowSnapshot: setRunWorkflowSnapshotMock,
+  ReplayNotClaimableError,
 }))
 
 vi.mock('../safe-persist', () => ({
@@ -91,14 +105,16 @@ beforeEach(() => {
   selectWhereMock.mockReset()
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
-  markNodeQueuedMock.mockReset()
-  resetRunForReplayMock.mockReset()
+  markQueuePublicationSucceededMock.mockReset().mockResolvedValue(true)
+  claimReplayTransitionMock.mockReset().mockResolvedValue({
+    recoveryClaimToken: 'claim-token-1',
+    publicationGeneration: 1,
+  })
   appendEventMock.mockReset()
-  setRunWorkflowSnapshotMock.mockReset()
 })
 
 describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
-  it('un-terminates the run + re-queues the failed node, then enqueues (attempt=1)', async () => {
+  it('atomically claims the replay transition, snapshots, then enqueues (attempt=1)', async () => {
     await adapter.replayDeadLetter({
       runId: 'orig-run',
       workflow: baseWorkflow,
@@ -110,18 +126,72 @@ describe('DLQReplayAdapter.replayDeadLetter (production replay)', () => {
       runId: 'orig-run',
       nodeId: failingNode.id,
       attempt: 1,
+      recoveryClaimToken: 'claim-token-1',
     })
-    // The replayed workflow becomes the run's authoritative snapshot so the
-    // slim queue worker (and the downstream cascade) reload the right DAG.
-    expect(setRunWorkflowSnapshotMock).toHaveBeenCalledWith('orig-run', baseWorkflow)
-    // Un-terminate the run + re-queue the failed node so the re-enqueued job
-    // actually executes (the runtime skips queued jobs on a failed run, and
-    // `markNodeRunning` only claims a `queued` node). Without both, the replay
-    // silently no-ops and the run stays failed.
-    expect(resetRunForReplayMock).toHaveBeenCalledWith('orig-run')
-    expect(markNodeQueuedMock).toHaveBeenCalledWith('orig-run', failingNode.id)
+    // One atomic transition un-terminates the run + re-queues the failed node,
+    // replacing the non-atomic resetRunForReplay + markNodeQueued pair whose
+    // gap let a cancel land between them.
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: null,
+      recoveryActorId: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    }, baseWorkflow)
+    expect(markQueuePublicationSucceededMock)
+      .toHaveBeenCalledWith('orig-run', failingNode.id, 1, 1, 'claim-token-1')
     // Production replay is a single enqueue — no new run row, no new node rows.
     expect(txInsertMock).not.toHaveBeenCalled()
+  })
+
+  it('carries the DLQ recovery claim and initiating actor into the node transition', async () => {
+    await adapter.replayDeadLetter({
+      runId: 'orig-run',
+      workflow: baseWorkflow,
+      node: failingNode,
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+    })
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    }, baseWorkflow)
+  })
+
+  it('binds a verified playbook and validation run to the replay generation', async () => {
+    await adapter.replayDeadLetter({
+      runId: 'orig-run',
+      workflow: baseWorkflow,
+      node: failingNode,
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: 'playbook-1',
+      recoveryValidationRunId: 'validation-1',
+    })
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: 'dlq-1',
+      recoveryActorId: 'operator-1',
+      recoveryPlaybookId: 'playbook-1',
+      recoveryValidationRunId: 'validation-1',
+    }, baseWorkflow)
+  })
+
+  it('atomically claims with the snapshot before enqueueing — a rejected claim mutates nothing', async () => {
+    claimReplayTransitionMock.mockRejectedValueOnce(new ReplayNotClaimableError('node_mid_retry'))
+
+    await expect(adapter.replayDeadLetter({ runId: 'orig-run', workflow: baseWorkflow, node: failingNode }))
+      .rejects.toBeInstanceOf(ReplayNotClaimableError)
+
+    expect(claimReplayTransitionMock).toHaveBeenCalledWith('orig-run', failingNode.id, {
+      deadLetterId: null,
+      recoveryActorId: null,
+      recoveryPlaybookId: null,
+      recoveryValidationRunId: null,
+    }, baseWorkflow)
+    expect(enqueueNodeMock).not.toHaveBeenCalled()
   })
 })
 
@@ -155,21 +225,41 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
       createdBy: 'user-1',
     })
 
-    // One run_nodes insert with both nodes seeded as pending.
+    // The failing generation and its durable publication marker commit with
+    // the run; downstream nodes remain pending.
     const runNodesInsertCalls = txInsertMock.mock.calls.filter((args) => args[0] === runNodesTable)
     expect(runNodesInsertCalls).toHaveLength(1)
     expect(runNodesInsertCalls[0][1]).toHaveLength(2)
-    const nodeIds = (runNodesInsertCalls[0][1] as Array<{ nodeId: string }>).map((row) => row.nodeId).sort()
+    const rows = runNodesInsertCalls[0][1] as Array<{
+      nodeId: string
+      status: string
+      attempts: number
+      queuePublicationRepairAfter: Date | null
+      queuePublicationGeneration: number
+    }>
+    const nodeIds = rows.map((row) => row.nodeId).sort()
     expect(nodeIds).toEqual(['fetch', 'finish'])
+    expect(rows.find((row) => row.nodeId === 'fetch')).toMatchObject({
+      status: 'queued',
+      attempts: 1,
+      queuePublicationRepairAfter: expect.any(Date),
+      queuePublicationGeneration: 1,
+    })
+    expect(rows.find((row) => row.nodeId === 'finish')).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      queuePublicationRepairAfter: null,
+      queuePublicationGeneration: 0,
+    })
 
-    // The failing node specifically is queued, then enqueued.
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'fetch')
+    // The failing node specifically is published from its atomic DB claim.
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1)
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
       nodeId: 'fetch',
       attempt: 1,
     })
+    expect(markQueuePublicationSucceededMock).toHaveBeenCalledWith(result.runId, 'fetch', 1, 1)
 
     // Sandbox start event so the timeline distinguishes it from production runs.
     const eventInsertCalls = txInsertMock.mock.calls.filter((args) => args[0] === runEventsTable)
@@ -193,6 +283,25 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
     expect((runsInsertCall![1] as { inputJson: { workflow: unknown; failingNodeId: string } }).inputJson).toEqual({
       workflow: baseWorkflow,
       failingNodeId: 'fetch',
+    })
+  })
+
+  it('attests an explicit Recovery Playbook use in the validation run and start event', async () => {
+    await adapter.replayDeadLetterAsValidation({
+      orgId: 'org-1',
+      originalRunId: 'orig-run',
+      suggestedWorkflow: baseWorkflow,
+      failingNode,
+      recoveryPlaybookId: 'playbook-1',
+    })
+
+    const runsInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runsTable)
+    expect(runsInsertCall?.[1]).toMatchObject({
+      inputJson: { workflow: baseWorkflow, failingNodeId: 'fetch', recoveryPlaybookId: 'playbook-1' },
+    })
+    const eventInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runEventsTable)
+    expect(eventInsertCall?.[1]).toMatchObject({
+      payload: expect.objectContaining({ recoveryPlaybookId: 'playbook-1' }),
     })
   })
 
@@ -249,7 +358,78 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
       stateJson: { output: { url: 'https://api.example/customer/123' } },
       errorJson: null,
     })
-    expect(failedNode).toMatchObject({ status: 'pending', stateJson: {}, errorJson: null })
+    expect(failedNode).toMatchObject({
+      status: 'queued',
+      stateJson: {},
+      errorJson: null,
+      attempts: 1,
+      queuePublicationRepairAfter: expect.any(Date),
+      queuePublicationGeneration: 1,
+    })
     expect(downstream).toMatchObject({ status: 'pending', stateJson: {}, errorJson: null })
+  })
+
+  it('skips non-terminal ancestors and unrelated roots outside the validation path', async () => {
+    const workflow = {
+      dslVersion: '1.0' as const,
+      nodes: [
+        { id: 'trigger', type: 'webhook' as const, config: {} },
+        { id: 'repair_target', type: 'noop' as const, config: {} },
+        { id: 'downstream', type: 'noop' as const, config: {} },
+        { id: 'unrelated_root', type: 'noop' as const, config: {} },
+      ],
+      edges: [
+        { from: 'trigger', to: 'repair_target' },
+        { from: 'repair_target', to: 'downstream' },
+      ],
+    }
+    const target = workflow.nodes[1]!
+    originalRunNodeRowsRef.current = [
+      {
+        nodeId: 'trigger',
+        status: 'waiting',
+        stateJson: { waiting: { kind: 'webhook' } },
+        attempts: 1,
+        startedAt: new Date('2026-01-01T00:00:00.000Z'),
+        finishedAt: null,
+        errorJson: null,
+      },
+      {
+        nodeId: 'repair_target',
+        status: 'failed',
+        stateJson: {},
+        attempts: 1,
+        startedAt: new Date('2026-01-01T00:00:01.000Z'),
+        finishedAt: new Date('2026-01-01T00:00:02.000Z'),
+        errorJson: { message: 'repair me' },
+      },
+    ]
+
+    await adapter.replayDeadLetterAsValidation({
+      orgId: 'org-1',
+      originalRunId: 'orig-run',
+      suggestedWorkflow: workflow,
+      failingNode: target,
+    })
+
+    const runNodesInsertCall = txInsertMock.mock.calls.find((args) => args[0] === runNodesTable)
+    const rows = runNodesInsertCall?.[1] as Array<{
+      nodeId: string
+      status: string
+      stateJson: unknown
+      finishedAt: Date | null
+    }>
+    expect(rows.find((row) => row.nodeId === 'trigger')).toMatchObject({
+      status: 'skipped',
+      stateJson: { skipped: { reason: 'outside_validation_path', failingNodeId: 'repair_target' } },
+      finishedAt: expect.any(Date),
+    })
+    expect(rows.find((row) => row.nodeId === 'unrelated_root')).toMatchObject({
+      status: 'skipped',
+      stateJson: { skipped: { reason: 'outside_validation_path', failingNodeId: 'repair_target' } },
+      finishedAt: expect.any(Date),
+    })
+    expect(rows.find((row) => row.nodeId === 'repair_target')).toMatchObject({ status: 'queued' })
+    expect(rows.find((row) => row.nodeId === 'downstream')).toMatchObject({ status: 'pending' })
   })
 })

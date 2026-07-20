@@ -19,6 +19,8 @@
  *   `memory.consent.revoked` audit; `cancelPendingMemoryPurge`
  *   awaited before the `memory.consent.granted` audit so the
  *   `pendingPurgeCancelled` boolean rides the audit metadata.
+ * - `apps/api/src/routes/memory-routes.ts` —
+ *   `getMemoryPurgeStatus` powers the read-only consent transparency surface.
  * - `packages/engine/src/worker.ts` —
  *   `handleMemoryBulkPurgeTrigger` dispatched from the `Worker`
  *   constructor on `job.name === MEMORY_BULK_PURGE_JOB_NAME`. NO boot
@@ -42,7 +44,7 @@
  *   re-granted consent inside the 7-day window but the cancel call
  *   somehow failed. Cancellation is an optimization; safety lives in
  *   the handler.
- * - Deterministic per-org `jobId` means concurrent worker replicas
+ * - Deterministic, hashed per-org `jobId` means concurrent worker replicas
  *   booting at the same time + rapid revoke-grant-revoke cycles all
  *   converge on a single in-flight purge per org. The `schedule`
  *   helper removes any existing job FIRST before adding the new one
@@ -53,6 +55,7 @@ import {
   getOrgConfigSnapshot,
   purgeMemoryForOrg,
 } from "@janusly/data";
+import { createHash } from "node:crypto";
 
 import { workflowQueue } from "./queue";
 
@@ -66,13 +69,59 @@ export const DEFAULT_MEMORY_PURGE_DELAY_MS = 7 * 24 * 60 * 60 * 1000;
 export const MEMORY_PURGE_QUEUE_TIMEOUT_MS = 5_000;
 
 /**
- * Build the deterministic BullMQ job id for a given org. The shape is
- * `memory-purge:<orgId>` — colon-delimited like the per-tenant
- * `schedule:<orgId>:...` ids, distinct prefix because this is a
- * one-shot delayed job, not a recurring scheduler entry.
+ * Build the deterministic BullMQ job id for a given org. BullMQ rejects `:`
+ * in custom one-shot job ids, and provider-issued org ids may contain other
+ * reserved characters, so the tenant identity is represented by a bounded
+ * SHA-256 digest. Scheduler ids use a different BullMQ API and keep their
+ * existing colon-delimited format.
  */
 export function buildMemoryPurgeJobId(orgId: string): string {
-  return `memory-purge:${orgId}`;
+  const digest = createHash("sha256").update(orgId).digest("hex");
+  return `memory-purge-${digest}`;
+}
+
+export type MemoryPurgeStatus =
+  | { status: "none"; scheduledFor: null }
+  | { status: "scheduled"; scheduledFor: string }
+  | { status: "running"; scheduledFor: string | null }
+  | { status: "unknown"; scheduledFor: null };
+
+/**
+ * Inspect the deterministic per-org purge job without exposing BullMQ or
+ * Redis details to callers. Queue failures and unrecognised states degrade to
+ * `unknown`; a transparency read must never leak infrastructure errors.
+ */
+export async function getMemoryPurgeStatus(input: {
+  orgId: string;
+}): Promise<MemoryPurgeStatus> {
+  const jobId = buildMemoryPurgeJobId(input.orgId);
+  try {
+    const job = await withQueueTimeout(
+      workflowQueue.getJob(jobId),
+      "memory purge get status job",
+    );
+    if (!job) return { status: "none", scheduledFor: null };
+
+    const state = await withQueueTimeout(job.getState(), "memory purge get job state");
+    const scheduledAtMs = Number(job.timestamp) + Number(job.delay);
+    const scheduledFor = Number.isFinite(scheduledAtMs)
+      ? new Date(scheduledAtMs).toISOString()
+      : null;
+
+    if (state === "active") return { status: "running", scheduledFor };
+    if (state === "delayed" || state === "waiting" || state === "waiting-children") {
+      return scheduledFor
+        ? { status: "scheduled", scheduledFor }
+        : { status: "unknown", scheduledFor: null };
+    }
+    if (state === "completed" || state === "failed") {
+      return { status: "none", scheduledFor: null };
+    }
+    return { status: "unknown", scheduledFor: null };
+  } catch (err) {
+    console.warn("[memory-purge] status read failed", { orgId: input.orgId, jobId, err });
+    return { status: "unknown", scheduledFor: null };
+  }
 }
 
 /**
@@ -117,7 +166,7 @@ function withQueueTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
 
 /**
  * Schedule a delayed bulk-purge job for the org. Idempotent via the
- * deterministic `memory-purge:<orgId>` job id — concurrent worker
+ * deterministic, BullMQ-safe per-org job id — concurrent worker
  * replicas booting at the same time re-schedule the same id, and
  * rapid revoke-grant-revoke cycles converge on the most recent
  * schedule.

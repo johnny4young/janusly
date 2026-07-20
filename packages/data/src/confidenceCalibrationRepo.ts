@@ -31,7 +31,7 @@
  *   silently drop out of the fit rather than skewing it toward 0.
  */
 
-import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { db, confidenceCalibrations, orgConfigs, recoveryFeedback } from "@janusly/db";
 
 /** Default rolling window for the calibration fit — matches the 30-day convention used across the recovery surfaces. */
@@ -151,7 +151,11 @@ export async function listCalibrations(orgId: string): Promise<StoredCalibration
       lastComputedAt: confidenceCalibrations.lastComputedAt,
     })
     .from(confidenceCalibrations)
-    .where(eq(confidenceCalibrations.orgId, orgId));
+    .where(eq(confidenceCalibrations.orgId, orgId))
+    // The patch route indexes this array, while the Recovery Center renders
+    // it directly. Keep the visible approach rows stable across database
+    // plans and refreshes instead of relying on heap order.
+    .orderBy(asc(confidenceCalibrations.approachLabel));
 }
 
 /**

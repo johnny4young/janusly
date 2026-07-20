@@ -2,7 +2,7 @@
  * OpenTelemetry Resource shared by the tracer and meter providers.
  *
  * Carries `service.name="janusly"`, `service.namespace="janusly"`, and an
- * env-derived `service.instance.id` so multi-instance Jaeger/Prometheus
+ * env-derived `service.instance.id` so multi-instance OTLP/Prometheus
  * dashboards can disambiguate every Janusly process. The Resource is set
  * once on `NodeTracerProvider` (`./otel.ts`) and `MeterProvider`
  * (`./prometheus.ts`); both signals carry the same triple.
@@ -29,7 +29,7 @@ import {
 } from "@opentelemetry/semantic-conventions";
 
 /**
- * Resolve a stable per-process identifier so multi-instance Jaeger and
+ * Resolve a stable per-process identifier so multi-instance OTLP and
  * Prometheus dashboards can disambiguate two Janusly workers writing to the
  * same backend. Order of precedence:
  *  1. `OTEL_SERVICE_INSTANCE_ID` (operator override; e.g. a Kubernetes pod

@@ -54,6 +54,7 @@ function makeChain(rows: unknown[]) {
     from: () => chain,
     where: () => chain,
     limit: () => Promise.resolve(rows),
+    // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(rows).then(resolve),
   };
   return chain;

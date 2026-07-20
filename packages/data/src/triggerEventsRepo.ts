@@ -26,7 +26,7 @@
  *   does not fire.
  */
 
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
 import { db, triggerEvents, workflowVersions } from "@janusly/db";
 import {
   isTriggerNodeType,
@@ -136,6 +136,64 @@ export async function markTriggerEventSkipped(orgId: string, id: string, reason:
     .update(triggerEvents)
     .set({ status: "skipped", skippedReason: reason.slice(0, 512) })
     .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
+}
+
+/**
+ * Park a trigger-event row as `buffered`: its workflow was paused when the
+ * event arrived, so no run was spawned and the payload is owed one on resume.
+ * Distinct from `skipped` (deliberately discarded) — backfill reads exactly
+ * this status. Org-scoped.
+ */
+export async function markTriggerEventBuffered(orgId: string, id: string, reason: string): Promise<void> {
+  await db
+    .update(triggerEvents)
+    .set({ status: "buffered", skippedReason: reason.slice(0, 512) })
+    .where(and(eq(triggerEvents.orgId, orgId), eq(triggerEvents.id, id)));
+}
+
+/**
+ * Oldest-first page of the events a workflow buffered while paused — the
+ * backfill window. Oldest-first because the payloads are a causal sequence:
+ * replaying "order updated" before "order created" inverts the story the
+ * upstream system actually told.
+ *
+ * `limit` bounds the window: a long pause can buffer more than one resume
+ * should replay in a single breath, and the caller paces what it gets.
+ */
+export async function listBufferedTriggerEvents(
+  orgId: string,
+  workflowId: string,
+  limit: number,
+): Promise<Array<{ id: string; workflowVersionId: string; nodeId: string; triggerType: string }>> {
+  if (limit <= 0) return [];
+  return db
+    .select({
+      id: triggerEvents.id,
+      workflowVersionId: triggerEvents.workflowVersionId,
+      nodeId: triggerEvents.nodeId,
+      triggerType: triggerEvents.triggerType,
+    })
+    .from(triggerEvents)
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.workflowId, workflowId),
+      eq(triggerEvents.status, "buffered"),
+    ))
+    .orderBy(asc(triggerEvents.createdAt))
+    .limit(limit);
+}
+
+/** How many events a workflow has buffered. Drives the operator-facing count. */
+export async function countBufferedTriggerEvents(orgId: string, workflowId: string): Promise<number> {
+  const rows = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(triggerEvents)
+    .where(and(
+      eq(triggerEvents.orgId, orgId),
+      eq(triggerEvents.workflowId, workflowId),
+      eq(triggerEvents.status, "buffered"),
+    ));
+  return rows[0]?.count ?? 0;
 }
 
 /** Flip a trigger-event row to `failed` with a human-readable reason. Org-scoped. */

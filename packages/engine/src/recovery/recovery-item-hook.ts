@@ -11,18 +11,18 @@
  *    at BOTH api and worker boot. Honours
  *    `org_configs.recovery.autoCreateItems` (default `true`). Idempotent
  *    on `(orgId, deadLetterId)` so cluster-apply fan-out is safe.
- *  - `autoResolveRecoveryItemFromReplay` — called from
- *    `/dlq/replay` and `/dlq/resolve` and the `/dlq/cluster-apply` loop
- *    after the DLQ row is marked replayed / resolved.
+ *  - `resolveRecoveryItemForDismiss` — closes an incident only when the
+ *    operator explicitly accepts the loss. Replay-driven closure now happens
+ *    atomically in `recordRecoveryImpactTx` after terminal node success.
  *
- * Both helpers NEVER throw. Audit writes go inline via
- * `db.insert(auditLogs)` + the shared `safePersistPayload` chokepoint
- * (same posture as `packages/engine/src/alerts/dispatcher.ts`), because
- * the api-side `audit()` helper isn't importable from engine.
+ * Both helpers NEVER throw. Audit writes go through the shared
+ * `recordSystemAudit` chokepoint in `@janusly/data` (redaction + cap +
+ * never-throw in one place), because the api-side `audit()` helper isn't
+ * importable from engine.
  */
 
-import { auditLogs, db } from "@janusly/db";
 import {
+  recordSystemAudit,
   getOrgConfigSnapshot,
   createRecoveryItem,
   getRecoveryItemByDeadLetterId,
@@ -33,9 +33,7 @@ import {
   attachDeadLetterToRecoveryItem,
 } from "@janusly/data";
 
-import { safePersistPayload } from "../safe-persist";
 
-const AUDIT_METADATA_MAX_BYTES = 64_000;
 
 /**
  * Debounce window clamp. A configured value of 0 disables debounce
@@ -46,8 +44,8 @@ const AUDIT_METADATA_MAX_BYTES = 64_000;
 const DEBOUNCE_MIN_SECONDS = 30;
 const DEBOUNCE_MAX_SECONDS = 3_600;
 
-/** Inline audit writer. Mirrors `apps/api/src/audit.ts` byte-for-byte. */
-async function writeAuditRow(input: {
+/** Audit via the shared data-layer chokepoint; the actor is the triggering user. */
+function writeAuditRow(input: {
   orgId: string;
   userId: string;
   action: string;
@@ -55,20 +53,8 @@ async function writeAuditRow(input: {
   targetId: string;
   metadata: Record<string, unknown>;
 }): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: input.orgId,
-      userId: input.userId,
-      action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      metadata: safePersistPayload(input.metadata, { maxBytes: AUDIT_METADATA_MAX_BYTES }),
-    });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("[recovery-item-hook] audit write failed", { action: input.action, err });
-  }
+  const { userId, ...rest } = input;
+  return recordSystemAudit({ ...rest, actor: userId, logTag: "[recovery-item-hook]" });
 }
 
 /** The two per-org recovery toggles this hook consults, read in one snapshot fetch. */
@@ -211,24 +197,22 @@ export async function createRecoveryItemForDeadLetter(
   }
 }
 
-export type AutoResolveRecoveryItemFromReplayInput = {
+export type ResolveRecoveryItemForDismissInput = {
   orgId: string;
   deadLetterId: string;
   actor: string;
-  resolutionReason?: "sandbox_replay_succeeded" | "accepted_loss";
-  via?: string;
+  via: string;
 };
 
-/** Closes the recovery_item linked to a replayed DLQ row. Safe to call when no item exists. */
-export async function autoResolveRecoveryItemFromReplay(
-  input: AutoResolveRecoveryItemFromReplayInput,
+/** Records an explicit accepted-loss dismissal. Safe when no item exists. */
+export async function resolveRecoveryItemForDismiss(
+  input: ResolveRecoveryItemForDismissInput,
 ): Promise<void> {
   try {
     const item = await getRecoveryItemByDeadLetterId(input.orgId, input.deadLetterId);
     if (!item) return;
     if (item.status === "resolved") return;
-    const resolutionReason = input.resolutionReason ?? "sandbox_replay_succeeded";
-    const via = input.via ?? "dlq_replay";
+    const resolutionReason = "accepted_loss";
     const result = await resolveRecoveryItem(input.orgId, item.id, {
       actor: input.actor,
       reason: resolutionReason,
@@ -244,12 +228,12 @@ export async function autoResolveRecoveryItemFromReplay(
         before: { status: result.before.status, resolutionReason: result.before.resolutionReason },
         after: { status: result.after.status, resolutionReason: result.after.resolutionReason },
         resolutionReason,
-        via,
+        via: input.via,
       },
     });
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("[recovery-item-hook] autoResolveRecoveryItemFromReplay failed", {
+    console.warn("[recovery-item-hook] resolveRecoveryItemForDismiss failed", {
       orgId: input.orgId,
       deadLetterId: input.deadLetterId,
       err,

@@ -179,7 +179,7 @@ export const productionBudgetChecker: BudgetChecker = async (input) => {
   const limit = resolved.monthlyUsdLimit;
   const overLimit = monthlyUsdSpent >= limit;
   const warningThresholdCrossed = monthlyUsdSpent >= (limit * resolved.warningPercent) / 100;
-  const allowed = overLimit && resolved.policy === "block" ? false : true;
+  const allowed = !(overLimit && resolved.policy === "block");
 
   return {
     allowed,

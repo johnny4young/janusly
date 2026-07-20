@@ -34,9 +34,11 @@
  */
 
 import { evaluateExpression } from "../expression";
+import { materializeWaitingCheckpointMetadata } from "../waiting-time";
 import { logNodeEvent } from "../observability/logger";
 import { workflowEvent } from "./events";
 import { shouldRetry, computeRetryDelay } from "./retry-policy";
+import { decideTransient, isTransientTierEnabled, transientAttemptFromCounters } from "./transient-tier";
 import {
   getRoutingStats,
   updateRoutingStats,
@@ -97,31 +99,25 @@ export class WorkflowRuntime {
   ) {}
 
   async executeQueuedNode(input: ExecuteQueuedNodeInput): Promise<void> {
-    const { runId, node } = input;
+    const { runId, node, recoveryClaimToken } = input;
     const attempt = input.attempt ?? 1;
+    const publicationGeneration = input.publicationGeneration ?? 0;
     const start = Date.now();
 
-    // Pre-execution cancellation guard: a run that has already reached a
-    // terminal status (cancelled / failed) must NOT have its queued jobs
-    // executed. Without this, a worker pulling a job from the BullMQ queue
-    // for a cancelled run would re-flip the cancelled node back to running
-    // and execute its body — defeating the cancellation.
-    const preStatus = await this.store.getRunStatus(runId);
-    if (preStatus === "cancelled" || preStatus === "failed") {
-      await this.store.appendEvent(workflowEvent({
-        runId, nodeId: node.id,
-        type: "node.skipped",
-        payload: { reason: `Run ${preStatus}`, attempt },
-      }));
-      return;
-    }
-
-    // Atomic `queued → running` claim. Defends against the race window
-    // between the run-status read above and this UPDATE: if cancellation
-    // lands in between, the conditional WHERE clause won't match the
-    // now-cancelled row, the claim fails, and we emit a skip event.
-    const claimed = await this.store.markNodeRunning(runId, node.id, attempt);
-    if (!claimed) {
+    // The production store serializes this queued-generation claim with the
+    // run row. A failed-run consumer durably restores the exact generation
+    // to `pending`; a concurrent subworkflow reattachment that reopens first
+    // lets this same job proceed. This removes the stale status-read window.
+    const executionClaim = await this.store.claimNodeForExecution(
+      runId,
+      node.id,
+      attempt,
+      recoveryClaimToken,
+      publicationGeneration,
+    );
+    if (executionClaim !== "claimed") {
+      if (executionClaim !== "not_claimed") return;
+      if (recoveryClaimToken) return;
       await this.store.appendEvent(workflowEvent({
         runId, nodeId: node.id,
         type: "node.skipped",
@@ -132,13 +128,14 @@ export class WorkflowRuntime {
     await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.running", payload: { attempt } }));
 
     let metadata: RunMetadata | null = null;
+    let writeSideExecuted = false;
     try {
       // Stable per-run metadata loaded once after the claim wins. Used by
       // the router branch (org-scoped routing-stats writes + RL bandit input
       // to `decide`) and the improvement-evaluation branch
       // (workflow-version-scoped improvement ledger). Loaded post-claim so a
       // cancellation landing while a job sits queued doesn't burn an extra
-      // DB round-trip — `markNodeRunning` already short-circuits when the
+      // DB round-trip — `claimNodeForExecution` already short-circuits when the
       // row has advanced past `queued`. Returns `null` if the run row was
       // deleted between scheduling and execution; metadata-dependent
       // branches no-op gracefully and the executor still runs so node-status
@@ -182,7 +179,42 @@ export class WorkflowRuntime {
 
           await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "decision.made", payload: decision }));
           logNodeEvent({ runId, nodeId: node.id, type: "decision.made", attempt });
-          await this.store.markNodeSucceeded(runId, node.id, { decision });
+          const completed = await this.store.markNodeSucceeded(
+            runId,
+            node.id,
+            { decision },
+            recoveryClaimToken,
+          );
+          if (!completed) return;
+
+          // ROUTE the decision: mark every non-chosen candidate that is a
+          // direct successor of this router as skipped BEFORE the readiness
+          // scan. Without this, `enqueueReadyNodes` queues every outgoing
+          // edge and the decision is decorative — both paths execute,
+          // doubling cost and side effects.
+          // Mirrors the condition-edge skip exactly: readiness treats
+          // "skipped" as satisfied, so a join fed by the losing branch
+          // still unblocks. Guards: only candidates still `pending` in the
+          // context snapshot (a mis-wired candidate that already ran keeps
+          // its state — validation rejects that shape on new saves via
+          // `router_candidate_not_successor`).
+          const chosen = decision.chosenNodeId;
+          if (chosen) {
+            const successorIds = new Set(
+              input.workflow.edges.filter((edge) => edge.from === node.id).map((edge) => edge.to),
+            );
+            const statusById = context as Record<string, { status?: string } | undefined>;
+            for (const candidate of candidates) {
+              if (candidate.nodeId === chosen) continue;
+              if (!successorIds.has(candidate.nodeId)) continue;
+              if (statusById[candidate.nodeId]?.status !== "pending") continue;
+              const reason = `Router ${node.id} chose ${chosen}`;
+              await this.store.markNodeSkipped(runId, candidate.nodeId, { reason });
+              await this.store.appendEvent(workflowEvent({ runId, nodeId: candidate.nodeId, type: "node.skipped", payload: { reason } }));
+              logNodeEvent({ runId, nodeId: candidate.nodeId, type: "node.skipped" });
+            }
+          }
+
           // Re-check run status before scheduling downstream work — a
           // cancellation that lands while this node was running shouldn't
           // re-queue work for the operator who just cancelled.
@@ -193,12 +225,23 @@ export class WorkflowRuntime {
         }
       }
 
-      const result = await this.executors.execute({ runId, node, context, attempt });
+      const result = await this.executors.execute({ runId, node, context, attempt, recoveryClaimToken });
+      writeSideExecuted = result?.status !== "waiting" && result?.writeSideExecuted === true;
       const durationMs = Date.now() - start;
 
       if (result?.status === "waiting") {
-        await this.store.markNodeWaiting(runId, node.id, result.metadata);
-        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: result }));
+        if (result.checkpointPersisted) {
+          logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
+          return;
+        }
+        const checkpointAt = new Date();
+        const metadata = {
+          ...materializeWaitingCheckpointMetadata(result.metadata, checkpointAt.getTime()),
+          waitingSince: checkpointAt.toISOString(),
+        };
+        const waiting = await this.store.markNodeWaiting(runId, node.id, metadata, recoveryClaimToken);
+        if (!waiting) return;
+        await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.waiting", payload: { ...result, metadata } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.waiting", attempt, durationMs });
         return;
       }
@@ -207,17 +250,19 @@ export class WorkflowRuntime {
       // not the loose context bag. The repo's own `if (!orgId) return`
       // guard remains as defence in depth, but on a healthy run the
       // metadata helper above hands it a structured value every time.
-      // Independent writes (different tables, no ordering contract between
-      // them) run concurrently — the completion path is a chain of
-      // sequential DB round-trips and this is the one safely parallel pair.
       // The `succeeded` node transition + its `node.succeeded` event commit
       // together in one transaction (`markNodeSucceededWithEvent`), so the
       // event never repeats the (potentially 1 MB) output the node row
       // already stores.
-      await Promise.all([
-        updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true }),
-        this.store.markNodeSucceededWithEvent(runId, node.id, result?.output ?? {}, attempt),
-      ]);
+      const completed = await this.store.markNodeSucceededWithEvent(
+        runId,
+        node.id,
+        result?.output ?? {},
+        attempt,
+        recoveryClaimToken,
+      );
+      if (!completed) return;
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: 1, success: true });
       logNodeEvent({ runId, nodeId: node.id, type: "node.succeeded", attempt, durationMs });
 
       await this.evaluateImprovement(runId, context, metadata);
@@ -231,44 +276,145 @@ export class WorkflowRuntime {
       await this.enqueueReadyNodes(input);
     } catch (err: any) {
       const durationMs = Date.now() - start;
-      const context = await this.store.getRunContext(runId).catch(() => ({}));
-      const error: SerializedError = { message: err.message, name: err.name, code: err.code, statusCode: err.statusCode };
-
-      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
+      const error: SerializedError = {
+        message: err.message,
+        name: err.name,
+        code: err.code,
+        statusCode: err.statusCode,
+        details: err.details,
+      };
+      if (writeSideExecuted) error.writeSide = true;
+      // Carry the write-side-timeout flag into error_json / the DLQ so a
+      // blind replay of a possibly-committed side effect can be gated.
+      if (err?.writeSide === true) error.writeSide = true;
 
       const retryPolicy = node.config?.retry as RetryPolicy | undefined;
       const maxAttempts = retryPolicy?.maxAttempts ?? 1;
 
-      if (attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
+      // A timed-out or partially failed write-side execution may already have
+      // committed effects. Never retry it as a whole node: replay requires an
+      // operator decision rather than risking duplicate external writes.
+      if (error.writeSide !== true && attempt < maxAttempts && shouldRetry(error, retryPolicy)) {
         const nextAttempt = attempt + 1;
         const delayMs = computeRetryDelay(nextAttempt, retryPolicy);
         const retryRunStatus = await this.store.getRunStatus(runId);
         if (retryRunStatus === "cancelled" || retryRunStatus === "failed") return;
 
-        await this.store.markNodeQueued(runId, node.id, nextAttempt);
+        const queued = await this.store.markNodeQueued(
+          runId,
+          node.id,
+          nextAttempt,
+          recoveryClaimToken,
+          delayMs,
+        );
+        if (!queued) return;
+        await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
         await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.retry", payload: { attempt: nextAttempt, delayMs, error } }));
         logNodeEvent({ runId, nodeId: node.id, type: "node.retry", attempt: nextAttempt, durationMs, error });
 
-        await this.queue.enqueueNode({ runId, nodeId: node.id, delayMs, attempt: nextAttempt });
+        await this.queue.enqueueNode({
+          runId,
+          nodeId: node.id,
+          delayMs,
+          attempt: queued.attempt,
+          publicationGeneration: queued.publicationGeneration,
+          ...(queued.recoveryClaimToken
+            ? { recoveryClaimToken: queued.recoveryClaimToken }
+            : {}),
+        });
+        await this.store.markQueuePublicationSucceeded(
+          runId,
+          node.id,
+          queued.attempt,
+          queued.publicationGeneration,
+          queued.recoveryClaimToken ?? undefined,
+        );
         return;
       }
 
-      if (this.queue.enqueueDeadLetter) {
-        await this.queue.enqueueDeadLetter({
+      // Transient fast path: a 429 / dropped connection / gateway
+      // timeout that already burned the node's own retries gets one more
+      // deterministic, zero-LLM ladder before the DLQ — so the operator is
+      // paged for the interesting failures, not the ones that heal. The
+      // decision is pure (`decideTransient`); write-side errors and spent
+      // ladders fall straight through to `persistTerminalFailure` below.
+      const transientDecision = decideTransient({
+        error,
+        transientAttempt: transientAttemptFromCounters(attempt, maxAttempts),
+        enabled: isTransientTierEnabled(),
+      });
+      if (transientDecision.kind === "transient_retry") {
+        const transientRunStatus = await this.store.getRunStatus(runId);
+        if (transientRunStatus === "cancelled" || transientRunStatus === "failed") return;
+
+        // Same claim → publish → mark machinery as the ordinary retry above:
+        // the attempt counter carries the ladder position, so a crash resumes
+        // at the right rung and a lost claim means another worker owns it.
+        const queued = await this.store.markNodeQueued(
           runId,
-          orgId: metadata?.orgId ?? "default",
-          workflowId: metadata?.workflowId ?? input.workflow.id ?? null,
-          workflow: input.workflow,
-          node,
-          attempt,
+          node.id,
+          attempt + 1,
+          recoveryClaimToken,
+          transientDecision.delayMs,
+        );
+        if (!queued) return;
+
+        await this.store.appendEvent(workflowEvent({
+          runId,
+          nodeId: node.id,
+          type: "node.transient_retry",
+          payload: {
+            attempt: queued.attempt,
+            delayMs: transientDecision.delayMs,
+            transientClass: transientDecision.transientClass,
+            transientAttempt: transientDecision.transientAttempt,
+            ladderLength: transientDecision.ladderLength,
+            error,
+          },
+        }));
+        logNodeEvent({
+          runId,
+          nodeId: node.id,
+          type: "node.transient_retry",
+          attempt: queued.attempt,
+          durationMs,
           error,
         });
+
+        await this.queue.enqueueNode({
+          runId,
+          nodeId: node.id,
+          delayMs: transientDecision.delayMs,
+          attempt: queued.attempt,
+          publicationGeneration: queued.publicationGeneration,
+          ...(queued.recoveryClaimToken
+            ? { recoveryClaimToken: queued.recoveryClaimToken }
+            : {}),
+        });
+        await this.store.markQueuePublicationSucceeded(
+          runId,
+          node.id,
+          queued.attempt,
+          queued.publicationGeneration,
+          queued.recoveryClaimToken ?? undefined,
+        );
+        return;
       }
 
-      await this.store.markNodeFailed(runId, node.id, error);
-      await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.failed", payload: { error, attempt } }));
+      const failed = await this.queue.persistTerminalFailure({
+        runId,
+        orgId: metadata?.orgId ?? "default",
+        workflowId: metadata?.workflowId ?? input.workflow.id ?? null,
+        workflow: input.workflow,
+        node,
+        attempt,
+        error,
+        recoveryClaimToken,
+      });
+      if (!failed) return;
+
+      await updateRoutingStats({ orgId: metadata?.orgId, nodeId: node.id, reward: -1, success: false });
       logNodeEvent({ runId, nodeId: node.id, type: "node.failed", attempt, durationMs, error });
-      await this.store.updateRunStatusFromNodes(runId);
       throw err;
     }
   }
@@ -372,7 +518,11 @@ export class WorkflowRuntime {
 
       if (!ready || currentStatus !== "pending") continue;
 
-      let shouldRun = false;
+      // Roots have no incoming edges and are unconditionally runnable. This
+      // matters when the durable publication reconciler restores a consumed
+      // root generation to `pending`: routing it through the ordinary DAG
+      // scan must republish the root, not reinterpret it as a condition miss.
+      let shouldRun = incomingEdges.length === 0;
       for (const edge of incomingEdges) {
         if (!edge.condition) { shouldRun = true; break; }
         const result = evaluateExpression(edge.condition, { context, inputs: {} });
@@ -390,9 +540,22 @@ export class WorkflowRuntime {
       const claimed = await this.store.tryClaimNodeForQueue(runId, node.id, 1);
       if (!claimed) continue;
       statuses.set(node.id, "queued");
-      await this.queue.enqueueNode({ runId, nodeId: node.id, attempt: 1 });
+      await this.queue.enqueueNode({
+        runId,
+        nodeId: node.id,
+        attempt: claimed.attempt,
+        publicationGeneration: claimed.publicationGeneration,
+        ...(claimed.recoveryClaimToken ? { recoveryClaimToken: claimed.recoveryClaimToken } : {}),
+      });
+      await this.store.markQueuePublicationSucceeded(
+        runId,
+        node.id,
+        claimed.attempt,
+        claimed.publicationGeneration,
+        claimed.recoveryClaimToken ?? undefined,
+      );
       await this.store.appendEvent(workflowEvent({ runId, nodeId: node.id, type: "node.queued" }));
-      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: 1 });
+      logNodeEvent({ runId, nodeId: node.id, type: "node.queued", attempt: claimed.attempt });
       queued++;
     }
 

@@ -22,6 +22,8 @@
  * - `runs`, `run_nodes`, `run_events` — execution history (timeline events
  *   are paginated by `(run_id, created_at)`).
  * - `dead_letters` — DLQ rows; replayed via `POST /dlq/replay`.
+ * - `recovery_impact_events`, `recovery_impact_rollups` — terminally verified
+ *   recovery value and its constant-time tenant lifetime projection.
  * - `routing_stats`, `workflow_improvements` — RL counters and
  *   improvement-engine bookkeeping.
  * - `usage_events` — billing telemetry (LLM calls and write-side tool usage).
@@ -40,7 +42,7 @@
  */
 
 import { sql } from "drizzle-orm";
-import { pgTable, text, jsonb, timestamp, integer, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, integer, bigint, real, boolean, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
@@ -177,14 +179,17 @@ export const runs = pgTable(
      * reached `succeeded` yet (failed/cancelled runs never populate this).
      */
     outputJson: jsonb("output_json"),
-    /**
-     * Subworkflow linkage. Non-null = this run was spawned by a `subworkflow`
-     * node in a parent run. Used by `notifyParentOnTerminal` to flip the
-     * parent's subworkflow node when the child reaches a terminal status.
-     */
+    /** Parent execution/provenance link; interpret it through `parentLinkKind`. */
     parentRunId: text("parent_run_id"),
-    /** Node id within the parent that spawned this child run. Pairs with `parentRunId`. */
+    /** Parent node for an invocation or replay fork; whole-run replay lineage may leave it NULL. */
     parentNodeId: text("parent_node_id"),
+    /**
+     * Meaning of the parent link: `subworkflow` is an executable invocation;
+     * `replay` is trace-only lineage. NULL for top-level and legacy rows.
+     */
+    parentLinkKind: text("parent_link_kind").$type<"subworkflow" | "replay">(),
+    /** Durable lease/outbox marker for terminal child→parent delivery. */
+    parentNotificationAfter: timestamp("parent_notification_after", { withTimezone: true }),
     /**
      * OTel trace id shared across a subworkflow chain. Inherited from the
      * parent on `subworkflow` calls; generated lazily when the chain starts.
@@ -202,12 +207,19 @@ export const runs = pgTable(
      * `writeSide`) when set.
      */
     replayMode: text("replay_mode"),
+    /** Atomic per-run idempotency claim for Recovery Playbook validation accounting. */
+    recoveryPlaybookValidationRecordedAt: timestamp("recovery_playbook_validation_recorded_at", { withTimezone: true }),
+    /** Atomic per-run idempotency claim for Recovery Playbook production-use accounting. */
+    recoveryPlaybookAppliedRecordedAt: timestamp("recovery_playbook_applied_recorded_at", { withTimezone: true }),
     createdBy: text("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
     index("runs_org_created_idx").on(table.orgId, table.createdAt.desc()),
     index("runs_parent_idx").on(table.parentRunId),
+    index("runs_parent_notification_idx")
+      .on(table.parentNotificationAfter, table.id)
+      .where(sql`"parent_notification_after" IS NOT NULL`),
     index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
   ],
 );
@@ -220,9 +232,29 @@ export const runNodes = pgTable(
     nodeId: text("node_id").notNull(),
     status: text("status").notNull(),
     stateJson: jsonb("state_json"),
+    /** Durable lease for the bounded-wait Redis repair sweep. */
+    waitingRepairAfter: timestamp("waiting_repair_after", { withTimezone: true }),
+    /**
+     * Durable Postgres→BullMQ publication outbox/lease. Non-null means the
+     * exact queued generation still needs publication confirmation (or a
+     * failed-run guard consumed its job and restored it to `pending`).
+     */
+    queuePublicationRepairAfter: timestamp("queue_publication_repair_after", { withTimezone: true }),
+    /** Rotates only when a new physical BullMQ delivery is required. */
+    queuePublicationGeneration: integer("queue_publication_generation").notNull().default(0),
     attempts: integer("attempts").default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
+    /** DLQ replay claim carried until this node reaches terminal success. */
+    recoveryDeadLetterId: text("recovery_dead_letter_id"),
+    /** Operator/system actor that initiated `recoveryDeadLetterId`. */
+    recoveryRequestedBy: text("recovery_requested_by"),
+    /** Per-replay generation carried by the BullMQ job and CAS-checked on completion. */
+    recoveryClaimToken: text("recovery_claim_token"),
+    /** Active Recovery Playbook explicitly chosen for this replay generation. */
+    recoveryPlaybookId: text("recovery_playbook_id"),
+    /** Fresh sandbox run that attested `recoveryPlaybookId` before production replay. */
+    recoveryValidationRunId: text("recovery_validation_run_id"),
     errorJson: jsonb("error_json"),
   },
   (table) => [
@@ -234,6 +266,23 @@ export const runNodes = pgTable(
     index("run_nodes_running_started_idx")
       .on(table.startedAt)
       .where(sql`"status" = 'running'`),
+    // Backs the once-per-minute bounded-wait reconciler. Unclaimed rows sort
+    // first so a leased poison batch cannot starve later checkpoints; the
+    // target expression covers mutually exclusive approval/timer timestamps.
+    index("run_nodes_waiting_target_idx")
+      .on(
+        table.waitingRepairAfter.asc().nullsFirst(),
+        sql`(COALESCE("state_json" #>> '{waiting,deadlineAt}', "state_json" #>> '{waiting,wakeAt}'))`,
+        table.runId,
+        table.nodeId,
+      )
+      .where(sql`"status" = 'waiting'`),
+    // Backs the once-per-minute Postgres→BullMQ publication reconciler.
+    // Healthy rows clear the marker immediately after Queue.add succeeds, so
+    // the partial index contains only crash/failure recovery work.
+    index("run_nodes_queue_publication_repair_idx")
+      .on(table.queuePublicationRepairAfter, table.runId, table.nodeId)
+      .where(sql`"queue_publication_repair_after" IS NOT NULL AND "status" IN ('pending', 'queued')`),
   ],
 );
 
@@ -266,6 +315,10 @@ export const deadLetters = pgTable(
     nodeJson: jsonb("node_json").notNull(),
     errorJson: jsonb("error_json").notNull(),
     status: text("status").notNull().default("open"),
+    /** Replay generation persisted before the BullMQ job becomes visible. */
+    replayClaimToken: text("replay_claim_token"),
+    /** Causal replay boundary; unlike replayedAt, this lands before enqueue. */
+    replayClaimedAt: timestamp("replay_claimed_at", { withTimezone: true }),
     replayedAt: timestamp("replayed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
@@ -276,8 +329,51 @@ export const deadLetters = pgTable(
     // above, Postgres can't produce keyset-ordered output and re-sorts the
     // org's entire DLQ per page.
     index("dead_letters_org_created_idx").on(table.orgId, table.createdAt.desc(), table.id.desc()),
+    index("dead_letters_org_replay_claimed_idx").on(table.orgId, table.replayClaimedAt.desc()),
+    index("dead_letters_org_run_node_created_idx").on(
+      table.orgId,
+      table.runId,
+      table.nodeId,
+      table.createdAt,
+    ),
   ],
 );
+
+/**
+ * One immutable fact per DLQ replay that reached terminal node success.
+ * `deadLetterId` is the idempotency key: worker retries cannot double-count a
+ * recovery. No FK is intentional — recovery evidence remains inspectable
+ * after orphan-tolerant parent retention, matching the rest of the DLQ model.
+ */
+export const recoveryImpactEvents = pgTable(
+  "recovery_impact_events",
+  {
+    deadLetterId: text("dead_letter_id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    runId: text("run_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    userId: text("user_id"),
+    recoveredAt: timestamp("recovered_at", { withTimezone: true }).notNull(),
+    downtimeEndedMs: bigint("downtime_ended_ms", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("recovery_impact_events_org_recovered_idx").on(table.orgId, table.recoveredAt.desc()),
+    index("recovery_impact_events_org_user_recovered_idx").on(table.orgId, table.userId, table.recoveredAt.desc()),
+  ],
+);
+
+/**
+ * Constant-time lifetime projection derived atomically from
+ * `recovery_impact_events`. One row per tenant; intentionally no FK so org
+ * deletion retains the same operational history posture as other tables.
+ */
+export const recoveryImpactRollups = pgTable("recovery_impact_rollups", {
+  orgId: text("org_id").primaryKey(),
+  totalRecovered: integer("total_recovered").notNull().default(0),
+  downtimeEndedMs: bigint("downtime_ended_ms", { mode: "number" }).notNull().default(0),
+  firstRecoveredAt: timestamp("first_recovered_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const routingStats = pgTable(
   "routing_stats",
@@ -330,10 +426,10 @@ export const usageEvents = pgTable(
   },
   (table) => [
     index("usage_events_org_metric_idx").on(table.orgId, table.metric),
-    // Composite for the billing + value-dashboard hot paths that
-    // filter (orgId, metric='llm.completion', createdAt >= since)
-    // LIMIT N. Without the createdAt column in the index, the plan
-    // degrades to scan-then-sort once the table crosses ~100k rows.
+    // Composite for the billing + value-dashboard hot paths that filter
+    // (orgId, metric='llm.completion', createdAt >= since). Without the
+    // createdAt column, the rolling-window scan degrades once the table
+    // crosses ~100k rows.
     // The generated migration must use CREATE INDEX CONCURRENTLY (hand-
     // patched — drizzle's index() builder emits the blocking variant).
     index("usage_events_org_metric_created_idx").on(
@@ -341,6 +437,11 @@ export const usageEvents = pgTable(
       table.metric,
       table.createdAt.desc(),
     ),
+    // Bounded per-run diagnostics scan. Partial because route-level AI calls
+    // without a run id remain valid usage rows but can never satisfy this read.
+    index("usage_events_org_run_created_idx")
+      .on(table.orgId, table.runId, table.createdAt.desc(), table.id.desc())
+      .where(sql`${table.runId} IS NOT NULL`),
   ],
 );
 
@@ -524,6 +625,84 @@ export const recoveryFeedback = pgTable(
     index("recovery_feedback_org_workflow_idx").on(table.orgId, table.workflowId, table.createdAt.desc()),
     // Direct DLQ-row scoping for per-row audits.
     index("recovery_feedback_org_dlq_idx").on(table.orgId, table.deadLetterId),
+  ],
+);
+
+/**
+ * Durable freshness projection for the recovery-feedback loop.
+ *
+ * `recovery_feedback` is retention-managed, but the operator needs to know
+ * when a workflow/approach stopped receiving accepted fixes even after the
+ * source rows have expired. This compact one-row-per-approach projection is
+ * updated atomically with every feedback decision and intentionally remains
+ * orphan-tolerant like the rest of Janusly's recovery records.
+ */
+export const recoveryFeedbackHealth = pgTable(
+  "recovery_feedback_health",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id").notNull(),
+    approachLabel: text("approach_label").notNull(),
+    /** Most recent accept OR reject decision for this approach. */
+    feedbackLastSeen: timestamp("feedback_last_seen", { withTimezone: true }).notNull().defaultNow(),
+    /** Most recent accepted fix; null when all recorded decisions were rejected. */
+    acceptedFixLastSeen: timestamp("accepted_fix_last_seen", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("recovery_feedback_health_org_workflow_approach_idx").on(
+      table.orgId,
+      table.workflowId,
+      table.approachLabel,
+    ),
+    index("recovery_feedback_health_org_workflow_idx").on(table.orgId, table.workflowId),
+  ],
+);
+
+/**
+ * Versioned operator-owned recovery procedures promoted from a proven fix.
+ *
+ * Playbooks intentionally remain orphan-tolerant: workflow versions and
+ * workflows may be retention-purged while the audit record of what operators
+ * trusted remains inspectable. Runtime use re-checks that the source workflow
+ * and version are still active before returning an executable snapshot.
+ */
+export const recoveryPlaybooks = pgTable(
+  "recovery_playbooks",
+  {
+    id: text("id").primaryKey(),
+    orgId: text("org_id").notNull(),
+    workflowId: text("workflow_id"),
+    signature: text("signature").notNull(),
+    version: integer("version").notNull(),
+    status: text("status").notNull().default("draft"),
+    title: text("title").notNull(),
+    instructionsMarkdown: text("instructions_markdown").notNull(),
+    evidenceRequirementsJson: jsonb("evidence_requirements_json").notNull(),
+    sourceWorkflowVersionId: text("source_workflow_version_id").notNull(),
+    approachLabel: text("approach_label").notNull().default("other"),
+    successfulUses: integer("successful_uses").notNull().default(0),
+    regressions: integer("regressions").notNull().default(0),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    /** Idempotency marker for terminal sandbox outcomes. */
+    lastValidationRunId: text("last_validation_run_id"),
+    /** Idempotency marker for production applies after a passed sandbox. */
+    lastAppliedValidationRunId: text("last_applied_validation_run_id"),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("recovery_playbooks_org_signature_version_idx").on(table.orgId, table.signature, table.version),
+    uniqueIndex("recovery_playbooks_org_source_version_idx").on(table.orgId, table.sourceWorkflowVersionId),
+    uniqueIndex("recovery_playbooks_one_active_match_idx")
+      .on(table.orgId, table.workflowId, table.signature)
+      .where(sql`"status" = 'active'`),
+    index("recovery_playbooks_org_signature_status_idx").on(table.orgId, table.signature, table.status),
+    index("recovery_playbooks_org_workflow_idx").on(table.orgId, table.workflowId),
   ],
 );
 
@@ -1352,9 +1531,9 @@ export const alertDispatches = pgTable(
  * `createRecoveryItem` idempotent so cluster-apply fan-out can call it N
  * times safely.
  *
- * Closure path: either `/dlq/replay` succeeds (auto-close with
- * `resolutionReason: sandbox_replay_succeeded`) or the operator explicitly
- * resolves with a closed-enum reason. Comments live in jsonb as
+ * Closure path: either a generation-matched replay reaches terminal node
+ * success (auto-close with `resolutionReason: sandbox_replay_succeeded`) or
+ * the operator explicitly resolves with a closed-enum reason. Comments live in jsonb as
  * `Array<{ id, authorUserId, body, createdAt }>` and are append-only via
  * the repo helper (cap 200).
  */
@@ -1372,6 +1551,10 @@ export const recoveryItems = pgTable(
     resolutionReason: text("resolution_reason"),
     resolvedBy: text("resolved_by"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // Set once on the first meaningful recovery action. This is intentionally
+    // independent from `updatedAt`, which also moves for passive occurrence
+    // grouping and would overstate operator reaction time.
+    firstActionAt: timestamp("first_action_at", { withTimezone: true }),
     comments: jsonb("comments").notNull().default([]),
     // Debounce / failure-storm grouping. The normalized error signature is
     // the match key (alongside orgId + workflowId) for collapsing repeated
@@ -1393,6 +1576,12 @@ export const recoveryItems = pgTable(
       table.slaTargetAt,
     ),
     index("recovery_items_org_owner_idx").on(table.orgId, table.owner),
+    index("recovery_items_org_created_idx").on(table.orgId, table.createdAt),
+    index("recovery_items_org_signature_first_idx").on(
+      table.orgId,
+      table.errorSignature,
+      table.firstOccurredAt,
+    ),
     // Backs the debounce lookup: find a recent open item with the same
     // (orgId, workflowId, errorSignature) to attach a new occurrence to.
     index("recovery_items_org_wf_sig_idx").on(
@@ -1441,6 +1630,10 @@ export const recoveryItemChildren = pgTable(
     index("recovery_item_children_item_occurred_idx").on(
       table.recoveryItemId,
       table.occurredAt.desc(),
+    ),
+    index("recovery_item_children_org_dlq_idx").on(
+      table.orgId,
+      table.deadLetterId,
     ),
   ],
 );
@@ -1509,8 +1702,9 @@ export const recoveryItemHandoffs = pgTable(
  * subsystem consults when a row is created from a DLQ entry or reassigned.
  *
  * Multi-tenant scope on every read via `eq(workflowMetadata.orgId, orgId)`.
- * Operator-supplied content (runbookMarkdown, description) flows through
- * the safe Markdown subset before display.
+ * Operator-supplied content (runbookMarkdown, aiGuidanceMarkdown,
+ * description) flows through the safe Markdown subset before display or is
+ * scrubbed + DATA-framed before reaching an AI prompt.
  */
 export const workflowMetadata = pgTable(
   "workflow_metadata",
@@ -1522,6 +1716,8 @@ export const workflowMetadata = pgTable(
     owners: jsonb("owners").$type<string[]>().notNull().default([]),
     /** Operator-supplied free-form Markdown (closed subset; 32 KiB cap enforced at write). */
     runbookMarkdown: text("runbook_markdown"),
+    /** Bounded operator preferences for AI generation/recovery; never a secret or system-policy store. */
+    aiGuidanceMarkdown: text("ai_guidance_markdown"),
     /** Short human-readable description. */
     description: text("description"),
     /** Operator-chosen labels (closed bounded array). */
@@ -1895,6 +2091,10 @@ export const triggerEvents = pgTable(
     index("trigger_events_org_created_idx").on(table.orgId, table.createdAt.desc()),
     // Per-trigger-node lookup (replay history for one node).
     index("trigger_events_org_node_idx").on(table.orgId, table.workflowVersionId, table.nodeId),
+    // Buffered-window reads: the resume backfill lists + counts a workflow's
+    // `buffered` rows oldest-first. Without this the scan rides the
+    // (org, createdAt) index and pays for the whole event history.
+    index("trigger_events_org_workflow_status_idx").on(table.orgId, table.workflowId, table.status, table.createdAt),
   ],
 );
 

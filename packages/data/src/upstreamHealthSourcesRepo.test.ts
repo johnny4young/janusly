@@ -48,6 +48,7 @@ function makeSelectChain() {
       whereSpy(predicate);
       return {
         orderBy: () => Promise.resolve(selectRows),
+        // oxlint-disable-next-line unicorn/no-thenable -- Drizzle query builders are intentionally thenable.
         then: (resolve: (v: unknown[]) => unknown) => Promise.resolve(selectRows).then(resolve),
       };
     },

@@ -40,6 +40,7 @@ import {
   buildMemoryPurgeJobId,
   cancelPendingMemoryPurge,
   DEFAULT_MEMORY_PURGE_DELAY_MS,
+  getMemoryPurgeStatus,
   handleMemoryBulkPurgeTrigger,
   MEMORY_BULK_PURGE_JOB_NAME,
   MEMORY_PURGE_QUEUE_TIMEOUT_MS,
@@ -68,6 +69,16 @@ beforeEach(() => {
   purgeMemoryForOrgMock.mockResolvedValue({ entriesPurged: 0, kindsAffected: [] });
 });
 
+describe("buildMemoryPurgeJobId", () => {
+  it("builds a bounded deterministic custom id without BullMQ-reserved colons", () => {
+    const first = buildMemoryPurgeJobId("provider:org/with unsafe characters");
+    expect(first).toBe(buildMemoryPurgeJobId("provider:org/with unsafe characters"));
+    expect(first).not.toContain(":");
+    expect(first).toMatch(/^memory-purge-[a-f0-9]{64}$/);
+    expect(first).not.toBe(buildMemoryPurgeJobId("another-org"));
+  });
+});
+
 describe("schedulePendingMemoryPurge", () => {
   it("schedules with the default 7-day delay when env is empty", async () => {
     await expect(
@@ -79,7 +90,7 @@ describe("schedulePendingMemoryPurge", () => {
       { orgId: "org-1" },
       expect.objectContaining({
         delay: DEFAULT_MEMORY_PURGE_DELAY_MS,
-        jobId: "memory-purge:org-1",
+        jobId: buildMemoryPurgeJobId("org-1"),
         attempts: 1,
       }),
     );
@@ -211,6 +222,54 @@ describe("cancelPendingMemoryPurge", () => {
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("getMemoryPurgeStatus", () => {
+  it("returns the scheduled timestamp for a delayed purge", async () => {
+    getJobMock.mockResolvedValueOnce({
+      timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+      delay: 5_000,
+      getState: vi.fn().mockResolvedValue("delayed"),
+    } as never);
+
+    await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toEqual({
+      status: "scheduled",
+      scheduledFor: "2026-01-01T00:00:05.000Z",
+    });
+  });
+
+  it("distinguishes an active purge from completed and absent jobs", async () => {
+    getJobMock
+      .mockResolvedValueOnce({
+        timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+        delay: 5_000,
+        getState: vi.fn().mockResolvedValue("active"),
+      } as never)
+      .mockResolvedValueOnce({
+        timestamp: Date.now(),
+        delay: 0,
+        getState: vi.fn().mockResolvedValue("completed"),
+      } as never)
+      .mockResolvedValueOnce(null as never);
+
+    await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toMatchObject({ status: "running" });
+    await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toEqual({ status: "none", scheduledFor: null });
+    await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toEqual({ status: "none", scheduledFor: null });
+  });
+
+  it("degrades to unknown when Redis state cannot be read", async () => {
+    getJobMock.mockRejectedValueOnce(new Error("redis down"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(getMemoryPurgeStatus({ orgId: "org-1" })).resolves.toEqual({
+        status: "unknown",
+        scheduledFor: null,
+      });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });

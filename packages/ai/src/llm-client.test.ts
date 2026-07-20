@@ -449,6 +449,86 @@ describe("usage recorder fires on success and failure", () => {
     expect(record.aiError).toBeUndefined();
   });
 
+  it("records provider-neutral prompt-cache token details when present", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: {
+        inputTokens: 120,
+        outputTokens: 20,
+        inputTokenDetails: {
+          noCacheTokens: 20,
+          cacheReadTokens: 80,
+          cacheWriteTokens: 20,
+        },
+      },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({
+      JANUSLY_LLM_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+
+    await createLlmClient(cfg).generateText({
+      prompt: "hi",
+      context: { orgId: "org-1" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder).toHaveBeenCalledTimes(1);
+    expect(recorder.mock.calls[0][0]).toMatchObject({
+      cachedInputTokens: 80,
+      cacheCreationInputTokens: 20,
+    });
+  });
+
+  it("falls back to Anthropic metadata and ignores malformed cache counts", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: { inputTokens: 100, outputTokens: 10 },
+      providerMetadata: {
+        anthropic: {
+          cacheCreationInputTokens: 14,
+          usage: { cache_read_input_tokens: 61 },
+        },
+      },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({
+      JANUSLY_LLM_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+
+    await createLlmClient(cfg).generateText({ prompt: "hi", context: { orgId: "org-1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(recorder.mock.calls[0][0]).toMatchObject({
+      cachedInputTokens: 61,
+      cacheCreationInputTokens: 14,
+    });
+
+    generateTextMock.mockResolvedValueOnce({
+      text: "ok",
+      finishReason: "stop",
+      usage: {
+        inputTokens: 1,
+        outputTokens: 1,
+        inputTokenDetails: { cacheReadTokens: -1, cacheWriteTokens: 1.5 },
+      },
+      providerMetadata: { anthropic: { usage: { cache_read_input_tokens: "many" } } },
+    });
+    await createLlmClient(cfg).generateText({ prompt: "hi", context: { orgId: "org-1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    const malformedRecord = recorder.mock.calls[1][0] as UsageRecord;
+    expect(malformedRecord.cachedInputTokens).toBeUndefined();
+    expect(malformedRecord.cacheCreationInputTokens).toBeUndefined();
+  });
+
   it("calls the recorder once on the failure path with mode='fallback' + aiError", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("rate limit"));
     const recorder = vi.fn();
@@ -604,6 +684,37 @@ describe("generateObject (schema-aware generation)", () => {
     expect(result.model).toBe("gpt-4o-mini");
     expect(typeof result.latencyMs).toBe("number");
     expect(result.costUsd).toBeCloseTo((50 * 0.15 + 25 * 0.6) / 1e6, 9);
+  });
+
+  it("records cache token details for structured output calls", async () => {
+    generateTextMock.mockResolvedValueOnce({
+      experimental_output: { id: "wf-cache" },
+      finishReason: "stop",
+      usage: {
+        inputTokens: 90,
+        outputTokens: 10,
+        inputTokenDetails: { cacheReadTokens: 70, cacheWriteTokens: 5 },
+      },
+    });
+    const recorder = vi.fn();
+    setUsageRecorder(recorder);
+    const cfg = resolveLlmConfig({
+      JANUSLY_LLM_PROVIDER: "anthropic",
+      ANTHROPIC_API_KEY: "sk-ant-x",
+    } as NodeJS.ProcessEnv)!;
+
+    await createLlmClient(cfg).generateObject({
+      prompt: "hi",
+      schema: mockSchema,
+      context: { orgId: "org-1" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(recorder.mock.calls[0][0]).toMatchObject({
+      cachedInputTokens: 70,
+      cacheCreationInputTokens: 5,
+    });
   });
 
   it("falls back to result.output when result.experimental_output is absent", async () => {

@@ -14,12 +14,13 @@
 
 import {
   appendEvent,
+  claimNodeForExecution,
   getRunContext,
   getRunMetadata,
   getRunStatus,
-  markNodeFailed,
-  markNodeQueued,
-  markNodeRunning,
+  markExecutingNodeFailed,
+  markExecutingNodeQueued,
+  markQueuePublicationSucceeded,
   markNodeSkipped,
   markNodeSucceeded,
   markNodeSucceededWithEvent,
@@ -48,40 +49,62 @@ export class PostgresExecutionStore implements ExecutionStore {
     return getNodeStatus(runId, nodeId) as Promise<NodeStatus>;
   }
 
-  markNodeQueued(runId: string, nodeId: string, attempt?: number) {
-    return markNodeQueued(runId, nodeId, attempt);
+  markNodeQueued(runId: string, nodeId: string, attempt?: number, recoveryClaimToken?: string, delayMs?: number) {
+    return markExecutingNodeQueued(runId, nodeId, attempt, recoveryClaimToken, delayMs);
   }
 
   tryClaimNodeForQueue(runId: string, nodeId: string, attempt?: number) {
     return tryClaimNodeForQueue(runId, nodeId, attempt);
   }
 
-  markNodeRunning(runId: string, nodeId: string, attempt?: number): Promise<boolean> {
-    return markNodeRunning(runId, nodeId, attempt);
+  claimNodeForExecution(
+    runId: string,
+    nodeId: string,
+    attempt?: number,
+    recoveryClaimToken?: string,
+    publicationGeneration?: number,
+  ) {
+    return claimNodeForExecution(runId, nodeId, attempt, recoveryClaimToken, publicationGeneration);
   }
 
-  markNodeSucceeded(runId: string, nodeId: string, output: unknown) {
-    return markNodeSucceeded(runId, nodeId, output);
+  markQueuePublicationSucceeded(
+    runId: string,
+    nodeId: string,
+    attempt: number,
+    publicationGeneration: number,
+    recoveryClaimToken?: string,
+  ) {
+    return markQueuePublicationSucceeded(
+      runId,
+      nodeId,
+      attempt,
+      publicationGeneration,
+      recoveryClaimToken,
+    );
   }
 
-  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number) {
-    return markNodeSucceededWithEvent(runId, nodeId, output, attempt);
+  markNodeSucceeded(runId: string, nodeId: string, output: unknown, recoveryClaimToken?: string) {
+    return markNodeSucceeded(runId, nodeId, output, recoveryClaimToken);
   }
 
-  markNodeFailed(runId: string, nodeId: string, error: SerializedError) {
-    return markNodeFailed(runId, nodeId, error);
+  markNodeSucceededWithEvent(runId: string, nodeId: string, output: unknown, attempt: number, recoveryClaimToken?: string) {
+    return markNodeSucceededWithEvent(runId, nodeId, output, attempt, recoveryClaimToken);
   }
 
-  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown) {
-    return markNodeWaiting(runId, nodeId, metadata);
+  markNodeFailed(runId: string, nodeId: string, error: SerializedError, recoveryClaimToken?: string) {
+    return markExecutingNodeFailed(runId, nodeId, error, recoveryClaimToken);
+  }
+
+  markNodeWaiting(runId: string, nodeId: string, metadata?: unknown, recoveryClaimToken?: string) {
+    return markNodeWaiting(runId, nodeId, metadata, recoveryClaimToken);
   }
 
   markNodeSkipped(runId: string, nodeId: string, metadata?: unknown) {
     return markNodeSkipped(runId, nodeId, metadata);
   }
 
-  appendEvent(event: WorkflowEvent) {
-    return appendEvent(event.runId, event.nodeId ?? null, event.type, event.payload ?? {});
+  async appendEvent(event: WorkflowEvent): Promise<void> {
+    await appendEvent(event.runId, event.nodeId ?? null, event.type, event.payload ?? {});
   }
 
   async updateRunStatusFromNodes(runId: string): Promise<void> {

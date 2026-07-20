@@ -33,16 +33,18 @@
 
 import type { Workflow, WorkflowEdge, WorkflowNode } from "@janusly/shared";
 import { SENSITIVE_KEY_PATTERN } from "./safe-persist";
+import { isToolInvocationWriteSide } from "./tool-execution";
 
 /** Per-issue severity. `fail` blocks production-mode runs; `warn` is informational. */
 export type ReadinessSeverity = "warn" | "fail";
 
-/** One readiness finding. `code` is the stable key the web matches on for localisation; `nodeId` set when locatable. */
+/** One readiness finding. `code` is the stable key the web matches on for localisation; entity ids are set when locatable. */
 export type ReadinessIssue = {
   code: string;
   severity: ReadinessSeverity;
   message: string;
   nodeId?: string;
+  edgeId?: string;
   /** Optional human-readable hint surfaced next to the issue in the badge expansion. */
   suggestion?: string;
 };
@@ -213,6 +215,9 @@ export function isSensitiveAction(node: WorkflowNode): boolean {
     if (typeof tool !== "string") return false;
     if (SENSITIVE_TOOL_NAMES.has(tool)) return true;
     return SENSITIVE_TOOL_SUFFIXES.some((suffix) => tool.endsWith(suffix));
+  }
+  if (node.type === "loop" && node.config.mode === "for_each") {
+    return isToolInvocationWriteSide(node.config.tool, node.config.input);
   }
   // External MCP tool invocations are treated as write-side by default.
   // The workflow JSON only carries (connectionAlias, toolName); the

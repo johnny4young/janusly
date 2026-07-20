@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   appendEventMock,
   enqueueNodeMock,
-  markNodeQueuedMock,
   runEventsTable,
   runNodesTable,
   runsTable,
@@ -12,7 +11,6 @@ const {
 } = vi.hoisted(() => ({
   appendEventMock: vi.fn().mockResolvedValue(undefined),
   enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
-  markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
   runEventsTable: { name: 'runEvents' },
   runNodesTable: { name: 'runNodes' },
   runsTable: { name: 'runs' },
@@ -41,7 +39,7 @@ vi.mock('../queue', () => ({
 }))
 
 vi.mock('../persistence', () => ({
-  markNodeQueued: markNodeQueuedMock,
+  markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
   appendEvent: appendEventMock,
 }))
 
@@ -80,12 +78,11 @@ const forkWorkflow = {
 beforeEach(() => {
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
-  markNodeQueuedMock.mockReset()
   appendEventMock.mockReset()
 })
 
 describe('replayRunAsValidation', () => {
-  it('creates a sandbox run with replayMode="validation" and seeds every node as pending', async () => {
+  it('creates a sandbox run with roots durably queued and downstream nodes pending', async () => {
     const result = await replayRunAsValidation({
       orgId: 'org-1',
       sourceRunId: 'src-run',
@@ -110,12 +107,30 @@ describe('replayRunAsValidation', () => {
 
     const nodesInsert = txInsertMock.mock.calls.find((args) => args[0] === runNodesTable)
     expect(nodesInsert).toBeDefined()
-    const rows = nodesInsert![1] as Array<{ nodeId: string; status: string; stateJson: unknown }>
+    const rows = nodesInsert![1] as Array<{
+      nodeId: string
+      status: string
+      stateJson: unknown
+      attempts: number
+      queuePublicationRepairAfter: Date | null
+      queuePublicationGeneration: number
+    }>
     expect(rows).toHaveLength(3)
-    for (const row of rows) {
-      expect(row.status).toBe('pending')
-      expect(row.stateJson).toEqual({})
+    expect(rows.find((row) => row.nodeId === 'fetch')).toMatchObject({
+      status: 'queued',
+      attempts: 1,
+      queuePublicationRepairAfter: expect.any(Date),
+      queuePublicationGeneration: 1,
+    })
+    for (const row of rows.filter((candidate) => candidate.nodeId !== 'fetch')) {
+      expect(row).toMatchObject({
+        status: 'pending',
+        attempts: 0,
+        queuePublicationRepairAfter: null,
+        queuePublicationGeneration: 0,
+      })
     }
+    expect(rows.every((row) => JSON.stringify(row.stateJson) === '{}')).toBe(true)
   })
 
   it('emits a run.started.replay-lab event with sourceRunId + hasPatch', async () => {
@@ -185,8 +200,6 @@ describe('replayRunAsValidation', () => {
       workflow: linearWorkflow,
     })
 
-    expect(markNodeQueuedMock).toHaveBeenCalledTimes(1)
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'fetch')
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1)
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
@@ -197,14 +210,18 @@ describe('replayRunAsValidation', () => {
   })
 
   it('enqueues every root when the DAG has multiple entry points (fan-in to join)', async () => {
-    const result = await replayRunAsValidation({
+    await replayRunAsValidation({
       orgId: 'org-1',
       sourceRunId: 'src-run',
       workflow: forkWorkflow,
     })
 
-    expect(markNodeQueuedMock).toHaveBeenCalledTimes(2)
-    const queuedNodeIds = markNodeQueuedMock.mock.calls.map((call) => call[1]).sort()
+    const nodesInsert = txInsertMock.mock.calls.find((args) => args[0] === runNodesTable)
+    expect(nodesInsert).toBeDefined()
+    const queuedNodeIds = (nodesInsert![1] as Array<{ nodeId: string; status: string }>)
+      .filter((row) => row.status === 'queued')
+      .map((row) => row.nodeId)
+      .sort()
     expect(queuedNodeIds).toEqual(['root_a', 'root_b'])
     expect(enqueueNodeMock).toHaveBeenCalledTimes(2)
     const enqueuedNodeIds = enqueueNodeMock.mock.calls
@@ -224,7 +241,6 @@ describe('replayRunAsValidation', () => {
 
     const nodesInsert = txInsertMock.mock.calls.find((args) => args[0] === runNodesTable)
     expect(nodesInsert).toBeUndefined()
-    expect(markNodeQueuedMock).not.toHaveBeenCalled()
     expect(enqueueNodeMock).not.toHaveBeenCalled()
     expect(result.runId).toEqual(expect.any(String))
   })

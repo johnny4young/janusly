@@ -40,7 +40,11 @@ export type RecoveryMetricRationaleCode =
   | "clusters_resolved.empty"
   | "clusters_resolved.summary"
   | "sla_attainment.empty"
-  | "sla_attainment.summary";
+  | "sla_attainment.summary"
+  | "time_to_first_action.empty"
+  | "time_to_first_action.summary"
+  | "recurrence.empty"
+  | "recurrence.summary";
 
 /** Per-provider/model row inside the cost breakdown. */
 export type CostProviderRow = {
@@ -48,7 +52,21 @@ export type CostProviderRow = {
   model: string;
   usd: number;
   tokens: number;
+  /** Optional at the repo boundary so older fixtures and callers remain source-compatible. */
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheCreationInputTokens?: number;
   calls: number;
+  /** True when this row folds provider/model groups beyond the breakdown cap. */
+  aggregated?: boolean;
+};
+
+/** Cache-token efficiency across every LLM completion in the selected window. */
+export type CacheEfficiency = {
+  inputTokens: number;
+  readTokens: number;
+  creationTokens: number;
+  readSharePercent: number | null;
 };
 
 /** Run-status counts collected by the repo over the window. */
@@ -90,6 +108,20 @@ export type SlaAttainmentCounts = {
   metSla: number;
 };
 
+/** First meaningful recovery-action latency, measured in seconds. */
+export type TimeToFirstActionCounts = {
+  avgSeconds: number | null;
+  p95Seconds: number | null;
+  sampleSize: number;
+};
+
+/** Terminal recoveries evaluated for a same-signature recurrence within seven days. */
+export type RecoveryRecurrenceCounts = {
+  resolved: number;
+  recurred: number;
+  recurredSignatures: string[];
+};
+
 /** One per-day point for the MTTR trend sparkline. `day` is `YYYY-MM-DD`, `seconds` the day's avg recovery time. */
 export type MttrTrendPoint = { day: string; seconds: number };
 
@@ -106,6 +138,8 @@ export type RecoveryMetricsSignals = {
   replayOutcomes: ReplayOutcomeCounts;
   resolvedClusters: ResolvedClustersCounts;
   slaAttainment: SlaAttainmentCounts;
+  timeToFirstAction: TimeToFirstActionCounts;
+  recurrence: RecoveryRecurrenceCounts;
 };
 
 /** Single metric card payload surfaced to the UI. */
@@ -159,16 +193,23 @@ export type RecoveryMetrics = {
   p95Latency: RecoveryMetric;
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
-  costThisWindow: RecoveryMetric & { providers: CostProviderRow[] };
+  costThisWindow: RecoveryMetric & {
+    providers: Array<CostProviderRow & Required<Pick<CostProviderRow,
+      "inputTokens" | "cachedInputTokens" | "cacheCreationInputTokens"
+    >>>;
+    cache: CacheEfficiency;
+  };
   clustersResolved: RecoveryMetric & { totalEntries: number; capped: boolean };
   slaAttainment: RecoveryMetric & { resolvedInWindow: number; metSla: number };
+  timeToFirstAction: RecoveryMetric;
+  recurrenceRate: RecoveryMetric;
   valueEstimate: ValueEstimate;
   windowDays: number;
   /** Total terminal runs (succeeded + failed + cancelled) — useful as the denominator for downstream per-workflow rollups. */
   terminalRuns: number;
   /** Per-day avg recovery time (last ≤14 days, oldest-first) driving the MTTR tile's trend sparkline. `[]` when nothing replayed. */
   mttrTrend: MttrTrendPoint[];
-  /** Total automation downtime CLOSED in the window (ms) — the summed `replayedAt − createdAt` of recovered failures. A MEASURED figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
+  /** Total automation downtime closed in the window (ms), summed from terminal recovery-impact events. A measured figure (not an estimate); bounded by the MTTR sample cap like `mttr` itself. */
   downtimeEndedMs: number;
 };
 
@@ -180,6 +221,11 @@ export const LATENCY_BANDS_MS = { healthy: 5_000, warn: 30_000 } as const;
 export const APPROVALS_BANDS = { neutralMax: 5, warnAbove: 5 } as const;
 export const REPLAY_RATE_BANDS = { healthy: 90, warn: 70 } as const;
 export const SLA_ATTAINMENT_BANDS = { healthy: 90, warn: 75 } as const;
+export const TIME_TO_FIRST_ACTION_BANDS_SECONDS = {
+  healthy: 15 * 60,
+  warn: 60 * 60,
+} as const;
+export const RECURRENCE_RATE_BANDS = { healthy: 90, warn: 75 } as const;
 
 /* ----------------------------- Provider lookup --------------------------- */
 
@@ -255,6 +301,8 @@ export function composeRecoveryMetrics(
   const costThisWindow = computeCost(signals.costByProvider, windowDays);
   const clustersResolved = computeClustersResolved(signals.resolvedClusters);
   const slaAttainment = computeSlaAttainment(signals.slaAttainment);
+  const timeToFirstAction = computeTimeToFirstAction(signals.timeToFirstAction);
+  const recurrenceRate = computeRecurrenceRate(signals.recurrence);
   const valueEstimate = estimateValueSavings(
     signals.resolvedClusters.totalClusters,
     mttr.value != null ? Math.round(mttr.value / 1000) : null,
@@ -274,11 +322,72 @@ export function composeRecoveryMetrics(
     costThisWindow,
     clustersResolved,
     slaAttainment,
+    timeToFirstAction,
+    recurrenceRate,
     valueEstimate,
     windowDays,
     terminalRuns,
     mttrTrend: signals.mttrTrend ?? [],
     downtimeEndedMs: signals.mttrDurations.reduce((sum, ms) => sum + ms, 0),
+  };
+}
+
+/**
+ * Operator reaction time, independent from the later execution/replay time
+ * represented by MTTR. The numeric value is seconds to match the repo signal.
+ */
+function computeTimeToFirstAction(counts: TimeToFirstActionCounts): RecoveryMetric {
+  const { avgSeconds, p95Seconds, sampleSize } = counts;
+  if (avgSeconds == null || p95Seconds == null || sampleSize === 0) {
+    return {
+      value: null,
+      display: "—",
+      severity: "neutral",
+      rationale: "No first recovery actions recorded in this window yet.",
+      rationaleCode: "time_to_first_action.empty",
+    };
+  }
+  const severity: MetricSeverity = avgSeconds <= TIME_TO_FIRST_ACTION_BANDS_SECONDS.healthy
+    ? "healthy"
+    : avgSeconds <= TIME_TO_FIRST_ACTION_BANDS_SECONDS.warn ? "warn" : "unhealthy";
+  const avg = formatDurationMs(avgSeconds * 1000);
+  const p95 = formatDurationMs(p95Seconds * 1000);
+  return {
+    value: avgSeconds,
+    display: avg,
+    severity,
+    rationale: `First action averaged ${avg} across ${sampleSize} incident${sampleSize === 1 ? "" : "s"} · p95 ${p95}.`,
+    rationaleCode: "time_to_first_action.summary",
+    // `count` drives i18next plural selection while `sampleSize` keeps the
+    // wire metadata explicit for non-i18n SDK consumers.
+    rationaleMeta: { avg, p95, sampleSize, count: sampleSize },
+  };
+}
+
+/** Percentage of terminal recoveries with no known same-signature recurrence. */
+function computeRecurrenceRate(counts: RecoveryRecurrenceCounts): RecoveryMetric {
+  const { resolved, recurred } = counts;
+  if (resolved === 0) {
+    return {
+      value: null,
+      display: "—",
+      severity: "neutral",
+      rationale: "No terminal recoveries available for recurrence analysis yet.",
+      rationaleCode: "recurrence.empty",
+    };
+  }
+  const held = Math.max(0, resolved - recurred);
+  const rate = (held / resolved) * 100;
+  const severity: MetricSeverity = rate >= RECURRENCE_RATE_BANDS.healthy
+    ? "healthy"
+    : rate >= RECURRENCE_RATE_BANDS.warn ? "warn" : "unhealthy";
+  return {
+    value: rate,
+    display: `${rate.toFixed(1)}%`,
+    severity,
+    rationale: `${held} of ${resolved} terminal recoveries have not re-failed with the same signature within seven days.`,
+    rationaleCode: "recurrence.summary",
+    rationaleMeta: { held, resolved, recurred },
   };
 }
 
@@ -494,11 +603,26 @@ function computeReplayRate(replay: ReplayOutcomeCounts): RecoveryMetric {
 function computeCost(
   rows: CostProviderRow[],
   windowDays: number,
-): RecoveryMetric & { providers: CostProviderRow[] } {
+): RecoveryMetrics["costThisWindow"] {
   const total = rows.reduce((sum, row) => sum + row.usd, 0);
   const providers = rows
-    .map((row) => ({ ...row, provider: displayProvider(row.provider) }))
+    .map((row) => ({
+      ...row,
+      provider: displayProvider(row.provider),
+      inputTokens: row.inputTokens ?? 0,
+      cachedInputTokens: row.cachedInputTokens ?? 0,
+      cacheCreationInputTokens: row.cacheCreationInputTokens ?? 0,
+    }))
     .sort((a, b) => b.usd - a.usd);
+  const cache = providers.reduce<CacheEfficiency>((summary, row) => ({
+    inputTokens: summary.inputTokens + row.inputTokens,
+    readTokens: summary.readTokens + row.cachedInputTokens,
+    creationTokens: summary.creationTokens + row.cacheCreationInputTokens,
+    readSharePercent: null,
+  }), { inputTokens: 0, readTokens: 0, creationTokens: 0, readSharePercent: null });
+  cache.readSharePercent = cache.inputTokens > 0
+    ? Math.min(100, (cache.readTokens / cache.inputTokens) * 100)
+    : null;
   return {
     value: total,
     display: `$${total.toFixed(2)}`,
@@ -507,6 +631,7 @@ function computeCost(
     rationaleCode: "cost.summary",
     rationaleMeta: { providerCount: providers.length, windowDays },
     providers,
+    cache,
   };
 }
 

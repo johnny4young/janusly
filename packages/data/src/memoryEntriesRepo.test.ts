@@ -394,6 +394,31 @@ describe("recallMemory — disabled-org rejection", () => {
     expect(generateEmbeddingMock).not.toHaveBeenCalled();
     expect(selectMock).not.toHaveBeenCalled();
   });
+
+  it("threads run and workflow scope into recall telemetry on failure", async () => {
+    const recorder = vi.fn();
+    getMemoryUsageRecorderMock.mockReturnValue(recorder);
+    isMemoryAllowedMock.mockResolvedValueOnce({
+      allowed: false,
+      reason: "tenant_disabled",
+      message: "off",
+    });
+
+    await recallMemory({
+      orgId: "default",
+      runId: "run-1",
+      workflowId: "workflow-1",
+      kind: "agent_episode",
+      query: "anything",
+    });
+
+    expect(recorder).toHaveBeenCalledWith(expect.objectContaining({
+      metric: "memory.recall",
+      runId: "run-1",
+      workflowId: "workflow-1",
+      ok: false,
+    }));
+  });
 });
 
 describe("recallMemory — embedding failure degrades to empty", () => {

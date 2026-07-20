@@ -35,7 +35,17 @@ export function classifyError(error: SerializedError): string[] {
   }
 
   const message = error.message.toLowerCase();
-  if (message.includes("timeout") || error.code === "ETIMEDOUT") labels.add("timeout");
+  // "timed out" (the wording `NodeTimeoutError` itself emits) counts too —
+  // matching only "timeout" left the executor's own timeout unlabelled, so a
+  // `retryOn: ["timeout"]` policy silently never fired for it.
+  if (
+    message.includes("timeout")
+    || message.includes("timed out")
+    || error.code === "ETIMEDOUT"
+    || error.code === "NODE_TIMEOUT"
+  ) {
+    labels.add("timeout");
+  }
   if (message.includes("network") || error.code === "ECONNRESET" || error.code === "ENOTFOUND") labels.add("network");
 
   return [...labels];

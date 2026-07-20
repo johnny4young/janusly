@@ -140,6 +140,39 @@ describe('checkWorkflowReadiness', () => {
     expect(result.issues.find((issue) => issue.code === 'sensitive_action_missing_approval' && issue.nodeId === 'read_db')).toBeUndefined()
   })
 
+  it('classifies for_each tools with the same write-side rules as ordinary tool nodes', () => {
+    const workflow = makeWorkflow({
+      nodes: [
+        { id: 'start', type: 'noop', config: {} },
+        { id: 'post_batch', type: 'loop', config: { mode: 'for_each', items: ['a'], tool: 'http.request', input: { url: 'https://api.example.com', method: 'POST' } } },
+        { id: 'read_batch', type: 'loop', config: { mode: 'for_each', items: ['a'], tool: 'http.request', input: { url: 'https://api.example.com', method: 'GET' } } },
+        { id: 'email_batch', type: 'loop', config: { mode: 'for_each', items: ['a'], tool: 'email.send', input: { to: 'user@example.com' } } },
+        { id: 'dynamic_http_batch', type: 'loop', config: { mode: 'for_each', items: [{ url: 'https://api.example.com', method: 'POST' }], tool: 'http.request', input: '{{item}}' } },
+      ],
+      edges: [
+        { from: 'start', to: 'post_batch' },
+        { from: 'start', to: 'read_batch' },
+        { from: 'start', to: 'email_batch' },
+        { from: 'start', to: 'dynamic_http_batch' },
+      ],
+    })
+    const result = checkWorkflowReadiness(workflow)
+
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'sensitive_action_missing_approval',
+      nodeId: 'post_batch',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'sensitive_action_missing_approval',
+      nodeId: 'email_batch',
+    }))
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: 'sensitive_action_missing_approval',
+      nodeId: 'dynamic_http_batch',
+    }))
+    expect(result.issues.find((issue) => issue.code === 'sensitive_action_missing_approval' && issue.nodeId === 'read_batch')).toBeUndefined()
+  })
+
   it('flags every mcp_tool node as a sensitive action (fail-safe — workflow JSON has no visibility into the descriptor writeSide flag)', () => {
     const workflow = makeWorkflow({
       nodes: [

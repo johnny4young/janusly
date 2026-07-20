@@ -38,7 +38,7 @@ describe("parseWorkflowCached", () => {
     expect(first.ok && second.ok).toBe(true);
     if (first.ok && second.ok) {
       expect(second.workflow).not.toBe(first.workflow);
-      expect((second.workflow.nodes[0]?.config as { retried?: boolean }).retried).toBe(true);
+      expect((second.workflow.nodes[0]!.config as { retried?: boolean }).retried).toBe(true);
     }
   });
 

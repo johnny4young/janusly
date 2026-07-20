@@ -38,6 +38,7 @@ import {
   recordMemoryUsage,
   recordPdfUsage,
   recordUsage,
+  getRateLimiterAdminHealth,
   setMemoryUsageRecorder,
   productionBudgetChecker,
 } from "@janusly/data";
@@ -49,12 +50,14 @@ import { setEngineRateLimiter } from "./rate-limit";
 import { setBudgetChecker } from "./budget";
 import { closeWorkerRateLimitRedis, enforceWorkerRateLimit } from "./rate-limit-redis";
 import { closeWorkerRunEventRedis, registerWorkerRunEventPublisher } from "./run-event-redis";
+import { closeWorkerCacheInvalidationSubscriber, startWorkerCacheInvalidationSubscriber } from "./cache-invalidation-redis";
 import { connection } from "./queue";
 import { WorkflowRuntime } from "./core/runtime";
 import { PostgresExecutionStore } from "./adapters/postgres-execution-store";
 import { BullMQQueueAdapter } from "./adapters/bullmq-queue-adapter";
 import { executeNode } from "./execute-node";
 import { handleWaitResume } from "./wait-until";
+import { handleApprovalDeadlineArm, handleApprovalTimeout } from "./approval-timeout";
 import { handleScheduleTrigger, replayAllScheduleEntries } from "./schedule-scheduler";
 import {
   handleMemoryRetentionTrigger,
@@ -95,10 +98,49 @@ import {
   registerStalledNodeReaperScheduler,
   STALLED_NODE_REAPER_JOB_NAME,
 } from "./stalled-node-reaper";
+import {
+  handleWaitingCheckpointReconcilerTrigger,
+  registerWaitingCheckpointReconciler,
+  WAITING_CHECKPOINT_RECONCILER_JOB_NAME,
+} from "./waiting-checkpoint-reconciler";
+import {
+  handleQueuePublicationReconcilerTrigger,
+  QUEUE_PUBLICATION_RECONCILER_JOB_NAME,
+  registerQueuePublicationReconciler,
+} from "./queue-publication-reconciler";
+import {
+  handleSubworkflowTerminalReconcilerTrigger,
+  registerSubworkflowTerminalReconciler,
+  SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME,
+} from "./subworkflow-terminal-reconciler";
 import { parseWorkflowCached } from "./workflow-parse-cache";
 import { loadRunWorkflowRaw } from "./persistence";
+import { withSpan } from "./observability/tracer";
+import { shutdownTracing } from "./observability/otel";
+import {
+  registerQueueObservables,
+  registerRateLimiterObservables,
+} from "./observability/metrics";
+import {
+  shutdownPrometheusMetrics,
+  startPrometheusMetrics,
+  WORKER_METRICS_DEFAULT_PORT,
+} from "./observability/prometheus";
+import { createWorkflowQueueCountReader } from "./observability/queue-reader";
 
 await assertMigrationsApplied();
+
+await startPrometheusMetrics({ defaultPort: WORKER_METRICS_DEFAULT_PORT, processName: "worker" });
+const queueMetricsReader = createWorkflowQueueCountReader();
+const unregisterQueueMetrics = registerQueueObservables(queueMetricsReader.getCounts);
+const unregisterRateLimiterMetrics = registerRateLimiterObservables(
+  () => getRateLimiterAdminHealth().degradedBuckets.length,
+);
+
+// Subscribe before scheduler registration or job execution can populate an
+// org-config snapshot. Redis faults degrade to the cache TTL rather than
+// blocking the worker's startup path.
+startWorkerCacheInvalidationSubscriber();
 
 // Re-register every enabled schedule entry with BullMQ BEFORE the
 // worker starts pulling jobs. Idempotent via the deterministic
@@ -199,6 +241,36 @@ try {
   console.error("[stalled-node-reaper] scheduler registration failed", err);
 }
 
+// Once-per-minute repair for persisted approval/timer checkpoints whose
+// delayed Redis job was lost or exhausted infrastructure retries. The final
+// handlers remain generation-CAS guarded, so duplicate repair is harmless.
+try {
+  const registered = await registerWaitingCheckpointReconciler();
+  if (registered) console.log("[waiting-checkpoint-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[waiting-checkpoint-reconciler] scheduler registration failed", err);
+}
+
+// Once-per-minute repair for node generations whose deterministic BullMQ job
+// was not durably acknowledged after the Postgres queue transition. Covers a
+// process crash, Redis publication failure, and failed-parent job consumption.
+try {
+  const registered = await registerQueuePublicationReconciler();
+  if (registered) console.log("[queue-publication-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[queue-publication-reconciler] scheduler registration failed", err);
+}
+
+// Once-per-minute repair for terminal child runs whose exact parent-node
+// handoff was not durably acknowledged after the child status transition.
+// Covers crashes between status commit, parent-node CAS, and DAG readiness.
+try {
+  const registered = await registerSubworkflowTerminalReconciler();
+  if (registered) console.log("[subworkflow-terminal-reconciler] sweep scheduler registered");
+} catch (err) {
+  console.error("[subworkflow-terminal-reconciler] scheduler registration failed", err);
+}
+
 // Register the usage_events writer once at boot. Every LLM call
 // from the `ai` node and `agent` planner fires it fire-and-forget.
 setUsageRecorder(recordUsage);
@@ -291,15 +363,23 @@ const runtime = new WorkflowRuntime(
   new PostgresExecutionStore(),
   new BullMQQueueAdapter(),
   {
-    execute: async ({ runId, node }) => {
-      return executeNode({ runId, node });
+    execute: async ({ runId, node, recoveryClaimToken }) => {
+      return executeNode({ runId, node, recoveryClaimToken });
     },
   }
 );
 
 type ResolvedJob =
   | { skip: true }
-  | { skip: false; runId: string; node: z.infer<typeof NodeSchema>; workflow: Workflow };
+  | {
+      skip: false;
+      runId: string;
+      node: z.infer<typeof NodeSchema>;
+      workflow: Workflow;
+      attempt: number;
+      publicationGeneration: number;
+      recoveryClaimToken?: string;
+    };
 
 /**
  * Resolve a slim `execute-node` job (`{ runId, nodeId }`) into the full
@@ -327,6 +407,28 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   if (typeof obj.nodeId !== "string" || obj.nodeId.length === 0) {
     throw new UnrecoverableError("Invalid job data: missing nodeId");
   }
+  if (
+    obj.recoveryClaimToken !== undefined
+    && (typeof obj.recoveryClaimToken !== "string" || obj.recoveryClaimToken.length === 0)
+  ) {
+    throw new UnrecoverableError("Invalid job data: invalid recoveryClaimToken");
+  }
+  if (
+    obj.publicationGeneration !== undefined
+    && (
+      typeof obj.publicationGeneration !== "number"
+      || !Number.isSafeInteger(obj.publicationGeneration)
+      || obj.publicationGeneration < 0
+    )
+  ) {
+    throw new UnrecoverableError("Invalid job data: invalid publicationGeneration");
+  }
+  const attempt = typeof obj.attempt === "number" && Number.isSafeInteger(obj.attempt) && obj.attempt > 0
+    ? obj.attempt
+    : 1;
+  const publicationGeneration = typeof obj.publicationGeneration === "number"
+    ? obj.publicationGeneration
+    : 0;
 
   const { found, workflow: rawWorkflow } = await loadRunWorkflowRaw(obj.runId);
   if (!found) {
@@ -341,7 +443,15 @@ async function resolveJobData(data: unknown): Promise<ResolvedJob> {
   if (!node) {
     throw new UnrecoverableError(`Node ${obj.nodeId} not found in workflow for run ${obj.runId}`);
   }
-  return { skip: false, runId: obj.runId, node, workflow: parsed.workflow };
+  return {
+    skip: false,
+    runId: obj.runId,
+    node,
+    workflow: parsed.workflow,
+    attempt,
+    publicationGeneration,
+    ...(typeof obj.recoveryClaimToken === "string" ? { recoveryClaimToken: obj.recoveryClaimToken } : {}),
+  };
 }
 
 export const worker = new Worker(
@@ -351,6 +461,14 @@ export const worker = new Worker(
     // shape than regular execution jobs — dispatch on `job.name` first.
     if (job.name === "wait-resume") {
       await handleWaitResume(job.data);
+      return;
+    }
+    if (job.name === "approval-timeout") {
+      await handleApprovalTimeout(job.data);
+      return;
+    }
+    if (job.name === "approval-deadline-arm") {
+      await handleApprovalDeadlineArm(job.data);
       return;
     }
     if (job.name === "schedule-trigger") {
@@ -385,6 +503,18 @@ export const worker = new Worker(
       await handleStalledNodeReaperTrigger();
       return;
     }
+    if (job.name === WAITING_CHECKPOINT_RECONCILER_JOB_NAME) {
+      await handleWaitingCheckpointReconcilerTrigger();
+      return;
+    }
+    if (job.name === QUEUE_PUBLICATION_RECONCILER_JOB_NAME) {
+      await handleQueuePublicationReconcilerTrigger();
+      return;
+    }
+    if (job.name === SUBWORKFLOW_TERMINAL_RECONCILER_JOB_NAME) {
+      await handleSubworkflowTerminalReconcilerTrigger();
+      return;
+    }
     // One-shot delayed job — scheduled on demand from the
     // `memory.consent.revoked` audit specialization in
     // `apps/api/src/routes/org-routes.ts`. No boot registration here:
@@ -396,8 +526,19 @@ export const worker = new Worker(
     }
     const resolved = await resolveJobData(job.data);
     if (resolved.skip) return;
-    const { runId, node, workflow } = resolved;
-    await runtime.executeQueuedNode({ runId, node, workflow });
+    const { runId, node, workflow, attempt, recoveryClaimToken, publicationGeneration } = resolved;
+    await withSpan(
+      "workflow.node.execute",
+      () => runtime.executeQueuedNode({
+        runId,
+        node,
+        workflow,
+        attempt,
+        publicationGeneration,
+        recoveryClaimToken,
+      }),
+      { "run.id": runId, "node.id": node.id, "node.type": node.type },
+    );
   },
   {
     connection,
@@ -412,8 +553,18 @@ async function shutdown(signal: NodeJS.Signals) {
   console.log(`[worker] received ${signal}, draining in-flight jobs…`);
   try {
     await worker.close();
+    await closeWorkerCacheInvalidationSubscriber();
     await closeWorkerRateLimitRedis();
     await closeWorkerRunEventRedis();
+    unregisterQueueMetrics();
+    unregisterRateLimiterMetrics();
+    await queueMetricsReader.close();
+    await shutdownPrometheusMetrics().catch((error) => {
+      console.warn("[otel] metrics shutdown failed; worker resources still drained", error);
+    });
+    await shutdownTracing().catch((error) => {
+      console.warn("[otel] trace shutdown failed; worker resources still drained", error);
+    });
     console.log("[worker] drained, exiting");
     process.exit(0);
   } catch (error) {

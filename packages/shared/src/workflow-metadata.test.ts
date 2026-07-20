@@ -12,6 +12,7 @@ import {
   UpsertWorkflowMetadataBodySchema,
   WORKFLOW_BULK_ASSIGN_MAX,
   WORKFLOW_METADATA_FOLDER_MAX_LENGTH,
+  WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES,
   WORKFLOW_METADATA_OWNERS_MAX,
   WORKFLOW_METADATA_RUNBOOK_MAX_BYTES,
   WORKFLOW_METADATA_TAG_MAX_LENGTH,
@@ -58,6 +59,36 @@ describe('WorkflowMetadataSchema — size caps', () => {
   it('rejects runbook over 32 KiB by UTF-8 bytes', () => {
     const huge = '€'.repeat(Math.floor(WORKFLOW_METADATA_RUNBOOK_MAX_BYTES / 3) + 1)
     expect(WorkflowMetadataSchema.safeParse({ runbookMarkdown: huge }).success).toBe(false)
+  })
+
+  it('accepts the workflow AI guidance cap and rejects one byte more', () => {
+    expect(WorkflowMetadataSchema.safeParse({
+      aiGuidanceMarkdown: 'a'.repeat(WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES),
+    }).success).toBe(true)
+    expect(WorkflowMetadataSchema.safeParse({
+      aiGuidanceMarkdown: 'a'.repeat(WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES + 1),
+    }).success).toBe(false)
+  })
+
+  it('applies the workflow AI guidance cap by UTF-8 bytes', () => {
+    const exact = 'é'.repeat(WORKFLOW_METADATA_AI_GUIDANCE_MAX_BYTES / 2)
+    expect(WorkflowMetadataSchema.safeParse({ aiGuidanceMarkdown: exact }).success).toBe(true)
+    expect(WorkflowMetadataSchema.safeParse({ aiGuidanceMarkdown: `${exact}a` }).success).toBe(false)
+  })
+
+  it('rejects secret-shaped values in workflow AI guidance', () => {
+    for (const aiGuidanceMarkdown of [
+      `Prefer this credential: sk-${'a'.repeat(20)}`,
+      `Prefer this credential: sk-proj-${'a'.repeat(24)}`,
+      'Read from postgres://user:password@db.internal/app',
+      'Read from mysql://user:password@db.internal/app',
+      'Fetch https://operator:super-secret@example.com/report',
+      '-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----',
+    ]) {
+      const result = WorkflowMetadataSchema.safeParse({ aiGuidanceMarkdown })
+      expect(result.success).toBe(false)
+      if (!result.success) expect(result.error.issues[0]?.message).toMatch(/secret-like/i)
+    }
   })
 
   it(`rejects more than ${WORKFLOW_METADATA_OWNERS_MAX} owners`, () => {

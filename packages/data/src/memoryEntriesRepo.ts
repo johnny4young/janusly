@@ -443,6 +443,10 @@ export async function commitMemory(input: CommitMemoryInput): Promise<CommitMemo
 
 export type RecallMemoryInput = {
   orgId: string;
+  /** Workflow run whose executor initiated this recall, when applicable. */
+  runId?: string;
+  /** Saved workflow whose executor initiated this recall, when applicable. */
+  workflowId?: string;
   kind?: MemoryKind;
   /**
    * Recall across several kinds in ONE call — one embedding round-trip and
@@ -477,11 +481,13 @@ export type RecallMemoryResult = { entries: MemoryRecallEntry[] };
 
 export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemoryResult> {
   const startedAt = Date.now();
+  const usageScope = { runId: input.runId, workflowId: input.workflowId };
   const consent = await isMemoryAllowed(input.orgId);
   if (!consent.allowed) {
     fireUsageRecorder({
       metric: "memory.recall",
       orgId: input.orgId,
+      ...usageScope,
       kind: input.kind,
       embeddingProvider: "",
       embeddingModel: "",
@@ -504,6 +510,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     fireUsageRecorder({
       metric: "memory.recall",
       orgId: input.orgId,
+      ...usageScope,
       kind: input.kind,
       embeddingProvider: "",
       embeddingModel: "",
@@ -538,6 +545,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     fireUsageRecorder({
       metric: "memory.recall",
       orgId: input.orgId,
+      ...usageScope,
       kind: input.kind,
       embeddingProvider: config.embeddingProvider,
       embeddingModel: config.embeddingModel,
@@ -560,6 +568,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     fireUsageRecorder({
       metric: "memory.recall",
       orgId: input.orgId,
+      ...usageScope,
       kind: input.kind,
       embeddingProvider: embedding.provider,
       embeddingModel: embedding.model,
@@ -627,6 +636,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
     fireUsageRecorder({
       metric: "memory.recall",
       orgId: input.orgId,
+      ...usageScope,
       kind: input.kind,
       embeddingProvider: embedding.provider,
       embeddingModel: embedding.model,
@@ -668,6 +678,7 @@ export async function recallMemory(input: RecallMemoryInput): Promise<RecallMemo
   fireUsageRecorder({
     metric: "memory.recall",
     orgId: input.orgId,
+    ...usageScope,
     kind: input.kind,
     embeddingProvider: embedding.provider,
     embeddingModel: embedding.model,
@@ -787,14 +798,6 @@ async function writeAudit(
   } catch (error) {
     console.warn("[memory] audit write failed", { action, error });
   }
-}
-
-async function writeEntryCreatedAudit(
-  orgId: string,
-  entryId: string,
-  metadata: Record<string, unknown>,
-): Promise<void> {
-  await writeAudit(orgId, null, "memory.entry.created", "memory_entry", entryId, metadata);
 }
 
 async function writeCommitFailedAudit(

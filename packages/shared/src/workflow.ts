@@ -35,6 +35,9 @@ import { z } from "zod";
  */
 export const workflowDslVersion = "1.0" as const;
 
+/** Highest workflow version representable by PostgreSQL's `integer` column. */
+export const workflowVersionMax = 2_147_483_647;
+
 /**
  * Closed set of node-type discriminators. Adding a new value here is a
  * one-step compile-time check across the runtime — every consumer that
@@ -84,6 +87,8 @@ export const NodeTypeSchema = z.enum(nodeTypeValues);
 export const NodeSchema = z.object({
   id: z.string().trim().min(1, "Node id is required"),
   type: NodeTypeSchema,
+  /** Optional operator-authored display name. The runtime still dispatches by `type`. */
+  label: z.string().trim().min(1).max(80).optional(),
   config: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -175,6 +180,28 @@ export type WorkflowInputSchemaShape = {
  */
 export const WorkflowOutputsSchema = z.record(z.string(), z.string());
 
+/** Editor-only coordinates persisted with the workflow, ignored by the runtime. */
+export const WorkflowPositionSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+
+/**
+ * Additive editor metadata. Keeping this separate from node execution fields
+ * lets non-visual consumers ignore it while authoring clients restore layout.
+ */
+export const WorkflowUiSchema = z.object({
+  positions: z.record(z.string().trim().min(1), WorkflowPositionSchema).optional(),
+});
+
+/**
+ * Runtime handling for a node-config template whose path cannot be resolved.
+ * `lenient` preserves the historical empty-string substitution while emitting
+ * timeline evidence; `strict` fails the node before its executor can perform a
+ * side effect. Optional on the wire so legacy snapshots remain byte-compatible.
+ */
+export const TemplatePolicySchema = z.enum(["lenient", "strict"]);
+
 /**
  * Top-level workflow definition. Persisted as JSON in
  * `workflow_versions.dag_json` and consumed by the engine.
@@ -186,8 +213,23 @@ export const WorkflowSchema = z.object({
   metadata: WorkflowJsonMetadataSchema.optional(),
   inputs: WorkflowInputSchema.optional(),
   outputs: WorkflowOutputsSchema.optional(),
+  templatePolicy: TemplatePolicySchema.optional(),
+  ui: WorkflowUiSchema.optional(),
   nodes: z.array(NodeSchema),
   edges: z.array(EdgeSchema),
+}).superRefine((workflow, context) => {
+  const positions = workflow.ui?.positions
+  if (!positions) return
+  const nodeIds = new Set(workflow.nodes.map(node => node.id))
+  for (const nodeId of Object.keys(positions)) {
+    if (!nodeIds.has(nodeId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["ui", "positions", nodeId],
+        message: "Workflow position must reference an existing node",
+      });
+    }
+  }
 });
 
 /** Discriminator type for the closed set of node kinds. */
@@ -202,5 +244,9 @@ export type WorkflowJsonMetadata = z.infer<typeof WorkflowJsonMetadataSchema>;
 export type WorkflowInputType = z.infer<typeof WorkflowInputTypeSchema>;
 /** Output-projection map (output-name → template string). */
 export type WorkflowOutputs = z.infer<typeof WorkflowOutputsSchema>;
+/** Runtime policy for unresolved node-config template paths. */
+export type TemplatePolicy = z.infer<typeof TemplatePolicySchema>;
+/** Persisted editor coordinates keyed by node id. */
+export type WorkflowUi = z.infer<typeof WorkflowUiSchema>;
 /** Top-level parsed workflow. */
 export type Workflow = z.infer<typeof WorkflowSchema>;

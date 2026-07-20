@@ -4,7 +4,6 @@ import type { Workflow } from '@janusly/shared'
 const {
   appendEventMock,
   enqueueNodeMock,
-  markNodeQueuedMock,
   runEventsTable,
   runNodesTable,
   runsTable,
@@ -14,7 +13,6 @@ const {
 } = vi.hoisted(() => ({
   appendEventMock: vi.fn().mockResolvedValue(undefined),
   enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
-  markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
   runEventsTable: { name: 'runEvents' },
   runNodesTable: { name: 'runNodes' },
   runsTable: { name: 'runs' },
@@ -44,7 +42,7 @@ vi.mock('../queue', () => ({
 }))
 
 vi.mock('../persistence', () => ({
-  markNodeQueued: markNodeQueuedMock,
+  markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
   appendEvent: appendEventMock,
   updateRunStatusFromNodes: updateRunStatusFromNodesMock,
 }))
@@ -67,7 +65,6 @@ const linearWorkflow = {
 beforeEach(() => {
   txInsertMock.mockReset()
   enqueueNodeMock.mockReset()
-  markNodeQueuedMock.mockReset()
   appendEventMock.mockReset()
   updateRunStatusFromNodesMock.mockReset()
   updateRunStatusFromNodesMock.mockResolvedValue('succeeded')
@@ -107,19 +104,22 @@ describe('startSandboxRun', () => {
       stateJson: { output: input },
     })
     expect(nodeRows.find((row) => row.nodeId === 'notify')).toMatchObject({
-      status: 'pending',
+      status: 'queued',
       stateJson: {},
+      attempts: 1,
+      queuePublicationRepairAfter: expect.any(Date),
+      queuePublicationGeneration: 1,
     })
 
     expect(appendEventMock).toHaveBeenCalledWith(result.runId, 'trigger', 'node.completed', {
       output: input,
       sandboxTrigger: true,
     })
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'notify')
     expect(enqueueNodeMock).toHaveBeenCalledWith({
       runId: result.runId,
       nodeId: linearWorkflow.nodes[1].id,
       attempt: 1,
+      publicationGeneration: 1,
     })
     expect(updateRunStatusFromNodesMock).not.toHaveBeenCalled()
   })
@@ -137,7 +137,6 @@ describe('startSandboxRun', () => {
       input: { ticketId: 'ticket-1' },
     })
 
-    expect(markNodeQueuedMock).not.toHaveBeenCalled()
     expect(enqueueNodeMock).not.toHaveBeenCalled()
     expect(updateRunStatusFromNodesMock).toHaveBeenCalledWith(result.runId)
   })
@@ -161,8 +160,11 @@ describe('startSandboxRun', () => {
       workflow: fanInWorkflow,
     })
 
-    expect(markNodeQueuedMock).toHaveBeenCalledTimes(1)
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(result.runId, 'join')
+    const nodeRows = txInsertMock.mock.calls.find((args) => args[0] === runNodesTable)?.[1] as Array<{
+      nodeId: string
+      status: string
+    }>
+    expect(nodeRows.find((row) => row.nodeId === 'join')?.status).toBe('queued')
     expect(enqueueNodeMock.mock.calls[0][0]).toMatchObject({
       runId: result.runId,
       nodeId: fanInWorkflow.nodes[2].id,

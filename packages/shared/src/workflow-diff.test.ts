@@ -68,6 +68,24 @@ describe("computeWorkflowDiff — node add / remove", () => {
 });
 
 describe("computeWorkflowDiff — node config changes + tags", () => {
+  it.each([
+    [undefined, "Review invoice"],
+    ["Review invoice", "Approve invoice"],
+    ["Review invoice", undefined],
+  ])("records a node label change from %s to %s", (beforeLabel, afterLabel) => {
+    const before = makeWorkflow({
+      nodes: [{ id: "review", type: "noop", ...(beforeLabel ? { label: beforeLabel } : {}), config: {} }],
+    });
+    const after = makeWorkflow({
+      nodes: [{ id: "review", type: "noop", ...(afterLabel ? { label: afterLabel } : {}), config: {} }],
+    });
+    const result = computeWorkflowDiff(before, after);
+    expect(result.summary.nodesChanged).toBe(1);
+    const changed = result.nodes[0];
+    if (changed.kind !== "changed") throw new Error("expected changed node");
+    expect(changed.fields).toEqual([{ path: "label", before: beforeLabel, after: afterLabel, tag: null }]);
+  });
+
   it("records a single config field change with no tag", () => {
     const before = makeWorkflow({
       nodes: [{ id: "fetch", type: "http", config: { url: "https://a" } }],
@@ -113,6 +131,19 @@ describe("computeWorkflowDiff — node config changes + tags", () => {
     if (changed.kind !== "changed") throw new Error("expected changed node");
     const timeoutChange = changed.fields.find((f) => f.path === "config.timeoutMs");
     expect(timeoutChange?.tag).toBe("timeout");
+  });
+
+  it("tags approval decision deadline changes as timeout controls", () => {
+    const before = makeWorkflow({
+      nodes: [{ id: "gate", type: "approval", config: { decisionTimeoutMs: 60_000 } }],
+    });
+    const after = makeWorkflow({
+      nodes: [{ id: "gate", type: "approval", config: { decisionTimeoutMs: 120_000 } }],
+    });
+
+    const changed = computeWorkflowDiff(before, after).nodes[0];
+    if (changed.kind !== "changed") throw new Error("expected changed node");
+    expect(changed.fields.find((field) => field.path === "config.decisionTimeoutMs")?.tag).toBe("timeout");
   });
 
   it("tags bounds config changes", () => {
@@ -217,6 +248,18 @@ describe("computeWorkflowDiff — workflow-level fields", () => {
     const result = computeWorkflowDiff(before, after);
     expect(result.workflow[0]).toMatchObject({ path: "name", tag: "rationale" });
     expect(result.summary.totalChanges).toBe(1);
+  });
+
+  it("captures an unresolved-template policy change", () => {
+    const before = makeWorkflow({});
+    const after = makeWorkflow({ templatePolicy: "strict" });
+    const result = computeWorkflowDiff(before, after);
+    expect(result.workflow).toContainEqual({
+      path: "templatePolicy",
+      before: undefined,
+      after: "strict",
+      tag: null,
+    });
   });
 });
 

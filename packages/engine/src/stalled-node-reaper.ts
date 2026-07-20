@@ -4,10 +4,11 @@
  * (kill -9 / OOM / container eviction) while a node is executing.
  *
  * Why it's needed:
- *   `markNodeRunning` flips a node `queued → running` atomically, then the
+ *   `claimNodeForExecution` flips a node `queued → running` atomically while
+ *   holding the parent-run lock, then the
  *   executor runs. If the worker dies mid-execution the `run_nodes` row is
  *   left `running`. BullMQ redelivers the stalled job, but the redelivered
- *   `executeQueuedNode` calls `markNodeRunning` again — which only matches a
+ *   `executeQueuedNode` calls `claimNodeForExecution` again — which only matches a
  *   `queued` row — so the claim fails, a `node.skipped` event is emitted, and
  *   the job "completes". The node stays `running` forever, nothing ever calls
  *   `updateRunStatusFromNodes` for that run again, and the run is stuck in a
@@ -47,22 +48,22 @@
  *   `runs.input_json`): if the snapshot is missing/unparseable the node is
  *   still failed and the run still terminates, so the recoverability promise
  *   holds even without a replay surface.
- * - Known residual: a process crash in the sub-millisecond window between the
- *   CAS fail and the status rollup leaves a `failed` node under a non-terminal
- *   run that the node-status scan won't re-find. This matches the engine's
- *   existing non-transactional multi-step write posture (the runtime's own
- *   catch block has the same shape) and is self-corrected if the run has any
- *   other stalled node; otherwise a manual rollup is the fallback.
+ * - Known residual: unlike the ordinary runtime's atomic terminal-failure
+ *   transaction, this recovery sweep still performs its CAS fail, DLQ write,
+ *   event, and status rollup as separate best-effort steps. A process crash in
+ *   the sub-millisecond window after the CAS can therefore leave a `failed`
+ *   node under a non-terminal run that the running-node scan won't re-find.
+ *   Another stalled node can trigger a later rollup; otherwise an operator
+ *   must repair the run. Do not copy this posture into normal execution.
  */
 
-import { auditLogs, db } from "@janusly/db";
-import { findStalledRunningNodes, type StalledRunningNode } from "@janusly/data";
+import {
+  recordSystemAudit, findStalledRunningNodes, type StalledRunningNode } from "@janusly/data";
 import { WorkflowSchema } from "@janusly/shared";
 
 import { DeadLetterQueueAdapter } from "./adapters/dead-letter-queue";
 import { appendEvent, failStalledRunningNode, updateRunStatusFromNodes } from "./persistence";
 import { workflowQueue } from "./queue";
-import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 import type { DeadLetterInput, SerializedError } from "./core/types";
 
@@ -321,22 +322,13 @@ export async function registerStalledNodeReaperScheduler(
  * Best-effort — a failed audit write is logged and swallowed. Skipped entirely
  * on the healthy `scanned === 0` path so the cron doesn't spam `audit_logs`.
  */
-async function writeReaperAudit(metadata: Record<string, unknown>): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: "system",
-      userId: null,
-      action: "run.stalled_node.reaped",
-      targetType: null,
-      targetId: null,
-      metadata: safePersistPayload(metadata) as Record<string, unknown>,
-    });
-  } catch (err) {
-    console.warn("[stalled-node-reaper] audit write failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
+function writeReaperAudit(metadata: Record<string, unknown>): Promise<void> {
+  return recordSystemAudit({
+    orgId: "system",
+    action: "run.stalled_node.reaped",
+    metadata,
+    logTag: "[stalled-node-reaper]",
+  });
 }
 
 /**
@@ -359,7 +351,7 @@ export async function handleStalledNodeReaperTrigger(
         findStalled: (input) => findStalledRunningNodes(input),
         failNode: (runId, nodeId, error) => failStalledRunningNode(runId, nodeId, error),
         enqueueDeadLetter: (input) => deadLetterAdapter.enqueueDeadLetter(input),
-        appendNodeFailedEvent: (runId, nodeId, payload) => appendEvent(runId, nodeId, "node.failed", payload),
+        appendNodeFailedEvent: (runId, nodeId, payload) => appendEvent(runId, nodeId, "node.failed", payload).then(() => undefined),
         rollupRunStatus: (runId) => updateRunStatusFromNodes(runId).then(() => undefined),
         now: () => new Date(),
       },

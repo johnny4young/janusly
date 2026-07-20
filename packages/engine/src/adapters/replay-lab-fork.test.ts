@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *   - Predecessor computation walks edges backwards correctly (linear,
  *     diamond, disconnected).
  *   - Predecessors are cloned with `status='succeeded'` + source stateJson.
- *   - The fork node is `pending` with the override seeded.
+ *   - The fork node and its publication marker commit as `queued`.
  *   - Downstream nodes stay `pending`; sibling/disconnected nodes are skipped.
  *   - The route's discriminated error paths fire on missing fork node and
  *     not-succeeded predecessor.
@@ -28,7 +28,6 @@ type FakeRunNodeRow = {
 const {
   appendEventMock,
   enqueueNodeMock,
-  markNodeQueuedMock,
   runEventsTable,
   runNodesTable,
   runsTable,
@@ -39,7 +38,6 @@ const {
 } = vi.hoisted(() => ({
   appendEventMock: vi.fn().mockResolvedValue(undefined),
   enqueueNodeMock: vi.fn().mockResolvedValue(undefined),
-  markNodeQueuedMock: vi.fn().mockResolvedValue(undefined),
   runEventsTable: { name: "runEvents" },
   runNodesTable: { name: "runNodes" },
   runsTable: { name: "runs" },
@@ -76,7 +74,7 @@ vi.mock("@janusly/db", () => ({
 
 vi.mock("../queue", () => ({ enqueueNode: enqueueNodeMock }));
 vi.mock("../persistence", () => ({
-  markNodeQueued: markNodeQueuedMock,
+  markQueuePublicationSucceeded: vi.fn().mockResolvedValue(true),
   appendEvent: appendEventMock,
 }));
 vi.mock("../safe-persist", () => ({ safePersistPayload: safePersistPayloadMock }));
@@ -129,7 +127,6 @@ const isolatedWorkflow = {
 beforeEach(() => {
   appendEventMock.mockClear();
   enqueueNodeMock.mockClear();
-  markNodeQueuedMock.mockClear();
   txInsertMock.mockClear();
   selectFromMock.mockClear();
   sourceRunNodes.length = 0;
@@ -231,7 +228,7 @@ describe("replayRunAsValidationFork — happy path", () => {
     });
 
     // Verify the run_nodes insert: 4 rows (A, B, C, D), preds=succeeded,
-    // C=pending, D=downstream pending.
+    // C=queued atomically, D=downstream pending.
     const nodesInsert = txInsertMock.mock.calls.find(([table]) => table === runNodesTable);
     expect(nodesInsert).toBeDefined();
     const nodeRows = nodesInsert![1] as Array<{ nodeId: string; status: string; stateJson: unknown }>;
@@ -239,7 +236,12 @@ describe("replayRunAsValidationFork — happy path", () => {
     expect(byId.get("A")?.status).toBe("succeeded");
     expect(byId.get("A")?.stateJson).toMatchObject({ output: "from A" });
     expect(byId.get("B")?.status).toBe("succeeded");
-    expect(byId.get("C")?.status).toBe("pending");
+    expect(byId.get("C")).toMatchObject({
+      status: "queued",
+      attempts: 1,
+      queuePublicationRepairAfter: expect.any(Date),
+      queuePublicationGeneration: 1,
+    });
     expect(byId.get("C")?.stateJson).toMatchObject({ input: { tweaked: true } });
     expect(byId.get("D")?.status).toBe("pending");
 
@@ -257,8 +259,6 @@ describe("replayRunAsValidationFork — happy path", () => {
     });
 
     // Only the fork node was queued — predecessors never queue.
-    expect(markNodeQueuedMock).toHaveBeenCalledTimes(1);
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(expect.any(String), "C");
     expect(enqueueNodeMock).toHaveBeenCalledTimes(1);
   });
 
@@ -311,7 +311,7 @@ describe("replayRunAsValidationFork — happy path", () => {
     expect(nodeRows.filter((r) => r.nodeId === "left")).toHaveLength(1);
     expect(nodeRows.filter((r) => r.nodeId === "right")).toHaveLength(1);
     expect(nodeRows.find((r) => r.nodeId === "root")?.status).toBe("succeeded");
-    expect(nodeRows.find((r) => r.nodeId === "join")?.status).toBe("pending");
+    expect(nodeRows.find((r) => r.nodeId === "join")?.status).toBe("queued");
   });
 
   it("works on a disconnected fork node — no predecessors cloned", async () => {
@@ -337,8 +337,7 @@ describe("replayRunAsValidationFork — happy path", () => {
     const nodeRows = nodesInsert![1] as Array<{ nodeId: string; status: string }>;
     expect(nodeRows.find((r) => r.nodeId === "unrelated_a")?.status).toBe("skipped");
     expect(nodeRows.find((r) => r.nodeId === "unrelated_b")?.status).toBe("skipped");
-    expect(markNodeQueuedMock).toHaveBeenCalledTimes(1);
-    expect(markNodeQueuedMock).toHaveBeenCalledWith(expect.any(String), "alone");
+    expect(nodeRows.find((r) => r.nodeId === "alone")?.status).toBe("queued");
   });
 });
 
@@ -357,7 +356,6 @@ describe("replayRunAsValidationFork — error paths", () => {
     expect(result.code).toBe("fork_node_not_found");
     // No DB writes should happen on validation failure.
     expect(txInsertMock).not.toHaveBeenCalled();
-    expect(markNodeQueuedMock).not.toHaveBeenCalled();
   });
 
   it("returns predecessor_not_succeeded when a predecessor failed in the source run", async () => {
@@ -379,7 +377,6 @@ describe("replayRunAsValidationFork — error paths", () => {
     expect(result.message).toContain("B");
     // Critical: no run / nodes / events written when validation fails.
     expect(txInsertMock).not.toHaveBeenCalled();
-    expect(markNodeQueuedMock).not.toHaveBeenCalled();
   });
 
   it("returns predecessor_not_succeeded when a predecessor is missing entirely from the source run", async () => {

@@ -42,10 +42,9 @@
  *    cross-tenant pause is possible.
  */
 
-import { auditLogs, db } from "@janusly/db";
 import {
+  recordSystemAudit,
   WORKFLOW_STATUS_PAUSED_UPSTREAM,
-  findUpstreamHealthSourceByName,
   listSourcesToPoll,
   listWorkflowIdsTaggedWithSource,
   pauseWorkflowsForUpstream,
@@ -58,7 +57,6 @@ import { parseUpstreamFeed, type UpstreamFeedParseResult } from "@janusly/shared
 
 import { fetchHttpTarget, type HttpBufferedResult } from "./http-policy";
 import { workflowQueue } from "./queue";
-import { safePersistPayload } from "./safe-persist";
 import { validateCronExpression } from "./schedule";
 
 /** Deterministic global scheduler id. The `system:` prefix is reserved for non-tenant cron jobs. */
@@ -79,7 +77,6 @@ const UPSTREAM_FEED_MAX_BYTES = 256 * 1024;
 /** Per-source fetch timeout. A slow status page must not stall the sweep. */
 const UPSTREAM_FEED_TIMEOUT_MS = 10_000;
 /** Audit metadata size bound (matches the API chokepoint default). */
-const AUDIT_METADATA_MAX_BYTES = 256 * 1024;
 
 /** Injectable fetcher so tests can drive the parse/pause logic without the network. */
 export type UpstreamFetcher = (
@@ -97,27 +94,19 @@ const defaultFetcher: UpstreamFetcher = async (url) => {
 
 // ─── audit ────────────────────────────────────────────────────────────────────
 
-/** Inline system-actor audit writer. Mirrors `apps/api/src/audit.ts` byte-for-byte. */
-async function writeAuditRow(input: {
+/** System-actor audit via the shared data-layer chokepoint. */
+function writeAuditRow(input: {
   orgId: string;
   action: string;
   targetType: string;
   targetId: string;
   metadata: Record<string, unknown>;
 }): Promise<void> {
-  try {
-    await db.insert(auditLogs).values({
-      id: crypto.randomUUID(),
-      orgId: input.orgId,
-      userId: "system:upstream-health",
-      action: input.action,
-      targetType: input.targetType,
-      targetId: input.targetId,
-      metadata: safePersistPayload(input.metadata, { maxBytes: AUDIT_METADATA_MAX_BYTES }),
-    });
-  } catch (err) {
-    console.warn("[upstream-health] audit write failed", { action: input.action, err });
-  }
+  return recordSystemAudit({
+    ...input,
+    actor: "system:upstream-health",
+    logTag: "[upstream-health]",
+  });
 }
 
 // ─── single-source poll (testable core) ────────────────────────────────────────

@@ -79,6 +79,22 @@ describe("normalizeOrgConfigValue — memory.enabled", () => {
   });
 });
 
+describe("normalizeOrgConfigValue — runs.humanFormResumeTtlSeconds", () => {
+  const def = findDef("runs.humanFormResumeTtlSeconds");
+
+  it("defaults to seven days and accepts the 5-minute..7-day range", () => {
+    expect(def.defaultValue).toBe(604_800);
+    expect(normalizeOrgConfigValue(def, 300)).toBe(300);
+    expect(normalizeOrgConfigValue(def, 604_800)).toBe(604_800);
+  });
+
+  it("rejects shorter, longer, and non-numeric values", () => {
+    expect(() => normalizeOrgConfigValue(def, 299)).toThrow(/>= 300/);
+    expect(() => normalizeOrgConfigValue(def, 604_801)).toThrow(/<= 604800/);
+    expect(() => normalizeOrgConfigValue(def, "3600")).toThrow(/must be a finite number/);
+  });
+});
+
 describe("normalizeOrgConfigValue — memory.allowedKinds CSV validator", () => {
   const def = findDef("memory.allowedKinds");
 
@@ -605,6 +621,34 @@ describe("normalizeOrgConfigValue — ai.surfaceModels JSON validator", () => {
       "explain-run": "claude-haiku-4-5",
     });
     expect(normalizeOrgConfigValue(def, all)).toBe(all);
+  });
+});
+
+describe("normalizeOrgConfigValue — ai.operatorGuidance", () => {
+  const def = findDef("ai.operatorGuidance");
+
+  it("is an empty-default, tenant-only AI string", () => {
+    expect(def.category).toBe("ai");
+    expect(def.defaultValue).toBe("");
+    expect(def.allowEmpty).toBe(true);
+    expect(def.envKeys).toBeUndefined();
+  });
+
+  it("accepts bounded Markdown and rejects more than 8 KiB by UTF-8 bytes", () => {
+    const guidance = "# janusly.md\nPrefer explicit approval gates.";
+    expect(normalizeOrgConfigValue(def, guidance)).toBe(guidance);
+    expect(normalizeOrgConfigValue(def, "é".repeat(4 * 1024))).toBe("é".repeat(4 * 1024));
+    expect(() => normalizeOrgConfigValue(def, `${"é".repeat(4 * 1024)}a`)).toThrow(/8 KiB/);
+  });
+
+  it("rejects secret-shaped values anywhere in guidance", () => {
+    expect(() => normalizeOrgConfigValue(def, `Bearer ${"a".repeat(20)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, `Prefer this credential: sk-${"a".repeat(20)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, `Prefer this credential: sk-proj-${"a".repeat(24)}`)).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Read from postgres://user:password@db.internal/app")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Read from mysql://user:password@db.internal/app")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "Fetch https://operator:super-secret@example.com/report")).toThrow(/secret-like values/);
+    expect(() => normalizeOrgConfigValue(def, "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----")).toThrow(/secret-like values/);
   });
 });
 

@@ -23,7 +23,8 @@
  *   is Postgres `dead_letters`, not Redis — without a bound, BullMQ keeps
  *   failed jobs forever, so a poisoned producer or schema drift would grow
  *   Redis unboundedly.
- * - `execute-node` job payloads are SLIM (`{ runId, nodeId, attempt }`) — the
+ * - `execute-node` job payloads are SLIM (`{ runId, nodeId, attempt,
+ *   publicationGeneration, recoveryClaimToken? }`) — the
  *   worker reloads the workflow from `runs.inputJson` per job rather than
  *   carrying the full workflow JSON in every Redis message.
  */
@@ -32,6 +33,7 @@ import { Queue } from "bullmq";
 import IORedis from "ioredis";
 import { loadRootEnv } from "@janusly/db";
 import type { EnqueueNodeInput } from "./core/types";
+import { buildExecuteNodeJobId } from "./queue-job-id";
 
 loadRootEnv();
 
@@ -55,10 +57,17 @@ const REMOVE_ON_FAIL = { count: 1000, age: 7 * 24 * 60 * 60 };
 export async function enqueueNode(payload: EnqueueNodeInput) {
   return workflowQueue.add(
     "execute-node",
-    { runId: payload.runId, nodeId: payload.nodeId, attempt: payload.attempt },
+    {
+      runId: payload.runId,
+      nodeId: payload.nodeId,
+      attempt: payload.attempt,
+      publicationGeneration: payload.publicationGeneration ?? 0,
+      ...(payload.recoveryClaimToken ? { recoveryClaimToken: payload.recoveryClaimToken } : {}),
+    },
     {
       attempts: 1,
       delay: payload.delayMs ?? 0,
+      jobId: buildExecuteNodeJobId(payload),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,
     },
@@ -76,12 +85,51 @@ export async function enqueueNode(payload: EnqueueNodeInput) {
  * is a no-op. This guards the (rare) double-resume race when a user calls
  * `POST /resume` while the delayed job is already in flight.
  */
-export async function enqueueWaitUntilResume(runId: string, nodeId: string, delayMs: number, statusCheckAttempts = 0) {
+export async function enqueueWaitUntilResume(runId: string, nodeId: string, delayMs: number) {
   return workflowQueue.add(
     "wait-resume",
-    { runId, nodeId, statusCheckAttempts },
+    { runId, nodeId },
     {
-      attempts: 1,
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/** Install the pre-checkpoint watcher that arms an approval's exact deadline. */
+export async function enqueueApprovalDeadlineArm(runId: string, nodeId: string, delayMs: number) {
+  return workflowQueue.add(
+    "approval-deadline-arm",
+    { runId, nodeId },
+    {
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
+      delay: Math.max(0, delayMs),
+      removeOnComplete: 1000,
+      removeOnFail: REMOVE_ON_FAIL,
+    },
+  );
+}
+
+/** Schedule a policy decision for one exact approval-deadline generation. */
+export async function enqueueApprovalTimeout(
+  runId: string,
+  nodeId: string,
+  deadlineAt: string,
+  delayMs: number,
+) {
+  return workflowQueue.add(
+    "approval-timeout",
+    { runId, nodeId, deadlineAt },
+    {
+      // Handler failures are infrastructure failures, not policy outcomes.
+      // Exponential retry keeps the persisted Redis job durable through a
+      // prolonged Postgres/Redis recovery window without hot-looping.
+      attempts: 20,
+      backoff: { type: "exponential", delay: 1_000 },
       delay: Math.max(0, delayMs),
       removeOnComplete: 1000,
       removeOnFail: REMOVE_ON_FAIL,
