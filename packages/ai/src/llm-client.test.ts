@@ -650,7 +650,7 @@ describe("usage recorder fires on success and failure", () => {
 });
 
 describe("generateObject (schema-aware generation)", () => {
-  // The AI SDK exposes the typed payload at `experimental_output`. We mock
+  // AI SDK 7 exposes the typed payload at `output`. We mock
   // `generateText` (the underlying SDK function) AND `Output.object` (so the
   // schema arg doesn't have to be a real Zod schema) — the abstraction's job
   // is to thread inputs/outputs around, not to validate the schema itself.
@@ -662,7 +662,7 @@ describe("generateObject (schema-aware generation)", () => {
 
   it("returns the typed object on the happy path", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-1", nodes: [], edges: [] },
+      output: { id: "wf-1", nodes: [], edges: [] },
       finishReason: "stop",
       usage: { inputTokens: 50, outputTokens: 25 },
     });
@@ -678,7 +678,7 @@ describe("generateObject (schema-aware generation)", () => {
       expect.objectContaining({ schema: mockSchema }),
     );
     const opts = generateTextMock.mock.calls[0][0];
-    expect(opts.experimental_output).toBeDefined();
+    expect(opts.output).toBeDefined();
     expect(result.object).toEqual({ id: "wf-1", nodes: [], edges: [] });
     expect(result.provider).toBe("openai");
     expect(result.model).toBe("gpt-4o-mini");
@@ -688,7 +688,7 @@ describe("generateObject (schema-aware generation)", () => {
 
   it("records cache token details for structured output calls", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-cache" },
+      output: { id: "wf-cache" },
       finishReason: "stop",
       usage: {
         inputTokens: 90,
@@ -717,21 +717,6 @@ describe("generateObject (schema-aware generation)", () => {
     });
   });
 
-  it("falls back to result.output when result.experimental_output is absent", async () => {
-    generateTextMock.mockResolvedValueOnce({
-      output: { id: "wf-2" },
-      finishReason: "stop",
-      usage: { inputTokens: 10, outputTokens: 5 },
-    });
-    const cfg = resolveLlmConfig({ JANUSLY_LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-x" } as NodeJS.ProcessEnv)!;
-    const client = createLlmClient(cfg);
-    const result = await client.generateObject<{ id: string }>({
-      prompt: "hi",
-      schema: mockSchema,
-    });
-    expect(result.object).toEqual({ id: "wf-2" });
-  });
-
   it("throws and fires the recorder with mode='fallback' on schema rejection", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("NoObjectGeneratedError: schema invalid"));
     const recorder = vi.fn();
@@ -754,7 +739,7 @@ describe("generateObject (schema-aware generation)", () => {
     expect(record.provider).toBe("openai");
   });
 
-  it("throws and records fallback when the SDK returns neither output nor experimental_output", async () => {
+  it("throws and records fallback when the SDK returns no output", async () => {
     generateTextMock.mockResolvedValueOnce({
       // Neither field present — defensive guard fires.
       finishReason: "stop",
@@ -790,7 +775,7 @@ describe("generateObject (schema-aware generation)", () => {
 
   it("threads a 'provider/model' spec through to the resolved provider", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-3" },
+      output: { id: "wf-3" },
       finishReason: "stop",
       usage: { inputTokens: 1, outputTokens: 1 },
     });
@@ -810,7 +795,7 @@ describe("generateObject (schema-aware generation)", () => {
 
   it("a throwing recorder NEVER breaks generateObject (fail-open)", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-4" },
+      output: { id: "wf-4" },
       finishReason: "stop",
       usage: { inputTokens: 1, outputTokens: 1 },
     });
@@ -829,7 +814,7 @@ describe("generateObject (schema-aware generation)", () => {
 
   it("does NOT fire the recorder when context.orgId is absent", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-5" },
+      output: { id: "wf-5" },
       finishReason: "stop",
     });
     const recorder = vi.fn();
@@ -905,7 +890,7 @@ describe("cacheSystemPrompt — Anthropic ephemeral system-prompt caching", () =
 
   it("applies the cache breakpoint on the generateObject path too", async () => {
     generateTextMock.mockResolvedValueOnce({
-      experimental_output: { id: "wf-cache" },
+      output: { id: "wf-cache" },
       finishReason: "stop",
       usage: baseUsage,
     });

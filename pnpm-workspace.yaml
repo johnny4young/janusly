@@ -2,6 +2,12 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  # Required by Vite/tsx; the exact version is constrained below.
+  esbuild: true
+  # Optional native acceleration used by BullMQ's msgpackr dependency.
+  msgpackr-extract: true
+
 # pnpm overrides. CI's `dep_audit` job (.github/workflows/ci.yml) runs
 # `pnpm audit --audit-level moderate` on every push/PR, so any transitive
 # that regresses to a vulnerable version fails CI — that audit is the

@@ -27,8 +27,9 @@ first release tag is cut.
 
 ### Changed
 
-- Runtime support is verified on Node.js 22.12 and 24, with Postgres 15 as the
-  compatibility floor and Postgres 18 as the baseline.
+- The JavaScript toolchain now requires Node.js 24 and pnpm 11, with TypeScript
+  7 and Vercel AI SDK 7; Postgres 15 remains the compatibility floor and
+  Postgres 18 the baseline.
 - LLM completions use a provider-neutral client while the supported production
   posture remains Anthropic-only; every AI path preserves deterministic
   fallback behavior.

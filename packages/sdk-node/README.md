@@ -3,7 +3,7 @@
 > Typed TypeScript client for the Janusly HTTP API. Resource-style methods,
 > async iterators for run listing and event streaming, a typed error class
 > hierarchy, an opt-in retry layer, and a webhook signature verifier.
-> Node 22.12+ in workspace source mode. Zero runtime dependencies.
+> Node 24 in workspace source mode. Zero runtime dependencies.
 
 ## Install
 
@@ -392,8 +392,8 @@ Fastify's `rawBody` plugin, or your framework's equivalent.
 - Target: ES2023, ESM modules, strict mode.
 - Types are inlined — every DTO + class is exported from
   `@janusly/sdk` (no separate `@types/janusly__sdk`).
-- Node 22.12+ required in the current workspace-private source package
-  (matches the monorepo `engines.node` floor). The future publish pipeline
+- Node 24 required in the current workspace-private source package
+  (matches the monorepo `engines.node` contract). The future publish pipeline
   can lower the runtime target further once it emits `dist/` JavaScript
   instead of pointing package entrypoints at `.ts` source.
 - Tested against Vitest 4. Zero runtime deps; `vitest` +

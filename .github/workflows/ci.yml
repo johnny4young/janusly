@@ -16,13 +16,8 @@ permissions:
 
 jobs:
   build_test:
-    name: Build + jsdom test (Node ${{ matrix.node }})
+    name: Build + jsdom test (Node 24)
     runs-on: ubuntu-latest
-    strategy:
-      # Node 22 LTS is the supported self-host FLOOR (engines >=22.12); 24 is
-      # the dev/prod baseline. Both must stay green or the floor is fiction.
-      matrix:
-        node: [22, 24]
     steps:
       - uses: actions/checkout@v6
 
@@ -33,7 +28,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
           cache: pnpm
 
       - name: Install
@@ -166,7 +161,7 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile

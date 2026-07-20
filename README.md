@@ -89,7 +89,7 @@ packages/
   shared     -> Zod 4 contracts for the workflow DSL
   mcp-server -> stdio MCP server that proxies Janusly API tools
   solution-packs -> code-resident installable workflow starter catalog
-  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 22.12+ source package, zero runtime deps,
+  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24 source package, zero runtime deps,
                 resource-style API + async iterators + opt-in retries +
                 webhook signature verifier — see `packages/sdk-node/README.md`)
   sdk-python -> typed `janusly` Python client + stdlib webhook verifier
@@ -103,8 +103,8 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 | Layer       | Library                                                                |
 | ----------- | ---------------------------------------------------------------------- |
-| Runtime     | Node.js 22.12+ (24 LTS baseline), Postgres 15+ (18 baseline), Redis 8   |
-| TypeScript  | 6.0                                                                     |
+| Runtime     | Node.js 24, Postgres 15+ (18 baseline), Redis 8                           |
+| TypeScript  | 7.0                                                                     |
 | Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
 | AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback; attempted LLM-call failures surface `{ mode: "fallback", aiError, ... }`. |
 | Validation  | `zod` 4                                                                 |
@@ -118,18 +118,18 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 ## Requirements
 
-- Node.js **22.12+** (`engines.node` enforced at root; **24** is the dev/prod baseline)
-- PNPM **10** (`corepack enable`)
+- Node.js **24** (`engines.node` rejects earlier and future major versions)
+- PNPM **11** (`corepack enable`; the exact version is pinned in `packageManager`)
 - Docker (for Postgres + Redis 8 + Ollama services in local dev)
 - (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
 
 ### Supported-version matrix (self-host)
 
-The **floor** is the oldest version CI proves green; the **baseline** is what the dev/prod fleet runs. Both are exercised in CI (`build_test` runs the unit suite on Node 22 **and** 24; `test_compat_pg15` runs the integration lanes against Postgres 15) so the floor is a tested promise, not a hope.
+The **floor** is the oldest version CI proves green; the **baseline** is what the dev/prod fleet runs. Node 24 is the only supported JavaScript runtime and every Node CI lane uses it. `test_compat_pg15` separately proves the Postgres 15 compatibility floor.
 
 | Component | Floor (CI-verified) | Baseline (dev/prod) |
 | --------- | ------------------- | ------------------- |
-| Node.js   | 22.12 LTS           | 24 LTS (Krypton)    |
+| Node.js   | 24 LTS (Krypton)    | 24 LTS (Krypton)    |
 | Postgres  | 15 (+ `pgvector`)   | 18 (+ `pgvector`)   |
 | Redis     | 8                   | 8                   |
 
@@ -394,14 +394,14 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **JSON** | JavaScript Object Notation | The serialization format for workflow definitions, node configs, run state, and API request/response bodies. |
 | **JWT** | JSON Web Token | The token shape Supabase issues for app login; the API verifies it on every request when Supabase mode is on. |
 | **LLM** | Large Language Model | The model behind every AI surface. Provider-neutral via `LlmClient`; production posture is Anthropic-only (`claude-haiku-4-5-20251001`). |
-| **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the dev/prod baseline; 22.12 LTS is the CI-verified floor. |
+| **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the only supported JavaScript runtime. |
 | **MCP** | Model Context Protocol | The Anthropic-defined protocol for exposing tools to LLM clients. Janusly ships an MCP server (`packages/mcp-server`) and consumes external MCP servers as `mcp_tool` workflow nodes. |
 | **MFA** | Multi-Factor Authentication | A marker flag on `org_configs.auth.mfaRequired`. **Informational only** — Janusly warn-logs server-side when set, but actual enforcement happens at the IdP (Okta / Azure AD carry the claim, Supabase does not). |
 | **MTTR** | Mean Time To Recovery | The north-star metric: how long from a failed automation to that automation working again. Surfaced on `GET /recovery/metrics` and as an SLO threshold field (`mttrSeconds`). |
 | **MVP** | Minimum Viable Product | The current shipping scope — Anthropic-only LLM support, single recovery loop, no cross-provider verification yet. |
 | **OTEL** | OpenTelemetry | The tracing / metrics stack. Tracer + Meter carry `service.name="janusly"`; Prometheus exporter is wired in. |
 | **p95** | 95th percentile | Latency notation: 95% of runs / nodes finish at or below this duration. Surfaced on the workflow health rollup, the recovery metrics dashboard, and as an SLO threshold (`p95DurationMs`). |
-| **PNPM** | Performant Node Package Manager | The package manager used at the monorepo root (pinned to `pnpm@10` via `packageManager`). |
+| **PNPM** | Performant Node Package Manager | The package manager used at the monorepo root (pinned to `pnpm@11` via `packageManager`). |
 | **RL** | Reinforcement Learning | The decision-engine layer that reads per-node `routing_stats` and shifts future router scoring after enough observed successes / failures. |
 | **RPA** | Robotic Process Automation | Click-record desktop automation (UiPath / Automation Anywhere shape). Janusly is *not* this — it operates AI workflows, not desktop scripts. |
 | **SCIM** | System for Cross-domain Identity Management | The IdP-side standard for pushing user / group lifecycle into a SaaS. Janusly consumes SCIM through WorkOS Directory Sync via `POST /webhooks/workos/directory`, normalizing events into `org_members` upserts / deactivations. |

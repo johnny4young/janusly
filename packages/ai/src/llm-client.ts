@@ -505,7 +505,7 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
           // provider's structured-output capability and validates the
           // response. Schema rejection throws here — caller's try/catch
           // degrades to fallback per AGENTS.md.
-          experimental_output: Output.object({
+          output: Output.object({
             schema: input.schema,
             name: input.schemaName,
             description: input.schemaDescription,
@@ -536,13 +536,9 @@ export function createLlmClient(cfg: ResolvedLlmConfig): LlmClient {
       const cacheUsage = readCacheTokenUsage(aiResult);
       const costUsd = computeCostUsd(getModelPrice(providerName, modelId), usage);
 
-      // The AI SDK exposes the typed payload at `experimental_output` (and
-      // also at `output` once the API stabilises). Read both so minor-version
-      // bumps don't break the abstraction; throw before the success recorder
-      // fires if neither is present.
-      const obj =
-        (aiResult as { experimental_output?: T }).experimental_output ??
-        (aiResult as { output?: T }).output;
+      // AI SDK 7 exposes the validated structured payload at `output`.
+      // Throw before the success recorder fires if it is unexpectedly absent.
+      const obj = (aiResult as { output?: T }).output;
       if (obj === undefined) {
         const error = new Error("generateObject: SDK did not return a parsed output (schema rejected)");
         void fireUsageRecorder({
