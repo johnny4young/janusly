@@ -11,7 +11,10 @@ services:
       - "6379:6379"
 
   postgres:
-    image: pgvector/pgvector:pg18
+    # Parametrized so the CI compat job (and any self-host operator) can run
+    # the SAME lifecycle against the oldest supported Postgres. Default stays
+    # the dev/prod baseline.
+    image: ${JANUSLY_POSTGRES_IMAGE:-pgvector/pgvector:pg18}
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -30,7 +33,9 @@ services:
   # `docker compose up <services>` invocation. First boot pulls the bge-m3
   # model (~1.2 GB) into the named volume; subsequent boots reuse the cache.
   ollama:
-    image: ollama/ollama:latest
+    # Pinned (was :latest — unreproducible builds). 0.24.0 is the version the
+    # dev fleet already runs; bump deliberately, not via silent pulls.
+    image: ollama/ollama:0.24.0
     entrypoint:
       - /bin/sh
       - -c

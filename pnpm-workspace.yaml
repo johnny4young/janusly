@@ -25,16 +25,3 @@ overrides:
   # `ConnectionOptions` type (type-identity mismatch in queue.ts/worker.ts).
   # Align everything to a single copy. Drop once bullmq's pin reaches it.
   ioredis: ">=5.11.0"
-
-# Audit ignores for advisories that cannot be cleared via overrides
-# (e.g. peer-dep-locked transitives). Every entry MUST have a matching
-# section in SECURITY.md with the parent chain, the why-it-is-safe
-# rationale, the upstream blocker, and a revisit trigger. Adding an
-# ignore without a SECURITY.md entry is a security regression — review
-# rejects it.
-auditConfig:
-  ignoreGhsas:
-    # uuid <11.1.1 buffer bounds check via @opentelemetry/exporter-
-    # jaeger > jaeger-client > uuid. Janusly does not call uuid with a
-    # caller-provided buf; the vector does not apply. See SECURITY.md.
-    - "GHSA-w5hq-g745-h8pq"

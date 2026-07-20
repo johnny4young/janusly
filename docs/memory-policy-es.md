@@ -15,10 +15,11 @@ recuperación aprobados para que las sugerencias de IA mejoren con el tiempo.
 La memoria está **apagada por default**, requiere opt-in explícito a nivel
 organización, queda aislada por tenant, se trata como datos del cliente
 (nunca como datos de entrenamiento para los proveedores del modelo), y
-respeta retención acotada más borrado y exportación dirigidos por el operador
-que siguen como superficies planificadas. La memoria recordada se enmarca al
-LLM como dato, nunca como instrucción. Los fallos de embedding degradan a
-recall vacío — nunca rompen la ejecución del workflow ni la recuperación.
+respeta una retención acotada y la purga ya implementada cuando se revoca el
+consentimiento. El borrado por entrada y la exportación siguen previstos como
+superficies de administración. La memoria recordada se presenta al LLM como
+dato, nunca como instrucción. Los fallos de embedding producen una consulta
+vacía — nunca rompen la ejecución del workflow ni la recuperación.
 
 ## 1. Por qué existe esta política
 
@@ -126,6 +127,14 @@ ni modo "encendido por default" en producción.
   Un admin puede habilitar memoria para rationales de recuperación pero no
   para resúmenes de corrida. Cualquier cosa que no esté en el CSV se rechaza
   en write-time.
+- **Transparencia para el operador:** `GET /memory/consent-status` devuelve el
+  estado efectivo de las dos autorizaciones y una proyección segura
+  `none` / `scheduled` / `running` / `unknown` de la tarea de purga de la
+  organización. Operaciones → Acceso muestra ambas autorizaciones, el Centro
+  de recuperación advierte con una cuenta regresiva después de la revocación,
+  y el filtro `memory.` de la bitácora reúne los registros de autorización,
+  revocación y purga. Las claves de la cola, los nombres de variables de
+  entorno y los errores internos de Redis nunca atraviesan la API.
 
 Ambas flags deben ser true para cualquier escritura de memoria. Si
 cualquiera está en false, la escritura se rechaza con un código de error
@@ -187,11 +196,13 @@ entradas de memoria de manera idéntica a otras tablas con retención.
 
 ### 6.3 Cascada de borrado por org
 
-Cuando una org de Janusly se borra (el camino operativo es el flujo
-existente de offboarding del tenant), todas las entradas de memoria de esa
-org se purgan antes de que la fila de `organizations` se elimine. La cascada
-es el delete estándar `eq(memory_entries.orgId, orgId)`; no hay referencias
-FK desde otras tablas.
+Janusly no tiene actualmente una ruta pública para borrar organizaciones ni
+aplica una cascada automática en la base de datos. La salida operativa de un
+tenant debe purgar la memoria de forma explícita antes de eliminar el registro
+de la organización; de lo contrario, las filas huérfanas permanecen y al
+volver a crear el mismo identificador de organización se hereda ese estado.
+Esto coincide con la postura del repositorio, que tolera filas huérfanas, y no
+debe presentarse como una garantía automática del producto.
 
 ### 6.4 Borrado de usuario
 
@@ -421,10 +432,9 @@ trabajo implementado en el repo de aprobaciones humanas de rollout:
 - [ ] Revisión legal (lenguaje del DPA en §10 confirmado por consejería).
 - [ ] Revisión de ingeniería (un approver familiarizado con el catálogo de
   `org_configs` y el chokepoint `safe-persist`).
-- [x] `docs/ROADMAP.md` §3c línea de compuerta de memoria actualizada para
-  apuntar aquí.
+- [x] Compuerta de memoria documentada aquí como fuente de verdad.
 - [x] `docs/ai.md` §10 "Memory privacy notes" agregado apuntando aquí.
-- [x] `docs/PLAN.md` §7.1 actualizado para referenciar este doc.
+- [x] Consentimiento y gobernanza de memoria documentados en esta política.
 - [x] Entradas del catálogo `org_configs.memory.*` integradas (`packages/data/src/orgConfigRepo.ts`).
 - [x] Paridad en español publicada (`docs/memory-policy-es.md`).
 

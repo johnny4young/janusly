@@ -113,7 +113,7 @@ export type RunDetails = {
  * Severity bands the server emits with each recovery metric. Mirrors the
  * `MetricSeverity` type in `packages/engine/src/recovery-metrics.ts`.
  */
-export type RecoveryMetricSeverity = "healthy" | "warn" | "alert" | "neutral";
+export type RecoveryMetricSeverity = "healthy" | "warn" | "unhealthy" | "neutral";
 
 /** Single recovery metric card shape. */
 export type RecoveryMetric = {
@@ -133,14 +133,47 @@ export type RecoveryMetric = {
 /** Single cost-provider row inside the `costThisWindow` metric. */
 export type RecoveryCostProviderRow = {
   provider: string;
-  costUsd: number;
-  spendShare: number;
+  model: string;
+  usd: number;
+  tokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  calls: number;
+  /** True when this row folds provider/model groups beyond the breakdown cap. */
+  aggregated?: boolean;
+};
+
+/** Aggregate prompt-cache efficiency for the selected recovery-metrics window. */
+export type RecoveryCacheEfficiency = {
+  inputTokens: number;
+  readTokens: number;
+  creationTokens: number;
+  readSharePercent: number | null;
 };
 
 /** SLA-attainment card inside the recovery metrics payload. */
 export type RecoverySlaAttainmentMetric = RecoveryMetric & {
   resolvedInWindow: number;
   metSla: number;
+};
+
+/** Distinct resolved-cluster card inside the recovery metrics payload. */
+export type RecoveryClustersResolvedMetric = RecoveryMetric & {
+  totalEntries: number;
+  capped: boolean;
+};
+
+/** Operator-supplied assumptions and the value estimate derived from them. */
+export type RecoveryValueEstimate = {
+  hoursSaved: number;
+  dollarSaved: number;
+  mttrDeltaSeconds: number | null;
+  assumptions: {
+    hourlyCost: number;
+    minutesSavedPerRecovery: number;
+    baselineMttrSeconds: number;
+  };
 };
 
 /** One per-day point of the MTTR trend sparkline. `day` is `YYYY-MM-DD`. */
@@ -154,7 +187,14 @@ export type RecoveryMetrics = {
   approvalsPending: RecoveryMetric;
   replayRate: RecoveryMetric;
   slaAttainment: RecoverySlaAttainmentMetric;
-  costThisWindow: RecoveryMetric & { providers: RecoveryCostProviderRow[] };
+  timeToFirstAction: RecoveryMetric;
+  recurrenceRate: RecoveryMetric;
+  costThisWindow: RecoveryMetric & {
+    providers: RecoveryCostProviderRow[];
+    cache: RecoveryCacheEfficiency;
+  };
+  clustersResolved: RecoveryClustersResolvedMetric;
+  valueEstimate: RecoveryValueEstimate;
   windowDays: number;
   /** Total terminal runs in the window — denominator for downstream rollups. */
   terminalRuns: number;

@@ -30,15 +30,17 @@ This is the destination, not a claim that every edge is finished today. The dire
 
 ## What ships today
 
-Janusly already has the core shape of that vision:
+The recovery loop is production-shaped end to end:
 
-- A Postgres-backed workflow runtime for observable DAG execution.
-- A Recovery Center that surfaces failed runs, failure clusters, pending human actions, and recovery metrics.
-- AI-assisted failure explanation and 1–3 patch suggestions with confidence scores.
-- Sandbox validation before applying a recovery patch, cluster-level apply for repeated failures, and one-click rollback through workflow version history.
-- Deterministic fallback paths when no Anthropic key is configured, so non-AI runtime behavior still works.
+- **Observable runtime.** Postgres-backed DAG execution with per-node `run_events`, live SSE run streaming, a Recovery Center home surfacing failed runs / failure clusters / pending approvals / MTTR-style recovery metrics, and OpenTelemetry traces + Prometheus metrics.
+- **Diagnosis + patch.** AI failure explanation and 1–3 patch suggestions with self-rated confidence, calibrated per approach against the team's own accept/reject history, with a Recovery Confidence Passport that scores whether a patch is safe to apply.
+- **Safe recovery.** Sandbox validation (write-side effects skipped) before any patch saves, cluster-level apply across a shared failure signature, one-click rollback through version history, and production redrive that continues a failed run on the patched version.
+- **Containment.** A transient-error fast path that auto-retries the failures that would have healed anyway (429 / dropped connection / gateway timeout) before they reach the DLQ, and a circuit breaker that pauses a workflow after repeated failures — buffering inbound trigger events for backfill on resume instead of dropping them.
+- **Evidence-gated Recovery Playbooks** that promote a proven fix, with a per-playbook success scorecard.
+- **Operate + govern.** Visual React Flow builder, per-org RBAC with a closed permission catalog and custom roles, append-only audit log per action, SSO (WorkOS) + SCIM directory sync, cost/budget governance, an MCP client (workflow tool nodes) and an MCP server (proxying the API to agent ecosystems), and typed Node + Python SDKs.
+- **Runs without an LLM.** Every AI surface degrades to a deterministic fallback, so the runtime works with no model key configured.
 
-**In one line:** Run critical AI workflows, explain failures, propose safe fixes, and evolve workflow versions with full auditability.
+**In one line:** Run critical AI workflows, explain failures, propose sandbox-validated fixes, redrive on the fix, and evolve workflow versions with full auditability — under human supervision.
 
 ## What Janusly is NOT
 
@@ -47,9 +49,8 @@ Janusly already has the core shape of that vision:
 - Not generic RPA. We operate AI workflows; we don't click-record desktop scripts.
 - Not "agents that do everything." Human approval gates are first-class; the operator stays in the loop.
 
-See [`docs/PLAN.md` §16.0](docs/PLAN.md) for the full positioning thesis, or [`docs/marketing/narrative.md`](docs/marketing/narrative.md) for the brand-voice version — same anchors, written for a slide or a sales conversation.
 
-> Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. Tokens declared CSS-first via `@theme {}` in [`apps/web/src/index.css`](apps/web/src/index.css).
+> Design system: **Cobalt** (`#245BFF`) primary with **Cyan** (`#06B6D4`) accent. [`apps/web/src/index.css`](apps/web/src/index.css) imports the ordered hand-written modules; tokens are declared CSS-first via `@theme {}` in [`apps/web/src/styles/foundations.css`](apps/web/src/styles/foundations.css).
 
 ---
 
@@ -85,7 +86,7 @@ packages/
   shared     -> Zod 4 contracts for the workflow DSL
   mcp-server -> stdio MCP server that proxies Janusly API tools
   solution-packs -> code-resident installable workflow starter catalog
-  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24+ source package, zero runtime deps,
+  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 22.12+ source package, zero runtime deps,
                 resource-style API + async iterators + opt-in retries +
                 webhook signature verifier — see `packages/sdk-node/README.md`)
   sdk-python -> typed `janusly` Python client + stdlib webhook verifier
@@ -99,7 +100,7 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 | Layer       | Library                                                                |
 | ----------- | ---------------------------------------------------------------------- |
-| Runtime     | Node.js 24 LTS (Krypton), Postgres 18, Redis 8                         |
+| Runtime     | Node.js 22.12+ (24 LTS baseline), Postgres 15+ (18 baseline), Redis 8   |
 | TypeScript  | 6.0                                                                     |
 | Backend     | `bullmq`, `ioredis`, `drizzle-orm`/`postgres-js`, Vercel `ai` SDK      |
 | AI          | Vercel AI SDK with **`anthropic/claude-haiku-4-5-20251001`** as the supported MVP provider. `LlmClient` registry also carries `openai` for future expansion, but production posture is Anthropic-only until cross-provider verification reopens it. Every AI surface has a deterministic fallback; attempted LLM-call failures surface `{ mode: "fallback", aiError, ... }`. |
@@ -114,10 +115,22 @@ The worker lives at `packages/engine/src/worker.ts` and runs with `pnpm --filter
 
 ## Requirements
 
-- Node.js **24+** (`engines.node` enforced at root)
+- Node.js **22.12+** (`engines.node` enforced at root; **24** is the dev/prod baseline)
 - PNPM **10** (`corepack enable`)
-- Docker (for Postgres 18 + Redis 8 + Ollama services in local dev)
+- Docker (for Postgres + Redis 8 + Ollama services in local dev)
 - (Optional) Anthropic API key — see [`docs/ai.md`](docs/ai.md). MVP support posture is Anthropic-only; OpenAI is registered in the provider abstraction but not currently a verified runtime target.
+
+### Supported-version matrix (self-host)
+
+The **floor** is the oldest version CI proves green; the **baseline** is what the dev/prod fleet runs. Both are exercised in CI (`build_test` runs the unit suite on Node 22 **and** 24; `test_compat_pg15` runs the integration lanes against Postgres 15) so the floor is a tested promise, not a hope.
+
+| Component | Floor (CI-verified) | Baseline (dev/prod) |
+| --------- | ------------------- | ------------------- |
+| Node.js   | 22.12 LTS           | 24 LTS (Krypton)    |
+| Postgres  | 15 (+ `pgvector`)   | 18 (+ `pgvector`)   |
+| Redis     | 8                   | 8                   |
+
+Self-hosting on an older Postgres? Point Compose at it: `JANUSLY_POSTGRES_IMAGE=pgvector/pgvector:pg15 docker compose up postgres`.
 
 ---
 
@@ -134,10 +147,12 @@ pnpm install
 pnpm dev
 
 # 3. Open the Studio
-# http://localhost:5173
+# http://127.0.0.1:5173
 ```
 
-Open <http://localhost:5173> — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). (If port 5173 is already in use, Vite falls back to 5174; both are in `API_ALLOWED_ORIGINS` by default.)
+Open <http://127.0.0.1:5173> after `pnpm dev` prints its ready line — Janusly signs you in as `dev-user` in org `default`. Click **Validate**, **Save**, **Run**. Open the **Runs** tab and chat with the **AI Run Explainer**. The first reply will be `mode: "fallback"` until you add an `ANTHROPIC_API_KEY` to `.env` — see [§ AI](#ai-janusly-as-an-ai-operator). Port `5173` is strict: if another process owns it, startup fails instead of silently moving the Studio. Use `pnpm dev:doctor` to clear an orphan.
+
+The web server binds loopback-only by default. Deliberate LAN or container exposure is explicit: `JANUSLY_DEV_HOST=0.0.0.0 pnpm dev`.
 
 The first `pnpm dev` boot may take several minutes while Ollama pulls the `bge-m3` embedding model into the `ollama_models` volume. That model is only used after memory is enabled with both `JANUSLY_MEMORY_ENABLED=true` and the tenant `memory.enabled` config flag.
 
@@ -168,11 +183,13 @@ See [`packages/mcp-server/README.md`](packages/mcp-server/README.md) for the arc
 ### Root commands
 
 ```bash
-pnpm dev             # full local stack: Compose redis/postgres/ollama + migrate + api/worker/web
-pnpm dev:doctor      # free orphaned api/web dev ports (:3001, :5173, :5174); add --compose to tear Compose down too
+pnpm dev             # full local stack: Compose + migrate + api/worker/web; waits for HTTP readiness
+pnpm dev:doctor      # free api/web ports (:3001, :5173, legacy :5174); add --compose to tear Compose down too
 pnpm stop            # docker compose stop (keeps volumes)
 pnpm clean           # docker compose down -v (removes local volumes)
 pnpm migrate         # apply Drizzle migrations against DATABASE_URL
+pnpm contract:generate # regenerate apps/api/openapi.v1.json from Zod route contracts
+pnpm contract:check  # fail when the checked-in OpenAPI 3.1 contract has drifted
 pnpm test            # Vitest across the workspace packages
 pnpm test:browser    # Vitest browser mode for *.browser.test.tsx (Playwright/Chromium)
 pnpm build           # type-check + Vite production build (Rolldown, manualChunks)
@@ -347,7 +364,7 @@ pnpm test               # full Vitest workspace suite
 pnpm test:browser       # Vitest browser-mode (Playwright/Chromium) for `*.browser.test.tsx`
 pnpm test:e2e           # Playwright with automatic Compose up/down
 pnpm build              # type-check + web build
-pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, :5174) after a crashed local run
+pnpm dev:doctor         # free orphaned dev ports (:3001, :5173, legacy :5174) after a crashed local run
 pnpm --filter @janusly/web test:watch   # Vitest watch
 ```
 
@@ -363,7 +380,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **API** | Application Programming Interface | The HTTP control plane in `apps/api` (plain Node `http`, no framework). |
 | **CAS** | Compare-And-Swap | The "atomic claim" pattern used in concurrency-sensitive transitions — `UPDATE … WHERE status='pending'` in `tryClaimNodeForQueue`, and `UPDATE … WHERE status='validated'` in auto-healing `recordDecision` so concurrent operator-click vs auto-apply can't double-apply (loser returns 409). |
 | **CRUD** | Create / Read / Update / Delete | Basic record-level operations against a resource (e.g. workflows, members, credentials). |
-| **CSS** | Cascading Style Sheets | The design system is hand-written CSS in `apps/web/src/index.css` (Tailwind 4 CSS-first via `@theme {}`). |
+| **CSS** | Cascading Style Sheets | The design system is hand-written CSS behind the ordered `apps/web/src/index.css` entrypoint; Tailwind 4 CSS-first tokens live in `apps/web/src/styles/foundations.css`. |
 | **DAG** | Directed Acyclic Graph | The workflow shape: nodes + edges, no cycles. The engine executes nodes in topological order. |
 | **DI** | Dependency Injection | The "seam" pattern used to keep `@janusly/engine` DB-agnostic — `setBudgetChecker`, `setUsageRecorder`, `setEngineRateLimiter`, `setIntegrationUsageRecorder`, `setEmailUsageRecorder`, `setPdfUsageRecorder`, `setMcpUsageRecorder`. Wired to the real implementations from `@janusly/data` at API + worker boot. |
 | **DLQ** | Dead Letter Queue | Where a node lands after exhausting its `retryPolicy.maxAttempts`. Surfaced in the Recovery Center for triage / replay. |
@@ -374,7 +391,7 @@ Acronyms used throughout this README and the wider Janusly codebase ([`AGENTS.md
 | **JSON** | JavaScript Object Notation | The serialization format for workflow definitions, node configs, run state, and API request/response bodies. |
 | **JWT** | JSON Web Token | The token shape Supabase issues for app login; the API verifies it on every request when Supabase mode is on. |
 | **LLM** | Large Language Model | The model behind every AI surface. Provider-neutral via `LlmClient`; production posture is Anthropic-only (`claude-haiku-4-5-20251001`). |
-| **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the supported runtime. |
+| **LTS** | Long-Term Support | Node.js 24 LTS (codename Krypton) is the dev/prod baseline; 22.12 LTS is the CI-verified floor. |
 | **MCP** | Model Context Protocol | The Anthropic-defined protocol for exposing tools to LLM clients. Janusly ships an MCP server (`packages/mcp-server`) and consumes external MCP servers as `mcp_tool` workflow nodes. |
 | **MFA** | Multi-Factor Authentication | A marker flag on `org_configs.auth.mfaRequired`. **Informational only** — Janusly warn-logs server-side when set, but actual enforcement happens at the IdP (Okta / Azure AD carry the claim, Supabase does not). |
 | **MTTR** | Mean Time To Recovery | The north-star metric: how long from a failed automation to that automation working again. Surfaced on `GET /recovery/metrics` and as an SLO threshold field (`mttrSeconds`). |

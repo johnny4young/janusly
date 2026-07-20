@@ -16,7 +16,8 @@ secret values stay env-only.
 | `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/workflow` | `packages/db` | Postgres connection string for Drizzle, API, worker, and migrations. |
 | `REDIS_URL` | `redis://localhost:6379` | API rate limiter, engine queue | Redis connection for shared rate-limit state and BullMQ. |
 | `PORT` | `3001` | `apps/api` | API HTTP port. |
-| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. Includes `5174` so dev still works when Vite falls back from `5173` due to a port collision. |
+| `API_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174` | `apps/api/src/http.ts` | Comma-separated CORS allowlist. `pnpm dev` uses strict `5173`; `5174` remains for legacy/manual development setups. |
+| `JANUSLY_DEV_HOST` | `127.0.0.1` | `scripts/run-dev.mjs` | Validated Vite bind hostname/IP for `pnpm dev`. Loopback is the safe default; use `0.0.0.0` only for deliberate LAN/container exposure. |
 | `API_MAX_JSON_BODY_BYTES` | `1048576` | `apps/api` | Maximum request JSON body size. |
 | `API_SERVICE_TOKEN` | unset | `apps/api/src/auth.ts` | Optional Bearer token for service clients, including production MCP mode. |
 | `JANUSLY_REQUIRE_SAVED_WORKFLOW` | `false` | `apps/api` | When `true`, rejects ad-hoc `POST /start` workflow payloads. |
@@ -143,6 +144,7 @@ only to select the safe provider/model/limit behavior.
 | `VITE_SUPABASE_URL` | unset | `apps/web/src/auth.ts` | Browser Supabase URL for the login UI. |
 | `VITE_SUPABASE_ANON_KEY` | unset | `apps/web/src/auth.ts` | Browser Supabase anon key for the login UI. |
 | `VITE_API_URL` | `http://localhost:3001` | `apps/web/src/api.ts` | API base URL compiled into the Vite web app. |
+| `VITE_DOCS_URL` | unset | `apps/web/src/docs-link.ts` | Optional credential-free HTTPS documentation URL compiled into the web app. When unset or invalid, Docs controls are hidden. |
 | `JANUSLY_PUBLIC_APP_URL` | unset | reports, recovery handoff, alerts | Public web base URL used in generated links. Falls back to `JANUSLY_WEB_BASE_URL` in handoff routes. |
 | `WORKOS_CLIENT_ID` | unset | `apps/api/src/workos.ts` | WorkOS client id for SSO code exchange. |
 | `WORKOS_API_KEY` | unset | `apps/api/src/workos.ts` | WorkOS API key for SSO profile exchange. Secret; keep in `.env` or vault only. |
@@ -291,11 +293,19 @@ registration failures log and do not block process boot.
 
 | Variable | Default | Used by | Purpose |
 | --- | --- | --- | --- |
-| `OTEL_METRICS_PORT` | `9464` | `packages/engine/src/observability/prometheus.ts` | Prometheus exporter port. |
+| `OTEL_METRICS_HOST` | `127.0.0.1` | `apps/api`, `packages/engine/src/worker.ts` | Process-local Prometheus bind host. Set a reachable interface such as `0.0.0.0` only when a remote scraper requires it and network policy protects the endpoint. |
+| `OTEL_METRICS_PORT` | API `9464`; worker `9465` | `apps/api`, `packages/engine/src/worker.ts` | Per-process Prometheus exporter port. Override per service when multiple replicas share a host. Bind conflicts fail process startup instead of silently dropping telemetry. |
+| `JANUSLY_QUEUE_LAG_WARN_SECONDS` | `60` | `apps/api/src/queue-health.ts` | Oldest-waiting-job age that marks queue pressure degraded. Integer range 1..86400; invalid values use the default. |
 | `OTEL_SERVICE_INSTANCE_ID` | `HOSTNAME`, then `os.hostname()` | `packages/engine/src/observability/resource.ts` | Stable OpenTelemetry `service.instance.id`. |
 | `HOSTNAME` | system-provided | `packages/engine/src/observability/resource.ts` | Fallback instance id in containerized environments. |
-| `OTEL_EXPORTER` | unset | `packages/engine/src/observability/otel.ts` | Set to `jaeger` to enable the Jaeger trace exporter. |
-| `OTEL_EXPORTER_JAEGER_ENDPOINT` | `http://localhost:14268/api/traces` | `packages/engine/src/observability/otel.ts` | Jaeger collector endpoint. |
+| `OTEL_EXPORTER` | `console` when unset | `packages/engine/src/observability/trace-exporter.ts` | Trace delivery mode: `console` for local development or `otlp` for batched OTLP/HTTP export. Any other value fails startup. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | `http://localhost:4318/v1/traces` | `packages/engine/src/observability/trace-exporter.ts` | Exact OTLP/HTTP traces endpoint. Takes precedence over the shared base endpoint. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | `packages/engine/src/observability/trace-exporter.ts` | Shared OTLP base URL; Janusly appends `/v1/traces` when the trace-specific endpoint is absent. |
+
+`OTEL_EXPORTER=jaeger` and `OTEL_EXPORTER_JAEGER_ENDPOINT` are no longer
+supported. Point Jaeger deployments at a Collector or Jaeger's native OTLP
+HTTP receiver and use `OTEL_EXPORTER=otlp`; Janusly deliberately does not
+reinterpret the old `/api/traces` URL as an OTLP endpoint.
 
 ## Local Test And Eval Helpers
 

@@ -20,8 +20,16 @@ def client() -> JanuslyClient:
 def test_get_metrics_threads_window_days(client: JanuslyClient, httpx_mock: HTTPXMock) -> None:
     httpx_mock.add_response(
         url="https://api.test.janus.ly/recovery/metrics?windowDays=7",
-        json={"successRate": {"value": 0.95}, "windowDays": 7, "terminalRuns": 10},
+        json={
+            "successRate": {"value": 0.95},
+            "timeToFirstAction": {"value": 120, "display": "2m"},
+            "recurrenceRate": {"value": 90, "display": "90.0%"},
+            "windowDays": 7,
+            "terminalRuns": 10,
+        },
     )
     result = client.recovery.get_metrics(window_days=7)
     assert result["windowDays"] == 7
     assert result["successRate"]["value"] == 0.95
+    assert result["timeToFirstAction"] == {"value": 120, "display": "2m"}
+    assert result["recurrenceRate"] == {"value": 90, "display": "90.0%"}
