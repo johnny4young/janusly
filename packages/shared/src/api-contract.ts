@@ -21,6 +21,7 @@ export const V1_READ_PATHS = {
   run: "/run",
   runUsage: "/run/usage",
   runStatus: "/status",
+  runExplainReport: "/reports/run-explain",
   deadLetters: "/dlq",
   failureClusters: "/dlq/clusters",
 } as const;

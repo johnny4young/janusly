@@ -76,7 +76,7 @@ export const PERMISSION_CATALOG = [
   { key: "recovery.read",        category: "recovery",  description: "View recovery metrics + delta",            defaultRoles: ["viewer", "editor", "admin"] },
   { key: "recovery.write",       category: "recovery",  description: "Submit recovery feedback, manage recovery items (acknowledge / resolve / comment / escalate)", defaultRoles: ["editor", "admin"] },
   // reports
-  { key: "reports.read",         category: "reports",   description: "Download run-explain reports",             defaultRoles: ["viewer", "editor", "admin"] },
+  { key: "reports.read",         category: "reports",   description: "Download run and value reports",           defaultRoles: ["viewer", "editor", "admin"] },
   { key: "reports.deliver",      category: "reports",   description: "Deliver run-explain via Slack / GitHub / webhook", defaultRoles: ["editor", "admin"] },
   // ai
   { key: "ai.write",             category: "ai",        description: "Use AI generate / patch / suggest / explain", defaultRoles: ["editor", "admin"] },

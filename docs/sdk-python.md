@@ -27,6 +27,10 @@ The Python SDK mirrors the TypeScript SDK's four resource bindings. `JanuslyClie
 | `client.runs` | `resume_node(run_id, node_id, input=None, resume_token=None)` | `POST /v1/resume` |
 | `client.runs` | `cancel(run_id, reason=None)` | `POST /v1/run/cancel` |
 | `client.reports` | `export_run_explain(run_id, format="markdown" | "json")` | `GET /reports/run-explain` |
+
+Report exports remain on the unversioned artifact route so downloaded bytes and
+filenames stay stable; programmatic JSON clients can use
+`GET /v1/reports/run-explain?runId=…&format=json`.
 | `client.recovery` | `get_metrics(window_days=30)` | `GET /v1/recovery/metrics` |
 | `client.webhooks` | `verify_signature(body, signature_header, secret, …)` | local (no HTTP) |
 

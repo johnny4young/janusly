@@ -59,7 +59,7 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `dlq.list` | `GET /v1/dlq` | List bounded DLQ entries. |
 | `dlq.clusters` | `GET /v1/dlq/clusters` | Group recent failures by normalized signature. |
 | `recovery.metrics` | `GET /v1/recovery/metrics` | Read the tenant recovery rollup. |
-| `reports.run_explain` | `GET /reports/run-explain` | Explain one run with structured evidence. |
+| `reports.run_explain` | `GET /v1/reports/run-explain` | Explain one run with structured evidence. |
 | `ai.patch_workflow` | `POST /ai/patch-workflow` | Suggest patches without saving a workflow version. |
 | `ai.generate_workflow` | `POST /ai/generate-workflow` | Generate a workflow suggestion without saving it. |
 | `workflows.validate` | `POST /v1/validate` | Validate workflow shape and graph rules without saving. |

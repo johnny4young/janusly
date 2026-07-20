@@ -109,6 +109,9 @@ Cancelling flips the run + its non-running nodes to `cancelled`. A run that alre
 
 **Export a run-explain report.**
 
+Exports intentionally use the unversioned artifact route so Markdown and JSON
+downloads retain their raw bytes and `Content-Disposition` filename.
+
 ```python
 result = client.reports.export_run_explain("run-abc", format="markdown")
 with open(result["filename"] or "report.md", "wb") as f:

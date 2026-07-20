@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { computeWorkflowHealth } from "@janusly/engine/src/workflow-health";
 import { clusterFailureSamples } from "@janusly/engine/src/cluster-failures";
+import { buildRunExplainReport } from "@janusly/engine/src/run-explain-report";
 import { checkWorkflowReadiness } from "@janusly/engine/src/workflow-readiness";
 import { validateWorkflow } from "@janusly/engine/src/workflow-validation";
 import { WorkflowSchema } from "@janusly/shared";
@@ -15,6 +16,7 @@ import { WorkflowSchema } from "@janusly/shared";
 import {
   checkWorkflowReadinessContract,
   getWorkflowHealthContract,
+  getRunExplainReportContract,
   listDeadLettersContract,
   listFailureClustersContract,
   replayDeadLetterContract,
@@ -28,6 +30,74 @@ const workflow = WorkflowSchema.parse({
   id: "contract-smoke",
   nodes: [{ id: "start", type: "noop", config: {} }],
   edges: [],
+});
+
+describe("run-explanation stable contract", () => {
+  it("requires an explicit JSON format and rejects download-only variants", () => {
+    const querySchema = getRunExplainReportContract.request.query;
+    expect(getRunExplainReportContract.errorCodes).toContain("invalid_input");
+    expect(querySchema.safeParse({ runId: "run-1", format: "json" }).success).toBe(true);
+    expect(querySchema.safeParse({ runId: "run-1" }).success).toBe(false);
+    expect(querySchema.safeParse({ runId: "run-1", format: "markdown" }).success).toBe(false);
+    expect(querySchema.safeParse({ runId: "run-1", format: "json", download: "1" }).success).toBe(false);
+  });
+
+  it("accepts a real bounded engine report with failure evidence", () => {
+    const report = buildRunExplainReport({
+      run: {
+        id: "run-1",
+        status: "failed",
+        workflowVersionId: "version-3",
+        createdAt: "2026-07-20T12:00:00.000Z",
+      },
+      runNodes: [{
+        nodeId: "http-1",
+        status: "failed",
+        attempts: 3,
+        startedAt: "2026-07-20T12:00:01.000Z",
+        finishedAt: "2026-07-20T12:00:04.000Z",
+        stateJson: { nodeType: "http" },
+        errorJson: { message: "Request timed out after 10 seconds" },
+      }],
+      runEvents: [{
+        id: "event-1",
+        nodeId: "http-1",
+        type: "node.failed",
+        createdAt: "2026-07-20T12:00:04.000Z",
+      }],
+      recoveryAudit: {
+        createdAt: "2026-07-20T12:05:00.000Z",
+        metadata: {
+          mode: "ai",
+          envelopeKind: "http",
+          patchStyle: "config_only",
+          topApproachLabel: "raise_timeout",
+          suggestionsCount: 2,
+        },
+      },
+    });
+
+    expect(getRunExplainReportContract.response.safeParse(report.json).success).toBe(true);
+  });
+
+  it("rejects reports that exceed the deterministic timeline cap", () => {
+    const report = buildRunExplainReport({
+      run: { id: "run-1", status: "succeeded" },
+      runNodes: [],
+      runEvents: [],
+      recoveryAudit: null,
+    }).json;
+    const oversized = {
+      ...report,
+      timeline: Array.from({ length: 51 }, (_, index) => ({
+        at: null,
+        nodeId: null,
+        type: `event.${index}`,
+      })),
+    };
+
+    expect(getRunExplainReportContract.response.safeParse(oversized).success).toBe(false);
+  });
 });
 
 describe("workflow stable contracts", () => {

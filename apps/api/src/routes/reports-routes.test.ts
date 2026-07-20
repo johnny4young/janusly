@@ -263,6 +263,17 @@ beforeEach(() => {
 });
 
 describe("/reports/run-explain — happy path", () => {
+  it("declares the read permission and stable JSON contract", () => {
+    expect(reportsRoute()).toMatchObject({
+      role: "viewer",
+      permission: "reports.read",
+      contract: expect.objectContaining({
+        operationId: "getRunExplainReport",
+        path: "/reports/run-explain",
+      }),
+    });
+  });
+
   it("returns Markdown with attachment Content-Disposition by default", async () => {
     selectRowsBox.rows = [
       [{
@@ -405,6 +416,23 @@ describe("/reports/run-explain — happy path", () => {
     );
   });
 
+  it("routes stable JSON through sendJson for response validation and v1 wrapping", async () => {
+    selectRowsBox.rows = [
+      [{ id: "run_abc", orgId: "org-1", status: "failed", createdAt: new Date("2026-05-12T14:55:00Z") }],
+      [], [], [],
+    ];
+
+    await reportsRoute().handler({
+      req: { url: "/reports/run-explain?runId=run_abc&format=json" } as never,
+      res: { ...makeRes(), apiVersion: "v1" } as never,
+      auth,
+    });
+
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), baseReport.json);
+    expect(resWriteHeadMock).not.toHaveBeenCalled();
+    expect(resEndMock).not.toHaveBeenCalled();
+  });
+
   it("records recoveryAuditFound=true when a matching audit row exists", async () => {
     selectRowsBox.rows = [
       [{ id: "run_abc", orgId: "org-1", status: "failed" }],
@@ -498,6 +526,7 @@ describe("/reports/value-dashboard — export", () => {
     const route = valueDashboardRoute();
     expect(route.method).toBe("GET");
     expect(route.role).toBe("viewer");
+    expect(route.permission).toBe("reports.read");
     expect(typeof route.match).toBe("function");
     expect((route.match as (url: string) => boolean)("/reports/value-dashboard?format=markdown")).toBe(true);
   });
@@ -989,6 +1018,7 @@ describe("/reports/run-explain/deliver — route shape", () => {
     const route = deliverRoute();
     expect(route.method).toBe("POST");
     expect(route.role).toBe("editor");
+    expect(route.permission).toBe("reports.deliver");
     // Match shape — exact string per the registry pattern, not a predicate.
     expect(route.match).toBe("/reports/run-explain/deliver");
   });

@@ -122,6 +122,55 @@ const WorkflowHealthSchema = z.object({
   }).nullable().optional(),
 });
 
+const RunExplainReportSchema = z.object({
+  generatedAt: IsoDateSchema,
+  summary: z.object({
+    runId: z.string().min(1).max(256),
+    status: z.enum(runStatusValues),
+    workflowVersionId: z.string().max(256).nullable(),
+    parentRunId: z.string().max(256).nullable(),
+    replayMode: z.string().max(64).nullable(),
+    createdAt: NullableIsoDateSchema,
+    isFailure: z.boolean(),
+  }),
+  rootCause: z.object({
+    signature: z.string().max(240),
+    category: z.enum([
+      "secret_missing",
+      "http_error",
+      "network_timeout",
+      "ai_provider",
+      "parse_error",
+      "tool_input",
+      "unknown",
+    ]),
+    suggestedOwner: z.enum(["ops", "workflow_author", "platform"]),
+  }).nullable(),
+  failedNode: z.object({
+    nodeId: z.string().max(120),
+    status: z.enum(nodeStatusValues),
+    attempts: z.number().int().nonnegative(),
+    startedAt: NullableIsoDateSchema,
+    finishedAt: NullableIsoDateSchema,
+    errorSummary: z.string().max(240),
+  }).nullable(),
+  timeline: z.array(z.object({
+    at: NullableIsoDateSchema,
+    nodeId: z.string().max(120).nullable(),
+    type: z.string().max(120),
+  })).max(50),
+  timelineTruncated: z.boolean(),
+  suggestedFix: z.object({
+    mode: z.enum(["ai", "fallback"]),
+    topApproachLabel: z.string().max(120),
+    envelopeKind: z.string().max(120),
+    patchStyle: z.enum(["structural", "config_only", "unknown"]),
+    suggestionsCount: z.number().int().nonnegative(),
+    suggestedAt: NullableIsoDateSchema,
+  }).nullable(),
+  nextAction: z.string().min(1).max(500),
+});
+
 // Validation and readiness intentionally accept incomplete workflow objects:
 // identifying structural failures is the purpose of these endpoints. Their
 // successful result schemas remain strict enough to protect the stable wire.
@@ -597,6 +646,22 @@ export const getWorkflowHealthContract = {
   ],
 } satisfies ApiRouteContract;
 
+export const getRunExplainReportContract = {
+  operationId: "getRunExplainReport",
+  path: V1_READ_PATHS.runExplainReport,
+  summary: "Get a structured deterministic explanation of one run",
+  tags: ["Reports"],
+  request: {
+    query: z.object({
+      runId: z.string().min(1).max(256),
+      format: z.literal("json")
+        .describe("The stable API exposes structured JSON only; downloadable artifacts remain on the legacy route."),
+    }).strict(),
+  },
+  response: RunExplainReportSchema,
+  errorCodes: ["invalid_input", "reports_run_not_found"],
+} satisfies ApiRouteContract;
+
 export const saveWorkflowContract = {
   operationId: "saveWorkflow",
   path: V1_WRITE_PATHS.saveWorkflow,
@@ -1033,6 +1098,7 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "POST", role: "editor", contract: validateWorkflowContract },
   { method: "POST", role: "editor", contract: checkWorkflowReadinessContract },
   { method: "GET", role: "viewer", contract: getWorkflowHealthContract },
+  { method: "GET", role: "viewer", permission: "reports.read", contract: getRunExplainReportContract },
   { method: "POST", role: "editor", permission: "workflows.write", contract: saveWorkflowContract },
   { method: "POST", role: "editor", permission: "workflows.write", contract: rollbackWorkflowContract },
   { method: "GET", role: "viewer", permission: "dlq.read", contract: listDeadLettersContract },

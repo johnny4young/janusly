@@ -424,7 +424,7 @@ const READ_TOOLS: Tool[] = [
   {
     name: "reports.run_explain",
     description:
-      "Generate a structured explanation report for a single run (root cause, failed node, recommended next action, run metadata). Returns the JSON envelope shape; the equivalent Markdown rendering is available from the same API by passing format=markdown but this tool forces JSON for structured client consumption. No workflow mutation; the API writes the same report-export audit row as the web download path.",
+      "Generate a structured explanation report for a single run (root cause, failed node, recommended next action, run metadata). Uses the stable JSON contract; the equivalent Markdown artifact remains available from the unversioned download endpoint. No workflow mutation; the API writes the same report-export audit row as the web download path.",
     inputSchema: {
       type: "object",
       required: ["runId"],
@@ -629,7 +629,7 @@ async function runOne(
         throw new Error("reports.run_explain requires `runId` (non-empty string)");
       }
       const params = new URLSearchParams({ runId: args.runId, format: "json" });
-      return callApi(`/reports/run-explain?${params.toString()}`);
+      return callApi(`/v1/reports/run-explain?${params.toString()}`);
     }
     case "ai.patch_workflow": {
       if (typeof args.deadLetterId !== "string" || args.deadLetterId.length === 0) {

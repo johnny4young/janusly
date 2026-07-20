@@ -333,7 +333,7 @@ describe("dispatchTool", () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "reports.run_explain", { runId: "run-77" });
     const path = mock.mock.calls[0][0] as string;
-    expect(path).toMatch(/^\/reports\/run-explain\?/);
+    expect(path).toMatch(/^\/v1\/reports\/run-explain\?/);
     expect(path).toContain("runId=run-77");
     expect(path).toContain("format=json");
   });

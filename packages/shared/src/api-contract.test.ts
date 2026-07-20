@@ -6,7 +6,7 @@ describe("v1 API read paths", () => {
   it("keeps the closed path catalog unique", () => {
     const paths = Object.values(V1_READ_PATHS);
     expect(new Set(paths).size).toBe(paths.length);
-    expect(paths).toHaveLength(17);
+    expect(paths).toHaveLength(18);
   });
 
   it("matches exact paths only", () => {
@@ -15,6 +15,7 @@ describe("v1 API read paths", () => {
     expect(isV1ReadPath("/workflows/schedule-preview")).toBe(true);
     expect(isV1ReadPath("/memory/consent-status")).toBe(true);
     expect(isV1ReadPath("/run/usage")).toBe(true);
+    expect(isV1ReadPath("/reports/run-explain")).toBe(true);
     expect(isV1ReadPath("/templates")).toBe(true);
     expect(isV1ReadPath("/tools")).toBe(true);
     expect(isV1ReadPath("/workflows/health")).toBe(true);

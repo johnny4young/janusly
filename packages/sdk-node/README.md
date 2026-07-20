@@ -200,6 +200,9 @@ reached a terminal status throws `JanuslyApiError` (409).
 
 ### 6. Export a run-explain report
 
+Exports intentionally use the unversioned artifact route so Markdown and JSON
+downloads retain their raw bytes and `Content-Disposition` filename.
+
 ```typescript
 import { writeFile } from "node:fs/promises";
 

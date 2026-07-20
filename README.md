@@ -163,7 +163,7 @@ When you're done, press `Ctrl+C` in the `pnpm dev` terminal. The orchestrator sh
 
 ### Use Janusly from Claude Desktop / Cursor (MCP)
 
-`packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
+`packages/mcp-server` ships an MCP server over stdio. It always advertises read-only inspection, preflight, and AI-authoring tools; when both MCP write-consent flags are enabled it additionally advertises workflow authoring, run operation, exact-DLQ replay, rollback, and outbound-connection management. Contracted tools use runtime-validated `/v1` envelopes; `reports.run_explain` consumes the structured JSON contract while downloadable report artifacts remain on the unversioned route, and `dlq.replay` requires the `deadLetterId` returned by `dlq.list` so terminal recovery evidence stays attributable. With `pnpm dev` running, drop this into `~/Library/Application Support/Claude/claude_desktop_config.json` (or your platform equivalent) and restart Claude Desktop:
 
 ```jsonc
 {

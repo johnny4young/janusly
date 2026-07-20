@@ -23,6 +23,7 @@ import {
   type RecoveryLedgerRepo,
 } from "@janusly/data";
 import { auditAction } from "../audit-helper";
+import { getRunExplainReportContract } from "../api-contracts";
 import { HTTP_CAPS, RATE_LIMIT_WINDOW_MS } from "../constants";
 import { corsHeaders, readJson, sendError, sendJson } from "../http";
 import { enforceRateLimit } from "../rate-limit";
@@ -229,7 +230,7 @@ export const reportsRoutes: Route[] = [
   // explicitly requested for programmatic consumers. Org-scoped on
   // the run lookup; cross-org / missing run id returns a uniform 404
   // (no enumeration leak).
-  { method: "GET", match: (url) => url.startsWith("/reports/run-explain"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/reports/run-explain"), role: "viewer", permission: "reports.read", contract: getRunExplainReportContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const runId = url.searchParams.get("runId");
@@ -342,6 +343,12 @@ export const reportsRoutes: Route[] = [
       });
 
       if (formatRaw === "json") {
+        // Stable callers receive the normal runtime-validated v1 envelope,
+        // not a downloadable file whose contents happen to be JSON. The
+        // unversioned route retains its byte-compatible attachment response
+        // for the web and SDK export helpers.
+        if (res.apiVersion === "v1") return sendJson(res, report.json);
+
         // Use the same disposition pattern for JSON so an operator who
         // saves the response gets a filename instead of "download.bin".
         // sendJson sets Content-Type; we write manually to layer the
@@ -388,7 +395,7 @@ export const reportsRoutes: Route[] = [
   //
   // Audit row `report.run_explain.delivered` is written on BOTH success
   // AND failure (matches the AI-mutation audit posture).
-  { method: "POST", match: "/reports/run-explain/deliver", role: "editor",
+  { method: "POST", match: "/reports/run-explain/deliver", role: "editor", permission: "reports.deliver",
     handler: async ({ req, res, auth }) => {
       const rawBody = await readJson(req, 64_000);
       const parsed = deliverRequestSchema.safeParse(rawBody);
@@ -502,7 +509,7 @@ export const reportsRoutes: Route[] = [
   // stakeholder ("here's what the platform recovered for us this month").
   // Multi-tenant scoped on `auth.orgId` — no enumeration of other orgs.
   // Every export writes a `report.value_dashboard.exported` audit row.
-  { method: "GET", match: (url) => url.startsWith("/reports/value-dashboard"), role: "viewer",
+  { method: "GET", match: (url) => url.startsWith("/reports/value-dashboard"), role: "viewer", permission: "reports.read",
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const rawWindow = Number.parseInt(url.searchParams.get("windowDays") ?? "", 10);

@@ -228,6 +228,22 @@ describe("buildRunExplainReport — recovery audit row present", () => {
     expect(report.json.suggestedFix?.patchStyle).toBe("unknown");
     expect(report.markdown).toContain("**Patch style:** unknown");
   });
+
+  it("normalizes malformed historical suggestion counts to a safe integer", () => {
+    const report = buildRunExplainReport({
+      run: runSnapshot({ status: "failed" }),
+      runNodes: [{ nodeId: "fetch", status: "failed", errorJson: { message: "500" } }],
+      runEvents: [],
+      recoveryAudit: {
+        metadata: {
+          mode: "fallback",
+          suggestionsCount: -2.75,
+        },
+      },
+    });
+
+    expect(report.json.suggestedFix?.suggestionsCount).toBe(0);
+  });
 });
 
 describe("buildRunExplainReport — secret-shape scrub", () => {

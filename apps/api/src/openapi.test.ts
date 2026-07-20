@@ -29,6 +29,7 @@ describe("OpenAPI v1 contract", () => {
       ...Object.values(V1_MCP_PATHS),
     ])].sort());
     expect(document.paths["/run"].get.operationId).toBe("getRun");
+    expect(document.paths["/reports/run-explain"].get.operationId).toBe("getRunExplainReport");
     expect(document.paths["/run"].get.responses).toHaveProperty("200");
     expect(document.paths["/run"].get.responses).toHaveProperty("default");
     expect(document.paths["/run"].get.responses).toMatchObject({
@@ -57,6 +58,15 @@ describe("OpenAPI v1 contract", () => {
 
   it("matches the checked-in generated artifact byte-for-byte", () => {
     expect(readFileSync(checkedInPath, "utf8")).toBe(serializeOpenApi(V1_CONTRACT_ROUTES));
+  });
+
+  it("declares invalid_input for every dispatcher-validated request contract", () => {
+    const missing = V1_CONTRACT_ROUTES
+      .filter((route) => route.contract.request !== undefined)
+      .filter((route) => !route.contract.errorCodes.includes("invalid_input"))
+      .map((route) => route.contract.operationId);
+
+    expect(missing).toEqual([]);
   });
 
   it("rejects drift between path templates and declared path schemas", () => {

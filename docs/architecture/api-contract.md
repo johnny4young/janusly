@@ -84,8 +84,10 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
    required/type drift fails closed, while additive keys on ordinary
    `z.object` response schemas remain backward-compatible unless that object is
    explicitly strict.
-6. Route-specific error codes must be declared. Dispatcher-level errors are
-   automatically available to every contract.
+6. Route-specific error codes must be declared. Generic server errors are
+   automatically available to every contract, but a contract with a validated
+   path, query, or body must explicitly include `invalid_input`; otherwise the
+   dispatcher rejection itself fails the versioned error contract.
 7. Legacy response bodies remain unchanged. The web client opts contracted GET
    paths into `/v1` and unwraps them inside `apps/web/src/api.ts`, so components
    keep their existing payload types.
@@ -100,6 +102,11 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
    evidence. `/v1/dlq/replay` requires `deadLetterId`; run/node replay aliases
    remain legacy-only because they cannot identify a dead-letter recovery claim
    for terminal-impact attribution.
+10. Stable run explanation requires viewer rank plus `reports.read` and accepts
+    only `format=json`. `/v1/reports/run-explain` returns the normal validated
+    JSON envelope; downloadable Markdown and JSON attachments deliberately stay
+    on the unversioned route so version negotiation never changes an artifact's
+    bytes or filename.
 
 ## Adding a contracted route
 

@@ -44,6 +44,9 @@ retroactively.
 - Stable `/v1` DLQ summary, failure-cluster, and exact dead-letter replay
   contracts. The MCP server now uses those envelopes and requires
   `deadLetterId` for generation-bound replay attribution.
+- A stable JSON-only `/v1/reports/run-explain` contract for deterministic run
+  evidence. MCP uses the validated envelope while web and SDK artifact
+  downloads keep their existing filenames and raw bytes.
 
 ### Fixed
 
@@ -54,6 +57,8 @@ retroactively.
   reliability projection instead of loading the complete immutable history.
 - DLQ reads now enforce the existing `dlq.read` permission in addition to
   viewer rank, so custom roles cannot bypass a tenant's permission override.
+- Run/value report exports and report delivery now enforce their existing
+  `reports.read` and `reports.deliver` permissions in addition to role rank.
 - Structured AI generation now uses the stable AI SDK 7 output API while
   preserving validated object results and deterministic fallbacks.
 - Repository ratchets that inspect TypeScript and TSX source now use the Oxc
