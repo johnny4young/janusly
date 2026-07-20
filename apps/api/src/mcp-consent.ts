@@ -43,6 +43,7 @@ import {
   getOrgConfigSnapshot,
 } from "@janusly/data";
 import type { AuthContext } from "./auth";
+import type { ApiErrorCode } from "./error-codes";
 import { enforceRateLimit } from "./rate-limit";
 import { RATE_LIMIT_WINDOW_MS } from "./constants";
 
@@ -103,7 +104,7 @@ export function mcpRateLimitBucket(actionKey: string): string {
 /** Result of the MCP write gate — `ok:false` carries a ready-to-send 403 body. */
 export type McpWriteGate =
   | { ok: true }
-  | { ok: false; status: number; body: { error: string; code: string } };
+  | { ok: false; status: number; body: { error: string; code: ApiErrorCode } };
 
 /**
  * Single chokepoint every MCP-write route calls at the top of its handler.
@@ -121,7 +122,10 @@ export async function guardMcpWrite(auth: AuthContext, actionKey: string): Promi
   if (auth.source !== "mcp") return { ok: true };
   const consent = await isMcpWriteAllowed(auth.orgId);
   if (!consent.allowed) {
-    return { ok: false, status: 403, body: { error: consent.message, code: `mcp_${consent.reason}` } };
+    const code: ApiErrorCode = consent.reason === "process_disabled"
+      ? "mcp_process_disabled"
+      : "mcp_tenant_disabled";
+    return { ok: false, status: 403, body: { error: consent.message, code } };
   }
   await enforceRateLimit(auth.orgId, {
     name: mcpRateLimitBucket(actionKey),

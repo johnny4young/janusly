@@ -158,10 +158,12 @@ export type ApiErrorCode =
   | "mcp_command_invalid"
   | "mcp_command_not_allowed"
   | "mcp_command_required"
+  | "mcp_process_disabled"
   | "mcp_no_updatable_fields"
   | "mcp_rate_limit_invalid"
   | "mcp_rate_limited"
   | "mcp_transport_invalid"
+  | "mcp_tenant_disabled"
   | "mcp_url_invalid"
   | "mcp_url_required"
   // members

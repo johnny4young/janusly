@@ -20,6 +20,14 @@ retroactively.
   7, Vite 8, Vitest 4, Oxlint, and Vercel AI SDK 7.
 - CI, containers, workspace metadata, SDK metadata, and contributor
   documentation now describe the same Node.js 24 runtime boundary.
+- The private Node SDK now consumes stable `/v1` envelopes and builds a normal
+  ESM package with declarations, source maps, and an isolated tarball consumer
+  smoke test. Registry publication remains disabled.
+
+### Added
+
+- Stable `/v1` contracts and OpenAPI operations for starting, resuming, and
+  cancelling runs, including runtime validation of strict JSON request bodies.
 
 ### Fixed
 

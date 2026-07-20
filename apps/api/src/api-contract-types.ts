@@ -17,7 +17,7 @@ export type ApiContractRequest = {
   query?: ZodObject<ZodRawShape>;
   /** Query keys that must always be represented as arrays before Zod parsing. */
   repeatableQueryParams?: readonly string[];
-  /** JSON body schema for future contracted mutation routes. */
+  /** Raw JSON body schema. The dispatcher validates it and handlers reuse the memoized parse. */
   body?: ZodType;
 };
 

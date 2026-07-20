@@ -14,7 +14,10 @@ function makeConfig(fetchImpl: FakeFetch): JanuslyClientConfig {
 }
 
 function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ apiVersion: "v1", requestId: "sdk-test", data: body }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 const SAMPLE_METRICS: RecoveryMetrics = {
@@ -92,7 +95,7 @@ const SAMPLE_METRICS: RecoveryMetrics = {
 };
 
 describe("RecoveryResource.getMetrics", () => {
-  it("GETs /recovery/metrics without query when windowDays omitted", async () => {
+  it("GETs /v1/recovery/metrics without query when windowDays omitted", async () => {
     const captured: Array<{ url: string }> = [];
     const fetchImpl = vi.fn(async (url: unknown) => {
       captured.push({ url: String(url) });
@@ -101,7 +104,7 @@ describe("RecoveryResource.getMetrics", () => {
     const recovery = new RecoveryResource(makeConfig(fetchImpl));
     const result = await recovery.getMetrics();
     expect(result).toEqual(SAMPLE_METRICS);
-    expect(captured[0]!.url).toBe("https://api.test.example.com/recovery/metrics");
+    expect(captured[0]!.url).toBe("https://api.test.example.com/v1/recovery/metrics");
   });
 
   it("appends windowDays when provided", async () => {

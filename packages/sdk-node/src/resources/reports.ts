@@ -7,8 +7,8 @@
  * and web behaviour stay consistent.
  */
 
-import { sendApiRequest, type AttachmentResponse } from "../request.ts";
-import type { JanuslyClientConfig, JanuslyRequestOptions } from "../types.ts";
+import { sendApiRequest, type AttachmentResponse } from "../request.js";
+import type { JanuslyClientConfig, JanuslyRequestOptions } from "../types.js";
 
 /** Closed enum of formats the server emits. */
 export type RunExplainFormat = "markdown" | "json";

@@ -89,8 +89,8 @@ packages/
   shared     -> Zod 4 contracts for the workflow DSL
   mcp-server -> stdio MCP server that proxies Janusly API tools
   solution-packs -> code-resident installable workflow starter catalog
-  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24 source package, zero runtime deps,
-                resource-style API + async iterators + opt-in retries +
+  sdk-node   -> typed `@janusly/sdk` HTTP client (Node 24 ESM package, zero runtime deps,
+                stable /v1 envelopes + async iterators + opt-in retries +
                 webhook signature verifier — see `packages/sdk-node/README.md`)
   sdk-python -> typed `janusly` Python client + stdlib webhook verifier
 ```
@@ -359,7 +359,7 @@ See [`docs/ai.md`](docs/ai.md) for the full guide.
 | `packages/db`, `packages/data` | Vitest 4 for migrations/env/schema helpers and data repos; `tsc --noEmit` as a type guard. |
 | `packages/mcp-server`      | Vitest 4 for MCP stdio protocol, tool descriptors, auth headers, and dispatch. |
 | `packages/solution-packs`  | Vitest 4 for pack schema validity, fixture integrity, and public catalog shape. |
-| `packages/sdk-node`        | Vitest 4 for typed client headers, errors, polling/streaming, reports, recovery, and webhooks. |
+| `packages/sdk-node`        | Vitest 4 for typed client headers, stable envelopes, polling/streaming, reports, recovery, and webhooks; isolated npm-tarball consumer smoke. |
 | `packages/sdk-python`      | Pytest for auth, errors, runs, reports, recovery, webhook signatures, and packaging. |
 
 ```bash

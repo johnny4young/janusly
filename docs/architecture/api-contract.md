@@ -9,13 +9,14 @@ by prefix alone.
 
 - `apps/api/src/api-contracts.ts` — Zod request/response schemas and the pure
   `V1_CONTRACT_ROUTES` manifest.
-- `packages/shared/src/api-contract.ts` — zero-dependency exact-path catalog
-  shared by the API contracts and browser transport.
+- `packages/shared/src/api-contract.ts` — zero-dependency exact-path catalogs
+  for stable reads and writes, shared by API contracts and first-party clients.
 - `apps/api/src/routes.ts` — optional `contract` field on a route entry.
 - `apps/api/src/server.ts` — exact-route-first dispatch, `/v1` alias resolution,
-  query validation, request ID assignment, and unchanged auth/RBAC ordering.
+  query/body validation, request ID assignment, and unchanged auth/RBAC ordering.
 - `apps/api/src/http.ts` — versioned success/error envelopes and runtime output
-  validation at the JSON wire boundary.
+  validation at the JSON wire boundary; its memoized `readJson` lets the
+  dispatcher and handler share one single-consumption request stream.
 - `apps/api/src/openapi.ts` — deterministic OpenAPI 3.1 generation through Zod
   4 `toJSONSchema`.
 - `apps/api/openapi.v1.json` — reviewed generated artifact; `pnpm
@@ -61,19 +62,23 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 1. Exact routes resolve before aliasing, so `/v1/openapi.json` is a public raw
    OpenAPI document rather than an enveloped data route.
 2. The dispatcher runs auth, role, and permission gates in the same order for
-   legacy and v1 requests. It validates a v1 query only after authorization.
+   legacy and v1 requests. It validates v1 queries and declared JSON bodies
+   only after authorization. Strict body schemas reject unknown top-level keys.
 3. A v1 handler receives the legacy URL (`/v1/run?...` becomes `/run?...`), so
    tenant-scoped handler logic is shared rather than forked.
-4. `sendJson` validates the serialized JSON payload against the declared
+4. A contracted mutation handler reuses the memoized raw JSON parse after the
+   dispatcher validates it; Zod transformations are not substituted into the
+   legacy handler path, so versioning does not silently change handler semantics.
+5. `sendJson` validates the serialized JSON payload against the declared
    response schema. A mismatch logs operation ID plus safe issue paths/messages
    and returns a generic `server_internal_error`; it never ships an invalid
    contract or raw internal value. OpenAPI uses the same Zod input semantics:
    required/type drift fails closed, while additive keys on ordinary
    `z.object` response schemas remain backward-compatible unless that object is
    explicitly strict.
-5. Route-specific error codes must be declared. Dispatcher-level errors are
+6. Route-specific error codes must be declared. Dispatcher-level errors are
    automatically available to every contract.
-6. Legacy response bodies remain unchanged. The web client opts contracted GET
+7. Legacy response bodies remain unchanged. The web client opts contracted GET
    paths into `/v1` and unwraps them inside `apps/web/src/api.ts`, so components
    keep their existing payload types.
 
@@ -85,12 +90,12 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 2. Attach the contract to the real route entry without changing its role,
    permission, or tenant-scoped handler.
 3. Add the matching method/gates/contract to `V1_CONTRACT_ROUTES`.
-4. If the web should migrate immediately, add the exact GET path to
-   `V1_READ_PATHS` in `packages/shared/src/api-contract.ts`; the browser checks
-   that shared catalog rather than maintaining a second list.
+4. Add a stable read or mutation to the matching exact-path catalog in
+   `packages/shared/src/api-contract.ts`. If the browser should migrate a GET
+   immediately, its transport reads `V1_READ_PATHS` directly.
 5. Run `pnpm contract:generate`, review `apps/api/openapi.v1.json`, then run
    `pnpm contract:check` and the legacy/v1 parity tests.
 
 Do not add a schema with opaque top-level payloads merely to increase route
-count. Do not generate SDKs until the intended surface has complete contracts;
-the checked-in OpenAPI document is the compatibility boundary first.
+count. SDK methods may consume only explicitly contracted `/v1` operations;
+the checked-in OpenAPI document remains the compatibility boundary.

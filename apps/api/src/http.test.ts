@@ -47,6 +47,16 @@ describe("readJson", () => {
     await expect(readJson(fakeRequest([]), 1024)).resolves.toEqual({});
   });
 
+  it("memoizes the parsed body for contract validation and handler reuse", async () => {
+    const request = fakeRequest([Buffer.from('{"runId":"run-1"}', "utf8")]);
+
+    const first = readJson(request, 1024);
+    const second = readJson(request, 1024);
+
+    await expect(first).resolves.toEqual({ runId: "run-1" });
+    await expect(second).resolves.toEqual({ runId: "run-1" });
+  });
+
   it("tolerates string chunks (encoding-set streams and test doubles)", async () => {
     // Production IncomingMessage streams emit Buffers, but a stream with an
     // encoding set — or a hand-rolled test double — emits strings. readJson

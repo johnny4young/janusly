@@ -14,7 +14,8 @@ import http from "http";
 import { randomUUID } from "node:crypto";
 
 import { requireAuth, type AuthContext } from "./auth";
-import { corsHeaders, sendError, type CorsAwareResponse } from "./http";
+import { MAX_JSON_BODY_BYTES } from "./api-config";
+import { corsHeaders, readJson, sendError, type CorsAwareResponse } from "./http";
 import { requirePermission, requireRole } from "./permissions";
 import { matchesRoute, type Route } from "./routes";
 
@@ -151,6 +152,16 @@ async function dispatchRequest(
       if (!result.success) {
         const field = result.error.issues[0]?.path.join(".") || "query";
         sendError(response, "invalid_input", "Invalid request query", 400, { field });
+        return;
+      }
+    }
+
+    if (versionedAlias && matched.contract?.request?.body) {
+      const body = await readJson(req, MAX_JSON_BODY_BYTES);
+      const result = matched.contract.request.body.safeParse(body);
+      if (!result.success) {
+        const field = result.error.issues[0]?.path.join(".") || "body";
+        sendError(response, "invalid_input", "Invalid request body", 400, { field });
         return;
       }
     }

@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { sendError, sendJson } from "./http";
+import { readJson, sendError, sendJson } from "./http";
 import type { ApiRouteContract } from "./api-contract-types";
 import type { Route } from "./routes";
 
@@ -257,6 +257,55 @@ describe("createApiServer", () => {
         error: { code: "server_not_found" },
       });
       expect(handler).not.toHaveBeenCalled();
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("validates contracted v1 bodies before dispatch and lets handlers reuse the parsed body", async () => {
+    const handler = vi.fn(async ({ req, res }) => {
+      const body = await readJson(req, 1_048_576);
+      sendJson(res, { value: (body as { value: string }).value });
+    });
+    const contract: ApiRouteContract = {
+      ...testContract("createStable", "/stable"),
+      request: {
+        body: z.object({ value: z.string().min(1) }).strict(),
+      },
+    };
+    const server = createApiServer({
+      routes: [{ method: "POST", match: "/stable", contract, handler }],
+    });
+    const baseUrl = await listen(server);
+
+    try {
+      const valid = await fetch(`${baseUrl}/v1/stable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: "accepted" }),
+      });
+      expect(valid.status).toBe(200);
+      await expect(valid.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        data: { value: "accepted" },
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      const invalid = await fetch(`${baseUrl}/v1/stable`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: "accepted", unexpected: true }),
+      });
+      expect(invalid.status).toBe(400);
+      await expect(invalid.json()).resolves.toMatchObject({
+        apiVersion: "v1",
+        error: {
+          code: "invalid_input",
+          message: "Invalid request body",
+          params: { field: "body" },
+        },
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
     } finally {
       await close(server);
     }

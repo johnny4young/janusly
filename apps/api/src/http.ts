@@ -9,7 +9,9 @@
  *
  * Invariants:
  * - `readJson` enforces `API_MAX_JSON_BODY_BYTES` and rejects 413 when
- *   exceeded — callers shouldn't read the stream themselves.
+ *   exceeded, and memoizes the parsed body so contract validation and the
+ *   route handler can share one stream read — callers shouldn't read the
+ *   stream themselves.
  * - `corsHeaders` returns `null` for the Origin when the request came from
  *   a non-allowlisted origin; never `*` with credentials.
  */
@@ -28,6 +30,11 @@ export type HttpError = Error & { statusCode?: number };
  * catalogued error envelopes are well under a KB).
  */
 const GZIP_MIN_BYTES = 1024;
+const PARSED_JSON_BODY = Symbol("janusly.parsedJsonBody");
+
+type JsonReadableRequest = http.IncomingMessage & {
+  [PARSED_JSON_BODY]?: Promise<unknown>;
+};
 
 /** Compression is on by default; `JANUSLY_HTTP_COMPRESSION=false` is the kill-switch. */
 function compressionEnabled(): boolean {
@@ -315,7 +322,10 @@ export function sendSseComment(res: http.ServerResponse, text: string) {
  * is SILENT: the body still parses and the mangled text gets persisted.
  */
 export async function readJson(req: http.IncomingMessage, maxBytes: number) {
-  return new Promise<unknown>((resolve, reject) => {
+  const request = req as JsonReadableRequest;
+  if (request[PARSED_JSON_BODY]) return request[PARSED_JSON_BODY];
+
+  const parsed = new Promise<unknown>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let receivedBytes = 0;
     let rejected = false;
@@ -350,6 +360,8 @@ export async function readJson(req: http.IncomingMessage, maxBytes: number) {
       }
     });
   });
+  request[PARSED_JSON_BODY] = parsed;
+  return parsed;
 }
 
 /**

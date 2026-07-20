@@ -51,7 +51,15 @@ import {
   productionSecretRefResolver,
 } from "../readiness-helpers";
 import type { Route } from "../routes";
-import { getRunContract, getRunStatusContract, getRunUsageContract, listRunsContract } from "../api-contracts";
+import {
+  cancelRunContract,
+  getRunContract,
+  getRunStatusContract,
+  getRunUsageContract,
+  listRunsContract,
+  resumeRunContract,
+  startRunContract,
+} from "../api-contracts";
 
 // SSE heartbeat cadence. The server destroys idle sockets after 60s
 // (`server.setTimeout`); a comment well under that keeps an idle run's
@@ -635,7 +643,7 @@ export const runsRoutes: Route[] = [
       return sendJson(res, { runId: result.runId });
     } },
   // Run lifecycle (start / resume / cancel)
-  { method: "POST", match: "/start", role: "editor", permission: "runs.start",
+  { method: "POST", match: "/start", role: "editor", permission: "runs.start", contract: startRunContract,
     handler: async ({ req, res, auth }) => {
       const startMcpGate = await guardMcpWrite(auth, "runs.start");
       if (!startMcpGate.ok) return sendJson(res, startMcpGate.body, startMcpGate.status);
@@ -748,7 +756,7 @@ export const runsRoutes: Route[] = [
         throw err;
       }
     } },
-  { method: "POST", match: "/resume", role: "editor",
+  { method: "POST", match: "/resume", role: "editor", contract: resumeRunContract,
     handler: async ({ req, res, auth }) => {
       const resumeMcpGate = await guardMcpWrite(auth, "runs.resume");
       if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
@@ -783,7 +791,7 @@ export const runsRoutes: Route[] = [
   // (engine helper) flips run + non-running nodes to "cancelled" and emits a
   // `run.cancelled` event. The worker's running job continues to completion;
   // the cancelled-stays-cancelled rollup absorbs the post-cancel writes.
-  { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel",
+  { method: "POST", match: "/run/cancel", role: "editor", permission: "runs.cancel", contract: cancelRunContract,
     handler: async ({ req, res, auth }) => {
       const cancelMcpGate = await guardMcpWrite(auth, "runs.cancel");
       if (!cancelMcpGate.ok) return sendJson(res, cancelMcpGate.body, cancelMcpGate.status);

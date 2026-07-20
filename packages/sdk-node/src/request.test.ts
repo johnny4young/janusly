@@ -3,6 +3,7 @@ import {
   JanuslyApiError,
   JanuslyAuthError,
   JanuslyRateLimitError,
+  JanuslyProtocolError,
   JanuslyServerError,
   JanuslyValidationError,
 } from "./errors.ts";
@@ -158,6 +159,20 @@ describe("sendApiRequest — error envelope unwrap", () => {
     });
   });
 
+  it("maps nested v1 errors to the same typed hierarchy", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(422, {
+      apiVersion: "v1",
+      requestId: "request-1",
+      error: { message: "invalid", code: "invalid_input", params: { field: "body" } },
+    })) as unknown as FakeFetch;
+    const config = makeConfig({}, fetchImpl);
+    await expect(sendApiRequest(config, { ...POST_INPUT, path: "/v1/start" })).rejects.toMatchObject({
+      name: "JanuslyValidationError",
+      code: "invalid_input",
+      params: { field: "body" },
+    });
+  });
+
   it("maps 401 to JanuslyAuthError", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse(401, { error: "no auth" })) as unknown as FakeFetch;
     const config = makeConfig({}, fetchImpl);
@@ -186,6 +201,28 @@ describe("sendApiRequest — error envelope unwrap", () => {
     expect(thrown).toBeInstanceOf(JanuslyApiError);
     expect(thrown).not.toBeInstanceOf(JanuslyAuthError);
     expect(thrown).not.toBeInstanceOf(JanuslyServerError);
+  });
+});
+
+describe("sendApiRequest — v1 success envelope", () => {
+  it("unwraps stable response data", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, {
+      apiVersion: "v1",
+      requestId: "request-1",
+      data: { runId: "run-1" },
+    })) as unknown as FakeFetch;
+    const config = makeConfig({}, fetchImpl);
+
+    await expect(sendApiRequest(config, { ...POST_INPUT, path: "/v1/start" }))
+      .resolves.toEqual({ runId: "run-1" });
+  });
+
+  it("fails closed when a successful v1 response omits the envelope", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(200, { runId: "run-1" })) as unknown as FakeFetch;
+    const config = makeConfig({}, fetchImpl);
+
+    await expect(sendApiRequest(config, { ...POST_INPUT, path: "/v1/start" }))
+      .rejects.toBeInstanceOf(JanuslyProtocolError);
   });
 });
 

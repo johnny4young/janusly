@@ -7,7 +7,7 @@
  */
 
 import { WorkflowSchema } from "@janusly/shared";
-import { V1_READ_PATHS } from "@janusly/shared/src/api-contract";
+import { V1_READ_PATHS, V1_WRITE_PATHS } from "@janusly/shared/src/api-contract";
 import { nodeStatusValues, runStatusValues } from "@janusly/shared/src/status";
 import { z } from "zod";
 
@@ -393,6 +393,87 @@ export const getRunUsageContract = {
   errorCodes: ["invalid_input", "runs_run_id_required", "runs_forbidden"],
 } satisfies ApiRouteContract;
 
+const MCP_WRITE_ERROR_CODES = ["mcp_process_disabled", "mcp_tenant_disabled"] as const;
+
+export const startRunContract = {
+  operationId: "startRun",
+  path: V1_WRITE_PATHS.startRun,
+  summary: "Start a workflow run",
+  tags: ["Runs"],
+  request: {
+    body: z.object({
+      workflow: WorkflowSchema,
+      input: JsonValueSchema.optional(),
+      forceRunDuringPause: z.boolean().optional(),
+    }).strict(),
+  },
+  response: z.object({
+    runId: z.string().min(1),
+    parentWaitingMetadata: JsonValueSchema.optional(),
+  }),
+  errorCodes: [
+    "invalid_input",
+    "runs_validation_failed",
+    "runs_not_production_ready",
+    "runs_adhoc_disabled",
+    "runs_input_validation_failed",
+    "upstream_degraded",
+    "workflow_circuit_breaker_paused",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const resumeRunContract = {
+  operationId: "resumeRun",
+  path: V1_WRITE_PATHS.resumeRun,
+  summary: "Resume a waiting run node",
+  tags: ["Runs"],
+  request: {
+    body: z.object({
+      runId: z.string().trim().min(1).max(256),
+      nodeId: z.string().trim().min(1).max(256),
+      input: JsonValueSchema.optional(),
+      resumeToken: z.string().min(1).max(8192).optional(),
+    }).strict(),
+  },
+  response: z.object({ resumed: z.literal(true) }),
+  errorCodes: [
+    "invalid_input",
+    "runs_run_id_and_node_id_required",
+    "runs_forbidden",
+    "runs_input_validation_failed",
+    "runs_resume_conflict",
+    "runs_resume_token_required",
+    "runs_invalid_resume_token",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
+export const cancelRunContract = {
+  operationId: "cancelRun",
+  path: V1_WRITE_PATHS.cancelRun,
+  summary: "Cancel an in-flight run",
+  tags: ["Runs"],
+  request: {
+    body: z.object({
+      runId: z.string().trim().min(1).max(256),
+      reason: z.string().trim().min(1).max(1000).optional(),
+    }).strict(),
+  },
+  response: z.object({
+    runId: z.string().min(1),
+    status: z.literal("cancelled"),
+  }),
+  errorCodes: [
+    "invalid_input",
+    "runs_run_id_required",
+    "runs_run_not_found",
+    "runs_forbidden",
+    "runs_already_terminal",
+    ...MCP_WRITE_ERROR_CODES,
+  ],
+} satisfies ApiRouteContract;
+
 /**
  * Side-effect-free contract manifest. The generator imports this instead of
  * the handler registry so contract checks never create Redis/DB clients.
@@ -411,4 +492,7 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", contract: getRunContract },
   { method: "GET", permission: "runs.read", contract: getRunUsageContract },
   { method: "GET", contract: getRunStatusContract },
+  { method: "POST", role: "editor", permission: "runs.start", contract: startRunContract },
+  { method: "POST", role: "editor", contract: resumeRunContract },
+  { method: "POST", role: "editor", permission: "runs.cancel", contract: cancelRunContract },
 ];

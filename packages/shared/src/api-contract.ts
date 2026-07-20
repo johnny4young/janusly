@@ -23,6 +23,15 @@ export const V1_READ_PATHS = {
 
 export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
 
+/** Stable mutation paths exposed to first-party and SDK callers. */
+export const V1_WRITE_PATHS = {
+  startRun: "/start",
+  resumeRun: "/resume",
+  cancelRun: "/run/cancel",
+} as const;
+
+export type V1WritePath = typeof V1_WRITE_PATHS[keyof typeof V1_WRITE_PATHS];
+
 const V1_READ_PATH_SET: ReadonlySet<string> = new Set(Object.values(V1_READ_PATHS));
 
 /** True when an exact URL pathname belongs to the stable v1 read lane. */

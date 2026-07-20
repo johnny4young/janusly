@@ -29,6 +29,24 @@ describe("JanuslyApiError.fromResponse", () => {
     expect(err.params).toEqual({ field: "email" });
   });
 
+  it("extracts the nested stable v1 error envelope", () => {
+    const err = JanuslyApiError.fromResponse(makeResponse(422), {
+      apiVersion: "v1",
+      requestId: "request-1",
+      error: {
+        message: "invalid request body",
+        code: "invalid_input",
+        params: { field: "workflow" },
+      },
+    });
+    expect(err).toBeInstanceOf(JanuslyValidationError);
+    expect(err).toMatchObject({
+      message: "invalid request body",
+      code: "invalid_input",
+      params: { field: "workflow" },
+    });
+  });
+
   it("dispatches 429 to JanuslyRateLimitError and parses Retry-After", () => {
     const res = makeResponse(429, { "retry-after": "42" });
     const err = JanuslyApiError.fromResponse(res, { error: "too many" });
