@@ -71,10 +71,13 @@ import { backfillBufferedTriggerEvents } from "./trigger-ingest-routes";
 import { rollbackAuditMetadata, rollbackWorkflowToVersion } from "../workflows-rollback";
 import { saveWorkflowVersion } from "../workflows-save";
 import {
+  checkWorkflowReadinessContract,
   getSchedulePreviewContract,
   getLatestWorkflowVersionContract,
+  getWorkflowHealthContract,
   listWorkflowsContract,
   listWorkflowVersionsContract,
+  validateWorkflowContract,
 } from "../api-contracts";
 
 /**
@@ -525,7 +528,7 @@ export const workflowsRoutes: Route[] = [
     } },
 
   // Validate
-  { method: "POST", match: "/validate", role: "editor",
+  { method: "POST", match: "/validate", role: "editor", contract: validateWorkflowContract,
     handler: async ({ req, res }) => sendJson(res, validateWorkflow(await readJson(req, MAX_JSON_BODY_BYTES))) },
 
   // Production-readiness gate. Sister to `/validate` — this asserts
@@ -535,7 +538,7 @@ export const workflowsRoutes: Route[] = [
   // engine portion is pure; the rollback-availability check is layered
   // here because it needs `workflow_versions` access. Body shape: either
   // a flat workflow JSON or `{ workflow }` envelope (mirrors `/validate`).
-  { method: "POST", match: "/workflows/readiness", role: "editor",
+  { method: "POST", match: "/workflows/readiness", role: "editor", contract: checkWorkflowReadinessContract,
     handler: async ({ req, res, auth }) => {
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const candidate = (body.workflow && typeof body.workflow === "object") ? asRecord(body.workflow) : body;
@@ -766,7 +769,7 @@ export const workflowsRoutes: Route[] = [
       });
     } },
 
-  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer",
+  { method: "GET", match: (url) => url === "/workflows/health" || url.startsWith("/workflows/health?"), role: "viewer", contract: getWorkflowHealthContract,
     handler: async ({ req, res, auth }) => {
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.searchParams.get("workflowId");

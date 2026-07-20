@@ -140,7 +140,7 @@ describe('api', () => {
     })
   })
 
-  it('routes recipe and tool catalogs through their stable read contracts', async () => {
+  it('routes discovery catalogs and workflow health through stable read contracts', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       apiVersion: 'v1',
       requestId: 'req-catalog',
@@ -153,9 +153,11 @@ describe('api', () => {
 
     await expect(api('/templates')).resolves.toEqual([])
     await expect(api('/tools')).resolves.toEqual([])
+    await expect(api('/workflows/health?workflowId=wf-1')).resolves.toEqual([])
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       'http://localhost:3001/v1/templates',
       'http://localhost:3001/v1/tools',
+      'http://localhost:3001/v1/workflows/health?workflowId=wf-1',
     ])
   })
 

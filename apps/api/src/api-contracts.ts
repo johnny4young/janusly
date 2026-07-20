@@ -7,7 +7,7 @@
  * emission.
  */
 
-import { WorkflowSchema } from "@janusly/shared";
+import { WorkflowSchema, WorkflowSloBreachesSchema, WorkflowSloSchema } from "@janusly/shared";
 import { V1_MCP_PATHS, V1_READ_PATHS, V1_WRITE_PATHS } from "@janusly/shared/src/api-contract";
 import { nodeStatusValues, runStatusValues } from "@janusly/shared/src/status";
 import { z } from "zod";
@@ -44,6 +44,83 @@ const PublicToolSchema = z.object({
   optional: z.array(z.string()).optional(),
   inputExample: z.record(z.string(), z.unknown()).optional(),
 });
+
+const WorkflowValidationIssueSchema = z.object({
+  code: z.string().min(1),
+  message: z.string(),
+  nodeId: z.string().optional(),
+  edgeId: z.string().optional(),
+});
+
+const WorkflowValidationResultSchema = z.object({
+  valid: z.boolean(),
+  issues: z.array(WorkflowValidationIssueSchema),
+});
+
+const ReadinessIssueSchema = WorkflowValidationIssueSchema.extend({
+  severity: z.enum(["warn", "fail"]),
+  suggestion: z.string().optional(),
+});
+
+const ReadinessResultSchema = z.object({
+  status: z.enum(["pass", "warn", "fail"]),
+  issues: z.array(ReadinessIssueSchema),
+});
+
+const HealthRationaleMetaSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean()]),
+);
+const HealthBreakdownEntrySchema = z.object({
+  score: z.number().int().min(0).max(100),
+  rationale: z.string(),
+  rationaleCode: z.enum([
+    "reliability.no_runs",
+    "reliability.summary",
+    "safety.clean",
+    "safety.summary",
+    "latency.insufficient",
+    "latency.summary",
+    "cost.none",
+    "cost.summary",
+    "maintainability.summary",
+    "ai_risk.no_ai",
+    "ai_risk.summary",
+  ]),
+  rationaleMeta: HealthRationaleMetaSchema.optional(),
+});
+const WorkflowHealthSchema = z.object({
+  score: z.number().int().min(0).max(100),
+  status: z.enum(["healthy", "warn", "unhealthy"]),
+  breakdown: z.object({
+    reliability: HealthBreakdownEntrySchema,
+    safety: HealthBreakdownEntrySchema,
+    cost: HealthBreakdownEntrySchema,
+    latency: HealthBreakdownEntrySchema,
+    maintainability: HealthBreakdownEntrySchema,
+    aiRisk: HealthBreakdownEntrySchema,
+  }),
+  signals: z.object({
+    totalRuns: z.number().int().nonnegative(),
+    successCount: z.number().int().nonnegative(),
+    failureCount: z.number().int().nonnegative(),
+    retryCount: z.number().int().nonnegative(),
+    dlqOpenCount: z.number().int().nonnegative(),
+    p95LatencyMs: z.number().nonnegative().nullable(),
+    totalCostUsd: z.number().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+    versionCount: z.number().int().nonnegative(),
+  }),
+  slo: z.object({
+    slo: WorkflowSloSchema,
+    breaches: WorkflowSloBreachesSchema,
+  }).nullable().optional(),
+});
+
+// Validation and readiness intentionally accept incomplete workflow objects:
+// identifying structural failures is the purpose of these endpoints. Their
+// successful result schemas remain strict enough to protect the stable wire.
+const WorkflowCandidateBodySchema = z.record(z.string(), z.unknown());
 
 const WorkflowListRowSchema = z.object({
   id: z.string(),
@@ -388,6 +465,46 @@ export const listToolsContract = {
   errorCodes: [],
 } satisfies ApiRouteContract;
 
+export const validateWorkflowContract = {
+  operationId: "validateWorkflow",
+  path: V1_WRITE_PATHS.validateWorkflow,
+  summary: "Validate a workflow draft without persisting it",
+  tags: ["Workflows"],
+  request: { body: WorkflowCandidateBodySchema },
+  response: WorkflowValidationResultSchema,
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const checkWorkflowReadinessContract = {
+  operationId: "checkWorkflowReadiness",
+  path: V1_WRITE_PATHS.workflowReadiness,
+  summary: "Check a workflow draft's production readiness",
+  tags: ["Workflows"],
+  request: { body: WorkflowCandidateBodySchema },
+  response: ReadinessResultSchema,
+  errorCodes: ["invalid_input"],
+} satisfies ApiRouteContract;
+
+export const getWorkflowHealthContract = {
+  operationId: "getWorkflowHealth",
+  path: V1_READ_PATHS.workflowHealth,
+  summary: "Get the latest workflow health score and signals",
+  tags: ["Workflows"],
+  request: {
+    query: z.object({
+      workflowId: z.string().trim().min(1).max(256),
+    }).strict(),
+  },
+  response: WorkflowHealthSchema,
+  errorCodes: [
+    "invalid_input",
+    "workflows_workflow_id_required",
+    "workflow_not_found",
+    "workflows_no_versions",
+    "workflows_version_malformed",
+  ],
+} satisfies ApiRouteContract;
+
 export const listWorkflowsContract = {
   operationId: "listWorkflows",
   path: V1_READ_PATHS.workflows,
@@ -727,6 +844,9 @@ export const V1_CONTRACT_ROUTES: readonly ApiContractRouteDescriptor[] = [
   { method: "GET", role: "viewer", contract: recoveryMyWinsContract },
   { method: "GET", contract: listTemplatesContract },
   { method: "GET", contract: listToolsContract },
+  { method: "POST", role: "editor", contract: validateWorkflowContract },
+  { method: "POST", role: "editor", contract: checkWorkflowReadinessContract },
+  { method: "GET", role: "viewer", contract: getWorkflowHealthContract },
   { method: "GET", contract: listWorkflowsContract },
   { method: "GET", role: "viewer", permission: "workflows.read", contract: getSchedulePreviewContract },
   { method: "GET", contract: listWorkflowVersionsContract },

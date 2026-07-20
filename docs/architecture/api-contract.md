@@ -72,6 +72,11 @@ the response header and v1 envelope. CORS exposes `X-Request-Id` and
 4. A contracted mutation handler reuses the memoized raw JSON parse after the
    dispatcher validates it; Zod transformations are not substituted into the
    legacy handler path, so versioning does not silently change handler semantics.
+   Diagnostic workflow endpoints are the deliberate exception to shape-first
+   request schemas: `/validate` and `/workflows/readiness` accept an object
+   candidate whose fields may be invalid so their successful response can
+   report structured findings. The global JSON byte cap still bounds the body,
+   and their result envelopes are fully typed and runtime-validated.
 5. `sendJson` validates the serialized JSON payload against the declared
    response schema. A mismatch logs operation ID plus safe issue paths/messages
    and returns a generic `server_internal_error`; it never ships an invalid

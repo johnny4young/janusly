@@ -155,13 +155,13 @@ describe("dispatchTool", () => {
     expect(JSON.parse(init?.body as string)).toEqual(workflow);
   });
 
-  it("workflows.save with dryRun: true routes to /validate instead of /workflows/save", async () => {
+  it("workflows.save with dryRun: true routes to stable validation instead of saving", async () => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "true");
     const { mock } = makeMockCallApi();
     const workflow = { dslVersion: "1.0", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
     await dispatchTool(mock, "workflows.save", { workflow, dryRun: true });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/validate");
+    expect(path).toBe("/v1/validate");
     expect(init?.method).toBe("POST");
     // Dispatcher reshapes the call result into { mode: "dry-run", validation }
     expect(mock).toHaveBeenCalledTimes(1);
@@ -174,12 +174,12 @@ describe("dispatchTool", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("workflows.validate POSTs the workflow body to /validate", async () => {
+  it("workflows.validate POSTs the workflow body to stable validation", async () => {
     const { mock } = makeMockCallApi();
     const workflow = { nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
     await dispatchTool(mock, "workflows.validate", { workflow });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/validate");
+    expect(path).toBe("/v1/validate");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual(workflow);
   });
@@ -219,7 +219,7 @@ describe("dispatchTool", () => {
   it("workflows.health URL-encodes the workflowId", async () => {
     const { mock } = makeMockCallApi();
     await dispatchTool(mock, "workflows.health", { workflowId: "wf-1" });
-    expect(mock).toHaveBeenCalledWith("/workflows/health?workflowId=wf-1");
+    expect(mock).toHaveBeenCalledWith("/v1/workflows/health?workflowId=wf-1");
   });
 
   it("workflows.health throws when workflowId is missing", async () => {
@@ -228,12 +228,12 @@ describe("dispatchTool", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("workflows.readiness POSTs the workflow body to /workflows/readiness", async () => {
+  it("workflows.readiness POSTs the workflow body to stable readiness", async () => {
     const { mock } = makeMockCallApi();
     const workflow = { dslVersion: "1.0", nodes: [{ id: "n1", type: "noop", config: {} }], edges: [] };
     await dispatchTool(mock, "workflows.readiness", { workflow });
     const [path, init] = mock.mock.calls[0];
-    expect(path).toBe("/workflows/readiness");
+    expect(path).toBe("/v1/workflows/readiness");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual(workflow);
   });

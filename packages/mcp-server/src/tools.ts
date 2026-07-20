@@ -320,7 +320,7 @@ const READ_TOOLS: Tool[] = [
   {
     name: "workflows.health",
     description:
-      "Compute the per-workflow health rollup: a 0-100 score plus six per-category sub-scores (reliability, safety, latency, cost, maintainability, AI risk). Reads recent runs + readiness + DLQ counts. No side effects. Returns the same shape `GET /workflows/health` does.",
+      "Compute the per-workflow health rollup: a 0-100 score plus six per-category sub-scores (reliability, safety, latency, cost, maintainability, AI risk). Reads recent runs + readiness + DLQ counts. No side effects. Returns the same shape `GET /v1/workflows/health` does.",
     inputSchema: {
       type: "object",
       required: ["workflowId"],
@@ -558,7 +558,7 @@ async function runOne(
       if (!isObject(args.workflow)) {
         throw new Error("workflows.validate requires `workflow` (object)");
       }
-      return callApi("/validate", {
+      return callApi("/v1/validate", {
         method: "POST",
         body: JSON.stringify(args.workflow),
       });
@@ -573,13 +573,13 @@ async function runOne(
       if (typeof args.workflowId !== "string" || args.workflowId.length === 0) {
         throw new Error("workflows.health requires `workflowId` (non-empty string)");
       }
-      return callApi(`/workflows/health?workflowId=${encodeURIComponent(args.workflowId)}`);
+      return callApi(`/v1/workflows/health?workflowId=${encodeURIComponent(args.workflowId)}`);
     }
     case "workflows.readiness": {
       if (!isObject(args.workflow)) {
         throw new Error("workflows.readiness requires `workflow` (object)");
       }
-      return callApi("/workflows/readiness", {
+      return callApi("/v1/workflows/readiness", {
         method: "POST",
         body: JSON.stringify(args.workflow),
       });
@@ -746,7 +746,7 @@ async function runOne(
         throw new Error("workflows.save requires `workflow` (object)");
       }
       if (args.dryRun === true) {
-        const validation = await callApi("/validate", {
+        const validation = await callApi("/v1/validate", {
           method: "POST",
           body: JSON.stringify(args.workflow),
         });

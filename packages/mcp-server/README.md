@@ -51,7 +51,7 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `workflows.list` | `GET /v1/workflows` | List active workflows with bounded filters and keyset pagination. |
 | `workflows.get` | `GET /v1/workflows/latest` | Fetch the latest active workflow version. |
 | `workflows.versions` | `GET /v1/workflows/versions` | List immutable versions newest-first. |
-| `workflows.health` | `GET /workflows/health` | Compute workflow health and SLO signals. |
+| `workflows.health` | `GET /v1/workflows/health` | Compute workflow health and SLO signals. |
 | `recipes.list` | `GET /v1/templates` | List built-in workflow recipes. |
 | `tools.list` | `GET /v1/tools` | List the runtime tool catalog. |
 | `runs.get` | `GET /v1/run` | Fetch one run with paginated events. |
@@ -62,8 +62,8 @@ Boot story: Claude Desktop reads its config file (`~/Library/Application Support
 | `reports.run_explain` | `GET /reports/run-explain` | Explain one run with structured evidence. |
 | `ai.patch_workflow` | `POST /ai/patch-workflow` | Suggest patches without saving a workflow version. |
 | `ai.generate_workflow` | `POST /ai/generate-workflow` | Generate a workflow suggestion without saving it. |
-| `workflows.validate` | `POST /validate` | Validate workflow shape and graph rules without saving. |
-| `workflows.readiness` | `POST /workflows/readiness` | Evaluate safety, rollback, approval, and secret readiness. |
+| `workflows.validate` | `POST /v1/validate` | Validate workflow shape and graph rules without saving. |
+| `workflows.readiness` | `POST /v1/workflows/readiness` | Evaluate safety, rollback, approval, and secret readiness. |
 | `mcp.connections.list` | `GET /v1/mcp/connections` | List outbound MCP connections and tool counts. |
 | `mcp.connections.tools` | `GET /v1/mcp/connections/{alias}/tools` | List cached descriptors for one connection. |
 
@@ -71,7 +71,7 @@ Write tools are advertised only when `JANUSLY_MCP_WRITES_ENABLED=true` is set in
 
 | MCP tool | API endpoint | Notes |
 | --- | --- | --- |
-| `workflows.save` | `POST /workflows/save` | Save a workflow version; `dryRun: true` uses `/validate` instead. |
+| `workflows.save` | `POST /workflows/save` | Save a workflow version; `dryRun: true` uses `/v1/validate` instead. |
 | `workflows.rollback` | `POST /workflows/rollback` | Append a prior DAG as the new latest version. |
 | `runs.start` | `POST /v1/start` | Start a production run. |
 | `runs.resume` | `POST /v1/resume` | Resume a waiting approval or human-form node. |

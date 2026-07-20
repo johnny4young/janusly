@@ -37,6 +37,8 @@ retroactively.
 - Stable `/v1` contracts for outbound MCP connection management and the recipe
   and runtime-tool catalogs, including decoded dynamic-path validation and
   required OpenAPI path parameters.
+- Stable `/v1` workflow validation, production-readiness, and health contracts,
+  with the web and MCP clients migrated to versioned health and preflight calls.
 
 ### Fixed
 

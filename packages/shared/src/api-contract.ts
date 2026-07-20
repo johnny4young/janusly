@@ -13,6 +13,7 @@ export const V1_READ_PATHS = {
   templates: "/templates",
   tools: "/tools",
   workflows: "/workflows",
+  workflowHealth: "/workflows/health",
   schedulePreview: "/workflows/schedule-preview",
   workflowVersions: "/workflows/versions",
   latestWorkflowVersion: "/workflows/latest",
@@ -26,6 +27,8 @@ export type V1ReadPath = typeof V1_READ_PATHS[keyof typeof V1_READ_PATHS];
 
 /** Stable mutation paths exposed to first-party and SDK callers. */
 export const V1_WRITE_PATHS = {
+  validateWorkflow: "/validate",
+  workflowReadiness: "/workflows/readiness",
   startRun: "/start",
   resumeRun: "/resume",
   cancelRun: "/run/cancel",
