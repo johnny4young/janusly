@@ -10,13 +10,14 @@
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { db, workflows } from "@janusly/db";
+import { db, triggerEvents, workflows } from "@janusly/db";
 import { listDeletedWorkflowsWithRunSummary, listWorkflowsWithRunSummary } from "../workflowsListRepo";
 
 const RUN_TAG = `${Date.now()}-${process.pid}`;
 const ORG = `it-wf-${RUN_TAG}`;
 
 afterAll(async () => {
+  await db.delete(triggerEvents).where(eq(triggerEvents.orgId, ORG));
   await db.delete(workflows).where(eq(workflows.orgId, ORG));
 });
 
@@ -71,5 +72,22 @@ describe("Flows list keyset pagination (real Postgres)", () => {
     // page size 1 forces the cursor to advance every page (no overlap/skip).
     expect(seen).toEqual([`${RUN_TAG}-d1`, `${RUN_TAG}-d0`]);
     expect(seen).not.toContain(`${RUN_TAG}-a0`);
+  });
+
+  it("folds the buffered trigger count with one page-scoped aggregate", async () => {
+    const workflowId = `${RUN_TAG}-buffered`;
+    await db.insert(workflows).values({ id: workflowId, orgId: ORG, name: "Buffered" });
+    await db.insert(triggerEvents).values([
+      { id: `${RUN_TAG}-evt-1`, orgId: ORG, workflowId, workflowVersionId: "v1", nodeId: "inbox", triggerType: "email_received", status: "buffered", payloadJson: {} },
+      { id: `${RUN_TAG}-evt-2`, orgId: ORG, workflowId, workflowVersionId: "v1", nodeId: "inbox", triggerType: "email_received", status: "buffered", payloadJson: {} },
+      { id: `${RUN_TAG}-evt-3`, orgId: ORG, workflowId, workflowVersionId: "v1", nodeId: "inbox", triggerType: "email_received", status: "started", payloadJson: {} },
+      { id: `${RUN_TAG}-evt-4`, orgId: ORG, workflowId, workflowVersionId: "v1", nodeId: "inbox", triggerType: "email_received", status: "backfilling", payloadJson: {}, backfillClaimToken: "expired", backfillClaimedAt: new Date(Date.now() - 10 * 60 * 1000) },
+      { id: `${RUN_TAG}-evt-5`, orgId: ORG, workflowId, workflowVersionId: "v1", nodeId: "inbox", triggerType: "email_received", status: "backfilling", payloadJson: {}, backfillClaimToken: "fresh", backfillClaimedAt: new Date() },
+    ]);
+
+    const rows = await listWorkflowsWithRunSummary(ORG, 10, { search: workflowId });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.bufferedTriggerCount).toBe(3);
   });
 });

@@ -98,7 +98,7 @@ export type SolutionPackPublic = {
  * `lastRunStatus`, which is the outcome of its most recent run. A paused
  * workflow refuses new runs, so the list must say so.
  */
-export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
+export type SavedWorkflow = { id: string; orgId: string; name: string; createdBy?: string; createdAt?: string; updatedAt?: string; lastRunStatus?: string | null; runCount?: number; bufferedTriggerCount?: number; status?: string; pausedReason?: string | null; tags?: string[]; folder?: string | null; deletedAt?: string | null }
 export type RunSummary = {
   id: string
   orgId?: string

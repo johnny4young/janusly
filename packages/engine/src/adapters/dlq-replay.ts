@@ -31,12 +31,10 @@ import { db, runs, runNodes, runEvents } from "@janusly/db";
 import { eq } from "drizzle-orm";
 import type { DeadLetterReplayAdapter, DeadLetterReplayInput } from "../core/types";
 import type { Workflow, WorkflowNode } from "@janusly/shared";
-import { enqueueNode } from "../queue";
 import {
-  appendEvent,
   claimReplayTransition,
-  markQueuePublicationSucceeded,
 } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -127,20 +125,14 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
       workflow,
     );
 
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: node.id,
       attempt: 1,
       publicationGeneration: replayClaim.publicationGeneration,
       recoveryClaimToken: replayClaim.recoveryClaimToken,
+      recordQueuedEvent: false,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      node.id,
-      1,
-      replayClaim.publicationGeneration,
-      replayClaim.recoveryClaimToken,
-    );
   }
 
   /**
@@ -264,19 +256,12 @@ export class DLQReplayAdapter implements DeadLetterReplayAdapter {
     // Enqueue ONLY the failing node — the runtime's
     // `enqueueReadyNodes` cascade will pick up downstream nodes as the
     // failing node terminates.
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: failingNode.id,
       attempt: 1,
       publicationGeneration: 1,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      failingNode.id,
-      1,
-      1,
-    );
-    await appendEvent(runId, failingNode.id, "node.queued", {});
 
     return { runId };
   }

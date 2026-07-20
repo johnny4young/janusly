@@ -466,8 +466,10 @@ export const dlqRoutes: Route[] = [
   // fetch and apply) doesn't sneak through. Each replayed row gets a
   // `recovery.cluster_apply` audit row tagged with the cluster signature
   // and its sequence index in the batch.
-  { method: "POST", match: "/dlq/cluster-apply", role: "editor",
+  { method: "POST", match: "/dlq/cluster-apply", role: "editor", permission: "dlq.replay",
     handler: async ({ req, res, auth }) => {
+      const replayMcpGate = await guardMcpWrite(auth, "dlq.replay");
+      if (!replayMcpGate.ok) return sendJson(res, replayMcpGate.body, replayMcpGate.status);
       const { orgConfig } = await orgLlmRuntime(auth.orgId);
       await enforceRateLimit(auth.orgId, { name: "ai", windowMs: RATE_LIMIT_WINDOW_MS, max: orgConfig.ai.rateLimitPerMin });
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
@@ -616,6 +618,8 @@ export const dlqRoutes: Route[] = [
   // downstream work. Carries `dlq.replay` permission to match single replay.
   { method: "POST", match: "/dlq/bulk-replay", role: "editor", permission: "dlq.replay",
     handler: async ({ req, res, auth }) => {
+      const replayMcpGate = await guardMcpWrite(auth, "dlq.replay");
+      if (!replayMcpGate.ok) return sendJson(res, replayMcpGate.body, replayMcpGate.status);
       const body = asRecord(await readJson(req, MAX_JSON_BODY_BYTES));
       const idsRaw = body.deadLetterIds;
       if (!Array.isArray(idsRaw) || idsRaw.length === 0) {

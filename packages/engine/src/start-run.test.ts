@@ -146,7 +146,27 @@ describe('startRun persistence chokepoint', () => {
       attempt: 1,
       publicationGeneration: 1,
     }))
-    expect(markQueuePublicationSucceededMock).toHaveBeenCalledWith(expect.any(String), 'start', 1, 1)
+    expect(markQueuePublicationSucceededMock).toHaveBeenCalledWith(expect.any(String), 'start', 1, 1, undefined)
+  })
+
+  it('returns the committed run when immediate queue publication is unavailable', async () => {
+    enqueueNodeMock.mockRejectedValueOnce(new Error('redis unavailable'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    await expect(startRun({
+      dslVersion: '1.0',
+      id: 'workflow-version-1',
+      nodes: [{ id: 'start', type: 'noop', config: {} }],
+      edges: [],
+    })).resolves.toEqual(expect.objectContaining({ runId: expect.any(String) }))
+
+    expect(markQueuePublicationSucceededMock).not.toHaveBeenCalled()
+    expect(appendEventMock).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(
+      '[initial-node-publication] immediate publication deferred',
+      expect.objectContaining({ nodeId: 'start', stage: 'enqueue', errorName: 'Error' }),
+    )
+    warn.mockRestore()
   })
 
   it('preserves an inherited trace id for subworkflow correlation', async () => {

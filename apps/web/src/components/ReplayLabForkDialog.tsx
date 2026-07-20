@@ -94,7 +94,7 @@ export function ReplayLabForkDialog({
     // Parse override client-side. Empty textarea = no override field
     // on the POST body (the route accepts that; it falls through to
     // the source run's original input value at the fork node).
-    let inputOverride: unknown 
+    let inputOverride: unknown
     const trimmed = overrideText.trim()
     if (trimmed.length > 0) {
       // Pre-flight the 64 KiB cap the route enforces so an over-cap

@@ -84,6 +84,7 @@ describe("redriveRun (real Postgres)", () => {
       targetWorkflowVersionId: "wfv-target-2",
       input: { orderId: "o-1" },
       createdBy: "op-1",
+      traceId: "trace-source-redrive",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -96,6 +97,7 @@ describe("redriveRun (real Postgres)", () => {
     expect(runRow?.parentRunId).toBe(sourceRunId);
     expect(runRow?.parentNodeId).toBe("transform");
     expect(runRow?.parentLinkKind).toBe("replay");
+    expect(runRow?.traceId).toBe("trace-source-redrive");
 
     const nodeRows = await db.select().from(runNodes).where(eq(runNodes.runId, result.runId));
     const byId = new Map(nodeRows.map((row) => [row.nodeId, row]));
@@ -146,5 +148,37 @@ describe("redriveRun (real Postgres)", () => {
       input: {},
     });
     expect(result).toMatchObject({ ok: false, code: "node_not_in_version" });
+  });
+
+  it("converges concurrent retries onto one continuation run", async () => {
+    const sourceRunId = `${RUN_TAG}-idempotent`;
+    createdRunIds.push(sourceRunId);
+    await seedSourceRun(sourceRunId, [
+      { nodeId: "fetch", status: "succeeded" },
+      { nodeId: "transform", status: "failed" },
+    ]);
+
+    const input = {
+      orgId: ORG,
+      sourceRunId,
+      failedNodeId: "transform",
+      workflow: TARGET_WORKFLOW,
+      targetWorkflowVersionId: "wfv-target-idempotent",
+      input: {},
+    };
+    const [first, second] = await Promise.all([redriveRun(input), redriveRun(input)]);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(first.runId).toBe(second.runId);
+    expect([first.wasCreated, second.wasCreated].sort()).toEqual([false, true]);
+    createdRunIds.push(first.runId);
+
+    const continuations = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.parentRunId, sourceRunId));
+    expect(continuations).toEqual([{ id: first.runId }]);
   });
 });

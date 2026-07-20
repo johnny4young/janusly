@@ -13,12 +13,22 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type RetentionAuditInput = {
+  orgId: string;
+  actor?: string | null;
+  action: string;
+  metadata: {
+    totalRowsDeleted: number;
+    tables: unknown[];
+  };
+};
+
 vi.mock("./queue", () => ({
   workflowQueue: { upsertJobScheduler: vi.fn() },
 }));
 
 const auditInsertValuesMock = vi.fn();
-const recordSystemAuditMock = vi.hoisted(() => vi.fn(async () => undefined));
+const recordSystemAuditMock = vi.hoisted(() => vi.fn(async (_input: RetentionAuditInput) => undefined));
 vi.mock("@janusly/db", () => ({
   db: { insert: vi.fn(() => ({ values: auditInsertValuesMock })) },
   auditLogs: { id: "id_col" },

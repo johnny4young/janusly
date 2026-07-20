@@ -147,6 +147,12 @@ beforeEach(() => {
   startRunMock.mockResolvedValue({ runId: "run-1" });
 });
 
+describe("/start declaration", () => {
+  it("requires the editor rank and run-start permission", () => {
+    expect(startRoute()).toMatchObject({ role: "editor", permission: "runs.start" });
+  });
+});
+
 describe("/start upstream-health pause gate", () => {
   it("rejects a paused workflow with 409 + upstream_degraded", async () => {
     bodyBox.value = SAVED_WORKFLOW;

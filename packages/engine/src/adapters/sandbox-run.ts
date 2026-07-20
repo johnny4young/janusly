@@ -28,8 +28,8 @@
 
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { appendEvent, markQueuePublicationSucceeded, updateRunStatusFromNodes } from "../persistence";
+import { appendEvent, updateRunStatusFromNodes } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -179,19 +179,12 @@ export async function startSandboxRun(args: SandboxRunInput): Promise<{ runId: s
   // cascade picks up the rest as each node terminates — the same pattern
   // `replayDeadLetterAsValidation` uses after seeding ancestor state.
   for (const node of readyNodes) {
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: node.id,
       attempt: 1,
       publicationGeneration: 1,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      node.id,
-      1,
-      1,
-    );
-    await appendEvent(runId, node.id, "node.queued", {});
   }
 
   // Edge case: a workflow with no edges (every node is a root → all seeded

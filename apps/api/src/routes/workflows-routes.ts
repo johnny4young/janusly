@@ -836,35 +836,39 @@ export const workflowsRoutes: Route[] = [
     },
     permission: "workflows.write",
     handler: async ({ req, res, auth }) => {
+      const resumeMcpGate = await guardMcpWrite(auth, "workflows.resume");
+      if (!resumeMcpGate.ok) return sendJson(res, resumeMcpGate.body, resumeMcpGate.status);
       const url = new URL(req.url ?? "", "http://localhost");
       const workflowId = url.pathname.match(/^\/workflows\/([^/]+)\/resume$/)?.[1];
       if (!workflowId) return sendError(res, "workflows_workflow_id_required", "workflowId is required", 400);
 
+      const id = decodeURIComponent(workflowId);
       const resumed = await resumeWorkflowCircuitBreaker({
         orgId: auth.orgId,
-        workflowId: decodeURIComponent(workflowId),
+        workflowId: id,
         userId: auth.userId,
       });
       // The repo audits the flip inside its own transaction, so a losing
-      // caller writes nothing. Report the miss by the workflow's actual
-      // state rather than a bare 404: "already active" and "paused for
-      // something else" are different operator situations.
+      // caller writes nothing. An already-active workflow may still have a
+      // capped buffered window, so repeated calls drain the next page. Other
+      // pause sources remain distinct operator situations and are rejected.
       if (!resumed) {
-        const status = await getWorkflowBreakerStatus(auth.orgId, decodeURIComponent(workflowId));
+        const status = await getWorkflowBreakerStatus(auth.orgId, id);
         if (status === null) return sendError(res, "workflow_not_found", "Workflow not found", 404);
-        return sendError(
-          res,
-          "workflow_not_circuit_breaker_paused",
-          `Workflow is not paused by its circuit breaker (status: ${status})`,
-          409,
-          { status },
-        );
+        if (status !== "active") {
+          return sendError(
+            res,
+            "workflow_not_circuit_breaker_paused",
+            `Workflow is not paused by its circuit breaker (status: ${status})`,
+            409,
+            { status },
+          );
+        }
       }
       // The pause is over, so the events it buffered are owed their runs.
       // Backfill AFTER the flip and never let it fail the resume: the
       // workflow IS active now, and reporting otherwise would send the
       // operator to un-pause something that isn't paused.
-      const id = decodeURIComponent(workflowId);
       const backfill = await backfillBufferedTriggerEvents({ auth, workflowId: id });
       // The repo already audited the flip inside its own transaction; this is
       // a DIFFERENT fact (an operator action spawned N runs), so it gets its

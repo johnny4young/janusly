@@ -6,8 +6,13 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+type CapturedAuditRow = {
+  metadata: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 const { insertMock, valuesMock } = vi.hoisted(() => {
-  const valuesMock = vi.fn(async () => undefined);
+  const valuesMock = vi.fn(async (_row: CapturedAuditRow) => undefined);
   return { insertMock: vi.fn(() => ({ values: valuesMock })), valuesMock };
 });
 
@@ -18,6 +23,12 @@ import { recordSystemAudit, SYSTEM_AUDIT_METADATA_MAX_BYTES } from "./systemAudi
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+function lastCapturedRow(): CapturedAuditRow {
+  const row = valuesMock.mock.lastCall?.[0];
+  if (!row) throw new Error("Expected an audit row to be captured");
+  return row;
+}
 
 describe("recordSystemAudit", () => {
   it("writes an unattributed system row by default", async () => {
@@ -47,7 +58,7 @@ describe("recordSystemAudit", () => {
       metadata: { apiKey: "sk-live-123", rows: 4 },
     });
 
-    const row = valuesMock.mock.calls.at(-1)?.[0] as { metadata: Record<string, unknown> };
+    const row = lastCapturedRow();
     expect(row.metadata.rows).toBe(4);
     expect(row.metadata.apiKey).not.toBe("sk-live-123");
   });
@@ -59,7 +70,7 @@ describe("recordSystemAudit", () => {
       metadata: { blob: "a".repeat(SYSTEM_AUDIT_METADATA_MAX_BYTES + 1024) },
     });
 
-    const row = valuesMock.mock.calls.at(-1)?.[0] as { metadata: Record<string, unknown> };
+    const row = lastCapturedRow();
     expect(row.metadata.__truncated).toBe(true);
   });
 
@@ -71,7 +82,7 @@ describe("recordSystemAudit", () => {
       maxBytes: 64_000,
     });
 
-    const row = valuesMock.mock.calls.at(-1)?.[0] as { metadata: Record<string, unknown> };
+    const row = lastCapturedRow();
     expect(row.metadata.__truncated).toBe(true);
   });
 

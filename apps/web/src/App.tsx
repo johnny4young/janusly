@@ -730,8 +730,7 @@ export default function App() {
   useEffect(() => {
     const deepLink = consumeDeadLetterDeepLink()
     if (deepLink?.deadLetterId) openRecoveryQueue(deepLink.deadLetterId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [openRecoveryQueue])
 
   const injectPackFailure = useCallback(async (packId: string) => {
     await runPlatformMutation<{ deadLetterId?: string }>({

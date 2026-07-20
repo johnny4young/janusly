@@ -27,11 +27,10 @@
  *   v1 policy, mirroring the Replay Lab fork.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { appendEvent, markQueuePublicationSucceeded } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 import { computePredecessors, computeSuccessors } from "./replay-lab";
 
@@ -52,14 +51,16 @@ export type RedriveInput = {
   /** The source run's trigger input, carried forward so `context.input` resolves. */
   input: Record<string, unknown>;
   createdBy?: string | null;
+  /** Correlation id inherited from the failed source run. */
+  traceId?: string | null;
 };
 
 export type RedriveResult =
-  | { ok: true; runId: string; predecessorCount: number }
+  | { ok: true; runId: string; predecessorCount: number; wasCreated: boolean }
   | { ok: false; code: "node_not_in_version" | "predecessor_not_succeeded"; message: string; details?: Record<string, unknown> };
 
 export async function redriveRun(args: RedriveInput): Promise<RedriveResult> {
-  const { orgId, sourceRunId, failedNodeId, workflow, targetWorkflowVersionId, input, createdBy } = args;
+  const { orgId, sourceRunId, failedNodeId, workflow, targetWorkflowVersionId, input, createdBy, traceId } = args;
 
   if (!workflow.nodes.some((node) => node.id === failedNodeId)) {
     return {
@@ -95,8 +96,8 @@ export async function redriveRun(args: RedriveInput): Promise<RedriveResult> {
   const runId = crypto.randomUUID();
   const publicationMarkedAt = new Date();
 
-  await db.transaction(async (tx) => {
-    await tx.insert(runs).values({
+  const creation = await db.transaction(async (tx) => {
+    const insertedRuns = await tx.insert(runs).values({
       id: runId,
       orgId,
       // The REAL target version id — health/usage attribution follows the
@@ -116,8 +117,31 @@ export async function redriveRun(args: RedriveInput): Promise<RedriveResult> {
       parentRunId: sourceRunId,
       parentNodeId: failedNodeId,
       parentLinkKind: "replay",
-      traceId: null,
-    });
+      traceId: traceId ?? crypto.randomUUID(),
+    })
+      .onConflictDoNothing({
+        target: [runs.orgId, runs.parentRunId, runs.parentNodeId, runs.workflowVersionId],
+        where: sql`"parent_link_kind" = 'replay' AND "replay_mode" IS NULL AND "input_json" ? 'redrive'`,
+      })
+      .returning({ id: runs.id });
+
+    if (!insertedRuns[0]) {
+      const existing = await tx
+        .select({ id: runs.id })
+        .from(runs)
+        .where(and(
+          eq(runs.orgId, orgId),
+          eq(runs.parentRunId, sourceRunId),
+          eq(runs.parentNodeId, failedNodeId),
+          eq(runs.workflowVersionId, targetWorkflowVersionId),
+          eq(runs.parentLinkKind, "replay"),
+          isNull(runs.replayMode),
+          sql`${runs.inputJson} ? 'redrive'`,
+        ))
+        .limit(1);
+      if (!existing[0]) throw new Error("Existing redrive continuation could not be resolved");
+      return { runId: existing[0].id, wasCreated: false };
+    }
 
     if (workflow.nodes.length > 0) {
       const skippedAt = new Date();
@@ -197,17 +221,21 @@ export async function redriveRun(args: RedriveInput): Promise<RedriveResult> {
         predecessorCount: predIds.size,
       }),
     });
+
+    return { runId, wasCreated: true };
   });
 
+  if (!creation.wasCreated) {
+    return { ok: true, runId: creation.runId, predecessorCount: predIds.size, wasCreated: false };
+  }
+
   // Queue ONLY the failed node — `enqueueReadyNodes` cascades from there.
-  await enqueueNode({
+  await publishInitialNode({
     runId,
     nodeId: failedNodeId,
     attempt: 1,
     publicationGeneration: 1,
   });
-  await markQueuePublicationSucceeded(runId, failedNodeId, 1, 1);
-  await appendEvent(runId, failedNodeId, "node.queued", {});
 
-  return { ok: true, runId, predecessorCount: predIds.size };
+  return { ok: true, runId, predecessorCount: predIds.size, wasCreated: true };
 }

@@ -8,6 +8,8 @@
  *
  * Used by:
  * - `apps/api/src/routes/runs-routes.ts` `POST /start` — primary caller.
+ * - `apps/api/src/routes/trigger-ingest-routes.ts` — inbound event starts and
+ *   claimed-event backfill.
  * - `packages/engine/src/resume-run.ts` — for restart-from-checkpoint paths.
  *
  * Invariants:
@@ -15,12 +17,13 @@
  * - Distinct `run.started` vs `run.started.adhoc` audit events depending on
  *   whether the workflow was persisted. The split keeps audit
  *   readers honest about which runs came from saved DAGs.
+ * - An inbound trigger event, when supplied, becomes `started` in the same
+ *   transaction as its run so a process crash cannot duplicate or lose it.
  */
 
-import { db, runs, runNodes, runEvents } from "@janusly/db";
+import { db, runs, runNodes, runEvents, triggerEvents } from "@janusly/db";
 import { and, eq, isNull } from "drizzle-orm";
-import { enqueueNode } from "./queue";
-import { appendEvent, markQueuePublicationSucceeded } from "./persistence";
+import { publishInitialNode } from "./initial-node-publication";
 import { publishRunEvent } from "./run-event-stream";
 import { safePersistPayload } from "./safe-persist";
 import type { Workflow } from "@janusly/shared";
@@ -55,7 +58,17 @@ export type StartableWorkflow = Workflow & {
   replayMode?: "validation" | null;
   /** OTel trace id shared across a subworkflow chain. Inherited from the parent or generated lazily. */
   traceId?: string;
+  /** Exact inbound event consumed atomically with run creation. */
+  triggerEventStart?: { id: string; claimToken?: string };
 };
+
+/** The event was already consumed or moved to a non-startable state. */
+export class TriggerEventStartConflictError extends Error {
+  constructor() {
+    super("Trigger event is no longer startable");
+    this.name = "TriggerEventStartConflictError";
+  }
+}
 
 export async function startRun(workflow: StartableWorkflow) {
   // When the workflow declares typed `inputs`, validate the run-start payload
@@ -100,6 +113,7 @@ export async function startRun(workflow: StartableWorkflow) {
   const {
     parentCheckpoint: _parentCheckpoint,
     replayMode: _replayMode,
+    triggerEventStart: _triggerEventStart,
     ...workflowSnapshot
   } = workflow;
 
@@ -161,6 +175,31 @@ export async function startRun(workflow: StartableWorkflow) {
       // inherited value so the whole chain remains copyable as one trace.
       traceId: workflow.traceId ?? crypto.randomUUID(),
     });
+
+    if (workflow.triggerEventStart) {
+      const eventStatusPredicate = workflow.triggerEventStart.claimToken
+        ? and(
+            eq(triggerEvents.status, "backfilling"),
+            eq(triggerEvents.backfillClaimToken, workflow.triggerEventStart.claimToken),
+          )
+        : and(eq(triggerEvents.status, "received"), isNull(triggerEvents.runId));
+      const [claimedEvent] = await tx
+        .update(triggerEvents)
+        .set({
+          status: "started",
+          runId,
+          skippedReason: null,
+          backfillClaimToken: null,
+          backfillClaimedAt: null,
+        })
+        .where(and(
+          eq(triggerEvents.orgId, workflow.orgId ?? "default"),
+          eq(triggerEvents.id, workflow.triggerEventStart.id),
+          eventStatusPredicate,
+        ))
+        .returning({ id: triggerEvents.id });
+      if (!claimedEvent) throw new TriggerEventStartConflictError();
+    }
 
     if (workflow.nodes.length > 0) {
       await tx.insert(runNodes).values(workflow.nodes.map((node) => {
@@ -248,19 +287,12 @@ export async function startRun(workflow: StartableWorkflow) {
   const startNodes = workflow.nodes.filter((node) => startNodeIds.has(node.id));
 
   for (const node of startNodes) {
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: node.id,
       attempt: 1,
       publicationGeneration: 1,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      node.id,
-      1,
-      1,
-    );
-    await appendEvent(runId, node.id, "node.queued", {});
   }
 
   return { runId, ...(parentWaitingMetadata ? { parentWaitingMetadata } : {}) };

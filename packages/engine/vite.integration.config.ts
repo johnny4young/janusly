@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
  * `*.integration.test.ts` against REAL Postgres and Redis (via
  * scripts/run-integration.mjs). Covers SQL/transaction and queue semantics the
  * mocked-DB unit suite can't prove — e.g. `claimReplayTransition`'s atomic
- * CAS + rollback-on-throw (Q-02). Serial + single-fork; each test uses a
+ * CAS + rollback-on-throw. Serial + single-fork; each test uses a
  * unique run/org id.
  */
 export default defineConfig({

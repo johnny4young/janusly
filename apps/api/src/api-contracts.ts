@@ -31,6 +31,7 @@ const WorkflowListRowSchema = z.object({
   createdAt: NullableIsoDateSchema,
   lastRunStatus: z.string().nullable(),
   runCount: z.number().int().nonnegative(),
+  bufferedTriggerCount: z.number().int().nonnegative(),
   status: z.string(),
   pausedReason: z.string().nullable(),
   tags: z.array(z.string()),

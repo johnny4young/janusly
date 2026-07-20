@@ -312,11 +312,7 @@ export function RecoveryDialog({
       cancelled = true
       window.clearInterval(handle)
     }
-    // applyAfterValidation closes over `bumpPlatformVersion` and `dlq.id`
-    // which don't change between renders; intentionally exclude from deps
-    // so the poll restarts only on a real step transition.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step.kind, step.kind === 'validating' ? step.runId : null])
+  }, [dlq.id, dlq.nodeId, step])
 
   const generateSuggestion = async () => {
     setStep({ kind: 'loading' })

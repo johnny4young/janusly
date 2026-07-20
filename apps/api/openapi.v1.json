@@ -3149,6 +3149,11 @@
                             "minimum": 0,
                             "maximum": 9007199254740991
                           },
+                          "bufferedTriggerCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
                           "status": {
                             "type": "string"
                           },
@@ -3199,6 +3204,7 @@
                           "createdAt",
                           "lastRunStatus",
                           "runCount",
+                          "bufferedTriggerCount",
                           "status",
                           "pausedReason",
                           "tags",

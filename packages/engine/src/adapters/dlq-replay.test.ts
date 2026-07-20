@@ -259,7 +259,7 @@ describe('DLQReplayAdapter.replayDeadLetterAsValidation (sandbox replay)', () =>
       nodeId: 'fetch',
       attempt: 1,
     })
-    expect(markQueuePublicationSucceededMock).toHaveBeenCalledWith(result.runId, 'fetch', 1, 1)
+    expect(markQueuePublicationSucceededMock).toHaveBeenCalledWith(result.runId, 'fetch', 1, 1, undefined)
 
     // Sandbox start event so the timeline distinguishes it from production runs.
     const eventInsertCalls = txInsertMock.mock.calls.filter((args) => args[0] === runEventsTable)

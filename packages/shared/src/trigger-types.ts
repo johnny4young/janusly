@@ -251,9 +251,10 @@ export type McpServerEventPayload = z.infer<typeof McpServerEventPayloadSchema>;
  * arrived, so no run was spawned but the payload is kept verbatim for
  * backfill on resume. It is deliberately NOT `skipped` — a skipped event is
  * discarded on purpose (deduped, rate-limited); a buffered one is still owed
- * a run. Terminal-vs-pending is the distinction that lets backfill find them.
+ * a run. `backfilling` is the leased in-progress state; an expired lease can
+ * return to the claim pool after a process crash.
  */
-export const triggerEventStatusValues = ["received", "started", "skipped", "failed", "buffered"] as const;
+export const triggerEventStatusValues = ["received", "started", "skipped", "failed", "buffered", "backfilling"] as const;
 /** Zod enum derived from `triggerEventStatusValues`. */
 export const TriggerEventStatusSchema = z.enum(triggerEventStatusValues);
 /** One structured trigger-event status. */

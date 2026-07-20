@@ -28,8 +28,7 @@
 import { eq } from "drizzle-orm";
 import { db, runs, runNodes, runEvents } from "@janusly/db";
 import type { Workflow } from "@janusly/shared";
-import { enqueueNode } from "../queue";
-import { appendEvent, markQueuePublicationSucceeded } from "../persistence";
+import { publishInitialNode } from "../initial-node-publication";
 import { safePersistPayload } from "../safe-persist";
 
 const INITIAL_NODE_STATE_MAX_BYTES = 1_000_000;
@@ -152,19 +151,12 @@ export async function replayRunAsValidation(
   const startNodes = workflow.nodes.filter((node) => startNodeIds.has(node.id));
 
   for (const node of startNodes) {
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: node.id,
       attempt: 1,
       publicationGeneration: 1,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      node.id,
-      1,
-      1,
-    );
-    await appendEvent(runId, node.id, "node.queued", {});
   }
 
   return { runId };
@@ -439,19 +431,12 @@ export async function replayRunAsValidationFork(
   //    flip to `succeeded` after execution).
   const forkNode = workflow.nodes.find((n) => n.id === forkNodeId);
   if (forkNode) {
-    await enqueueNode({
+    await publishInitialNode({
       runId,
       nodeId: forkNode.id,
       attempt: 1,
       publicationGeneration: 1,
     });
-    await markQueuePublicationSucceeded(
-      runId,
-      forkNode.id,
-      1,
-      1,
-    );
-    await appendEvent(runId, forkNode.id, "node.queued", {});
   }
 
   return { ok: true, runId, predecessorCount: predIds.size };

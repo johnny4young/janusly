@@ -221,6 +221,9 @@ export const runs = pgTable(
       .on(table.parentNotificationAfter, table.id)
       .where(sql`"parent_notification_after" IS NOT NULL`),
     index("runs_org_replay_mode_idx").on(table.orgId, table.replayMode),
+    uniqueIndex("runs_redrive_idempotency_idx")
+      .on(table.orgId, table.parentRunId, table.parentNodeId, table.workflowVersionId)
+      .where(sql`"parent_link_kind" = 'replay' AND "replay_mode" IS NULL AND "input_json" ? 'redrive'`),
   ],
 );
 
@@ -839,8 +842,8 @@ export const ssoConnections = pgTable(
  *
  * Pruning is not automated — expired rows are harmless (the verifier
  * checks `expiresAt > now` before honoring) and the table is small
- * (only as wide as concurrent in-flight SSO logins per org). A future
- * cleanup ticket can add a periodic sweep.
+ * (only as wide as concurrent in-flight SSO logins per org). A periodic
+ * retention sweep may prune them without affecting verification.
  *
  * Multi-tenant scope: every read carries `eq(ssoStateNonces.orgId, orgId)`.
  */
@@ -2072,7 +2075,7 @@ export const triggerEvents = pgTable(
     workflowVersionId: text("workflow_version_id").notNull(),
     /** The trigger node id inside that version. */
     nodeId: text("node_id").notNull(),
-    /** Lifecycle status — one of the closed `triggerEventStatusValues`. */
+    /** Lifecycle status — one of the closed `triggerEventStatusValues`, including buffered leases. */
     status: text("status").notNull().default("received"),
     /** The run this event spawned (null until `started`). */
     runId: text("run_id"),
@@ -2082,6 +2085,10 @@ export const triggerEvents = pgTable(
     payloadJson: jsonb("payload_json").notNull(),
     /** When `status` is `skipped` / `failed`, the human-readable reason. */
     skippedReason: text("skipped_reason"),
+    /** Lease token while a buffered event is being attached to exactly one run. */
+    backfillClaimToken: text("backfill_claim_token"),
+    /** Lease clock used to recover a claim abandoned by a crashed API process. */
+    backfillClaimedAt: timestamp("backfill_claimed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => [
@@ -2095,6 +2102,9 @@ export const triggerEvents = pgTable(
     // `buffered` rows oldest-first. Without this the scan rides the
     // (org, createdAt) index and pays for the whole event history.
     index("trigger_events_org_workflow_status_idx").on(table.orgId, table.workflowId, table.status, table.createdAt),
+    index("trigger_events_backfill_claim_idx")
+      .on(table.orgId, table.workflowId, table.backfillClaimedAt)
+      .where(sql`"status" = 'backfilling'`),
   ],
 );
 

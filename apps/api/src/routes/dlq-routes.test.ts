@@ -1012,26 +1012,41 @@ describe("POST /dlq/bulk-replay", () => {
   });
 });
 
-// Proves `guardMcpWrite` is WIRED at the top of POST /dlq/replay — an
-// MCP-source caller (that passes RBAC) with the process flag off is refused
-// before the DLQ row is even looked up, so no node is re-enqueued.
-describe("POST /dlq/replay — MCP-source write consent gate", () => {
-  it("refuses MCP-source replay (403 mcp_process_disabled) with the process flag off, and never re-enqueues", async () => {
+describe("production replay route gates", () => {
+  it.each(["/dlq/replay", "/dlq/bulk-replay", "/dlq/cluster-apply"])(
+    "%s requires editor rank and dlq.replay permission",
+    (path) => {
+      const route = findRoute("POST", path);
+      expect(route.role).toBe("editor");
+      expect(route.permission).toBe("dlq.replay");
+    },
+  );
+
+  it.each([
+    ["/dlq/replay", { deadLetterId: "dl-1" }],
+    ["/dlq/bulk-replay", { deadLetterIds: ["dl-1"] }],
+    ["/dlq/cluster-apply", { clusterSignature: "sig-1", deadLetterIds: ["dl-1"] }],
+  ])("refuses MCP-source writes on %s before reading recovery data", async (path, body) => {
     vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
-    requireAuthMock.mockResolvedValueOnce({ orgId: "org-1", userId: "user-1", mode: "service-token", source: "mcp", serviceTokenSuffix: "abcd" });
+    requireAuthMock.mockResolvedValueOnce({
+      orgId: "org-1",
+      userId: "user-1",
+      mode: "service-token",
+      source: "mcp",
+      serviceTokenSuffix: "abcd",
+    });
     requireRoleMock.mockResolvedValueOnce("editor");
 
     const server = createApiServer({ routes: dlqRoutes });
     const baseUrl = await listen(server);
     try {
-      const response = await fetch(`${baseUrl}/dlq/replay`, {
+      const response = await fetch(`${baseUrl}${path}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ deadLetterId: "dl-1" }),
+        body: JSON.stringify(body),
       });
       expect(response.status).toBe(403);
       expect((await response.json()).code).toBe("mcp_process_disabled");
-      // Gate fired before the DLQ lookup + the replay adapter.
       expect(getDeadLetterMock).not.toHaveBeenCalled();
       expect(replayDeadLetterMock).not.toHaveBeenCalled();
     } finally {

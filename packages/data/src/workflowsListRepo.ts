@@ -1,6 +1,6 @@
 /**
- * Saved-workflows list with a per-workflow run summary (last-run status +
- * run count) for the Flows dashboard.
+ * Saved-workflows list with per-workflow run and buffered-trigger summaries
+ * for the Flows dashboard.
  *
  * Used by: `apps/api` GET /workflows route handler.
  *
@@ -17,11 +17,14 @@
  * - The aggregate is scoped to exactly the page just selected (`inArray` on
  *   the page ids) so the pagination cap holds — an off-page workflow is
  *   never aggregated.
+ * - Buffered-trigger counts use one page-scoped aggregate, never one query per
+ *   workflow.
  */
 
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 
-import { db, runs, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
+import { db, runs, triggerEvents, workflowMetadata, workflows, workflowVersions } from "@janusly/db";
+import { TRIGGER_BACKFILL_CLAIM_LEASE_MS } from "./triggerEventsRepo";
 
 /** One Flows-list row: the base workflow fields plus the run summary. */
 export type WorkflowListRow = {
@@ -32,6 +35,8 @@ export type WorkflowListRow = {
   createdAt: Date | null;
   lastRunStatus: string | null;
   runCount: number;
+  /** Events accepted during a pause that still need a run. */
+  bufferedTriggerCount: number;
   /** Operational status — `active` or `paused_upstream_degraded`. Drives the paused pill + force-run affordance. */
   status: string;
   /** Operator-visible reason when paused; null when active. */
@@ -184,26 +189,48 @@ async function foldRunSummary(orgId: string, base: WorkflowBaseRow[]): Promise<W
   // Per-workflow run aggregate (runs → workflow_versions → workflows), scoped
   // to the org + this page + production runs only.
   const ids = base.map((w) => w.id);
-  const agg = await db
-    .select({
-      workflowId: workflowVersions.workflowId,
-      runCount: sql<number>`count(${runs.id})::int`,
-      lastRunStatus: sql<
-        string | null
-      >`(array_agg(${runs.status} ORDER BY ${runs.createdAt} DESC))[1]`,
-    })
-    .from(runs)
-    .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
-    .where(
-      and(
-        eq(workflowVersions.orgId, orgId),
-        isNull(runs.replayMode),
-        inArray(workflowVersions.workflowId, ids),
-      ),
-    )
-    .groupBy(workflowVersions.workflowId);
+  const staleBackfillBefore = new Date(Date.now() - TRIGGER_BACKFILL_CLAIM_LEASE_MS);
+  const [agg, buffered] = await Promise.all([
+    db
+      .select({
+        workflowId: workflowVersions.workflowId,
+        runCount: sql<number>`count(${runs.id})::int`,
+        lastRunStatus: sql<
+          string | null
+        >`(array_agg(${runs.status} ORDER BY ${runs.createdAt} DESC))[1]`,
+      })
+      .from(runs)
+      .innerJoin(workflowVersions, eq(workflowVersions.id, runs.workflowVersionId))
+      .where(
+        and(
+          eq(workflowVersions.orgId, orgId),
+          isNull(runs.replayMode),
+          inArray(workflowVersions.workflowId, ids),
+        ),
+      )
+      .groupBy(workflowVersions.workflowId),
+    db
+      .select({
+        workflowId: triggerEvents.workflowId,
+        count: sql<number>`count(${triggerEvents.id})::int`,
+      })
+      .from(triggerEvents)
+      .where(and(
+        eq(triggerEvents.orgId, orgId),
+        or(
+          eq(triggerEvents.status, "buffered"),
+          and(
+            eq(triggerEvents.status, "backfilling"),
+            lt(triggerEvents.backfillClaimedAt, staleBackfillBefore),
+          ),
+        ),
+        inArray(triggerEvents.workflowId, ids),
+      ))
+      .groupBy(triggerEvents.workflowId),
+  ]);
 
   const byId = new Map(agg.map((r) => [r.workflowId, r]));
+  const bufferedById = new Map(buffered.map((r) => [r.workflowId, r.count]));
   return base.map((w) => ({
     id: w.id,
     orgId: w.orgId,
@@ -212,6 +239,7 @@ async function foldRunSummary(orgId: string, base: WorkflowBaseRow[]): Promise<W
     createdAt: w.createdAt ?? null,
     lastRunStatus: byId.get(w.id)?.lastRunStatus ?? null,
     runCount: byId.get(w.id)?.runCount ?? 0,
+    bufferedTriggerCount: bufferedById.get(w.id) ?? 0,
     status: w.status ?? "active",
     pausedReason: w.pausedReason ?? null,
     tags: Array.isArray(w.tags) ? (w.tags as string[]) : [],

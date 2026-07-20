@@ -36,11 +36,12 @@ export type FlowRowProps = {
   moveToFolder: (workflowId: string, folderKey: string) => void | Promise<void>
   deleteWorkflow: (workflowId: string) => void | Promise<void>
   resumeWorkflow: (workflowId: string) => void | Promise<void>
+  recoveryBusy: boolean
   t: TFunc
 }
 
 /** `workflows.status` for a workflow its circuit breaker paused. */
-const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker' 
+const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 export const FlowRow = memo(function FlowRow({
   workflow,
@@ -60,11 +61,13 @@ export const FlowRow = memo(function FlowRow({
   moveToFolder,
   deleteWorkflow,
   resumeWorkflow,
+  recoveryBusy,
   t,
 }: FlowRowProps) {
   // `status` is absent on older cached rows; treat that as active.
   const pausedByBreaker = workflow.status === STATUS_PAUSED_CIRCUIT_BREAKER
-  const isPaused = Boolean(workflow.status) && workflow.status !== 'active' 
+  const isPaused = Boolean(workflow.status) && workflow.status !== 'active'
+  const hasBufferedTriggers = (workflow.bufferedTriggerCount ?? 0) > 0
   // Folder choices for the per-row "Move to folder" select: the org-wide
   // folder list plus the row's own folder if a stale value isn't already in it
   // (so the native select can always render its current value as a real option).
@@ -209,16 +212,28 @@ export const FlowRow = memo(function FlowRow({
             </select>
           )}
           {/* Only breaker pauses get a Resume: an upstream-outage pause clears
-              itself when the status page recovers, so a manual override there
-              would just re-run into the same outage. */}
+              itself when the status page recovers. An active workflow can
+              continue a capped buffered window without changing pause state. */}
           {pausedByBreaker && (
             <button
               onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
               className="small-command"
               title={t('workflowsDashboard.resumeFlowTitle')}
               data-testid={`workflows-resume-${workflow.id}`}
+              disabled={recoveryBusy}
             >
               <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.resumeFlow')}
+            </button>
+          )}
+          {!isPaused && hasBufferedTriggers && (
+            <button
+              onClick={(event) => { event.stopPropagation(); void resumeWorkflow(workflow.id) }}
+              className="small-command"
+              title={t('workflowsDashboard.continueBackfillTitle', { count: workflow.bufferedTriggerCount ?? 0 })}
+              data-testid={`workflows-backfill-${workflow.id}`}
+              disabled={recoveryBusy}
+            >
+              <PlayCircle size={12} aria-hidden="true" /> {t('workflowsDashboard.continueBackfill')}
             </button>
           )}
           <button onClick={(event) => { event.stopPropagation(); onOpen(workflow.id) }} className="small-command">{t('workflowsDashboard.openFlow')}</button>

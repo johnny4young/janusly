@@ -183,6 +183,19 @@ describe("POST /workflows/:id/resume — circuit-breaker resume", () => {
     expect(resumeRoute().permission).toBe("workflows.write");
   });
 
+  it("refuses MCP-source traffic before changing workflow state when write consent is off", async () => {
+    vi.stubEnv("JANUSLY_MCP_WRITES_ENABLED", "");
+    await resumeRoute().handler({
+      req: { url: "/workflows/wf-1/resume" } as never,
+      res: {} as never,
+      auth: mcpAuth,
+    });
+
+    expect(sendJsonMock.mock.calls.at(-1)?.[2]).toBe(403);
+    expect(resumeBreakerMock).not.toHaveBeenCalled();
+    expect(backfillMock).not.toHaveBeenCalled();
+  });
+
   it("does not claim the /workflows/trash or /restore routes", () => {
     const match = resumeRoute().match as (url: string) => boolean;
     expect(match("/workflows/wf-1/restore")).toBe(false);
@@ -211,13 +224,20 @@ describe("POST /workflows/:id/resume — circuit-breaker resume", () => {
     expect(auditActionMock).not.toHaveBeenCalledWith(auth, "workflow.trigger_backfill", expect.anything());
   });
 
-  it("never backfills a resume that did not happen", async () => {
+  it("drains the next buffered page when the workflow is already active", async () => {
     resumeBreakerMock.mockResolvedValue(false);
     getWorkflowBreakerStatusMock.mockResolvedValue("active");
+    backfillMock.mockResolvedValue({ backfilled: 4, failed: 0, remaining: 3 });
 
     await call("/workflows/wf-1/resume");
 
-    expect(backfillMock).not.toHaveBeenCalled();
+    expect(backfillMock).toHaveBeenCalledWith({ auth, workflowId: "wf-1" });
+    expect(sendJsonMock.mock.calls.at(-1)?.[1]).toMatchObject({
+      ok: true,
+      status: "active",
+      backfilled: 4,
+      remaining: 3,
+    });
   });
 
   it("resumes as the calling operator, so the audit names a person", async () => {

@@ -498,7 +498,7 @@ export const runsRoutes: Route[] = [
   // latest (or an explicit) saved workflow version, reusing every upstream
   // output that already succeeded. The wedge's last mile: DLQ → patch →
   // save v(n+1) → redrive continues the work instead of re-running it.
-  { method: "POST", match: "/runs/redrive", role: "editor",
+  { method: "POST", match: "/runs/redrive", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const redriveMcpGate = await guardMcpWrite(auth, "runs.redrive");
       if (!redriveMcpGate.ok) return sendJson(res, redriveMcpGate.body, redriveMcpGate.status);
@@ -593,7 +593,12 @@ export const runsRoutes: Route[] = [
       // Same production-mode posture as POST /start: fail-level readiness
       // issues block a redrive that would execute write-side work.
       if (process.env.JANUSLY_PRODUCTION_MODE === "true") {
-        const readiness = checkWorkflowReadiness(parsedTarget.data);
+        const baseReadiness = checkWorkflowReadiness(parsedTarget.data);
+        const [rollbackIssues, credentialIssues] = await Promise.all([
+          checkRollbackAvailability(auth.orgId, parsedTarget.data.id),
+          getCredentialReadinessIssues(auth.orgId, parsedTarget.data, productionSecretRefResolver),
+        ]);
+        const readiness = mergeReadiness(baseReadiness, [...rollbackIssues, ...credentialIssues]);
         if (readiness.status === "fail") {
           return sendError(res, "runs_not_production_ready", "Workflow not production-ready", 422);
         }
@@ -610,6 +615,7 @@ export const runsRoutes: Route[] = [
           ? sourceInput as Record<string, unknown>
           : {},
         createdBy: auth.userId,
+        traceId: sourceRun.traceId,
       });
       if (!result.ok) {
         const code = result.code === "node_not_in_version"
@@ -618,16 +624,18 @@ export const runsRoutes: Route[] = [
         return sendError(res, code, result.message, 409);
       }
 
-      await auditAction(auth, "run.redrive", { targetType: "run", targetId: result.runId, metadata: {
-        sourceRunId: runId,
-        failedNodeId,
-        targetWorkflowVersionId: targetVersionRow.id,
-        predecessorCount: result.predecessorCount,
-      } });
+      if (result.wasCreated) {
+        await auditAction(auth, "run.redrive", { targetType: "run", targetId: result.runId, metadata: {
+          sourceRunId: runId,
+          failedNodeId,
+          targetWorkflowVersionId: targetVersionRow.id,
+          predecessorCount: result.predecessorCount,
+        } });
+      }
       return sendJson(res, { runId: result.runId });
     } },
   // Run lifecycle (start / resume / cancel)
-  { method: "POST", match: "/start", role: "editor",
+  { method: "POST", match: "/start", role: "editor", permission: "runs.start",
     handler: async ({ req, res, auth }) => {
       const startMcpGate = await guardMcpWrite(auth, "runs.start");
       if (!startMcpGate.ok) return sendJson(res, startMcpGate.body, startMcpGate.status);

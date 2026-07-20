@@ -36,6 +36,7 @@ function props(workflow: SavedWorkflow, selectedIds = new Set<string>()): FlowRo
     moveToFolder: noop,
     deleteWorkflow: noop,
     resumeWorkflow: noop,
+    recoveryBusy: false,
     t,
   }
 }
@@ -111,5 +112,19 @@ describe('<FlowRow /> paused state', () => {
 
     expect(resumeWorkflow).toHaveBeenCalledWith('wf-1')
     expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('offers the next buffered page on an active workflow and locks duplicate clicks', () => {
+    const resumeWorkflow = vi.fn()
+    render(<FlowRow
+      {...props({ ...base, status: 'active', bufferedTriggerCount: 9 })}
+      resumeWorkflow={resumeWorkflow}
+      recoveryBusy
+    />)
+
+    const button = screen.getByTestId('workflows-backfill-wf-1')
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(resumeWorkflow).not.toHaveBeenCalled()
   })
 })

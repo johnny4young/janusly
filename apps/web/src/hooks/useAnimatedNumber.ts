@@ -23,16 +23,21 @@ import { useEffect, useRef, useState } from 'react'
 
 export function useAnimatedNumber(target: number, durationMs: number, snap: boolean): number {
   const [value, setValue] = useState(snap ? target : 0)
+  const valueRef = useRef(value)
   const rafRef = useRef<number | null>(null)
   const startRef = useRef<number | null>(null)
   const startValueRef = useRef<number>(0)
+
+  useEffect(() => {
+    valueRef.current = value
+  }, [value])
 
   useEffect(() => {
     if (snap || !Number.isFinite(target)) {
       setValue(target)
       return
     }
-    startValueRef.current = value
+    startValueRef.current = valueRef.current
     startRef.current = null
     const step = (timestamp: number) => {
       if (startRef.current === null) startRef.current = timestamp
@@ -53,8 +58,6 @@ export function useAnimatedNumber(target: number, durationMs: number, snap: bool
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-    // value intentionally excluded from deps — we re-anchor each target change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, durationMs, snap])
 
   return value

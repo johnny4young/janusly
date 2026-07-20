@@ -11,7 +11,7 @@
  * so the next open surfaces them at the top.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDialogFocusTrap } from '../hooks/useDialogFocusTrap'
 import {
   Activity,
@@ -261,7 +261,10 @@ export function CommandPalette({
     return () => document.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  const labelFor = (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never))
+  const labelFor = useCallback(
+    (cmd: Command): string => dynamicLabels.get(cmd.id) ?? (t(cmd.labelKey as never)),
+    [dynamicLabels, t],
+  )
 
   const ordered = useMemo<Command[]>(() => {
     const byId = new Map(commands.map(cmd => [cmd.id, cmd]))
@@ -272,8 +275,7 @@ export function CommandPalette({
       query,
       all.map((cmd) => ({ item: cmd, label: labelFor(cmd), keywords: [cmd.id] })),
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commands, recent, query, t, dynamicLabels])
+  }, [commands, labelFor, query, recent])
 
   useEffect(() => {
     setActiveIndex(0)

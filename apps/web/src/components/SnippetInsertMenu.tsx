@@ -19,7 +19,7 @@
  * Used by `App.tsx` (Inspector "Insert snippet…" button + Cmd+K palette).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Layers, Search, X } from 'lucide-react'
 import {
   BUILTIN_SNIPPET_ID_PREFIX,
@@ -117,18 +117,24 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
   }, [open, onClose])
 
   /** Resolve the display name (built-ins use i18n; custom use their stored name). */
-  const nameFor = (snippet: SnippetDefinition): string =>
-    snippet.builtin
+  const nameFor = useCallback(
+    (snippet: SnippetDefinition): string => snippet.builtin
       ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.name` as never))
-      : snippet.name
+      : snippet.name,
+    [t],
+  )
 
-  const descriptionFor = (snippet: SnippetDefinition): string =>
-    snippet.builtin
+  const descriptionFor = useCallback(
+    (snippet: SnippetDefinition): string => snippet.builtin
       ? (t(`snippets.builtin.${builtinSlug(snippet.id)}.description` as never))
-      : snippet.description
+      : snippet.description,
+    [t],
+  )
 
-  const categoryLabel = (category: SnippetCategory): string =>
-    t(`snippets.category.${category}` as never)
+  const categoryLabel = useCallback(
+    (category: SnippetCategory): string => t(`snippets.category.${category}` as never),
+    [t],
+  )
 
   const filtered = useMemo<SnippetDefinition[]>(() => {
     const normalised = query.trim().toLowerCase()
@@ -137,8 +143,7 @@ export function SnippetInsertMenu({ open, onClose }: SnippetInsertMenuProps) {
       const hay = `${nameFor(snippet)} ${descriptionFor(snippet)} ${snippet.tags.join(' ')} ${categoryLabel(snippet.category)}`.toLowerCase()
       return hay.includes(normalised)
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snippets, query, t])
+  }, [categoryLabel, descriptionFor, nameFor, query, snippets])
 
   if (!open) return null
 

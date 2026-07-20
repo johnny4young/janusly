@@ -11,11 +11,24 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { dbQueue, redriveRunMock, auditActionMock, sendJsonMock } = vi.hoisted(() => ({
+const {
+  dbQueue,
+  redriveRunMock,
+  auditActionMock,
+  sendJsonMock,
+  checkWorkflowReadinessMock,
+  checkRollbackAvailabilityMock,
+  getCredentialReadinessIssuesMock,
+  mergeReadinessMock,
+} = vi.hoisted(() => ({
   dbQueue: [] as unknown[][],
   redriveRunMock: vi.fn(),
   auditActionMock: vi.fn(),
   sendJsonMock: vi.fn((_res: unknown, payload: unknown, status = 200) => ({ payload, status })),
+  checkWorkflowReadinessMock: vi.fn(() => ({ status: "pass", issues: [] as unknown[] })),
+  checkRollbackAvailabilityMock: vi.fn(async () => []),
+  getCredentialReadinessIssuesMock: vi.fn(async () => []),
+  mergeReadinessMock: vi.fn(() => ({ status: "pass", issues: [] as unknown[] })),
 }));
 
 // Thenable query builder: every chained method returns the builder; awaiting
@@ -78,7 +91,7 @@ vi.mock("@janusly/engine/src/resume-run", () => ({
   resumeRun: vi.fn(),
 }));
 vi.mock("@janusly/engine/src/start-run", () => ({ startRun: vi.fn() }));
-vi.mock("@janusly/engine/src/workflow-readiness", () => ({ checkWorkflowReadiness: vi.fn(() => ({ status: "pass", issues: [] })) }));
+vi.mock("@janusly/engine/src/workflow-readiness", () => ({ checkWorkflowReadiness: checkWorkflowReadinessMock }));
 vi.mock("@janusly/engine/src/workflow-validation", () => ({
   validateWorkflow: vi.fn(() => ({ valid: true, issues: [] })),
 }));
@@ -102,9 +115,9 @@ vi.mock("../http", () => ({
 }));
 vi.mock("../rate-limit", () => ({ enforceRateLimit: vi.fn() }));
 vi.mock("../readiness-helpers", () => ({
-  checkRollbackAvailability: vi.fn(),
-  getCredentialReadinessIssues: vi.fn(),
-  mergeReadiness: vi.fn(),
+  checkRollbackAvailability: checkRollbackAvailabilityMock,
+  getCredentialReadinessIssues: getCredentialReadinessIssuesMock,
+  mergeReadiness: mergeReadinessMock,
   productionSecretRefResolver: {},
 }));
 
@@ -136,11 +149,13 @@ afterEach(() => {
   vi.clearAllMocks();
   dbQueue.length = 0;
   bodyBox.value = {};
+  delete process.env.JANUSLY_PRODUCTION_MODE;
 });
 
 describe("POST /runs/redrive declaration", () => {
-  it("declares role: editor", () => {
+  it("requires the editor rank and run-start permission", () => {
     expect(redriveRoute().role).toBe("editor");
+    expect(redriveRoute().permission).toBe("runs.start");
   });
 });
 
@@ -188,6 +203,33 @@ describe("POST /runs/redrive rejections", () => {
     await invoke();
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ code: "runs_redrive_predecessor_not_succeeded" }), 409);
   });
+
+  it("applies rollback and credential readiness before production redrive", async () => {
+    process.env.JANUSLY_PRODUCTION_MODE = "true";
+    bodyBox.value = { runId: "run-1" };
+    dbQueue.push([SOURCE_RUN]);
+    dbQueue.push([{ nodeId: "n1", status: "failed" }]);
+    dbQueue.push([{ workflowId: "wf-1" }]);
+    dbQueue.push([{ id: "wf-1", status: "active" }]);
+    dbQueue.push([{ id: "wfv-2", workflowId: "wf-1", dagJson: VALID_DAG }]);
+    mergeReadinessMock.mockReturnValueOnce({ status: "fail", issues: [{ code: "credential_missing" }] });
+
+    await invoke();
+
+    expect(checkWorkflowReadinessMock).toHaveBeenCalledWith(expect.objectContaining({ id: "wf-1" }));
+    expect(checkRollbackAvailabilityMock).toHaveBeenCalledWith("org-1", "wf-1");
+    expect(getCredentialReadinessIssuesMock).toHaveBeenCalledWith(
+      "org-1",
+      expect.objectContaining({ id: "wf-1" }),
+      expect.anything(),
+    );
+    expect(sendJsonMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ code: "runs_not_production_ready" }),
+      422,
+    );
+    expect(redriveRunMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /runs/redrive happy path", () => {
@@ -198,7 +240,7 @@ describe("POST /runs/redrive happy path", () => {
     dbQueue.push([{ workflowId: "wf-1" }]);
     dbQueue.push([{ id: "wf-1", status: "active" }]);
     dbQueue.push([{ id: "wfv-2", workflowId: "wf-1", dagJson: VALID_DAG }]);
-    redriveRunMock.mockResolvedValueOnce({ ok: true, runId: "run-2", predecessorCount: 0 });
+    redriveRunMock.mockResolvedValueOnce({ ok: true, runId: "run-2", predecessorCount: 0, wasCreated: true });
 
     await invoke();
 
@@ -209,11 +251,27 @@ describe("POST /runs/redrive happy path", () => {
       targetWorkflowVersionId: "wfv-2",
       input: { orderId: "o-9" },
       createdBy: "user-1",
+      traceId: undefined,
     }));
     expect(auditActionMock).toHaveBeenCalledWith(auth, "run.redrive", expect.objectContaining({
       targetType: "run",
       targetId: "run-2",
     }));
     expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), { runId: "run-2" });
+  });
+
+  it("returns an existing continuation without duplicating its audit", async () => {
+    bodyBox.value = { runId: "run-1" };
+    dbQueue.push([SOURCE_RUN]);
+    dbQueue.push([{ nodeId: "n1", status: "failed" }]);
+    dbQueue.push([{ workflowId: "wf-1" }]);
+    dbQueue.push([{ id: "wf-1", status: "active" }]);
+    dbQueue.push([{ id: "wfv-2", workflowId: "wf-1", dagJson: VALID_DAG }]);
+    redriveRunMock.mockResolvedValueOnce({ ok: true, runId: "run-existing", predecessorCount: 0, wasCreated: false });
+
+    await invoke();
+
+    expect(auditActionMock).not.toHaveBeenCalled();
+    expect(sendJsonMock).toHaveBeenCalledWith(expect.anything(), { runId: "run-existing" });
   });
 });

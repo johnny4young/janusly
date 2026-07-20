@@ -21,6 +21,7 @@ import { TrashPanel } from './TrashPanel'
 /** Run statuses that count as "failed" for the failed-first sort (mirrors
  *  the server's terminal-failure set). */
 const FAILED_RUN_STATUSES = new Set(['failed', 'cancelled', 'timed_out'])
+const STATUS_PAUSED_CIRCUIT_BREAKER = 'paused_circuit_breaker'
 
 /** Flows-list page size — the initial load and each "Load more" page fetch this
  *  many rows. A full page (`=== PAGE_SIZE`) means another page may exist; a short
@@ -60,6 +61,8 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
   const bumpPlatformVersion = useWorkflowStore(state => state.bumpPlatformVersion)
   const [workflows, setWorkflows] = useState<SavedWorkflow[]>([])
   const [loading, setLoading] = useState(false)
+  const recoveryBusyRef = useRef(new Set<string>())
+  const [recoveryBusyIds, setRecoveryBusyIds] = useState<Set<string>>(() => new Set())
   // "Load more" keyset pagination. `hasMore` is true when the last page came back
   // full (so another page may exist); `loadingMore` guards the in-flight append.
   const [hasMore, setHasMore] = useState(false)
@@ -626,13 +629,17 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
     [workflows, addToast, bumpPlatformVersion, t],
   )
 
-  // Resume a workflow the circuit breaker paused. Optimistic like the other
-  // row mutations: flip the row to active, roll back on failure. The operator
-  // is asserting the underlying fault is fixed — nothing else can know that,
-  // which is why there's no automatic resume for this pause source.
+  // Resume a breaker pause or drain the next capped buffered page from an
+  // already-active workflow. The per-row lock prevents duplicate production
+  // continuations while either request is in flight.
   const resumeWorkflow = useCallback(
     async (workflowId: string) => {
+      if (recoveryBusyRef.current.has(workflowId)) return
       const prior = workflows.find((w) => w.id === workflowId)
+      if (!prior) return
+      recoveryBusyRef.current.add(workflowId)
+      setRecoveryBusyIds((current) => new Set(current).add(workflowId))
+      const wasPausedByBreaker = prior.status === STATUS_PAUSED_CIRCUIT_BREAKER
       setWorkflows((prev) =>
         prev.map((w) => (w.id === workflowId ? { ...w, status: 'active', pausedReason: null } : w)),
       )
@@ -646,12 +653,19 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
         // during the outage were replayed or dropped.
         const backfilled = res?.backfilled ?? 0
         const remaining = res?.remaining ?? 0
+        setWorkflows((prev) => prev.map((w) => (
+          w.id === workflowId ? { ...w, bufferedTriggerCount: remaining } : w
+        )))
         addToast(
-          remaining > 0
-            ? t('workflowsDashboard.resumedWithRemaining', { count: backfilled, remaining })
-            : backfilled > 0
-              ? t('workflowsDashboard.resumedWithBackfill', { count: backfilled })
-              : t('workflowsDashboard.resumed'),
+          wasPausedByBreaker
+            ? remaining > 0
+              ? t('workflowsDashboard.resumedWithRemaining', { count: backfilled, remaining })
+              : backfilled > 0
+                ? t('workflowsDashboard.resumedWithBackfill', { count: backfilled })
+                : t('workflowsDashboard.resumed')
+            : remaining > 0
+              ? t('workflowsDashboard.backfillWithRemaining', { count: backfilled, remaining })
+              : t('workflowsDashboard.backfillCompleted', { count: backfilled }),
           'success',
         )
         bumpPlatformVersion()
@@ -662,6 +676,13 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
             : w)),
         )
         addToast(tApiError(err) || t('workflowsDashboard.resumeFailed'), 'error')
+      } finally {
+        recoveryBusyRef.current.delete(workflowId)
+        setRecoveryBusyIds((current) => {
+          const next = new Set(current)
+          next.delete(workflowId)
+          return next
+        })
       }
     },
     [workflows, addToast, bumpPlatformVersion, t],
@@ -899,6 +920,7 @@ export function WorkflowsDashboard({ onOpen }: { onOpen: (id: string) => void })
       moveToFolder={moveToFolder}
       deleteWorkflow={deleteWorkflow}
       resumeWorkflow={resumeWorkflow}
+      recoveryBusy={recoveryBusyIds.has(workflow.id)}
       t={t}
     />
   )

@@ -23,7 +23,7 @@
  *   6. (email) upload attachments to the object store under
  *      `orgs/<orgId>/email/...` and replace the bodies with object keys.
  *   7. Spawn the run via `startRun` with the normalized event as the input,
- *      flip the row to `started`, and audit.
+ *      atomically attach the event to that run, and audit.
  *
  * `POST /triggers/events/:id/replay` re-runs a persisted event's stored
  * payload (the DLQ-style replay), reusing the same resolve + spawn path.
@@ -36,6 +36,8 @@
  * - Audit on every outcome (`received` / `started` / `skipped` / `replayed`).
  */
 
+import { createHash } from "node:crypto";
+
 import {
   EmailReceivedPayloadSchema,
   FileDroppedPayloadSchema,
@@ -45,27 +47,31 @@ import {
   MCP_EVENT_PAYLOAD_MAX_BYTES,
   resolveTriggerRateLimitPerMin,
   utf8ByteLength,
+  isTriggerNodeType,
   type TriggerEventStatus,
   type TriggerNodeType,
 } from "@janusly/shared/src/trigger-types";
 import { WorkflowSchema } from "@janusly/shared";
 import {
   countBufferedTriggerEvents,
+  claimBufferedTriggerEvents,
   findTriggerEventByDedupeKey,
   getTriggerEvent,
   getWorkflowStatus,
-  listBufferedTriggerEvents,
   resolveWorkflowPauseAction,
   listTriggerEvents,
   markTriggerEventBuffered,
   markTriggerEventFailed,
   markTriggerEventSkipped,
-  markTriggerEventStarted,
   recordTriggerEvent,
+  releaseTriggerEventBackfillClaim,
+  retireTriggerEventBackfillClaim,
   resolveTriggerNode,
+  type TriggerEvent,
   type ResolvedTriggerNode,
 } from "@janusly/data";
-import { startRun } from "@janusly/engine/src/start-run";
+import { startRun, TriggerEventStartConflictError } from "@janusly/engine/src/start-run";
+import { WorkflowInputValidationError } from "@janusly/engine/src/inputs-validator";
 import { safePersistPayload } from "@janusly/engine/src/safe-persist";
 import { getObjectStore } from "@janusly/engine/src/object-store";
 
@@ -87,7 +93,7 @@ const TRIGGER_INGEST_MAX_JSON_BYTES = 1_048_576;
 type StatusFilter = TriggerEventStatus | undefined;
 
 function parseStatusFilter(value: string | null): StatusFilter {
-  if (value === "received" || value === "started" || value === "skipped" || value === "failed") return value;
+  if (value === "received" || value === "started" || value === "skipped" || value === "failed" || value === "buffered" || value === "backfilling") return value;
   return undefined;
 }
 
@@ -124,23 +130,28 @@ async function persistEventAndSpawnRun(args: {
    * attachments share one id. Defaults to a fresh UUID inside the repo.
    */
   eventId?: string;
+  /** Existing `received` row recovered before attachment offload. */
+  existingEvent?: TriggerEvent;
 }): Promise<{ status: number; body: unknown }> {
-  const { auth, triggerType, resolved, payload, dedupeKey, replayOfEventId, eventId } = args;
+  const { auth, triggerType, resolved, payload, dedupeKey, replayOfEventId, eventId, existingEvent } = args;
 
   // 1. Persist the structured event BEFORE the run (DLQ-style replay anchor),
   //    idempotent on (orgId, dedupeKey) so a relay retry converges.
-  const { event, wasCreated } = await recordTriggerEvent({
-    orgId: auth.orgId,
-    triggerType,
-    workflowId: resolved.workflowId,
-    workflowVersionId: resolved.workflowVersionId,
-    nodeId: resolved.nodeId,
-    dedupeKey,
-    payloadJson: safePersistPayload({ event: payload }),
-    id: eventId,
-  });
+  const recorded = existingEvent
+    ? { event: existingEvent, wasCreated: false }
+    : await recordTriggerEvent({
+        orgId: auth.orgId,
+        triggerType,
+        workflowId: resolved.workflowId,
+        workflowVersionId: resolved.workflowVersionId,
+        nodeId: resolved.nodeId,
+        dedupeKey,
+        payloadJson: safePersistPayload({ event: payload }),
+        id: eventId,
+      });
+  const { event, wasCreated } = recorded;
 
-  if (!wasCreated) {
+  if (!wasCreated && event.status !== "received") {
     // Duplicate inbound event (same dedupe key already processed). Don't
     // spawn a second run — return the prior event so the relay sees 200.
     return {
@@ -149,17 +160,50 @@ async function persistEventAndSpawnRun(args: {
     };
   }
 
-  await auditAction(auth, "trigger.event.received", {
-    targetType: "trigger_event",
-    targetId: event.id,
-    metadata: { triggerType, workflowId: resolved.workflowId, nodeId: resolved.nodeId, replay: Boolean(replayOfEventId) },
-  });
+  let effectiveTriggerType = triggerType;
+  let effectiveResolved = resolved;
+  let effectivePayload = payload;
+  if (!wasCreated) {
+    if (!isTriggerNodeType(event.triggerType)) {
+      await markTriggerEventFailed(auth.orgId, event.id, "invalid_persisted_trigger_type");
+      return {
+        status: 422,
+        body: errorEnvelope("trigger_invalid_payload", "Persisted trigger event has an invalid type"),
+      };
+    }
+    const persistedResolved = await resolveTriggerNode(
+      auth.orgId,
+      event.triggerType,
+      () => true,
+      event.workflowId ? { workflowId: event.workflowId, nodeId: event.nodeId } : undefined,
+    );
+    if (!persistedResolved) {
+      await markTriggerEventFailed(auth.orgId, event.id, "persisted_trigger_node_missing");
+      return {
+        status: 404,
+        body: errorEnvelope("trigger_no_matching_node", "Persisted trigger node no longer exists"),
+      };
+    }
+    effectiveTriggerType = event.triggerType;
+    effectiveResolved = persistedResolved;
+    effectivePayload = (event.payloadJson && typeof event.payloadJson === "object" && !Array.isArray(event.payloadJson)
+      ? (event.payloadJson as { event?: Record<string, unknown> }).event
+      : undefined) ?? {};
+  }
+
+  if (wasCreated) {
+    await auditAction(auth, "trigger.event.received", {
+      targetType: "trigger_event",
+      targetId: event.id,
+      metadata: { triggerType: effectiveTriggerType, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, replay: Boolean(replayOfEventId) },
+    });
+  }
 
   // 2. Per-trigger storm guard. Over-limit → record skipped + 429.
-  const ratePerMin = resolveTriggerRateLimitPerMin(resolved.nodeConfig.rateLimitPerMin);
+  const ratePerMin = resolveTriggerRateLimitPerMin(effectiveResolved.nodeConfig.rateLimitPerMin);
   try {
     await enforceRateLimit(auth.orgId, {
-      name: triggerRateLimitBucket(resolved),
+      name: triggerRateLimitBucket(effectiveResolved),
       windowMs: RATE_LIMIT_WINDOW_MS,
       max: ratePerMin,
     });
@@ -169,7 +213,7 @@ async function persistEventAndSpawnRun(args: {
       await auditAction(auth, "trigger.event.skipped", {
         targetType: "trigger_event",
         targetId: event.id,
-        metadata: { triggerType, reason: "rate_limited", ratePerMin },
+        metadata: { triggerType: effectiveTriggerType, reason: "rate_limited", ratePerMin },
       });
       return {
         status: 429,
@@ -186,15 +230,15 @@ async function persistEventAndSpawnRun(args: {
   //    `buffered` instead; resume backfills the window. 202, not 200: the
   //    event is accepted, its run is deferred — 200 would claim it ran, and
   //    a 4xx/5xx would make the relay retry or give up.
-  if (resolved.workflowId) {
-    const wfStatus = await getWorkflowStatus(auth.orgId, resolved.workflowId);
+  if (effectiveResolved.workflowId) {
+    const wfStatus = await getWorkflowStatus(auth.orgId, effectiveResolved.workflowId);
     const pauseAction = resolveWorkflowPauseAction(wfStatus?.status, "trigger");
     if (pauseAction.kind === "buffer") {
       await markTriggerEventBuffered(auth.orgId, event.id, pauseAction.reason);
       await auditAction(auth, "trigger.event.buffered", {
         targetType: "trigger_event",
         targetId: event.id,
-        metadata: { triggerType, reason: pauseAction.reason, workflowId: resolved.workflowId, nodeId: resolved.nodeId },
+        metadata: { triggerType: effectiveTriggerType, reason: pauseAction.reason, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId },
       });
       return {
         status: 202,
@@ -205,7 +249,7 @@ async function persistEventAndSpawnRun(args: {
 
   // 4. Spawn the run with the normalized event as the input. The trigger
   //    executor reads `input.event` and passes it to downstream nodes.
-  const parsed = WorkflowSchema.safeParse(resolved.dagJson);
+  const parsed = WorkflowSchema.safeParse(effectiveResolved.dagJson);
   if (!parsed.success) {
     await markTriggerEventFailed(auth.orgId, event.id, "workflow_parse_failed");
     return {
@@ -218,20 +262,39 @@ async function persistEventAndSpawnRun(args: {
     const { runId } = await startRun({
       ...parsed.data,
       orgId: auth.orgId,
-      versionId: resolved.workflowVersionId,
+      versionId: effectiveResolved.workflowVersionId,
       createdBy: auth.userId,
-      input: { triggeredBy: triggerType, triggerEventId: event.id, event: payload },
+      input: { triggeredBy: effectiveTriggerType, triggerEventId: event.id, event: effectivePayload },
+      triggerEventStart: { id: event.id },
     });
-    await markTriggerEventStarted(auth.orgId, event.id, runId);
     await auditAction(auth, replayOfEventId ? "trigger.event.replayed" : "trigger.event.started", {
       targetType: "trigger_event",
       targetId: event.id,
-      metadata: { triggerType, runId, workflowId: resolved.workflowId, nodeId: resolved.nodeId, ...(replayOfEventId ? { replayOf: replayOfEventId } : {}) },
+      metadata: { triggerType: effectiveTriggerType, runId, workflowId: effectiveResolved.workflowId, nodeId: effectiveResolved.nodeId, ...(replayOfEventId ? { replayOf: replayOfEventId } : {}) },
     });
     return { status: 200, body: { ok: true, triggerEventId: event.id, runId } };
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    await markTriggerEventFailed(auth.orgId, event.id, reason);
+    if (err instanceof TriggerEventStartConflictError) {
+      const existing = await getTriggerEvent(auth.orgId, event.id);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          duplicate: true,
+          triggerEventId: event.id,
+          runId: existing?.runId ?? null,
+        },
+      };
+    }
+    if (err instanceof WorkflowInputValidationError) {
+      await markTriggerEventFailed(auth.orgId, event.id, "workflow_input_invalid");
+      return {
+        status: 422,
+        body: errorEnvelope("trigger_invalid_payload", "Trigger payload does not satisfy workflow inputs"),
+      };
+    }
+    // Infrastructure failure: keep the row `received` so an upstream retry
+    // can safely finish the atomic event-to-run transition.
     return { status: 500, body: { ok: false, error: "run_spawn_failed", triggerEventId: event.id } };
   }
 }
@@ -313,9 +376,10 @@ export const TRIGGER_BACKFILL_MAX_PER_RESUME = 100;
  *    that is owed a run — cloning it doubles the table and leaves the original
  *    still owed.
  *
- * So this transitions the existing row `buffered -> started` against the
- * CURRENT latest version: the operator resumed because they fixed something,
- * and the backfill should run on the fix.
+ * So this leases and transitions the existing row
+ * `buffered -> backfilling -> started` against the CURRENT latest version:
+ * the operator resumed because they fixed something, and the backfill should
+ * run on the fix.
  *
  * Never throws: the workflow is already resumed by the time this runs, and a
  * backfill fault must not read as a failed resume. A per-event failure is
@@ -331,26 +395,44 @@ export async function backfillBufferedTriggerEvents(args: {
   let backfilled = 0;
   let failed = 0;
   try {
-    const pending = await listBufferedTriggerEvents(args.auth.orgId, args.workflowId, limit);
+    const pending = await claimBufferedTriggerEvents(args.auth.orgId, args.workflowId, limit);
     for (const row of pending) {
       try {
         const event = await getTriggerEvent(args.auth.orgId, row.id);
-        if (!event) continue;
+        if (!event) {
+          await releaseTriggerEventBackfillClaim(args.auth.orgId, row.id, row.claimToken).catch(() => {});
+          continue;
+        }
 
         const triggerType = event.triggerType as TriggerNodeType;
-        const resolved = await resolveTriggerNode(args.auth.orgId, triggerType, () => true);
+        const resolved = await resolveTriggerNode(args.auth.orgId, triggerType, () => true, {
+          workflowId: args.workflowId,
+          nodeId: event.nodeId,
+        });
         if (!resolved) {
           // The trigger node is gone from the current version — the event can
           // never run again. Retire it so it stops counting as owed work.
-          await markTriggerEventSkipped(args.auth.orgId, row.id, "backfill_no_trigger_node");
-          failed += 1;
+          const retired = await retireTriggerEventBackfillClaim(
+            args.auth.orgId,
+            row.id,
+            row.claimToken,
+            "skipped",
+            "backfill_no_trigger_node",
+          );
+          if (retired) failed += 1;
           continue;
         }
 
         const parsed = WorkflowSchema.safeParse(resolved.dagJson);
         if (!parsed.success) {
-          await markTriggerEventFailed(args.auth.orgId, row.id, "workflow_parse_failed");
-          failed += 1;
+          const retired = await retireTriggerEventBackfillClaim(
+            args.auth.orgId,
+            row.id,
+            row.claimToken,
+            "failed",
+            "workflow_parse_failed",
+          );
+          if (retired) failed += 1;
           continue;
         }
 
@@ -364,18 +446,17 @@ export async function backfillBufferedTriggerEvents(args: {
           versionId: resolved.workflowVersionId,
           createdBy: args.auth.userId,
           input: { triggeredBy: triggerType, triggerEventId: row.id, backfilled: true, event: storedPayload },
+          triggerEventStart: { id: row.id, claimToken: row.claimToken },
         });
-        await markTriggerEventStarted(args.auth.orgId, row.id, runId);
         await auditAction(args.auth, "trigger.event.started", {
           targetType: "trigger_event",
           targetId: row.id,
           metadata: { triggerType, runId, workflowId: args.workflowId, nodeId: resolved.nodeId, backfilled: true },
         });
         backfilled += 1;
-      } catch (err) {
-        await markTriggerEventFailed(args.auth.orgId, row.id, err instanceof Error ? err.message : "backfill_failed")
-          .catch(() => {});
-        failed += 1;
+      } catch {
+        const released = await releaseTriggerEventBackfillClaim(args.auth.orgId, row.id, row.claimToken).catch(() => false);
+        if (released) failed += 1;
       }
     }
     const remaining = await countBufferedTriggerEvents(args.auth.orgId, args.workflowId);
@@ -437,9 +518,20 @@ export const triggerIngestRoutes: Route[] = [
       // original row and the freshly-uploaded objects would be orphaned. Skip
       // the upload entirely and report the duplicate. (NULL messageId never
       // dedupes, so it always uploads — there's nothing to converge on.)
-      const emailDedupeKey = payload.messageId ?? null;
+      const emailDedupeKey = payload.messageId ? `email:${payload.messageId}` : null;
       const priorEmailEvent = await findTriggerEventByDedupeKey(auth.orgId, emailDedupeKey);
       if (priorEmailEvent) {
+        if (priorEmailEvent.status === "received") {
+          const result = await persistEventAndSpawnRun({
+            auth,
+            triggerType: "email_received",
+            resolved,
+            payload: {},
+            dedupeKey: emailDedupeKey,
+            existingEvent: priorEmailEvent,
+          });
+          return sendJson(res, result.body, result.status);
+        }
         return sendJson(res, {
           ok: true,
           duplicate: true,
@@ -454,7 +546,9 @@ export const triggerIngestRoutes: Route[] = [
       const attachmentBodies = raw.attachmentBodies && typeof raw.attachmentBodies === "object" && !Array.isArray(raw.attachmentBodies)
         ? (raw.attachmentBodies as Record<string, string>)
         : undefined;
-      const triggerEventId = crypto.randomUUID();
+      const triggerEventId = emailDedupeKey
+        ? `email-${createHash("sha256").update(`${auth.orgId}\0${emailDedupeKey}`).digest("hex").slice(0, 40)}`
+        : crypto.randomUUID();
       const storedAttachments = await offloadEmailAttachments({
         orgId: auth.orgId,
         triggerEventId,
@@ -538,7 +632,7 @@ export const triggerIngestRoutes: Route[] = [
         },
         // Dedupe on (bucket, key, etag) so the same object-event retry
         // converges; etag changes per object version so re-uploads re-fire.
-        dedupeKey: `${payload.bucket}:${payload.key}:${payload.etag ?? ""}`,
+        dedupeKey: `file:${payload.bucket}:${payload.key}:${payload.etag ?? ""}`,
       });
       return sendJson(res, result.body, result.status);
     },
@@ -616,11 +710,12 @@ export const triggerIngestRoutes: Route[] = [
         : undefined) ?? {};
 
       const triggerType = event.triggerType as TriggerNodeType;
-      // Replay against the FIRST trigger node of this type in the org's
-      // current latest versions — the resolver loads the latest version, so
-      // the operator's fixed DAG is what runs. (v1 doesn't pin the exact
-      // original node id; an org should keep trigger keys unique per type.)
-      const resolved = await resolveTriggerNode(auth.orgId, triggerType, () => true);
+      const resolved = await resolveTriggerNode(
+        auth.orgId,
+        triggerType,
+        () => true,
+        event.workflowId ? { workflowId: event.workflowId, nodeId: event.nodeId } : undefined,
+      );
       if (!resolved) {
         return sendError(res, "trigger_no_matching_node", "No trigger node of this type exists to replay against", 404);
       }

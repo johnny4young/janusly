@@ -2,7 +2,7 @@
  * Real-Chromium coverage for AI Studio's provider setup guidance.
  *
  * Used by the browser-mode lane to keep the rendered local-mode copy aligned
- * with Janusly's supported Anthropic provider in both shipped locales.
+ * with Janusly's supported Anthropic provider in English and Spanish.
  */
 
 import { fireEvent, render, screen } from '@testing-library/react'
