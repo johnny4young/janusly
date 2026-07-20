@@ -6,7 +6,7 @@ The product positioning anchors on a single sentence:
 
 > **Janusly is a self-healing AI workflow operator. Every run is observable, every failure is explainable, every proposed fix is reviewable, and every production change is replayable before rollout.**
 
-The primary business metric is **Mean Time To Recovery for failed automations**. Every demo loops back to that number. The full positioning thesis — the four product anchors with engineering-reality citations, the anti-positioning rejects with one-line whys, and the canonical metric — lives in [`docs/PLAN.md` §16.0](../PLAN.md).
+The primary business metric is **Mean Time To Recovery for failed automations**. Every demo loops back to that number and to the product purpose described in the root [`README.md`](../../README.md).
 
 ## Flagship demos (3 — 3-5 minute sales-call material)
 

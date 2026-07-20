@@ -6,9 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 
 /**
  * Real build stamp, computed once at config load: `<date>-<short-sha>`.
- * Replaces the hardcoded literal that went stale within weeks (fourth-wave
- * audit W-08). Falls back to "dev" outside a git checkout (e.g. a tarball
- * build) — an honest "dev" beats a confident wrong date.
+ * Replaces a hardcoded literal that went stale within weeks. Falls back to
+ * "dev" outside a git checkout (e.g.
+ * a tarball build) — an honest "dev" beats a confident wrong date.
  */
 function buildId(): string {
   try {

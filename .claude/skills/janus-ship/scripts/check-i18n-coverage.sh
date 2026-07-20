@@ -1,1 +1,0 @@
-../../../../apps/web/scripts/check-i18n-coverage.sh

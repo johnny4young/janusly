@@ -19,7 +19,7 @@
 # findings) otherwise. False positives are tolerable — the reviewer is
 # expected to skim the report.
 #
-# Used by janus-ship Hard rule "i18n coverage" and janus-review check (q).
+# Used by the repository's localization coverage gate.
 set -u
 
 cd "$(git rev-parse --show-toplevel)" || exit 0
